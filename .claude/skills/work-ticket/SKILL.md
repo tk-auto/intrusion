@@ -127,20 +127,23 @@ PR for CI/review activity (`subscribe_pr_activity`) rather than polling.
 
 ## 8. Merge once CI is green
 
-A finished ticket ends **merged**, not just in an open PR. After opening it, watch
-the repo's CI (the fmt/clippy/test gate in `.github/workflows`) through to a
-result, then:
+A finished ticket ends **merged**, not just in an open PR. This repo has GitHub
+auto-merge enabled, so the default is:
 
-- **CI green → squash-merge it** (`merge_pull_request`, `merge_method: "squash"` —
-  this repo's history is one squashed commit per issue, e.g. `… (#24)`). Delete the
-  branch after merge. Report the merged SHA; if the change deploys (Pages, §13.1),
-  note the deploy follows from the push to `main`.
-- **CI red → do not merge.** Diagnose, fix on the same branch, push, let CI re-run.
-  Only merge on green.
+- **Enable auto-merge, squash** (`enable_pr_auto_merge`, `mergeMethod: "SQUASH"` —
+  this repo's history is one squashed commit per issue, e.g. `… (#24)`) right after
+  opening the PR. GitHub then merges it the moment CI passes, with no polling; the
+  branch auto-deletes if the repo is set to. Report that auto-merge is armed and
+  what will happen on green; if the change deploys (Pages, §13.1), note the deploy
+  follows from the merge to `main`.
+- **CI red → it won't merge.** The webhook delivers the failure — diagnose, fix on
+  the same branch, push, and let CI (and the armed auto-merge) re-run.
 
-CI **success is not delivered as a webhook** (only failures are), so don't wait
-passively for it — poll the checks (`pull_request_read` → `get_status` /
-`get_check_runs`), scheduling a follow-up (`send_later`) if the run is slow.
+If `enable_pr_auto_merge` reports auto-merge is **not** enabled for the repo, fall
+back to merging by hand: CI **success is not delivered as a webhook** (only
+failures are), so poll the checks (`pull_request_read` → `get_status` /
+`get_check_runs`), scheduling a follow-up (`send_later`) if the run is slow, and
+`merge_pull_request` (`squash`) on green.
 
 **Do NOT auto-merge — leave the PR open and hand it back — when any of these hold:**
 
