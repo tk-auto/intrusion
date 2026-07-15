@@ -318,11 +318,14 @@ impl State {
 
         // A door: bump a closed panel to open it (§4.3, §10.4). Opening or closing a
         // door changes the world and spends the turn; a close refused by an occupant
-        // changed nothing and is free.
+        // changed nothing and is free. The close consults the general occupancy
+        // predicate — any actor on a panel refuses the close, so a door never crushes
+        // (§10.4). Fields are captured so it can borrow them while `layout` is `&mut`.
         let action = {
+            let player = self.player;
             let guards = &self.guards;
             self.layout
-                .bump_door(target, |c| guards.iter().any(|g| g.pos == c))
+                .bump_door(target, |c| actor_occupies(player, guards, c))
         };
         if let Some(action) = action {
             return match action {
@@ -386,35 +389,43 @@ impl State {
                 events.push(Event::Captured { by: target });
                 return;
             }
-            if self.actor_may_enter(target, i) {
+            // A guard moves onto a cell the terrain admits and no actor occupies. Its
+            // own cell is a step behind `target`, so the mover is never in the way; the
+            // player's cell was captured above but `occupied` still guards it.
+            if self.layout.facility().can_enter(target, ACTOR_FILL) && !self.occupied(target) {
                 self.guards[i].pos = target;
             }
         }
-    }
-
-    /// Whether guard `mover` may enter `cell`: the terrain admits an actor and no
-    /// *other* guard already stands there. (The player's cell is capture, handled
-    /// before this.)
-    fn actor_may_enter(&self, cell: Cell, mover: usize) -> bool {
-        self.layout.facility().can_enter(cell, ACTOR_FILL)
-            && !self
-                .guards
-                .iter()
-                .enumerate()
-                .any(|(j, g)| j != mover && g.pos == cell)
     }
 
     /// The index of a guard standing on `cell`, if any.
     fn guard_at(&self, cell: Cell) -> Option<usize> {
         self.guards.iter().position(|g| g.pos == cell)
     }
+
+    /// Whether any actor occupies `cell` — the loop's single occupancy predicate.
+    /// Actors are the player and the guards today; bodies, decoys and the rest fold in
+    /// here (§4.3/§12.3) so occupancy is asked in one place and nothing — not the
+    /// player, not guards — is special-cased at the call sites.
+    fn occupied(&self, cell: Cell) -> bool {
+        actor_occupies(self.player, &self.guards, cell)
+    }
+}
+
+/// Whether an actor occupies `cell`, given the player and guards directly. The free
+/// twin of [`State::occupied`], for callers that must borrow the actor fields apart
+/// from the rest of the state (door closing borrows the layout mutably at the same
+/// time). One definition of "an actor is here" — extend it, not the call sites, when
+/// new actor kinds arrive.
+fn actor_occupies(player: Cell, guards: &[Guard], cell: Cell) -> bool {
+    player == cell || guards.iter().any(|g| g.pos == cell)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::facility::Facility;
-    use crate::{generate, Rng};
+    use crate::{generate, DoorId, Rng};
 
     /// An open room: a `w × h` walled box, all interior floor, wrapped as a bare
     /// layout. Enough to drive movement, objectives, and capture without generation.
@@ -610,6 +621,104 @@ mod tests {
             Direction::South => Direction::North,
             Direction::East => Direction::West,
             Direction::West => Direction::East,
+        }
+    }
+
+    /// §10.4: **a door never closes on an actor** — doors don't crush. Standing on a
+    /// panel and bumping the hinge to shut the door must be refused, leaving the door
+    /// open and the panel walk-through. (Regression: the close check once consulted
+    /// only guards, so a player on a panel got shut in on themselves.)
+    #[test]
+    fn a_door_will_not_close_on_the_player() {
+        // Find a door across seeds whose panel can be reached from a perpendicular
+        // floor cell and has a hinge adjacent along the door line, then try to shut it
+        // on ourselves.
+        for seed in 0..64 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let Some((id, from, into, panel, hinge_dir)) = crush_scenario(&layout) else {
+                continue;
+            };
+
+            // Exit parked on the border corner (always wall, never walked): a valid
+            // Cell we never touch, so stamping it can't disturb the door.
+            let mut s = State::new(
+                layout,
+                from,
+                Direction::North,
+                Vec::new(),
+                Vec::new(),
+                Cell::new(0, 0),
+            );
+
+            // Open the door, then step onto the now-open panel.
+            assert_eq!(
+                s.step(Input::Step(into)),
+                vec![Event::DoorOpened { at: panel }]
+            );
+            assert_eq!(s.step(Input::Step(into)), vec![Event::Moved { to: panel }]);
+            assert_eq!(s.player(), panel);
+
+            // Bump the hinge to close: refused — we're on a panel. Nothing changes.
+            let events = s.step(Input::Step(hinge_dir));
+            assert!(events.is_empty(), "a refused close is a free no-op");
+            assert!(
+                s.layout().regions().door(id).is_open(),
+                "seed {seed}: the door shut on the player"
+            );
+            assert_eq!(
+                s.layout().facility().terrain(panel),
+                Some(Terrain::DoorPanelOpen),
+                "seed {seed}: the panel went solid under the player — crushed"
+            );
+            assert_eq!(s.player(), panel, "the player is unmoved and uncrushed");
+            return;
+        }
+        panic!("no door with a reachable end panel found in 64 seeds");
+    }
+
+    /// A door setup for the crush test: a door id, the floor cell to start on, the
+    /// direction to step into the panel, the end panel itself, and the direction from
+    /// that panel to its adjacent hinge (what you bump to close).
+    fn crush_scenario(layout: &Layout) -> Option<(DoorId, Cell, Direction, Cell, Direction)> {
+        for (id, door) in layout.regions().doors() {
+            let panel = door.panels()[0];
+            // The end panel abuts a hinge; the door line runs panel→hinge.
+            let Some(&hinge) = door
+                .hinges()
+                .iter()
+                .find(|&&h| panel.manhattan_distance(h) == 1)
+            else {
+                continue;
+            };
+            let Some(hinge_dir) = dir_between(panel, hinge) else {
+                continue;
+            };
+            // Approach the panel perpendicular to the door line, from floor.
+            for perp in perpendicular(hinge_dir) {
+                let Some(from) = panel.step(perp) else {
+                    continue;
+                };
+                let f = layout.facility();
+                if f.terrain(from) == Some(Terrain::Floor) && f.can_enter(from, ACTOR_FILL) {
+                    return Some((id, from, opposite(perp), panel, hinge_dir));
+                }
+            }
+        }
+        None
+    }
+
+    /// The cardinal direction stepping `from` to the adjacent `to`, if they touch.
+    fn dir_between(from: Cell, to: Cell) -> Option<Direction> {
+        Direction::ALL
+            .into_iter()
+            .find(|&d| from.step(d) == Some(to))
+    }
+
+    /// The two directions perpendicular to `dir`.
+    fn perpendicular(dir: Direction) -> [Direction; 2] {
+        match dir {
+            Direction::North | Direction::South => [Direction::East, Direction::West],
+            Direction::East | Direction::West => [Direction::North, Direction::South],
         }
     }
 
