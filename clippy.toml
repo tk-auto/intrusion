@@ -1,0 +1,7 @@
+# Clippy configuration for the Intrusion workspace.
+# The gate runs `cargo clippy --all-targets --all-features -- -D warnings`,
+# so warnings are hard errors. This file holds project-wide lint tuning.
+
+# The core is a game with lots of small integer coordinates and tables of
+# tuning constants (§10.2); a few large-ish literals are expected and readable.
+too-many-arguments-threshold = 8

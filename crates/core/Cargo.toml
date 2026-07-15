@@ -1,0 +1,14 @@
+[package]
+name = "intrusion-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure, deterministic game logic for Intrusion. No I/O, no platform, no clock."
+
+[lib]
+name = "intrusion_core"
+
+[dependencies]
+rand_core.workspace = true
+rand_pcg.workspace = true
