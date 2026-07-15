@@ -14,3 +14,18 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 intrusion-core = { path = "../core" }
 wasm-bindgen = "=0.2.100"
+
+# web-sys/js-sys are the raw DOM + canvas2d bindings the thin shell draws
+# through. Pinned to the versions that pair with wasm-bindgen 0.2.100 so the
+# glue never drifts (§12.4 determinism applies to the build, not just the game).
+js-sys = "=0.3.77"
+
+[dependencies.web-sys]
+version = "=0.3.77"
+features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+]

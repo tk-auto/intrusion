@@ -26,11 +26,15 @@
   <body>
     <div id="app">
       <!--
-        The canvas2d glyph grid (§11.1) and the wasm bootstrap land in the web
-        renderer ticket. For now this is the shell the wasm module (built from
-        crates/web via wasm-bindgen) will mount into.
+        The wasm module (built from crates/web via wasm-bindgen) mounts its
+        canvas2d glyph grid (§11.1) here. The build step emits intrusion_web.js
+        (the ES-module glue) and intrusion_web_bg.wasm alongside this file.
       -->
       <noscript>Intrusion needs JavaScript and WebAssembly.</noscript>
     </div>
+    <script type="module">
+      import init, { start } from "./intrusion_web.js";
+      init().then(start);
+    </script>
   </body>
 </html>
