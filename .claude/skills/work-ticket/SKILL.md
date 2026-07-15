@@ -111,8 +111,10 @@ Never commit with a red gate; if you can't get it green, stop and report why.
 git push -u origin <branch>
 ```
 
-Retry on network failure with exponential backoff (2s, 4s, 8s, 16s). Then open a
-PR (`create_pull_request`) targeting `main`:
+Retry on network failure with exponential backoff (2s, 4s, 8s, 16s). Then
+**always open a PR** (`create_pull_request`) targeting `main` — a finished ticket
+ends in a PR, every time; don't wait to be asked and don't stop at a pushed
+branch:
 
 - **Title:** the conventional-commit summary.
 - **Body:** what changed and why, the design section(s) honoured, how it was
