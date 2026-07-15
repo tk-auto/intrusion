@@ -5,7 +5,7 @@ description: >-
   steps of work. Use when the user wants to create tickets, break the design into
   tasks, plan the next steps, populate the backlog, or "make issues from the design".
   Drafts proposed tickets to a review file first, then creates the approved ones as
-  GitHub issues with v1/v2/v3 milestones and area/type/size labels.
+  GitHub issues with milestone:v1/v2/v3 labels and area/type/size labels.
 ---
 
 # Create tickets from the design
@@ -36,10 +36,11 @@ user has seen and approved the draft.
 
 ### Phase 2 — Create (only after explicit approval)
 
-1. Ensure the milestones and labels below exist (create any that are missing —
-   this is idempotent; skip ones that already exist).
+1. Ensure the labels below exist (create any that are missing — this is idempotent;
+   skip ones that already exist). Applying a label on `issue_write` auto-creates it
+   if the repo doesn't have it yet.
 2. For each approved ticket in the draft, create a GitHub issue with its title,
-   body, milestone, and labels.
+   body, and labels — including its `milestone:*` label.
 3. Record the created issue number back into `docs/tickets-draft.md` (e.g. append
    `→ #42`) so the file is a durable index, then report the list of created
    issues to the user.
@@ -47,22 +48,28 @@ user has seen and approved the draft.
 Use the GitHub MCP tools (`issue_write`, `list_issues`, etc.). If the GitHub MCP
 is unavailable, say so and leave the draft in place rather than inventing issues.
 
-## Milestones (from §14)
+## Milestones as labels (from §14)
 
-Map every ticket to exactly one:
+**GitHub milestone objects are not created via the API tooling in use — use a
+`milestone:*` label instead.** Also record the milestone in each ticket body
+(`**Milestone:** v1`) so the draft file stays self-describing. Map every ticket to
+exactly one:
 
-| Milestone | Scope |
+| Label | Scope |
 |---|---|
-| **v1** | Quick play only — one generated facility, the full stealth loop, the hiding game. The §14 "Included" list. |
-| **v2** | The headless sim + metrics (§13.2), saves, options, help/legend, game-over screen, alert indicator. |
-| **v3** | The campaign — facility map, salvaged-tech accumulation, intel currency, alert-scaled difficulty, an ending. |
+| **`milestone:v1`** | Quick play only — one generated facility, the full stealth loop, the hiding game. The §14 "Included" list. |
+| **`milestone:v2`** | The headless sim + metrics (§13.2), saves, options, help/legend, game-over screen, alert indicator. |
+| **`milestone:v3`** | The campaign — facility map, salvaged-tech accumulation, intel currency, alert-scaled difficulty, an ending. |
 
-Backlog ideas (§14 "Later") get no milestone unless the user asks; note them in the
-draft but don't file them by default — they are experiments, not committed work.
+Backlog ideas (§14 "Later") get no milestone label unless the user asks; note them
+in the draft but don't file them by default — they are experiments, not committed work.
 
 ## Labels
 
 Create these if missing, then apply one from each group per ticket.
+
+**milestone:** (the roadmap slice — see the table above; stands in for a GitHub
+milestone object) — one of `milestone:v1`, `milestone:v2`, `milestone:v3`.
 
 **area:** (the system the ticket touches)
 
