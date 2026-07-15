@@ -11,8 +11,7 @@ slash command (e.g. `/create-tickets`) or by describing the task.
 
 ## The intended loop
 
-1. `/create-tickets` — break the next roadmap slice into issues (the first is always
-   "scaffold the cargo workspace").
+1. `/create-tickets` — break the next roadmap slice into issues.
 2. `/work-ticket` — pick one, build it, ship a PR.
 3. `/playtest` — once the sim exists, let a bot flag suspicious seeds for a human to
    play and rule on (§13.1, §13.3).
