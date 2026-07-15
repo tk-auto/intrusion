@@ -1,13 +1,4 @@
-# Intrusion CI gate — the fmt/clippy/test quality gate for issue #1.
-#
-# ACTIVATION: this file must live at `.github/workflows/ci.yml` to run. It is
-# parked here because the credentials in the automated environment lack GitHub
-# `workflow` scope and cannot push under `.github/workflows/`. Move it into place
-# with a workflow-scoped token or via the GitHub web UI:
-#
-#     git mv ci/ci.yml .github/workflows/ci.yml   # then commit + push with workflow scope
-#
-# The contents below are final and ready to run as-is.
+# Intrusion CI gate — the fmt/clippy/test quality gate (issue #1).
 name: CI
 
 on:
