@@ -69,16 +69,37 @@ impl Region {
     }
 }
 
-/// One door edge: the two regions it joins and the cells of the doorway itself.
+/// Which part of a door a cell is — the two are operated differently (§10.4).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DoorCell {
+    /// A frame end: permanently solid and opaque, the handle you bump to *close*.
+    Hinge,
+    /// A movable panel: bump it to *open*; it fills the doorway when closed.
+    Panel,
+}
+
+/// One door: the two regions it joins, its hinge/panel structure, and its runtime
+/// open/closed state (§10.4).
 ///
-/// A door is an *edge*, not a node — its cells are the threshold between regions
-/// and belong to no region, so [`RegionGraph::region_at`] on a door cell is `None`.
-/// The full hinged/panelled door object (§10.4) is a later ticket; here a door is
-/// just the topological join plus where it sits.
+/// A door is a graph *edge*, not a node — its cells are the threshold between two
+/// regions and belong to no region, so [`RegionGraph::region_at`] on a door cell is
+/// `None`. Topologically it is a span of **3–6 cells**: a **hinge at each end**
+/// (permanently solid+opaque — the frame) and **1–4 panels** between them that open
+/// and close as one unit. Bump a panel to open, bump a hinge to close; the actual
+/// operation, which also restamps the facility terrain, lives on
+/// [`Layout`](crate::Layout) since it touches both the graph and the grid.
 #[derive(Clone, Debug)]
 pub struct Door {
     between: [RegionId; 2],
-    cells: Vec<Cell>,
+    /// The two frame ends, in scan order. Always solid and opaque.
+    hinges: Vec<Cell>,
+    /// The 1–4 panels between the hinges, opened and closed as a unit.
+    panels: Vec<Cell>,
+    /// Whether the panels are currently open.
+    open: bool,
+    /// Whether this door closes behind its user (§10.4 auto-close **[START]**).
+    /// Data-driven so playtest can compare with it on and off.
+    auto_close: bool,
 }
 
 impl Door {
@@ -87,9 +108,48 @@ impl Door {
         self.between
     }
 
-    /// The cells forming the doorway.
-    pub fn cells(&self) -> &[Cell] {
-        &self.cells
+    /// The frame-end cells — permanently solid+opaque, the handles that close the
+    /// door (§10.4).
+    pub fn hinges(&self) -> &[Cell] {
+        &self.hinges
+    }
+
+    /// The panel cells that open and close as one unit (§10.4).
+    pub fn panels(&self) -> &[Cell] {
+        &self.panels
+    }
+
+    /// Every cell of the doorway — hinges then panels — its full footprint in the
+    /// wall line.
+    pub fn cells(&self) -> impl Iterator<Item = Cell> + '_ {
+        self.hinges.iter().chain(self.panels.iter()).copied()
+    }
+
+    /// Whether the door's panels are currently open.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Whether this door closes behind its user (§10.4 **[START]**).
+    pub fn auto_close(&self) -> bool {
+        self.auto_close
+    }
+
+    /// Toggle the auto-close behaviour — the tuning knob playtest flips to compare
+    /// "doors stay open" against "doors close behind you" (§10.4 **[START]**).
+    pub fn set_auto_close(&mut self, auto_close: bool) {
+        self.auto_close = auto_close;
+    }
+
+    /// Which part of the door `cell` is, or `None` if the cell is not on this door.
+    pub fn role(&self, cell: Cell) -> Option<DoorCell> {
+        if self.hinges.contains(&cell) {
+            Some(DoorCell::Hinge)
+        } else if self.panels.contains(&cell) {
+            Some(DoorCell::Panel)
+        } else {
+            None
+        }
     }
 
     /// Given one of the door's two regions, the region on the other side. Panics
@@ -103,6 +163,13 @@ impl Door {
         } else {
             panic!("region {region:?} is not an endpoint of this door");
         }
+    }
+
+    /// Set the open state. Crate-internal: the panels' terrain must be restamped in
+    /// lockstep, which only [`Layout`](crate::Layout) can do, so it is the sole
+    /// caller.
+    pub(crate) fn set_open(&mut self, open: bool) {
+        self.open = open;
     }
 }
 
@@ -180,17 +247,21 @@ impl RegionGraph {
         id
     }
 
-    /// Register a door joining regions `a` and `b` through `cells`, returning its
-    /// handle. The door is recorded on both regions' boundaries.
+    /// Register a door joining regions `a` and `b`, returning its handle. The door
+    /// is recorded on both regions' boundaries, starts **closed**, and takes its
+    /// auto-close behaviour from `auto_close` (§10.4).
     ///
-    /// Panics if `a == b` (a door joins two *distinct* regions), if either handle
-    /// is unknown, or if `cells` is empty. Door cells are *not* claimed as region
-    /// cells — a doorway belongs to no region.
+    /// `hinges` are the frame ends (two, one at each end of the span) and `panels`
+    /// the 1–4 movable cells between them. Panics if `a == b` (a door joins two
+    /// *distinct* regions), if either handle is unknown, or if there are no panels.
+    /// Door cells are *not* claimed as region cells — a doorway belongs to no region.
     pub fn add_door(
         &mut self,
         a: RegionId,
         b: RegionId,
-        cells: impl IntoIterator<Item = Cell>,
+        hinges: impl IntoIterator<Item = Cell>,
+        panels: impl IntoIterator<Item = Cell>,
+        auto_close: bool,
     ) -> DoorId {
         assert!(
             a != b,
@@ -200,13 +271,17 @@ impl RegionGraph {
             self.is_region(a) && self.is_region(b),
             "unknown region in door {a:?}..{b:?}"
         );
-        let cells: Vec<Cell> = cells.into_iter().collect();
-        assert!(!cells.is_empty(), "a door must occupy at least one cell");
+        let hinges: Vec<Cell> = hinges.into_iter().collect();
+        let panels: Vec<Cell> = panels.into_iter().collect();
+        assert!(!panels.is_empty(), "a door must have at least one panel");
 
         let id = DoorId(self.doors.len() as u32);
         self.doors.push(Door {
             between: [a, b],
-            cells,
+            hinges,
+            panels,
+            open: false,
+            auto_close,
         });
         self.regions[a.0 as usize].doors.push(id);
         self.regions[b.0 as usize].doors.push(id);
@@ -231,6 +306,23 @@ impl RegionGraph {
     /// The door behind a handle.
     pub fn door(&self, id: DoorId) -> &Door {
         &self.doors[id.0 as usize]
+    }
+
+    /// The door whose hinges or panels include `cell`, or `None` if `cell` is not a
+    /// door cell. Linear over the handful of doors a level has — a level's whole
+    /// point is that there are few of them (§10.2).
+    pub fn door_at(&self, cell: Cell) -> Option<DoorId> {
+        self.doors
+            .iter()
+            .position(|d| d.role(cell).is_some())
+            .map(|i| DoorId(i as u32))
+    }
+
+    /// Mutable access to a door — crate-internal, because opening or closing one
+    /// must restamp the panels' terrain in the same step, which only
+    /// [`Layout`](crate::Layout) can coordinate.
+    pub(crate) fn door_mut(&mut self, id: DoorId) -> &mut Door {
+        &mut self.doors[id.0 as usize]
     }
 
     /// The kind of a region — convenience for the common "room or corridor?" query.
@@ -323,9 +415,22 @@ mod tests {
         let room_a = g.add_region(RegionKind::Room, rect(1, 4, 1, 5));
         let corridor = g.add_region(RegionKind::Corridor, rect(5, 7, 1, 5));
         let room_b = g.add_region(RegionKind::Room, rect(8, 11, 1, 5));
-        // Doorways sit in the wall columns separating the regions.
-        let door_a = g.add_door(room_a, corridor, [Cell::new(4, 3)]);
-        let door_b = g.add_door(corridor, room_b, [Cell::new(7, 3)]);
+        // Doorways sit in the wall columns separating the regions: a 3-cell span of
+        // hinge / panel / hinge running down the wall.
+        let door_a = g.add_door(
+            room_a,
+            corridor,
+            [Cell::new(4, 1), Cell::new(4, 3)],
+            [Cell::new(4, 2)],
+            true,
+        );
+        let door_b = g.add_door(
+            corridor,
+            room_b,
+            [Cell::new(7, 1), Cell::new(7, 3)],
+            [Cell::new(7, 2)],
+            true,
+        );
         (g, room_a, corridor, room_b, door_a, door_b)
     }
 
@@ -416,11 +521,35 @@ mod tests {
     }
 
     #[test]
+    fn a_door_is_hinges_around_panels_and_classifies_its_cells() {
+        let (g, _, _, _, door_a, _) = fixture();
+        let door = g.door(door_a);
+        assert_eq!(door.hinges(), [Cell::new(4, 1), Cell::new(4, 3)]);
+        assert_eq!(door.panels(), [Cell::new(4, 2)]);
+        assert_eq!(door.role(Cell::new(4, 1)), Some(DoorCell::Hinge));
+        assert_eq!(door.role(Cell::new(4, 2)), Some(DoorCell::Panel));
+        assert_eq!(door.role(Cell::new(9, 9)), None);
+        // A fresh door is closed, and the fixture asks for auto-close.
+        assert!(!door.is_open());
+        assert!(door.auto_close());
+        // door_at finds the door from any of its cells.
+        assert_eq!(g.door_at(Cell::new(4, 2)), Some(door_a));
+        assert_eq!(g.door_at(Cell::new(4, 1)), Some(door_a));
+        assert_eq!(g.door_at(Cell::new(1, 1)), None);
+    }
+
+    #[test]
     #[should_panic(expected = "two distinct regions")]
     fn a_door_cannot_join_a_region_to_itself() {
         let mut g = RegionGraph::new(10, 10);
         let r = g.add_region(RegionKind::Room, rect(1, 4, 1, 4));
-        g.add_door(r, r, [Cell::new(4, 2)]);
+        g.add_door(
+            r,
+            r,
+            [Cell::new(4, 1), Cell::new(4, 3)],
+            [Cell::new(4, 2)],
+            true,
+        );
     }
 
     #[test]
