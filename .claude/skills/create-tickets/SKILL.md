@@ -47,20 +47,6 @@ user has seen and approved the draft.
 Use the GitHub MCP tools (`issue_write`, `list_issues`, etc.). If the GitHub MCP
 is unavailable, say so and leave the draft in place rather than inventing issues.
 
-## The first ticket is always: scaffold the workspace
-
-If the repo has no Rust workspace yet (no root `Cargo.toml`), the **first** ticket
-in the draft must be the bootstrap task, because every other ticket depends on it:
-
-> **Scaffold the cargo workspace and CI** — create `crates/core` (pure logic, no
-> I/O, no wasm), `crates/web` (wasm-bindgen + canvas2d, thin), `crates/sim`
-> (headless harness placeholder), a workspace `Cargo.toml`, a pinned PRNG choice
-> (§12.4), `rustfmt.toml` + clippy config, and a CI workflow running
-> `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo test --workspace`.
-> Acceptance: `cargo test --workspace` and the lint gate pass on an empty skeleton.
-
-Label it `area:build`, `type:chore`, `size:M`, milestone **v1**.
-
 ## Milestones (from §14)
 
 Map every ticket to exactly one:
@@ -129,6 +115,6 @@ items are starting values the ticket may tune with justification.)
   the whole tuning surface up front — file the feature, note the numbers to try.
 - **Assertions are tickets too.** The reachability check (§10.6) and the sightline
   rule (§10.1a) are testable properties; file them as their own work.
-- **Respect dependency order.** Scaffold → spatial model (§10.5) → generation →
-  vision → guards → sound → abilities. The spatial model (§10.5) is called out as
-  the highest-leverage structural decision; most guard work is blocked behind it.
+- **Respect dependency order.** Spatial model (§10.5) → generation → vision →
+  guards → sound → abilities. The spatial model (§10.5) is called out as the
+  highest-leverage structural decision; most guard work is blocked behind it.
