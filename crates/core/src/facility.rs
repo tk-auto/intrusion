@@ -95,6 +95,22 @@ impl Facility {
             None
         }
     }
+
+    /// Set the terrain at `(x, y)`. Panics if the coordinate is off the grid.
+    ///
+    /// The seam the generator carves through: the partition (§10.1) starts from a
+    /// [`walled_box`](Self::walled_box) of interior floor and stamps corridor walls
+    /// and punch-throughs into it. Kept crate-internal — outside the core, a
+    /// facility is read-only; only generation writes cells.
+    pub(crate) fn set_terrain(&mut self, x: u32, y: u32, terrain: Terrain) {
+        assert!(
+            x < self.width && y < self.height,
+            "set_terrain ({x},{y}) is outside the {}x{} grid",
+            self.width,
+            self.height
+        );
+        self.cells[(y * self.width + x) as usize] = terrain;
+    }
 }
 
 #[cfg(test)]
