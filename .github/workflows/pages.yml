@@ -1,0 +1,93 @@
+# Build the wasm bundle and publish the static site to GitHub Pages (issue #22).
+#
+# The distribution target is a constraint the whole architecture serves (§3): a
+# static page, no server, that still builds in five years. So the pipeline is
+# deliberately boring and pinned — a plain Actions → Pages build with an exact
+# wasm-bindgen version — and the deploy is the "build" half of the v1 loop
+# (§13.1): every push to the default branch updates the URL you play.
+#
+# The fmt/clippy/test gate lives in ci.yml and runs on every PR; this workflow
+# only fires on the default branch (post-merge) plus manual dispatch, so what it
+# publishes has already been through the gate.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege for the Pages deployment (id-token for the deploy attestation).
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; never cancel an in-progress publish (it can leave Pages
+# in a half-updated state).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build wasm bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Pinned to match the wasm-bindgen crate (=0.2.100); the CLI and the crate
+      # must agree or the generated glue is invalid.
+      - name: Install wasm-bindgen CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.100
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-pages-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-pages-
+
+      - name: Build web crate for wasm
+        run: cargo build -p intrusion-web --release --target wasm32-unknown-unknown
+
+      - name: Generate wasm-bindgen glue and assemble the site
+        run: |
+          rm -rf dist && mkdir -p dist
+          wasm-bindgen target/wasm32-unknown-unknown/release/intrusion_web.wasm \
+            --out-dir dist --target web --no-typescript
+          cp web/index.html dist/
+          # Ship any static assets alongside (font, images) if present.
+          if [ -d web/assets ]; then cp -r web/assets dist/assets; fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
