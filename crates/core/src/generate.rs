@@ -33,7 +33,7 @@
 
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
-use crate::region::{RegionGraph, RegionKind};
+use crate::region::{RegionGraph, RegionId, RegionKind};
 use crate::rng::Rng;
 
 /// Corridor width is random 2–4, **never single-file** (§10.1). **[SETTLED]** — a
@@ -50,6 +50,17 @@ const MIN_SPLIT_AXIS: u32 = MIN_LEFTOVER * 2 + 2 + CORRIDOR_MIN_WIDTH;
 /// here so a large map can't subdivide without bound — §10.2 puts it at ~12.
 /// **[START]**.
 const MAX_ROOMS: usize = 12;
+
+/// The shortest wall run that gets a doorway (§10.1.4). Below this, cutting a door
+/// would leave no frame.
+const MIN_DOOR_RUN: u32 = 3;
+/// The longest a single doorway spans (§10.4): two hinges and up to four panels.
+const MAX_DOOR_LEN: u32 = 6;
+/// New doors close behind their user by default (§10.4 auto-close **[START]**).
+/// Kept as a constant, and per-door mutable via
+/// [`Door::set_auto_close`](crate::Door::set_auto_close), so playtest can compare
+/// the facility with auto-close on and off.
+const AUTO_CLOSE: bool = true;
 
 /// Why a facility could not be generated.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -79,6 +90,14 @@ impl Layout {
     /// The region graph over that grid.
     pub fn regions(&self) -> &RegionGraph {
         &self.regions
+    }
+
+    /// Mutable access to both halves at once — the grid and its graph. Crate-internal
+    /// and returned together because operating a door (§10.4) must move the graph's
+    /// open/closed state and the panels' terrain in one step; the door runtime in
+    /// [`crate::door`] is the only caller.
+    pub(crate) fn parts_mut(&mut self) -> (&mut Facility, &mut RegionGraph) {
+        (&mut self.facility, &mut self.regions)
     }
 }
 
@@ -141,6 +160,10 @@ pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenErr
     // guarantee, not a repair — but it makes the enclosure true by assertion, not
     // by argument (the §10.6 lesson).
     seal_border(&mut facility);
+
+    // Step 4: cut doorways where a room meets a corridor, now that every region is
+    // named (§10.1.4). Runs on the finished grid so it sees the true walls.
+    place_doorways(&mut facility, &mut regions, rng);
 
     debug_assert!(corridors > 0, "guarded footprint yielded no corridor");
     Ok(Layout { facility, regions })
@@ -352,6 +375,142 @@ fn seal_border(facility: &mut Facility) {
         facility.set_terrain(0, y, Terrain::Wall);
         facility.set_terrain(w - 1, y, Terrain::Wall);
     }
+}
+
+/// Cut doorways where rooms meet corridors (§10.1.4).
+///
+/// Scan every row, then every column. A run of wall cells with **interior on both
+/// flanks** is a door candidate; each **maximal** such run of length ≥ 3 gets
+/// **exactly one** doorway. "Maximal" is read against the two regions the run
+/// separates: a run breaks not only where a flank stops being interior but also
+/// where the pair of flanking regions changes, so every doorway joins one room to
+/// one corridor — never spanning two rooms at once. Because rooms are always
+/// separated from each other by corridor-plus-two-walls, the pair is always a room
+/// and a corridor, so **every door connects a room to a corridor** (§10.1.4, §10.6).
+fn place_doorways(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
+    let (w, h) = (facility.width(), facility.height());
+    // Rows first: a horizontal wall with floor north and south is a run in x, and
+    // its doorway joins the region above to the region below.
+    for y in 1..h - 1 {
+        scan_line(facility, regions, rng, Line::Row(y), w);
+    }
+    // Then columns: a vertical wall with floor west and east is a run in y.
+    for x in 1..w - 1 {
+        scan_line(facility, regions, rng, Line::Col(x), h);
+    }
+}
+
+/// One scan line: a fixed row (varying `x`) or column (varying `y`).
+#[derive(Clone, Copy)]
+enum Line {
+    Row(u32),
+    Col(u32),
+}
+
+impl Line {
+    /// The cell at position `i` along this line.
+    fn cell(self, i: u32) -> Cell {
+        match self {
+            Line::Row(y) => Cell::new(i, y),
+            Line::Col(x) => Cell::new(x, i),
+        }
+    }
+
+    /// The two flank cells perpendicular to the line at position `i` — the cells a
+    /// doorway here would connect (north/south for a row, west/east for a column).
+    fn flanks(self, i: u32) -> (Cell, Cell) {
+        match self {
+            Line::Row(y) => (Cell::new(i, y - 1), Cell::new(i, y + 1)),
+            Line::Col(x) => (Cell::new(x - 1, i), Cell::new(x + 1, i)),
+        }
+    }
+}
+
+/// Walk one scan line, breaking it into maximal runs of wall separating a constant
+/// pair of distinct regions, and cut one doorway into each run of length ≥ 3.
+fn scan_line(
+    facility: &mut Facility,
+    regions: &mut RegionGraph,
+    rng: &mut Rng,
+    line: Line,
+    extent: u32,
+) {
+    // The run in flight: start position along the line, length, and the two regions
+    // it separates.
+    let mut run: Option<(u32, u32, RegionId, RegionId)> = None;
+    for i in 1..extent - 1 {
+        let candidate = door_candidate(facility, regions, line, i);
+        match (run, candidate) {
+            (Some((start, len, a, b)), Some((ca, cb))) if (ca, cb) == (a, b) => {
+                run = Some((start, len + 1, a, b));
+            }
+            _ => {
+                if let Some((start, len, a, b)) = run.take() {
+                    place_door(facility, regions, rng, line, start, len, a, b);
+                }
+                run = candidate.map(|(a, b)| (i, 1, a, b));
+            }
+        }
+    }
+    if let Some((start, len, a, b)) = run.take() {
+        place_door(facility, regions, rng, line, start, len, a, b);
+    }
+}
+
+/// Whether the cell at `i` on `line` is a doorway candidate: a plain wall cell with
+/// a distinct interior region on each flank. Returns that region pair, or `None`.
+/// Requiring plain `Wall` skips cells already turned into a door by an earlier scan.
+fn door_candidate(
+    facility: &Facility,
+    regions: &RegionGraph,
+    line: Line,
+    i: u32,
+) -> Option<(RegionId, RegionId)> {
+    let cell = line.cell(i);
+    if facility.terrain_at(cell.x, cell.y) != Some(Terrain::Wall) {
+        return None;
+    }
+    let (near, far) = line.flanks(i);
+    let a = regions.region_at(near)?;
+    let b = regions.region_at(far)?;
+    if a == b {
+        return None;
+    }
+    Some((a, b))
+}
+
+/// Cut one doorway into a run of `len` wall cells starting at `start` on `line`,
+/// joining regions `a` and `b`. Length is random `3..=min(len, 6)` at a random
+/// offset (§10.1.4); the two ends become hinges, the cells between become closed
+/// panels (§10.4).
+fn place_door(
+    facility: &mut Facility,
+    regions: &mut RegionGraph,
+    rng: &mut Rng,
+    line: Line,
+    start: u32,
+    len: u32,
+    a: RegionId,
+    b: RegionId,
+) {
+    if len < MIN_DOOR_RUN {
+        return;
+    }
+    let door_len = rng.range_inclusive(MIN_DOOR_RUN as i32, len.min(MAX_DOOR_LEN) as i32) as u32;
+    let offset = rng.range_inclusive(0, (len - door_len) as i32) as u32;
+    let first = start + offset;
+    let last = first + door_len - 1;
+
+    let hinges = [line.cell(first), line.cell(last)];
+    let panels: Vec<Cell> = (first + 1..last).map(|i| line.cell(i)).collect();
+
+    for hinge in hinges {
+        facility.set_terrain(hinge.x, hinge.y, Terrain::DoorHinge);
+    }
+    for &panel in &panels {
+        facility.set_terrain(panel.x, panel.y, Terrain::DoorPanelClosed);
+    }
+    regions.add_door(a, b, hinges, panels, AUTO_CLOSE);
 }
 
 /// An inclusive rectangle of interior cells, `[x0, x1] × [y0, y1]`.
@@ -648,5 +807,54 @@ mod tests {
         let layout = generate(18, 18, &mut Rng::new(5)).expect("18x18 partitions");
         assert!(regions_of_kind(&layout, RegionKind::Corridor) >= 1);
         assert!(regions_of_kind(&layout, RegionKind::Room) >= 2);
+    }
+
+    /// §10.6: every room reaches a corridor. The doorway pass (§10.1.4) must cut at
+    /// least one door from every room into the corridor network — a room with no
+    /// door is sealed, taking its future objectives and guards with it.
+    #[test]
+    fn every_room_reaches_a_corridor_through_a_door() {
+        for &(w, h) in &[(18, 18), (40, 40), (24, 40), (60, 60)] {
+            for seed in 0..40 {
+                let layout = generate(w, h, &mut Rng::new(seed)).unwrap();
+                let regions = layout.regions();
+                for (id, region) in regions.regions() {
+                    if region.kind() != RegionKind::Room {
+                        continue;
+                    }
+                    let reaches_corridor = regions
+                        .neighbours(id)
+                        .any(|(_, other)| regions.kind(other) == RegionKind::Corridor);
+                    assert!(
+                        reaches_corridor,
+                        "{w}x{h} seed {seed}: a room has no door to a corridor"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every doorway is a valid §10.4 span: 2 hinges around 1–4 panels, 3–6 cells
+    /// total, all lying on a single straight wall line.
+    #[test]
+    fn doorways_are_well_formed_spans() {
+        for seed in 0..64 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            for (_, door) in layout.regions().doors() {
+                assert_eq!(door.hinges().len(), 2, "seed {seed}: a hinge at each end");
+                let panels = door.panels().len();
+                assert!(
+                    (1..=4).contains(&panels),
+                    "seed {seed}: {panels} panels, want 1..=4"
+                );
+                let cells: Vec<Cell> = door.cells().collect();
+                let straight = cells.iter().all(|c| c.x == cells[0].x)
+                    || cells.iter().all(|c| c.y == cells[0].y);
+                assert!(
+                    straight,
+                    "seed {seed}: a door must lie on one straight line"
+                );
+            }
+        }
     }
 }

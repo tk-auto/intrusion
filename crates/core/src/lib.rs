@@ -8,13 +8,14 @@
 //! So far it holds the seeded PRNG wrapper (§12.4) — the one primitive every
 //! other system builds on — the smallest slice of the facility (a walled
 //! rectangle, §4.1/§10, and the pure state→glyph-grid render, §11.1), the spatial
-//! region graph (§10.5) that gives corridors and rooms a name, and the
-//! corridor-first partition (§10.1) that carves them. Game systems (doorways,
-//! guards, vision, …) land in their own tickets.
+//! region graph (§10.5) that gives corridors and rooms a name, the corridor-first
+//! partition (§10.1) that carves them, and the hinged doors (§10.4) it cuts where
+//! rooms meet corridors. Game systems (guards, vision, …) land in their own tickets.
 
 #![forbid(unsafe_code)]
 
 mod cell;
+mod door;
 mod facility;
 mod generate;
 mod region;
@@ -22,8 +23,9 @@ mod render;
 mod rng;
 
 pub use cell::Cell;
-pub use facility::{Facility, Terrain};
+pub use door::DoorAction;
+pub use facility::{Facility, SoundBlocking, Terrain};
 pub use generate::{generate, GenError, Layout};
-pub use region::{Door, DoorId, Region, RegionGraph, RegionId, RegionKind};
+pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
 pub use render::ascii_grid;
 pub use rng::Rng;
