@@ -6,8 +6,10 @@
 //! natively in milliseconds with no browser.
 //!
 //! So far it holds the seeded PRNG wrapper (§12.4) — the one primitive every
-//! other system builds on — the smallest slice of the facility (a walled
-//! rectangle, §4.1/§10, and the pure state→glyph-grid render, §11.1), the spatial
+//! other system builds on — the grid substrate (§4.1/§4.3/§10.3): the terrain
+//! table, the cell-capacity occupancy query, and 4-directional movement with
+//! Manhattan distance, all wrapped in the indestructible border the facility
+//! guarantees. On top of it: the pure state→glyph-grid render (§11.1), the spatial
 //! region graph (§10.5) that gives corridors and rooms a name, the corridor-first
 //! partition (§10.1) that carves them, and the hinged doors (§10.4) it cuts where
 //! rooms meet corridors. Game systems (guards, vision, …) land in their own tickets.
@@ -22,7 +24,7 @@ mod region;
 mod render;
 mod rng;
 
-pub use cell::Cell;
+pub use cell::{Cell, Direction};
 pub use door::DoorAction;
 pub use facility::{Facility, SoundBlocking, Terrain};
 pub use generate::{generate, GenError, Layout};
