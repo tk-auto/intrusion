@@ -125,6 +125,39 @@ branch:
 Report the branch, the gate result, and the PR URL to the user. Offer to watch the
 PR for CI/review activity (`subscribe_pr_activity`) rather than polling.
 
+## 8. Merge once CI is green
+
+A finished ticket ends **merged**, not just in an open PR. This repo has GitHub
+auto-merge enabled, so the default is:
+
+- **Enable auto-merge, squash** (`enable_pr_auto_merge`, `mergeMethod: "SQUASH"` —
+  this repo's history is one squashed commit per issue, e.g. `… (#24)`) right after
+  opening the PR. GitHub then merges it the moment CI passes, with no polling; the
+  branch auto-deletes if the repo is set to. Report that auto-merge is armed and
+  what will happen on green; if the change deploys (Pages, §13.1), note the deploy
+  follows from the merge to `main`.
+- **CI red → it won't merge.** The webhook delivers the failure — diagnose, fix on
+  the same branch, push, and let CI (and the armed auto-merge) re-run.
+
+If `enable_pr_auto_merge` reports auto-merge is **not** enabled for the repo, fall
+back to merging by hand: CI **success is not delivered as a webhook** (only
+failures are), so poll the checks (`pull_request_read` → `get_status` /
+`get_check_runs`), scheduling a follow-up (`send_later`) if the run is slow, and
+`merge_pull_request` (`squash`) on green.
+
+**Do NOT auto-merge — leave the PR open and hand it back — when any of these hold:**
+
+- **The user asked to review** it, in this session or the ticket ("let me look
+  first", "don't merge yet", "open it for review"). Their word overrides the
+  default.
+- **You are unsure.** The change is risky, you couldn't fully verify it (e.g. a
+  browser-only render you can't exercise headlessly), it bends a `[SETTLED]` rule,
+  it tunes `[START]` numbers you're not confident in, or the ticket was ambiguous.
+  When in doubt, surface it (`AskUserQuestion`) — don't merge doubt into `main`.
+- **The PR is stacked** on another unmerged PR — merge the base first, then this.
+
+In those cases, report the PR URL, the CI state, and exactly why you're holding.
+
 ## Guardrails
 
 - **Don't ship a stub that looks like a feature (§2.3).** If the ticket's system
