@@ -105,6 +105,29 @@ impl Layout {
     pub(crate) fn parts_mut(&mut self) -> (&mut Facility, &mut RegionGraph) {
         (&mut self.facility, &mut self.regions)
     }
+
+    /// Stamp a single terrain cell into the finished grid — the placement write
+    /// (§10.1.7–9). Crate-internal: only generation and the turn loop's state
+    /// construction place tiles onto a level. Region membership is placement's own
+    /// bookkeeping (#12); this touches terrain only.
+    pub(crate) fn place(&mut self, cell: Cell, terrain: Terrain) {
+        self.facility.set_terrain(cell.x, cell.y, terrain);
+    }
+}
+
+/// A bare layout over `facility` with no regions or doors — for tests and tools
+/// that need a hand-made world without running the full generator. Real levels come
+/// from [`generate`]; this just wraps a grid so the turn loop and the door seam can
+/// operate on it.
+#[cfg(test)]
+impl Layout {
+    pub(crate) fn from_facility(facility: Facility) -> Self {
+        let (w, h) = (facility.width(), facility.height());
+        Self {
+            facility,
+            regions: RegionGraph::new(w, h),
+        }
+    }
 }
 
 /// Generate a facility by corridor-first binary partition (§10.1 steps 1–3).

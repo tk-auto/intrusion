@@ -26,6 +26,8 @@ features = [
     "Window",
     "Document",
     "Element",
+    "EventTarget",
+    "KeyboardEvent",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
 ]

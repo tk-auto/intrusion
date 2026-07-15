@@ -12,7 +12,11 @@
 //! guarantees. On top of it: the pure state→glyph-grid render (§11.1), the spatial
 //! region graph (§10.5) that gives corridors and rooms a name, the corridor-first
 //! partition (§10.1) that carves them, and the hinged doors (§10.4) it cuts where
-//! rooms meet corridors. Game systems (guards, vision, …) land in their own tickets.
+//! rooms meet corridors. On top of all that sits the turn loop (§4.2): the running
+//! [`State`], `state × input → state, events`, resolving player, sight, and guards in
+//! order with the turn-cost rule and the two win/lose conditions. The remaining game
+//! systems (real vision, guard AI, sound, abilities) land in their own tickets, in the
+//! phase hooks the loop already calls.
 
 #![forbid(unsafe_code)]
 
@@ -23,6 +27,7 @@ mod generate;
 mod region;
 mod render;
 mod rng;
+mod state;
 
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;
@@ -31,3 +36,4 @@ pub use generate::{generate, GenError, Layout};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
 pub use render::ascii_grid;
 pub use rng::Rng;
+pub use state::{Event, Guard, Input, Outcome, State};
