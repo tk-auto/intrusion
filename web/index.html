@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Intrusion</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0b0b;
+        color: #cfcfcf;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      #app {
+        display: grid;
+        place-items: center;
+        height: 100%;
+      }
+      canvas {
+        image-rendering: pixelated;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <!--
+        The canvas2d glyph grid (§11.1) and the wasm bootstrap land in the web
+        renderer ticket. For now this is the shell the wasm module (built from
+        crates/web via wasm-bindgen) will mount into.
+      -->
+      <noscript>Intrusion needs JavaScript and WebAssembly.</noscript>
+    </div>
+  </body>
+</html>

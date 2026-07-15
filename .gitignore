@@ -1,0 +1,12 @@
+# Rust build artifacts
+/target
+**/target
+
+# wasm-bindgen / web build output
+/web/pkg
+/crates/web/pkg
+*.wasm
+
+# Editor / OS cruft
+.DS_Store
+*.swp
