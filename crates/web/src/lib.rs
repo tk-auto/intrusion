@@ -8,7 +8,7 @@
 //! tiles later swap `fillText` for `drawImage` behind the same idea (§12.2), and
 //! colour categories, fog and input all grow from here in their own tickets.
 
-use intrusion_core::{ascii_grid, Facility};
+use intrusion_core::{ascii_grid, generate, Rng};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -23,17 +23,23 @@ const CELL_H: u32 = 20;
 const BG: &str = "#0b0b0b";
 const NEUTRAL: &str = "#cfcfcf";
 
-/// Boot the renderer: build the facility, mount a canvas, draw it once.
+/// Boot the renderer: generate a facility, mount a canvas, draw it once.
 ///
 /// This is the wasm entry point the page calls after the module initialises. It
 /// draws a static frame — the render loop and input pump land with the turn
-/// loop; for now it proves the pipeline core → glyph grid → canvas → Pages.
+/// loop; for now it proves the pipeline core → glyph grid → canvas → Pages, and
+/// shows the corridor-first partition (§10.1) doing its job. Reload for a new
+/// seed; explicit seed entry / sharing (§13.1) is a later ticket.
 #[wasm_bindgen]
 pub fn start() -> Result<(), JsValue> {
-    // The v1 facility footprint (§10.2). No generation yet: a walled rectangle,
-    // which is exactly the "big rectangle of walls" this slice draws.
-    let facility = Facility::walled_box(40, 40);
-    let grid = ascii_grid(&facility);
+    // The seed is the one impurity the shell owns (§12.1 keeps the *core* pure):
+    // read the clock here so each load is a different facility, and hand the core
+    // a plain u64. The v1 footprint is 40×40 (§10.2).
+    let seed = js_sys::Date::now() as u64;
+    let layout = generate(40, 40, &mut Rng::new(seed))
+        .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
+    let facility = layout.facility();
+    let grid = ascii_grid(facility);
 
     let document = web_sys::window()
         .and_then(|w| w.document())
