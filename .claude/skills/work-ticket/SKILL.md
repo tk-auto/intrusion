@@ -125,6 +125,36 @@ branch:
 Report the branch, the gate result, and the PR URL to the user. Offer to watch the
 PR for CI/review activity (`subscribe_pr_activity`) rather than polling.
 
+## 8. Merge once CI is green
+
+A finished ticket ends **merged**, not just in an open PR. After opening it, watch
+the repo's CI (the fmt/clippy/test gate in `.github/workflows`) through to a
+result, then:
+
+- **CI green → squash-merge it** (`merge_pull_request`, `merge_method: "squash"` —
+  this repo's history is one squashed commit per issue, e.g. `… (#24)`). Delete the
+  branch after merge. Report the merged SHA; if the change deploys (Pages, §13.1),
+  note the deploy follows from the push to `main`.
+- **CI red → do not merge.** Diagnose, fix on the same branch, push, let CI re-run.
+  Only merge on green.
+
+CI **success is not delivered as a webhook** (only failures are), so don't wait
+passively for it — poll the checks (`pull_request_read` → `get_status` /
+`get_check_runs`), scheduling a follow-up (`send_later`) if the run is slow.
+
+**Do NOT auto-merge — leave the PR open and hand it back — when any of these hold:**
+
+- **The user asked to review** it, in this session or the ticket ("let me look
+  first", "don't merge yet", "open it for review"). Their word overrides the
+  default.
+- **You are unsure.** The change is risky, you couldn't fully verify it (e.g. a
+  browser-only render you can't exercise headlessly), it bends a `[SETTLED]` rule,
+  it tunes `[START]` numbers you're not confident in, or the ticket was ambiguous.
+  When in doubt, surface it (`AskUserQuestion`) — don't merge doubt into `main`.
+- **The PR is stacked** on another unmerged PR — merge the base first, then this.
+
+In those cases, report the PR URL, the CI state, and exactly why you're holding.
+
 ## Guardrails
 
 - **Don't ship a stub that looks like a feature (§2.3).** If the ticket's system
