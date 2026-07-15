@@ -1145,6 +1145,45 @@ five years.
 
 ---
 
+### G8 — CI: build and publish the static site to GitHub Pages → #22
+**Labels:** `area:build` `type:chore` `size:S`
+**Milestone:** v1
+
+## Summary
+Ship the game where it's meant to live: a static GitHub Pages site, built and
+deployed automatically from CI. The distribution target is a constraint the whole
+architecture serves (§3), and the deploy is the "build" half of the v1 experiment
+loop (§13.1). Until there's a URL that updates on every push to the default branch,
+"you play, agents build" has no board.
+
+## Design reference
+§3 — ships as a **static GitHub Pages site. No server, no CLI, no runtime dependency
+on anything but a browser.** "A static page that still builds in five years."
+§13.1 — the loop needs a fast build, a **deploy preview**, and seed sharing.
+§12.2 — the artifact is `web/` (index.html, font, assets) + the wasm bundle from
+`crates/web`; bundle stays small.
+
+## Acceptance criteria
+- [ ] A GitHub Actions workflow builds the wasm bundle (`wasm32-unknown-unknown` via
+      wasm-bindgen) and assembles the deployable static site from `web/` + glue.
+- [ ] Deploys to GitHub Pages on push to the default branch (`actions/deploy-pages`);
+      the URL loads the game in a browser.
+- [ ] Artifact is fully self-contained and static — no server, no non-browser dep.
+- [ ] Build is reproducible/pinned (toolchain + wasm-bindgen) so it still builds
+      later; wasm output stays git-ignored.
+- [ ] The fmt/clippy/test gate (#1) stays green; Pages deploy runs after it passes.
+- [ ] README/docs note the published URL.
+
+## Notes / risks
+- Depends on the web shell (#20 / G7) for a loadable bundle — until it lands, deploy
+  the static `web/` shell to prove the pipeline, then carry the real wasm bundle.
+- Keep it a plain Actions → Pages pipeline; the five-year-build promise means
+  minimal, pinned, boring tooling.
+- Seed sharing (the third §13.1 ask) rides on the deployed site but is its own
+  concern — tracked with the determinism/replay work (H1), not here.
+
+---
+
 ## v1 — H. Determinism and testing (§12.4, §13.1)
 
 ### H1 — Replay `(seed, inputs)` + golden grid tests
