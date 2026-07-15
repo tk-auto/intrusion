@@ -30,7 +30,9 @@ Take one GitHub issue from idea to a pushed, reviewable PR. This skill owns the
 
 ## 2. Branch
 
-One branch per ticket, off the current default branch:
+One branch per ticket, off the current default branch. **The branch name must
+say what the change is about** — `<type>/<issue-number>-<slug>`, where the slug
+is a short, human-readable description of the work:
 
 ```
 git fetch origin main
@@ -38,10 +40,15 @@ git checkout -B <type>/<issue-number>-<slug> origin/main
 ```
 
 e.g. `feat/12-shadowcast-cone`, `chore/1-scaffold-workspace`. `<type>` matches the
-ticket's `type:` label (`feat`, `chore`, `fix`, `tune`).
+ticket's `type:` label (`feat`, `chore`, `fix`, `tune`). Never ship a branch whose
+name is an opaque or auto-generated token (e.g. `claude/next-ticket-xxxxx`) — the
+name is the first thing a reviewer reads.
 
-> If the session was assigned a specific development branch, honour that instead —
-> the assignment overrides this convention.
+> If the session was assigned a development branch whose name is already
+> descriptive of this ticket, use it. If the assigned branch name is opaque or
+> generic (a random token, `next-ticket`, etc.), **rename it to the descriptive
+> convention above** before pushing (`git branch -m <old> <type>/<issue>-<slug>`),
+> and push the renamed branch — do not push work under the opaque name.
 
 ## 3. Implement
 
