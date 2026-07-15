@@ -61,6 +61,12 @@ const MAX_DOOR_LEN: u32 = 6;
 /// [`Door::set_auto_close`](crate::Door::set_auto_close), so playtest can compare
 /// the facility with auto-close on and off.
 const AUTO_CLOSE: bool = true;
+/// The most doorways any one room gets **[START]**. A room with a door on every
+/// wall is a thoroughfare, not a room — most rooms want one or two ways in, and a
+/// three-door hub should be the exception. Every room still keeps at least one
+/// door, so none is ever sealed off (§10.6). The per-room count is drawn by
+/// [`room_door_budget`].
+const MAX_DOORS_PER_ROOM: u32 = 3;
 
 /// Why a facility could not be generated.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -377,27 +383,46 @@ fn seal_border(facility: &mut Facility) {
     }
 }
 
-/// Cut doorways where rooms meet corridors (§10.1.4).
+/// Cut doorways where rooms meet corridors (§10.1.4), capping how many each room
+/// gets so a room boxed in by corridors is not riddled with doors.
 ///
-/// Scan every row, then every column. A run of wall cells with **interior on both
-/// flanks** is a door candidate; each **maximal** such run of length ≥ 3 gets
-/// **exactly one** doorway. "Maximal" is read against the two regions the run
-/// separates: a run breaks not only where a flank stops being interior but also
-/// where the pair of flanking regions changes, so every doorway joins one room to
-/// one corridor — never spanning two rooms at once. Because rooms are always
-/// separated from each other by corridor-plus-two-walls, the pair is always a room
-/// and a corridor, so **every door connects a room to a corridor** (§10.1.4, §10.6).
+/// Two passes. **Collect:** scan every row, then every column, for **maximal runs**
+/// of wall with interior on both flanks — the door candidates. "Maximal" is read
+/// against the two regions a run separates: it breaks not only where a flank stops
+/// being interior but also where the pair of flanking regions changes, so every
+/// candidate joins one room to one corridor and never spans two rooms. **Choose:**
+/// a room with a door on every wall is a thoroughfare, not a room, so each room
+/// keeps only [`room_door_budget`]-many of its candidates (one or two usually,
+/// three rarely) — but always at least one, so no room is sealed (§10.6). Because
+/// rooms are always separated from each other by corridor-plus-two-walls, **every
+/// door connects a room to a corridor** (§10.1.4, §10.6).
 fn place_doorways(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
     let (w, h) = (facility.width(), facility.height());
+    let mut candidates: Vec<Candidate> = Vec::new();
     // Rows first: a horizontal wall with floor north and south is a run in x, and
     // its doorway joins the region above to the region below.
     for y in 1..h - 1 {
-        scan_line(facility, regions, rng, Line::Row(y), w);
+        collect_runs(regions, Line::Row(y), w, &mut candidates);
     }
     // Then columns: a vertical wall with floor west and east is a run in y.
     for x in 1..w - 1 {
-        scan_line(facility, regions, rng, Line::Col(x), h);
+        collect_runs(regions, Line::Col(x), h, &mut candidates);
     }
+
+    for idx in choose_doors(&candidates, rng) {
+        cut_door(facility, regions, rng, &candidates[idx]);
+    }
+}
+
+/// A maximal wall run that could become a doorway: where it sits, how long it is,
+/// and the room and corridor it would join.
+#[derive(Clone, Copy)]
+struct Candidate {
+    line: Line,
+    start: u32,
+    len: u32,
+    room: RegionId,
+    corridor: RegionId,
 }
 
 /// One scan line: a fixed row (varying `x`) or column (varying `y`).
@@ -427,50 +452,54 @@ impl Line {
 }
 
 /// Walk one scan line, breaking it into maximal runs of wall separating a constant
-/// pair of distinct regions, and cut one doorway into each run of length ≥ 3.
-fn scan_line(
-    facility: &mut Facility,
-    regions: &mut RegionGraph,
-    rng: &mut Rng,
-    line: Line,
-    extent: u32,
-) {
+/// pair of distinct regions, and push each run of length ≥ 3 as a [`Candidate`].
+fn collect_runs(regions: &RegionGraph, line: Line, extent: u32, out: &mut Vec<Candidate>) {
     // The run in flight: start position along the line, length, and the two regions
     // it separates.
     let mut run: Option<(u32, u32, RegionId, RegionId)> = None;
+    let flush = |run: Option<(u32, u32, RegionId, RegionId)>, out: &mut Vec<Candidate>| {
+        if let Some((start, len, a, b)) = run {
+            if len >= MIN_DOOR_RUN {
+                // Exactly one endpoint is a room (rooms never touch across a single
+                // wall), so name the room and corridor for the per-room budget.
+                let (room, corridor) = if regions.kind(a) == RegionKind::Room {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                out.push(Candidate {
+                    line,
+                    start,
+                    len,
+                    room,
+                    corridor,
+                });
+            }
+        }
+    };
     for i in 1..extent - 1 {
-        let candidate = door_candidate(facility, regions, line, i);
+        let candidate = door_candidate(regions, line, i);
         match (run, candidate) {
             (Some((start, len, a, b)), Some((ca, cb))) if (ca, cb) == (a, b) => {
                 run = Some((start, len + 1, a, b));
             }
             _ => {
-                if let Some((start, len, a, b)) = run.take() {
-                    place_door(facility, regions, rng, line, start, len, a, b);
-                }
+                flush(run.take(), out);
                 run = candidate.map(|(a, b)| (i, 1, a, b));
             }
         }
     }
-    if let Some((start, len, a, b)) = run.take() {
-        place_door(facility, regions, rng, line, start, len, a, b);
-    }
+    flush(run.take(), out);
 }
 
-/// Whether the cell at `i` on `line` is a doorway candidate: a plain wall cell with
-/// a distinct interior region on each flank. Returns that region pair, or `None`.
-/// Requiring plain `Wall` skips cells already turned into a door by an earlier scan.
-fn door_candidate(
-    facility: &Facility,
-    regions: &RegionGraph,
-    line: Line,
-    i: u32,
-) -> Option<(RegionId, RegionId)> {
-    let cell = line.cell(i);
-    if facility.terrain_at(cell.x, cell.y) != Some(Terrain::Wall) {
+/// Whether the cell at `i` on `line` is a doorway candidate: a wall cell with a
+/// distinct interior region on each flank. Returns that region pair, or `None`.
+fn door_candidate(regions: &RegionGraph, line: Line, i: u32) -> Option<(RegionId, RegionId)> {
+    let (near, far) = line.flanks(i);
+    // A wall separating two regions owns neither flank itself, so it is unclaimed.
+    if regions.region_at(line.cell(i)).is_some() {
         return None;
     }
-    let (near, far) = line.flanks(i);
     let a = regions.region_at(near)?;
     let b = regions.region_at(far)?;
     if a == b {
@@ -479,23 +508,66 @@ fn door_candidate(
     Some((a, b))
 }
 
-/// Cut one doorway into a run of `len` wall cells starting at `start` on `line`,
-/// joining regions `a` and `b`. Length is random `3..=min(len, 6)` at a random
-/// offset (§10.1.4); the two ends become hinges, the cells between become closed
-/// panels (§10.4).
-fn place_door(
+/// Pick which candidates become doors, capping each room to [`room_door_budget`]
+/// of its own — but never below one, so no room is sealed (§10.6). Returns the
+/// chosen indices into `candidates`, in ascending (scan) order so the cut pass is
+/// deterministic. Rooms are budgeted in first-appearance order, itself fixed by the
+/// scan, for the same reason.
+fn choose_doors(candidates: &[Candidate], rng: &mut Rng) -> Vec<usize> {
+    // Group candidate indices by the room they belong to, keeping rooms in the
+    // deterministic order they first appear in the scan.
+    let mut by_room: Vec<(RegionId, Vec<usize>)> = Vec::new();
+    for (i, c) in candidates.iter().enumerate() {
+        match by_room.iter_mut().find(|(r, _)| *r == c.room) {
+            Some((_, idxs)) => idxs.push(i),
+            None => by_room.push((c.room, vec![i])),
+        }
+    }
+
+    let mut chosen: Vec<usize> = Vec::new();
+    for (_, mut idxs) in by_room {
+        let budget = room_door_budget(rng) as usize;
+        let keep = budget.clamp(1, idxs.len());
+        // Partial Fisher–Yates: shuffle `keep` random candidates to the front.
+        for i in 0..keep {
+            let j = i + rng.below((idxs.len() - i) as u32) as usize;
+            idxs.swap(i, j);
+        }
+        idxs.truncate(keep);
+        chosen.extend(idxs);
+    }
+    chosen.sort_unstable();
+    chosen
+}
+
+/// A room's doorway budget: **one or two usually, three rarely, never more**
+/// (`MAX_DOORS_PER_ROOM`) **[START]**. Clamped afterwards to the candidates a room
+/// actually has, and never below one.
+fn room_door_budget(rng: &mut Rng) -> u32 {
+    // 40% one, 50% two, 10% three — most rooms have one or two ways in.
+    match rng.below(10) {
+        0..=3 => 1,
+        4..=8 => 2,
+        _ => MAX_DOORS_PER_ROOM,
+    }
+}
+
+/// Cut the doorway for one chosen `candidate`. Length is random `3..=min(len, 6)`
+/// at a random offset (§10.1.4); the two ends become hinges, the cells between
+/// become closed panels (§10.4).
+fn cut_door(
     facility: &mut Facility,
     regions: &mut RegionGraph,
     rng: &mut Rng,
-    line: Line,
-    start: u32,
-    len: u32,
-    a: RegionId,
-    b: RegionId,
+    candidate: &Candidate,
 ) {
-    if len < MIN_DOOR_RUN {
-        return;
-    }
+    let Candidate {
+        line,
+        start,
+        len,
+        room,
+        corridor,
+    } = *candidate;
     let door_len = rng.range_inclusive(MIN_DOOR_RUN as i32, len.min(MAX_DOOR_LEN) as i32) as u32;
     let offset = rng.range_inclusive(0, (len - door_len) as i32) as u32;
     let first = start + offset;
@@ -510,7 +582,7 @@ fn place_door(
     for &panel in &panels {
         facility.set_terrain(panel.x, panel.y, Terrain::DoorPanelClosed);
     }
-    regions.add_door(a, b, hinges, panels, AUTO_CLOSE);
+    regions.add_door(room, corridor, hinges, panels, AUTO_CLOSE);
 }
 
 /// An inclusive rectangle of interior cells, `[x0, x1] × [y0, y1]`.
@@ -832,6 +904,55 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A room gets one to three doors, never more (`MAX_DOORS_PER_ROOM`) — a room
+    /// boxed in by corridors is not riddled with a door on every wall — and never
+    /// fewer than one, so no room is sealed off (§10.6 **[START]**).
+    #[test]
+    fn rooms_have_one_to_three_doors() {
+        for &(w, h) in &[(18, 18), (40, 40), (24, 40), (60, 60)] {
+            for seed in 0..64 {
+                let layout = generate(w, h, &mut Rng::new(seed)).unwrap();
+                let regions = layout.regions();
+                for (id, region) in regions.regions() {
+                    if region.kind() != RegionKind::Room {
+                        continue;
+                    }
+                    let doors = region.doors().len() as u32;
+                    assert!(
+                        (1..=MAX_DOORS_PER_ROOM).contains(&doors),
+                        "{w}x{h} seed {seed}: room {id:?} has {doors} doors, want 1..={MAX_DOORS_PER_ROOM}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Most rooms are calm — one or two doors — with three-door hubs the exception,
+    /// per the [`room_door_budget`] weighting **[START]**. Asserted in aggregate over
+    /// many seeds so the distribution, not any single room, is what's pinned.
+    #[test]
+    fn most_rooms_have_one_or_two_doors() {
+        let (mut calm, mut total) = (0u32, 0u32);
+        for seed in 0..200 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let regions = layout.regions();
+            for (_, region) in regions.regions() {
+                if region.kind() != RegionKind::Room {
+                    continue;
+                }
+                total += 1;
+                if region.doors().len() <= 2 {
+                    calm += 1;
+                }
+            }
+        }
+        // Three-door rooms are rare; the overwhelming majority have one or two.
+        assert!(
+            calm * 100 >= total * 90,
+            "only {calm}/{total} rooms have <= 2 doors; expected the vast majority"
+        );
     }
 
     /// Every doorway is a valid §10.4 span: 2 hinges around 1–4 panels, 3–6 cells
