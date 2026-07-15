@@ -5,12 +5,17 @@
 //! whole contract is `state × input → state, events`, and it must be testable
 //! natively in milliseconds with no browser.
 //!
-//! For now it holds only the seeded PRNG wrapper (§12.4) — the one primitive
-//! every other system will build on. Game systems (generation, guards, vision,
-//! …) land in their own tickets.
+//! So far it holds the seeded PRNG wrapper (§12.4) — the one primitive every
+//! other system builds on — plus the smallest slice of the facility: a walled
+//! rectangle (§4.1, §10) and the pure state→glyph-grid render (§11.1). Game
+//! systems (generation, guards, vision, …) land in their own tickets.
 
 #![forbid(unsafe_code)]
 
+mod facility;
+mod render;
 mod rng;
 
+pub use facility::{Facility, Terrain};
+pub use render::ascii_grid;
 pub use rng::Rng;

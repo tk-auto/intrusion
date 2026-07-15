@@ -5,6 +5,7 @@
 # wasm-bindgen / web build output
 /web/pkg
 /crates/web/pkg
+/dist
 *.wasm
 
 # Editor / OS cruft
