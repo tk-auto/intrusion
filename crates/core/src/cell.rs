@@ -25,4 +25,105 @@ impl Cell {
     pub fn new(x: u32, y: u32) -> Self {
         Self { x, y }
     }
+
+    /// The Manhattan distance — the number of 4-directional steps — to `other`
+    /// (§4.1). This is the game's distance metric everywhere except sight range,
+    /// which uses a square box instead (§6.1).
+    pub fn manhattan_distance(self, other: Cell) -> u32 {
+        self.x.abs_diff(other.x) + self.y.abs_diff(other.y)
+    }
+
+    /// The neighbouring cell one step in `dir`, or `None` when that step would
+    /// leave the grid's north or west edge — coordinates are unsigned, so there
+    /// is no cell there to name. Stepping east or south always yields a `Cell`;
+    /// whether *that* cell is in bounds is the grid's call, so callers that need
+    /// bounds should go through [`Facility::neighbors`](crate::Facility::neighbors).
+    pub fn step(self, dir: Direction) -> Option<Cell> {
+        let cell = match dir {
+            Direction::North => Cell::new(self.x, self.y.checked_sub(1)?),
+            Direction::South => Cell::new(self.x, self.y + 1),
+            Direction::East => Cell::new(self.x + 1, self.y),
+            Direction::West => Cell::new(self.x.checked_sub(1)?, self.y),
+        };
+        Some(cell)
+    }
+}
+
+/// One of the four cardinal directions movement is allowed in (§4.1).
+///
+/// There is deliberately no diagonal variant: 4-directional movement is
+/// **[SETTLED]**, and the *absence* of a diagonal here is what makes "no diagonal
+/// path anywhere" structural — nothing built on [`Cell::step`] or
+/// [`Facility::neighbors`](crate::Facility::neighbors) can travel diagonally,
+/// because there is no diagonal to travel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Direction {
+    /// Decreasing `y` — toward the north wall.
+    North,
+    /// Increasing `x` — toward the east wall.
+    East,
+    /// Increasing `y` — toward the south wall.
+    South,
+    /// Decreasing `x` — toward the west wall.
+    West,
+}
+
+impl Direction {
+    /// The four directions, clockwise from north. Iterating this is the canonical
+    /// way to visit a cell's cardinal neighbours.
+    pub const ALL: [Direction; 4] = [
+        Direction::North,
+        Direction::East,
+        Direction::South,
+        Direction::West,
+    ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manhattan_distance_counts_steps_not_diagonals() {
+        let a = Cell::new(1, 1);
+        let b = Cell::new(4, 5);
+        // 3 east + 4 south = 7 steps; symmetric.
+        assert_eq!(a.manhattan_distance(b), 7);
+        assert_eq!(b.manhattan_distance(a), 7);
+        assert_eq!(a.manhattan_distance(a), 0);
+    }
+
+    #[test]
+    fn step_moves_one_cell_in_each_cardinal_direction() {
+        let c = Cell::new(3, 3);
+        assert_eq!(c.step(Direction::North), Some(Cell::new(3, 2)));
+        assert_eq!(c.step(Direction::South), Some(Cell::new(3, 4)));
+        assert_eq!(c.step(Direction::East), Some(Cell::new(4, 3)));
+        assert_eq!(c.step(Direction::West), Some(Cell::new(2, 3)));
+    }
+
+    /// Every cardinal step lands exactly one Manhattan unit away — the structural
+    /// guarantee that there is no diagonal move.
+    #[test]
+    fn every_step_is_one_manhattan_unit() {
+        let c = Cell::new(5, 5);
+        for dir in Direction::ALL {
+            let n = c.step(dir).expect("interior cell steps in every direction");
+            assert_eq!(c.manhattan_distance(n), 1, "{dir:?} is not a unit step");
+        }
+    }
+
+    /// Stepping off the north/west edge is `None` rather than an underflow panic;
+    /// the low edges are the only ones `Cell` alone can see (it holds no bounds).
+    #[test]
+    fn stepping_off_the_low_edge_is_none() {
+        assert_eq!(Cell::new(0, 0).step(Direction::North), None);
+        assert_eq!(Cell::new(0, 0).step(Direction::West), None);
+        // East/south always yield a cell; bounds are the grid's concern.
+        assert_eq!(Cell::new(0, 0).step(Direction::East), Some(Cell::new(1, 0)));
+        assert_eq!(
+            Cell::new(0, 0).step(Direction::South),
+            Some(Cell::new(0, 1))
+        );
+    }
 }

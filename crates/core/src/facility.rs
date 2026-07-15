@@ -8,12 +8,21 @@
 //! nothing here should have to change when it lands.
 //!
 //! Terrain started as two kinds — floor and wall — carrying only their glyph.
-//! Doors (§10.4) are the first terrain whose §10.3 properties actually diverge —
-//! a closed panel is opaque and solid yet *transparent to pathfinding* — so the
-//! door ticket is where the rest of the §10.3 table earns its keep. The columns
-//! filled in here (fill, sight, pathing, sound) are the ones doors demonstrate;
-//! the remaining terrain kinds and any partial-cover axis land in their own
-//! tickets, extending these same exhaustive matches.
+//! Doors (§10.4) were the first terrain whose §10.3 properties actually diverge —
+//! a closed panel is opaque and solid yet *transparent to pathfinding*. The rest
+//! of the static §10.3 table lands here: hideouts, consoles, the exit. Each new
+//! kind extends the same exhaustive property matches, so the compiler makes the
+//! table's completeness structural — a missing column will not build.
+//!
+//! What is *not* here is the entity half of the §10.3 table — player, guards,
+//! bodies, decoys. Those are entities the level owns (§12.3), not terrain stamped
+//! into the grid; they contribute a *fill* to a cell's occupancy, which is what
+//! [`Facility::can_enter`] sums. The "occupied hideout" row is the same story: a
+//! [`Terrain::Hideout`] is the empty alcove, and its occupied properties (solid,
+//! sound only partially muffled) arise when an occupant's fill sits in it — an
+//! occupancy overlay the sound and turn tickets read, not a second terrain kind.
+
+use crate::cell::{Cell, Direction};
 
 /// A kind of cell. The vocabulary the facility grid stores; the §10.3 terrain
 /// table lives on it as [`Terrain`]'s property methods.
@@ -32,6 +41,19 @@ pub enum Terrain {
     DoorPanelClosed,
     /// An open door panel: walk-through, like floor (§10.4). Renders blank (§10.3).
     DoorPanelOpen,
+    /// A hideout: an alcove carved into the wall the player can duck into (§10.1).
+    /// Empty it is walk-through (fill 0.0) yet **blocks pathfinding**, so guard
+    /// patrols route *around* it while the player slips *in* — that asymmetry is
+    /// the hiding mechanic. Renders `}` (§10.3). Its occupied state is an
+    /// occupancy overlay, not a separate kind (see the module note).
+    Hideout,
+    /// A console — the intel terminal you bump to use (§4.3). Solid (you cannot
+    /// share its cell) but transparent to sight, pathing and sound. Renders `$`
+    /// (§10.3, §11.3).
+    Console,
+    /// The exit: where a laden player leaves to win (§4.5). Solid but otherwise
+    /// transparent, like a console. Renders `E` (§10.3, §11.3).
+    Exit,
 }
 
 impl Terrain {
@@ -43,6 +65,9 @@ impl Terrain {
             Terrain::Wall => '#',
             Terrain::DoorHinge => '×',
             Terrain::DoorPanelClosed => '+',
+            Terrain::Hideout => '}',
+            Terrain::Console => '$',
+            Terrain::Exit => 'E',
         }
     }
 
@@ -51,8 +76,12 @@ impl Terrain {
     /// the fills already there plus the mover's stay ≤ 1.0.
     pub fn fill(self) -> f32 {
         match self {
-            Terrain::Floor | Terrain::DoorPanelOpen => 0.0,
-            Terrain::Wall | Terrain::DoorHinge | Terrain::DoorPanelClosed => 1.0,
+            Terrain::Floor | Terrain::DoorPanelOpen | Terrain::Hideout => 0.0,
+            Terrain::Wall
+            | Terrain::DoorHinge
+            | Terrain::DoorPanelClosed
+            | Terrain::Console
+            | Terrain::Exit => 1.0,
         }
     }
 
@@ -67,7 +96,11 @@ impl Terrain {
     /// there is no partial cover in v1 **[START]**.
     pub fn blocks_sight(self) -> bool {
         match self {
-            Terrain::Floor | Terrain::DoorPanelOpen => false,
+            Terrain::Floor
+            | Terrain::DoorPanelOpen
+            | Terrain::Hideout
+            | Terrain::Console
+            | Terrain::Exit => false,
             Terrain::Wall | Terrain::DoorHinge | Terrain::DoorPanelClosed => true,
         }
     }
@@ -78,8 +111,14 @@ impl Terrain {
     /// facility up over a level (§10.4).
     pub fn blocks_pathing(self) -> bool {
         match self {
-            Terrain::Wall | Terrain::DoorHinge => true,
-            Terrain::Floor | Terrain::DoorPanelClosed | Terrain::DoorPanelOpen => false,
+            // A hideout blocks pathing too: guard routes flow around it while the
+            // player ducks in — the asymmetry that makes it a hiding place (§10.1).
+            Terrain::Wall | Terrain::DoorHinge | Terrain::Hideout => true,
+            Terrain::Floor
+            | Terrain::DoorPanelClosed
+            | Terrain::DoorPanelOpen
+            | Terrain::Console
+            | Terrain::Exit => false,
         }
     }
 
@@ -88,7 +127,13 @@ impl Terrain {
     /// gives "close the door behind you" a point.
     pub fn sound(self) -> SoundBlocking {
         match self {
-            Terrain::Floor | Terrain::DoorPanelOpen => SoundBlocking::Passes,
+            // Empty-hideout sound; an *occupied* one only partially muffles, which
+            // the sound system applies from occupancy, not from terrain (§10.3).
+            Terrain::Floor
+            | Terrain::DoorPanelOpen
+            | Terrain::Hideout
+            | Terrain::Console
+            | Terrain::Exit => SoundBlocking::Passes,
             Terrain::DoorPanelClosed => SoundBlocking::Attenuates,
             Terrain::Wall | Terrain::DoorHinge => SoundBlocking::Blocks,
         }
@@ -162,12 +207,54 @@ impl Facility {
         self.height
     }
 
+    /// The capacity of every cell (§4.3). Fills occupying a cell may sum to at
+    /// most this; a move is admitted when what's already there plus the mover's
+    /// fill stays within it.
+    pub const CELL_CAPACITY: f32 = 1.0;
+
     /// The terrain at `(x, y)`, or `None` if the coordinate is off the grid.
     pub fn terrain_at(&self, x: u32, y: u32) -> Option<Terrain> {
         if x < self.width && y < self.height {
             Some(self.cells[(y * self.width + x) as usize])
         } else {
             None
+        }
+    }
+
+    /// Whether `cell` names a square on this grid.
+    pub fn in_bounds(&self, cell: Cell) -> bool {
+        cell.x < self.width && cell.y < self.height
+    }
+
+    /// The terrain at `cell`, or `None` off the grid — the [`Cell`]-typed
+    /// companion to [`terrain_at`](Self::terrain_at).
+    pub fn terrain(&self, cell: Cell) -> Option<Terrain> {
+        self.terrain_at(cell.x, cell.y)
+    }
+
+    /// The in-bounds cardinal neighbours of `cell` (§4.1): up to four, fewer at an
+    /// edge. 4-directional by construction — there is no diagonal in the walk, so
+    /// nothing built on it (movement, pathfinding, flood fill) can travel one.
+    pub fn neighbors(&self, cell: Cell) -> impl Iterator<Item = Cell> + '_ {
+        Direction::ALL
+            .into_iter()
+            .filter_map(move |dir| cell.step(dir))
+            .filter(|&c| self.in_bounds(c))
+    }
+
+    /// Whether a mover contributing `fill` may enter `cell` (§4.3): true when the
+    /// cell is on the grid and the fill already there plus the mover's stays within
+    /// [`CELL_CAPACITY`](Self::CELL_CAPACITY). Off-grid never admits anyone.
+    ///
+    /// A `false` here is not a dead end — it is the game's interaction verb (§4.3):
+    /// the caller turns a refused move into a *bump* (open the door, use the
+    /// console, take an unaware guard down). Today the only fill a cell carries is
+    /// its terrain's; when guards, the player and bodies come to live in the grid
+    /// (§12.3), their fills fold into this same sum without changing the query.
+    pub fn can_enter(&self, cell: Cell, fill: f32) -> bool {
+        match self.terrain(cell) {
+            Some(terrain) => terrain.fill() + fill <= Self::CELL_CAPACITY,
+            None => false,
         }
     }
 
@@ -296,5 +383,83 @@ mod tests {
         assert!(Terrain::Wall.blocks_sight());
         assert!(Terrain::Wall.blocks_pathing());
         assert_eq!(Terrain::Wall.sound(), SoundBlocking::Blocks);
+    }
+
+    /// The rest of the static §10.3 table: hideout, console, exit.
+    #[test]
+    fn hideout_console_and_exit_match_10_3() {
+        // Hideout, empty: walk-through (fill 0.0), sight/sound transparent, yet it
+        // *blocks pathing* — guards route around, the player ducks in.
+        let h = Terrain::Hideout;
+        assert_eq!(h.fill(), 0.0);
+        assert!(!h.blocks_movement());
+        assert!(!h.blocks_sight());
+        assert!(h.blocks_pathing(), "hideout must block pathing");
+        assert_eq!(h.sound(), SoundBlocking::Passes);
+        assert_eq!(h.glyph(), '}');
+
+        // Console and exit: solid (fill 1.0, blocks movement) but transparent to
+        // sight, pathing and sound — you see past them and route across them.
+        for (t, glyph) in [(Terrain::Console, '$'), (Terrain::Exit, 'E')] {
+            assert_eq!(t.fill(), 1.0);
+            assert!(t.blocks_movement());
+            assert!(!t.blocks_sight());
+            assert!(!t.blocks_pathing());
+            assert_eq!(t.sound(), SoundBlocking::Passes);
+            assert_eq!(t.glyph(), glyph);
+        }
+    }
+
+    /// §4.3 occupancy through the grid: a solid mover is admitted onto floor and an
+    /// open door, refused by a wall or a closed door, and never off-grid.
+    #[test]
+    fn can_enter_sums_fills_against_capacity() {
+        let mut f = Facility::walled_box(6, 6);
+        f.set_terrain(2, 2, Terrain::DoorPanelClosed);
+        f.set_terrain(3, 2, Terrain::DoorPanelOpen);
+
+        // A full-fill mover (guard/player, fill 1.0) onto empty floor: 0.0 + 1.0 ≤ 1.0.
+        assert!(f.can_enter(Cell::new(1, 1), 1.0));
+        // Onto an open door: still admitted.
+        assert!(f.can_enter(Cell::new(3, 2), 1.0));
+        // Into a wall or a closed door: 1.0 + 1.0 > 1.0, refused (→ a bump).
+        assert!(!f.can_enter(Cell::new(0, 0), 1.0));
+        assert!(!f.can_enter(Cell::new(2, 2), 1.0));
+        // A weightless mover (a decoy, fill 0.0) rides onto floor freely.
+        assert!(f.can_enter(Cell::new(1, 1), 0.0));
+        // The capacity check is inclusive (§4.3): two half-fills exactly fill a
+        // floor cell, so the second is still admitted at the 1.0 boundary.
+        assert!(f.can_enter(Cell::new(1, 1), Facility::CELL_CAPACITY));
+        // Off the grid admits no one.
+        assert!(!f.can_enter(Cell::new(6, 0), 1.0));
+    }
+
+    /// Neighbours are the ≤4 in-bounds cardinal cells, all one Manhattan unit away
+    /// — the "no diagonal path anywhere" guarantee, seen from the grid.
+    #[test]
+    fn neighbors_are_cardinal_and_in_bounds() {
+        let f = Facility::walled_box(5, 5);
+
+        let interior: Vec<Cell> = f.neighbors(Cell::new(2, 2)).collect();
+        assert_eq!(interior.len(), 4);
+        for n in &interior {
+            assert_eq!(Cell::new(2, 2).manhattan_distance(*n), 1);
+        }
+
+        // A corner sees only its two on-grid neighbours; the off-grid steps drop.
+        let corner: Vec<Cell> = f.neighbors(Cell::new(0, 0)).collect();
+        assert_eq!(corner.len(), 2);
+        assert!(corner.contains(&Cell::new(1, 0)));
+        assert!(corner.contains(&Cell::new(0, 1)));
+    }
+
+    #[test]
+    fn in_bounds_and_cell_terrain_agree_with_coordinates() {
+        let f = Facility::walled_box(4, 4);
+        assert!(f.in_bounds(Cell::new(3, 3)));
+        assert!(!f.in_bounds(Cell::new(4, 3)));
+        assert_eq!(f.terrain(Cell::new(0, 0)), Some(Terrain::Wall));
+        assert_eq!(f.terrain(Cell::new(1, 1)), Some(Terrain::Floor));
+        assert_eq!(f.terrain(Cell::new(4, 0)), None);
     }
 }
