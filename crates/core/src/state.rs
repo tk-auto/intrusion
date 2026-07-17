@@ -59,6 +59,10 @@ pub enum Event {
     /// A move was refused and nothing changed — a *free* bump (§4.4): a wall, a
     /// hinge, or (until takedowns land) a guard.
     Bumped { into: Cell },
+    /// The player bumped an empty hideout and climbed in (§4.3, §10.3): they now
+    /// occupy the cupboard and are concealed. Climbing back out is an ordinary
+    /// [`Event::Moved`] off the cell.
+    EnteredHideout { at: Cell },
     /// The player opened a closed door by bumping a panel (§4.3, §10.4).
     DoorOpened { at: Cell },
     /// The player took the intel at a console; `remaining` objectives are still out.
@@ -219,6 +223,19 @@ impl State {
         self.facing
     }
 
+    /// Whether the player is concealed — standing inside a hideout (§10.3).
+    ///
+    /// This is the one concealment query everything reads: the loop refuses a
+    /// guard's contact against a hidden player (§4.5/§7.6), the renderer recolours
+    /// the occupied cupboard to Owned, and — once vision lands (§6) — a guard's
+    /// detection set excludes a hidden player by AND-ing this in, so the danger
+    /// overlay cannot claim the player is seen while hidden. It is *derived* from
+    /// position rather than stored, so it can never desync: the only way onto a
+    /// hideout cell is to bump into it, and moving off clears it.
+    pub fn hidden(&self) -> bool {
+        self.layout.facility().terrain(self.player) == Some(Terrain::Hideout)
+    }
+
     /// The guards, for rendering and tests.
     pub fn guards(&self) -> &[Guard] {
         &self.guards
@@ -338,6 +355,23 @@ impl State {
             };
         }
 
+        // A hideout: bump the empty cupboard to climb in (§4.3, §10.3). Unlike
+        // floor, you do not drift onto it — entering is a *decision*. It moves you
+        // into the cell, spends the turn, and conceals you ([`hidden`](Self::hidden));
+        // climbing out is an ordinary step off the cell, no special case. Its whole
+        // cost is time: while you hide you make no progress and the clock keeps
+        // ticking (§2.3). A cupboard already holding an actor refuses — a free bump.
+        if self.layout.facility().terrain(target) == Some(Terrain::Hideout) {
+            if self.occupied(target) {
+                events.push(Event::Bumped { into: target });
+                return false;
+            }
+            self.player = target;
+            self.facing = dir; // facing follows the last successful step (§5)
+            events.push(Event::EnteredHideout { at: target });
+            return true;
+        }
+
         // Plain movement, if the cell admits the player.
         if self.layout.facility().can_enter(target, ACTOR_FILL) {
             self.player = target;
@@ -384,6 +418,14 @@ impl State {
             self.guards[i].advance();
 
             if target == self.player {
+                // Capture is contact (§4.5) — but a concealed player is the one
+                // exception: the occupied cupboard is solid and a patrol routes
+                // *around* it, so contact is refused (§10.3, §7.6). The guard cannot
+                // enter; it holds this turn (its route already advanced). This is the
+                // "hold still, watch the cone sweep past" payoff.
+                if self.hidden() {
+                    continue;
+                }
                 self.guards[i].pos = target;
                 self.outcome = Outcome::Lost;
                 events.push(Event::Captured { by: target });
@@ -720,6 +762,105 @@ mod tests {
             Direction::North | Direction::South => [Direction::East, Direction::West],
             Direction::East | Direction::West => [Direction::North, Direction::South],
         }
+    }
+
+    /// §4.3/§10.3: a hideout is **bump-to-enter**, not a cell you drift onto. Stepping
+    /// into an empty cupboard climbs in — the player occupies the cell, the turn is
+    /// spent, and they are now [`hidden`](State::hidden). Facing follows the step (§5).
+    #[test]
+    fn bumping_an_empty_hideout_enters_it_and_spends_the_turn() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 4), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(!s.hidden(), "the player starts in the open");
+
+        let events = s.step(Input::Step(Direction::East)); // bump the cupboard east
+        assert_eq!(
+            events,
+            vec![Event::EnteredHideout {
+                at: Cell::new(5, 4)
+            }]
+        );
+        assert_eq!(s.player(), Cell::new(5, 4), "the player climbed in");
+        assert_eq!(s.facing(), Direction::East, "facing follows the step");
+        assert_eq!(s.turn(), 1, "entering spends the turn");
+        assert!(s.hidden(), "the player is now concealed");
+    }
+
+    /// §4.3/§10.3: "move off to climb out." Stepping from a hideout onto floor is an
+    /// ordinary move that clears the hidden state — no special key, no special event.
+    #[test]
+    fn moving_off_a_hideout_climbs_out() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 4), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 4), // start already inside the cupboard
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(s.hidden(), "starting inside the cupboard is concealed");
+
+        let events = s.step(Input::Step(Direction::West)); // step out onto floor
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(4, 4)
+            }],
+            "climbing out is an ordinary move"
+        );
+        assert_eq!(s.player(), Cell::new(4, 4));
+        assert!(!s.hidden(), "leaving clears the concealment");
+    }
+
+    /// §4.5/§7.6/§10.3: a concealed player is contact-safe. A guard patrolling into the
+    /// player's cell captures in the open, but a cupboard is the one place contact is
+    /// refused — the guard cannot enter, holds, and the run goes on. This is the
+    /// "watch the cone sweep past" payoff; the same guard *would* capture if the player
+    /// were not hidden (see [`a_guard_stepping_into_the_player_captures`]).
+    #[test]
+    fn a_guard_cannot_capture_a_hidden_player() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(4, 4), Terrain::Hideout);
+        // Guard at (6,4) marching west; player hidden in the cupboard at (4,4). After
+        // the startup turn the guard is at (5,4), one step from the player's cell.
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(6, 4), vec![Direction::West])],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(s.hidden());
+        assert_eq!(
+            s.guards()[0].pos(),
+            Cell::new(5, 4),
+            "startup moved the guard"
+        );
+
+        // The guard tries to step onto the player's cell: contact refused. It holds at
+        // (5,4), no capture, still playing.
+        let events = s.step(Input::Wait);
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Captured { .. })),
+            "a hidden player is not captured"
+        );
+        assert_eq!(s.outcome(), Outcome::Playing, "the run continues");
+        assert_eq!(
+            s.guards()[0].pos(),
+            Cell::new(5, 4),
+            "the guard cannot enter the occupied cupboard"
+        );
     }
 
     /// §12.4: the loop is pure and deterministic. The same starting state and the same
