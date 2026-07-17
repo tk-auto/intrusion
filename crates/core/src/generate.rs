@@ -27,10 +27,17 @@
 //! whose two ends face an open side (the first carve of all is the exception — it
 //! seeds the tree and connects to nothing). The punch then fires only toward open
 //! sides, which are interior walls backed by corridor — never the border. The
-//! result: a connected network, and an enclosure that stays intact, both without a
-//! reject-and-retry loop. This refines §10.1's raw "50/50 axis" so the §10.6 tree
+//! result: a connected network, and an enclosure that stays intact, by
+//! construction. This refines §10.1's raw "50/50 axis" so the §10.6 tree
 //! guarantee holds by construction; the property tests below assert it over many
 //! seeds.
+//!
+//! Construction is not trusted, though — that was the old generator's mistake
+//! (§10.6: a room whose bounding wall runs all came out < 3 sealed shut,
+//! objectives inside, and nothing noticed). So [`generate`] gates every carve
+//! through the §10.6 assertions — border enclosed, every pathable cell reaching
+//! every other — and rejects the carve and redraws if one fails, up to a hard cap.
+//! Downstream code only ever sees a layout that passed.
 
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
@@ -95,6 +102,13 @@ const PILLAR_MAX_SIDE: u32 = 4;
 /// cover. Density is the open tuning knob here (§10.1a, §15.2) — a single named value.
 const HIDEOUT_MIN_SPACING: u32 = 7;
 
+/// How many carve attempts [`generate`] makes before giving up on the footprint
+/// (§10.6: reject the seed, retry, but never loop forever). Rejection is rare —
+/// the partition is connected by construction and the property tests below have
+/// never caught a violation — so hitting this cap means the *config* is bad, not
+/// the luck, and the caller gets [`GenError::RetriesExhausted`] instead of a hang.
+const MAX_GEN_ATTEMPTS: u32 = 64;
+
 /// Why a facility could not be generated.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GenError {
@@ -103,6 +117,11 @@ pub enum GenError {
     /// that must live in *different* rooms (§10.2). Below 18×18 in both axes this
     /// is unavoidable. Guard it; do not ship an unplaceable level.
     TooSmall { width: u32, height: u32 },
+    /// Every one of [`MAX_GEN_ATTEMPTS`] carves failed the §10.6 guarantees. The
+    /// loud failure §10.6 demands: a parameter set that cannot produce a valid
+    /// level errors out immediately rather than silently shipping a broken one or
+    /// spinning forever.
+    RetriesExhausted { attempts: u32 },
 }
 
 /// A generated facility: its terrain grid and the spatial region graph that names
@@ -157,12 +176,44 @@ impl Layout {
     }
 }
 
-/// Generate a facility by corridor-first binary partition (§10.1 steps 1–3).
+/// Generate a facility that passes every §10.6 guarantee, or fail loudly.
 ///
-/// All randomness is drawn from `rng` (§12.4): same seed, same facility, forever.
-/// Returns [`GenError::TooSmall`] for a footprint that cannot be partitioned into
-/// at least two rooms, rather than silently producing an unplaceable level.
+/// This is the single generation entry point: a layout it returns has been
+/// *asserted* enclosed and reachable, not merely argued so — the §10.6 lesson. A
+/// carve that fails [`passes_guarantees`] is rejected and redrawn from the same
+/// `rng` stream (so a run is still one seed, §12.4: same seed, same facility,
+/// forever), up to [`MAX_GEN_ATTEMPTS`] before [`GenError::RetriesExhausted`].
+/// Returns [`GenError::TooSmall`] immediately for a footprint that cannot be
+/// partitioned at all — no amount of redrawing fixes geometry.
 pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenError> {
+    generate_where(width, height, rng, passes_guarantees)
+}
+
+/// The reject-and-redraw loop behind [`generate`], with the guarantee check as a
+/// parameter so tests can exercise the loop itself (a real carve essentially never
+/// fails validation, which is the point — but the cap must still be provably a cap).
+fn generate_where(
+    width: u32,
+    height: u32,
+    rng: &mut Rng,
+    valid: impl Fn(&Layout) -> bool,
+) -> Result<Layout, GenError> {
+    for _ in 0..MAX_GEN_ATTEMPTS {
+        let layout = generate_once(width, height, rng)?;
+        if valid(&layout) {
+            return Ok(layout);
+        }
+    }
+    Err(GenError::RetriesExhausted {
+        attempts: MAX_GEN_ATTEMPTS,
+    })
+}
+
+/// One carve of the corridor-first binary partition (§10.1 steps 1–6), unvalidated.
+///
+/// All randomness is drawn from `rng` (§12.4). Only [`generate_where`] calls this;
+/// everything downstream receives layouts that have passed the §10.6 gate.
+fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenError> {
     // Step 1: one region covering the interior `(W-2) x (H-2)`. Below the minimum,
     // no corridor fits or a room could not reach 6×6 — reject rather than partition
     // into something unplaceable (§10.2).
@@ -236,6 +287,65 @@ pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenErr
 
     debug_assert!(corridors > 0, "guarded footprint yielded no corridor");
     Ok(Layout { facility, regions })
+}
+
+/// The §10.6 gate: every guarantee that must be *asserted* on a finished carve,
+/// not believed from the construction. Two checks:
+///
+/// - **Fully enclosed** — the border ring is unbroken wall. The punch-through
+///   design never fires at the border, but "never" is exactly the kind of claim
+///   §10.6 says to verify.
+/// - **One pathable component** — every cell that admits pathing (§10.3: floor,
+///   door panels open *or* closed, consoles, exits; not walls, hinges or hideouts)
+///   reaches every other. This is the reachability guarantee in its strongest
+///   form: the old generator could seal a room (with its objectives and guards)
+///   behind sub-3-cell wall runs that earned no door, and nothing noticed. With
+///   the whole walkable interior one component, *any* placement of start,
+///   objectives and exit (§10.1 steps 7–9, #12) is start → every objective → exit
+///   solvable — the property placement will rely on rather than re-prove.
+///
+/// Room size and count are not re-checked here: they are fixed by the partition
+/// constants before any wall is stamped, and the property tests below pin them.
+fn passes_guarantees(layout: &Layout) -> bool {
+    fully_enclosed(layout.facility()) && pathable_connected(layout.facility())
+}
+
+/// Whether the border ring is solid wall — §10.6 "fully enclosed".
+fn fully_enclosed(facility: &Facility) -> bool {
+    let (w, h) = (facility.width(), facility.height());
+    let mut border = (0..w)
+        .flat_map(|x| [Cell::new(x, 0), Cell::new(x, h - 1)])
+        .chain((0..h).flat_map(|y| [Cell::new(0, y), Cell::new(w - 1, y)]));
+    border.all(|c| facility.terrain(c) == Some(Terrain::Wall))
+}
+
+/// Whether the pathable cells form a single 4-connected component — the §10.6
+/// reachability flood fill. "It is a flood fill. It costs nothing."
+fn pathable_connected(facility: &Facility) -> bool {
+    let (w, h) = (facility.width(), facility.height());
+    let pathable = |c: Cell| facility.terrain(c).is_some_and(|t| !t.blocks_pathing());
+    let all: Vec<Cell> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| Cell::new(x, y)))
+        .filter(|&c| pathable(c))
+        .collect();
+    let Some(&start) = all.first() else {
+        return false; // a level with nowhere to stand is not a level
+    };
+    let mut seen = vec![false; (w * h) as usize];
+    let idx = |c: Cell| (c.y * w + c.x) as usize;
+    seen[idx(start)] = true;
+    let mut stack = vec![start];
+    let mut count = 1usize;
+    while let Some(c) = stack.pop() {
+        for n in facility.neighbors(c) {
+            if pathable(n) && !seen[idx(n)] {
+                seen[idx(n)] = true;
+                count += 1;
+                stack.push(n);
+            }
+        }
+    }
+    count == all.len()
 }
 
 /// The index of the largest-area region in the queue, with a deterministic
@@ -1122,8 +1232,11 @@ mod tests {
     /// single 4-connected component. Asserted over many seeds.
     #[test]
     fn the_corridor_network_is_always_connected() {
+        // Deliberately `generate_once`: this asserts the *construction* is sound,
+        // so the §10.6 gate in `generate` must not get the chance to mask a break
+        // by silently rejecting and redrawing.
         for seed in 0..200 {
-            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
             assert_corridors_connected(&layout, seed);
         }
     }
@@ -1133,7 +1246,7 @@ mod tests {
     fn connectivity_holds_across_sizes() {
         for &(w, h) in &[(18, 18), (24, 40), (40, 24), (33, 51), (60, 60)] {
             for seed in 0..40 {
-                let layout = generate(w, h, &mut Rng::new(seed)).unwrap();
+                let layout = generate_once(w, h, &mut Rng::new(seed)).unwrap();
                 assert_corridors_connected(&layout, seed);
             }
         }
@@ -1564,8 +1677,11 @@ mod tests {
     /// guarantees, and it protects the reachability the placement ticket asserts (#13).
     #[test]
     fn hideouts_keep_guard_pathing_connected() {
+        // `generate_once`, not `generate`: the §10.6 gate checks this exact
+        // property, so going through the entry point would mask a regression in
+        // `severs_pathing` as silent rejections instead of a red test.
         for seed in 0..200 {
-            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
             let f = layout.facility();
             let pathable: HashSet<Cell> = (0..f.height())
                 .flat_map(|y| (0..f.width()).map(move |x| Cell::new(x, y)))
@@ -1576,5 +1692,68 @@ mod tests {
                 "seed {seed}: hideouts split guard pathing"
             );
         }
+    }
+
+    /// The §10.6 flood fill rejects the exact failure the old generator shipped:
+    /// a room sealed shut, its contents unreachable, nothing noticing. Built by
+    /// hand, since the real carve (correctly) never produces one.
+    #[test]
+    fn a_sealed_pocket_fails_the_gate() {
+        let mut f = Facility::walled_box(12, 12);
+        for y in 1..=10 {
+            f.set_terrain(6, y, Terrain::Wall);
+        }
+        let layout = Layout::from_facility(f);
+        assert!(fully_enclosed(layout.facility()), "border is intact");
+        assert!(
+            !pathable_connected(layout.facility()),
+            "the east half is sealed off"
+        );
+        assert!(!passes_guarantees(&layout));
+    }
+
+    /// A closed door panel is transparent to pathing (§10.3/§10.4), so a room
+    /// whose only way out is a closed door is reachable — not a sealed pocket.
+    #[test]
+    fn a_closed_door_counts_as_reachable() {
+        let mut f = Facility::walled_box(12, 12);
+        for y in 1..=10 {
+            f.set_terrain(6, y, Terrain::Wall);
+        }
+        f.set_terrain(6, 5, Terrain::DoorPanelClosed);
+        assert!(passes_guarantees(&Layout::from_facility(f)));
+    }
+
+    /// §10.6 "fully enclosed" is asserted, not assumed: a breached border ring
+    /// fails the gate even though the interior stays connected.
+    #[test]
+    fn a_breached_border_fails_the_gate() {
+        let mut f = Facility::walled_box(12, 12);
+        f.set_terrain(0, 5, Terrain::Floor);
+        assert!(!passes_guarantees(&Layout::from_facility(f)));
+    }
+
+    /// The entry point's contract (#13): every layout [`generate`] accepts passes
+    /// every §10.6 assertion — no caller ever receives an unsolvable level.
+    #[test]
+    fn accepted_seeds_always_pass_the_gate() {
+        for seed in 0..200 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            assert!(passes_guarantees(&layout), "seed {seed}: gate breached");
+        }
+    }
+
+    /// The retry cap is a real cap: a config that can never validate fails loudly
+    /// with [`GenError::RetriesExhausted`] instead of spinning forever (§10.6
+    /// "fail loudly or retry the seed" — this is both, in order).
+    #[test]
+    fn an_unsatisfiable_config_fails_loudly() {
+        let err = generate_where(40, 40, &mut Rng::new(0), |_| false).unwrap_err();
+        assert_eq!(
+            err,
+            GenError::RetriesExhausted {
+                attempts: MAX_GEN_ATTEMPTS
+            }
+        );
     }
 }
