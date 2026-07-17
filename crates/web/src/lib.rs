@@ -45,15 +45,19 @@ const BG: &str = "#0b0b0b";
 /// is where category becomes pixels, so recolouring or an accessibility pass is a
 /// one-function edit. These are placeholders; the full 16-colour colour-blind-safe
 /// palette with darkened background variants is the colour-category ticket (§11.2).
+///
+/// Every entry must be **visibly distinct** on the dark background (asserted below):
+/// the threat ladder Caution→Warning→Danger reads as yellow→orange→red, and System
+/// furniture is a muted **brown** rather than a tan that blurs into Caution's yellow.
 fn category_color(category: Category) -> &'static str {
     match category {
-        Category::Neutral => "#cfcfcf",  // white — scenery
-        Category::Owned => "#7ab8ff",    // blue — you and what you made
-        Category::Caution => "#e6c34a",  // yellow — a threat, unaware
-        Category::Warning => "#e0803a",  // orange — a threat, hunting
-        Category::Danger => "#e0503a",   // red — a threat that has you
-        Category::Interest => "#b57ae0", // purple — goals and rewards
-        Category::System => "#c8a878",   // tan — doors, hideouts
+        Category::Neutral => "#d0d0d0",  // light grey — inert scenery, walls
+        Category::Owned => "#4ea6ff",    // blue — you and what you made
+        Category::Caution => "#f2d64a",  // yellow — a threat, unaware
+        Category::Warning => "#e07d1e",  // orange — a threat, hunting
+        Category::Danger => "#d83030",   // red — a threat that has you
+        Category::Interest => "#bd6bd6", // purple — goals and rewards
+        Category::System => "#9a7040",   // brown — doors, hideouts (furniture)
     }
 }
 
@@ -297,4 +301,51 @@ fn draw_char(ctx: &CanvasRenderingContext2d, x: f64, y: f64, glyph: char, m: &Me
     let py = y * m.cell_h + m.cell_h / 2.0;
     // fill_text only errors on an invalid surface; ignore the unit Ok.
     let _ = ctx.fill_text(&glyph.to_string(), px, py);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parse a `#rrggbb` string into RGB — mirror of what the browser does.
+    fn rgb(hex: &str) -> (i32, i32, i32) {
+        let h = hex.strip_prefix('#').expect("a #rrggbb colour");
+        let n = i32::from_str_radix(h, 16).expect("six hex digits");
+        (n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff)
+    }
+
+    /// Squared RGB distance — cheap and monotonic, enough to catch two colours that
+    /// would read as the same on screen.
+    fn dist2(a: (i32, i32, i32), b: (i32, i32, i32)) -> i32 {
+        let (dr, dg, db) = (a.0 - b.0, a.1 - b.1, a.2 - b.2);
+        dr * dr + dg * dg + db * db
+    }
+
+    /// Every category must map to a **visibly distinct** colour. The regression this
+    /// guards: `System` (doors, hideouts) once sat a tan hair away from `Caution`
+    /// (unaware guards), so doors, hideouts and guards all read as one yellow. The
+    /// threat ladder Caution→Warning→Danger and the furniture brown must stay apart.
+    #[test]
+    fn category_colours_are_all_visibly_distinct() {
+        let categories = [
+            Category::Neutral,
+            Category::Owned,
+            Category::Caution,
+            Category::Warning,
+            Category::Danger,
+            Category::Interest,
+            Category::System,
+        ];
+        // ~70 in RGB distance: the old tan/yellow clash measured ~61 and must fail.
+        const MIN_DIST2: i32 = 70 * 70;
+        for (i, &a) in categories.iter().enumerate() {
+            for &b in &categories[i + 1..] {
+                let d = dist2(rgb(category_color(a)), rgb(category_color(b)));
+                assert!(
+                    d >= MIN_DIST2,
+                    "{a:?} and {b:?} are too close to tell apart (dist^2 {d} < {MIN_DIST2})"
+                );
+            }
+        }
+    }
 }
