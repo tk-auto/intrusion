@@ -35,6 +35,7 @@ use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::region::{RegionGraph, RegionId, RegionKind};
 use crate::rng::Rng;
+use std::collections::HashSet;
 
 /// Corridor width is random 2–4, **never single-file** (§10.1). **[SETTLED]** — a
 /// single-file corridor is a death trap with no counterplay.
@@ -67,6 +68,24 @@ const AUTO_CLOSE: bool = true;
 /// door, so none is ever sealed off (§10.6). The per-room count is drawn by
 /// [`room_door_budget`].
 const MAX_DOORS_PER_ROOM: u32 = 3;
+
+/// How many feature attempts each room gets (§10.1.5). Each attempt proposes a
+/// partition wall and a pillar; the viable proposals pool and one is placed.
+const FEATURE_ATTEMPTS: u32 = 4;
+/// The shortest room that can host a partition wall (§10.1.5) — it needs an
+/// interior stub with a floor lane surviving on both flanks.
+const MIN_ROOM_FOR_PARTITION: u32 = 3;
+/// The shortest room that can host a pillar (§10.1.5). A pillar is freestanding, so
+/// it needs a 2-cell block plus a 1-cell margin on every side — which a 6-wide room
+/// affords exactly. This is also the geometry hideouts need, so pillars run before
+/// them (§10.1.6).
+const MIN_ROOM_FOR_PILLAR: u32 = 6;
+/// A partition stub is at least this long (§10.1.5); its max is `axis − 1`, so a
+/// stub never spans the room and an alcove always survives past its tip.
+const PARTITION_MIN_LEN: u32 = 2;
+/// A pillar's side length range (§10.1.5): a freestanding 2–4 by 2–4 block.
+const PILLAR_MIN_SIDE: u32 = 2;
+const PILLAR_MAX_SIDE: u32 = 4;
 
 /// Why a facility could not be generated.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -180,8 +199,16 @@ pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenErr
         }
     }
 
+    // Step 5: break up room interiors with a partition wall or a pillar (§10.1.5),
+    // *before* each room becomes a region, so the graph records the room's true
+    // (non-rectangular) footprint rather than its bounding box (§10.5). Pillars are
+    // the 2-cell-thick geometry hideouts need, so this must precede them (§10.1.6).
     for room in &rooms {
-        regions.add_region(RegionKind::Room, room.cells());
+        let feature = carve_room_features(&mut facility, room, rng);
+        regions.add_region(
+            RegionKind::Room,
+            room.cells().filter(|c| !feature.contains(c)),
+        );
     }
 
     // §10.6: the border is enclosed unconditionally. Punch-throughs only fire
@@ -608,6 +635,153 @@ fn cut_door(
     regions.add_door(room, corridor, hinges, panels, AUTO_CLOSE);
 }
 
+/// Carve one room feature — a partition wall or a pillar — into `room` (§10.1.5).
+///
+/// Runs up to [`FEATURE_ATTEMPTS`] attempts; each proposes a partition wall and a
+/// pillar, and every viable proposal joins a pool. One is then chosen and stamped
+/// as wall, and its cells are returned so the caller can withhold them from the
+/// room's region — that withholding is what gives the region its true, non-rectangular
+/// shape (§10.5). A room with an empty pool (nothing fit) is left as a plain
+/// rectangle. Every proposal is validated against `facility`'s current floor, so a
+/// feature can never seal a room off or run into a wall.
+fn carve_room_features(facility: &mut Facility, room: &Rect, rng: &mut Rng) -> HashSet<Cell> {
+    let mut pool: Vec<Vec<Cell>> = Vec::new();
+    for _ in 0..FEATURE_ATTEMPTS {
+        if let Some(cells) = propose_partition(room, facility, rng) {
+            pool.push(cells);
+        }
+        if let Some(cells) = propose_pillar(room, facility, rng) {
+            pool.push(cells);
+        }
+    }
+    if pool.is_empty() {
+        return HashSet::new();
+    }
+    let chosen = pool.swap_remove(rng.below(pool.len() as u32) as usize);
+    for &cell in &chosen {
+        facility.set_terrain(cell.x, cell.y, Terrain::Wall);
+    }
+    chosen.into_iter().collect()
+}
+
+/// Propose a partition wall for `room`, or `None` if this draw does not fit
+/// (§10.1.5). A 1-cell-thick stub juts perpendicularly in from one of the room's
+/// four walls; the alcoves it opens make sight-line breaks and dead ends.
+/// Orientation is weighted by the room's perpendicular extent — a tall room gets a
+/// horizontal stub — and the proposal is rejected unless its footprint grown by 1
+/// on its three free sides is clear floor, so a floor lane always survives on both
+/// flanks and past the tip.
+fn propose_partition(room: &Rect, facility: &Facility, rng: &mut Rng) -> Option<Vec<Cell>> {
+    if room.width() < MIN_ROOM_FOR_PARTITION || room.height() < MIN_ROOM_FOR_PARTITION {
+        return None;
+    }
+    // Orientation weighted by perpendicular extent: a horizontal stub grows along x
+    // and its flanking lanes run in y, so a tall room (large height) favours it.
+    let horizontal = rng.below(room.width() + room.height()) < room.height();
+    // `grow_axis` is the length the stub extends along; `span_axis` the wall it
+    // anchors to, measured perpendicular.
+    let (grow_axis, span_axis) = if horizontal {
+        (room.width(), room.height())
+    } else {
+        (room.height(), room.width())
+    };
+    // Length 2..=(axis−1): a stub never spans the room, leaving an alcove past its
+    // tip (§10.1.5). The grown-footprint check below still rejects a too-long draw.
+    let len = rng.range_inclusive(PARTITION_MIN_LEN as i32, (grow_axis - 1) as i32) as u32;
+    let from_low = rng.bool();
+    // Offset along the anchoring wall, kept off both corners (1..=span−2) so a floor
+    // lane survives on each flank of the base.
+    let along = rng.range_inclusive(1, (span_axis - 2) as i32) as u32;
+
+    // The base cell (adjacent to the anchoring wall), the inward growth step, and
+    // the lateral step along the wall.
+    let (base, grow, lat) = if horizontal {
+        let y = room.y0 + along;
+        if from_low {
+            (Cell::new(room.x0, y), (1i32, 0i32), (0i32, 1i32))
+        } else {
+            (Cell::new(room.x1, y), (-1, 0), (0, 1))
+        }
+    } else {
+        let x = room.x0 + along;
+        if from_low {
+            (Cell::new(x, room.y0), (0, 1), (1, 0))
+        } else {
+            (Cell::new(x, room.y1), (0, -1), (1, 0))
+        }
+    };
+
+    let stub: Vec<Cell> = (0..len as i32)
+        .map(|i| offset(base, (grow.0 * i, grow.1 * i)))
+        .collect();
+    // Clearance: both lateral flanks of every stub cell, plus the one cell past the
+    // tip. The anchoring wall behind the base is deliberately not checked — a stub
+    // is *supposed* to touch the wall it juts from.
+    let mut clearance: Vec<Cell> = Vec::new();
+    for &cell in &stub {
+        clearance.push(offset(cell, lat));
+        clearance.push(offset(cell, (-lat.0, -lat.1)));
+    }
+    clearance.push(offset(base, (grow.0 * len as i32, grow.1 * len as i32)));
+
+    if stub
+        .iter()
+        .chain(&clearance)
+        .all(|&c| is_clear(room, facility, c))
+    {
+        Some(stub)
+    } else {
+        None
+    }
+}
+
+/// Propose a freestanding pillar for `room`, or `None` if this draw does not fit
+/// (§10.1.5). A 2–4 by 2–4 block placed with a 1-cell floor margin on every side —
+/// that margin is what keeps it *freestanding* and is the geometry hideouts later
+/// carve into (§10.1.6). Rejected unless its footprint grown by 1 is clear floor.
+fn propose_pillar(room: &Rect, facility: &Facility, rng: &mut Rng) -> Option<Vec<Cell>> {
+    if room.width() < MIN_ROOM_FOR_PILLAR || room.height() < MIN_ROOM_FOR_PILLAR {
+        return None;
+    }
+    // A side up to 4, but capped so a 1-cell margin still fits inside the room.
+    let pw = rng.range_inclusive(
+        PILLAR_MIN_SIDE as i32,
+        PILLAR_MAX_SIDE.min(room.width() - 2) as i32,
+    ) as u32;
+    let ph = rng.range_inclusive(
+        PILLAR_MIN_SIDE as i32,
+        PILLAR_MAX_SIDE.min(room.height() - 2) as i32,
+    ) as u32;
+    // Top-left corner, kept ≥1 off every wall so the grown footprint stays interior.
+    let px = rng.range_inclusive((room.x0 + 1) as i32, (room.x1 - pw) as i32) as u32;
+    let py = rng.range_inclusive((room.y0 + 1) as i32, (room.y1 - ph) as i32) as u32;
+
+    let block: Vec<Cell> = (py..py + ph)
+        .flat_map(|y| (px..px + pw).map(move |x| Cell::new(x, y)))
+        .collect();
+    // The whole block grown by 1 must be clear floor — a 1-cell moat all around.
+    let grown = (py - 1..=py + ph).flat_map(|y| (px - 1..=px + pw).map(move |x| Cell::new(x, y)));
+    if grown.into_iter().all(|c| is_clear(room, facility, c)) {
+        Some(block)
+    } else {
+        None
+    }
+}
+
+/// Whether `cell` lies inside `room`'s floor rectangle and is currently floor — the
+/// "clear" test both feature proposals reject against (§10.1.5). Cells outside the
+/// room (a boundary wall, another region) are not clear, so a feature can neither
+/// touch a wall it doesn't anchor to nor collide with an already-placed feature.
+fn is_clear(room: &Rect, facility: &Facility, cell: Cell) -> bool {
+    room.contains(cell) && facility.terrain(cell) == Some(Terrain::Floor)
+}
+
+/// `cell` shifted by `(dx, dy)`. The room interior sits well inside the border, so
+/// feature offsets never underflow the grid.
+fn offset(cell: Cell, (dx, dy): (i32, i32)) -> Cell {
+    Cell::new((cell.x as i32 + dx) as u32, (cell.y as i32 + dy) as u32)
+}
+
 /// An inclusive rectangle of interior cells, `[x0, x1] × [y0, y1]`.
 #[derive(Clone, Copy, Debug)]
 struct Rect {
@@ -632,6 +806,11 @@ impl Rect {
 
     fn area(&self) -> u32 {
         self.width() * self.height()
+    }
+
+    /// Whether `cell` lies within this inclusive rectangle.
+    fn contains(&self, cell: Cell) -> bool {
+        (self.x0..=self.x1).contains(&cell.x) && (self.y0..=self.y1).contains(&cell.y)
     }
 
     fn cells(&self) -> impl Iterator<Item = Cell> {
@@ -998,6 +1177,151 @@ mod tests {
                     straight,
                     "seed {seed}: a door must lie on one straight line"
                 );
+            }
+        }
+    }
+
+    /// Whether a set of cells is a single 4-connected component.
+    fn is_4_connected(cells: &HashSet<Cell>) -> bool {
+        let start = match cells.iter().next() {
+            Some(&c) => c,
+            None => return true,
+        };
+        let mut seen = HashSet::new();
+        let mut stack = vec![start];
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) {
+                continue;
+            }
+            for (dx, dy) in [(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
+                let (nx, ny) = (c.x as i32 + dx, c.y as i32 + dy);
+                if nx >= 0 && ny >= 0 {
+                    let n = Cell::new(nx as u32, ny as u32);
+                    if cells.contains(&n) && !seen.contains(&n) {
+                        stack.push(n);
+                    }
+                }
+            }
+        }
+        seen.len() == cells.len()
+    }
+
+    /// A feature never seals a room: every room region's floor stays a single
+    /// 4-connected component. This is the operational form of the §10.1.5 "footprint
+    /// grown by 1 is clear" rule — a partition wall or pillar keeps its 1-cell moat,
+    /// so no pocket of floor is ever cut off (which would also break reachability, #13).
+    #[test]
+    fn room_floor_stays_connected_after_features() {
+        for seed in 0..200 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            for (id, region) in layout.regions().regions() {
+                if region.kind() != RegionKind::Room {
+                    continue;
+                }
+                let cells: HashSet<Cell> = region.cells().iter().copied().collect();
+                assert!(
+                    is_4_connected(&cells),
+                    "seed {seed}: room {id:?} floor split into pieces by a feature"
+                );
+            }
+        }
+    }
+
+    /// The §10.5 payoff: a featured room records its *true* footprint, not its
+    /// bounding box. Over many seeds the vast majority of rooms end up with fewer
+    /// floor cells than their bounding-box area — a genuine non-rectangular shape
+    /// carved by a feature — proving the region graph reflects it (§10.1.5, §10.5).
+    #[test]
+    fn features_make_rooms_non_rectangular() {
+        let (mut carved, mut total) = (0u32, 0u32);
+        for seed in 0..200 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            for (_, region) in layout.regions().regions() {
+                if region.kind() != RegionKind::Room {
+                    continue;
+                }
+                total += 1;
+                let (w, h) = bbox(region.cells());
+                if (region.cells().len() as u32) < w * h {
+                    carved += 1;
+                }
+            }
+        }
+        // Every room is ≥6×6, so a partition wall always fits and a pillar usually
+        // does — the overwhelming majority should carry a feature.
+        assert!(
+            carved * 100 >= total * 80,
+            "only {carved}/{total} rooms are non-rectangular; features are barely landing"
+        );
+    }
+
+    /// Feature walls stay strictly interior — a feature is stamped inside a room and
+    /// never onto the enclosing border (§10.6), which the border-seal test also
+    /// guards from the other direction.
+    #[test]
+    fn features_never_touch_the_border() {
+        for seed in 0..200 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let f = layout.facility();
+            for x in 0..f.width() {
+                assert_eq!(f.terrain_at(x, 0), Some(Terrain::Wall));
+                assert_eq!(f.terrain_at(x, f.height() - 1), Some(Terrain::Wall));
+            }
+            for y in 0..f.height() {
+                assert_eq!(f.terrain_at(0, y), Some(Terrain::Wall));
+                assert_eq!(f.terrain_at(f.width() - 1, y), Some(Terrain::Wall));
+            }
+        }
+    }
+
+    /// A pillar needs a 6×6 room (§10.1.5): below that there is no space for a
+    /// 2-cell block plus the freestanding 1-cell margin. A 5×5 room never yields
+    /// one; a 6×6 room can.
+    #[test]
+    fn pillars_need_a_six_by_six_room() {
+        // A 5×5 interior: propose_pillar rejects every draw.
+        let small = Facility::walled_box(7, 7);
+        let small_room = Rect::new(1, 1, 5, 5);
+        for seed in 0..64 {
+            assert!(
+                propose_pillar(&small_room, &small, &mut Rng::new(seed)).is_none(),
+                "a 5x5 room must never host a pillar"
+            );
+        }
+        // A 6×6 interior: at least one draw fits.
+        let big = Facility::walled_box(8, 8);
+        let big_room = Rect::new(1, 1, 6, 6);
+        assert!(
+            (0..64).any(|seed| propose_pillar(&big_room, &big, &mut Rng::new(seed)).is_some()),
+            "a 6x6 room should be able to host a pillar"
+        );
+    }
+
+    /// A proposed feature always respects its clearance: every stub/pillar cell and
+    /// its checked halo lies on floor inside the room. Asserted directly on the
+    /// proposals for a fresh room so a regression in the "grown by 1 is clear" rule
+    /// (§10.1.5) shows up close to the code that enforces it.
+    #[test]
+    fn proposed_features_stay_on_interior_floor() {
+        let facility = Facility::walled_box(20, 20);
+        let room = Rect::new(1, 1, 18, 18);
+        for seed in 0..128 {
+            let mut rng = Rng::new(seed);
+            for _ in 0..FEATURE_ATTEMPTS {
+                for proposal in [
+                    propose_partition(&room, &facility, &mut rng),
+                    propose_pillar(&room, &facility, &mut rng),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    for cell in proposal {
+                        assert!(
+                            room.contains(cell) && facility.terrain(cell) == Some(Terrain::Floor),
+                            "seed {seed}: feature cell {cell:?} is off the room floor"
+                        );
+                    }
+                }
             }
         }
     }
