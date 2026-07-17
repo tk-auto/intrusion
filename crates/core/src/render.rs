@@ -120,7 +120,12 @@ pub fn render(state: &State) -> Grid {
         // state machine (§7.4) is a later ticket; an un-alerted guard is Caution.
         put(guard.pos(), 'g', Category::Caution);
     }
-    put(state.player(), '@', Category::Owned);
+    // The player, always Owned. Inside a hideout the player is concealed: the
+    // cupboard keeps its `}` glyph but recolours to Owned (§10.3/§11.3) — the "you
+    // are hidden here" signal — instead of drawing the `@`. Read through the same
+    // `hidden` query the loop and vision use, so the picture cannot disagree.
+    let player_glyph = if state.hidden() { '}' } else { '@' };
+    put(state.player(), player_glyph, Category::Owned);
 
     Grid {
         width,
@@ -248,6 +253,33 @@ mod tests {
             vec![Guard::stationary(Cell::new(4, 4))],
         );
         assert_eq!(render(&both).get(4, 4).glyph, '@', "player outranks guard");
+    }
+
+    /// §10.3/§11.3: the occupied cupboard is the "you are hidden here" signal. An
+    /// empty hideout stays a System `}`; the one the player is concealed in keeps the
+    /// `}` glyph but recolours to **Owned** — the `@` is not drawn, the cupboard is.
+    #[test]
+    fn an_occupied_hideout_recolours_to_owned_and_an_empty_one_stays_system() {
+        let mut layout = Layout::from_facility(Facility::walled_box(10, 10));
+        layout.place(Cell::new(4, 4), Terrain::Hideout); // the one the player hides in
+        layout.place(Cell::new(7, 4), Terrain::Hideout); // an empty cupboard elsewhere
+        let s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        let g = render(&s);
+
+        let occupied = g.get(4, 4);
+        assert_eq!(occupied.glyph, '}', "the cupboard glyph, not the @");
+        assert_eq!(occupied.fg, Category::Owned, "occupied recolours to Owned");
+
+        let empty = g.get(7, 4);
+        assert_eq!(empty.glyph, '}');
+        assert_eq!(empty.fg, Category::System, "an empty cupboard stays System");
     }
 
     /// Terrain categories follow §11.2: an exit and a console are Interest, a hideout
