@@ -22,6 +22,7 @@
 //! sound only partially muffled) arise when an occupant's fill sits in it — an
 //! occupancy overlay the sound and turn tickets read, not a second terrain kind.
 
+use crate::category::Category;
 use crate::cell::{Cell, Direction};
 
 /// A kind of cell. The vocabulary the facility grid stores; the §10.3 terrain
@@ -68,6 +69,19 @@ impl Terrain {
             Terrain::Hideout => '}',
             Terrain::Console => '$',
             Terrain::Exit => 'E',
+        }
+    }
+
+    /// The information category this terrain declares (§11.2). The renderer tags
+    /// each cell with this; the platform shell owns the category → colour table, so
+    /// no concrete colour is named here. Walls and floor are inert **Neutral**; doors
+    /// and hideouts are **System** furniture; a console (intel) and the exit are
+    /// **Interest** — a goal or reward.
+    pub fn category(self) -> Category {
+        match self {
+            Terrain::Floor | Terrain::DoorPanelOpen | Terrain::Wall => Category::Neutral,
+            Terrain::DoorHinge | Terrain::DoorPanelClosed | Terrain::Hideout => Category::System,
+            Terrain::Console | Terrain::Exit => Category::Interest,
         }
     }
 

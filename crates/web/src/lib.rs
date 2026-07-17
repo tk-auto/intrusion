@@ -1,22 +1,32 @@
-//! The thin web shell (§12.2): the wasm-bindgen entry point, a canvas2d glyph
-//! renderer, and the input pump. It stays deliberately thin — all game logic lives
-//! in `intrusion-core`; this crate only draws the core's state and feeds it input.
+//! The thin web shell (§12.2): the wasm-bindgen entry point, a canvas2d blitter, and
+//! the input pump. It stays deliberately thin — all game logic *and all rendering*
+//! live in `intrusion-core`; this crate feeds the core input and paints the grid the
+//! core hands back.
+//!
+//! **The rendering seam (§11.1, and see `core::render`).** The core produces a
+//! [`Grid`] of `(glyph, fg-category, bg)` — it decides every glyph, resolves every
+//! overlap (glyph priority, §11.3), and tags each cell with an information *category*
+//! (§11.2). This shell does exactly **one** rendering job: map each cell's
+//! [`Category`] to a concrete colour and draw the glyph. It never decides a glyph,
+//! never overlays an entity itself, never picks a colour from game state — if it did,
+//! the core would stop being the single source of truth for what the game looks like.
 //!
 //! It runs the turn loop (§4.2): boot generates a facility, drops the player in, and
 //! draws it; arrow keys (or WASD / vi keys) drive [`State::step`], and every keypress
 //! redraws. The **whole level is always visible with no scrolling**, on desktop and
 //! mobile alike: the canvas is scaled to fit the viewport (aspect preserved) and its
 //! backing store is sized in device pixels so glyphs stay crisp; a resize/orientation
-//! change recomputes and redraws. A player-*centred* viewport (§11.4) — as opposed to
-//! this fit-the-whole-level view — is a later render ticket, as are colour categories
-//! (§11.2), fog (§11.5a), and explicit hotkeys (§11.6). Placement here (a floor-cell
-//! scan) is a preview harness; real placement is generation's job (§10.1).
+//! change recomputes and redraws. A player-*centred* viewport (§11.4), fog (§11.5a),
+//! the danger overlay (§11.5), and explicit hotkeys (§11.6) are later render tickets;
+//! the full colour-blind-safe palette (§11.2) refines the placeholder table below.
+//! Placement here (a floor-cell scan) is a preview harness; real placement is
+//! generation's job (§10.1).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ascii_grid, generate, Cell, Direction, Facility, Guard, Input, Rng, State, Terrain,
+    generate, render, Category, Cell, Direction, Facility, Grid, Guard, Input, Rng, State, Terrain,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -27,12 +37,25 @@ use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, KeyboardEve
 const CELL_W: f64 = 14.0;
 const CELL_H: f64 = 20.0;
 
-/// Colours the shell owns until the colour-category system (§11.2) lands and maps
-/// them from information categories. Concrete colours never live in the core (§11.2).
+/// The page background.
 const BG: &str = "#0b0b0b";
-const NEUTRAL: &str = "#cfcfcf"; // scenery
-const PLAYER: &str = "#7ab8ff"; // the player glyph, so `@` reads at a glance
-const GUARD: &str = "#e0803a"; // guards
+
+/// Map an information category (§11.2) to a concrete colour — **the shell's one and
+/// only rendering decision**. The core tags each cell with a [`Category`]; this table
+/// is where category becomes pixels, so recolouring or an accessibility pass is a
+/// one-function edit. These are placeholders; the full 16-colour colour-blind-safe
+/// palette with darkened background variants is the colour-category ticket (§11.2).
+fn category_color(category: Category) -> &'static str {
+    match category {
+        Category::Neutral => "#cfcfcf",  // white — scenery
+        Category::Owned => "#7ab8ff",    // blue — you and what you made
+        Category::Caution => "#e6c34a",  // yellow — a threat, unaware
+        Category::Warning => "#e0803a",  // orange — a threat, hunting
+        Category::Danger => "#e0503a",   // red — a threat that has you
+        Category::Interest => "#b57ae0", // purple — goals and rewards
+        Category::System => "#c8a878",   // tan — doors, hideouts
+    }
+}
 
 /// Boot the game: generate a facility, place the player, draw it, and start listening
 /// for input and resize (§4.2, §13.1's build→play half).
@@ -170,14 +193,10 @@ impl Game {
         self.draw();
     }
 
-    /// Draw one frame: the terrain glyph grid, then the guards and the player on top.
+    /// Draw one frame: ask the core to render the whole grid (terrain + entities,
+    /// glyph priority resolved), then blit it — colour by category, glyph as given.
     fn draw(&self) {
-        let grid = ascii_grid(self.state.layout().facility());
-        draw_grid(&self.ctx, &grid, &self.metrics);
-        for guard in self.state.guards() {
-            draw_glyph(&self.ctx, guard.pos(), 'g', GUARD, &self.metrics);
-        }
-        draw_glyph(&self.ctx, self.state.player(), '@', PLAYER, &self.metrics);
+        paint(&self.ctx, &render(&self.state), &self.metrics);
     }
 }
 
@@ -243,36 +262,33 @@ fn install_resize(game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
     Ok(())
 }
 
-/// Paint a glyph grid: fill the background, then draw each non-blank glyph centred in
-/// its cell. Blank (floor) cells are left as background. Sets the font and alignment
-/// the on-top glyphs ([`draw_glyph`]) then reuse.
-fn draw_grid(ctx: &CanvasRenderingContext2d, grid: &[String], m: &Metrics) {
-    let rows = grid.len() as f64;
-    let cols = grid.first().map_or(0, |r| r.chars().count()) as f64;
-
+/// Blit a rendered [`Grid`] to the canvas: fill the background, then draw each
+/// non-blank glyph centred in its cell, coloured by its category ([`category_color`]).
+/// Blank cells (floor) are left as background. This is the shell's whole rendering
+/// job — the glyphs, overlaps and categories were all decided by `core::render`.
+fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
     ctx.set_fill_style_str(BG);
-    ctx.fill_rect(0.0, 0.0, cols * m.cell_w, rows * m.cell_h);
+    ctx.fill_rect(
+        0.0,
+        0.0,
+        grid.width() as f64 * m.cell_w,
+        grid.height() as f64 * m.cell_h,
+    );
 
-    ctx.set_fill_style_str(NEUTRAL);
     ctx.set_font(&format!("{:.1}px ui-monospace, monospace", m.font));
     ctx.set_text_align("center");
     ctx.set_text_baseline("middle");
 
-    for (y, row) in grid.iter().enumerate() {
-        for (x, glyph) in row.chars().enumerate() {
-            if glyph == ' ' {
+    for y in 0..grid.height() {
+        for x in 0..grid.width() {
+            let cell = grid.get(x, y);
+            if cell.glyph == ' ' {
                 continue;
             }
-            draw_char(ctx, x as f64, y as f64, glyph, m);
+            ctx.set_fill_style_str(category_color(cell.fg));
+            draw_char(ctx, x as f64, y as f64, cell.glyph, m);
         }
     }
-}
-
-/// Draw one glyph at a cell in `color`, over the terrain grid. Relies on the font and
-/// alignment [`draw_grid`] set for this frame.
-fn draw_glyph(ctx: &CanvasRenderingContext2d, cell: Cell, glyph: char, color: &str, m: &Metrics) {
-    ctx.set_fill_style_str(color);
-    draw_char(ctx, cell.x as f64, cell.y as f64, glyph, m);
 }
 
 /// Paint a single character centred in cell `(x, y)` with the current fill style.

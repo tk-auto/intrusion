@@ -20,6 +20,7 @@
 
 #![forbid(unsafe_code)]
 
+mod category;
 mod cell;
 mod door;
 mod facility;
@@ -29,11 +30,12 @@ mod render;
 mod rng;
 mod state;
 
+pub use category::Category;
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;
 pub use facility::{Facility, SoundBlocking, Terrain};
 pub use generate::{generate, GenError, Layout};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
-pub use render::ascii_grid;
+pub use render::{ascii_grid, render, GlyphCell, Grid};
 pub use rng::Rng;
 pub use state::{Event, Guard, Input, Outcome, State};
