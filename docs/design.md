@@ -222,14 +222,18 @@ move into a cell succeeds if the fills already there, plus the mover's, are
 ≤ 1.0.
 
 - Fill 1.0: walls, closed door panels, door hinges, guards, the player, bodies,
-  consoles. Solid and exclusive.
-- Fill 0.0: open door panels, unoccupied hideouts, decoys. Walk-through.
+  consoles, **occupied hideouts**. Solid and exclusive.
+- Fill 0.0: open door panels, decoys. Walk-through.
+
+An **empty hideout** is the odd one out: it is walk-through for *pathing* accounting
+yet you **bump** to climb in rather than drifting onto it (§10.3), so entering is a
+decision, not an accident.
 
 **A blocked move is an interaction, not a failure.** Walking into a door opens
 it. Walking into a console uses it. Walking into an unaware guard takes them
-down. This "bump" is the game's entire interaction verb — there is no separate
-*use* key. **[SETTLED]** It is the reason the control scheme is four arrow keys
-and a handful of abilities.
+down. **Bumping a hideout climbs into it** (and moving off climbs out). This "bump"
+is the game's entire interaction verb — there is no separate *use* key. **[SETTLED]**
+It is the reason the control scheme is four arrow keys and a handful of abilities.
 
 ### 4.4 Turn cost — the rule that matters most
 
@@ -745,8 +749,17 @@ plumbing.
      Rejected unless its footprint grown by 1 is clear.
    - **Pillars must come before hideouts** — they are what creates the 2-cell-thick
      geometry hideouts need.
-6. **Hideouts.** Carve alcoves: a wall cell with exactly **3** wall neighbours and
-   exactly **1** empty neighbour. One attempt per room.
+6. **Hideouts.** Furnish the hiding-game board with **cupboards**: a floor cell set
+   **against a wall or a pillar face** (protruding, never floating in open ground)
+   becomes a hideout. Place them **along the corridor network and near junctions**,
+   not only in rooms — the flight path is where cover is needed (§7.6, §10.1a) — and
+   **do not stop at the first failure.** Space them out (a single **[START]** knob)
+   so the facility still reads as a building, and never let one wall off a patrol
+   route. Pillars must exist first (step 5), since a pillar face is a valid backing.
+   *(The original rule — "a wall cell with exactly 3 wall neighbours and 1 empty
+   neighbour, one attempt per room" — described a carved 1-deep niche and harvested
+   only the rare natural pockets; that is exactly what left the old game with no
+   board. The cupboard is placed deliberately instead of harvested.)*
 7. **Entry/exit and player** go in the **largest room**, at random empty cells.
 8. **Objectives** go in any room *except* the start room.
 9. **Guards** go in any room *except* the start room.
@@ -825,8 +838,8 @@ fail**. Guard the minimum.
 | **Door hinge** | `×` | Yes | Yes | Yes | Yes |
 | **Door panel, closed** | `+` | Yes | Yes | **No** — see below | **Mostly** |
 | **Door panel, open** | (blank) | No | No | No | No |
-| **Hideout, empty** | `}` | No | No | Yes | No |
-| **Hideout, occupied** | `}` | Yes | No | Yes | **Partially** |
+| **Hideout, empty** | `}` | **Bump** | No | Yes | No |
+| **Hideout, occupied** | `}` **(you)** | Yes | No | Yes | **Partially** |
 | **Console** | `$` | Yes | No | No | No |
 | **Exit** | `E` | Yes | No | No | No |
 | **Player** | `@` | Yes | No | No | No |
@@ -836,6 +849,21 @@ fail**. Guard the minimum.
 
 Vision is blocked when a cell's summed opacity reaches 1.0. No partial cover, no
 low walls, no glass. **[START]** — partial cover is an obvious future axis.
+
+> **The hideout is a cupboard, and entering it is a decision.** You **bump** into an
+> empty cupboard to climb in (§4.3 — hiding is an *interaction*, not a cell you
+> drift onto), and you move off it to climb out. While you are inside you are
+> **concealed** — no guard's cone detects you, so this is the "hold still, watch the
+> cone sweep past" of §7.6 — and the cell is **solid**, so a guard cannot walk into
+> your space (capture is contact, §4.5; a cupboard is the one place contact is
+> refused because a patrol routes *around* it). The occupied cupboard also
+> **recolours to Owned** (§11.2/§11.3) so you can always see which cell you are
+> hidden in.
+> Placement is the generator's job (§10.1.6); this behaviour — bump-to-enter, the
+> concealed state, and the occupied glyph — is the hideout **interaction** ticket,
+> which the turn loop, the renderer, and vision (§6) complete together. **Whether a
+> guard can ever flush you out** (search a cupboard when alerted) stays **[OPEN]**
+> (§15 Q5).
 
 ### 10.4 Doors
 
@@ -984,7 +1012,8 @@ foreground and as a darkened background variant.
 | (blank) | Floor | — |
 | `+` | Door panel | System |
 | `×` | Door hinge | System |
-| `}` | Hideout | System |
+| `}` | Hideout (empty) | System |
+| `}` | Hideout (occupied) | **Owned** — you are in it, so it recolours to Owned (blue) like the rest of "things you made"; the colour shift is how you see which cell hides you (§10.3) |
 | `$` | Intel | Interest |
 | `E` | Exit | Interest |
 
