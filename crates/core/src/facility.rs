@@ -74,12 +74,14 @@ impl Terrain {
 
     /// The information category this terrain declares (§11.2). The renderer tags
     /// each cell with this; the platform shell owns the category → colour table, so
-    /// no concrete colour is named here. Walls and floor are inert **Neutral**; doors
-    /// and hideouts are **System** furniture; a console (intel) and the exit are
-    /// **Interest** — a goal or reward.
+    /// no concrete colour is named here. Walls are inert **Neutral**; floor (and the
+    /// walkable gap of an open panel) is **Ground**, drawn to recede so everything
+    /// else pops; doors and hideouts are **System** furniture; a console (intel) and
+    /// the exit are **Interest** — a goal or reward.
     pub fn category(self) -> Category {
         match self {
-            Terrain::Floor | Terrain::DoorPanelOpen | Terrain::Wall => Category::Neutral,
+            Terrain::Wall => Category::Neutral,
+            Terrain::Floor | Terrain::DoorPanelOpen => Category::Ground,
             Terrain::DoorHinge | Terrain::DoorPanelClosed | Terrain::Hideout => Category::System,
             Terrain::Console | Terrain::Exit => Category::Interest,
         }
