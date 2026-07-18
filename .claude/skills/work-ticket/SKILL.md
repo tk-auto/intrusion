@@ -119,11 +119,12 @@ branch:
 - **Title:** the conventional-commit summary.
 - **Body:** what changed and why, the design section(s) honoured, how it was
   verified (paste the gate result), any `[START]` numbers tuned, and `Closes #<n>`.
-- If a PR template exists (`.github/pull_request_template.md`), fill its sections.
+- **This repo has no PR template** — don't go looking for one; the body sections
+  above are the format.
 - Link the PR back on the issue if useful; don't over-comment.
 
-Report the branch, the gate result, and the PR URL to the user. Offer to watch the
-PR for CI/review activity (`subscribe_pr_activity`) rather than polling.
+Report the branch, the gate result, and the PR URL to the user, then move
+straight to watching CI (step 8).
 
 ## 8. Merge once CI is green
 
@@ -131,19 +132,27 @@ A finished ticket ends **merged**, not just in an open PR. **Do NOT use GitHub
 auto-merge** (`enable_pr_auto_merge`) — merge deliberately, after *watching* CI
 go green:
 
-- **Subscribe to the PR** (`subscribe_pr_activity`) so failures and review
-  comments are delivered as events.
-- **Watch for CI completion yourself.** CI **success is not delivered as a
-  webhook** (only failures are), so arm a background watcher — a Bash
-  `run_in_background` until-loop (or Monitor) polling the head commit's check
-  runs (`pull_request_read` → `get_check_runs`, or the commits/check-runs API)
-  every ~20–30s until every check is completed. Never foreground-sleep.
+- **Watch for CI completion yourself, with basic monitors only.** Do NOT use the
+  Claude Code Remote tools (`subscribe_pr_activity`, `send_later`, triggers) —
+  see `CLAUDE.md`. Pace the wait with a background timer (Monitor, or a Bash
+  `run_in_background` sleep/until-loop — never a foreground sleep) and on each
+  wake poll the head commit's check runs via the GitHub MCP tools
+  (`pull_request_read` → `get_check_runs`) until every check is completed.
+  The raw GitHub API is not reachable from Bash in these sessions — the poll
+  itself must go through the MCP tools.
 - **On green:** re-check for review comments that arrived meanwhile, then merge
   with `merge_pull_request` (`squash` — this repo's history is one squashed
-  commit per issue, e.g. `… (#24)`). Report the merge; if the change deploys
-  (Pages, §13.1), note the deploy follows from the merge to `main`.
-- **On red:** diagnose from the failure event/logs, fix on the same branch,
-  push, and re-arm the watcher for the new run.
+  commit per issue, e.g. `… (#24)`).
+- **On red:** diagnose from the failure logs (`get_job_logs`), fix on the same
+  branch, push, and re-arm the watcher for the new run.
+- **After the merge, wait for the deploy and hand back the play URL.** The merge
+  to `main` kicks the Pages workflow (`pages.yml`); keep the same basic-monitor
+  pattern going — poll the workflow's run for `main` (`actions_list` →
+  `list_workflow_runs`) until it completes. On success, report the Pages URL
+  <https://tk-auto.github.io/intrusion/> as the final deliverable so the user can
+  play the merged change immediately; on failure, diagnose and fix rather than
+  handing back a dead link. If the deploy is unusually slow, hand back the URL
+  with a note that the deploy is still running rather than blocking forever.
 
 **Do NOT merge — leave the PR open and hand it back — when any of these hold:**
 

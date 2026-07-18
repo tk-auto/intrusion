@@ -4,8 +4,8 @@ description: >-
   Turn the Intrusion design doc (docs/design.md) into GitHub issues for the next
   steps of work. Use when the user wants to create tickets, break the design into
   tasks, plan the next steps, populate the backlog, or "make issues from the design".
-  Drafts proposed tickets to a review file first, then creates the approved ones as
-  GitHub issues with milestone:v1/v2/v3 labels and area/type/size labels.
+  Proposes tickets in the conversation for approval first, then creates the approved
+  ones as GitHub issues with milestone:v1/v2/v3 labels and area/type/size labels.
 ---
 
 # Create tickets from the design
@@ -14,12 +14,14 @@ Convert `docs/design.md` into actionable GitHub issues. The design doc is the
 single source of truth for *what* the game should be; this skill turns slices of
 it into *work*.
 
-## Workflow: draft, review, then create
+## Workflow: propose in conversation, then create
 
 This skill is **two-phase on purpose**. Never create issues on GitHub before the
-user has seen and approved the draft.
+user has seen and approved the proposal. **There is no draft file** — the proposal
+lives in the conversation itself; do not write tickets to `docs/` (a
+`docs/tickets-draft.md` used to exist and was deliberately removed).
 
-### Phase 1 — Draft
+### Phase 1 — Propose
 
 1. Read `docs/design.md` in full (or the sections the user named). If the user
    pointed at a specific area ("tickets for the guard AI"), scope to that;
@@ -27,32 +29,32 @@ user has seen and approved the draft.
    greenfield repo that is v1.
 2. Cross-check what already exists: run `git ls-files` and list open issues
    (`list_issues`) so you don't re-file work that is already tracked or done.
-3. Write proposed tickets to `docs/tickets-draft.md` using the template below.
-   Group them by milestone. Keep each ticket to a **single reviewable unit of
-   work** — if it can't be finished in one PR, split it or make it an epic with
-   checklist sub-tasks.
-4. Show the user the draft path and a short summary (count per milestone). Ask
-   them to review/edit the file and confirm before you create anything.
+3. Post the proposed tickets **as a message to the user**, using the template
+   below, grouped by milestone, with a short summary (count per milestone). Keep
+   each ticket to a **single reviewable unit of work** — if it can't be finished
+   in one PR, split it or make it an epic with checklist sub-tasks.
+4. Ask the user to approve, edit, or drop tickets before you create anything.
+   If they directly asked for a specific ticket to be created, that request is
+   the approval — skip the wait, not the proposal quality.
 
 ### Phase 2 — Create (only after explicit approval)
 
 1. Ensure the labels below exist (create any that are missing — this is idempotent;
    skip ones that already exist). Applying a label on `issue_write` auto-creates it
    if the repo doesn't have it yet.
-2. For each approved ticket in the draft, create a GitHub issue with its title,
-   body, and labels — including its `milestone:*` label.
-3. Record the created issue number back into `docs/tickets-draft.md` (e.g. append
-   `→ #42`) so the file is a durable index, then report the list of created
-   issues to the user.
+2. For each approved ticket, create a GitHub issue with its title, body, and
+   labels — including its `milestone:*` label.
+3. Report the created issue numbers back to the user. The issues themselves are
+   the durable index — there is no draft file to update.
 
 Use the GitHub MCP tools (`issue_write`, `list_issues`, etc.). If the GitHub MCP
-is unavailable, say so and leave the draft in place rather than inventing issues.
+is unavailable, say so and stop rather than inventing issues.
 
 ## Milestones as labels (from §14)
 
 **GitHub milestone objects are not created via the API tooling in use — use a
 `milestone:*` label instead.** Also record the milestone in each ticket body
-(`**Milestone:** v1`) so the draft file stays self-describing. Map every ticket to
+(`**Milestone:** v1`) so the issue stays self-describing. Map every ticket to
 exactly one:
 
 | Label | Scope |
@@ -61,8 +63,9 @@ exactly one:
 | **`milestone:v2`** | The headless sim + metrics (§13.2), saves, options, help/legend, game-over screen, alert indicator. |
 | **`milestone:v3`** | The campaign — facility map, salvaged-tech accumulation, intel currency, alert-scaled difficulty, an ending. |
 
-Backlog ideas (§14 "Later") get no milestone label unless the user asks; note them
-in the draft but don't file them by default — they are experiments, not committed work.
+Backlog ideas (§14 "Later") get no milestone label unless the user asks; mention
+them in the proposal but don't file them by default — they are experiments, not
+committed work.
 
 ## Labels
 
