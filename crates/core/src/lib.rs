@@ -45,7 +45,7 @@ pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{ascii_grid, render, GlyphCell, Grid, Visibility};
 pub use rng::Rng;
-pub use state::{Event, Guard, Input, Outcome, State};
+pub use state::{Event, Guard, GuardState, Input, Outcome, State};
 pub use vision::{
     field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
     PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
