@@ -21,6 +21,10 @@ CLI.
   deliberately after watching CI go green (see the work-ticket skill).
 - After a merge to `main`, the Pages workflow deploys the playable build to
   <https://tk-auto.github.io/intrusion/> — wait for it and hand that URL back.
+- For a playable preview *before* merge (or while iterating), use the
+  artifact-build skill: it packs the wasm build into a Claude Artifact at a
+  stable private URL. Player-visible PRs are validated this way before merging
+  (see the work-ticket skill, step 8).
 
 ## Tickets
 
