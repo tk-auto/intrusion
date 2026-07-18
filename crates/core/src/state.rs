@@ -21,16 +21,22 @@
 //! - **The startup turn (§4.2).** One full turn runs at level start, before the first
 //!   input, so guards have position and sight established when the player first acts.
 //!
-//! Two of the three phases are hooks here. **Sight** is an empty call in the right
-//! place — real FOV is the vision ticket (§6); calling it in phase 2 is what designs
-//! out the old one-turn sensory lag (§4.2). **Guards** move along a scripted route, a
-//! deterministic placeholder for the patrol/chase AI (§7.4–7.6) — enough to make the
-//! capture rule real and tested, and nothing more. Both slot behind clean phase
-//! boundaries so their tickets fill them in without reshaping the loop.
+//! **Sight is real** (§6): phase 2 recomputes every viewer's field of view — the
+//! player's ~180° half-disc (360° on a turn spent waiting, §8.3) and each guard's
+//! ~90° wedge — from its *current* position and facing, which is what designs out the
+//! old one-turn sensory lag (§4.2). **Guards** still move along a scripted route, a
+//! deterministic placeholder for the patrol/chase AI (§7.4–7.6): their cones are
+//! computed and stored, but nothing *reacts* to them yet — detection, chasing and the
+//! state machine are the guard tickets, which will read the sight data this loop
+//! already maintains.
 
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::generate::Layout;
+use crate::vision::{
+    field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
+    PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
+};
 use crate::DoorAction;
 
 /// The player and every guard are solid and exclusive — fill 1.0 (§4.3). A cell
@@ -89,15 +95,19 @@ pub enum Outcome {
 /// A guard on the level.
 ///
 /// Its movement is a **scripted route** walked one step per turn, cycling — the
-/// simplest possible placeholder for the patrol/chase AI (§7.4–7.6). It has no
-/// vision, no state machine, and does not open doors; it exists so that capture
-/// (§4.5) is a real, tested consequence rather than an untriggerable branch. The
-/// guard tickets replace the route with the real thing behind the same phase.
+/// simplest possible placeholder for the patrol/chase AI (§7.4–7.6). It has a real
+/// field of view — the ~90° cone (§6.2/§7.1), recomputed every sight phase — but no
+/// state machine and no reactions: it does not open doors, and it exists so that
+/// capture (§4.5) is a real, tested consequence rather than an untriggerable branch.
+/// The guard tickets replace the route with the real thing behind the same phase,
+/// reading the sight this loop already maintains.
 #[derive(Clone, Debug)]
 pub struct Guard {
     pos: Cell,
+    facing: Direction,
     route: Vec<Direction>,
     step: usize,
+    fov: VisibleSet,
 }
 
 impl Guard {
@@ -105,8 +115,10 @@ impl Guard {
     pub fn stationary(pos: Cell) -> Self {
         Self {
             pos,
+            facing: Direction::South, // initial facing is south (§7.1)
             route: Vec::new(),
             step: 0,
+            fov: VisibleSet::default(),
         }
     }
 
@@ -114,14 +126,31 @@ impl Guard {
     pub fn patrolling(pos: Cell, route: Vec<Direction>) -> Self {
         Self {
             pos,
+            facing: Direction::South, // initial facing is south (§7.1)
             route,
             step: 0,
+            fov: VisibleSet::default(),
         }
     }
 
     /// Where the guard stands.
     pub fn pos(&self) -> Cell {
         self.pos
+    }
+
+    /// Where the guard is looking: south at spawn (§7.1), then the direction of its
+    /// last successful step — facing follows movement, for guards as for the player
+    /// (§5), and a blocked step does not turn it.
+    pub fn facing(&self) -> Direction {
+        self.facing
+    }
+
+    /// The guard's field of view — the ~90° forward wedge (§6.2/§7.1), current as of
+    /// the last time this guard stood still or moved. This is the set the danger
+    /// overlay paints (§11.5) and the detection the guard AI will read: one truth,
+    /// so the picture and the rules cannot disagree.
+    pub fn fov(&self) -> &VisibleSet {
+        &self.fov
     }
 
     /// The direction the guard will try this turn, or `None` if it has no route.
@@ -159,6 +188,11 @@ pub struct State {
     layout: Layout,
     player: Cell,
     facing: Direction,
+    /// The player's field of view, recomputed every sight phase (§4.2/§6).
+    player_fov: VisibleSet,
+    /// Whether the last spent turn was a Wait — which widens the next sight
+    /// computation to the full 360° (§8.3).
+    waited: bool,
     guards: Vec<Guard>,
     objectives: Vec<Objective>,
     exit: Cell,
@@ -197,6 +231,8 @@ impl State {
             layout,
             player,
             facing,
+            player_fov: VisibleSet::default(),
+            waited: false,
             guards,
             objectives,
             exit,
@@ -221,6 +257,14 @@ impl State {
     /// The player's facing — the direction of their last successful step (§5).
     pub fn facing(&self) -> Direction {
         self.facing
+    }
+
+    /// The player's field of view (§6): the ~180° forward half-disc, or the full
+    /// 360° on a turn spent waiting — the only way to see behind you (§8.3). What is
+    /// in it renders lit and what is not renders dimmed (§11.5); the render ticket
+    /// reads this set, and fog memory (§11.5a) will feed from it.
+    pub fn player_fov(&self) -> &VisibleSet {
+        &self.player_fov
     }
 
     /// Whether the player is concealed — standing inside a hideout (§10.3).
@@ -287,9 +331,16 @@ impl State {
     /// or was free (a mis-input that ends nothing).
     fn player_phase(&mut self, input: Input, events: &mut Vec<Event>) -> bool {
         match input {
-            // Waiting is a real action: it spends the turn where you stand (§5).
-            Input::Wait => true,
-            Input::Step(dir) => self.resolve_step(dir, events),
+            // Waiting is a real action: it spends the turn where you stand (§5) —
+            // and buys the 360° look-around the coming sight phase grants (§8.3).
+            Input::Wait => {
+                self.waited = true;
+                true
+            }
+            Input::Step(dir) => {
+                self.waited = false;
+                self.resolve_step(dir, events)
+            }
         }
     }
 
@@ -395,10 +446,29 @@ impl State {
     }
 
     /// Phase 2 (§4.2): recompute every viewer's field of view from its current
-    /// position and facing. Vision — the shadowcast cone (§6) — is its own ticket;
-    /// until it lands this is the empty hook, placed here so that guards read *fresh*
-    /// sight once it exists, designing out the old one-turn lag (§4.2).
-    fn recompute_sight(&mut self) {}
+    /// position and facing (§6). Running *after* the player acts and *before* the
+    /// guards read it is what designs out the old one-turn sensory lag (§4.2). The
+    /// player's arc is the ~180° half-disc — or the full 360° if this turn was spent
+    /// waiting (§8.3). Guards carve their ~90° wedge with the same function (§6.2).
+    fn recompute_sight(&mut self) {
+        let facility = self.layout.facility();
+        let arc = if self.waited {
+            WAIT_SIGHT_ARC
+        } else {
+            PLAYER_SIGHT_ARC
+        };
+        self.player_fov =
+            field_of_view(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE);
+        for guard in &mut self.guards {
+            guard.fov = field_of_view(
+                facility,
+                guard.pos,
+                guard.facing,
+                GUARD_SIGHT_ARC,
+                GUARD_SIGHT_RANGE,
+            );
+        }
+    }
 
     /// Phase 3 (§4.2): each guard acts. A guard moving into the player's cell is a
     /// capture and ends the run (§4.5). Otherwise it advances along its route onto any
@@ -436,6 +506,18 @@ impl State {
             // player's cell was captured above but `occupied` still guards it.
             if self.layout.facility().can_enter(target, ACTOR_FILL) && !self.occupied(target) {
                 self.guards[i].pos = target;
+                self.guards[i].facing = dir; // facing follows the successful step (§5)
+                                             // Refresh the moved guard's cone at once, so the sight a frame shows
+                                             // never lags the position it shows — the danger overlay must not lie
+                                             // (§11.5). The AI's *decisions* read the phase-2 sight; the next
+                                             // phase 2 recomputes everything anyway.
+                self.guards[i].fov = field_of_view(
+                    self.layout.facility(),
+                    target,
+                    dir,
+                    GUARD_SIGHT_ARC,
+                    GUARD_SIGHT_RANGE,
+                );
             }
         }
     }
@@ -863,6 +945,115 @@ mod tests {
         );
     }
 
+    /// §4.2: the startup turn establishes sight before the first input. A freshly
+    /// built [`State`] already carries the player's half-disc and every guard's cone
+    /// — and a guard that has not moved is looking **south**, its initial facing
+    /// (§7.1).
+    #[test]
+    fn the_startup_turn_establishes_sight() {
+        let s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(8, 8))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+
+        // The player faces north: two ahead is lit, two directly behind is not (§6.2).
+        assert!(s.player_fov().contains(Cell::new(5, 3)));
+        assert!(!s.player_fov().contains(Cell::new(5, 7)));
+
+        // The stationary guard looks south from spawn (§7.1): its wedge covers two
+        // south, not two north.
+        let g = &s.guards()[0];
+        assert_eq!(g.facing(), Direction::South);
+        assert!(g.fov().contains(Cell::new(8, 10)));
+        assert!(!g.fov().contains(Cell::new(8, 6)));
+    }
+
+    /// §8.3: **Wait grants 360° vision for that turn** — the only way to see behind
+    /// you (§5). The widened arc lasts until the next spent turn narrows it again.
+    #[test]
+    fn waiting_widens_sight_to_the_full_circle() {
+        let mut s = solo(Cell::new(5, 5));
+        s.step(Input::Step(Direction::North)); // now at (5,4), facing north
+
+        let behind = Cell::new(5, 6); // two cells directly behind
+        assert!(
+            !s.player_fov().contains(behind),
+            "the half-disc does not see directly behind"
+        );
+
+        s.step(Input::Wait);
+        assert!(
+            s.player_fov().contains(behind),
+            "a turn spent waiting sees behind"
+        );
+
+        s.step(Input::Step(Direction::West)); // at (4,4), facing west; behind is east
+        assert!(
+            !s.player_fov().contains(Cell::new(6, 4)),
+            "moving narrows the arc back to the half-disc"
+        );
+    }
+
+    /// §4.2's design note, honoured: there is **no one-turn sensory lag**. The sight
+    /// phase runs after the player's move, so the stored FOV is always from the
+    /// player's current position and facing.
+    #[test]
+    fn sight_is_recomputed_from_the_players_new_position_and_facing() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        // Facing north, the side line runs west: (2,5) is lit.
+        assert!(s.player_fov().contains(Cell::new(2, 5)));
+
+        s.step(Input::Step(Direction::East)); // now at (6,5), facing east
+        assert!(
+            s.player_fov().contains(Cell::new(9, 5)),
+            "the cone points down the new facing"
+        );
+        assert!(
+            !s.player_fov().contains(Cell::new(2, 5)),
+            "what fell directly behind went dark this same turn"
+        );
+    }
+
+    /// Guards: **facing follows the successful step** (§5, for guards as for the
+    /// player), and a moved guard's stored cone is current when the turn ends — the
+    /// frame never shows a guard in one place with its sight in another (§11.5).
+    #[test]
+    fn a_moved_guards_cone_is_current_when_the_turn_ends() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(1, 1),
+            Direction::South,
+            vec![Guard::patrolling(Cell::new(8, 8), vec![Direction::West])],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        // The startup turn already walked the guard one west and turned it.
+        let g = &s.guards()[0];
+        assert_eq!(g.pos(), Cell::new(7, 8));
+        assert_eq!(g.facing(), Direction::West);
+        assert!(g.fov().contains(Cell::new(5, 8)), "the wedge points west");
+        assert!(!g.fov().contains(Cell::new(9, 8)), "not behind it");
+
+        s.step(Input::Wait);
+        let g = &s.guards()[0];
+        assert_eq!(g.pos(), Cell::new(6, 8));
+        assert!(
+            g.fov().contains(Cell::new(4, 8)) && !g.fov().contains(Cell::new(8, 8)),
+            "the cone moved with the guard this very turn"
+        );
+    }
+
     /// §12.4: the loop is pure and deterministic. The same starting state and the same
     /// input sequence produce an identical event stream and identical final state —
     /// the property that makes a run a `(seed, [inputs])` replay. The loop holds no
@@ -901,6 +1092,7 @@ mod tests {
                 s.outcome(),
                 s.objectives_remaining(),
                 s.guards()[0].pos(),
+                s.player_fov().clone(),
             )
         };
 

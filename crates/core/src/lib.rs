@@ -14,9 +14,11 @@
 //! partition (§10.1) that carves them, and the hinged doors (§10.4) it cuts where
 //! rooms meet corridors. On top of all that sits the turn loop (§4.2): the running
 //! [`State`], `state × input → state, events`, resolving player, sight, and guards in
-//! order with the turn-cost rule and the two win/lose conditions. The remaining game
-//! systems (real vision, guard AI, sound, abilities) land in their own tickets, in the
-//! phase hooks the loop already calls.
+//! order with the turn-cost rule and the two win/lose conditions — and the sight phase
+//! is real: the symmetric-shadowcast field of view (§6), the player's half-disc and
+//! the guards' wedges, recomputed every turn. The remaining game systems (guard AI,
+//! sound, abilities) land in their own tickets, in the phase hooks the loop already
+//! calls.
 
 #![forbid(unsafe_code)]
 
@@ -29,6 +31,7 @@ mod region;
 mod render;
 mod rng;
 mod state;
+mod vision;
 
 pub use category::Category;
 pub use cell::{Cell, Direction};
@@ -39,3 +42,7 @@ pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKi
 pub use render::{ascii_grid, render, GlyphCell, Grid};
 pub use rng::Rng;
 pub use state::{Event, Guard, Input, Outcome, State};
+pub use vision::{
+    field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
+    PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
+};
