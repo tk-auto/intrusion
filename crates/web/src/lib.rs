@@ -12,8 +12,9 @@
 //! the core would stop being the single source of truth for what the game looks like.
 //!
 //! It runs the turn loop (§4.2): boot generates a facility, drops the player in, and
-//! draws it; arrow keys (or WASD / vi keys) drive [`State::step`], and every keypress
-//! redraws. The **whole level is always visible with no scrolling**, on desktop and
+//! draws it; arrow keys (or WASD / vi keys) drive [`State::step`], as do screen taps
+//! (§11.6's touch slice — edge zones step, the centre waits, see [`tap_input`]), and
+//! every input redraws. The **whole level is always visible with no scrolling**, on desktop and
 //! mobile alike: the canvas is scaled to fit the viewport (aspect preserved) and its
 //! backing store is sized in device pixels so glyphs stay crisp; a resize/orientation
 //! change recomputes and redraws. A player-*centred* viewport (§11.4), fog (§11.5a),
@@ -30,7 +31,9 @@ use intrusion_core::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, KeyboardEvent, Window};
+use web_sys::{
+    CanvasRenderingContext2d, Document, HtmlCanvasElement, KeyboardEvent, PointerEvent, Window,
+};
 
 /// The glyph cell's base aspect (width:height); a monospace glyph reads best in a
 /// slightly tall box. Actual on-screen cell size is this scaled to fit the viewport.
@@ -111,6 +114,7 @@ pub fn start() -> Result<(), JsValue> {
     }));
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
     install_input(&document, &game)?;
+    install_tap(&document, &game)?;
     install_resize(&game)?;
     Ok(())
 }
@@ -162,6 +166,18 @@ impl Game {
         true
     }
 
+    /// Feed one tap/click at viewport point `(x, y)` to the loop: map it through
+    /// [`tap_input`] and, if the viewport was sane, step and redraw (§11.6's touch
+    /// slice — the mobile counterpart of [`Self::handle_key`]).
+    fn handle_tap(&mut self, x: f64, y: f64, w: f64, h: f64) -> bool {
+        let Some(input) = tap_input(x, y, w, h) else {
+            return false;
+        };
+        self.state.step(input);
+        self.draw();
+        true
+    }
+
     /// Fit the canvas to the viewport and redraw. Compute a uniform scale so the whole
     /// `cols × rows` grid fits within the window on both axes (aspect preserved), size
     /// the backing store in device pixels for crisp glyphs, set the CSS size so the
@@ -202,6 +218,41 @@ impl Game {
     fn draw(&self) {
         paint(&self.ctx, &render(&self.state), &self.metrics);
     }
+}
+
+/// Map a tap (or click) at viewport point `(x, y)` in a `w × h` viewport to an
+/// [`Input`] — the touch half of §11.6, pure so the zone rule is testable natively.
+///
+/// The screen is zoned: the **middle third** on both axes is Wait, and everything
+/// outside it steps toward the tap's **dominant axis** — left third steps west,
+/// right east, top north, bottom south. Dominant-axis (in viewport-normalised
+/// units) rather than a fixed 3×3 grid so corner taps still act: movement has no
+/// diagonals (§4.1 [SETTLED]), and an exact corner tie goes horizontal. Zones are
+/// screen-relative, not canvas-relative — a tap in the letterbox margin counts.
+/// A degenerate viewport maps to nothing.
+fn tap_input(x: f64, y: f64, w: f64, h: f64) -> Option<Input> {
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    // Displacement from the screen centre, normalised to [-0.5, 0.5] per axis.
+    let dx = x / w - 0.5;
+    let dy = y / h - 0.5;
+    const WAIT_HALF: f64 = 1.0 / 6.0; // middle third of each axis
+    if dx.abs() < WAIT_HALF && dy.abs() < WAIT_HALF {
+        return Some(Input::Wait);
+    }
+    let direction = if dx.abs() >= dy.abs() {
+        if dx < 0.0 {
+            Direction::West
+        } else {
+            Direction::East
+        }
+    } else if dy < 0.0 {
+        Direction::North
+    } else {
+        Direction::South
+    };
+    Some(Input::Step(direction))
 }
 
 /// Read a viewport dimension (`inner_width` / `inner_height`) as an `f64`, if the
@@ -251,6 +302,34 @@ fn install_input(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), Js
         }
     });
     document.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref())?;
+    cb.forget();
+    Ok(())
+}
+
+/// Install the tap pump: each pointerdown (touch tap or mouse click, anywhere on
+/// the page — the letterbox margins count too) drives one [`Game::handle_tap`]
+/// against the current viewport size, so the zones track a rotation the same way
+/// [`Game::fit_and_draw`] does. `preventDefault` on the consumed tap stops the
+/// browser's gesture follow-ups (double-tap zoom, synthetic mouse events);
+/// `touch-action: none` on the page covers the rest (see `web/index.html`).
+fn install_tap(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
+    let game = game.clone();
+    let cb = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
+        let win = web_sys::window().expect("a window");
+        let (Some(w), Some(h)) = (
+            viewport(&win, Window::inner_width),
+            viewport(&win, Window::inner_height),
+        ) else {
+            return;
+        };
+        if game
+            .borrow_mut()
+            .handle_tap(e.client_x() as f64, e.client_y() as f64, w, h)
+        {
+            e.prevent_default();
+        }
+    });
+    document.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
     cb.forget();
     Ok(())
 }
@@ -319,6 +398,78 @@ mod tests {
     fn dist2(a: (i32, i32, i32), b: (i32, i32, i32)) -> i32 {
         let (dr, dg, db) = (a.0 - b.0, a.1 - b.1, a.2 - b.2);
         dr * dr + dg * dg + db * db
+    }
+
+    /// The four edge zones step their direction and the exact screen centre waits,
+    /// on both a square and a phone-portrait viewport (zones are viewport-normalised,
+    /// so aspect must not matter).
+    #[test]
+    fn tap_zones_map_edges_to_steps_and_centre_to_wait() {
+        for &(w, h) in &[(600.0, 600.0), (390.0, 844.0)] {
+            let mid = |n: f64| n / 2.0;
+            let cases = [
+                (1.0, mid(h), Input::Step(Direction::West)),
+                (w - 1.0, mid(h), Input::Step(Direction::East)),
+                (mid(w), 1.0, Input::Step(Direction::North)),
+                (mid(w), h - 1.0, Input::Step(Direction::South)),
+                (mid(w), mid(h), Input::Wait),
+            ];
+            for (x, y, expected) in cases {
+                assert_eq!(
+                    tap_input(x, y, w, h),
+                    Some(expected),
+                    "tap at ({x}, {y}) in {w}x{h}"
+                );
+            }
+        }
+    }
+
+    /// The Wait box is the middle third of each axis: just inside its corner still
+    /// waits, just outside steps.
+    #[test]
+    fn tap_wait_box_is_the_middle_third() {
+        let (w, h) = (900.0, 600.0);
+        // The box spans [w/3, 2w/3] × [h/3, 2h/3]; probe around its top-left corner.
+        assert_eq!(tap_input(301.0, 201.0, w, h), Some(Input::Wait));
+        assert_eq!(
+            tap_input(299.0, 201.0, w, h),
+            Some(Input::Step(Direction::West))
+        );
+        assert_eq!(
+            tap_input(301.0, 199.0, w, h),
+            Some(Input::Step(Direction::North))
+        );
+    }
+
+    /// Corner taps resolve by dominant axis — there are no diagonals (§4.1) — and
+    /// an exact corner tie goes horizontal.
+    #[test]
+    fn tap_corners_resolve_by_dominant_axis() {
+        let (w, h) = (600.0, 600.0);
+        // Exact ties at the corners go horizontal.
+        assert_eq!(
+            tap_input(0.0, 0.0, w, h),
+            Some(Input::Step(Direction::West))
+        );
+        assert_eq!(tap_input(w, h, w, h), Some(Input::Step(Direction::East)));
+        // Off the diagonal, the larger displacement wins.
+        assert_eq!(
+            tap_input(100.0, 40.0, w, h),
+            Some(Input::Step(Direction::North))
+        );
+        assert_eq!(
+            tap_input(40.0, 100.0, w, h),
+            Some(Input::Step(Direction::West))
+        );
+    }
+
+    /// A degenerate viewport (zero, negative, or NaN dimensions) maps to nothing
+    /// rather than dividing into garbage.
+    #[test]
+    fn tap_in_degenerate_viewport_is_ignored() {
+        assert_eq!(tap_input(10.0, 10.0, 0.0, 600.0), None);
+        assert_eq!(tap_input(10.0, 10.0, 600.0, -1.0), None);
+        assert_eq!(tap_input(10.0, 10.0, f64::NAN, 600.0), None);
     }
 
     /// Every category must map to a **visibly distinct** colour. The regression this

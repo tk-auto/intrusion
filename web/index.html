@@ -15,6 +15,12 @@
         background: #0b0b0b;
         color: #cfcfcf;
         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        /* Taps are game input (§11.6): no pan/pinch/double-tap-zoom gestures, no
+           text selection or tap flash — the shell consumes pointerdown itself. */
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
       }
       #app {
         display: grid;
