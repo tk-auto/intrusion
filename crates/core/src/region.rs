@@ -288,6 +288,30 @@ impl RegionGraph {
         id
     }
 
+    /// Release `cell` from the region that owns it, leaving it unclaimed.
+    ///
+    /// This is the write behind stamping structure onto claimed floor after the
+    /// partition — a sightline blocker (§10.1a) turns a region's floor cell into
+    /// wall, and the graph must move in lockstep with the grid (a wall belongs to
+    /// no region). Crate-internal: only generation reshapes regions, and releasing
+    /// a cell nothing owns is a generator bug, so that panics.
+    pub(crate) fn remove_cell(&mut self, cell: Cell) {
+        let slot = self.slot(cell);
+        let id = self.index[slot]
+            .unwrap_or_else(|| panic!("released cell {cell:?} belongs to no region"));
+        self.index[slot] = None;
+        let cells = &mut self.regions[id.0 as usize].cells;
+        let at = cells
+            .iter()
+            .position(|&c| c == cell)
+            .expect("the index and the region's cell list are in lockstep");
+        cells.remove(at);
+        assert!(
+            !cells.is_empty(),
+            "removing {cell:?} emptied {id:?} — a region must own at least one cell"
+        );
+    }
+
     /// The region owning `cell`, or `None` for a wall, doorway, off-grid, or
     /// otherwise unclaimed cell. This is the O(1) lookup (a single indexed read).
     pub fn region_at(&self, cell: Cell) -> Option<RegionId> {
@@ -557,5 +581,26 @@ mod tests {
     fn cells_off_the_grid_are_rejected() {
         let mut g = RegionGraph::new(5, 5);
         g.add_region(RegionKind::Room, [Cell::new(9, 9)]);
+    }
+
+    /// Releasing a cell (a §10.1a sightline blocker stamped over claimed floor)
+    /// unclaims it in the index and drops it from the region's cell list — the
+    /// lockstep the generator relies on.
+    #[test]
+    fn remove_cell_releases_the_cell_and_shrinks_the_region() {
+        let mut g = RegionGraph::new(8, 8);
+        let id = g.add_region(RegionKind::Corridor, [Cell::new(1, 1), Cell::new(2, 1)]);
+        g.remove_cell(Cell::new(1, 1));
+        assert_eq!(g.region_at(Cell::new(1, 1)), None);
+        assert_eq!(g.region(id).cells(), &[Cell::new(2, 1)]);
+        assert_eq!(g.region_at(Cell::new(2, 1)), Some(id));
+    }
+
+    #[test]
+    #[should_panic(expected = "belongs to no region")]
+    fn removing_an_unclaimed_cell_is_a_bug() {
+        let mut g = RegionGraph::new(8, 8);
+        g.add_region(RegionKind::Room, [Cell::new(1, 1)]);
+        g.remove_cell(Cell::new(5, 5));
     }
 }

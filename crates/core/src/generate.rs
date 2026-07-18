@@ -9,7 +9,8 @@
 //! shared connective tissue.
 //!
 //! This module carries §10.1 steps 1–6: the partition (steps 1–3), doorways
-//! (step 4), room features (step 5) and the hideout board (step 6). Entity
+//! (step 4), room features (step 5) and the hideout board (step 6), plus the
+//! §10.1a sightline-cover pass between doorways and hideouts. Entity
 //! placement — entry/exit, objectives, guards (steps 7–9) — lands in its own ticket
 //! and writes into the same [`RegionGraph`] this produces.
 //!
@@ -39,7 +40,7 @@
 //! every other — and rejects the carve and redraws if one fails, up to a hard cap.
 //! Downstream code only ever sees a layout that passed.
 
-use crate::cell::Cell;
+use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::region::{RegionGraph, RegionId, RegionKind};
 use crate::rng::Rng;
@@ -101,6 +102,14 @@ const PILLAR_MAX_SIDE: u32 = 4;
 /// honeycomb; small enough that a fleeing player is rarely more than a few steps from
 /// cover. Density is the open tuning knob here (§10.1a, §15.2) — a single named value.
 const HIDEOUT_MIN_SPACING: u32 = 7;
+
+/// No unbroken straight sightline may exceed this many cells — §10.1a, the
+/// generator's most important job after connectivity. The *rule* is **[SETTLED]**;
+/// the value is **[START]**: the design band is 10–12, "roughly a guard's sight
+/// range" (§7.1's `GUARD_SIGHT_RANGE` is 10), and 11 splits it. This is the single
+/// named knob for the §15.2 how-much-cover experiments — longer than this and
+/// there is no geometry between the player and being seen.
+pub const SIGHTLINE_MAX_RUN: u32 = 11;
 
 /// How many carve attempts [`generate`] makes before giving up on the footprint
 /// (§10.6: reject the seed, retry, but never loop forever). Rejection is rare —
@@ -280,6 +289,11 @@ fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenEr
     // named (§10.1.4). Runs on the finished grid so it sees the true walls.
     place_doorways(&mut facility, &mut regions, rng);
 
+    // §10.1a: break every straight sightline longer than SIGHTLINE_MAX_RUN with
+    // stamped cover — after doorways so blockers keep clear of door throats, and
+    // before hideouts so a cupboard can back onto the new structure.
+    break_sightlines(&mut facility, &mut regions, rng);
+
     // Step 6: the hiding-game board — concealment cupboards set against walls and
     // pillar faces, spread along the flight paths (§10.1.6, §10.1a). After doorways
     // so a cupboard can steer clear of a door throat.
@@ -290,7 +304,7 @@ fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenEr
 }
 
 /// The §10.6 gate: every guarantee that must be *asserted* on a finished carve,
-/// not believed from the construction. Two checks:
+/// not believed from the construction. Three checks:
 ///
 /// - **Fully enclosed** — the border ring is unbroken wall. The punch-through
 ///   design never fires at the border, but "never" is exactly the kind of claim
@@ -303,11 +317,17 @@ fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenEr
 ///   the whole walkable interior one component, *any* placement of start,
 ///   objectives and exit (§10.1 steps 7–9, #12) is start → every objective → exit
 ///   solvable — the property placement will rely on rather than re-prove.
+/// - **Bounded sightlines** — no unobstructed straight run longer than
+///   [`SIGHTLINE_MAX_RUN`] (§10.1a). [`break_sightlines`] repairs the carve, but
+///   the rule is *measured* here on the finished grid — a run the repair could not
+///   break rejects the carve, exactly like a reachability failure.
 ///
 /// Room size and count are not re-checked here: they are fixed by the partition
 /// constants before any wall is stamped, and the property tests below pin them.
 fn passes_guarantees(layout: &Layout) -> bool {
-    fully_enclosed(layout.facility()) && pathable_connected(layout.facility())
+    fully_enclosed(layout.facility())
+        && pathable_connected(layout.facility())
+        && sightlines_bounded(layout.facility())
 }
 
 /// Whether the border ring is solid wall — §10.6 "fully enclosed".
@@ -1032,6 +1052,184 @@ fn shuffle(cells: &mut [Cell], rng: &mut Rng) {
     }
 }
 
+/// Break every over-long straight sightline with stamped cover (§10.1a).
+///
+/// Corridor-first partition has a severe emergent flaw that only shows up in play
+/// (§7.6): it produces long, dead-straight, full-span corridors — and the
+/// corridors are where the player flees. The rooms get features; the corridors got
+/// nothing. So this pass scans the whole grid for unobstructed straight runs
+/// longer than [`SIGHTLINE_MAX_RUN`] and stamps a 1-cell wall blocker near the
+/// middle of each — a buttress where it lands against a wall, a freestanding crate
+/// out in the open. Rooms are treated exactly like corridors: the §10.1a rule is
+/// per-cell over the level, and a long room gallery is as much a sightline as a
+/// corridor. (Jogging the corridors mid-carve is the other §10.1a technique; if
+/// the §15.2 experiments want it, it slots in beside this pass and the assertion
+/// below judges both the same way.)
+///
+/// A candidate that would sever guard pathing (§10.3) or split its own region
+/// into pieces (§10.5) is skipped — which in a 2-wide corridor forces the second
+/// lane's blocker to land offset from the first, an S-squeeze: the §10.1a "jog"
+/// emerging from the pathing constraint rather than a separate mechanism. A
+/// blocker *may* land beside a multi-panel door span — that is §10.1a's "cover
+/// near doors", something to duck behind on the far side — while a single-panel
+/// door can never be sealed, because walling its only approach leaves the panel
+/// no local detour and [`severs_pathing`] refuses.
+///
+/// The pass is a *repair*, not a proof: [`passes_guarantees`] re-measures the
+/// finished grid, so a run this pass could not break (every candidate disqualified)
+/// rejects the carve and redraws, exactly like a reachability failure (§10.6).
+fn break_sightlines(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
+    // Take the first still-over-long run in scan order and split it. Every placed
+    // blocker turns floor into wall, so the loop strictly shrinks the floor and
+    // always terminates.
+    loop {
+        let Some(run) = sight_runs(facility)
+            .into_iter()
+            .find(|r| r.len > SIGHTLINE_MAX_RUN)
+        else {
+            return;
+        };
+        if !place_blocker(facility, regions, &run, rng) {
+            return; // unbreakable — the §10.6 gate rejects this carve
+        }
+    }
+}
+
+/// A maximal straight run of see-through cells along one scan line — the unit the
+/// §10.1a rule is measured in.
+#[derive(Clone, Copy)]
+struct SightRun {
+    line: Line,
+    start: u32,
+    len: u32,
+}
+
+/// Every maximal see-through run in the grid, rows then columns, in scan order. A
+/// run is bounded by any sight-blocking terrain (§10.3) — wall, hinge, closed
+/// panel — so the measurement matches what a guard could actually see down.
+fn sight_runs(facility: &Facility) -> Vec<SightRun> {
+    let (w, h) = (facility.width(), facility.height());
+    let mut runs = Vec::new();
+    for y in 0..h {
+        collect_sight_runs(facility, Line::Row(y), w, &mut runs);
+    }
+    for x in 0..w {
+        collect_sight_runs(facility, Line::Col(x), h, &mut runs);
+    }
+    runs
+}
+
+/// Walk one scan line and push each maximal run of see-through cells.
+fn collect_sight_runs(facility: &Facility, line: Line, extent: u32, out: &mut Vec<SightRun>) {
+    let mut start: Option<u32> = None;
+    for i in 0..extent {
+        let clear = facility
+            .terrain(line.cell(i))
+            .is_some_and(|t| !t.blocks_sight());
+        match (start, clear) {
+            (None, true) => start = Some(i),
+            (Some(s), false) => {
+                out.push(SightRun {
+                    line,
+                    start: s,
+                    len: i - s,
+                });
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        out.push(SightRun {
+            line,
+            start: s,
+            len: extent - s,
+        });
+    }
+}
+
+/// The §10.1a sightline rule as a measured property of a finished grid: no
+/// unobstructed straight run exceeds [`SIGHTLINE_MAX_RUN`]. Covering every maximal
+/// row and column run covers every cell in each of the 4 cardinal directions.
+fn sightlines_bounded(facility: &Facility) -> bool {
+    sight_runs(facility)
+        .iter()
+        .all(|r| r.len <= SIGHTLINE_MAX_RUN)
+}
+
+/// Stamp one wall blocker into `run` and release its cell from the region graph,
+/// keeping grid and graph in lockstep. Returns whether a blocker landed.
+///
+/// Candidates are tried centre-out — the middle splits the run most evenly — from
+/// a seeded jittered aim point, so cover varies by seed instead of forming a
+/// metronomic grid. A candidate is skipped if it is no longer plain floor, would
+/// sever guard pathing, or would split its region; a blocker near an end merely
+/// shortens the run, and the [`break_sightlines`] loop comes back for the rest.
+fn place_blocker(
+    facility: &mut Facility,
+    regions: &mut RegionGraph,
+    run: &SightRun,
+    rng: &mut Rng,
+) -> bool {
+    // Aim at the middle, jittered by up to a sixth of the run either way.
+    let jitter = (run.len / 6).max(1) as i32;
+    let aim = (run.start + run.len / 2) as i32 + rng.range_inclusive(-jitter, jitter);
+    let aim = aim.clamp(run.start as i32, (run.start + run.len - 1) as i32) as u32;
+
+    let mut order: Vec<u32> = (run.start..run.start + run.len).collect();
+    order.sort_by_key(|&i| (i.abs_diff(aim), i));
+    for i in order {
+        let cell = run.line.cell(i);
+        if facility.terrain(cell) != Some(Terrain::Floor)
+            || severs_pathing(facility, cell)
+            || splits_region(regions, cell)
+        {
+            continue;
+        }
+        facility.set_terrain(cell.x, cell.y, Terrain::Wall);
+        regions.remove_cell(cell);
+        return true;
+    }
+    false
+}
+
+/// Whether removing `cell` would split the region that owns it into disconnected
+/// pieces. A region is a coherent space (§10.5) — a blocker may narrow a room or
+/// corridor, never partition it. This is the region-local complement of
+/// [`severs_pathing`]: *pathing* can survive a split (guards detour through a
+/// door), but the space itself must stay whole, or "which room am I in" stops
+/// meaning anything.
+fn splits_region(regions: &RegionGraph, cell: Cell) -> bool {
+    let Some(id) = regions.region_at(cell) else {
+        return false; // unclaimed cells partition nothing
+    };
+    let cells: HashSet<Cell> = regions
+        .region(id)
+        .cells()
+        .iter()
+        .copied()
+        .filter(|&c| c != cell)
+        .collect();
+    let Some(&flood_start) = cells.iter().next() else {
+        return true; // the region's only cell — removing it deletes the space
+    };
+    let mut seen: HashSet<Cell> = HashSet::new();
+    let mut stack = vec![flood_start];
+    while let Some(c) = stack.pop() {
+        if !seen.insert(c) {
+            continue;
+        }
+        for dir in Direction::ALL {
+            if let Some(n) = c.step(dir) {
+                if cells.contains(&n) && !seen.contains(&n) {
+                    stack.push(n);
+                }
+            }
+        }
+    }
+    seen.len() != cells.len()
+}
+
 /// An inclusive rectangle of interior cells, `[x0, x1] × [y0, y1]`.
 #[derive(Clone, Copy, Debug)]
 struct Rect {
@@ -1195,17 +1393,22 @@ mod tests {
     /// so the walkable interior is floor-or-hideout. Nothing is "painted and forgotten".
     #[test]
     fn every_walkable_cell_belongs_to_exactly_one_region() {
-        let layout = generate(40, 40, &mut Rng::new(11)).unwrap();
-        let facility = layout.facility();
-        for y in 0..facility.height() {
-            for x in 0..facility.width() {
-                let terrain = facility.terrain_at(x, y);
-                let walkable = terrain == Some(Terrain::Floor) || terrain == Some(Terrain::Hideout);
-                let has_region = layout.regions().region_at(Cell::new(x, y)).is_some();
-                assert_eq!(
-                    walkable, has_region,
-                    "({x},{y}): walkable={walkable} but region={has_region}"
-                );
+        // Many seeds, because the sightline pass now *removes* cells from regions
+        // (a blocker turns claimed floor into wall) — lockstep must survive that.
+        for seed in 0..64 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let facility = layout.facility();
+            for y in 0..facility.height() {
+                for x in 0..facility.width() {
+                    let terrain = facility.terrain_at(x, y);
+                    let walkable =
+                        terrain == Some(Terrain::Floor) || terrain == Some(Terrain::Hideout);
+                    let has_region = layout.regions().region_at(Cell::new(x, y)).is_some();
+                    assert_eq!(
+                        walkable, has_region,
+                        "seed {seed} ({x},{y}): walkable={walkable} but region={has_region}"
+                    );
+                }
             }
         }
     }
@@ -1692,6 +1895,103 @@ mod tests {
                 "seed {seed}: hideouts split guard pathing"
             );
         }
+    }
+
+    /// The longest see-through straight run in the grid, measured independently
+    /// of the generator's own scanner: walk every row and column counting
+    /// consecutive cells that don't block sight.
+    fn longest_straight_run(f: &Facility) -> u32 {
+        let (w, h) = (f.width(), f.height());
+        let clear = |x: u32, y: u32| f.terrain_at(x, y).is_some_and(|t| !t.blocks_sight());
+        let mut longest = 0u32;
+        for y in 0..h {
+            let mut run = 0;
+            for x in 0..w {
+                run = if clear(x, y) { run + 1 } else { 0 };
+                longest = longest.max(run);
+            }
+        }
+        for x in 0..w {
+            let mut run = 0;
+            for y in 0..h {
+                run = if clear(x, y) { run + 1 } else { 0 };
+                longest = longest.max(run);
+            }
+        }
+        longest
+    }
+
+    /// The headline §10.1a property: **no unbroken straight sightline longer than
+    /// L**, for every cell in each of the 4 cardinal directions — equivalently, no
+    /// maximal row or column run exceeds [`SIGHTLINE_MAX_RUN`]. Asserted on
+    /// [`generate`]'s accepted layouts across footprints: like reachability, the
+    /// rule is "repaired or the seed rejected" (§10.1a), so acceptance is where it
+    /// is unconditional.
+    #[test]
+    fn no_sightline_exceeds_the_cap() {
+        for &(w, h) in &[(18, 18), (40, 40), (24, 40), (60, 60)] {
+            for seed in 0..64 {
+                let layout = generate(w, h, &mut Rng::new(seed)).unwrap();
+                let run = longest_straight_run(layout.facility());
+                assert!(
+                    run <= SIGHTLINE_MAX_RUN,
+                    "{w}x{h} seed {seed}: a {run}-cell sightline on an accepted level"
+                );
+            }
+        }
+    }
+
+    /// The repair must stay a repair: [`break_sightlines`] satisfies §10.1a on
+    /// nearly every *raw* carve, with the §10.6 rejection reserved for genuinely
+    /// cornered geometry. Without this pin, the pass could silently rot into
+    /// "reject and redraw until lucky" and nothing above would notice — measured
+    /// at 1-in-1000 on the v1 config when written, budgeted at 2% here.
+    #[test]
+    fn the_cover_pass_repairs_almost_every_carve() {
+        let unrepaired = (0..200)
+            .filter(|&seed| {
+                let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
+                !sightlines_bounded(layout.facility())
+            })
+            .count();
+        assert!(
+            unrepaired <= 4,
+            "{unrepaired}/200 carves left unrepaired — the cover pass has degraded"
+        );
+    }
+
+    /// §10.1a **[START]** pins: *L* stays in the settled 10–12 band, "roughly a
+    /// guard's sight range". A tune that moves the knob out of the band — or lets
+    /// a guard's sight outgrow the cover that answers it — must move this pin
+    /// deliberately.
+    #[test]
+    fn the_sightline_cap_sits_in_the_settled_band() {
+        assert!(
+            (10..=12).contains(&SIGHTLINE_MAX_RUN),
+            "SIGHTLINE_MAX_RUN {SIGHTLINE_MAX_RUN} left the §10.1a 10–12 band"
+        );
+        let range = crate::vision::GUARD_SIGHT_RANGE;
+        assert!(
+            SIGHTLINE_MAX_RUN.abs_diff(range) <= 2,
+            "L {SIGHTLINE_MAX_RUN} drifted from GUARD_SIGHT_RANGE {range}"
+        );
+    }
+
+    /// An empty straight gallery — enclosed, connected, and one naked sightline —
+    /// fails the gate on §10.1a alone; a hall shorter than the cap passes. The
+    /// sightline rule is a first-class §10.6 guarantee, not a style preference.
+    #[test]
+    fn a_long_gallery_fails_the_gate() {
+        // 30×8 box: a 28-cell unbroken run down every interior row.
+        let long = Layout::from_facility(Facility::walled_box(30, 8));
+        assert!(fully_enclosed(long.facility()) && pathable_connected(long.facility()));
+        assert!(!sightlines_bounded(long.facility()));
+        assert!(!passes_guarantees(&long));
+
+        // 13×8 box: interior runs of 11 = SIGHTLINE_MAX_RUN, exactly at the cap.
+        let short = Layout::from_facility(Facility::walled_box(13, 8));
+        assert!(sightlines_bounded(short.facility()));
+        assert!(passes_guarantees(&short));
     }
 
     /// The §10.6 flood fill rejects the exact failure the old generator shipped:
