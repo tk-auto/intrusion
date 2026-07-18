@@ -37,7 +37,7 @@ pub use category::Category;
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;
 pub use facility::{Facility, SoundBlocking, Terrain};
-pub use generate::{generate, GenError, Layout};
+pub use generate::{generate, GenError, Layout, SIGHTLINE_MAX_RUN};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{ascii_grid, render, GlyphCell, Grid};
 pub use rng::Rng;
