@@ -21,9 +21,10 @@
 //! overlaid (§11.5 — `Danger` backgrounds on cells watched by visible guards); this
 //! shell maps each cell's knowledge state to styling: full category colour live,
 //! dark gray dimmed, muted slate remembered, and two red background shades for the
-//! danger overlay. A player-*centred* viewport (§11.4) and explicit hotkeys (§11.6)
-//! are later render tickets; the full colour-blind-safe palette (§11.2) refines the
-//! placeholder table below.
+//! danger overlay. Colours come from the §11.2 base palette below — a full-range,
+//! colour-blind-safe 16-colour set behind a single category→swatch table. A
+//! player-*centred* viewport (§11.4) and explicit hotkeys (§11.6) are later render
+//! tickets.
 //! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
 //! and player in the largest room, intel spread across rooms, guards seated where
 //! none eyes the spawn on turn one. The guards stand still until the guard-AI
@@ -47,48 +48,98 @@ use web_sys::{
 const CELL_W: f64 = 14.0;
 const CELL_H: f64 = 20.0;
 
-/// The page background.
-const BG: &str = "#0b0b0b";
+/// One row of the base palette (§11.2): a full-strength **foreground** and its
+/// **darkened background variant** — plus a further-darkened background shade for
+/// when the same category paints a cell *outside* the player's FOV (§11.5 fix #1:
+/// watched-but-unseen must read as watched, never as safe dark-on-dark).
+#[derive(Clone, Copy)]
+struct Swatch {
+    fg: &'static str,
+    bg: &'static str,
+    bg_dim: &'static str,
+}
+
+const fn sw(fg: &'static str, bg: &'static str, bg_dim: &'static str) -> Swatch {
+    Swatch { fg, bg, bg_dim }
+}
+
+/// The base palette (§11.2): a **16-colour, colour-blind-safe qualitative set**,
+/// each row a foreground plus darkened background variants. **Full-range [START]**
+/// — true black and true white are both here, deliberately: the old palette's
+/// gamma curve compressed everything into a washed 0.1–0.9 band with six colours
+/// never used at all. Compression gets added back only if something demands it.
+///
+/// Hues lean on the Okabe–Ito colour-blind-safe set (brightened for the dark
+/// backdrop), and the threat ladder yellow→orange→red is additionally separated
+/// by luminance so it survives a red-green deficiency; every pair is asserted
+/// visibly distinct below. Seven rows carry the §11.2 categories today; the
+/// spare rows are ready for the message bar, ability labels, and any category
+/// yet to come — claimed by naming them, like the rows below the table.
+const PALETTE: [Swatch; 16] = [
+    sw("#000000", "#000000", "#000000"), //  0 true black — the page backdrop
+    sw("#ffffff", "#5c5c5c", "#2e2e2e"), //  1 true white — Neutral
+    sw("#4a4a4a", "#1e1e1e", "#121212"), //  2 dark gray — out-of-FOV dimming (§11.5)
+    sw("#a8a8a8", "#434343", "#222222"), //  3 light gray — spare (secondary text)
+    sw("#667a8a", "#293138", "#14181c"), //  4 slate — tile memory (§11.5a)
+    sw("#4ea6ff", "#1f4266", "#102133"), //  5 blue — Owned
+    sw("#2456b8", "#0e224a", "#071125"), //  6 deep blue — spare
+    sw("#2ee6d6", "#125c56", "#092e2b"), //  7 cyan — spare
+    sw("#3ecf5a", "#195324", "#0c2a12"), //  8 green — spare
+    sw("#157f33", "#083314", "#04190a"), //  9 deep green — spare
+    sw("#f0e442", "#605b1a", "#302e0d"), // 10 yellow — Caution
+    sw("#e69f00", "#5c4000", "#2e2000"), // 11 orange — Warning
+    sw("#ff3333", "#8c2020", "#521717"), // 12 red — Danger
+    sw("#bd6bd6", "#4c2b56", "#26152b"), // 13 purple — Interest
+    sw("#9a7040", "#3e2d1a", "#1f160d"), // 14 tan — System
+    sw("#ff7ab8", "#66314a", "#331825"), // 15 pink — spare
+];
+
+// The rows the shell draws with today, named. A spare row stays reachable only
+// through [`PALETTE`] until a system claims and names it.
+const BLACK: Swatch = PALETTE[0];
+const WHITE: Swatch = PALETTE[1];
+const DIM_GRAY: Swatch = PALETTE[2];
+const SLATE: Swatch = PALETTE[4];
+const BLUE: Swatch = PALETTE[5];
+const YELLOW: Swatch = PALETTE[10];
+const ORANGE: Swatch = PALETTE[11];
+const RED: Swatch = PALETTE[12];
+const PURPLE: Swatch = PALETTE[13];
+const TAN: Swatch = PALETTE[14];
+
+/// The page background: true black — the full-range floor the §11.2 [START] note
+/// restores (the old palette had no true black anywhere).
+const BG: &str = BLACK.fg;
 
 /// The **remembered** styling (§11.5a): contents known only from tile memory draw
 /// in this muted slate instead of their category colour, so memory reads as memory
 /// — visibly distinct from anything live *and* from the dimmed gray (asserted
-/// below, with the categories). The §11.2 palette ticket refines all of it.
-const MEMORY_COLOR: &str = "#667a8a";
+/// below, with the categories).
+const MEMORY_COLOR: &str = SLATE.fg;
 
 /// The **dimmed** styling (§11.5): out-of-FOV geometry draws in this dark gray —
 /// dim but legible, the same glyph at low light. Distinct from [`MEMORY_COLOR`]
 /// so the three knowledge states never collapse into two (§11.5a's note).
-const DIM_COLOR: &str = "#4a4a4a";
+const DIM_COLOR: &str = DIM_GRAY.fg;
 
-/// The danger overlay (§11.5): the background of a watched cell inside the
-/// player's FOV. Red — the lose condition, painted.
-const DANGER_BG_LIVE: &str = "#8c2020";
-
-/// The danger overlay on a watched cell *outside* the player's FOV: a darker red
-/// that still unmistakably reads as red on the page background (asserted below).
-/// This is §11.5's fix #1 — the old version rendered these dark-on-dark, so the
-/// most dangerous unseen cells looked like the safest on the map.
-const DANGER_BG_DIMMED: &str = "#521717";
-
-/// Map an information category (§11.2) to a concrete colour — **the shell's one and
-/// only rendering decision**. The core tags each cell with a [`Category`]; this table
-/// is where category becomes pixels, so recolouring or an accessibility pass is a
-/// one-function edit. These are placeholders; the full 16-colour colour-blind-safe
-/// palette with darkened background variants is the colour-category ticket (§11.2).
+/// Map an information category (§11.2) to its palette row — **the shell's one and
+/// only rendering decision, and the single table a recolour edits**. The core tags
+/// each cell with a [`Category`]; here, and nowhere else, category becomes pixels,
+/// so an accessibility reskin is a one-table change (asserted below).
 ///
-/// Every entry must be **visibly distinct** on the dark background (asserted below):
-/// the threat ladder Caution→Warning→Danger reads as yellow→orange→red, and System
-/// furniture is a muted **brown** rather than a tan that blurs into Caution's yellow.
-fn category_color(category: Category) -> &'static str {
+/// Every entry must be **visibly distinct** on the dark background (asserted
+/// below): the threat ladder Caution→Warning→Danger reads as yellow→orange→red,
+/// and System furniture is the muted brown-tan row rather than a bright tan that
+/// would blur into Caution's yellow (the old regression).
+fn swatch(category: Category) -> Swatch {
     match category {
-        Category::Neutral => "#d0d0d0",  // light grey — inert scenery, walls
-        Category::Owned => "#4ea6ff",    // blue — you and what you made
-        Category::Caution => "#f2d64a",  // yellow — a threat, unaware
-        Category::Warning => "#e07d1e",  // orange — a threat, hunting
-        Category::Danger => "#d83030",   // red — a threat that has you
-        Category::Interest => "#bd6bd6", // purple — goals and rewards
-        Category::System => "#9a7040",   // brown — doors, hideouts (furniture)
+        Category::Neutral => WHITE,   // inert scenery, walls, spent objectives
+        Category::Owned => BLUE,      // you and what you made
+        Category::Caution => YELLOW,  // a threat, unaware
+        Category::Warning => ORANGE,  // a threat, hunting
+        Category::Danger => RED,      // a threat that has you
+        Category::Interest => PURPLE, // goals and rewards
+        Category::System => TAN,      // doors, hideouts — neutral furniture
     }
 }
 
@@ -358,7 +409,7 @@ fn install_resize(game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
 }
 
 /// Blit a rendered [`Grid`] to the canvas: fill the background, then draw each
-/// non-blank glyph centred in its cell, coloured by its category ([`category_color`]).
+/// non-blank glyph centred in its cell, coloured by its category ([`swatch`]).
 /// Blank cells (floor) are left as background. This is the shell's whole rendering
 /// job — the glyphs, overlaps and categories were all decided by `core::render`.
 fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
@@ -388,7 +439,7 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
             }
             let color = match cell.vis {
                 // Live: the full category colour (§11.5).
-                Visibility::Live => category_color(cell.fg),
+                Visibility::Live => swatch(cell.fg).fg,
                 // Out-of-FOV geometry: dim but legible (§11.5).
                 Visibility::Dimmed => DIM_COLOR,
                 // Remembered contents read as memory, not as the live thing (§11.5a).
@@ -400,18 +451,19 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
     }
 }
 
-/// Map a background category to a fill — today that is only the §11.5 danger
-/// overlay, in two shades by knowledge state: bright red on a watched cell the
-/// player sees, darker-but-still-red beyond the FOV (fix #1 — watched must never
-/// look safe). The §7.6 certain/glimpse zones add two *detection* shades when
-/// two-zone detection lands; until then the whole cone is one zone.
+/// Map a background category to a fill through the same table as the glyphs: the
+/// darkened [`Swatch::bg`] variant on a cell the player sees, the further-darkened
+/// [`Swatch::bg_dim`] beyond the FOV. Today only the §11.5 danger overlay paints a
+/// background — Danger's two shades are bright red and darker-but-still-red (fix
+/// #1: watched must never look safe) — but any category a future system declares
+/// arrives with its variants ready. The §7.6 certain/glimpse zones add two
+/// *detection* shades when two-zone detection lands; until then the whole cone is
+/// one zone.
 fn bg_color(bg: Category, vis: Visibility) -> &'static str {
-    match (bg, vis) {
-        (Category::Danger, Visibility::Live) => DANGER_BG_LIVE,
-        (Category::Danger, _) => DANGER_BG_DIMMED,
-        // Nothing else paints a background yet; a neutral dark placeholder so a
-        // future category shows up rather than vanishing into the backdrop.
-        _ => "#333333",
+    let swatch = swatch(bg);
+    match vis {
+        Visibility::Live => swatch.bg,
+        Visibility::Dimmed | Visibility::Remembered => swatch.bg_dim,
     }
 }
 
@@ -532,7 +584,7 @@ mod tests {
         const MIN_DIST2: i32 = 70 * 70;
         for (i, &a) in categories.iter().enumerate() {
             for &b in &categories[i + 1..] {
-                let d = dist2(rgb(category_color(a)), rgb(category_color(b)));
+                let d = dist2(rgb(swatch(a).fg), rgb(swatch(b).fg));
                 assert!(
                     d >= MIN_DIST2,
                     "{a:?} and {b:?} are too close to tell apart (dist^2 {d} < {MIN_DIST2})"
@@ -543,7 +595,7 @@ mod tests {
         // memory that could be mistaken for a live glyph would defeat the three
         // visual states the design demands.
         for &c in &categories {
-            let d = dist2(rgb(MEMORY_COLOR), rgb(category_color(c)));
+            let d = dist2(rgb(MEMORY_COLOR), rgb(swatch(c).fg));
             assert!(
                 d >= MIN_DIST2,
                 "the remembered colour is too close to {c:?} (dist^2 {d} < {MIN_DIST2})"
@@ -567,7 +619,9 @@ mod tests {
         // Squared distance for large background fills: 40 per channel is an easy
         // read on area colour even where 70 is the bar for thin glyph strokes.
         const MIN_BG_DIST2: i32 = 40 * 40;
-        for shade in [DANGER_BG_LIVE, DANGER_BG_DIMMED] {
+        let live = bg_color(Category::Danger, Visibility::Live);
+        let dimmed = bg_color(Category::Danger, Visibility::Dimmed);
+        for shade in [live, dimmed] {
             let d = dist2(rgb(shade), rgb(BG));
             assert!(
                 d >= MIN_BG_DIST2,
@@ -576,7 +630,79 @@ mod tests {
             let (r, g, b) = rgb(shade);
             assert!(r > g + 30 && r > b + 30, "{shade} must read as *red*");
         }
-        let d = dist2(rgb(DANGER_BG_LIVE), rgb(DANGER_BG_DIMMED));
+        let d = dist2(rgb(live), rgb(dimmed));
         assert!(d >= MIN_BG_DIST2, "the two danger shades blur (dist^2 {d})");
+    }
+
+    /// The §11.2 [START] promise, pinned: the base palette is **full-range** —
+    /// true black and true white are both present (the old palette's gamma curve
+    /// allowed neither) — and all sixteen foregrounds are pairwise tellable apart,
+    /// the same bar the category subset must clear.
+    #[test]
+    fn the_palette_is_full_range_and_pairwise_distinct() {
+        assert!(
+            PALETTE.iter().any(|s| s.fg == "#000000"),
+            "no true black — the palette is compressed again"
+        );
+        assert!(
+            PALETTE.iter().any(|s| s.fg == "#ffffff"),
+            "no true white — the palette is compressed again"
+        );
+        const MIN_DIST2: i32 = 70 * 70;
+        for (i, a) in PALETTE.iter().enumerate() {
+            for b in &PALETTE[i + 1..] {
+                let d = dist2(rgb(a.fg), rgb(b.fg));
+                assert!(
+                    d >= MIN_DIST2,
+                    "palette rows {} and {} are too close (dist^2 {d} < {MIN_DIST2})",
+                    a.fg,
+                    b.fg
+                );
+            }
+        }
+    }
+
+    /// §11.2: every palette row's background is a **darkened variant** of its
+    /// foreground — strictly darker, and the out-of-FOV shade darker again — so a
+    /// category used as a background can never outshine the glyphs on it. (True
+    /// black is its own floor; nothing is darker.)
+    #[test]
+    fn background_variants_darken_their_foreground() {
+        let lum = |hex: &str| {
+            let (r, g, b) = rgb(hex);
+            r + g + b
+        };
+        for s in &PALETTE {
+            if lum(s.fg) == 0 {
+                continue; // true black: fg and variants share the floor
+            }
+            assert!(
+                lum(s.bg) < lum(s.fg),
+                "{}'s bg variant {} is not darker",
+                s.fg,
+                s.bg
+            );
+            assert!(
+                lum(s.bg_dim) < lum(s.bg),
+                "{}'s out-of-FOV bg {} is not darker than its bg {}",
+                s.fg,
+                s.bg_dim,
+                s.bg
+            );
+        }
+    }
+
+    /// The ticket's acceptance test, end to end across the seam: a **chasing guard**
+    /// declares `Danger` (§7.4, core), and the one table maps `Danger` to a colour
+    /// that unmistakably reads as **red** — the player sees the guard's mind with no
+    /// game system ever naming a colour.
+    #[test]
+    fn a_chasing_guard_maps_to_danger_red() {
+        use intrusion_core::GuardState;
+        let category = GuardState::Chasing.category();
+        assert_eq!(category, Category::Danger);
+        let (r, g, b) = rgb(swatch(category).fg);
+        assert!(r > g + 60 && r > b + 60, "Danger must read as red");
+        assert!(r > 200, "full-range: Danger red is bright, not washed");
     }
 }
