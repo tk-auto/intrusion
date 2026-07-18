@@ -1245,3 +1245,52 @@ Body: as drafted in section C above, plus:
 
 No other new issues needed — #16/#17/#15 already cover the render side; filing
 duplicates would split the discussion.
+
+---
+
+# Batch — mobile tap controls (2026-07-18)
+
+**Goal:** make the game playable on a phone for playtesting — taps drive the turn
+loop. Requested directly ("tapping left of the screen to go left, tapping centre
+to wait"); no existing issue covers it — #18 explicitly scopes touch out, and
+§11.6's touch note is **[OPEN]**.
+
+**One new issue to file:**
+
+### T1 — Web: tap-to-move touch controls (edge zones step, centre waits) → #43
+**Labels:** `area:render` `type:feature` `size:S`
+**Milestone:** v1
+
+## Summary
+To playtest on mobile the turn loop must be drivable by touch: tapping the left
+of the screen steps west, right steps east, top steps north, bottom steps south,
+and tapping the centre waits. This is the first, deliberately narrow slice of
+touch (§11.6 [OPEN]) — movement + wait only, enough to play; abilities, menus and
+the manifest stay out of scope.
+
+## Design reference
+§11.6 — input. Movement is the arrow set; `5`/`w` is Wait. **Touch is a real
+target and was never finished** — the old version's half-built touch trapped
+users in dialogs; "either build touch properly or don't ship the manifest"
+**[OPEN]**. §15.8 Q8 is the same question. §4.1 — 4-directional movement, no
+diagonals **[SETTLED]**, so four edge zones + a centre zone cover the whole
+input surface. §12.2 — the shell stays thin: the tap→input mapping is a pure,
+natively-testable function; the DOM listener only feeds it.
+
+## Acceptance criteria
+- [ ] Tapping (or clicking) the viewport steps the game: left/right/top/bottom
+      zones map to west/east/north/south, the centre zone maps to Wait.
+- [ ] The zone rule is a pure function `(point, viewport) → Input` in the web
+      crate with native unit tests: the four edges, the centre box, corner taps
+      resolved by dominant axis, and a degenerate viewport.
+- [ ] A tap neither scrolls, zooms, nor selects on mobile (`touch-action` +
+      `preventDefault`); keyboard input keeps working unchanged.
+- [ ] fmt/clippy/test gate passes.
+
+## Notes / risks
+- Half-built touch is worse than none (§11.6). No manifest ships yet, so the old
+  trap (dialogs unreachable by touch) can't bite — but do not add one here.
+- Corner taps: no diagonals exist (§4.1), so ties resolve by dominant axis; an
+  exact tie goes horizontal. Documented in the function, pinned by a test.
+- Screen-relative zones (not canvas-relative): letterboxed margins around the
+  canvas still count, matching "tap the left of the screen".
