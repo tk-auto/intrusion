@@ -353,9 +353,10 @@ mod tests {
         assert_eq!(guard.glyph, 'g');
         assert_eq!(guard.fg, Category::Caution);
 
-        // A plain floor cell renders as a dot (§11.5), Neutral.
+        // A plain floor cell renders as a dot (§11.5), Ground — the recessive
+        // category, so the dots never compete with walls or entities for the eye.
         assert_eq!(g.get(5, 5).glyph, '·');
-        assert_eq!(g.get(1, 1).fg, Category::Neutral); // interior floor
+        assert_eq!(g.get(1, 1).fg, Category::Ground); // interior floor
     }
 
     /// §11.2's payoff, on screen: the `g` glyph is re-categorised every turn from
@@ -447,6 +448,8 @@ mod tests {
     #[test]
     fn terrain_carries_its_category() {
         assert_eq!(Terrain::Wall.category(), Category::Neutral);
+        assert_eq!(Terrain::Floor.category(), Category::Ground);
+        assert_eq!(Terrain::DoorPanelOpen.category(), Category::Ground);
         assert_eq!(Terrain::Exit.category(), Category::Interest);
         assert_eq!(Terrain::Console.category(), Category::Interest);
         assert_eq!(Terrain::Hideout.category(), Category::System);
@@ -507,7 +510,7 @@ mod tests {
         assert_eq!(g.get(10, 14).glyph, '·', "unseen intel is invisible");
         assert_eq!(
             g.get(10, 14).fg,
-            Category::Neutral,
+            Category::Ground,
             "…its cell reads as floor"
         );
         assert_eq!(g.get(12, 14).glyph, '·', "an unseen guard is not drawn");

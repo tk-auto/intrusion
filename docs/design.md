@@ -979,6 +979,7 @@ one-table edit.
 | Category | Colour | Meaning |
 |---|---|---|
 | **Neutral** | White | Inert scenery, spent objectives |
+| **Ground** | Dark gray | Traversable floor — the §11.5 dots, drawn to recede |
 | **Owned** | Blue | You, and things you made |
 | **Caution** | Yellow | A threat that is unaware |
 | **Warning** | Orange | A threat that is hunting |
@@ -1009,7 +1010,7 @@ foreground and as a darkened background variant.
 | `g` | Guard | Caution / Warning / Danger, by state |
 | `z` | Body | Caution |
 | `#` | Wall | Neutral |
-| (blank) | Floor | — |
+| `·` | Floor | Ground — recessive by design; blank until the §11.5 floor dots gave it a glyph |
 | `+` | Door panel | System |
 | `×` | Door hinge | System |
 | `}` | Hideout (empty) | System |
@@ -1062,7 +1063,7 @@ visibility is drawn.
 | Cell state | Rendering |
 |---|---|
 | In player's FOV | Full category colour |
-| Outside player's FOV | Same glyph, dark gray — dim but legible |
+| Outside player's FOV | Same glyph, dark gray — dim but legible. Two exceptions: Ground dims further (the dots whisper), and the exit keeps a dark Interest tint — it anchors every escape plan (§7.6) and must not sink into wall gray |
 | Watched by a guard, in player's FOV | **Red background** — the danger overlay |
 | Watched by a guard, outside player's FOV | Dark gray on dark gray — *unreadable* |
 

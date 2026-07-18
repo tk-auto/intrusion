@@ -20,8 +20,9 @@
 //! change recomputes and redraws. The grid arrives already fogged (§11.5a) and
 //! overlaid (§11.5 — `Danger` backgrounds on cells watched by visible guards); this
 //! shell maps each cell's knowledge state to styling: full category colour live,
-//! dark gray dimmed, muted slate remembered, and two red background shades for the
-//! danger overlay. Colours come from the §11.2 base palette below — a full-range,
+//! the row's dim shade out of FOV (dark gray for most; quieter for floor dots,
+//! tinted for the exit), muted slate remembered, and two red background shades for
+//! the danger overlay. Colours come from the §11.2 base palette below — a full-range,
 //! colour-blind-safe 16-colour set behind a single category→swatch table. A
 //! player-*centred* viewport (§11.4) and explicit hotkeys (§11.6) are later render
 //! tickets.
@@ -48,20 +49,35 @@ use web_sys::{
 const CELL_W: f64 = 14.0;
 const CELL_H: f64 = 20.0;
 
-/// One row of the base palette (§11.2): a full-strength **foreground** and its
-/// **darkened background variant** — plus a further-darkened background shade for
-/// when the same category paints a cell *outside* the player's FOV (§11.5 fix #1:
-/// watched-but-unseen must read as watched, never as safe dark-on-dark).
+/// One row of the base palette (§11.2): a full-strength **foreground**, the
+/// **dim** shade the same glyph draws in outside the player's FOV (§11.5 — "the
+/// same glyph at low light"), and the **darkened background variants** — `bg` on
+/// a live cell, `bg_dim` beyond the FOV (§11.5 fix #1: watched-but-unseen must
+/// read as watched, never as safe dark-on-dark).
 #[derive(Clone, Copy)]
 struct Swatch {
     fg: &'static str,
+    dim: &'static str,
     bg: &'static str,
     bg_dim: &'static str,
 }
 
-const fn sw(fg: &'static str, bg: &'static str, bg_dim: &'static str) -> Swatch {
-    Swatch { fg, bg, bg_dim }
+const fn sw(fg: &'static str, dim: &'static str, bg: &'static str, bg_dim: &'static str) -> Swatch {
+    Swatch {
+        fg,
+        dim,
+        bg,
+        bg_dim,
+    }
 }
+
+/// The standard §11.5 dim: out-of-FOV geometry collapses to this one dark gray —
+/// dim but legible — for most rows. Distinct from [`MEMORY_COLOR`] so the three
+/// knowledge states never collapse into two (§11.5a's note; asserted below). The
+/// exceptions carry their own dim: Ground recedes further (the dots must whisper),
+/// and Interest keeps a readable purple tint — the exit anchors every escape plan
+/// (§7.6) and §11.5a keeps it always visible, so it must not vanish into wall gray.
+const STD_DIM: &str = "#4a4a4a";
 
 /// The base palette (§11.2): a **16-colour, colour-blind-safe qualitative set**,
 /// each row a foreground plus darkened background variants. **Full-range [START]**
@@ -76,22 +92,22 @@ const fn sw(fg: &'static str, bg: &'static str, bg_dim: &'static str) -> Swatch 
 /// spare rows are ready for the message bar, ability labels, and any category
 /// yet to come — claimed by naming them, like the rows below the table.
 const PALETTE: [Swatch; 16] = [
-    sw("#000000", "#000000", "#000000"), //  0 true black — the page backdrop
-    sw("#ffffff", "#5c5c5c", "#2e2e2e"), //  1 true white — Neutral
-    sw("#4a4a4a", "#1e1e1e", "#121212"), //  2 dark gray — out-of-FOV dimming (§11.5)
-    sw("#a8a8a8", "#434343", "#222222"), //  3 light gray — spare (secondary text)
-    sw("#667a8a", "#293138", "#14181c"), //  4 slate — tile memory (§11.5a)
-    sw("#4ea6ff", "#1f4266", "#102133"), //  5 blue — Owned
-    sw("#2456b8", "#0e224a", "#071125"), //  6 deep blue — spare
-    sw("#2ee6d6", "#125c56", "#092e2b"), //  7 cyan — spare
-    sw("#3ecf5a", "#195324", "#0c2a12"), //  8 green — spare
-    sw("#157f33", "#083314", "#04190a"), //  9 deep green — spare
-    sw("#f0e442", "#605b1a", "#302e0d"), // 10 yellow — Caution
-    sw("#e69f00", "#5c4000", "#2e2000"), // 11 orange — Warning
-    sw("#ff3333", "#8c2020", "#521717"), // 12 red — Danger
-    sw("#bd6bd6", "#4c2b56", "#26152b"), // 13 purple — Interest
-    sw("#9a7040", "#3e2d1a", "#1f160d"), // 14 tan — System
-    sw("#ff7ab8", "#66314a", "#331825"), // 15 pink — spare
+    sw("#000000", "#000000", "#000000", "#000000"), //  0 true black — the page backdrop
+    sw("#ffffff", STD_DIM, "#5c5c5c", "#2e2e2e"),   //  1 true white — Neutral
+    sw("#4a4a4a", "#262626", "#1e1e1e", "#121212"), //  2 dark gray — Ground (floor dots)
+    sw("#a8a8a8", STD_DIM, "#434343", "#222222"),   //  3 light gray — spare (secondary text)
+    sw("#667a8a", STD_DIM, "#293138", "#14181c"),   //  4 slate — tile memory (§11.5a)
+    sw("#4ea6ff", STD_DIM, "#1f4266", "#102133"),   //  5 blue — Owned
+    sw("#2456b8", STD_DIM, "#0e224a", "#071125"),   //  6 deep blue — spare
+    sw("#2ee6d6", STD_DIM, "#125c56", "#092e2b"),   //  7 cyan — spare
+    sw("#3ecf5a", STD_DIM, "#195324", "#0c2a12"),   //  8 green — spare
+    sw("#157f33", "#0e3f1a", "#083314", "#04190a"), //  9 deep green — spare (darker than STD_DIM)
+    sw("#f0e442", STD_DIM, "#605b1a", "#302e0d"),   // 10 yellow — Caution
+    sw("#e69f00", STD_DIM, "#5c4000", "#2e2000"),   // 11 orange — Warning
+    sw("#ff3333", STD_DIM, "#8c2020", "#521717"),   // 12 red — Danger
+    sw("#bd6bd6", "#8a4a9e", "#4c2b56", "#26152b"), // 13 purple — Interest (dim keeps the tint)
+    sw("#9a7040", STD_DIM, "#3e2d1a", "#1f160d"),   // 14 tan — System
+    sw("#ff7ab8", STD_DIM, "#66314a", "#331825"),   // 15 pink — spare
 ];
 
 // The rows the shell draws with today, named. A spare row stays reachable only
@@ -117,11 +133,6 @@ const BG: &str = BLACK.fg;
 /// below, with the categories).
 const MEMORY_COLOR: &str = SLATE.fg;
 
-/// The **dimmed** styling (§11.5): out-of-FOV geometry draws in this dark gray —
-/// dim but legible, the same glyph at low light. Distinct from [`MEMORY_COLOR`]
-/// so the three knowledge states never collapse into two (§11.5a's note).
-const DIM_COLOR: &str = DIM_GRAY.fg;
-
 /// Map an information category (§11.2) to its palette row — **the shell's one and
 /// only rendering decision, and the single table a recolour edits**. The core tags
 /// each cell with a [`Category`]; here, and nowhere else, category becomes pixels,
@@ -134,6 +145,7 @@ const DIM_COLOR: &str = DIM_GRAY.fg;
 fn swatch(category: Category) -> Swatch {
     match category {
         Category::Neutral => WHITE,   // inert scenery, walls, spent objectives
+        Category::Ground => DIM_GRAY, // floor dots — drawn to recede (§11.5)
         Category::Owned => BLUE,      // you and what you made
         Category::Caution => YELLOW,  // a threat, unaware
         Category::Warning => ORANGE,  // a threat, hunting
@@ -440,8 +452,9 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
             let color = match cell.vis {
                 // Live: the full category colour (§11.5).
                 Visibility::Live => swatch(cell.fg).fg,
-                // Out-of-FOV geometry: dim but legible (§11.5).
-                Visibility::Dimmed => DIM_COLOR,
+                // Out-of-FOV geometry: the row's dim shade (§11.5) — the standard
+                // dark gray for most, quieter for Ground, tinted for the exit.
+                Visibility::Dimmed => swatch(cell.fg).dim,
                 // Remembered contents read as memory, not as the live thing (§11.5a).
                 Visibility::Remembered => MEMORY_COLOR,
             };
@@ -573,6 +586,7 @@ mod tests {
     fn category_colours_are_all_visibly_distinct() {
         let categories = [
             Category::Neutral,
+            Category::Ground,
             Category::Owned,
             Category::Caution,
             Category::Warning,
@@ -603,7 +617,7 @@ mod tests {
         }
         // And the dimmed gray must not collapse into the remembered slate — three
         // knowledge states, not two (§11.5a's implementation note).
-        let d = dist2(rgb(DIM_COLOR), rgb(MEMORY_COLOR));
+        let d = dist2(rgb(STD_DIM), rgb(MEMORY_COLOR));
         assert!(
             d >= MIN_DIST2 / 2,
             "dimmed and remembered blur (dist^2 {d})"
@@ -689,7 +703,62 @@ mod tests {
                 s.bg_dim,
                 s.bg
             );
+            // The dim shade is the same glyph at *low* light (§11.5): always
+            // strictly darker than the row's foreground, whichever dim it uses.
+            assert!(
+                lum(s.dim) < lum(s.fg),
+                "{}'s dim shade {} is not darker",
+                s.fg,
+                s.dim
+            );
         }
+    }
+
+    /// The floor-dot readability rule (§11.5): **Ground recedes**. Its live colour
+    /// is dimmer than every other category's — the dots are there to carry the FOV
+    /// edge, not to compete with walls and entities — and its own dim shade sits
+    /// far enough below it that the edge still reads across open ground.
+    #[test]
+    fn ground_recedes_beneath_every_other_category() {
+        let lum = |hex: &str| {
+            let (r, g, b) = rgb(hex);
+            r + g + b
+        };
+        let ground = swatch(Category::Ground);
+        for c in [
+            Category::Neutral,
+            Category::Owned,
+            Category::Caution,
+            Category::Warning,
+            Category::Danger,
+            Category::Interest,
+            Category::System,
+        ] {
+            assert!(
+                lum(ground.fg) < lum(swatch(c).fg),
+                "a floor dot outshines {c:?}"
+            );
+        }
+        let d = dist2(rgb(ground.fg), rgb(ground.dim));
+        assert!(
+            d >= 2500,
+            "live and dimmed ground blur (dist^2 {d}) — the FOV edge would vanish"
+        );
+    }
+
+    /// §7.6/§11.5a: the exit anchors every escape plan and is always visible — so
+    /// out of the FOV the `E` must not sink into wall gray the way it briefly did.
+    /// Interest's dim shade still reads as purple, apart from both the standard
+    /// dim and the memory slate (a dim exit is not a remembered content).
+    #[test]
+    fn the_dimmed_exit_still_reads_as_a_goal() {
+        let dim = swatch(Category::Interest).dim;
+        let (r, g, b) = rgb(dim);
+        assert!(r > g + 30 && b > g + 30, "{dim} must still read as purple");
+        let d = dist2(rgb(dim), rgb(STD_DIM));
+        assert!(d >= 70 * 70, "the dim exit blurs into dimmed walls ({d})");
+        let d = dist2(rgb(dim), rgb(MEMORY_COLOR));
+        assert!(d >= 70 * 70 / 2, "the dim exit impersonates memory ({d})");
     }
 
     /// The ticket's acceptance test, end to end across the seam: a **chasing guard**
