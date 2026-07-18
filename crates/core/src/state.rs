@@ -30,6 +30,7 @@
 //! state machine are the guard tickets, which will read the sight data this loop
 //! already maintains.
 
+use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::generate::Layout;
@@ -56,8 +57,10 @@ pub enum Input {
     Wait,
 }
 
-/// Something the loop did this turn, reported in resolution order. Categories and
-/// display priority (§11.7) are the message ticket's job; the loop reports facts.
+/// Something the loop did this turn, reported in resolution order. Each event knows
+/// its information [`Category`] ([`Event::category`]) so a message drawn from it
+/// colours through the same §11.2 table as everything else; display priority and
+/// the bar itself (§11.7) are the message ticket's job — the loop reports facts.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event {
     /// The player stepped to `to`.
@@ -81,6 +84,29 @@ pub enum Event {
     Captured { by: Cell },
 }
 
+impl Event {
+    /// What this event *means* when shown to the player (§11.2) — the category a
+    /// message reports it under, so a red message bar and a red `g` reinforce
+    /// (§11.7 owns priority and display; the meaning is declared here, and no
+    /// concrete colour ever is).
+    pub fn category(self) -> Category {
+        match self {
+            // Routine self-narration: inert facts about scenery and your own steps.
+            Event::Moved { .. } | Event::Bumped { .. } => Category::Neutral,
+            // Things you made — including making yourself hidden (§10.3: the
+            // occupied cupboard recolours to Owned; its message matches).
+            Event::EnteredHideout { .. } => Category::Owned,
+            // Neutral furniture doing furniture things (§10.4).
+            Event::DoorOpened { .. } => Category::System,
+            // Goals and rewards — including the exit talking about the goal it
+            // still refuses (§4.5) and the win itself.
+            Event::IntelTaken { .. } | Event::ExitRefused | Event::Won => Category::Interest,
+            // A threat that has you, literally (§4.5).
+            Event::Captured { .. } => Category::Danger,
+        }
+    }
+}
+
 /// Whether the run is still going, and if not, how it ended (§4.5).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Outcome {
@@ -92,15 +118,51 @@ pub enum Outcome {
     Lost,
 }
 
+/// The guard's mind — the §7.4 state machine's vocabulary.
+///
+/// The *transitions* (detection, timers, dispatch) are the guard AI tickets; what
+/// is settled now is the seam the presentation reads: every state declares the
+/// information [`Category`] it presents as ([`GuardState::category`]), and the
+/// renderer re-categorises the `g` glyph from it every turn (§11.2) — yellow →
+/// orange → red *is* the guard's mind, made visible.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GuardState {
+    /// The default: nothing seen, nothing suspected. Patrols (§7.5).
+    Calm,
+    /// Alert timer > 0 but nothing seen this turn: walking to a destination, then
+    /// searching it (§7.6).
+    Alerted,
+    /// The player was detected this turn: heading for their live cell (§7.6).
+    Chasing,
+    /// A decoy or a sound was detected: as chasing, but toward the source and
+    /// reported at lower severity (§7.4).
+    Investigating,
+    /// Dispatched by a missed radio ping (§7.3): walking to the silent guard's post.
+    Responding,
+}
+
+impl GuardState {
+    /// The information category this state presents as — the §7.4 colour column,
+    /// spoken in §11.2's vocabulary (never a concrete colour): an unaware threat is
+    /// Caution, a hunting one Warning, one that has you Danger.
+    pub fn category(self) -> Category {
+        match self {
+            GuardState::Calm => Category::Caution,
+            GuardState::Alerted | GuardState::Responding => Category::Warning,
+            GuardState::Chasing | GuardState::Investigating => Category::Danger,
+        }
+    }
+}
+
 /// A guard on the level.
 ///
 /// Its movement is a **scripted route** walked one step per turn, cycling — the
 /// simplest possible placeholder for the patrol/chase AI (§7.4–7.6). It has a real
-/// field of view — the ~90° cone (§6.2/§7.1), recomputed every sight phase — but no
-/// state machine and no reactions: it does not open doors, and it exists so that
-/// capture (§4.5) is a real, tested consequence rather than an untriggerable branch.
-/// The guard tickets replace the route with the real thing behind the same phase,
-/// reading the sight this loop already maintains.
+/// field of view — the ~90° cone (§6.2/§7.1), recomputed every sight phase — and a
+/// [`GuardState`], but no transitions and no reactions yet: it does not open doors,
+/// and it exists so that capture (§4.5) is a real, tested consequence rather than
+/// an untriggerable branch. The guard tickets replace the route with the real thing
+/// behind the same phase, reading the sight this loop already maintains.
 #[derive(Clone, Debug)]
 pub struct Guard {
     pos: Cell,
@@ -108,6 +170,7 @@ pub struct Guard {
     route: Vec<Direction>,
     step: usize,
     fov: VisibleSet,
+    state: GuardState,
 }
 
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
@@ -125,6 +188,7 @@ impl Guard {
             route: Vec::new(),
             step: 0,
             fov: VisibleSet::default(),
+            state: GuardState::Calm,
         }
     }
 
@@ -136,7 +200,16 @@ impl Guard {
             route,
             step: 0,
             fov: VisibleSet::default(),
+            state: GuardState::Calm,
         }
+    }
+
+    /// The same guard in `state`. The §7.4 transitions are the guard AI tickets'
+    /// job; until they land, this is how a scenario — a test, the sim — puts a
+    /// guard in a non-[`Calm`](GuardState::Calm) state.
+    pub fn with_state(mut self, state: GuardState) -> Self {
+        self.state = state;
+        self
     }
 
     /// Where the guard stands.
@@ -157,6 +230,13 @@ impl Guard {
     /// so the picture and the rules cannot disagree.
     pub fn fov(&self) -> &VisibleSet {
         &self.fov
+    }
+
+    /// The guard's §7.4 state — what its mind is doing. The renderer derives the
+    /// `g` glyph's category from this every turn ([`GuardState::category`]), so
+    /// the state machine is readable straight off the screen (§11.2).
+    pub fn state(&self) -> GuardState {
+        self.state
     }
 
     /// The direction the guard will try this turn, or `None` if it has no route.
@@ -1098,6 +1178,43 @@ mod tests {
             g.fov().contains(Cell::new(4, 8)) && !g.fov().contains(Cell::new(8, 8)),
             "the cone moved with the guard this very turn"
         );
+    }
+
+    /// The §7.4 colour column, pinned in §11.2's vocabulary: Calm is the unaware
+    /// threat, Alerted and Responding are hunting, Chasing and Investigating have
+    /// you. If a state's category moves, this test is where the change is owned.
+    #[test]
+    fn guard_states_declare_the_7_4_categories() {
+        use crate::category::Category;
+        assert_eq!(GuardState::Calm.category(), Category::Caution);
+        assert_eq!(GuardState::Alerted.category(), Category::Warning);
+        assert_eq!(GuardState::Responding.category(), Category::Warning);
+        assert_eq!(GuardState::Chasing.category(), Category::Danger);
+        assert_eq!(GuardState::Investigating.category(), Category::Danger);
+        // A guard carries its state: Calm by default, overridable for scenarios.
+        assert_eq!(Guard::stationary(Cell::new(1, 1)).state(), GuardState::Calm);
+        let chasing = Guard::stationary(Cell::new(1, 1)).with_state(GuardState::Chasing);
+        assert_eq!(chasing.state().category(), Category::Danger);
+    }
+
+    /// Events speak the same §11.2 table as the glyphs, so the message ticket can
+    /// colour its bar without inventing meanings: taking intel is Interest, the
+    /// capture is Danger, a step is routine Neutral.
+    #[test]
+    fn events_declare_their_message_category() {
+        use crate::category::Category;
+        let at = Cell::new(2, 3);
+        assert_eq!(Event::Moved { to: at }.category(), Category::Neutral);
+        assert_eq!(Event::Bumped { into: at }.category(), Category::Neutral);
+        assert_eq!(Event::EnteredHideout { at }.category(), Category::Owned);
+        assert_eq!(Event::DoorOpened { at }.category(), Category::System);
+        assert_eq!(
+            Event::IntelTaken { remaining: 1 }.category(),
+            Category::Interest
+        );
+        assert_eq!(Event::ExitRefused.category(), Category::Interest);
+        assert_eq!(Event::Won.category(), Category::Interest);
+        assert_eq!(Event::Captured { by: at }.category(), Category::Danger);
     }
 
     /// §12.4: the loop is pure and deterministic. The same starting state and the same

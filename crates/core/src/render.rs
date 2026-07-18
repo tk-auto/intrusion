@@ -204,9 +204,10 @@ pub fn render(state: &State) -> Grid {
         if !fov.contains(guard.pos()) {
             continue;
         }
-        // The guard glyph is re-categorised each turn from its state (§11.2). The
-        // state machine (§7.4) is a later ticket; an un-alerted guard is Caution.
-        put(guard.pos(), 'g', Category::Caution);
+        // The guard glyph is re-categorised every turn from its state (§11.2):
+        // yellow → orange → red is the guard's mind, made visible. The §7.4
+        // transitions are the guard AI tickets; the seam is already honest.
+        put(guard.pos(), 'g', guard.state().category());
     }
     // The player, always Owned — trivially inside their own FOV. Inside a hideout
     // the player is concealed: the cupboard keeps its `}` glyph but recolours to
@@ -355,6 +356,35 @@ mod tests {
         // A plain floor cell renders as a dot (§11.5), Neutral.
         assert_eq!(g.get(5, 5).glyph, '·');
         assert_eq!(g.get(1, 1).fg, Category::Neutral); // interior floor
+    }
+
+    /// §11.2's payoff, on screen: the `g` glyph is re-categorised every turn from
+    /// the guard's §7.4 state, so a chasing guard reads **Danger** — the player
+    /// sees the AI state machine as yellow → orange → red, and no game system ever
+    /// named a colour to do it.
+    #[test]
+    fn a_guards_glyph_category_tracks_its_state() {
+        use crate::state::GuardState;
+        for (guard_state, category) in [
+            (GuardState::Calm, Category::Caution),
+            (GuardState::Alerted, Category::Warning),
+            (GuardState::Responding, Category::Warning),
+            (GuardState::Investigating, Category::Danger),
+            (GuardState::Chasing, Category::Danger),
+        ] {
+            let s = state(
+                10,
+                10,
+                Cell::new(3, 3),
+                vec![Guard::stationary(Cell::new(6, 4)).with_state(guard_state)],
+            );
+            let cell = render(&s).get(6, 4);
+            assert_eq!(cell.glyph, 'g');
+            assert_eq!(
+                cell.fg, category,
+                "a {guard_state:?} guard must read {category:?}"
+            );
+        }
     }
 
     /// Glyph priority is *defined*, not last-writer-wins (§11.3): an entity always
