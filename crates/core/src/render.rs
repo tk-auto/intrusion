@@ -24,11 +24,16 @@
 //! player's per-cell memory, and this function draws only what §11.5a says the
 //! player knows — geometry always, contents once seen, live state only in the
 //! current FOV. Each drawn cell carries a [`Visibility`] so the shell can style the
-//! three knowledge states distinctly. What is **not** here yet: the §11.5 dimming
-//! *styling* and the danger overlay — those are ticket #16's, which will read
-//! [`Visibility::Dimmed`] and set [`GlyphCell::bg`]; until then every `bg` is
-//! `None`. Colour *values* are the shell's table (§11.2); this module only speaks
-//! in categories.
+//! three knowledge states distinctly.
+//!
+//! The **danger overlay** (§11.5) is painted here too — [`GlyphCell::bg`] set to
+//! `Danger` on every cell watched by a guard the player can see — because it must
+//! read the *same* sight data the guard AI reads
+//! ([`Guard::fov`](crate::state::Guard::fov)), not a re-implementation that could
+//! lie. What is **not** here yet: the two red shades of the §7.6 two-zone
+//! detection (certain vs glimpse) — detection zones are a guard ticket; until it
+//! lands the whole cone is one zone. Colour *values* are the shell's table
+//! (§11.2); this module only speaks in categories.
 
 use crate::category::Category;
 use crate::cell::Cell;
@@ -45,8 +50,8 @@ pub enum Visibility {
     /// Inside the player's FOV right now — drawn full colour (§11.5).
     Live,
     /// Outside the FOV, showing the always-visible layer: geometry, or the
-    /// geometry masking a never-seen content. Ticket #16's §11.5 dimming renders
-    /// this dark gray; until it lands the shell draws it like [`Visibility::Live`].
+    /// geometry masking a never-seen content. The shell renders this dark gray —
+    /// dim but legible (§11.5).
     Dimmed,
     /// Outside the FOV, drawn from tile memory: a content seen earlier this run
     /// (§11.5a) — its own visual state, distinct from both live and dimmed.
@@ -54,16 +59,15 @@ pub enum Visibility {
 }
 
 /// One rendered cell: a glyph, its foreground category, an optional background
-/// category (§11.1), and the knowledge state it is drawn in (§11.5a). `bg` is `None`
-/// until the danger overlay (§11.5, ticket #16) — today nothing paints a background.
+/// category (§11.1), and the knowledge state it is drawn in (§11.5a).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GlyphCell {
-    /// The character to draw; a space is empty (floor), painted as background only.
+    /// The character to draw; a space is empty, painted as background only.
     pub glyph: char,
     /// What the glyph *means* (§11.2). The shell maps this to a colour.
     pub fg: Category,
-    /// The background category, or `None` for the default backdrop. Reserved for the
-    /// danger overlay (§11.5); unused until ticket #16 lands.
+    /// The background category, or `None` for the default backdrop. `Danger` is
+    /// the §11.5 overlay: this cell is watched by a guard the player can see.
     pub bg: Option<Category>,
     /// The knowledge state this cell is drawn in (§11.5a): live, dimmed geometry,
     /// or remembered content. The shell styles the three distinctly.
@@ -106,8 +110,8 @@ impl Grid {
 }
 
 /// Render `state` to a full [`Grid`] (§11.1): terrain through the §11.5a fog first,
-/// then every *visible* entity on top, resolving overlaps by the glyph priority
-/// below.
+/// then every *visible* entity on top — resolving overlaps by the glyph priority
+/// below — then the §11.5 danger overlay across everything.
 ///
 /// # The fog (§11.5a)
 ///
@@ -129,6 +133,26 @@ impl Grid {
 /// they exist, §7.2/§8.3). We write terrain, then guards, then the player, so the
 /// highest-priority glyph is the last writer at any cell — a defined order, not an
 /// accident.
+///
+/// # The danger overlay (§11.5)
+///
+/// The best idea in the old game, kept **[SETTLED]**: every cell watched by a
+/// guard *the player can see* gets a `Danger` background — the literal detection
+/// set, the same [`Guard::fov`](crate::state::Guard::fov) the guard AI reads, so
+/// the picture cannot lie. If your cell isn't red, no guard you can see will
+/// detect you: the lose condition, painted. It covers watched cells even
+/// *outside* the player's FOV — a visible guard's cone is knowledge you have —
+/// fixing the old bug where watched-but-unseen cells rendered dark-on-dark and
+/// looked like the safest cells on the map. Cones of guards the player cannot
+/// see are unknown information and paint nothing.
+///
+/// # Floor dots (§11.5)
+///
+/// Floor draws as `·`, not blank: a blank cell has no foreground, so the FOV
+/// boundary was undetectable across open ground — you could only see the sight
+/// edge where it crossed a wall. Dots give every floor cell a glyph for the
+/// dimming to act on. An open door panel stays blank (§10.3): the gap in the
+/// wall *is* its rendering.
 pub fn render(state: &State) -> Grid {
     let facility = state.layout().facility();
     let (width, height) = (facility.width(), facility.height());
@@ -148,8 +172,15 @@ pub fn render(state: &State) -> Grid {
             } else {
                 fogged_view(terrain, memory.contains(cell))
             };
+            // Floor dots (§11.5): give open ground a foreground so the FOV edge
+            // reads across it. Masked contents dot too — they *show* floor.
+            let glyph = if shown == Terrain::Floor {
+                '·'
+            } else {
+                shown.glyph()
+            };
             GlyphCell {
-                glyph: shown.glyph(),
+                glyph,
                 fg: shown.category(),
                 bg: None,
                 vis,
@@ -184,6 +215,18 @@ pub fn render(state: &State) -> Grid {
     // the picture cannot disagree.
     let player_glyph = if state.hidden() { '}' } else { '@' };
     put(state.player(), player_glyph, Category::Owned);
+
+    // The danger overlay (§11.5), last, across terrain and entities alike: the
+    // union of every visible guard's cone. Backgrounds compose with whatever
+    // glyph is on the cell — a watched guard, a watched player, watched floor.
+    for guard in state.guards() {
+        if !fov.contains(guard.pos()) {
+            continue; // an unseen guard's cone is unknown, not safe — just unknown
+        }
+        for cell in guard.fov().cells() {
+            cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
+        }
+    }
 
     Grid {
         width,
@@ -309,8 +352,8 @@ mod tests {
         assert_eq!(guard.glyph, 'g');
         assert_eq!(guard.fg, Category::Caution);
 
-        // A plain floor cell keeps its terrain glyph/category.
-        assert_eq!(g.get(5, 5).glyph, ' ');
+        // A plain floor cell renders as a dot (§11.5), Neutral.
+        assert_eq!(g.get(5, 5).glyph, '·');
         assert_eq!(g.get(1, 1).fg, Category::Neutral); // interior floor
     }
 
@@ -431,13 +474,13 @@ mod tests {
 
         // Never seen: the intel masks as plain floor and the guard is not drawn.
         let g = render(&s);
-        assert_eq!(g.get(10, 14).glyph, ' ', "unseen intel is invisible");
+        assert_eq!(g.get(10, 14).glyph, '·', "unseen intel is invisible");
         assert_eq!(
             g.get(10, 14).fg,
             Category::Neutral,
             "…its cell reads as floor"
         );
-        assert_eq!(g.get(12, 14).glyph, ' ', "an unseen guard is not drawn");
+        assert_eq!(g.get(12, 14).glyph, '·', "an unseen guard is not drawn");
 
         // Turn south: both enter the FOV, live.
         s.step(Input::Step(Direction::South)); // to (10,11), facing south
@@ -461,7 +504,7 @@ mod tests {
         );
         assert_eq!(
             g.get(12, 14).glyph,
-            ' ',
+            '·',
             "a guard does not persist out of FOV"
         );
         assert_eq!(g.get(12, 14).vis, Visibility::Dimmed);
@@ -543,5 +586,122 @@ mod tests {
             ('+', Visibility::Dimmed),
             "door state is never remembered (§11.5a)"
         );
+    }
+
+    /// §11.5 fix #2: **floor renders as dots**, in and out of the FOV alike, so
+    /// the sight boundary reads across open ground and not just where it crosses
+    /// a wall. An open door panel stays blank (§10.3) — the gap is its rendering.
+    #[test]
+    fn floor_renders_as_dots_but_an_open_panel_stays_blank() {
+        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        layout.place(Cell::new(12, 8), Terrain::DoorPanelOpen);
+        let s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        let g = render(&s);
+
+        let lit = g.get(10, 8); // ahead: floor in the FOV
+        assert_eq!((lit.glyph, lit.vis), ('·', Visibility::Live));
+        let dark = g.get(10, 14); // behind: floor out of the FOV
+        assert_eq!((dark.glyph, dark.vis), ('·', Visibility::Dimmed));
+        assert_eq!(g.get(12, 8).glyph, ' ', "an open panel renders blank");
+    }
+
+    /// The §11.5 golden test: a guard cone the player can see paints the expected
+    /// red set — `Danger` backgrounds on exactly the watched cells, including the
+    /// player's own when they stand in it (the lose condition, painted), and
+    /// nothing anywhere else.
+    #[test]
+    fn the_danger_overlay_paints_a_visible_guards_cone() {
+        // Player at (10,10) facing north; guard adjacent at (9,9) — in the FOV —
+        // looking south (spawn facing, §7.1), its wedge over the player's cell.
+        let s = State::new(
+            Layout::from_facility(Facility::walled_box(20, 20)),
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(9, 9))],
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        let g = render(&s);
+        let guard_fov = s.guards()[0].fov();
+
+        // Straight down the wedge: watched, red.
+        assert!(guard_fov.contains(Cell::new(9, 11)));
+        assert_eq!(g.get(9, 11).bg, Some(Category::Danger));
+        // The player's own cell is watched: red under the `@`.
+        assert!(guard_fov.contains(Cell::new(10, 10)));
+        assert_eq!(g.get(10, 10).bg, Some(Category::Danger));
+        assert_eq!(g.get(10, 10).glyph, '@');
+        // The painted set is *exactly* the cone: every cell's background agrees
+        // with the same detection data the AI reads.
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                let expected = guard_fov.contains(Cell::new(x, y));
+                assert_eq!(
+                    g.get(x, y).bg.is_some(),
+                    expected,
+                    "bg at ({x},{y}) must mirror the guard's cone"
+                );
+            }
+        }
+    }
+
+    /// §11.5 fix #1: a **watched-but-unseen** cell must not look safe. A visible
+    /// guard's cone is knowledge the player has, so it paints red even where it
+    /// reaches outside the player's own FOV — over a dimmed glyph, not dark-on-dark
+    /// nothing.
+    #[test]
+    fn watched_cells_outside_the_players_fov_still_paint_red() {
+        // Guard at (9,9), visible in the ring, looking south: its wedge runs down
+        // *behind* the north-facing player, outside their half-disc.
+        let s = State::new(
+            Layout::from_facility(Facility::walled_box(20, 20)),
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(9, 9))],
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        let watched_unseen = Cell::new(9, 13);
+        assert!(s.guards()[0].fov().contains(watched_unseen), "in the cone");
+        assert!(!s.player_fov().contains(watched_unseen), "not in the FOV");
+
+        let cell = render(&s).get(9, 13);
+        assert_eq!(cell.bg, Some(Category::Danger), "red even though unseen");
+        assert_eq!(
+            (cell.glyph, cell.vis),
+            ('·', Visibility::Dimmed),
+            "the glyph below stays the dimmed geometry"
+        );
+    }
+
+    /// The flip side of the overlay's honesty: a guard the player **cannot see**
+    /// paints nothing. Its cone is unknown information — painting it would leak
+    /// what the player has not scouted ("no guard *you can see* will detect you").
+    #[test]
+    fn an_unseen_guards_cone_paints_nothing() {
+        // The guard stands behind the north-facing player, out of the FOV.
+        let s = State::new(
+            Layout::from_facility(Facility::walled_box(20, 20)),
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(10, 14))],
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        assert!(!s.player_fov().contains(Cell::new(10, 14)));
+
+        let g = render(&s);
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                assert_eq!(g.get(x, y).bg, None, "no red anywhere for ({x},{y})");
+            }
+        }
     }
 }

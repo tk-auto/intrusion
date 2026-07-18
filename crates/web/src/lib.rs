@@ -17,13 +17,13 @@
 //! every input redraws. The **whole level is always visible with no scrolling**, on desktop and
 //! mobile alike: the canvas is scaled to fit the viewport (aspect preserved) and its
 //! backing store is sized in device pixels so glyphs stay crisp; a resize/orientation
-//! change recomputes and redraws. The grid arrives already fogged (§11.5a — the core
-//! draws geometry always, contents once seen, live state only in the player's FOV);
-//! this shell's one addition is the *remembered* styling, a muted slate distinct
-//! from the live category colours. A player-*centred* viewport (§11.4), the FOV
-//! dimming and danger overlay (§11.5), and explicit hotkeys (§11.6) are later render
-//! tickets; the full colour-blind-safe palette (§11.2) refines the placeholder
-//! table below.
+//! change recomputes and redraws. The grid arrives already fogged (§11.5a) and
+//! overlaid (§11.5 — `Danger` backgrounds on cells watched by visible guards); this
+//! shell maps each cell's knowledge state to styling: full category colour live,
+//! dark gray dimmed, muted slate remembered, and two red background shades for the
+//! danger overlay. A player-*centred* viewport (§11.4) and explicit hotkeys (§11.6)
+//! are later render tickets; the full colour-blind-safe palette (§11.2) refines the
+//! placeholder table below.
 //! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
 //! and player in the largest room, intel spread across rooms, guards seated where
 //! none eyes the spawn on turn one. The guards stand still until the guard-AI
@@ -52,10 +52,24 @@ const BG: &str = "#0b0b0b";
 
 /// The **remembered** styling (§11.5a): contents known only from tile memory draw
 /// in this muted slate instead of their category colour, so memory reads as memory
-/// — visibly distinct from anything live (asserted below, with the categories).
-/// Ticket #16's §11.5 dimming supplies the third styling (dark-gray out-of-FOV
-/// geometry); the §11.2 palette ticket refines all of it.
+/// — visibly distinct from anything live *and* from the dimmed gray (asserted
+/// below, with the categories). The §11.2 palette ticket refines all of it.
 const MEMORY_COLOR: &str = "#667a8a";
+
+/// The **dimmed** styling (§11.5): out-of-FOV geometry draws in this dark gray —
+/// dim but legible, the same glyph at low light. Distinct from [`MEMORY_COLOR`]
+/// so the three knowledge states never collapse into two (§11.5a's note).
+const DIM_COLOR: &str = "#4a4a4a";
+
+/// The danger overlay (§11.5): the background of a watched cell inside the
+/// player's FOV. Red — the lose condition, painted.
+const DANGER_BG_LIVE: &str = "#8c2020";
+
+/// The danger overlay on a watched cell *outside* the player's FOV: a darker red
+/// that still unmistakably reads as red on the page background (asserted below).
+/// This is §11.5's fix #1 — the old version rendered these dark-on-dark, so the
+/// most dangerous unseen cells looked like the safest on the map.
+const DANGER_BG_DIMMED: &str = "#521717";
 
 /// Map an information category (§11.2) to a concrete colour — **the shell's one and
 /// only rendering decision**. The core tags each cell with a [`Category`]; this table
@@ -363,19 +377,41 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
     for y in 0..grid.height() {
         for x in 0..grid.width() {
             let cell = grid.get(x, y);
+            // The danger overlay (§11.5) first: a background paints even under a
+            // blank glyph — a watched open doorway is still watched.
+            if let Some(bg) = cell.bg {
+                ctx.set_fill_style_str(bg_color(bg, cell.vis));
+                ctx.fill_rect(x as f64 * m.cell_w, y as f64 * m.cell_h, m.cell_w, m.cell_h);
+            }
             if cell.glyph == ' ' {
                 continue;
             }
             let color = match cell.vis {
+                // Live: the full category colour (§11.5).
+                Visibility::Live => category_color(cell.fg),
+                // Out-of-FOV geometry: dim but legible (§11.5).
+                Visibility::Dimmed => DIM_COLOR,
                 // Remembered contents read as memory, not as the live thing (§11.5a).
                 Visibility::Remembered => MEMORY_COLOR,
-                // The §11.5 dimmed styling for out-of-FOV geometry is ticket #16;
-                // until it lands, dimmed draws like live.
-                Visibility::Live | Visibility::Dimmed => category_color(cell.fg),
             };
             ctx.set_fill_style_str(color);
             draw_char(ctx, x as f64, y as f64, cell.glyph, m);
         }
+    }
+}
+
+/// Map a background category to a fill — today that is only the §11.5 danger
+/// overlay, in two shades by knowledge state: bright red on a watched cell the
+/// player sees, darker-but-still-red beyond the FOV (fix #1 — watched must never
+/// look safe). The §7.6 certain/glimpse zones add two *detection* shades when
+/// two-zone detection lands; until then the whole cone is one zone.
+fn bg_color(bg: Category, vis: Visibility) -> &'static str {
+    match (bg, vis) {
+        (Category::Danger, Visibility::Live) => DANGER_BG_LIVE,
+        (Category::Danger, _) => DANGER_BG_DIMMED,
+        // Nothing else paints a background yet; a neutral dark placeholder so a
+        // future category shows up rather than vanishing into the backdrop.
+        _ => "#333333",
     }
 }
 
@@ -513,5 +549,34 @@ mod tests {
                 "the remembered colour is too close to {c:?} (dist^2 {d} < {MIN_DIST2})"
             );
         }
+        // And the dimmed gray must not collapse into the remembered slate — three
+        // knowledge states, not two (§11.5a's implementation note).
+        let d = dist2(rgb(DIM_COLOR), rgb(MEMORY_COLOR));
+        assert!(
+            d >= MIN_DIST2 / 2,
+            "dimmed and remembered blur (dist^2 {d})"
+        );
+    }
+
+    /// §11.5 fix #1, at the colour table: both danger-overlay shades must read
+    /// against the page background — the watched-but-unseen shade especially,
+    /// since the old version let it sink into dark-on-dark and the most dangerous
+    /// cells looked like the safest. The two shades also stay tellable apart.
+    #[test]
+    fn danger_overlay_shades_read_on_the_backdrop() {
+        // Squared distance for large background fills: 40 per channel is an easy
+        // read on area colour even where 70 is the bar for thin glyph strokes.
+        const MIN_BG_DIST2: i32 = 40 * 40;
+        for shade in [DANGER_BG_LIVE, DANGER_BG_DIMMED] {
+            let d = dist2(rgb(shade), rgb(BG));
+            assert!(
+                d >= MIN_BG_DIST2,
+                "{shade} vanishes into the page background (dist^2 {d})"
+            );
+            let (r, g, b) = rgb(shade);
+            assert!(r > g + 30 && r > b + 30, "{shade} must read as *red*");
+        }
+        let d = dist2(rgb(DANGER_BG_LIVE), rgb(DANGER_BG_DIMMED));
+        assert!(d >= MIN_BG_DIST2, "the two danger shades blur (dist^2 {d})");
     }
 }
