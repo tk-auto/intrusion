@@ -9,7 +9,9 @@
 //! other system builds on — the grid substrate (§4.1/§4.3/§10.3): the terrain
 //! table, the cell-capacity occupancy query, and 4-directional movement with
 //! Manhattan distance, all wrapped in the indestructible border the facility
-//! guarantees. On top of it: the pure state→glyph-grid render (§11.1), the spatial
+//! guarantees. On top of it: the pure state→glyph-grid render (§11.1, drawn
+//! through the §11.5a fog — geometry always, contents once seen then remembered,
+//! live state only in the current FOV), the spatial
 //! region graph (§10.5) that gives corridors and rooms a name, the corridor-first
 //! partition (§10.1) that carves them, and the hinged doors (§10.4) it cuts where
 //! rooms meet corridors. On top of all that sits the turn loop (§4.2): the running
@@ -41,7 +43,7 @@ pub use facility::{Facility, SoundBlocking, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
-pub use render::{ascii_grid, render, GlyphCell, Grid};
+pub use render::{ascii_grid, render, GlyphCell, Grid, Visibility};
 pub use rng::Rng;
 pub use state::{Event, Guard, Input, Outcome, State};
 pub use vision::{

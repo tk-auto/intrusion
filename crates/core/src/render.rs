@@ -19,18 +19,43 @@
 //! concern behind one interface* (§11.1): ASCII now, `drawImage` tiles later, same
 //! grid. The core must not know which shell consumes it.
 //!
-//! What is **not** here yet: fog and tile memory (§11.5a), the FOV dimming and the
-//! danger overlay (§11.5) — those set a cell's background and land with vision (§6);
-//! until then every [`GlyphCell::bg`] is `None`. Colour *values* are the shell's
-//! table (§11.2); this module only speaks in categories.
+//! Fog and tile memory (§11.5a) are applied here, because they are *presentation of
+//! knowledge*, not physics: the [`State`] keeps the whole true world plus the
+//! player's per-cell memory, and this function draws only what §11.5a says the
+//! player knows — geometry always, contents once seen, live state only in the
+//! current FOV. Each drawn cell carries a [`Visibility`] so the shell can style the
+//! three knowledge states distinctly. What is **not** here yet: the §11.5 dimming
+//! *styling* and the danger overlay — those are ticket #16's, which will read
+//! [`Visibility::Dimmed`] and set [`GlyphCell::bg`]; until then every `bg` is
+//! `None`. Colour *values* are the shell's table (§11.2); this module only speaks
+//! in categories.
 
 use crate::category::Category;
-use crate::facility::Facility;
+use crate::cell::Cell;
+use crate::facility::{Facility, Terrain};
 use crate::state::State;
 
-/// One rendered cell: a glyph, its foreground category, and an optional background
-/// category (§11.1). `bg` is `None` until the FOV dimming and danger overlay (§11.5)
-/// land with vision — today nothing paints a background.
+/// How much the player currently knows about what a drawn cell shows — the three
+/// visual states of §11.5a's implementation note (live / remembered / never-seen,
+/// where "never-seen" contents are simply not drawn and their cell falls back to
+/// its geometry). The shell styles each distinctly; remembered must **not** be
+/// collapsed into the §11.5 dimming scheme.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Visibility {
+    /// Inside the player's FOV right now — drawn full colour (§11.5).
+    Live,
+    /// Outside the FOV, showing the always-visible layer: geometry, or the
+    /// geometry masking a never-seen content. Ticket #16's §11.5 dimming renders
+    /// this dark gray; until it lands the shell draws it like [`Visibility::Live`].
+    Dimmed,
+    /// Outside the FOV, drawn from tile memory: a content seen earlier this run
+    /// (§11.5a) — its own visual state, distinct from both live and dimmed.
+    Remembered,
+}
+
+/// One rendered cell: a glyph, its foreground category, an optional background
+/// category (§11.1), and the knowledge state it is drawn in (§11.5a). `bg` is `None`
+/// until the danger overlay (§11.5, ticket #16) — today nothing paints a background.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GlyphCell {
     /// The character to draw; a space is empty (floor), painted as background only.
@@ -38,8 +63,11 @@ pub struct GlyphCell {
     /// What the glyph *means* (§11.2). The shell maps this to a colour.
     pub fg: Category,
     /// The background category, or `None` for the default backdrop. Reserved for the
-    /// FOV/danger overlay (§11.5); unused until vision lands.
+    /// danger overlay (§11.5); unused until ticket #16 lands.
     pub bg: Option<Category>,
+    /// The knowledge state this cell is drawn in (§11.5a): live, dimmed geometry,
+    /// or remembered content. The shell styles the three distinctly.
+    pub vis: Visibility,
 }
 
 /// A rendered frame: a `width × height` grid of [`GlyphCell`]s in row-major order —
@@ -77,8 +105,21 @@ impl Grid {
     }
 }
 
-/// Render `state` to a full [`Grid`] (§11.1): terrain first, then every entity on
-/// top, resolving overlaps by the glyph priority below.
+/// Render `state` to a full [`Grid`] (§11.1): terrain through the §11.5a fog first,
+/// then every *visible* entity on top, resolving overlaps by the glyph priority
+/// below.
+///
+/// # The fog (§11.5a)
+///
+/// Terrain splits into the design's layers. **Geometry** — walls, floor, hinges,
+/// door *positions*, and the exit (the door you came in by, §4.5, and the anchor of
+/// every escape plan, §7.6) — draws as-is from turn one, never fogged. **Contents**
+/// — a console, a hideout — draw only inside the current FOV or, once their cell is
+/// in tile memory, as [`Visibility::Remembered`]; never seen, the cell masks as the
+/// geometry naturally in its place (floor under a console, wall over a hideout
+/// alcove — the scouting reward of §11.5a). **Live state** — guards, and a door's
+/// open/closed pose — draws only inside the FOV and is never remembered: an
+/// out-of-view panel always shows its canonical closed `+`, whatever it really is.
 ///
 /// # Glyph priority (§11.3)
 ///
@@ -91,39 +132,56 @@ impl Grid {
 pub fn render(state: &State) -> Grid {
     let facility = state.layout().facility();
     let (width, height) = (facility.width(), facility.height());
+    let fov = state.player_fov();
+    let memory = state.memory();
 
-    // Terrain layer: every cell is its terrain's glyph and category.
+    // Terrain layer, through the fog: what the player knows of each cell.
     let mut cells: Vec<GlyphCell> = (0..height)
         .flat_map(|y| (0..width).map(move |x| (x, y)))
         .map(|(x, y)| {
             let terrain = facility
                 .terrain_at(x, y)
                 .expect("in-bounds by construction");
+            let cell = Cell::new(x, y);
+            let (shown, vis) = if fov.contains(cell) {
+                (terrain, Visibility::Live)
+            } else {
+                fogged_view(terrain, memory.contains(cell))
+            };
             GlyphCell {
-                glyph: terrain.glyph(),
-                fg: terrain.category(),
+                glyph: shown.glyph(),
+                fg: shown.category(),
                 bg: None,
+                vis,
             }
         })
         .collect();
-    let mut put = |cell: crate::cell::Cell, glyph: char, fg: Category| {
+    // Entities are live state: whatever is drawn here is being seen right now.
+    let mut put = |cell: Cell, glyph: char, fg: Category| {
         cells[(cell.y * width + cell.x) as usize] = GlyphCell {
             glyph,
             fg,
             bg: None,
+            vis: Visibility::Live,
         };
     };
 
     // Entity layers, lowest priority first so the top entity is the last writer.
     for guard in state.guards() {
+        // Live state (§11.5a): a guard exists on screen only while the player sees
+        // it — never remembered, so leaving the FOV erases it from the picture.
+        if !fov.contains(guard.pos()) {
+            continue;
+        }
         // The guard glyph is re-categorised each turn from its state (§11.2). The
         // state machine (§7.4) is a later ticket; an un-alerted guard is Caution.
         put(guard.pos(), 'g', Category::Caution);
     }
-    // The player, always Owned. Inside a hideout the player is concealed: the
-    // cupboard keeps its `}` glyph but recolours to Owned (§10.3/§11.3) — the "you
-    // are hidden here" signal — instead of drawing the `@`. Read through the same
-    // `hidden` query the loop and vision use, so the picture cannot disagree.
+    // The player, always Owned — trivially inside their own FOV. Inside a hideout
+    // the player is concealed: the cupboard keeps its `}` glyph but recolours to
+    // Owned (§10.3/§11.3) — the "you are hidden here" signal — instead of drawing
+    // the `@`. Read through the same `hidden` query the loop and vision use, so
+    // the picture cannot disagree.
     let player_glyph = if state.hidden() { '}' } else { '@' };
     put(state.player(), player_glyph, Category::Owned);
 
@@ -131,6 +189,32 @@ pub fn render(state: &State) -> Grid {
         width,
         height,
         cells,
+    }
+}
+
+/// What an out-of-FOV cell shows (§11.5a), given whether its cell is in tile
+/// memory: the terrain to draw and the knowledge state to draw it in. One
+/// exhaustive match, so every new terrain kind is forced to declare its layer —
+/// geometry, contents, or live state — the day it is added.
+fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
+    match terrain {
+        // Geometry: always visible, never fogged (§11.5a). The exit is geometry —
+        // the player entered by it (§4.5) and plans escape routes around it (§7.6).
+        Terrain::Floor | Terrain::Wall | Terrain::DoorHinge | Terrain::Exit => {
+            (terrain, Visibility::Dimmed)
+        }
+        // A door's *position* is geometry but its open/closed pose is live state,
+        // never remembered: out of view a panel always draws canonically closed.
+        Terrain::DoorPanelClosed | Terrain::DoorPanelOpen => {
+            (Terrain::DoorPanelClosed, Visibility::Dimmed)
+        }
+        // Contents: hidden until seen, then remembered (§11.5a).
+        Terrain::Console | Terrain::Hideout if remembered => (terrain, Visibility::Remembered),
+        // Never seen: masked by the geometry naturally in its place — plain floor
+        // where a console stands, plain wall over a hideout alcove, so the map
+        // gives neither away before the player has scouted it.
+        Terrain::Console => (Terrain::Floor, Visibility::Dimmed),
+        Terrain::Hideout => (Terrain::Wall, Visibility::Dimmed),
     }
 }
 
@@ -158,16 +242,18 @@ mod tests {
     use super::*;
     use crate::cell::{Cell, Direction};
     use crate::facility::{Facility, Terrain};
-    use crate::state::{Guard, State};
+    use crate::state::{Guard, Input, State};
     use crate::Layout;
 
     /// A hand-built state on a `w × h` walled box: the player, some guards, and a far
-    /// exit, no objectives. Enough to render.
+    /// exit, no objectives. Enough to render. Faces **south**, toward where these
+    /// tests put their guards — entities are live state (§11.5a) and draw only
+    /// inside the FOV, so a guard the test asserts on must be in view.
     fn state(w: u32, h: u32, player: Cell, guards: Vec<Guard>) -> State {
         State::new(
             Layout::from_facility(Facility::walled_box(w, h)),
             player,
-            Direction::North,
+            Direction::South,
             guards,
             Vec::new(),
             Cell::new(w - 2, h - 2),
@@ -234,10 +320,11 @@ mod tests {
     #[test]
     fn entities_win_over_terrain_and_the_player_wins_over_a_guard() {
         // A guard standing on a console ($, terrain) renders as the guard, not the $.
+        // The player faces south so the contested cell is live, not fogged (§11.5a).
         let s = State::new(
             Layout::from_facility(Facility::walled_box(10, 10)),
             Cell::new(2, 2),
-            Direction::North,
+            Direction::South,
             vec![Guard::stationary(Cell::new(5, 5))],
             [Cell::new(5, 5)], // an objective stamps a console under the guard
             Cell::new(8, 8),
@@ -291,5 +378,170 @@ mod tests {
         assert_eq!(Terrain::Console.category(), Category::Interest);
         assert_eq!(Terrain::Hideout.category(), Category::System);
         assert_eq!(Terrain::DoorPanelClosed.category(), Category::System);
+    }
+
+    /// §11.5a: **geometry is never fogged.** Walls far beyond sight range — and the
+    /// exit, part of the layout the player entered by — draw from turn one, so a
+    /// route can be planned before the first risky step. Out-of-FOV geometry
+    /// carries [`Visibility::Dimmed`]; what the player sees now is `Live`.
+    #[test]
+    fn geometry_draws_from_turn_one_even_far_out_of_sight() {
+        let mut layout = Layout::from_facility(Facility::walled_box(40, 30));
+        layout.place(Cell::new(35, 5), Terrain::Exit); // far outside the FOV
+        let s = State::new(
+            layout,
+            Cell::new(2, 2),
+            Direction::South,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(35, 5),
+        );
+        let g = render(&s);
+
+        // The far corner wall is way outside the 15-range box, yet drawn.
+        let far_wall = g.get(39, 29);
+        assert_eq!(far_wall.glyph, '#');
+        assert_eq!(far_wall.vis, Visibility::Dimmed);
+        // So is the exit: geometry, not a hidden content.
+        let exit = g.get(35, 5);
+        assert_eq!(exit.glyph, 'E');
+        assert_eq!(exit.fg, Category::Interest);
+        assert_eq!(exit.vis, Visibility::Dimmed);
+        // What is in the FOV right now is live.
+        assert_eq!(g.get(2, 4).vis, Visibility::Live);
+    }
+
+    /// The §11.5a golden test: an unseen intel is invisible (its cell reads as
+    /// plain floor); after entering the FOV it is live; after leaving it stays,
+    /// **remembered** — its own visual state — while a guard, live state, does not
+    /// persist out of the FOV.
+    #[test]
+    fn contents_are_remembered_but_live_state_is_not() {
+        // Player at (10,10) facing north; a console and a guard behind them to the
+        // south, outside the half-disc (§6.2 sees at most one row behind — the
+        // touching ring).
+        let mut s = State::new(
+            Layout::from_facility(Facility::walled_box(20, 20)),
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(12, 14))],
+            [Cell::new(10, 14)],
+            Cell::new(18, 18),
+        );
+
+        // Never seen: the intel masks as plain floor and the guard is not drawn.
+        let g = render(&s);
+        assert_eq!(g.get(10, 14).glyph, ' ', "unseen intel is invisible");
+        assert_eq!(
+            g.get(10, 14).fg,
+            Category::Neutral,
+            "…its cell reads as floor"
+        );
+        assert_eq!(g.get(12, 14).glyph, ' ', "an unseen guard is not drawn");
+
+        // Turn south: both enter the FOV, live.
+        s.step(Input::Step(Direction::South)); // to (10,11), facing south
+        let g = render(&s);
+        let intel = g.get(10, 14);
+        assert_eq!(
+            (intel.glyph, intel.fg, intel.vis),
+            ('$', Category::Interest, Visibility::Live)
+        );
+        let guard = g.get(12, 14);
+        assert_eq!((guard.glyph, guard.vis), ('g', Visibility::Live));
+
+        // Turn back north: the intel stays, remembered; the guard vanishes.
+        s.step(Input::Step(Direction::North)); // to (10,10), facing north
+        let g = render(&s);
+        let intel = g.get(10, 14);
+        assert_eq!(
+            (intel.glyph, intel.fg, intel.vis),
+            ('$', Category::Interest, Visibility::Remembered),
+            "seen intel stays on the map after leaving the FOV, as memory"
+        );
+        assert_eq!(
+            g.get(12, 14).glyph,
+            ' ',
+            "a guard does not persist out of FOV"
+        );
+        assert_eq!(g.get(12, 14).vis, Visibility::Dimmed);
+    }
+
+    /// §11.5a's scouting reward: an unscouted hideout reads as plain **wall** — the
+    /// alcove gives nothing away until the player has actually seen it. Once seen
+    /// it is remembered like any content.
+    #[test]
+    fn an_unseen_hideout_masks_as_wall_until_scouted() {
+        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        layout.place(Cell::new(10, 14), Terrain::Hideout); // behind the spawn facing
+        let mut s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.fg, cell.vis),
+            ('#', Category::Neutral, Visibility::Dimmed),
+            "an unscouted hideout reads as plain wall"
+        );
+
+        s.step(Input::Step(Direction::South)); // face it: live
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.fg, cell.vis),
+            ('}', Category::System, Visibility::Live)
+        );
+
+        s.step(Input::Step(Direction::North)); // leave: remembered
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.fg, cell.vis),
+            ('}', Category::System, Visibility::Remembered)
+        );
+    }
+
+    /// §11.5a: a door's **position** is geometry but its open/closed pose is live
+    /// state — out of the FOV a panel draws canonically closed, *even after the
+    /// player has seen it open*. Memory holds contents, never state.
+    #[test]
+    fn a_doors_pose_is_live_state_never_remembered() {
+        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        layout.place(Cell::new(10, 14), Terrain::DoorPanelOpen);
+        let mut s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+
+        // Out of the FOV: the actually-open panel draws in its closed pose.
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.fg, cell.vis),
+            ('+', Category::System, Visibility::Dimmed),
+            "an unseen door always shows the canonical closed pose"
+        );
+
+        // In the FOV: the true, live pose — open, blank.
+        s.step(Input::Step(Direction::South));
+        let cell = render(&s).get(10, 14);
+        assert_eq!((cell.glyph, cell.vis), (' ', Visibility::Live));
+
+        // Look away again: back to the closed pose, not a remembered open one —
+        // the cell is in tile memory now, but a pose is not a content.
+        s.step(Input::Step(Direction::North));
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.vis),
+            ('+', Visibility::Dimmed),
+            "door state is never remembered (§11.5a)"
+        );
     }
 }

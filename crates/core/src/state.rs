@@ -196,6 +196,12 @@ pub struct State {
     facing: Direction,
     /// The player's field of view, recomputed every sight phase (§4.2/§6).
     player_fov: VisibleSet,
+    /// Tile memory (§11.5a): the running union of every FOV the player has ever
+    /// had, absorbed each sight phase. Monotonic — a cell once seen stays seen for
+    /// the whole run — and deterministic, since it is derived purely from the FOV
+    /// sequence. The fog renderer reads it to decide which *contents* are
+    /// remembered; live state never consults it (§11.5a keeps those apart).
+    memory: VisibleSet,
     /// Whether the last spent turn was a Wait — which widens the next sight
     /// computation to the full 360° (§8.3).
     waited: bool,
@@ -238,6 +244,7 @@ impl State {
             player,
             facing,
             player_fov: VisibleSet::default(),
+            memory: VisibleSet::default(),
             waited: false,
             guards,
             objectives,
@@ -267,10 +274,20 @@ impl State {
 
     /// The player's field of view (§6): the ~180° forward half-disc, or the full
     /// 360° on a turn spent waiting — the only way to see behind you (§8.3). What is
-    /// in it renders lit and what is not renders dimmed (§11.5); the render ticket
-    /// reads this set, and fog memory (§11.5a) will feed from it.
+    /// in it renders lit and what is not renders dimmed (§11.5); the renderer
+    /// reads this set for the live layer, and tile memory
+    /// ([`memory`](Self::memory)) accumulates from it.
     pub fn player_fov(&self) -> &VisibleSet {
         &self.player_fov
+    }
+
+    /// The player's tile memory (§11.5a): every cell that has *ever* been inside
+    /// their FOV this run, accumulated each sight phase and never forgotten. The
+    /// fog renderer reads it to draw remembered contents — intel, hideouts —
+    /// distinct from live and never-seen; live state (guards, door open/closed)
+    /// deliberately never consults it, so nothing transient is ever "remembered".
+    pub fn memory(&self) -> &VisibleSet {
+        &self.memory
     }
 
     /// Whether the player is concealed — standing inside a hideout (§10.3).
@@ -465,6 +482,9 @@ impl State {
         };
         self.player_fov =
             field_of_view(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE);
+        // Tile memory (§11.5a) accumulates here, in the same phase that produced
+        // the sight — every cell the player can see now is remembered forever.
+        self.memory.absorb(&self.player_fov);
         for guard in &mut self.guards {
             guard.fov = field_of_view(
                 facility,
@@ -1004,6 +1024,26 @@ mod tests {
         );
     }
 
+    /// §11.5a: tile memory is the running union of every FOV the player has had —
+    /// seeded by the startup turn, grown each sight phase, and never forgetting a
+    /// cell that has since fallen out of view. It is derived purely from the FOV
+    /// sequence, so it is as deterministic as the loop itself.
+    #[test]
+    fn tile_memory_accumulates_and_never_forgets() {
+        let mut s = solo(Cell::new(5, 5)); // facing north
+        let ahead = Cell::new(5, 3);
+        assert!(s.player_fov().contains(ahead));
+        assert!(s.memory().contains(ahead), "the startup turn seeds memory");
+
+        // Turn around: (5,3) falls out of the FOV but stays in memory.
+        s.step(Input::Step(Direction::South)); // to (5,6), facing south
+        assert!(
+            !s.player_fov().contains(ahead),
+            "now behind, out of the FOV"
+        );
+        assert!(s.memory().contains(ahead), "memory keeps what the FOV lost");
+    }
+
     /// §4.2's design note, honoured: there is **no one-turn sensory lag**. The sight
     /// phase runs after the player's move, so the stored FOV is always from the
     /// player's current position and facing.
@@ -1099,6 +1139,7 @@ mod tests {
                 s.objectives_remaining(),
                 s.guards()[0].pos(),
                 s.player_fov().clone(),
+                s.memory().clone(),
             )
         };
 
