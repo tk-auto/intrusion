@@ -11,8 +11,9 @@
 //! This module carries §10.1 steps 1–6: the partition (steps 1–3), doorways
 //! (step 4), room features (step 5) and the hideout board (step 6), plus the
 //! §10.1a sightline-cover pass between doorways and hideouts. Entity
-//! placement — entry/exit, objectives, guards (steps 7–9) — lands in its own ticket
-//! and writes into the same [`RegionGraph`] this produces.
+//! placement — entry/exit, objectives, guards (steps 7–9) — lives in
+//! [`crate::place`] and reads the [`RegionGraph`] this produces;
+//! [`generate_level`] runs both under one seed-retry loop.
 //!
 //! # Connectivity is by construction, not by luck
 //!
@@ -42,6 +43,7 @@
 
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
+use crate::place::{place, LevelConfig, Placement};
 use crate::region::{RegionGraph, RegionId, RegionKind};
 use crate::rng::Rng;
 use std::collections::HashSet;
@@ -196,6 +198,35 @@ impl Layout {
 /// partitioned at all — no amount of redrawing fixes geometry.
 pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenError> {
     generate_where(width, height, rng, passes_guarantees)
+}
+
+/// Generate a *placed* level: a carve passing every §10.6 guarantee **and** a
+/// [`Placement`] honouring §10.1 steps 7–9 with the spacing guarantees — exact
+/// piece counts, a safe starting area, spread intel, and post-placement
+/// solvability (start → every objective → exit).
+///
+/// This is the entry point real levels come from. Carve rejection (#13) and
+/// placement rejection (#12) share this one seed-retry loop, as §10.6 asks: a
+/// carve whose geometry cannot seat the pieces is redrawn exactly like a carve
+/// that sealed a room, from the same `rng` stream (§12.4 — same seed, same level,
+/// forever), and a config that can never place errors out loudly with
+/// [`GenError::RetriesExhausted`] instead of shipping a silent shortfall.
+pub fn generate_level(
+    config: &LevelConfig,
+    rng: &mut Rng,
+) -> Result<(Layout, Placement), GenError> {
+    for _ in 0..MAX_GEN_ATTEMPTS {
+        let layout = generate_once(config.width, config.height, rng)?;
+        if !passes_guarantees(&layout) {
+            continue;
+        }
+        if let Some(placement) = place(&layout, config, rng) {
+            return Ok((layout, placement));
+        }
+    }
+    Err(GenError::RetriesExhausted {
+        attempts: MAX_GEN_ATTEMPTS,
+    })
 }
 
 /// The reject-and-redraw loop behind [`generate`], with the guarantee check as a
@@ -1045,10 +1076,12 @@ fn chebyshev(a: Cell, b: Cell) -> u32 {
 }
 
 /// A deterministic in-place Fisher–Yates shuffle driven by the run `Rng` (§12.4).
-fn shuffle(cells: &mut [Cell], rng: &mut Rng) {
-    for i in (1..cells.len()).rev() {
+/// Shared with placement (`crate::place`), which shuffles rooms and candidate
+/// cells from the same stream.
+pub(crate) fn shuffle<T>(items: &mut [T], rng: &mut Rng) {
+    for i in (1..items.len()).rev() {
         let j = rng.below((i + 1) as u32) as usize;
-        cells.swap(i, j);
+        items.swap(i, j);
     }
 }
 

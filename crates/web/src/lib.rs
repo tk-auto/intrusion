@@ -20,14 +20,16 @@
 //! change recomputes and redraws. A player-*centred* viewport (§11.4), fog (§11.5a),
 //! the danger overlay (§11.5), and explicit hotkeys (§11.6) are later render tickets;
 //! the full colour-blind-safe palette (§11.2) refines the placeholder table below.
-//! Placement here (a floor-cell scan) is a preview harness; real placement is
-//! generation's job (§10.1).
+//! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
+//! and player in the largest room, intel spread across rooms, guards seated where
+//! none eyes the spawn on turn one. The guards stand still until the guard-AI
+//! tickets give them patrols; the shell just instantiates what placement chose.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    generate, render, Category, Cell, Direction, Facility, Grid, Guard, Input, Rng, State, Terrain,
+    generate_level, render, Category, Direction, Grid, Guard, Input, LevelConfig, Rng, State,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -75,27 +77,25 @@ fn category_color(category: Category) -> &'static str {
 #[wasm_bindgen]
 pub fn start() -> Result<(), JsValue> {
     let seed = js_sys::Date::now() as u64;
-    let layout = generate(40, 40, &mut Rng::new(seed))
+    // The full v1 level (§10.2): a carve passing every §10.6 guarantee, with the
+    // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards are
+    // stationary until the guard-AI tickets land patrols.
+    let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(seed))
         .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
-
-    // Preview placement: player at the first floor cell, exit at the last, and a
-    // couple of stationary guards for the picture. Real placement — safe start,
-    // spread objectives, real patrols — is generation's job (§10.1.7–9, #12).
-    let floors = floor_cells(layout.facility());
-    let &spawn = floors
-        .first()
-        .ok_or_else(|| JsValue::from_str("no floor"))?;
-    let &exit = floors.last().unwrap();
-    let guards = floors
+    let guards = placement
+        .guards()
         .iter()
-        .skip(floors.len() / 3)
-        .step_by(floors.len().max(1) / 2 + 1)
-        .filter(|&&c| c != spawn && c != exit)
-        .take(2)
         .map(|&c| Guard::stationary(c))
         .collect();
 
-    let state = State::new(layout, spawn, Direction::North, guards, Vec::new(), exit);
+    let state = State::new(
+        layout,
+        placement.player(),
+        Direction::North,
+        guards,
+        placement.intel().iter().copied(),
+        placement.exit(),
+    );
 
     let document = web_sys::window()
         .and_then(|w| w.document())
@@ -259,20 +259,6 @@ fn tap_input(x: f64, y: f64, w: f64, h: f64) -> Option<Input> {
 /// browser gives one.
 fn viewport(win: &Window, get: fn(&Window) -> Result<JsValue, JsValue>) -> Option<f64> {
     get(win).ok().and_then(|v| v.as_f64())
-}
-
-/// Every interior floor cell, row-major — the shell's stand-in for placement until
-/// generation does it (§10.1). Border and structure are skipped; only walkable floor.
-fn floor_cells(f: &Facility) -> Vec<Cell> {
-    let mut cells = Vec::new();
-    for y in 0..f.height() {
-        for x in 0..f.width() {
-            if f.terrain_at(x, y) == Some(Terrain::Floor) {
-                cells.push(Cell::new(x, y));
-            }
-        }
-    }
-    cells
 }
 
 /// Create the canvas, mount it, and hand it back. Its size is set later by
