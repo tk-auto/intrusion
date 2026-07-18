@@ -73,6 +73,23 @@ impl VisibleSet {
         }
     }
 
+    /// Fold another set's seen cells into this one — the accumulation step of the
+    /// player's tile memory (§11.5a): memory is the running union of every FOV the
+    /// sight phase has produced, so it only ever grows. A default (empty)
+    /// accumulator adopts the other set's grid; after that both must cover the
+    /// same grid, which they do by construction — every set comes from the one
+    /// facility.
+    pub(crate) fn absorb(&mut self, other: &VisibleSet) {
+        if self.seen.is_empty() {
+            *self = other.clone();
+            return;
+        }
+        debug_assert_eq!((self.width, self.height), (other.width, other.height));
+        for (mine, theirs) in self.seen.iter_mut().zip(&other.seen) {
+            *mine |= *theirs;
+        }
+    }
+
     /// Whether the viewer sees `cell`. Anything off the grid is unseen.
     pub fn contains(&self, cell: Cell) -> bool {
         cell.x < self.width

@@ -17,9 +17,13 @@
 //! every input redraws. The **whole level is always visible with no scrolling**, on desktop and
 //! mobile alike: the canvas is scaled to fit the viewport (aspect preserved) and its
 //! backing store is sized in device pixels so glyphs stay crisp; a resize/orientation
-//! change recomputes and redraws. A player-*centred* viewport (§11.4), fog (§11.5a),
-//! the danger overlay (§11.5), and explicit hotkeys (§11.6) are later render tickets;
-//! the full colour-blind-safe palette (§11.2) refines the placeholder table below.
+//! change recomputes and redraws. The grid arrives already fogged (§11.5a — the core
+//! draws geometry always, contents once seen, live state only in the player's FOV);
+//! this shell's one addition is the *remembered* styling, a muted slate distinct
+//! from the live category colours. A player-*centred* viewport (§11.4), the FOV
+//! dimming and danger overlay (§11.5), and explicit hotkeys (§11.6) are later render
+//! tickets; the full colour-blind-safe palette (§11.2) refines the placeholder
+//! table below.
 //! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
 //! and player in the largest room, intel spread across rooms, guards seated where
 //! none eyes the spawn on turn one. The guards stand still until the guard-AI
@@ -30,6 +34,7 @@ use std::rc::Rc;
 
 use intrusion_core::{
     generate_level, render, Category, Direction, Grid, Guard, Input, LevelConfig, Rng, State,
+    Visibility,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -44,6 +49,13 @@ const CELL_H: f64 = 20.0;
 
 /// The page background.
 const BG: &str = "#0b0b0b";
+
+/// The **remembered** styling (§11.5a): contents known only from tile memory draw
+/// in this muted slate instead of their category colour, so memory reads as memory
+/// — visibly distinct from anything live (asserted below, with the categories).
+/// Ticket #16's §11.5 dimming supplies the third styling (dark-gray out-of-FOV
+/// geometry); the §11.2 palette ticket refines all of it.
+const MEMORY_COLOR: &str = "#667a8a";
 
 /// Map an information category (§11.2) to a concrete colour — **the shell's one and
 /// only rendering decision**. The core tags each cell with a [`Category`]; this table
@@ -354,7 +366,14 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
             if cell.glyph == ' ' {
                 continue;
             }
-            ctx.set_fill_style_str(category_color(cell.fg));
+            let color = match cell.vis {
+                // Remembered contents read as memory, not as the live thing (§11.5a).
+                Visibility::Remembered => MEMORY_COLOR,
+                // The §11.5 dimmed styling for out-of-FOV geometry is ticket #16;
+                // until it lands, dimmed draws like live.
+                Visibility::Live | Visibility::Dimmed => category_color(cell.fg),
+            };
+            ctx.set_fill_style_str(color);
             draw_char(ctx, x as f64, y as f64, cell.glyph, m);
         }
     }
@@ -483,6 +502,16 @@ mod tests {
                     "{a:?} and {b:?} are too close to tell apart (dist^2 {d} < {MIN_DIST2})"
                 );
             }
+        }
+        // The §11.5a remembered styling must stand apart from every live category —
+        // memory that could be mistaken for a live glyph would defeat the three
+        // visual states the design demands.
+        for &c in &categories {
+            let d = dist2(rgb(MEMORY_COLOR), rgb(category_color(c)));
+            assert!(
+                d >= MIN_DIST2,
+                "the remembered colour is too close to {c:?} (dist^2 {d} < {MIN_DIST2})"
+            );
         }
     }
 }
