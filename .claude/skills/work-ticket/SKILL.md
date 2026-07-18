@@ -124,9 +124,31 @@ branch:
 - Link the PR back on the issue if useful; don't over-comment.
 
 Report the branch, the gate result, and the PR URL to the user, then move
-straight to watching CI (step 8).
+straight to validating the build (step 8) and watching CI (step 9).
 
-## 8. Merge once CI is green
+## 8. Validate player-visible changes with an artifact build
+
+If the PR touches anything a player would see or feel — `crates/core` logic or
+rendering, `crates/web`, `web/` — **validate it in a real browser before it can
+merge**, using the **artifact-build skill** on the PR branch: build the wasm
+bundle, assemble the single-file page, run the headless smoke check, read the
+screenshots, and publish/refresh the artifact.
+
+- **A failed smoke check is a red gate.** The unit tests can be green while the
+  page won't boot (a wasm-bindgen mismatch, a DOM regression, a blank canvas).
+  Fix on the branch and push — do not merge a build you haven't watched run.
+- **Hand the artifact URL back alongside the PR URL**, noting which branch the
+  snapshot is of, so the user can play the change while CI runs.
+- **For key changes, hold the merge for the user's playtest.** A change is
+  *key* when its worth can only be judged by feel — game balance, guard
+  behaviour, input handling, generation character, anything touching a
+  `[SETTLED]` rule or tuning `[START]` numbers. For those, the headless check
+  only proves it runs; say you're holding for their verdict on the artifact and
+  leave the PR open. Mechanical changes (refactors, scaffolding, pure-core
+  logic pinned by tests) don't need to wait.
+- Purely internal PRs (docs, CI, sim-only, test-only) skip this step.
+
+## 9. Merge once CI is green
 
 A finished ticket ends **merged**, not just in an open PR. **Do NOT use GitHub
 auto-merge** (`enable_pr_auto_merge`) — merge deliberately, after *watching* CI
@@ -159,6 +181,8 @@ go green:
 - **The user asked to review** it, in this session or the ticket ("let me look
   first", "don't merge yet", "open it for review"). Their word overrides the
   default.
+- **Step 8 flagged it as key** — the artifact is published but the user hasn't
+  ruled on it yet, or the smoke check is still red.
 - **You are unsure.** The change is risky, you couldn't fully verify it (e.g. a
   browser-only render you can't exercise headlessly), it bends a `[SETTLED]` rule,
   it tunes `[START]` numbers you're not confident in, or the ticket was ambiguous.
