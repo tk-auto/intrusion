@@ -110,12 +110,18 @@ pub struct Guard {
     fov: VisibleSet,
 }
 
+/// Every guard looks **south** at spawn (§7.1). One definition, shared by the
+/// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
+/// if the spawn facing ever changes, the "no guard eyes the player's spawn"
+/// guarantee moves with it instead of silently lying.
+pub(crate) const GUARD_INITIAL_FACING: Direction = Direction::South;
+
 impl Guard {
     /// A guard that holds its cell — no patrol.
     pub fn stationary(pos: Cell) -> Self {
         Self {
             pos,
-            facing: Direction::South, // initial facing is south (§7.1)
+            facing: GUARD_INITIAL_FACING,
             route: Vec::new(),
             step: 0,
             fov: VisibleSet::default(),
@@ -126,7 +132,7 @@ impl Guard {
     pub fn patrolling(pos: Cell, route: Vec<Direction>) -> Self {
         Self {
             pos,
-            facing: Direction::South, // initial facing is south (§7.1)
+            facing: GUARD_INITIAL_FACING,
             route,
             step: 0,
             fov: VisibleSet::default(),
