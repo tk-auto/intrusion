@@ -404,7 +404,7 @@ corridor; rooms ≥6×6, ≤~12; **a path exists start → every objective → e
 
 ## v1 — C. Vision (§6)
 
-### C1 — Shadowcast FOV: facing cone + 360° touching ring
+### C1 — Shadowcast FOV: facing cone + 360° touching ring → #41
 **Labels:** `area:vision` `type:feature` `size:M`
 **Milestone:** v1
 
@@ -1218,7 +1218,7 @@ then render it (#16, filed), on top of the colour table's dim variants (#15, fil
 
 **One new issue to file** — C1 above, with these repo-current notes folded in:
 
-### C1 — Shadowcast FOV: facing cone + 360° touching ring *(to file)*
+### C1 — Shadowcast FOV: facing cone + 360° touching ring → #41
 **Labels:** `area:vision` `type:feature` `size:M`
 **Milestone:** v1
 
@@ -1238,7 +1238,7 @@ Body: as drafted in section C above, plus:
 
 | Order | Issue | Role in the goal |
 |---|---|---|
-| 1 | **C1 (new)** | Compute the visible set. Everything else reads it. |
+| 1 | **#41 (C1)** | Compute the visible set. Everything else reads it. |
 | 2 | **#15** — colour category system | The "coloured" half: full-range palette **and the darkened/desaturated dim variants** the out-of-FOV state needs. Partially landed (#38 separated the categories); the dim variant table is the remaining piece. |
 | 3 | **#16** — FOV rendering + danger overlay + floor dots | The ask itself: in-FOV full colour, out-of-FOV dark gray, floor dots so the boundary reads on open ground. The guard danger-overlay half can ship against C1's guard cones; the two-shades-of-red zoning waits for D3 (unfiled), as the issue already notes. |
 | 4 | **#17** — fog and tile memory | Companion, not blocker: the three-state memory (never-seen / remembered / live) that makes what the dimming *means* honest. Can follow #16. |
