@@ -1199,3 +1199,49 @@ scaffolding around the one question v1 exists to answer:
 Every `[START]` number above is a latent `type:tuning` ticket (§12 is the machinery
 for changing them). Not filing the tuning surface up front — file the feature, note
 the numbers, tune under playtest.
+
+---
+
+# Batch — player FOV interpretability (2026-07-18)
+
+**Goal:** make the player's field of view readable at a glance — what the player
+can see renders **lit and fully coloured**; what they cannot renders **darkened and
+desaturated** (dim but legible, §11.5), with the FOV edge visible even across open
+floor.
+
+**State of the repo today:** the renderer lives in core behind one interface
+(#14/#37), colours are category-driven (`category.rs`), and the web shell draws the
+grid. But **no FOV exists anywhere** — the turn loop's sight phase is an explicit
+stub (`state.rs:398`), guards are scripted walkers with no cones, and `render()`
+paints every cell at full colour. The path is: compute the FOV (C1, never filed),
+then render it (#16, filed), on top of the colour table's dim variants (#15, filed).
+
+**One new issue to file** — C1 above, with these repo-current notes folded in:
+
+### C1 — Shadowcast FOV: facing cone + 360° touching ring *(to file)*
+**Labels:** `area:vision` `type:feature` `size:M`
+**Milestone:** v1
+
+Body: as drafted in section C above, plus:
+
+- The sight phase hook already exists in `State::step` (phase 2 of §4.2) — this
+  ticket replaces the stub, storing the player's visible set in `State` where
+  `render()` (#16) and the guard AI (D-series, unfiled) will read it.
+- Guards today are scripted (`Guard::stationary`/`patrolling`, no state machine).
+  Compute their cones with the same function (R10/arc2) so #16's danger overlay
+  and the future D-series read the same data, but guard *reactions* to sight stay
+  out of scope — that's D1.
+- Wait already exists as an `Input`; wire it to arc 5 (360°) here since the FOV
+  function is what interprets it.
+
+**Already filed — the rest of this batch, in order:**
+
+| Order | Issue | Role in the goal |
+|---|---|---|
+| 1 | **C1 (new)** | Compute the visible set. Everything else reads it. |
+| 2 | **#15** — colour category system | The "coloured" half: full-range palette **and the darkened/desaturated dim variants** the out-of-FOV state needs. Partially landed (#38 separated the categories); the dim variant table is the remaining piece. |
+| 3 | **#16** — FOV rendering + danger overlay + floor dots | The ask itself: in-FOV full colour, out-of-FOV dark gray, floor dots so the boundary reads on open ground. The guard danger-overlay half can ship against C1's guard cones; the two-shades-of-red zoning waits for D3 (unfiled), as the issue already notes. |
+| 4 | **#17** — fog and tile memory | Companion, not blocker: the three-state memory (never-seen / remembered / live) that makes what the dimming *means* honest. Can follow #16. |
+
+No other new issues needed — #16/#17/#15 already cover the render side; filing
+duplicates would split the discussion.
