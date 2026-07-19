@@ -833,6 +833,10 @@ is unclear and probably wants play evidence first.
 | Intel | **3** **[START]** |
 | Exit rule | All intel required |
 
+Size is **screen-bound**: the whole level renders on screen with no camera
+(§11.4 **[SETTLED]**), so it cannot outgrow what one screen shows legibly. The
+scale axis beyond a screen is more stories (§14 Later), not a bigger grid.
+
 Room count emerges from the partition constants and is bounded at roughly **12**
 regardless of map size — the partition loop budget caps it. Note that a 20×20
 level supports at most ~4 rooms, and **below 18×18 no partition is possible at
@@ -1021,7 +1025,7 @@ one-table edit.
 **The guard glyph is re-categorised every turn from its own state**, so the player
 reads the AI state machine directly off the colour of `g`. Yellow → orange → red
 *is* the guard's mind, visible. Message colour uses the same table, so a red
-message bar and a red `g` reinforce. Keep all of this.
+near line (§11.4) and a red `g` reinforce. Keep all of this.
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant.
@@ -1056,36 +1060,59 @@ last-writer-wins, so a guard in a doorway rendered arbitrarily. Define the order
 
 ### 11.4 Layout
 
+**[SETTLED]** — **the whole level on screen, no camera, no scrolling.** The
+screen *is* the board. The danger overlay (§11.5) only earns its "the lose
+condition, painted" title when the player can see all of it at once; a scrolled
+map hides exactly the threats a plan needs to account for, and demands camera
+math, off-screen threat indicators, and scroll handling in exchange. The level
+is therefore **screen-bound**: it cannot outgrow what one screen shows legibly.
+The scale axis beyond that is **more stories, not a bigger grid** — multi-story
+facilities (stairs, elevators, one story per screen) are parked in the §14
+backlog until a single screen-bound story proves fun.
+
 ```
-┌─ map viewport: camera always centred on the player ────────────┬─ abilities ─┐
-│                                                                │             │
-│              ##################                                │ Wait        │
-│              #                #        ####                    │             │
-│              #    $           +        #  #                    │ Run         │
-│              #                #        #} #                    │             │
-│              ##########×#######        ####                    │ Takedown    │
-│                                                                │             │
-│                        g                                       │ Camo /3/    │
-│           ##############        #########                      │             │
-│           #            #        #       #                      │ Decoy       │
-│           #      @     ×        +   g   #                      │             │
-│           #            #        #       #                      │ Dephase [2] │
-│           ##############        #########                      │             │
-│                                                                │             │
-│                            E                                   │             │
-├────────────────────────────────────────────────────────────────┴─────────────┤
-│ You collect some intel                                                       │
-└──────────────────────────────────────────────────────────────────────────────┘
-  ↑ message bar: full width, solid band coloured by message category
+┌─ map: the whole story, fixed ──────────────────────────────┐
+│    ################                                        │
+│    #              #        ####                            │
+│    #    $         +        #  #                            │
+│    #              #        #} #                            │
+│    ##########×#####        ####                            │
+│                                                            │
+│              g                                             │
+│    ##############        #########                         │
+│    #            #        #       #                         │
+│    #      @     ×        +   g   #                         │
+│    #            #        #       #                         │
+│    ##############        #########                         │
+│                       E                                    │
+├────────────────────────────────────────────────────────────┤
+│ Radio chatter, north                                       │ ← near line
+│ door: open                                                 │ ← usable line
+└────────────────────────────────────────────────────────────┘
 ```
 
-- **Map viewport**: camera always centred on the player.
-- **Abilities column**: fixed **14** columns, right-anchored. Label format:
-  `Name` (ready, white) / `Name [3]` (active, blue, 3 turns left) / `Name /2/`
-  (cooling, dark gray) / `Name` (unusable, dark gray).
-- **Message bar**: the bottom row, always a **solid band in the message's category
-  colour**. Threat reads as a colour flash across the bottom of the screen,
-  legible without reading the words. That's a nice piece of design — keep it.
+- **Map**: the full story, statically fitted to the screen (scaled, aspect
+  preserved). No camera.
+- **Near line** — *what is around you*: the highest-priority live message
+  (§11.7) — guard caution, radio chatter, an alert change, intel collected —
+  drawn as a **solid band in the message's category colour**. Threat reads as a
+  colour flash across the bottom of the screen, legible without reading the
+  words; that's a nice piece of design — keep it. When no message is live, the
+  line falls back to quiet **ambient status** (alert level, an active ability's
+  remaining turns) instead of sitting empty.
+- **Usable line** — *what you can act on*: the bump affordances adjacent to the
+  player right now (`console: collect intel`, `door: open`, `guard: takedown`,
+  `cupboard: hide`). Not a message — a **pure derived function of state**,
+  recomputed every frame, no plumbing. Empty when nothing is adjacent.
+
+**No ability column.** The old fixed 14-column list spent a seventh of the
+screen on information consulted once a minute. Ability state (ready / active
+`[3]` / cooling `/2/` / unusable) must stay *discoverable*, but where it lives
+is **[OPEN]** — first experiment: **show the ability list while waiting**
+(peeking costs a turn, which is exactly the §2.3 "cost is load-bearing"
+principle applied to UI); alternatives: a toggle key, or a strip that appears
+only while something is active or cooling. Whatever wins, hotkeys stay explicit
+and stable (§11.6) — never dependent on a visible list.
 
 ### 11.5 Field of view and the danger overlay
 
@@ -1179,16 +1206,21 @@ inescapable. Either build touch properly or don't ship the manifest. **[OPEN]**
 
 ### 11.7 Messages
 
+Messages feed the **near line** (§11.4). The usable line is *not* part of this
+system — it is derived from adjacency every frame and carries no state.
+
 - Messages carry a **category**, a **priority**, and optionally a **source cell**.
-- The bar shows only the **highest-priority** message.
+- The near line shows only the **highest-priority** live message.
 - **Messages clear on the player's next action** — a status line, not a
-  scrollback. **[START]** — the old TODO wanted an expandable log, and with sound
+  scrollback — falling back to the ambient status of §11.4, never to an empty
+  row. **[START]** — the old TODO wanted an expandable log, and with sound
   and radio pings there is much more to say, so this probably needs to grow.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
 
 Priority ladder **[START]**: routine self-narration ≤ 0; guard threat escalates
-2 → 4 → 10; objective feedback dominates at 20.
+2 → 4 → 10; objective feedback dominates at 20; ambient status sits below
+everything (it is the floor, not a message).
 
 ---
 
@@ -1344,7 +1376,7 @@ Included:
 - **Working sound** (§9)
 - Innate abilities + the starting tech set
 - Takedowns, bodies, dragging, hiding
-- The character grid, danger overlay, ability column, message bar
+- The character grid, danger overlay, the near + usable status lines (§11.4)
 - **Visible layout / hidden contents, with tile memory (§11.5a)**
 - Seeded determinism + seed sharing
 - Native test suite + golden grid tests
@@ -1412,6 +1444,11 @@ Deliberately parked. Each is an experiment for the loop in §13, not a commitmen
 - In-level lore
 - Ability upgrade trees
 - Low walls / vaulting *(partial cover itself shipped as the §10.3 table)*
+- **Multi-story facilities** — stairs and elevators, each story contained on one
+  screen (§11.4). The scale axis once a single screen-bound story is fun. The
+  §10.6 solvability flood must then span stories (start → every objective → exit
+  *through* the stairs); elevators are the interesting object — a chokepoint, a
+  noise source, maybe a door that moves.
 - Tiles
 
 ---
@@ -1457,3 +1494,8 @@ default.
    danger overlay.
 8. **Touch.** A real target, or drop the manifest? Half-built touch is worse than
    none — the old version could trap a touch user in a dialog they couldn't close.
+9. **Where does ability state live on screen?** (§11.4) The fixed column is gone.
+   Show-on-wait (peeking costs a turn) is the first experiment; a toggle key and
+   an only-while-active strip are the alternatives. Constraints: ready / active /
+   cooling must stay discoverable, and hotkeys (§11.6) must never depend on a
+   visible list.
