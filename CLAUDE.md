@@ -1,5 +1,11 @@
 # CLAUDE.md — session conventions for this repo
 
+## Language
+
+Instructions may be given in French. Regardless of the language of the
+request, all replies, commit messages, code, comments, and other written
+work must be in English.
+
 ## Waiting on external state: basic monitors only
 
 **Never use the Claude Code Remote MCP tools** — no `subscribe_pr_activity`,
