@@ -28,11 +28,19 @@ Take one GitHub issue from idea to a pushed, reviewable PR. This skill owns the
    is the contract; `[SETTLED]` rules are non-negotiable, `[START]` numbers may be
    tuned with justification recorded in the PR.
 
-## 2. Branch
+## 2. Branch — always start from fresh `main`
 
-One branch per ticket, off the current default branch. **The branch name must
-say what the change is about** — `<type>/<issue-number>-<slug>`, where the slug
-is a short, human-readable description of the work:
+**Fetch before you read, and branch from `origin/main` — never from the local
+`main` ref or whatever the session happened to have checked out.** A remote
+session's clone is a snapshot from container start and can be many merges
+stale; conclusions drawn from a stale tree (and diffs cut against one) are
+wrong in ways that only surface at merge time. So the *first* git action of a
+ticket, before studying any code, is the fetch; if it moved `main`, re-read
+anything you had already looked at.
+
+One branch per ticket, off freshly fetched `origin/main`. **The branch name
+must say what the change is about** — `<type>/<issue-number>-<slug>`, where the
+slug is a short, human-readable description of the work:
 
 ```
 git fetch origin main
