@@ -72,6 +72,12 @@ pub enum Event {
     /// occupy the cupboard and are concealed. Climbing back out is an ordinary
     /// [`Event::Moved`] off the cell.
     EnteredHideout { at: Cell },
+    /// The player spent a turn waiting beside partial cover and ducked behind it
+    /// (§10.3): they are now crouched, concealed from any viewer whose line of
+    /// sight crosses the table at `behind`. Reported only when the crouch
+    /// *engages* — waiting on while already crouched repeats nothing. Standing up
+    /// is any spent step, no special event.
+    Crouched { behind: Cell },
     /// The player opened a closed door by bumping a panel (§4.3, §10.4).
     DoorOpened { at: Cell },
     /// The player took the intel at a console; `remaining` objectives are still out.
@@ -94,8 +100,9 @@ impl Event {
             // Routine self-narration: inert facts about scenery and your own steps.
             Event::Moved { .. } | Event::Bumped { .. } => Category::Neutral,
             // Things you made — including making yourself hidden (§10.3: the
-            // occupied cupboard recolours to Owned; its message matches).
-            Event::EnteredHideout { .. } => Category::Owned,
+            // occupied cupboard and the covering table recolour to Owned; their
+            // messages match).
+            Event::EnteredHideout { .. } | Event::Crouched { .. } => Category::Owned,
             // Neutral furniture doing furniture things (§10.4).
             Event::DoorOpened { .. } => Category::System,
             // Goals and rewards — including the exit talking about the goal it
@@ -282,8 +289,10 @@ pub struct State {
     /// sequence. The fog renderer reads it to decide which *contents* are
     /// remembered; live state never consults it (§11.5a keeps those apart).
     memory: VisibleSet,
-    /// Whether the last spent turn was a Wait — which widens the next sight
-    /// computation to the full 360° (§8.3).
+    /// Whether the last **spent** turn was a Wait — which widens the next sight
+    /// computation to the full 360° (§8.3) and, beside partial cover, is the
+    /// crouch ([`crouched`](Self::crouched)). A free action (a wall bump) spends
+    /// nothing and changes nothing (§4.4), so it does not clear this.
     waited: bool,
     guards: Vec<Guard>,
     objectives: Vec<Objective>,
@@ -383,6 +392,72 @@ impl State {
         self.layout.facility().terrain(self.player) == Some(Terrain::Hideout)
     }
 
+    /// Whether the player is **crouched** behind partial cover (§10.3): the last
+    /// spent turn was a Wait and a table is orthogonally adjacent. Like
+    /// [`hidden`](Self::hidden) it is *derived*, never stored, so it cannot
+    /// desync: any spent step stands the player up, and there is no crouch away
+    /// from cover. Crouching is weaker than the cupboard — concealment is
+    /// directional, per-viewer ([`concealed_from`](Self::concealed_from)) — and
+    /// it is not contact-safe: a guard walking into a crouched player still
+    /// captures (§4.5).
+    pub fn crouched(&self) -> bool {
+        self.waited && self.adjacent_cover().next().is_some()
+    }
+
+    /// The partial-cover cells orthogonally adjacent to the player, in
+    /// [`Direction::ALL`] order — the tables a crouch ducks behind. The renderer
+    /// reads these to recolour the covering table to Owned while crouched.
+    pub(crate) fn adjacent_cover(&self) -> impl Iterator<Item = Cell> + '_ {
+        Direction::ALL
+            .into_iter()
+            .filter_map(|dir| self.player.step(dir))
+            .filter(|&c| {
+                self.layout
+                    .facility()
+                    .terrain(c)
+                    .is_some_and(|t| t.provides_cover())
+            })
+    }
+
+    /// Whether the player is concealed from a viewer standing at `viewer` — the
+    /// per-viewer concealment query the guard AI's detection will AND in and the
+    /// danger overlay already honours (§11.5: the overlay must not claim the
+    /// player is seen while they are not).
+    ///
+    /// Two ways to be concealed:
+    /// - **In a cupboard** ([`hidden`](Self::hidden)): omnidirectional — no
+    ///   viewer anywhere detects the player (§10.3).
+    /// - **Crouched behind cover** ([`crouched`](Self::crouched)): directional —
+    ///   only from viewers whose line of sight crosses an adjacent table, i.e.
+    ///   viewers in the quarter-plane the table faces: the viewer's offset from
+    ///   the player leans at least as far *along* the player→table direction as
+    ///   it strays perpendicular to it (a viewer exactly on the 45° diagonal
+    ///   grazes the table's corner and still counts). Integer arithmetic
+    ///   throughout, so it is exactly deterministic (§12.4).
+    ///
+    /// Concealment is not cover from *contact*: a guard can still walk into a
+    /// crouched player and capture (§4.5). And it composes with sight, not
+    /// replaces it — a viewer that cannot see the player's cell at all needs no
+    /// concealing.
+    pub fn concealed_from(&self, viewer: Cell) -> bool {
+        if self.hidden() {
+            return true;
+        }
+        if !self.crouched() {
+            return false;
+        }
+        let (px, py) = (i64::from(self.player.x), i64::from(self.player.y));
+        let (vx, vy) = (i64::from(viewer.x) - px, i64::from(viewer.y) - py);
+        self.adjacent_cover().any(|cover| {
+            let (dx, dy) = (i64::from(cover.x) - px, i64::from(cover.y) - py);
+            // `(dx, dy)` is a unit cardinal: the viewer's components along and
+            // across the player→table direction.
+            let along = vx * dx + vy * dy;
+            let across = (vx * dy - vy * dx).abs();
+            along >= 1 && along >= across
+        })
+    }
+
     /// The guards, for rendering and tests.
     pub fn guards(&self) -> &[Guard] {
         &self.guards
@@ -436,13 +511,26 @@ impl State {
         match input {
             // Waiting is a real action: it spends the turn where you stand (§5) —
             // and buys the 360° look-around the coming sight phase grants (§8.3).
+            // Beside partial cover it is also the crouch (§10.3): the duck is
+            // automatic, reported once when it engages.
             Input::Wait => {
+                let already_crouched = self.crouched();
                 self.waited = true;
+                if !already_crouched {
+                    if let Some(behind) = self.adjacent_cover().next() {
+                        events.push(Event::Crouched { behind });
+                    }
+                }
                 true
             }
             Input::Step(dir) => {
-                self.waited = false;
-                self.resolve_step(dir, events)
+                let spent = self.resolve_step(dir, events);
+                // Only a *spent* step stands the player up / narrows the arc: a
+                // free action changes nothing, not even posture (§4.4).
+                if spent {
+                    self.waited = false;
+                }
+                spent
             }
         }
     }
@@ -1051,6 +1139,177 @@ mod tests {
         );
     }
 
+    /// §10.3: **waiting beside a table is the crouch.** The duck is automatic —
+    /// wait with partial cover adjacent and you are crouched, reported once as
+    /// the crouch engages; waiting on keeps it without repeating the event. A
+    /// table itself is solid furniture: stepping into it is a free bump, not an
+    /// interaction.
+    #[test]
+    fn waiting_beside_a_table_crouches_once() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 4), Terrain::PartialCover);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(!s.crouched(), "standing until a turn is spent waiting");
+
+        let events = s.step(Input::Wait);
+        assert_eq!(
+            events,
+            vec![Event::Crouched {
+                behind: Cell::new(5, 4)
+            }]
+        );
+        assert!(s.crouched());
+
+        // Waiting on: still crouched, no repeated event.
+        assert!(s.step(Input::Wait).is_empty());
+        assert!(s.crouched());
+
+        // Bumping the table is free and does not move the player (§4.4).
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(
+            events,
+            vec![Event::Bumped {
+                into: Cell::new(5, 4)
+            }]
+        );
+        assert_eq!(s.player(), Cell::new(4, 4));
+    }
+
+    /// §10.3: **any spent step stands the player up** — the crouch is a posture,
+    /// not a place — while a *free* action (a wall bump) changes nothing, not
+    /// even posture (§4.4): the world does not move, so neither does the crouch.
+    #[test]
+    fn a_spent_step_stands_up_but_a_free_bump_does_not() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(1, 2), Terrain::PartialCover);
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 1), // in the corner: west and north are wall
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Wait);
+        assert!(s.crouched());
+
+        // A mis-input into the wall is free: still crouched, turn unspent.
+        let turn = s.turn();
+        s.step(Input::Step(Direction::West));
+        assert_eq!(s.turn(), turn, "a wall bump is free");
+        assert!(s.crouched(), "a free action does not break the crouch");
+
+        // A real step stands up — even though the new cell is still beside cover.
+        s.step(Input::Step(Direction::East));
+        assert!(!s.crouched(), "moving stands the player up");
+    }
+
+    /// §10.3: crouch concealment is **directional** — the table covers the
+    /// quarter-plane it faces. A viewer across the cover (straight or leaning up
+    /// to the 45° diagonal) is blinded; a viewer on the flank or behind the
+    /// player is not; and without the crouch the same table conceals nothing.
+    #[test]
+    fn crouch_conceals_only_across_the_cover() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::PartialCover); // east of the player
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+
+        // Standing, the table conceals from no one.
+        assert!(!s.concealed_from(Cell::new(7, 4)));
+
+        s.step(Input::Wait);
+        assert!(s.crouched());
+        // Straight across the table, near and far: concealed.
+        assert!(s.concealed_from(Cell::new(6, 4)));
+        assert!(s.concealed_from(Cell::new(9, 4)));
+        // Leaning, within the quarter-plane (along ≥ across): concealed —
+        // including the exact 45° diagonal, which grazes the table's corner.
+        assert!(s.concealed_from(Cell::new(6, 3)));
+        assert!(s.concealed_from(Cell::new(6, 2)));
+        // Past the diagonal — the flank, the perpendicular, and behind: seen.
+        assert!(!s.concealed_from(Cell::new(5, 2)));
+        assert!(!s.concealed_from(Cell::new(4, 2)));
+        assert!(!s.concealed_from(Cell::new(2, 4)));
+    }
+
+    /// §10.3: the cupboard is the stronger hide — omnidirectional. A hidden
+    /// player is concealed from every direction, cover or none.
+    #[test]
+    fn a_hidden_player_is_concealed_from_every_direction() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(4, 4), Terrain::Hideout);
+        let s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(s.hidden());
+        for viewer in [
+            Cell::new(4, 1),
+            Cell::new(7, 4),
+            Cell::new(4, 7),
+            Cell::new(1, 4),
+            Cell::new(6, 6),
+        ] {
+            assert!(
+                s.concealed_from(viewer),
+                "hidden must conceal from {viewer:?}"
+            );
+        }
+    }
+
+    /// §4.5: the crouch hides you from *sight*, not from *contact* — unlike the
+    /// cupboard, a guard walking into a crouched player still captures. Being
+    /// unseen is not being safe.
+    #[test]
+    fn a_crouched_player_is_still_captured_by_contact() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(4, 3), Terrain::PartialCover); // cover to the north
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(6, 4), vec![Direction::West])],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert_eq!(
+            s.guards()[0].pos(),
+            Cell::new(5, 4),
+            "startup moved the guard"
+        );
+
+        // The wait crouches the player — and hands the guard its step into them.
+        let events = s.step(Input::Wait);
+        assert!(events.contains(&Event::Crouched {
+            behind: Cell::new(4, 3)
+        }));
+        assert!(
+            events.contains(&Event::Captured {
+                by: Cell::new(4, 4)
+            }),
+            "contact captures a crouched player"
+        );
+        assert_eq!(s.outcome(), Outcome::Lost);
+    }
+
     /// §4.2: the startup turn establishes sight before the first input. A freshly
     /// built [`State`] already carries the player's half-disc and every guard's cone
     /// — and a guard that has not moved is looking **south**, its initial facing
@@ -1207,6 +1466,7 @@ mod tests {
         assert_eq!(Event::Moved { to: at }.category(), Category::Neutral);
         assert_eq!(Event::Bumped { into: at }.category(), Category::Neutral);
         assert_eq!(Event::EnteredHideout { at }.category(), Category::Owned);
+        assert_eq!(Event::Crouched { behind: at }.category(), Category::Owned);
         assert_eq!(Event::DoorOpened { at }.category(), Category::System);
         assert_eq!(
             Event::IntelTaken { remaining: 1 }.category(),

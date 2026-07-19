@@ -777,24 +777,35 @@ connective tissue, the place every chase happens — got **nothing**. A 38-cell
 straight 3-wide corridor with a guard in it has no counterplay. It is not a space;
 it is a sightline.
 
-**The rule: no unbroken straight sightline longer than *L*.** **[START]** — start
-around **10–12**, i.e. roughly a guard's sight range. Longer than that and there
-is no geometry between you and being seen.
+**The rule: no straight sightline longer than *L* without counterplay in it.**
+**[START]** — *L* around **10–12**, i.e. roughly a guard's sight range. Longer
+than that and there is no geometry between you and being seen. *Counterplay* is
+either an obstruction (a wall, a closed door) **or a partial-cover table
+(§10.3)** — a table does not stop a guard's sight, but it plants the crouch in
+the middle of the straight, which is what the rule actually demands. (The rule
+was first stated as "no unbroken sightline", and the pass stamped 1-cell *wall*
+blockers — which read as floating wall noise, not a building. The table
+restatement replaced them: same assertion machinery, honest furniture.)
 
 This is a **testable property of a generated level**, not a vibe. Assert it, the
 same way reachability is asserted (§10.6):
 
-> For every cell, for each of the 4 cardinal directions, the unobstructed run
-> length is ≤ *L*.
+> For every cell, for each of the 4 cardinal directions, the run length without
+> an obstruction or a cover cell is ≤ *L*.
 
 Ways to satisfy it — all **[START]**, and worth experimenting with, which is
 exactly what §13 is for:
 
+- **Stamp tables.** *(Implemented — the current mechanism.)* A repair pass scans
+  the finished grid and stamps a partial-cover table near the middle of every
+  over-long run — rooms and corridors alike — skipping any cell that would sever
+  guard pathing or split a region; a run the pass cannot break rejects the carve
+  like a reachability failure.
 - **Jog the corridors.** Offset a corridor mid-span by a cell or two, so it bends.
   Breaks the sightline and costs nothing structurally.
 - **Give corridors features too.** The room-feature step (partition stubs, pillars)
   should run on corridors as well, sized for a 2–4 wide space: recesses, buttresses,
-  crates, a pillar that forces a 1-cell squeeze.
+  a pillar that forces a 1-cell squeeze.
 - **Cover near doors.** A door you burst through should have something to duck
   behind on the other side, or bursting through it accomplishes nothing.
 
@@ -840,6 +851,7 @@ fail**. Guard the minimum.
 | **Door panel, open** | (blank) | No | No | No | No |
 | **Hideout, empty** | `}` | **Bump** | No | Yes | No |
 | **Hideout, occupied** | `}` **(you)** | Yes | No | Yes | **Partially** |
+| **Partial cover (table)** | `π` | Yes | **No** | Yes | No |
 | **Console** | `$` | Yes | No | No | No |
 | **Exit** | `E` | Yes | No | No | No |
 | **Player** | `@` | Yes | No | No | No |
@@ -847,8 +859,27 @@ fail**. Guard the minimum.
 | **Body** | `z` | Yes | No | No | No |
 | **Decoy** | `@` | **No** | No | No | No |
 
-Vision is blocked when a cell's summed opacity reaches 1.0. No partial cover, no
-low walls, no glass. **[START]** — partial cover is an obvious future axis.
+Vision is blocked when a cell's summed opacity reaches 1.0 — opacity itself is
+still all-or-nothing, no half-shadows, no glass. **Partial cover exists as the
+table**, and its concealment is *behavioural*, not optical: sight passes over it
+freely; what it grants is the crouch (below). **[START]** — low walls / vaulting
+stay a future axis.
+
+> **The table is partial cover, and the crouch is automatic.** A table blocks
+> movement and pathing like a wall — patrols route around it, bumping it is a
+> free mis-input — but a guard sees straight over it. Spend a turn **waiting
+> beside one** (§5's wait, the same key) and you duck behind it: while crouched
+> you still see everything (your own sight is unchanged), but you are
+> **concealed from any viewer whose line of sight crosses the table** — the
+> quarter-plane the cover faces, out to the 45° diagonals. Concealment is
+> directional and per-guard: the flanks and your back are open, which is what
+> keeps a table weaker than a cupboard (omnidirectional, contact-safe) — and a
+> crouched player **can still be captured by contact** (§4.5); unseen is not
+> safe. Any spent step stands you up; a free action changes nothing, posture
+> included (§4.4). Legibility rides the same conventions as the cupboard: the
+> covering table recolours to **Owned** while it conceals you (§11.3), the
+> crouch reports itself once as an Owned message, and the §11.5 danger overlay
+> spares your cell — red under you always means *detected*.
 
 > **The hideout is a cupboard, and entering it is a decision.** You **bump** into an
 > empty cupboard to climb in (§4.3 — hiding is an *interaction*, not a cell you
@@ -1015,6 +1046,8 @@ foreground and as a darkened background variant.
 | `×` | Door hinge | System |
 | `}` | Hideout (empty) | System |
 | `}` | Hideout (occupied) | **Owned** — you are in it, so it recolours to Owned (blue) like the rest of "things you made"; the colour shift is how you see which cell hides you (§10.3) |
+| `π` | Partial cover (table) | System |
+| `π` | Partial cover, concealing you | **Owned** — the same convention as the occupied cupboard: while you are crouched behind it, the covering table recolours to Owned, so the blue `@`-`π` pair reads as one hidden unit (§10.3) |
 | `$` | Intel | Interest |
 | `E` | Exit | Interest |
 
@@ -1378,7 +1411,7 @@ Deliberately parked. Each is an experiment for the loop in §13, not a commitmen
 - Electrical circuits and powered doors
 - In-level lore
 - Ability upgrade trees
-- Partial cover / low walls
+- Low walls / vaulting *(partial cover itself shipped as the §10.3 table)*
 - Tiles
 
 ---

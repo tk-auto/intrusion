@@ -48,6 +48,14 @@ pub enum Terrain {
     /// the hiding mechanic. Renders `}` (§10.3). Its occupied state is an
     /// occupancy overlay, not a separate kind (see the module note).
     Hideout,
+    /// Partial cover — a table (§10.1a, §10.3): the furniture the sightline pass
+    /// stamps into over-long straight runs. Solid to movement and pathing like a
+    /// wall, but it does **not block sight** — a guard sees straight over it. Its
+    /// counterplay is behavioural, not optical: a player who spends a turn
+    /// *waiting* beside one auto-crouches and is concealed from any viewer whose
+    /// line of sight crosses the table ([`provides_cover`](Self::provides_cover);
+    /// the crouch itself lives on the turn loop). Renders `π` (§10.3).
+    PartialCover,
     /// A console — the intel terminal you bump to use (§4.3). Solid (you cannot
     /// share its cell) but transparent to sight, pathing and sound. Renders `$`
     /// (§10.3, §11.3).
@@ -67,6 +75,7 @@ impl Terrain {
             Terrain::DoorHinge => '×',
             Terrain::DoorPanelClosed => '+',
             Terrain::Hideout => '}',
+            Terrain::PartialCover => 'π',
             Terrain::Console => '$',
             Terrain::Exit => 'E',
         }
@@ -82,7 +91,10 @@ impl Terrain {
         match self {
             Terrain::Wall => Category::Neutral,
             Terrain::Floor | Terrain::DoorPanelOpen => Category::Ground,
-            Terrain::DoorHinge | Terrain::DoorPanelClosed | Terrain::Hideout => Category::System,
+            Terrain::DoorHinge
+            | Terrain::DoorPanelClosed
+            | Terrain::Hideout
+            | Terrain::PartialCover => Category::System,
             Terrain::Console | Terrain::Exit => Category::Interest,
         }
     }
@@ -96,6 +108,7 @@ impl Terrain {
             Terrain::Wall
             | Terrain::DoorHinge
             | Terrain::DoorPanelClosed
+            | Terrain::PartialCover
             | Terrain::Console
             | Terrain::Exit => 1.0,
         }
@@ -108,17 +121,28 @@ impl Terrain {
         self.fill() >= 1.0
     }
 
-    /// Whether this terrain blocks sight (§10.3). Opacity is all-or-nothing —
-    /// there is no partial cover in v1 **[START]**.
+    /// Whether this terrain blocks sight (§10.3). Opacity itself is still
+    /// all-or-nothing; partial cover is see-through — its concealment is the
+    /// crouch behaviour ([`provides_cover`](Self::provides_cover)), not opacity.
     pub fn blocks_sight(self) -> bool {
         match self {
             Terrain::Floor
             | Terrain::DoorPanelOpen
             | Terrain::Hideout
+            | Terrain::PartialCover
             | Terrain::Console
             | Terrain::Exit => false,
             Terrain::Wall | Terrain::DoorHinge | Terrain::DoorPanelClosed => true,
         }
+    }
+
+    /// Whether this terrain is **partial cover** (§10.1a/§10.3): see-through, but a
+    /// player crouched beside it is concealed from any viewer whose line of sight
+    /// crosses it. Cover also *terminates* a §10.1a sightline run — the rule
+    /// guarantees counterplay on every long straight, which cover provides without
+    /// blocking sight.
+    pub fn provides_cover(self) -> bool {
+        matches!(self, Terrain::PartialCover)
     }
 
     /// Whether this terrain blocks **pathfinding** (§10.3). The one deliberate
@@ -129,7 +153,8 @@ impl Terrain {
         match self {
             // A hideout blocks pathing too: guard routes flow around it while the
             // player ducks in — the asymmetry that makes it a hiding place (§10.1).
-            Terrain::Wall | Terrain::DoorHinge | Terrain::Hideout => true,
+            // A table is solid furniture: patrols route around it like a wall.
+            Terrain::Wall | Terrain::DoorHinge | Terrain::Hideout | Terrain::PartialCover => true,
             Terrain::Floor
             | Terrain::DoorPanelClosed
             | Terrain::DoorPanelOpen
@@ -148,6 +173,7 @@ impl Terrain {
             Terrain::Floor
             | Terrain::DoorPanelOpen
             | Terrain::Hideout
+            | Terrain::PartialCover
             | Terrain::Console
             | Terrain::Exit => SoundBlocking::Passes,
             Terrain::DoorPanelClosed => SoundBlocking::Attenuates,
@@ -423,6 +449,37 @@ mod tests {
             assert!(!t.blocks_pathing());
             assert_eq!(t.sound(), SoundBlocking::Passes);
             assert_eq!(t.glyph(), glyph);
+        }
+    }
+
+    /// The §10.3 partial-cover row: a table is solid to movement and pathing like
+    /// a wall, but **see-through** — the one terrain where "can I walk there" and
+    /// "can I see there" split this way round. It passes sound, and it is the only
+    /// terrain that provides §10.1a cover.
+    #[test]
+    fn partial_cover_matches_10_3() {
+        let t = Terrain::PartialCover;
+        assert_eq!(t.fill(), 1.0);
+        assert!(t.blocks_movement());
+        assert!(!t.blocks_sight(), "a guard sees straight over a table");
+        assert!(t.blocks_pathing(), "patrols route around furniture");
+        assert_eq!(t.sound(), SoundBlocking::Passes);
+        assert_eq!(t.glyph(), 'π');
+        assert_eq!(t.category(), Category::System);
+
+        // Cover is this row's exclusive property: nothing else provides it.
+        assert!(t.provides_cover());
+        for other in [
+            Terrain::Floor,
+            Terrain::Wall,
+            Terrain::DoorHinge,
+            Terrain::DoorPanelClosed,
+            Terrain::DoorPanelOpen,
+            Terrain::Hideout,
+            Terrain::Console,
+            Terrain::Exit,
+        ] {
+            assert!(!other.provides_cover(), "{other:?} must not provide cover");
         }
     }
 
