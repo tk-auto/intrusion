@@ -217,14 +217,34 @@ pub fn render(state: &State) -> Grid {
     let player_glyph = if state.hidden() { '}' } else { '@' };
     put(state.player(), player_glyph, Category::Owned);
 
+    // The crouch signal (§10.3/§11.3): while the player is crouched, every
+    // adjacent table recolours to Owned — the same vocabulary the occupied
+    // cupboard speaks ("Owned = what is concealing you"), so the blue @-π pair
+    // reads as one hidden unit. Read through the same `crouched` query the
+    // concealment rule uses, so the picture cannot disagree with the rules.
+    if state.crouched() {
+        for cover in state.adjacent_cover() {
+            cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
+        }
+    }
+
     // The danger overlay (§11.5), last, across terrain and entities alike: the
     // union of every visible guard's cone. Backgrounds compose with whatever
     // glyph is on the cell — a watched guard, a watched player, watched floor.
+    // The one exception is the player's own cell while they are concealed from
+    // that guard — in a cupboard, or crouched behind a table the guard looks
+    // across (§10.3): the overlay's promise is "red under you = detected"
+    // (§11.5), and a concealed player is not. The table itself stays red — the
+    // guard watches the furniture, just not what is ducked behind it.
     for guard in state.guards() {
         if !fov.contains(guard.pos()) {
             continue; // an unseen guard's cone is unknown, not safe — just unknown
         }
+        let spare_player = state.concealed_from(guard.pos());
         for cell in guard.fov().cells() {
+            if spare_player && cell == state.player() {
+                continue;
+            }
             cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
         }
     }
@@ -244,9 +264,13 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
     match terrain {
         // Geometry: always visible, never fogged (§11.5a). The exit is geometry —
         // the player entered by it (§4.5) and plans escape routes around it (§7.6).
-        Terrain::Floor | Terrain::Wall | Terrain::DoorHinge | Terrain::Exit => {
-            (terrain, Visibility::Dimmed)
-        }
+        // A table is geometry too: it replaced a stamped wall (§10.1a), and being
+        // surprised by furniture mid-flight is as bad as being surprised by a wall.
+        Terrain::Floor
+        | Terrain::Wall
+        | Terrain::DoorHinge
+        | Terrain::Exit
+        | Terrain::PartialCover => (terrain, Visibility::Dimmed),
         // A door's *position* is geometry but its open/closed pose is live state,
         // never remembered: out of view a panel always draws canonically closed.
         Terrain::DoorPanelClosed | Terrain::DoorPanelOpen => {
@@ -441,6 +465,110 @@ mod tests {
         let empty = g.get(7, 4);
         assert_eq!(empty.glyph, '}');
         assert_eq!(empty.fg, Category::System, "an empty cupboard stays System");
+    }
+
+    /// §10.3/§11.3: the crouch borrows the cupboard's vocabulary — **Owned = what
+    /// is concealing you**. While the player is crouched, the covering table keeps
+    /// its `π` glyph but recolours to Owned; standing back up returns it to System
+    /// furniture. The `@` stays drawn — the player is beside the table, not inside
+    /// it.
+    #[test]
+    fn a_covering_table_recolours_to_owned_while_crouched() {
+        let mut layout = Layout::from_facility(Facility::walled_box(10, 10));
+        layout.place(Cell::new(5, 4), Terrain::PartialCover);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+
+        // Standing: the table is plain System furniture.
+        let table = render(&s).get(5, 4);
+        assert_eq!((table.glyph, table.fg), ('π', Category::System));
+
+        s.step(Input::Wait); // crouch
+        let g = render(&s);
+        let table = g.get(5, 4);
+        assert_eq!(
+            (table.glyph, table.fg),
+            ('π', Category::Owned),
+            "the covering table recolours while crouched"
+        );
+        assert_eq!(g.get(4, 4).glyph, '@', "the player stays drawn beside it");
+
+        s.step(Input::Step(Direction::West)); // stand up
+        let table = render(&s).get(5, 4);
+        assert_eq!(table.fg, Category::System, "standing returns it to System");
+    }
+
+    /// §11.5's promise kept under the crouch: **red under you = detected.** A
+    /// visible guard looking across a table paints its cone — the table included —
+    /// but spares the cell of a player concealed from it; the moment the player
+    /// stands, their cell paints red again.
+    #[test]
+    fn the_danger_overlay_spares_a_concealed_player() {
+        // Guard at (5,3) looking south (spawn facing, §7.1) straight down the
+        // column; a table at (5,6); the player one south of it at (5,7), facing
+        // north so the guard is in view.
+        let mut layout = Layout::from_facility(Facility::walled_box(12, 12));
+        layout.place(Cell::new(5, 6), Terrain::PartialCover);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 7),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 3))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        let cone = s.guards()[0].fov();
+        assert!(
+            cone.contains(Cell::new(5, 7)),
+            "sight passes over the table"
+        );
+
+        // Standing: watched, and painted so.
+        assert_eq!(render(&s).get(5, 7).bg, Some(Category::Danger));
+
+        // Crouched: concealed from this guard — the player's cell is spared while
+        // the table and the rest of the cone stay red.
+        s.step(Input::Wait);
+        let g = render(&s);
+        assert_eq!(g.get(5, 7).bg, None, "a concealed player's cell is not red");
+        assert_eq!(
+            g.get(5, 6).bg,
+            Some(Category::Danger),
+            "the table stays watched"
+        );
+        assert_eq!(
+            g.get(5, 5).bg,
+            Some(Category::Danger),
+            "so does the open cone"
+        );
+    }
+
+    /// §11.5a: a table is **geometry** — it replaced a stamped wall (§10.1a), so
+    /// like a wall it draws from turn one, dimmed beyond the FOV, never masked.
+    #[test]
+    fn a_table_is_geometry_and_never_fogged() {
+        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        layout.place(Cell::new(10, 14), Terrain::PartialCover); // behind the spawn facing
+        let s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.fg, cell.vis),
+            ('π', Category::System, Visibility::Dimmed),
+            "an out-of-FOV table still draws, dimmed"
+        );
     }
 
     /// Terrain categories follow §11.2: an exit and a console are Interest, a hideout
