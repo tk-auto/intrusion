@@ -26,7 +26,7 @@
 
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
-use crate::generate::{shuffle, Layout};
+use crate::generate::{has_adjacent_usable, shuffle, Layout};
 use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
 use crate::state::GUARD_INITIAL_FACING;
@@ -137,16 +137,34 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
 
     // Exit first, then the player: the first shuffled pair far enough apart. A
     // cramped largest room with no such pair fails the draw rather than seating
-    // them adjacent (§10.6).
+    // them adjacent (§10.6). The exit is a usable (§11.4), so among the valid
+    // pairs a shuffled scan prefers an exit that keeps every floor cell to one
+    // adjacent usable — but that is a preference, not a gate: if no conflict-free
+    // exit has a far-enough partner, any valid pair is taken rather than failing
+    // the draw (the arrow keeps a doubled cell unambiguous).
     shuffle(&mut start_floor, rng);
-    let (exit, player) = start_floor.iter().enumerate().find_map(|(i, &exit)| {
+    let far_partner = |i: usize, exit: Cell| {
         start_floor[i + 1..]
             .iter()
             .find(|&&p| p.manhattan_distance(exit) >= PLAYER_EXIT_MIN_DISTANCE)
-            .map(|&player| (exit, player))
-    })?;
+            .map(|&p| (exit, p))
+    };
+    let (exit, player) = start_floor
+        .iter()
+        .enumerate()
+        .filter(|&(_, &exit)| !placement_conflict(layout, exit, &[]))
+        .find_map(|(i, &exit)| far_partner(i, exit))
+        .or_else(|| {
+            start_floor
+                .iter()
+                .enumerate()
+                .find_map(|(i, &exit)| far_partner(i, exit))
+        })?;
 
     let mut taken: Vec<Cell> = vec![exit, player];
+    // The usables placed so far — what later usable picks prefer not to crowd
+    // (§11.4, one usable per cell — a preference, not a gate).
+    let mut usables: Vec<Cell> = vec![exit];
 
     // §10.1.8 + §10.6: intel in any room except the start room — and *spread*, one
     // room each, so all three can never land in one room. Rooms are drawn in
@@ -158,8 +176,21 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     }
     let mut intel = Vec::with_capacity(config.intel);
     for &i in others.iter().take(config.intel) {
-        intel.push(pick_free(&rooms[i].1, &taken, rng)?);
-        taken.push(*intel.last().unwrap());
+        // A console is a usable (§11.4): prefer a cell that keeps every floor
+        // cell to one adjacent usable, but fall back to the whole room rather
+        // than fail the draw — the preference never blocks a placement (the
+        // arrow keeps a doubled cell unambiguous).
+        let clean: Vec<Cell> = rooms[i]
+            .1
+            .iter()
+            .copied()
+            .filter(|&c| !placement_conflict(layout, c, &usables))
+            .collect();
+        let console =
+            pick_free(&clean, &taken, rng).or_else(|| pick_free(&rooms[i].1, &taken, rng))?;
+        intel.push(console);
+        taken.push(console);
+        usables.push(console);
     }
 
     // §10.1.9 + §10.6: guards in any room except the start room, and never where
@@ -199,11 +230,25 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         intel,
         guards,
     };
-    // The post-placement solvability assertion: on the grid as it will actually be
-    // played (consoles and exit solid), the player still reaches every objective
-    // and the way out. §10.6's "assert it, don't argue it", applied once more
-    // after the last pieces land.
+    // The post-placement solvability assertion: on the grid as it will actually
+    // be played (consoles and exit solid), the player still reaches every
+    // objective and the way out. §10.6's "assert it, don't argue it", applied
+    // once more after the last pieces land. The one-usable preference (§11.4) is
+    // best-effort, not asserted — the placements above honour it where they can.
     solvable(facility, &placement).then_some(placement)
+}
+
+/// Whether placing a usable (a console, the exit) at `cell` would give some
+/// floor neighbour a **second** adjacent usable — the §11.4 one-usable
+/// *preference*, given the usable cells already `placed`. A neighbour that is
+/// itself a placed usable does not count (it is not a standing cell).
+fn placement_conflict(layout: &Layout, cell: Cell, placed: &[Cell]) -> bool {
+    let facility = layout.facility();
+    facility.neighbors(cell).any(|f| {
+        facility.terrain(f) == Some(Terrain::Floor)
+            && !placed.contains(&f)
+            && has_adjacent_usable(facility, f, placed)
+    })
 }
 
 /// A random cell of `floor` not already in `taken`, or `None` if the room is

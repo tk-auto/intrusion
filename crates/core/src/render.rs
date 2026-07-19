@@ -36,7 +36,7 @@
 //! (§11.2); this module only speaks in categories.
 
 use crate::category::Category;
-use crate::cell::Cell;
+use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::state::State;
 use crate::status::near_line;
@@ -218,15 +218,14 @@ pub fn render(state: &State) -> Grid {
     let player_glyph = if state.hidden() { '}' } else { '@' };
     put(state.player(), player_glyph, Category::Owned);
 
-    // The crouch signal (§10.3/§11.3): while the player is crouched, every
-    // adjacent table recolours to Owned — the same vocabulary the occupied
-    // cupboard speaks ("Owned = what is concealing you"), so the blue @-π pair
-    // reads as one hidden unit. Read through the same `crouched` query the
-    // concealment rule uses, so the picture cannot disagree with the rules.
-    if state.crouched() {
-        for cover in state.adjacent_cover() {
-            cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
-        }
+    // The crouch signal (§10.3/§11.3): while the player is crouched, the table
+    // they ducked behind — that one, not every table they stand beside —
+    // recolours to Owned, the same vocabulary the occupied cupboard speaks
+    // ("Owned = what is concealing you"), so the blue @-π pair reads as one
+    // hidden unit. Read through the same stored pose the concealment rule
+    // uses, so the picture cannot disagree with the rules.
+    if let Some(cover) = state.crouched_behind() {
+        cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
     }
 
     // The danger overlay (§11.5), last, across terrain and entities alike: the
@@ -317,12 +316,23 @@ pub fn render_screen(state: &State) -> Grid {
     let usable: Vec<(String, Category)> = state
         .affordances()
         .into_iter()
-        .map(|a| (a.label().to_string(), a.category()))
+        .map(|(dir, a)| (format!("{} {}", arrow(dir), a.label()), a.category()))
         .collect();
     grid.cells.extend(status_row(grid.width, &usable, None));
 
     grid.height += STATUS_ROWS;
     grid
+}
+
+/// The usable line's direction glyph (§11.4): which way to bump for the
+/// affordance beside it.
+fn arrow(dir: Direction) -> char {
+    match dir {
+        Direction::North => '↑',
+        Direction::East => '→',
+        Direction::South => '↓',
+        Direction::West => '←',
+    }
 }
 
 /// Lay one status row out as grid cells: segments left to right from a one-cell
@@ -563,7 +573,7 @@ mod tests {
         let table = render(&s).get(5, 4);
         assert_eq!((table.glyph, table.fg), ('π', Category::System));
 
-        s.step(Input::Wait); // crouch
+        s.step(Input::Step(Direction::East)); // bump the table: crouch (§10.3)
         let g = render(&s);
         let table = g.get(5, 4);
         assert_eq!(
@@ -573,7 +583,7 @@ mod tests {
         );
         assert_eq!(g.get(4, 4).glyph, '@', "the player stays drawn beside it");
 
-        s.step(Input::Step(Direction::West)); // stand up
+        s.step(Input::Step(Direction::West)); // step away: stand up
         let table = render(&s).get(5, 4);
         assert_eq!(table.fg, Category::System, "standing returns it to System");
     }
@@ -608,7 +618,7 @@ mod tests {
 
         // Crouched: concealed from this guard — the player's cell is spared while
         // the table and the rest of the cone stay red.
-        s.step(Input::Wait);
+        s.step(Input::Step(Direction::North)); // bump the table: crouch
         let g = render(&s);
         assert_eq!(g.get(5, 7).bg, None, "a concealed player's cell is not red");
         assert_eq!(
@@ -871,7 +881,7 @@ mod tests {
                 "#·····················E#".to_string(),
                 "########################".to_string(),
                 " intel remaining: 1     ".to_string(),
-                " console: take intel    ".to_string(),
+                " → console: take intel  ".to_string(),
             ]
         );
     }
@@ -906,10 +916,12 @@ mod tests {
             }
             assert_eq!(g.get(x, usable_y).bg, None, "the usable line has no band");
         }
-        // The affordance speaks its own category: `console: take intel` is
-        // Interest (§11.2 — goals and rewards).
-        assert_eq!(g.get(1, usable_y).glyph, 'c');
+        // The affordance leads with its bump direction and speaks its own
+        // category: `→ console: take intel` is Interest (§11.2 — goals and
+        // rewards), and the console is east of the player.
+        assert_eq!(g.get(1, usable_y).glyph, '→');
         assert_eq!(g.get(1, usable_y).fg, Category::Interest);
+        assert_eq!(g.get(3, usable_y).glyph, 'c');
 
         // A threat message flips the whole band to its category: get captured
         // and the near line reads Danger — the colour flash before the words.

@@ -203,7 +203,7 @@ mod tests {
             Vec::new(),
             Cell::new(10, 10),
         );
-        s.step(Input::Wait); // the crouch engages
+        s.step(Input::Step(Direction::East)); // bump the table: the crouch engages
         let line = near_line(&s);
         assert_eq!(line.text, "you duck behind the table");
         assert_eq!(line.category, Category::Owned);

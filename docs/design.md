@@ -970,7 +970,7 @@ This is the highest-leverage structural decision in the document. Nearly every
 | Every room reaches a corridor | Every room is bounded by corridor walls, which qualify as door candidates |
 | Every room ≥ 6×6, ≤ ~12 rooms | Partition constants |
 | **A path exists: start → every objective → exit** | **Assert it. See below.** |
-| **At most one usable beside any floor cell** | Conflict-aware stamping + assert-and-redraw. See below. |
+| **One usable beside any floor cell (preferred)** | Conflict-aware stamping, best-effort; the arrow disambiguates the rest. See below. |
 
 **The old generator never verified solvability.** It relied on the structural
 argument above — which has a hole: **a wall run shorter than 3 cells gets no
@@ -982,17 +982,26 @@ it, nothing repaired it, and no seed was ever rejected.
 It is a flood fill. It costs nothing. It is exactly the kind of property a
 generator must never merely *believe*.
 
-**One usable per cell.** The usable line (§11.4) shows one action and one arrow,
-and a bump is aimed by direction — so no floor cell may sit orthogonally
-adjacent to **two distinct usables** (a door, a table, a cupboard, a console,
-the exit; a multi-cell door counts once). A cell beside both a table and a
-doorway would make the line ambiguous and a mis-aimed bump routine — and a
-mis-key ends a run (§11.6). Every stamping stage respects the usables already
-down (tables slide along their run, cupboard sites are skipped, console and
-exit candidates are filtered), and the finished board is asserted like
-reachability — violation rejects the carve. The guarantee is over plain floor
-cells: standing *on* an open door panel or inside a cupboard is exempt, which
-is what keeps §10.1a's cover-near-doors legal.
+**One usable per cell — a preference, not a guarantee.** The usable line
+(§11.4) points each bump with its own arrow, so a floor cell beside **two
+distinct usables** (a door, a table, a cupboard, a console, the exit; a
+multi-cell door counts once) is still *legible* — `→ door: open` and `↑ table:
+crouch` are two aimed actions, not one ambiguous prompt — but it reads cleanest
+at one. So every stamping stage **avoids crowding where it cheaply can**:
+cupboard sites that would double up are skipped (sites are plentiful), and
+console and exit candidates prefer a clean cell, falling back rather than
+failing the draw.
+
+**Two of the §10.6 guarantees outrank it, so it is not asserted.** Connectivity
+and the sightline rule (§10.1a) come first, and §10.1a puts cover squarely in
+corridors — which are door-rich by construction, so a sightline table doubling
+with a nearby door is often unavoidable. Forcing the blocker off-centre to dodge
+it only shortens the run instead of splitting it, multiplying generation cost
+for a cosmetic win. And structural doors can cluster in a way no carve undoes.
+The honest rule is therefore best-effort placement plus the arrow — *not* a
+flood-fill-style assert-and-redraw. (An earlier draft made it a hard guarantee;
+measured, it rejected ~85% of carves and stalled generation — the arrow already
+buys the legibility the guarantee was chasing.)
 
 Also worth fixing, all real:
 
@@ -1120,14 +1129,15 @@ backlog until a single screen-bound story proves fun.
   words; that's a nice piece of design — keep it. When no message is live, the
   line falls back to quiet **ambient status** (alert level, an active ability's
   remaining turns) instead of sitting empty.
-- **Usable line** — *what you can act on*: the bump affordance adjacent to the
-  player right now, **with an arrow giving the bump's direction** (`→ door:
+- **Usable line** — *what you can act on*: the bump affordances adjacent to the
+  player right now, each **with an arrow giving the bump's direction** (`→ door:
   open`, `↑ console: take intel`, `← table: crouch`, `↓ cupboard: hide`). Not a
   message — a **pure derived function of state**, recomputed every frame, no
-  plumbing. Empty when nothing is adjacent. The generator guarantees at most
-  one usable beside any floor cell (§10.6), so the line is one action and one
-  arrow — an unambiguous "press this, get that"; the renderer still lists
-  multiple entries if a hand-built level breaks the guarantee.
+  plumbing. Empty when nothing is adjacent. The arrow makes each bump an aimed
+  "press this way, get that", so even the rare cell beside two usables stays
+  unambiguous — one row lists each with its own direction. The generator
+  *prefers* one usable per floor cell (§10.6, best-effort) to keep the common
+  case to a single line, but does not guarantee it.
 
 **No ability column.** The old fixed 14-column list spent a seventh of the
 screen on information consulted once a minute. Ability state (ready / active
