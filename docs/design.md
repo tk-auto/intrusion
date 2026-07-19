@@ -869,21 +869,28 @@ table**, and its concealment is *behavioural*, not optical: sight passes over it
 freely; what it grants is the crouch (below). **[START]** — low walls / vaulting
 stay a future axis.
 
-> **The table is partial cover, and the crouch is automatic.** A table blocks
-> movement and pathing like a wall — patrols route around it, bumping it is a
-> free mis-input — but a guard sees straight over it. Spend a turn **waiting
-> beside one** (§5's wait, the same key) and you duck behind it: while crouched
-> you still see everything (your own sight is unchanged), but you are
-> **concealed from any viewer whose line of sight crosses the table** — the
-> quarter-plane the cover faces, out to the 45° diagonals. Concealment is
-> directional and per-guard: the flanks and your back are open, which is what
-> keeps a table weaker than a cupboard (omnidirectional, contact-safe) — and a
-> crouched player **can still be captured by contact** (§4.5); unseen is not
-> safe. Any spent step stands you up; a free action changes nothing, posture
-> included (§4.4). Legibility rides the same conventions as the cupboard: the
-> covering table recolours to **Owned** while it conceals you (§11.3), the
-> crouch reports itself once as an Owned message, and the §11.5 danger overlay
-> spares your cell — red under you always means *detected*.
+> **The table is partial cover, and the crouch is a bump.** A table blocks
+> movement and pathing like a wall — patrols route around it — but a guard sees
+> straight over it. **Bump the table** (§4.3's one interaction verb, same as
+> the cupboard: ducking is a *decision*, aimed at a specific table) and you
+> crouch behind it: while crouched you still see everything (your own sight is
+> unchanged), but you are **concealed from any viewer whose line of sight
+> crosses that table** — the quarter-plane the cover faces, out to the 45°
+> diagonals. Concealment is directional, per-guard, and per *the table you
+> ducked behind* — not every table you happen to stand beside. The flanks and
+> your back are open, which is what keeps a table weaker than a cupboard
+> (omnidirectional, contact-safe) — and a crouched player **can still be
+> captured by contact** (§4.5); unseen is not safe. The crouch spends the turn;
+> **waiting holds it** (hold still, watch the cone sweep past, §7.6); any other
+> spent action stands you up; a free action changes nothing, posture included
+> (§4.4) — re-bumping the table you are already behind is a free no-op.
+> *(Waiting beside a table used to crouch automatically; that coupling is gone —
+> wait is pure (§5, §8.3's 360° look), and the crouch shows its direction in
+> the usable line (§11.4) like every other bump.)* Legibility rides the same
+> conventions as the cupboard: the covering table recolours to **Owned** while
+> it conceals you (§11.3), the crouch reports itself once as an Owned message,
+> and the §11.5 danger overlay spares your cell — red under you always means
+> *detected*.
 
 > **The hideout is a cupboard, and entering it is a decision.** You **bump** into an
 > empty cupboard to climb in (§4.3 — hiding is an *interaction*, not a cell you
@@ -963,6 +970,7 @@ This is the highest-leverage structural decision in the document. Nearly every
 | Every room reaches a corridor | Every room is bounded by corridor walls, which qualify as door candidates |
 | Every room ≥ 6×6, ≤ ~12 rooms | Partition constants |
 | **A path exists: start → every objective → exit** | **Assert it. See below.** |
+| **At most one usable beside any floor cell** | Conflict-aware stamping + assert-and-redraw. See below. |
 
 **The old generator never verified solvability.** It relied on the structural
 argument above — which has a hole: **a wall run shorter than 3 cells gets no
@@ -973,6 +981,18 @@ it, nothing repaired it, and no seed was ever rejected.
 **Do not rely on a structural argument. Assert reachability and reject the seed.**
 It is a flood fill. It costs nothing. It is exactly the kind of property a
 generator must never merely *believe*.
+
+**One usable per cell.** The usable line (§11.4) shows one action and one arrow,
+and a bump is aimed by direction — so no floor cell may sit orthogonally
+adjacent to **two distinct usables** (a door, a table, a cupboard, a console,
+the exit; a multi-cell door counts once). A cell beside both a table and a
+doorway would make the line ambiguous and a mis-aimed bump routine — and a
+mis-key ends a run (§11.6). Every stamping stage respects the usables already
+down (tables slide along their run, cupboard sites are skipped, console and
+exit candidates are filtered), and the finished board is asserted like
+reachability — violation rejects the carve. The guarantee is over plain floor
+cells: standing *on* an open door panel or inside a cupboard is exempt, which
+is what keeps §10.1a's cover-near-doors legal.
 
 Also worth fixing, all real:
 
@@ -1087,7 +1107,7 @@ backlog until a single screen-bound story proves fun.
 │                       E                                    │
 ├────────────────────────────────────────────────────────────┤
 │ Radio chatter, north                                       │ ← near line
-│ door: open                                                 │ ← usable line
+│ → door: open                                               │ ← usable line
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -1100,10 +1120,14 @@ backlog until a single screen-bound story proves fun.
   words; that's a nice piece of design — keep it. When no message is live, the
   line falls back to quiet **ambient status** (alert level, an active ability's
   remaining turns) instead of sitting empty.
-- **Usable line** — *what you can act on*: the bump affordances adjacent to the
-  player right now (`console: collect intel`, `door: open`, `guard: takedown`,
-  `cupboard: hide`). Not a message — a **pure derived function of state**,
-  recomputed every frame, no plumbing. Empty when nothing is adjacent.
+- **Usable line** — *what you can act on*: the bump affordance adjacent to the
+  player right now, **with an arrow giving the bump's direction** (`→ door:
+  open`, `↑ console: take intel`, `← table: crouch`, `↓ cupboard: hide`). Not a
+  message — a **pure derived function of state**, recomputed every frame, no
+  plumbing. Empty when nothing is adjacent. The generator guarantees at most
+  one usable beside any floor cell (§10.6), so the line is one action and one
+  arrow — an unambiguous "press this, get that"; the renderer still lists
+  multiple entries if a hand-built level breaks the guarantee.
 
 **No ability column.** The old fixed 14-column list spent a seventh of the
 screen on information consulted once a minute. Ability state (ready / active
