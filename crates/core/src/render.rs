@@ -36,9 +36,10 @@
 //! (§11.2); this module only speaks in categories.
 
 use crate::category::Category;
-use crate::cell::Cell;
+use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::state::State;
+use crate::status::near_line;
 
 /// How much the player currently knows about what a drawn cell shows — the three
 /// visual states of §11.5a's implementation note (live / remembered / never-seen,
@@ -217,15 +218,14 @@ pub fn render(state: &State) -> Grid {
     let player_glyph = if state.hidden() { '}' } else { '@' };
     put(state.player(), player_glyph, Category::Owned);
 
-    // The crouch signal (§10.3/§11.3): while the player is crouched, every
-    // adjacent table recolours to Owned — the same vocabulary the occupied
-    // cupboard speaks ("Owned = what is concealing you"), so the blue @-π pair
-    // reads as one hidden unit. Read through the same `crouched` query the
-    // concealment rule uses, so the picture cannot disagree with the rules.
-    if state.crouched() {
-        for cover in state.adjacent_cover() {
-            cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
-        }
+    // The crouch signal (§10.3/§11.3): while the player is crouched, the table
+    // they ducked behind — that one, not every table they stand beside —
+    // recolours to Owned, the same vocabulary the occupied cupboard speaks
+    // ("Owned = what is concealing you"), so the blue @-π pair reads as one
+    // hidden unit. Read through the same stored pose the concealment rule
+    // uses, so the picture cannot disagree with the rules.
+    if let Some(cover) = state.crouched_behind() {
+        cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
     }
 
     // The danger overlay (§11.5), last, across terrain and entities alike: the
@@ -284,6 +284,90 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
         Terrain::Console => (Terrain::Floor, Visibility::Dimmed),
         Terrain::Hideout => (Terrain::Wall, Visibility::Dimmed),
     }
+}
+
+/// The rows the screen adds beneath the map (§11.4): the near line and the
+/// usable line. A shell fitting the screen sizes for `facility height + this`.
+pub const STATUS_ROWS: u32 = 2;
+
+/// Render the full §11.4 **screen**: the map ([`render`]) with the two status
+/// lines beneath it — `map height + STATUS_ROWS` rows, same width, one [`Grid`],
+/// so a whole frame is still a pure function of state that prints as text
+/// (§11.1) and golden-testable to the last row.
+///
+/// - **Near line** (row `height-2`): the highest-priority message of the last
+///   action, or the ambient floor ([`near_line`], §11.7) — drawn as a solid
+///   band in the message's category (every cell's `bg`), with the words in
+///   Neutral on top. Threat reads as a colour flash before it reads as words.
+/// - **Usable line** (row `height-1`): the adjacent bump affordances
+///   ([`State::affordances`]), each in its own category, no band — a quiet menu
+///   of what a bump would do, empty when nothing is adjacent.
+pub fn render_screen(state: &State) -> Grid {
+    let mut grid = render(state);
+
+    let message = near_line(state);
+    let band = Some(message.category);
+    grid.cells.extend(status_row(
+        grid.width,
+        &[(message.text, Category::Neutral)],
+        band,
+    ));
+
+    let usable: Vec<(String, Category)> = state
+        .affordances()
+        .into_iter()
+        .map(|(dir, a)| (format!("{} {}", arrow(dir), a.label()), a.category()))
+        .collect();
+    grid.cells.extend(status_row(grid.width, &usable, None));
+
+    grid.height += STATUS_ROWS;
+    grid
+}
+
+/// The usable line's direction glyph (§11.4): which way to bump for the
+/// affordance beside it.
+fn arrow(dir: Direction) -> char {
+    match dir {
+        Direction::North => '↑',
+        Direction::East => '→',
+        Direction::South => '↓',
+        Direction::West => '←',
+    }
+}
+
+/// Lay one status row out as grid cells: segments left to right from a one-cell
+/// margin, two spaces between segments, truncated at the edge; `band` paints
+/// every cell's background (the §11.4 message band) or none.
+fn status_row(
+    width: u32,
+    segments: &[(String, Category)],
+    band: Option<Category>,
+) -> Vec<GlyphCell> {
+    let blank = GlyphCell {
+        glyph: ' ',
+        fg: Category::Neutral,
+        bg: band,
+        vis: Visibility::Live,
+    };
+    let mut cells = vec![blank; width as usize];
+    let mut x = 1; // the one-cell left margin
+    for (i, (text, category)) in segments.iter().enumerate() {
+        if i > 0 {
+            x += 2;
+        }
+        for glyph in text.chars() {
+            if x >= cells.len() {
+                return cells;
+            }
+            cells[x] = GlyphCell {
+                glyph,
+                fg: *category,
+                ..blank
+            };
+            x += 1;
+        }
+    }
+    cells
 }
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row
@@ -489,7 +573,7 @@ mod tests {
         let table = render(&s).get(5, 4);
         assert_eq!((table.glyph, table.fg), ('π', Category::System));
 
-        s.step(Input::Wait); // crouch
+        s.step(Input::Step(Direction::East)); // bump the table: crouch (§10.3)
         let g = render(&s);
         let table = g.get(5, 4);
         assert_eq!(
@@ -499,7 +583,7 @@ mod tests {
         );
         assert_eq!(g.get(4, 4).glyph, '@', "the player stays drawn beside it");
 
-        s.step(Input::Step(Direction::West)); // stand up
+        s.step(Input::Step(Direction::West)); // step away: stand up
         let table = render(&s).get(5, 4);
         assert_eq!(table.fg, Category::System, "standing returns it to System");
     }
@@ -534,7 +618,7 @@ mod tests {
 
         // Crouched: concealed from this guard — the player's cell is spared while
         // the table and the rest of the cone stay red.
-        s.step(Input::Wait);
+        s.step(Input::Step(Direction::North)); // bump the table: crouch
         let g = render(&s);
         assert_eq!(g.get(5, 7).bg, None, "a concealed player's cell is not red");
         assert_eq!(
@@ -771,6 +855,110 @@ mod tests {
         let dark = g.get(10, 14); // behind: floor out of the FOV
         assert_eq!((dark.glyph, dark.vis), ('·', Visibility::Dimmed));
         assert_eq!(g.get(12, 8).glyph, ' ', "an open panel renders blank");
+    }
+
+    /// The §11.4 golden test, whole screen: map, near line, usable line — one
+    /// grid, printed as text. The near line rests on its ambient floor (no
+    /// action yet) and the usable line offers the adjacent console.
+    #[test]
+    fn the_full_screen_renders_golden() {
+        let s = State::new(
+            Layout::from_facility(Facility::walled_box(24, 6)),
+            Cell::new(2, 2),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(3, 2)], // a console east of the player
+            Cell::new(22, 4),
+        );
+        let g = render_screen(&s);
+        assert_eq!(
+            g.to_text(),
+            vec![
+                "########################".to_string(),
+                "#······················#".to_string(),
+                "#·@$···················#".to_string(),
+                "#······················#".to_string(),
+                "#·····················E#".to_string(),
+                "########################".to_string(),
+                " intel remaining: 1     ".to_string(),
+                " → console: take intel  ".to_string(),
+            ]
+        );
+    }
+
+    /// The screen is the map plus [`STATUS_ROWS`], same width — and the two
+    /// status rows carry their §11.4 styling: the near line is a full-width
+    /// band in the message's category with Neutral words on top; the usable
+    /// line has no band and speaks each affordance's own category.
+    #[test]
+    fn status_rows_carry_the_band_and_the_categories() {
+        let mut s = State::new(
+            Layout::from_facility(Facility::walled_box(24, 6)),
+            Cell::new(2, 2),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(3, 2)],
+            Cell::new(22, 4),
+        );
+        let map = render(&s);
+        let g = render_screen(&s);
+        assert_eq!(g.width(), map.width());
+        assert_eq!(g.height(), map.height() + STATUS_ROWS);
+
+        let near_y = map.height();
+        let usable_y = near_y + 1;
+        for x in 0..g.width() {
+            let cell = g.get(x, near_y);
+            assert_eq!(cell.bg, Some(Category::Interest), "the band spans the row");
+            assert_eq!(cell.vis, Visibility::Live);
+            if cell.glyph != ' ' {
+                assert_eq!(cell.fg, Category::Neutral, "words read Neutral on the band");
+            }
+            assert_eq!(g.get(x, usable_y).bg, None, "the usable line has no band");
+        }
+        // The affordance leads with its bump direction and speaks its own
+        // category: `→ console: take intel` is Interest (§11.2 — goals and
+        // rewards), and the console is east of the player.
+        assert_eq!(g.get(1, usable_y).glyph, '→');
+        assert_eq!(g.get(1, usable_y).fg, Category::Interest);
+        assert_eq!(g.get(3, usable_y).glyph, 'c');
+
+        // A threat message flips the whole band to its category: get captured
+        // and the near line reads Danger — the colour flash before the words.
+        s = State::new(
+            Layout::from_facility(Facility::walled_box(24, 6)),
+            Cell::new(2, 2),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(2, 4), vec![Direction::North])],
+            Vec::new(),
+            Cell::new(22, 4),
+        );
+        s.step(Input::Wait); // the guard steps north into the player: caught
+        let g = render_screen(&s);
+        assert_eq!(g.get(0, near_y).bg, Some(Category::Danger));
+        assert_eq!(g.get(1, near_y).glyph, 'c'); // "caught"
+    }
+
+    /// A message longer than the row truncates at the edge instead of
+    /// panicking or wrapping — the status rows are single grid rows.
+    #[test]
+    fn a_long_status_line_truncates_at_the_edge() {
+        let mut s = State::new(
+            Layout::from_facility(Facility::walled_box(12, 6)),
+            Cell::new(2, 2),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(3, 2)],
+            Cell::new(10, 4),
+        );
+        s.step(Input::Step(Direction::East)); // take the intel: a long message
+        let g = render_screen(&s);
+        let near: String = (0..g.width()).map(|x| g.get(x, 6).glyph).collect();
+        assert_eq!(near.chars().count(), 12, "exactly one grid row wide");
+        assert!(
+            near.starts_with(" intel in h"),
+            "the words run to the edge and stop: {near:?}"
+        );
     }
 
     /// The §11.5 golden test: a guard cone the player can see paints the expected

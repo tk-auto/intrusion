@@ -34,6 +34,7 @@ use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::generate::Layout;
+use crate::region::DoorCell;
 use crate::vision::{
     field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
     PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
@@ -72,11 +73,11 @@ pub enum Event {
     /// occupy the cupboard and are concealed. Climbing back out is an ordinary
     /// [`Event::Moved`] off the cell.
     EnteredHideout { at: Cell },
-    /// The player spent a turn waiting beside partial cover and ducked behind it
-    /// (§10.3): they are now crouched, concealed from any viewer whose line of
-    /// sight crosses the table at `behind`. Reported only when the crouch
-    /// *engages* — waiting on while already crouched repeats nothing. Standing up
-    /// is any spent step, no special event.
+    /// The player bumped a table and ducked behind it (§4.3, §10.3): they are
+    /// now crouched, concealed from any viewer whose line of sight crosses the
+    /// table at `behind`. Reported only when the crouch *engages* — re-bumping
+    /// the table you are already behind is a free no-op. Waiting holds the
+    /// pose; any other spent action stands you up, no special event.
     Crouched { behind: Cell },
     /// The player opened a closed door by bumping a panel (§4.3, §10.4).
     DoorOpened { at: Cell },
@@ -110,6 +111,61 @@ impl Event {
             Event::IntelTaken { .. } | Event::ExitRefused | Event::Won => Category::Interest,
             // A threat that has you, literally (§4.5).
             Event::Captured { .. } => Category::Danger,
+        }
+    }
+}
+
+/// One thing a bump would do right now — the **usable line**'s vocabulary
+/// (§11.4). Derived from adjacency by [`State::affordances`], never stored: the
+/// line is a pure view of state, recomputed every frame, with nothing to clear.
+///
+/// The set is exactly the interactions [`State::step`]'s bump resolution
+/// actually performs — a takedown affordance joins when takedowns land (§7.2),
+/// not before: the line must never offer what a bump will not do (§2.3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Affordance {
+    /// A closed door panel: bump to open (§10.4).
+    OpenDoor,
+    /// An open door's hinge: bump to close (§10.4).
+    CloseDoor,
+    /// An untaken intel console: bump to take the intel (§4.3).
+    TakeIntel,
+    /// An empty cupboard: bump to climb in and be concealed (§10.3).
+    Hide,
+    /// A table: bump to crouch behind it (§10.3).
+    Crouch,
+    /// The exit, with every objective in hand: bump to win (§4.5).
+    Leave,
+    /// The exit while intel is still out: bumping it will refuse (§4.5).
+    ExitRefused,
+}
+
+impl Affordance {
+    /// The words the usable line shows for this affordance.
+    pub fn label(self) -> &'static str {
+        match self {
+            Affordance::OpenDoor => "door: open",
+            Affordance::CloseDoor => "door: close",
+            Affordance::TakeIntel => "console: take intel",
+            Affordance::Hide => "cupboard: hide",
+            Affordance::Crouch => "table: crouch",
+            Affordance::Leave => "exit: leave",
+            Affordance::ExitRefused => "exit: needs the intel",
+        }
+    }
+
+    /// What acting on this affordance is *about* (§11.2): doors, cupboards and
+    /// tables are System furniture; the console and the exit are the goal,
+    /// Interest.
+    pub fn category(self) -> Category {
+        match self {
+            Affordance::OpenDoor
+            | Affordance::CloseDoor
+            | Affordance::Hide
+            | Affordance::Crouch => Category::System,
+            Affordance::TakeIntel | Affordance::Leave | Affordance::ExitRefused => {
+                Category::Interest
+            }
         }
     }
 }
@@ -290,15 +346,25 @@ pub struct State {
     /// remembered; live state never consults it (§11.5a keeps those apart).
     memory: VisibleSet,
     /// Whether the last **spent** turn was a Wait — which widens the next sight
-    /// computation to the full 360° (§8.3) and, beside partial cover, is the
-    /// crouch ([`crouched`](Self::crouched)). A free action (a wall bump) spends
+    /// computation to the full 360° (§8.3). A free action (a wall bump) spends
     /// nothing and changes nothing (§4.4), so it does not clear this.
     waited: bool,
+    /// The table the player is crouched behind (§10.3), set by bumping it and
+    /// cleared by any spent action other than a Wait (waiting holds the pose).
+    /// Always orthogonally adjacent by construction: the bump that sets it is a
+    /// bump into an adjacent cell, and every action that could move the player
+    /// clears it.
+    crouched_behind: Option<Cell>,
     guards: Vec<Guard>,
     objectives: Vec<Objective>,
     exit: Cell,
     turn: u32,
     outcome: Outcome,
+    /// The events of the player's most recent action, free or spent — what the
+    /// near line reads (§11.7: messages clear on the next action, so holding
+    /// exactly one action's events *is* the clearing rule). Empty before the
+    /// first input; frozen once the run ends, so the final message stays.
+    last_events: Vec<Event>,
 }
 
 impl State {
@@ -335,11 +401,13 @@ impl State {
             player_fov: VisibleSet::default(),
             memory: VisibleSet::default(),
             waited: false,
+            crouched_behind: None,
             guards,
             objectives,
             exit,
             turn: 0,
             outcome: Outcome::Playing,
+            last_events: Vec::new(),
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -392,31 +460,22 @@ impl State {
         self.layout.facility().terrain(self.player) == Some(Terrain::Hideout)
     }
 
-    /// Whether the player is **crouched** behind partial cover (§10.3): the last
-    /// spent turn was a Wait and a table is orthogonally adjacent. Like
-    /// [`hidden`](Self::hidden) it is *derived*, never stored, so it cannot
-    /// desync: any spent step stands the player up, and there is no crouch away
-    /// from cover. Crouching is weaker than the cupboard — concealment is
-    /// directional, per-viewer ([`concealed_from`](Self::concealed_from)) — and
-    /// it is not contact-safe: a guard walking into a crouched player still
-    /// captures (§4.5).
+    /// Whether the player is **crouched** behind partial cover (§10.3): they
+    /// bumped a table to duck behind it and have not spent a turn on anything
+    /// but waiting since. Crouching is weaker than the cupboard — concealment
+    /// is directional, per-viewer, and only across the chosen table
+    /// ([`concealed_from`](Self::concealed_from)) — and it is not contact-safe:
+    /// a guard walking into a crouched player still captures (§4.5).
     pub fn crouched(&self) -> bool {
-        self.waited && self.adjacent_cover().next().is_some()
+        self.crouched_behind.is_some()
     }
 
-    /// The partial-cover cells orthogonally adjacent to the player, in
-    /// [`Direction::ALL`] order — the tables a crouch ducks behind. The renderer
-    /// reads these to recolour the covering table to Owned while crouched.
-    pub(crate) fn adjacent_cover(&self) -> impl Iterator<Item = Cell> + '_ {
-        Direction::ALL
-            .into_iter()
-            .filter_map(|dir| self.player.step(dir))
-            .filter(|&c| {
-                self.layout
-                    .facility()
-                    .terrain(c)
-                    .is_some_and(|t| t.provides_cover())
-            })
+    /// The table the player is crouched behind (§10.3), if any — always
+    /// orthogonally adjacent. The renderer reads this to recolour the one
+    /// concealing table to Owned (§11.3); everything rule-side goes through
+    /// [`concealed_from`](Self::concealed_from).
+    pub fn crouched_behind(&self) -> Option<Cell> {
+        self.crouched_behind
     }
 
     /// Whether the player is concealed from a viewer standing at `viewer` — the
@@ -427,9 +486,10 @@ impl State {
     /// Two ways to be concealed:
     /// - **In a cupboard** ([`hidden`](Self::hidden)): omnidirectional — no
     ///   viewer anywhere detects the player (§10.3).
-    /// - **Crouched behind cover** ([`crouched`](Self::crouched)): directional —
-    ///   only from viewers whose line of sight crosses an adjacent table, i.e.
-    ///   viewers in the quarter-plane the table faces: the viewer's offset from
+    /// - **Crouched behind a table** ([`crouched`](Self::crouched)): directional —
+    ///   only from viewers whose line of sight crosses **the table the player
+    ///   ducked behind** (not every table they happen to stand beside), i.e.
+    ///   viewers in the quarter-plane that table faces: the viewer's offset from
     ///   the player leans at least as far *along* the player→table direction as
     ///   it strays perpendicular to it (a viewer exactly on the 45° diagonal
     ///   grazes the table's corner and still counts). Integer arithmetic
@@ -443,19 +503,17 @@ impl State {
         if self.hidden() {
             return true;
         }
-        if !self.crouched() {
+        let Some(cover) = self.crouched_behind else {
             return false;
-        }
+        };
         let (px, py) = (i64::from(self.player.x), i64::from(self.player.y));
         let (vx, vy) = (i64::from(viewer.x) - px, i64::from(viewer.y) - py);
-        self.adjacent_cover().any(|cover| {
-            let (dx, dy) = (i64::from(cover.x) - px, i64::from(cover.y) - py);
-            // `(dx, dy)` is a unit cardinal: the viewer's components along and
-            // across the player→table direction.
-            let along = vx * dx + vy * dy;
-            let across = (vx * dy - vy * dx).abs();
-            along >= 1 && along >= across
-        })
+        let (dx, dy) = (i64::from(cover.x) - px, i64::from(cover.y) - py);
+        // `(dx, dy)` is a unit cardinal: the viewer's components along and
+        // across the player→table direction.
+        let along = vx * dx + vy * dy;
+        let across = (vx * dy - vy * dx).abs();
+        along >= 1 && along >= across
     }
 
     /// The guards, for rendering and tests.
@@ -476,6 +534,75 @@ impl State {
     /// Whether the run is live, won, or lost (§4.5).
     pub fn outcome(&self) -> Outcome {
         self.outcome
+    }
+
+    /// The events of the player's most recent action — the near line's source
+    /// (§11.7). Empty before the first input; frozen once the run ends.
+    pub fn last_events(&self) -> &[Event] {
+        &self.last_events
+    }
+
+    /// What a bump would do from here — the **usable line** (§11.4): each
+    /// interaction orthogonally adjacent to the player, with the direction to
+    /// bump it, in [`Direction::ALL`] order. The §10.6 one-usable guarantee
+    /// keeps this to a single entry on generated boards; a hand-built state
+    /// may list more, one per direction.
+    ///
+    /// This mirrors [`step`](Self::step)'s bump resolution case for case, so
+    /// the line can never promise what a bump won't deliver: a guard is skipped
+    /// (bumping one is a free no-op until takedowns land, §7.2), a spent
+    /// console and an occupied cupboard are just solid, and door poses come
+    /// from the same door graph the bump consults (§10.4). Each target must
+    /// also be in the player's FOV — which the touching ring always is (§6.2) —
+    /// so the line can never leak what the fog still hides (§11.5a).
+    pub fn affordances(&self) -> Vec<(Direction, Affordance)> {
+        let mut out = Vec::new();
+        for dir in Direction::ALL {
+            let Some(target) = self.player.step(dir) else {
+                continue;
+            };
+            if !self.player_fov.contains(target) || self.guard_at(target).is_some() {
+                continue;
+            }
+            let affordance = if target == self.exit {
+                if self.objectives_remaining() == 0 {
+                    Some(Affordance::Leave)
+                } else {
+                    Some(Affordance::ExitRefused)
+                }
+            } else if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
+                Some(Affordance::TakeIntel)
+            } else if let Some(id) = self.layout.regions().door_at(target) {
+                let door = self.layout.regions().door(id);
+                match (door.role(target), door.is_open()) {
+                    (Some(DoorCell::Panel), false) => Some(Affordance::OpenDoor),
+                    // A close with an actor on a panel would be refused — doors
+                    // never crush (§10.4) — so it is not offered either.
+                    (Some(DoorCell::Hinge), true)
+                        if !door.panels().iter().any(|&c| self.occupied(c)) =>
+                    {
+                        Some(Affordance::CloseDoor)
+                    }
+                    _ => None,
+                }
+            } else if self.layout.facility().terrain(target) == Some(Terrain::Hideout)
+                && !self.occupied(target)
+            {
+                Some(Affordance::Hide)
+            } else if self.layout.facility().terrain(target) == Some(Terrain::PartialCover)
+                && self.crouched_behind != Some(target)
+            {
+                // The table already crouched behind offers nothing: re-bumping
+                // it is a free no-op.
+                Some(Affordance::Crouch)
+            } else {
+                None
+            };
+            if let Some(a) = affordance {
+                out.push((dir, a));
+            }
+        }
+        out
     }
 
     /// Resolve one turn: player, then — only if the turn was actually spent — sight
@@ -502,6 +629,9 @@ impl State {
             // Abilities land in their own ticket; this is the spot the loop reserves.
         }
 
+        // Every action replaces the near line's source, free bumps included —
+        // this assignment is §11.7's "messages clear on the next action".
+        self.last_events = events.clone();
         events
     }
 
@@ -511,24 +641,24 @@ impl State {
         match input {
             // Waiting is a real action: it spends the turn where you stand (§5) —
             // and buys the 360° look-around the coming sight phase grants (§8.3).
-            // Beside partial cover it is also the crouch (§10.3): the duck is
-            // automatic, reported once when it engages.
+            // It also *holds* a crouch (§10.3): the pose survives exactly the
+            // turns spent holding still.
             Input::Wait => {
-                let already_crouched = self.crouched();
                 self.waited = true;
-                if !already_crouched {
-                    if let Some(behind) = self.adjacent_cover().next() {
-                        events.push(Event::Crouched { behind });
-                    }
-                }
                 true
             }
             Input::Step(dir) => {
+                let posture = self.crouched_behind;
                 let spent = self.resolve_step(dir, events);
-                // Only a *spent* step stands the player up / narrows the arc: a
-                // free action changes nothing, not even posture (§4.4).
+                // Only a *spent* action stands the player up / narrows the arc: a
+                // free action changes nothing, not even posture (§4.4). The one
+                // spent action that doesn't stand you up is the crouch itself —
+                // recognisable as the action that changed the pose.
                 if spent {
                     self.waited = false;
+                    if self.crouched_behind == posture {
+                        self.crouched_behind = None;
+                    }
                 }
                 spent
             }
@@ -611,6 +741,21 @@ impl State {
             self.player = target;
             self.facing = dir; // facing follows the last successful step (§5)
             events.push(Event::EnteredHideout { at: target });
+            return true;
+        }
+
+        // A table: bump it to crouch behind it (§4.3, §10.3). Like the cupboard,
+        // ducking is a *decision*, aimed at a specific table — concealment is
+        // across that table only. The crouch spends the turn; re-bumping the
+        // table you are already behind changes nothing and is free (§4.4). The
+        // player does not move — the table stays solid furniture.
+        if self.layout.facility().terrain(target) == Some(Terrain::PartialCover) {
+            if self.crouched_behind == Some(target) {
+                events.push(Event::Bumped { into: target });
+                return false;
+            }
+            self.crouched_behind = Some(target);
+            events.push(Event::Crouched { behind: target });
             return true;
         }
 
@@ -1139,13 +1284,13 @@ mod tests {
         );
     }
 
-    /// §10.3: **waiting beside a table is the crouch.** The duck is automatic —
-    /// wait with partial cover adjacent and you are crouched, reported once as
-    /// the crouch engages; waiting on keeps it without repeating the event. A
-    /// table itself is solid furniture: stepping into it is a free bump, not an
-    /// interaction.
+    /// §10.3: **bumping a table is the crouch** — ducking is a decision aimed at
+    /// a specific table, like the cupboard's bump-to-enter. It spends the turn,
+    /// reports once as the crouch engages, does not move the player, and
+    /// re-bumping the same table is a free no-op. Waiting holds the pose; a
+    /// plain wait away from cover crouches nothing.
     #[test]
-    fn waiting_beside_a_table_crouches_once() {
+    fn bumping_a_table_crouches_once() {
         let mut layout = open_room(10, 10);
         layout.place(Cell::new(5, 4), Terrain::PartialCover);
         let mut s = State::new(
@@ -1156,9 +1301,12 @@ mod tests {
             Vec::new(),
             Cell::new(8, 8),
         );
-        assert!(!s.crouched(), "standing until a turn is spent waiting");
+        assert!(!s.crouched(), "standing until the table is bumped");
+        s.step(Input::Wait);
+        assert!(!s.crouched(), "waiting beside a table no longer crouches");
 
-        let events = s.step(Input::Wait);
+        let turn = s.turn();
+        let events = s.step(Input::Step(Direction::East)); // bump the table
         assert_eq!(
             events,
             vec![Event::Crouched {
@@ -1166,12 +1314,16 @@ mod tests {
             }]
         );
         assert!(s.crouched());
+        assert_eq!(s.crouched_behind(), Some(Cell::new(5, 4)));
+        assert_eq!(s.player(), Cell::new(4, 4), "the crouch does not move you");
+        assert_eq!(s.turn(), turn + 1, "the crouch spends the turn");
 
-        // Waiting on: still crouched, no repeated event.
+        // Waiting on: still crouched, nothing repeated.
         assert!(s.step(Input::Wait).is_empty());
         assert!(s.crouched());
 
-        // Bumping the table is free and does not move the player (§4.4).
+        // Re-bumping the table you are already behind is a free no-op (§4.4).
+        let turn = s.turn();
         let events = s.step(Input::Step(Direction::East));
         assert_eq!(
             events,
@@ -1179,12 +1331,14 @@ mod tests {
                 into: Cell::new(5, 4)
             }]
         );
-        assert_eq!(s.player(), Cell::new(4, 4));
+        assert_eq!(s.turn(), turn, "a re-bump is free");
+        assert!(s.crouched(), "and it does not break the crouch");
     }
 
-    /// §10.3: **any spent step stands the player up** — the crouch is a posture,
-    /// not a place — while a *free* action (a wall bump) changes nothing, not
-    /// even posture (§4.4): the world does not move, so neither does the crouch.
+    /// §10.3: **any spent action but a wait stands the player up** — the crouch
+    /// is a posture, not a place — while a *free* action (a wall bump) changes
+    /// nothing, not even posture (§4.4): the world does not move, so neither
+    /// does the crouch.
     #[test]
     fn a_spent_step_stands_up_but_a_free_bump_does_not() {
         let mut layout = open_room(10, 10);
@@ -1197,7 +1351,7 @@ mod tests {
             Vec::new(),
             Cell::new(8, 8),
         );
-        s.step(Input::Wait);
+        s.step(Input::Step(Direction::South)); // bump the table below: crouch
         assert!(s.crouched());
 
         // A mis-input into the wall is free: still crouched, turn unspent.
@@ -1231,7 +1385,7 @@ mod tests {
         // Standing, the table conceals from no one.
         assert!(!s.concealed_from(Cell::new(7, 4)));
 
-        s.step(Input::Wait);
+        s.step(Input::Step(Direction::East)); // bump the table: crouch
         assert!(s.crouched());
         // Straight across the table, near and far: concealed.
         assert!(s.concealed_from(Cell::new(6, 4)));
@@ -1296,8 +1450,8 @@ mod tests {
             "startup moved the guard"
         );
 
-        // The wait crouches the player — and hands the guard its step into them.
-        let events = s.step(Input::Wait);
+        // The bump crouches the player — and hands the guard its step into them.
+        let events = s.step(Input::Step(Direction::North));
         assert!(events.contains(&Event::Crouched {
             behind: Cell::new(4, 3)
         }));
@@ -1521,5 +1675,142 @@ mod tests {
         };
 
         assert_eq!(run(), run(), "same state + inputs must replay identically");
+    }
+
+    /// The usable line's contract (§11.4): [`State::affordances`] offers exactly
+    /// what a bump would do. A live console reads `TakeIntel`; once taken it is
+    /// just solid and offers nothing; the exit answers by whether the intel is
+    /// in hand; an empty cupboard offers `Hide`.
+    #[test]
+    fn affordances_mirror_what_a_bump_would_do() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(4, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(6, 5)], // a console east
+            Cell::new(5, 4),   // the exit north
+        );
+
+        // Console east, exit north (intel still out), cupboard west — each with
+        // the direction to bump it.
+        assert_eq!(
+            s.affordances(),
+            vec![
+                (Direction::North, Affordance::ExitRefused),
+                (Direction::East, Affordance::TakeIntel),
+                (Direction::West, Affordance::Hide)
+            ],
+            "Direction::ALL order: north, east, … west"
+        );
+
+        // Take the intel: the console goes solid and the exit opens up.
+        s.step(Input::Step(Direction::East));
+        assert_eq!(
+            s.affordances(),
+            vec![
+                (Direction::North, Affordance::Leave),
+                (Direction::West, Affordance::Hide)
+            ],
+            "a spent console offers nothing; the exit now offers the win"
+        );
+
+        // In the middle of open floor, the line is empty.
+        let s = solo(Cell::new(4, 4));
+        assert_eq!(s.affordances(), Vec::new());
+    }
+
+    /// An adjacent guard offers **nothing**: bumping one is a free no-op until
+    /// takedowns land (§7.2), and the usable line must never promise what a bump
+    /// will not do (§2.3). An occupied cupboard is likewise just solid.
+    #[test]
+    fn affordances_skip_guards_and_occupied_hideouts() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(6, 5))], // east of the player
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        // Enter the cupboard north; the guard east never shows.
+        assert_eq!(s.affordances(), vec![(Direction::North, Affordance::Hide)]);
+        s.step(Input::Step(Direction::North));
+        assert!(s.hidden());
+
+        // From inside, the cupboard's own cell is the player's — and stepping
+        // back out is a plain move, not an affordance.
+        assert_eq!(s.affordances(), Vec::new());
+    }
+
+    /// Door affordances speak the §10.4 door graph: a closed panel offers the
+    /// open; an open hinge offers the close — except while an actor stands on a
+    /// panel, when the close would be refused (doors never crush) and so is
+    /// never offered.
+    #[test]
+    fn door_affordances_track_pose_and_obstruction() {
+        for seed in 0..64 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let Some((_, from, into, panel, hinge_dir)) = crush_scenario(&layout) else {
+                continue;
+            };
+            // The hinge's floor neighbour on the player's side of the wall: the
+            // cell to close the door from. `side` steps off the door line back
+            // toward `from`'s side.
+            let hinge = panel.step(hinge_dir).expect("hinge adjacent to panel");
+            let side = dir_between(panel, from).expect("from is beside the panel");
+            let Some(beside_hinge) = hinge.step(side) else {
+                continue;
+            };
+            let f = layout.facility();
+            if f.terrain(beside_hinge) != Some(Terrain::Floor)
+                || !f.can_enter(beside_hinge, ACTOR_FILL)
+            {
+                continue;
+            }
+
+            let mut s = State::new(
+                layout,
+                from,
+                Direction::North,
+                Vec::new(),
+                Vec::new(),
+                Cell::new(0, 0), // border corner: never walked, never bumped
+            );
+            let offers =
+                |s: &State, want: Affordance| s.affordances().iter().any(|&(_, a)| a == want);
+            assert!(
+                offers(&s, Affordance::OpenDoor),
+                "seed {seed}: a closed panel offers the open"
+            );
+            assert!(!offers(&s, Affordance::CloseDoor));
+
+            // Open it, then stand on the panel: the close would be refused, so
+            // the hinge offers nothing.
+            s.step(Input::Step(into));
+            s.step(Input::Step(into));
+            assert_eq!(s.player(), panel);
+            assert!(
+                !offers(&s, Affordance::CloseDoor),
+                "seed {seed}: no close offered while standing on the panel"
+            );
+
+            // Step back off the panel, then along the wall to sit beside the
+            // hinge: now the close is a real offer.
+            s.step(Input::Step(side));
+            s.step(Input::Step(hinge_dir));
+            assert_eq!(s.player(), beside_hinge);
+            assert!(
+                offers(&s, Affordance::CloseDoor),
+                "seed {seed}: an open hinge offers the close"
+            );
+            assert!(!offers(&s, Affordance::OpenDoor));
+            return;
+        }
+        panic!("no usable door scenario found in 64 seeds");
     }
 }

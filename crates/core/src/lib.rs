@@ -29,11 +29,13 @@ mod cell;
 mod door;
 mod facility;
 mod generate;
+mod input;
 mod place;
 mod region;
 mod render;
 mod rng;
 mod state;
+mod status;
 mod vision;
 
 pub use category::Category;
@@ -41,11 +43,13 @@ pub use cell::{Cell, Direction};
 pub use door::DoorAction;
 pub use facility::{Facility, SoundBlocking, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
+pub use input::{ability_hotkey, input_for_key};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
-pub use render::{ascii_grid, render, GlyphCell, Grid, Visibility};
+pub use render::{ascii_grid, render, render_screen, GlyphCell, Grid, Visibility, STATUS_ROWS};
 pub use rng::Rng;
-pub use state::{Event, Guard, GuardState, Input, Outcome, State};
+pub use state::{Affordance, Event, Guard, GuardState, Input, Outcome, State};
+pub use status::{message_for, near_line, Message};
 pub use vision::{
     field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
     PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,

@@ -360,10 +360,56 @@ fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenEr
 ///
 /// Room size and count are not re-checked here: they are fixed by the partition
 /// constants before any wall is stamped, and the property tests below pin them.
+///
+/// **One usable per cell is a preference, not a guarantee** (§11.4): the
+/// stamping passes ([`place_blocker`], [`place_hideouts`]) and placement
+/// (`crate::place`) *avoid* crowding a floor cell with a second adjacent usable
+/// wherever a free alternative exists, but two of the guarantees here —
+/// connectivity and the sightline rule — outrank it, and structural doors can
+/// cluster no carve can undo. So it is not asserted: a rare doubled cell stays
+/// legible because the usable line points each bump with its own arrow (§11.4).
 fn passes_guarantees(layout: &Layout) -> bool {
     fully_enclosed(layout.facility())
         && pathable_connected(layout.facility())
         && sightlines_bounded(layout.facility())
+}
+
+/// Whether `terrain` is a **usable** a player bumps (§11.4): a door cell (a
+/// hinge or either panel pose — whatever its pose, a door is one usable), a
+/// table, or a cupboard. Consoles and the exit are still plain floor during
+/// generation (§10.1.7–8), so callers pass those cells in via `extra`.
+fn is_usable_terrain(terrain: Terrain) -> bool {
+    matches!(
+        terrain,
+        Terrain::DoorHinge
+            | Terrain::DoorPanelClosed
+            | Terrain::DoorPanelOpen
+            | Terrain::PartialCover
+            | Terrain::Hideout
+    )
+}
+
+/// Whether `cell` already has at least one usable orthogonally adjacent — a
+/// door cell, a table, a cupboard, or one of `extra` (placement's consoles and
+/// exit). Terrain-only and four lookups: the §11.4 one-usable checks only ever
+/// ask this yes/no question, never a deduped count, so this never touches the
+/// door list (which turned the check quadratic).
+pub(crate) fn has_adjacent_usable(facility: &Facility, cell: Cell, extra: &[Cell]) -> bool {
+    facility
+        .neighbors(cell)
+        .any(|n| extra.contains(&n) || facility.terrain(n).is_some_and(is_usable_terrain))
+}
+
+/// Whether stamping a usable at `cell` would give some floor neighbour a
+/// **second** adjacent usable — the §11.4 one-usable *preference*. The stamping
+/// passes consult this to prefer a cleaner site; unlike a guarantee it may be
+/// overridden (a sightline that only one crowded cell can break, a structural
+/// door cluster), so nothing asserts its absence — the arrow disambiguates a
+/// doubled cell instead.
+fn creates_usable_conflict(facility: &Facility, cell: Cell) -> bool {
+    facility.neighbors(cell).any(|f| {
+        facility.terrain(f) == Some(Terrain::Floor) && has_adjacent_usable(facility, f, &[])
+    })
 }
 
 /// Whether the border ring is solid wall — §10.6 "fully enclosed".
@@ -1010,6 +1056,14 @@ fn place_hideouts(facility: &mut Facility, regions: &RegionGraph, rng: &mut Rng)
         if severs_pathing(facility, cell) {
             continue;
         }
+        // Prefer not to crowd a floor cell's usable line (§11.4): a cupboard
+        // beside a cell that already borders a door, a table or another cupboard
+        // is skipped. Cupboards are best-effort furniture with plentiful sites
+        // (§10.1.6), so skipping here only improves the spread — nothing depends
+        // on this particular cell taking one.
+        if creates_usable_conflict(facility, cell) {
+            continue;
+        }
         facility.set_terrain(cell.x, cell.y, Terrain::Hideout);
         placed.push(cell);
     }
@@ -1224,6 +1278,14 @@ fn place_blocker(
 
     let mut order: Vec<u32> = (run.start..run.start + run.len).collect();
     order.sort_by_key(|&i| (i.abs_diff(aim), i));
+    // The one-usable preference (§11.4) is *not* applied to sightline cover: the
+    // §10.1a rule puts tables squarely in corridors, which are door-rich by
+    // construction, so a table doubling with a nearby door is often unavoidable
+    // — and steering the blocker off the centre to dodge it only shortens the
+    // run instead of splitting it, forcing many more break passes (each a full
+    // grid re-scan). The blocker takes the best split; the arrow on the usable
+    // line keeps the rare doubled cell unambiguous. Cupboards and consoles/exit,
+    // which have plentiful sites, do honour the preference (see their passes).
     for i in order {
         let cell = run.line.cell(i);
         if facility.terrain(cell) != Some(Terrain::Floor)
