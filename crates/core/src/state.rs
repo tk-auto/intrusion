@@ -34,6 +34,7 @@ use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::generate::Layout;
+use crate::region::DoorCell;
 use crate::vision::{
     field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
     PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
@@ -110,6 +111,54 @@ impl Event {
             Event::IntelTaken { .. } | Event::ExitRefused | Event::Won => Category::Interest,
             // A threat that has you, literally (§4.5).
             Event::Captured { .. } => Category::Danger,
+        }
+    }
+}
+
+/// One thing a bump would do right now — the **usable line**'s vocabulary
+/// (§11.4). Derived from adjacency by [`State::affordances`], never stored: the
+/// line is a pure view of state, recomputed every frame, with nothing to clear.
+///
+/// The set is exactly the interactions [`State::step`]'s bump resolution
+/// actually performs — a takedown affordance joins when takedowns land (§7.2),
+/// not before: the line must never offer what a bump will not do (§2.3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Affordance {
+    /// A closed door panel: bump to open (§10.4).
+    OpenDoor,
+    /// An open door's hinge: bump to close (§10.4).
+    CloseDoor,
+    /// An untaken intel console: bump to take the intel (§4.3).
+    TakeIntel,
+    /// An empty cupboard: bump to climb in and be concealed (§10.3).
+    Hide,
+    /// The exit, with every objective in hand: bump to win (§4.5).
+    Leave,
+    /// The exit while intel is still out: bumping it will refuse (§4.5).
+    ExitRefused,
+}
+
+impl Affordance {
+    /// The words the usable line shows for this affordance.
+    pub fn label(self) -> &'static str {
+        match self {
+            Affordance::OpenDoor => "door: open",
+            Affordance::CloseDoor => "door: close",
+            Affordance::TakeIntel => "console: take intel",
+            Affordance::Hide => "cupboard: hide",
+            Affordance::Leave => "exit: leave",
+            Affordance::ExitRefused => "exit: needs the intel",
+        }
+    }
+
+    /// What acting on this affordance is *about* (§11.2): doors and cupboards
+    /// are System furniture; the console and the exit are the goal, Interest.
+    pub fn category(self) -> Category {
+        match self {
+            Affordance::OpenDoor | Affordance::CloseDoor | Affordance::Hide => Category::System,
+            Affordance::TakeIntel | Affordance::Leave | Affordance::ExitRefused => {
+                Category::Interest
+            }
         }
     }
 }
@@ -299,6 +348,11 @@ pub struct State {
     exit: Cell,
     turn: u32,
     outcome: Outcome,
+    /// The events of the player's most recent action, free or spent — what the
+    /// near line reads (§11.7: messages clear on the next action, so holding
+    /// exactly one action's events *is* the clearing rule). Empty before the
+    /// first input; frozen once the run ends, so the final message stays.
+    last_events: Vec<Event>,
 }
 
 impl State {
@@ -340,6 +394,7 @@ impl State {
             exit,
             turn: 0,
             outcome: Outcome::Playing,
+            last_events: Vec::new(),
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -478,6 +533,69 @@ impl State {
         self.outcome
     }
 
+    /// The events of the player's most recent action — the near line's source
+    /// (§11.7). Empty before the first input; frozen once the run ends.
+    pub fn last_events(&self) -> &[Event] {
+        &self.last_events
+    }
+
+    /// What a bump would do from here — the **usable line** (§11.4), one entry
+    /// per distinct interaction orthogonally adjacent to the player, in
+    /// [`Direction::ALL`] order, duplicates collapsed.
+    ///
+    /// This mirrors [`step`](Self::step)'s bump resolution case for case, so
+    /// the line can never promise what a bump won't deliver: a guard is skipped
+    /// (bumping one is a free no-op until takedowns land, §7.2), a spent
+    /// console and an occupied cupboard are just solid, and door poses come
+    /// from the same door graph the bump consults (§10.4). Each target must
+    /// also be in the player's FOV — which the touching ring always is (§6.2) —
+    /// so the line can never leak what the fog still hides (§11.5a).
+    pub fn affordances(&self) -> Vec<Affordance> {
+        let mut out = Vec::new();
+        for dir in Direction::ALL {
+            let Some(target) = self.player.step(dir) else {
+                continue;
+            };
+            if !self.player_fov.contains(target) || self.guard_at(target).is_some() {
+                continue;
+            }
+            let affordance = if target == self.exit {
+                if self.objectives_remaining() == 0 {
+                    Some(Affordance::Leave)
+                } else {
+                    Some(Affordance::ExitRefused)
+                }
+            } else if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
+                Some(Affordance::TakeIntel)
+            } else if let Some(id) = self.layout.regions().door_at(target) {
+                let door = self.layout.regions().door(id);
+                match (door.role(target), door.is_open()) {
+                    (Some(DoorCell::Panel), false) => Some(Affordance::OpenDoor),
+                    // A close with an actor on a panel would be refused — doors
+                    // never crush (§10.4) — so it is not offered either.
+                    (Some(DoorCell::Hinge), true)
+                        if !door.panels().iter().any(|&c| self.occupied(c)) =>
+                    {
+                        Some(Affordance::CloseDoor)
+                    }
+                    _ => None,
+                }
+            } else if self.layout.facility().terrain(target) == Some(Terrain::Hideout)
+                && !self.occupied(target)
+            {
+                Some(Affordance::Hide)
+            } else {
+                None
+            };
+            if let Some(a) = affordance {
+                if !out.contains(&a) {
+                    out.push(a);
+                }
+            }
+        }
+        out
+    }
+
     /// Resolve one turn: player, then — only if the turn was actually spent — sight
     /// and guards (§4.2). Returns the events, in order.
     ///
@@ -502,6 +620,9 @@ impl State {
             // Abilities land in their own ticket; this is the spot the loop reserves.
         }
 
+        // Every action replaces the near line's source, free bumps included —
+        // this assignment is §11.7's "messages clear on the next action".
+        self.last_events = events.clone();
         events
     }
 
@@ -1521,5 +1642,136 @@ mod tests {
         };
 
         assert_eq!(run(), run(), "same state + inputs must replay identically");
+    }
+
+    /// The usable line's contract (§11.4): [`State::affordances`] offers exactly
+    /// what a bump would do. A live console reads `TakeIntel`; once taken it is
+    /// just solid and offers nothing; the exit answers by whether the intel is
+    /// in hand; an empty cupboard offers `Hide`.
+    #[test]
+    fn affordances_mirror_what_a_bump_would_do() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(4, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(6, 5)], // a console east
+            Cell::new(5, 4),   // the exit north
+        );
+
+        // Console east, exit north (intel still out), cupboard west.
+        assert_eq!(
+            s.affordances(),
+            vec![
+                Affordance::ExitRefused,
+                Affordance::TakeIntel,
+                Affordance::Hide
+            ],
+            "Direction::ALL order: north, east, … west"
+        );
+
+        // Take the intel: the console goes solid and the exit opens up.
+        s.step(Input::Step(Direction::East));
+        assert_eq!(
+            s.affordances(),
+            vec![Affordance::Leave, Affordance::Hide],
+            "a spent console offers nothing; the exit now offers the win"
+        );
+
+        // In the middle of open floor, the line is empty.
+        let s = solo(Cell::new(4, 4));
+        assert_eq!(s.affordances(), Vec::new());
+    }
+
+    /// An adjacent guard offers **nothing**: bumping one is a free no-op until
+    /// takedowns land (§7.2), and the usable line must never promise what a bump
+    /// will not do (§2.3). An occupied cupboard is likewise just solid.
+    #[test]
+    fn affordances_skip_guards_and_occupied_hideouts() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(6, 5))], // east of the player
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        // Enter the cupboard north; the guard east never shows.
+        assert_eq!(s.affordances(), vec![Affordance::Hide]);
+        s.step(Input::Step(Direction::North));
+        assert!(s.hidden());
+
+        // From inside, the cupboard's own cell is the player's — and stepping
+        // back out is a plain move, not an affordance.
+        assert_eq!(s.affordances(), Vec::new());
+    }
+
+    /// Door affordances speak the §10.4 door graph: a closed panel offers the
+    /// open; an open hinge offers the close — except while an actor stands on a
+    /// panel, when the close would be refused (doors never crush) and so is
+    /// never offered.
+    #[test]
+    fn door_affordances_track_pose_and_obstruction() {
+        for seed in 0..64 {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let Some((_, from, into, panel, hinge_dir)) = crush_scenario(&layout) else {
+                continue;
+            };
+            // The hinge's floor neighbour on the player's side of the wall: the
+            // cell to close the door from. `side` steps off the door line back
+            // toward `from`'s side.
+            let hinge = panel.step(hinge_dir).expect("hinge adjacent to panel");
+            let side = dir_between(panel, from).expect("from is beside the panel");
+            let Some(beside_hinge) = hinge.step(side) else {
+                continue;
+            };
+            let f = layout.facility();
+            if f.terrain(beside_hinge) != Some(Terrain::Floor)
+                || !f.can_enter(beside_hinge, ACTOR_FILL)
+            {
+                continue;
+            }
+
+            let mut s = State::new(
+                layout,
+                from,
+                Direction::North,
+                Vec::new(),
+                Vec::new(),
+                Cell::new(0, 0), // border corner: never walked, never bumped
+            );
+            assert!(
+                s.affordances().contains(&Affordance::OpenDoor),
+                "seed {seed}: a closed panel offers the open"
+            );
+            assert!(!s.affordances().contains(&Affordance::CloseDoor));
+
+            // Open it, then stand on the panel: the close would be refused, so
+            // the hinge offers nothing.
+            s.step(Input::Step(into));
+            s.step(Input::Step(into));
+            assert_eq!(s.player(), panel);
+            assert!(
+                !s.affordances().contains(&Affordance::CloseDoor),
+                "seed {seed}: no close offered while standing on the panel"
+            );
+
+            // Step back off the panel, then along the wall to sit beside the
+            // hinge: now the close is a real offer.
+            s.step(Input::Step(side));
+            s.step(Input::Step(hinge_dir));
+            assert_eq!(s.player(), beside_hinge);
+            assert!(
+                s.affordances().contains(&Affordance::CloseDoor),
+                "seed {seed}: an open hinge offers the close"
+            );
+            assert!(!s.affordances().contains(&Affordance::OpenDoor));
+            return;
+        }
+        panic!("no usable door scenario found in 64 seeds");
     }
 }

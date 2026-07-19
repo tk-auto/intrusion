@@ -23,9 +23,10 @@
 //! the row's dim shade out of FOV (dark gray for most; quieter for floor dots,
 //! tinted for the exit), muted slate remembered, and two red background shades for
 //! the danger overlay. Colours come from the §11.2 base palette below — a full-range,
-//! colour-blind-safe 16-colour set behind a single category→swatch table. A
-//! player-*centred* viewport (§11.4) and explicit hotkeys (§11.6) are later render
-//! tickets.
+//! colour-blind-safe 16-colour set behind a single category→swatch table. The frame
+//! is the full §11.4 *screen* — the map plus the near and usable status lines, all
+//! composed by `core::render_screen` — and keys map through `core::input_for_key`
+//! (§11.6), so both the picture and the bindings are pinned by native tests.
 //! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
 //! and player in the largest room, intel spread across rooms, guards seated where
 //! none eyes the spawn on turn one. The guards stand still until the guard-AI
@@ -35,8 +36,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    generate_level, render, Category, Direction, Grid, Guard, Input, LevelConfig, Rng, State,
-    Visibility,
+    generate_level, input_for_key, render_screen, Category, Direction, Grid, Guard, Input,
+    LevelConfig, Rng, State, Visibility, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -237,18 +238,14 @@ struct Game {
 }
 
 impl Game {
-    /// Map a key to an [`Input`] and, if it is one the loop takes, step and redraw.
-    /// Returns whether the key was consumed (so the caller can stop the page from
-    /// scrolling on the arrows). Explicit, stable hotkeys are §11.6's ticket; this is
-    /// the minimal movement set.
+    /// Map a key through the core's §11.6 table and, if it is one the loop takes,
+    /// step and redraw. Returns whether the key was consumed (so the caller can
+    /// stop the page from scrolling on the arrows). The mapping itself lives in
+    /// `core::input_for_key` where native tests pin every binding — this shell
+    /// never interprets a key.
     fn handle_key(&mut self, key: &str) -> bool {
-        let input = match key {
-            "ArrowUp" | "w" | "k" => Input::Step(Direction::North),
-            "ArrowDown" | "s" | "j" => Input::Step(Direction::South),
-            "ArrowLeft" | "a" | "h" => Input::Step(Direction::West),
-            "ArrowRight" | "d" | "l" => Input::Step(Direction::East),
-            "." | "5" => Input::Wait,
-            _ => return false,
+        let Some(input) = input_for_key(key) else {
+            return false;
         };
         self.state.step(input);
         self.draw();
@@ -274,7 +271,11 @@ impl Game {
     /// resize / orientation change.
     fn fit_and_draw(&mut self) {
         let facility = self.state.layout().facility();
-        let (cols, rows) = (facility.width() as f64, facility.height() as f64);
+        // The screen is the map plus the §11.4 status lines beneath it.
+        let (cols, rows) = (
+            facility.width() as f64,
+            (facility.height() + STATUS_ROWS) as f64,
+        );
         let win = web_sys::window().expect("a window");
 
         let avail_w = viewport(&win, Window::inner_width).unwrap_or(cols * CELL_W);
@@ -302,10 +303,11 @@ impl Game {
         self.draw();
     }
 
-    /// Draw one frame: ask the core to render the whole grid (terrain + entities,
-    /// glyph priority resolved), then blit it — colour by category, glyph as given.
+    /// Draw one frame: ask the core to render the whole §11.4 screen (map, near
+    /// line, usable line — glyphs, overlaps and categories all decided there),
+    /// then blit it — colour by category, glyph as given.
     fn draw(&self) {
-        paint(&self.ctx, &render(&self.state), &self.metrics);
+        paint(&self.ctx, &render_screen(&self.state), &self.metrics);
     }
 }
 
