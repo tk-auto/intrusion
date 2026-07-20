@@ -41,4 +41,10 @@ pub enum Category {
     Interest,
     /// Tan. Doors, hideouts — neutral furniture.
     System,
+    /// Cyan. A noise the player *hears* but cannot see (§9.3) — the source cell of
+    /// a sound that reached them, flashed for the one turn it was made. Its meaning
+    /// is *perception*, not a thing on the map: nothing physical is cyan, a heard
+    /// sound is. Presentation owns *how* that reads (a flash, later maybe an edge
+    /// arrow or compass, §15.3); the category only names what the cell means.
+    Noise,
 }
