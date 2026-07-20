@@ -321,10 +321,12 @@ mod tests {
     use super::*;
     use crate::generate::generate_level;
     use crate::state::{Guard, State};
+    use crate::test_support::seed_sweep;
     use crate::{Direction, GenError, Outcome};
 
-    /// The seeds every property below sweeps. Placement must hold on *accepted*
-    /// seeds universally, not on a lucky one (§10.6).
+    /// The exhaustive seed range every property below sweeps. Placement must hold on
+    /// *accepted* seeds universally, not on a lucky one (§10.6). The routine gate
+    /// samples this via [`seed_sweep`]; CI (`INTRUSION_SLOW_TESTS=1`) runs it whole.
     const SEEDS: u64 = 64;
 
     fn v1(seed: u64) -> (Layout, Placement) {
@@ -360,7 +362,7 @@ mod tests {
     /// old asked-for-5-got-4 silent shortfall.
     #[test]
     fn accepted_seeds_place_exact_counts_on_plain_floor() {
-        for seed in 0..SEEDS {
+        for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             assert_eq!(p.intel().len(), LevelConfig::V1.intel, "seed {seed}");
             assert_eq!(p.guards().len(), LevelConfig::V1.guards, "seed {seed}");
@@ -391,7 +393,7 @@ mod tests {
     /// and never spawn within [`PLAYER_EXIT_MIN_DISTANCE`] of each other.
     #[test]
     fn player_and_exit_share_the_largest_room_well_apart() {
-        for seed in 0..SEEDS {
+        for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             let start = room_of(&layout, p.player());
             assert_eq!(
@@ -422,7 +424,7 @@ mod tests {
     /// room nor another intel's room — all three can never clump (the old bug).
     #[test]
     fn intel_spreads_across_distinct_non_start_rooms() {
-        for seed in 0..SEEDS {
+        for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             let start = room_of(&layout, p.player());
             let rooms: Vec<RegionId> = p.intel().iter().map(|&c| room_of(&layout, c)).collect();
@@ -445,7 +447,7 @@ mod tests {
     /// player's spawn.
     #[test]
     fn no_guard_eyes_the_spawn_on_turn_one() {
-        for seed in 0..SEEDS {
+        for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             let start = room_of(&layout, p.player());
             for &g in p.guards() {

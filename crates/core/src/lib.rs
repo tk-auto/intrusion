@@ -39,6 +39,8 @@ mod rng;
 mod sound;
 mod state;
 mod status;
+#[cfg(test)]
+mod test_support;
 mod vision;
 
 pub use category::Category;

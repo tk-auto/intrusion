@@ -45,7 +45,12 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Test
+        # Run the exhaustive per-seed generation sweeps in CI (issue #60): the
+        # routine local `cargo test` samples seeds to stay fast, this restores the
+        # full §10.6 coverage on every push.
         run: cargo test --workspace
+        env:
+          INTRUSION_SLOW_TESTS: "1"
 
       - name: Build web crate for wasm
         run: cargo build -p intrusion-web --target wasm32-unknown-unknown
