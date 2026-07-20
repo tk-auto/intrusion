@@ -379,6 +379,13 @@ fn passes_guarantees(layout: &Layout) -> bool {
 /// hinge or either panel pose — whatever its pose, a door is one usable), a
 /// table, or a cupboard. Consoles and the exit are still plain floor during
 /// generation (§10.1.7–8), so callers pass those cells in via `extra`.
+///
+/// This is deliberately *not* the runtime bump ladder [`State::bump_kind`](crate::State):
+/// generation has only terrain — no objectives, no live door state, no player — so it
+/// cannot ask "what would a bump do here". It asks the coarser, pose-independent
+/// question "could this cell be a usable at all", which is all the §11.4 one-usable
+/// *placement preference* needs. The two must agree on the terrain set (door cell,
+/// table, cupboard); they answer different questions, so they stay separate lists.
 fn is_usable_terrain(terrain: Terrain) -> bool {
     matches!(
         terrain,

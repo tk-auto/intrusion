@@ -47,13 +47,36 @@ impl Layout {
     /// `occupied(cell)` reports whether an actor stands on `cell`.
     pub fn bump_door(&mut self, cell: Cell, occupied: impl Fn(Cell) -> bool) -> Option<DoorAction> {
         let id = self.regions().door_at(cell)?;
-        let door = self.regions().door(id);
-        match (door.role(cell)?, door.is_open()) {
-            (DoorCell::Panel, false) => {
+        match self.preview_door_bump(cell, &occupied)? {
+            DoorAction::Opened => {
                 self.set_door_open(id, true);
                 Some(DoorAction::Opened)
             }
-            (DoorCell::Hinge, true) => Some(self.close_door(id, occupied)),
+            // The close verdict (Closed vs. the refused Obstructed) is re-derived by
+            // `close_door`, which owns the crush-safety check and the mutation.
+            DoorAction::Closed | DoorAction::Obstructed => Some(self.close_door(id, occupied)),
+        }
+    }
+
+    /// What bumping `cell` *would* do to a door, touching nothing — the read-only twin
+    /// of [`bump_door`], so the usable line (§11.4) can predict the exact outcome the
+    /// bump will produce. Returns `None` for the non-door-action cases `bump_door`
+    /// also declines: an open panel (walked through), a closed hinge (solid wall), or
+    /// a cell that is no door at all.
+    pub fn preview_door_bump(
+        &self,
+        cell: Cell,
+        occupied: impl Fn(Cell) -> bool,
+    ) -> Option<DoorAction> {
+        let id = self.regions().door_at(cell)?;
+        let door = self.regions().door(id);
+        match (door.role(cell)?, door.is_open()) {
+            (DoorCell::Panel, false) => Some(DoorAction::Opened),
+            (DoorCell::Hinge, true) => Some(if door.panels().iter().any(|&c| occupied(c)) {
+                DoorAction::Obstructed
+            } else {
+                DoorAction::Closed
+            }),
             _ => None,
         }
     }
