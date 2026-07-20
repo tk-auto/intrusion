@@ -467,7 +467,8 @@ mod tests {
     use super::*;
     use crate::cell::{Cell, Direction};
     use crate::facility::{Facility, Terrain};
-    use crate::state::{Guard, Input, State};
+    use crate::guard::Guard;
+    use crate::state::{Input, State};
     use crate::Layout;
 
     /// A hand-built state on a `w × h` walled box: the player, some guards, and a far
@@ -546,7 +547,7 @@ mod tests {
     /// named a colour to do it.
     #[test]
     fn a_guards_glyph_category_tracks_its_state() {
-        use crate::state::GuardState;
+        use crate::guard::GuardState;
         for (guard_state, category) in [
             (GuardState::Calm, Category::Caution),
             (GuardState::Alerted, Category::Warning),

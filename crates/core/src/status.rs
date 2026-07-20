@@ -107,7 +107,8 @@ mod tests {
     use super::*;
     use crate::cell::{Cell, Direction};
     use crate::facility::{Facility, Terrain};
-    use crate::state::{Guard, Input};
+    use crate::guard::Guard;
+    use crate::state::Input;
     use crate::Layout;
 
     /// A walled box with the player at `player`, one intel console at `intel`,
