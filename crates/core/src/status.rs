@@ -216,13 +216,13 @@ mod tests {
     /// `caught` on a capture, in Danger, at the top of the threat ladder.
     #[test]
     fn the_final_message_persists_after_the_run_ends() {
-        // A guard scripted to walk straight into the player.
+        // A guard sent straight down the column into the player.
         let s = {
             let mut s = State::new(
                 Layout::from_facility(Facility::walled_box(12, 12)),
                 Cell::new(5, 5),
                 Direction::North,
-                vec![Guard::patrolling(Cell::new(5, 3), vec![Direction::South])],
+                vec![Guard::patrolling_to(Cell::new(5, 3), Cell::new(5, 10))],
                 Vec::new(),
                 Cell::new(10, 10),
             );

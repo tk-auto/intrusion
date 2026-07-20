@@ -170,14 +170,14 @@ fn swatch(category: Category) -> Swatch {
 pub fn start() -> Result<(), JsValue> {
     let seed = js_sys::Date::now() as u64;
     // The full v1 level (§10.2): a carve passing every §10.6 guarantee, with the
-    // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards are
-    // stationary until the guard-AI tickets land patrols.
+    // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards patrol
+    // their territories (§7.5); the reactive states ride on the same seam.
     let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(seed))
         .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
     let guards = placement
         .guards()
         .iter()
-        .map(|&c| Guard::stationary(c))
+        .map(|&c| Guard::patrolling(c))
         .collect();
 
     let state = State::new(
