@@ -796,28 +796,9 @@ fn actor_occupies(player: Cell, guards: &[Guard], cell: Cell) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facility::Facility;
     use crate::guard::{GuardState, PATROL_RADIUS};
+    use crate::test_support::{open_room, solo};
     use crate::{generate, DoorId, Rng};
-
-    /// An open room: a `w × h` walled box, all interior floor, wrapped as a bare
-    /// layout. Enough to drive movement, objectives, and capture without generation.
-    fn open_room(w: u32, h: u32) -> Layout {
-        Layout::from_facility(Facility::walled_box(w, h))
-    }
-
-    /// A player in an empty room, facing north, no guards or objectives, exit unused
-    /// in a far corner.
-    fn solo(player: Cell) -> State {
-        State::new(
-            open_room(10, 10),
-            player,
-            Direction::North,
-            Vec::new(),
-            Vec::new(),
-            Cell::new(8, 8),
-        )
-    }
 
     #[test]
     fn a_move_into_open_floor_spends_the_turn_and_turns_the_player() {

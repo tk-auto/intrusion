@@ -469,7 +469,7 @@ mod tests {
     use crate::facility::{Facility, Terrain};
     use crate::guard::Guard;
     use crate::state::{Input, State};
-    use crate::Layout;
+    use crate::test_support::open_room;
 
     /// A hand-built state on a `w × h` walled box: the player, some guards, and a far
     /// exit, no objectives. Enough to render. Faces **south**, toward where these
@@ -477,7 +477,7 @@ mod tests {
     /// inside the FOV, so a guard the test asserts on must be in view.
     fn state(w: u32, h: u32, player: Cell, guards: Vec<Guard>) -> State {
         State::new(
-            Layout::from_facility(Facility::walled_box(w, h)),
+            open_room(w, h),
             player,
             Direction::South,
             guards,
@@ -578,7 +578,7 @@ mod tests {
         // A guard standing on a console ($, terrain) renders as the guard, not the $.
         // The player faces south so the contested cell is live, not fogged (§11.5a).
         let s = State::new(
-            Layout::from_facility(Facility::walled_box(10, 10)),
+            open_room(10, 10),
             Cell::new(2, 2),
             Direction::South,
             vec![Guard::stationary(Cell::new(5, 5))],
@@ -603,7 +603,7 @@ mod tests {
     /// `}` glyph but recolours to **Owned** — the `@` is not drawn, the cupboard is.
     #[test]
     fn an_occupied_hideout_recolours_to_owned_and_an_empty_one_stays_system() {
-        let mut layout = Layout::from_facility(Facility::walled_box(10, 10));
+        let mut layout = open_room(10, 10);
         layout.place(Cell::new(4, 4), Terrain::Hideout); // the one the player hides in
         layout.place(Cell::new(7, 4), Terrain::Hideout); // an empty cupboard elsewhere
         let s = State::new(
@@ -632,7 +632,7 @@ mod tests {
     /// it.
     #[test]
     fn a_covering_table_recolours_to_owned_while_crouched() {
-        let mut layout = Layout::from_facility(Facility::walled_box(10, 10));
+        let mut layout = open_room(10, 10);
         layout.place(Cell::new(5, 4), Terrain::PartialCover);
         let mut s = State::new(
             layout,
@@ -671,7 +671,7 @@ mod tests {
         // Guard at (5,3) looking south (spawn facing, §7.1) straight down the
         // column; a table at (5,6); the player one south of it at (5,7), facing
         // north so the guard is in view.
-        let mut layout = Layout::from_facility(Facility::walled_box(12, 12));
+        let mut layout = open_room(12, 12);
         layout.place(Cell::new(5, 6), Terrain::PartialCover);
         let mut s = State::new(
             layout,
@@ -711,7 +711,7 @@ mod tests {
     /// like a wall it draws from turn one, dimmed beyond the FOV, never masked.
     #[test]
     fn a_table_is_geometry_and_never_fogged() {
-        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        let mut layout = open_room(20, 20);
         layout.place(Cell::new(10, 14), Terrain::PartialCover); // behind the spawn facing
         let s = State::new(
             layout,
@@ -748,7 +748,7 @@ mod tests {
     /// carries [`Visibility::Dimmed`]; what the player sees now is `Live`.
     #[test]
     fn geometry_draws_from_turn_one_even_far_out_of_sight() {
-        let mut layout = Layout::from_facility(Facility::walled_box(40, 30));
+        let mut layout = open_room(40, 30);
         layout.place(Cell::new(35, 5), Terrain::Exit); // far outside the FOV
         let s = State::new(
             layout,
@@ -783,7 +783,7 @@ mod tests {
         // south, outside the half-disc (§6.2 sees at most one row behind — the
         // touching ring).
         let mut s = State::new(
-            Layout::from_facility(Facility::walled_box(20, 20)),
+            open_room(20, 20),
             Cell::new(10, 10),
             Direction::North,
             vec![Guard::stationary(Cell::new(12, 14))],
@@ -834,7 +834,7 @@ mod tests {
     /// it is remembered like any content.
     #[test]
     fn an_unseen_hideout_masks_as_wall_until_scouted() {
-        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        let mut layout = open_room(20, 20);
         layout.place(Cell::new(10, 14), Terrain::Hideout); // behind the spawn facing
         let mut s = State::new(
             layout,
@@ -872,7 +872,7 @@ mod tests {
     /// player has seen it open*. Memory holds contents, never state.
     #[test]
     fn a_doors_pose_is_live_state_never_remembered() {
-        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        let mut layout = open_room(20, 20);
         layout.place(Cell::new(10, 14), Terrain::DoorPanelOpen);
         let mut s = State::new(
             layout,
@@ -912,7 +912,7 @@ mod tests {
     /// a wall. An open door panel stays blank (§10.3) — the gap is its rendering.
     #[test]
     fn floor_renders_as_dots_but_an_open_panel_stays_blank() {
-        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        let mut layout = open_room(20, 20);
         layout.place(Cell::new(12, 8), Terrain::DoorPanelOpen);
         let s = State::new(
             layout,
@@ -937,7 +937,7 @@ mod tests {
     #[test]
     fn the_full_screen_renders_golden() {
         let s = State::new(
-            Layout::from_facility(Facility::walled_box(24, 6)),
+            open_room(24, 6),
             Cell::new(2, 2),
             Direction::North,
             Vec::new(),
@@ -967,7 +967,7 @@ mod tests {
     #[test]
     fn status_rows_carry_the_band_and_the_categories() {
         let mut s = State::new(
-            Layout::from_facility(Facility::walled_box(24, 6)),
+            open_room(24, 6),
             Cell::new(2, 2),
             Direction::North,
             Vec::new(),
@@ -1000,7 +1000,7 @@ mod tests {
         // A threat message flips the whole band to its category: get captured
         // and the near line reads Danger — the colour flash before the words.
         s = State::new(
-            Layout::from_facility(Facility::walled_box(24, 6)),
+            open_room(24, 6),
             Cell::new(2, 2),
             Direction::North,
             vec![Guard::patrolling_to(Cell::new(2, 4), Cell::new(2, 1))],
@@ -1018,7 +1018,7 @@ mod tests {
     #[test]
     fn a_long_status_line_truncates_at_the_edge() {
         let mut s = State::new(
-            Layout::from_facility(Facility::walled_box(12, 6)),
+            open_room(12, 6),
             Cell::new(2, 2),
             Direction::North,
             Vec::new(),
@@ -1044,7 +1044,7 @@ mod tests {
         // Player at (10,10) facing north; guard adjacent at (9,9) — in the FOV —
         // looking south (spawn facing, §7.1), its wedge over the player's cell.
         let s = State::new(
-            Layout::from_facility(Facility::walled_box(20, 20)),
+            open_room(20, 20),
             Cell::new(10, 10),
             Direction::North,
             vec![Guard::stationary(Cell::new(9, 9))],
@@ -1084,7 +1084,7 @@ mod tests {
         // Guard at (9,9), visible in the ring, looking south: its wedge runs down
         // *behind* the north-facing player, outside their half-disc.
         let s = State::new(
-            Layout::from_facility(Facility::walled_box(20, 20)),
+            open_room(20, 20),
             Cell::new(10, 10),
             Direction::North,
             vec![Guard::stationary(Cell::new(9, 9))],
@@ -1111,7 +1111,7 @@ mod tests {
     fn an_unseen_guards_cone_paints_nothing() {
         // The guard stands behind the north-facing player, out of the FOV.
         let s = State::new(
-            Layout::from_facility(Facility::walled_box(20, 20)),
+            open_room(20, 20),
             Cell::new(10, 10),
             Direction::North,
             vec![Guard::stationary(Cell::new(10, 14))],
@@ -1173,7 +1173,7 @@ mod tests {
     #[test]
     fn a_wall_clips_the_audibility_range() {
         // A wall column one east of where the player steps seals that side.
-        let mut layout = Layout::from_facility(Facility::walled_box(20, 20));
+        let mut layout = open_room(20, 20);
         for y in 8..=12 {
             layout.place(Cell::new(12, y), Terrain::Wall);
         }
@@ -1207,7 +1207,7 @@ mod tests {
         // player at (10,10) steps toward it to (10,9). The footfall's range reaches
         // (10,11), two south — a cell the guard's cone also watches.
         let mut s = State::new(
-            Layout::from_facility(Facility::walled_box(20, 20)),
+            open_room(20, 20),
             Cell::new(10, 10),
             Direction::North,
             vec![Guard::stationary(Cell::new(10, 8))],

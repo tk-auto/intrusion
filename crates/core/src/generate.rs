@@ -1410,7 +1410,7 @@ enum Axis {
 mod tests {
     use super::*;
     use crate::region::RegionKind;
-    use crate::test_support::seed_sweep;
+    use crate::test_support::{open_room, seed_sweep};
     use std::collections::HashSet;
 
     /// The bounding box `(width, height)` of a set of cells.
@@ -2108,13 +2108,13 @@ mod tests {
     #[test]
     fn a_long_gallery_fails_the_gate() {
         // 30×8 box: a 28-cell unbroken run down every interior row.
-        let long = Layout::from_facility(Facility::walled_box(30, 8));
+        let long = open_room(30, 8);
         assert!(fully_enclosed(long.facility()) && pathable_connected(long.facility()));
         assert!(!sightlines_bounded(long.facility()));
         assert!(!passes_guarantees(&long));
 
         // 13×8 box: interior runs of 11 = SIGHTLINE_MAX_RUN, exactly at the cap.
-        let short = Layout::from_facility(Facility::walled_box(13, 8));
+        let short = open_room(13, 8);
         assert!(sightlines_bounded(short.facility()));
         assert!(passes_guarantees(&short));
     }
