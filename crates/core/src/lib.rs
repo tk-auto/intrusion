@@ -31,7 +31,9 @@ mod cell;
 mod door;
 mod facility;
 mod generate;
+mod guard;
 mod input;
+mod path;
 mod place;
 mod region;
 mod render;
@@ -48,6 +50,7 @@ pub use cell::{Cell, Direction};
 pub use door::DoorAction;
 pub use facility::{Facility, SoundBlocking, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
+pub use guard::{Guard, GuardState};
 pub use input::{ability_hotkey, input_for_key};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
@@ -56,7 +59,7 @@ pub use render::{
 };
 pub use rng::Rng;
 pub use sound::{audible_field, AudibleField, Loudness, Sound, DOOR_ATTENUATION};
-pub use state::{Affordance, Event, Guard, GuardState, Input, Outcome, State};
+pub use state::{Affordance, Event, Input, Outcome, State};
 pub use status::{message_for, near_line, Message};
 pub use vision::{
     field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,

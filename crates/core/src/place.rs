@@ -27,9 +27,9 @@
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
+use crate::guard::GUARD_INITIAL_FACING;
 use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
-use crate::state::GUARD_INITIAL_FACING;
 use crate::vision::{field_of_view, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
 
 /// The player and the exit spawn at least this far apart (Manhattan) **[START]**.
@@ -320,7 +320,8 @@ fn solvable(facility: &Facility, placement: &Placement) -> bool {
 mod tests {
     use super::*;
     use crate::generate::generate_level;
-    use crate::state::{Guard, State};
+    use crate::guard::Guard;
+    use crate::state::State;
     use crate::test_support::seed_sweep;
     use crate::{Direction, GenError, Outcome};
 
