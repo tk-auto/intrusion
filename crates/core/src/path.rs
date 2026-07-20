@@ -138,15 +138,7 @@ pub(crate) fn flood_from(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-
-    /// A passability predicate for a `w × h` open box (cells `[0,w) × [0,h)`) with a
-    /// set of blocked cells punched out — enough to exercise the search without a
-    /// [`Facility`](crate::Facility).
-    fn open_box(w: u32, h: u32, walls: &[Cell]) -> impl Fn(Cell) -> bool {
-        let blocked: HashSet<Cell> = walls.iter().copied().collect();
-        move |c: Cell| c.x < w && c.y < h && !blocked.contains(&c)
-    }
+    use crate::test_support::open_box;
 
     #[test]
     fn first_step_takes_the_shortest_route_around_a_wall() {

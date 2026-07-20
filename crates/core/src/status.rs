@@ -106,16 +106,16 @@ fn ambient(state: &State) -> Message {
 mod tests {
     use super::*;
     use crate::cell::{Cell, Direction};
-    use crate::facility::{Facility, Terrain};
+    use crate::facility::Terrain;
     use crate::guard::Guard;
     use crate::state::Input;
-    use crate::Layout;
+    use crate::test_support::open_room;
 
     /// A walled box with the player at `player`, one intel console at `intel`,
     /// and the exit far away — enough state to generate real messages.
     fn state(player: Cell, intel: Cell) -> State {
         State::new(
-            Layout::from_facility(Facility::walled_box(12, 12)),
+            open_room(12, 12),
             player,
             Direction::North,
             Vec::new(),
@@ -160,7 +160,7 @@ mod tests {
     /// read as Owned — the same vocabulary as the recoloured cupboard and table.
     #[test]
     fn ambient_reports_concealment_as_owned() {
-        let mut layout = Layout::from_facility(Facility::walled_box(12, 12));
+        let mut layout = open_room(12, 12);
         layout.place(Cell::new(5, 5), Terrain::Hideout);
         layout.place(Cell::new(8, 7), Terrain::PartialCover);
         let mut s = State::new(
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(line.category, Category::Owned);
 
         let mut s = State::new(
-            Layout::from_facility(Facility::walled_box(12, 12)),
+            open_room(12, 12),
             Cell::new(5, 6),
             Direction::North,
             Vec::new(),
@@ -194,7 +194,7 @@ mod tests {
     /// next wait repeats nothing and the ambient takes over.
     #[test]
     fn a_crouch_reports_once_then_reads_as_ambient() {
-        let mut layout = Layout::from_facility(Facility::walled_box(12, 12));
+        let mut layout = open_room(12, 12);
         layout.place(Cell::new(6, 6), Terrain::PartialCover);
         let mut s = State::new(
             layout,
@@ -220,7 +220,7 @@ mod tests {
         // A guard sent straight down the column into the player.
         let s = {
             let mut s = State::new(
-                Layout::from_facility(Facility::walled_box(12, 12)),
+                open_room(12, 12),
                 Cell::new(5, 5),
                 Direction::North,
                 vec![Guard::patrolling_to(Cell::new(5, 3), Cell::new(5, 10))],
