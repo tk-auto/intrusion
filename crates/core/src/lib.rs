@@ -49,7 +49,9 @@ pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN
 pub use input::{ability_hotkey, input_for_key};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
-pub use render::{ascii_grid, render, render_screen, GlyphCell, Grid, Visibility, STATUS_ROWS};
+pub use render::{
+    ascii_grid, audibility_range, render, render_screen, GlyphCell, Grid, Visibility, STATUS_ROWS,
+};
 pub use rng::Rng;
 pub use sound::{audible_field, AudibleField, Loudness, Sound, DOOR_ATTENUATION};
 pub use state::{Affordance, Event, Guard, GuardState, Input, Outcome, State};

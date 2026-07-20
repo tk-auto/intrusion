@@ -100,7 +100,7 @@ const PALETTE: [Swatch; 16] = [
     sw("#667a8a", STD_DIM, "#293138", "#14181c"),   //  4 slate — tile memory (§11.5a)
     sw("#4ea6ff", STD_DIM, "#1f4266", "#102133"),   //  5 blue — Owned
     sw("#2456b8", STD_DIM, "#0e224a", "#071125"),   //  6 deep blue — spare
-    sw("#2ee6d6", STD_DIM, "#125c56", "#092e2b"),   //  7 cyan — spare
+    sw("#2ee6d6", STD_DIM, "#0d2523", "#081413"),   //  7 cyan — Noise (§9.3): a faint hint
     sw("#3ecf5a", STD_DIM, "#195324", "#0c2a12"),   //  8 green — spare
     sw("#157f33", "#0e3f1a", "#083314", "#04190a"), //  9 deep green — spare (darker than STD_DIM)
     sw("#f0e442", STD_DIM, "#605b1a", "#302e0d"),   // 10 yellow — Caution
@@ -118,6 +118,7 @@ const WHITE: Swatch = PALETTE[1];
 const DIM_GRAY: Swatch = PALETTE[2];
 const SLATE: Swatch = PALETTE[4];
 const BLUE: Swatch = PALETTE[5];
+const CYAN: Swatch = PALETTE[7];
 const YELLOW: Swatch = PALETTE[10];
 const ORANGE: Swatch = PALETTE[11];
 const RED: Swatch = PALETTE[12];
@@ -153,6 +154,7 @@ fn swatch(category: Category) -> Swatch {
         Category::Danger => RED,      // a threat that has you
         Category::Interest => PURPLE, // goals and rewards
         Category::System => TAN,      // doors, hideouts — neutral furniture
+        Category::Noise => CYAN,      // a heard sound's source (§9.3)
     }
 }
 
@@ -595,6 +597,7 @@ mod tests {
             Category::Danger,
             Category::Interest,
             Category::System,
+            Category::Noise,
         ];
         // ~70 in RGB distance: the old tan/yellow clash measured ~61 and must fail.
         const MIN_DIST2: i32 = 70 * 70;
