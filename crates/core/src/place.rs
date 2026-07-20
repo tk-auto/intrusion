@@ -28,9 +28,11 @@ use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
 use crate::guard::GUARD_INITIAL_FACING;
+use crate::path;
 use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
 use crate::vision::{field_of_view, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
+use std::collections::HashSet;
 
 /// The player and the exit spawn at least this far apart (Manhattan) **[START]**.
 /// The old generator let them land adjacent — a run that starts won (§10.6). The
@@ -298,22 +300,15 @@ fn solvable(facility: &Facility, placement: &Placement) -> bool {
     };
 
     let (w, h) = (facility.width(), facility.height());
-    let mut seen = vec![false; (w * h) as usize];
-    let idx = |c: Cell| (c.y * w + c.x) as usize;
-    seen[idx(placement.player)] = true;
-    let mut stack = vec![placement.player];
-    while let Some(c) = stack.pop() {
-        for n in facility.neighbors(c) {
-            if enterable(n) && !seen[idx(n)] {
-                seen[idx(n)] = true;
-                stack.push(n);
-            }
-        }
-    }
+    let reached: HashSet<Cell> = path::flood_from(placement.player, w, h, enterable)
+        .into_iter()
+        .collect();
 
+    // Consoles and the exit are bump-interactions, so each must be *adjacent* to the
+    // flooded set rather than inside it.
     solid
         .iter()
-        .all(|&target| facility.neighbors(target).any(|n| seen[idx(n)]))
+        .all(|&target| facility.neighbors(target).any(|n| reached.contains(&n)))
 }
 
 #[cfg(test)]

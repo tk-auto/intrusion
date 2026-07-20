@@ -43,6 +43,7 @@
 
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
+use crate::path;
 use crate::place::{place, LevelConfig, Placement};
 use crate::region::{RegionGraph, RegionId, RegionKind};
 use crate::rng::Rng;
@@ -422,7 +423,9 @@ fn fully_enclosed(facility: &Facility) -> bool {
 }
 
 /// Whether the pathable cells form a single 4-connected component — the §10.6
-/// reachability flood fill. "It is a flood fill. It costs nothing."
+/// reachability flood fill. "It is a flood fill. It costs nothing." Runs on every
+/// carve inside the retry loop, so it leans on [`path::flood_from`]'s bit-grid
+/// sweep rather than a set.
 fn pathable_connected(facility: &Facility) -> bool {
     let (w, h) = (facility.width(), facility.height());
     let pathable = |c: Cell| facility.terrain(c).is_some_and(|t| !t.blocks_pathing());
@@ -433,21 +436,8 @@ fn pathable_connected(facility: &Facility) -> bool {
     let Some(&start) = all.first() else {
         return false; // a level with nowhere to stand is not a level
     };
-    let mut seen = vec![false; (w * h) as usize];
-    let idx = |c: Cell| (c.y * w + c.x) as usize;
-    seen[idx(start)] = true;
-    let mut stack = vec![start];
-    let mut count = 1usize;
-    while let Some(c) = stack.pop() {
-        for n in facility.neighbors(c) {
-            if pathable(n) && !seen[idx(n)] {
-                seen[idx(n)] = true;
-                count += 1;
-                stack.push(n);
-            }
-        }
-    }
-    count == all.len()
+    // One component iff the flood from any pathable cell reaches them all.
+    path::flood_from(start, w, h, pathable).len() == all.len()
 }
 
 /// The index of the largest-area region in the queue, with a deterministic
@@ -1113,6 +1103,8 @@ fn severs_pathing(facility: &Facility, cell: Cell) -> bool {
     }
     // Flood the pathable ring (Chebyshev ≤ 1 of `cell`, excluding `cell` itself) from
     // one target; if it reaches every other target, a detour exists and `cell` is safe.
+    // This is deliberately the O(ring) local flood, *not* `path::flood_from` over the
+    // whole level — folding it into the full-grid primitive would defeat the O(1) point.
     let in_ring = |c: Cell| c != cell && chebyshev(cell, c) <= 1;
     let mut seen = vec![targets[0]];
     let mut stack = vec![targets[0]];
@@ -1321,6 +1313,8 @@ fn splits_region(regions: &RegionGraph, cell: Cell) -> bool {
     let Some(&flood_start) = cells.iter().next() else {
         return true; // the region's only cell — removing it deletes the space
     };
+    // Region-local: this floods only the region's own cell set, not the full grid, so
+    // it stays `path::flood_from`'s O(region) sibling rather than being folded into it.
     let mut seen: HashSet<Cell> = HashSet::new();
     let mut stack = vec![flood_start];
     while let Some(c) = stack.pop() {
@@ -1574,25 +1568,11 @@ mod tests {
             .collect();
         assert!(!corridor.is_empty(), "seed {seed}: no corridors");
 
+        let (w, h) = (layout.facility().width(), layout.facility().height());
         let start = *corridor.iter().next().unwrap();
-        let mut seen = HashSet::new();
-        let mut stack = vec![start];
-        while let Some(c) = stack.pop() {
-            if !seen.insert(c) {
-                continue;
-            }
-            for (dx, dy) in [(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
-                let (nx, ny) = (c.x as i32 + dx, c.y as i32 + dy);
-                if nx >= 0 && ny >= 0 {
-                    let n = Cell::new(nx as u32, ny as u32);
-                    if corridor.contains(&n) && !seen.contains(&n) {
-                        stack.push(n);
-                    }
-                }
-            }
-        }
+        let reached = path::flood_from(start, w, h, |c| corridor.contains(&c)).len();
         assert_eq!(
-            seen.len(),
+            reached,
             corridor.len(),
             "seed {seed}: corridor network split into disconnected pieces"
         );
@@ -1756,23 +1736,11 @@ mod tests {
             Some(&c) => c,
             None => return true,
         };
-        let mut seen = HashSet::new();
-        let mut stack = vec![start];
-        while let Some(c) = stack.pop() {
-            if !seen.insert(c) {
-                continue;
-            }
-            for (dx, dy) in [(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
-                let (nx, ny) = (c.x as i32 + dx, c.y as i32 + dy);
-                if nx >= 0 && ny >= 0 {
-                    let n = Cell::new(nx as u32, ny as u32);
-                    if cells.contains(&n) && !seen.contains(&n) {
-                        stack.push(n);
-                    }
-                }
-            }
-        }
-        seen.len() == cells.len()
+        // Bound the flood grid to just past the set's extent; membership *is* the
+        // passability predicate.
+        let w = cells.iter().map(|c| c.x).max().unwrap() + 1;
+        let h = cells.iter().map(|c| c.y).max().unwrap() + 1;
+        path::flood_from(start, w, h, |c| cells.contains(&c)).len() == cells.len()
     }
 
     /// A feature never seals a room: every room region's floor stays a single

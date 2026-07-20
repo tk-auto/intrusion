@@ -92,6 +92,49 @@ pub(crate) fn reachable_within(
     cells
 }
 
+/// Every cell reachable from `start` across `passable` cells on a `width × height`
+/// grid — the full-grid 4-connected flood fill. A sibling to [`reachable_within`]
+/// with no distance bound: only the `passable` predicate stops it.
+///
+/// Neighbours are visited in [`Direction::ALL`] order and de-duplicated through a
+/// `width × height` bit grid — the same cheap index sweep the §10.6 reachability
+/// and solvability checks each used to hand-roll — so the flood stays fast enough
+/// to run inside the generation retry loop and the reachable set is reproducible
+/// (§12.4). The return order is breadth-first, but callers should treat the result
+/// as a set; only membership and count are meaningful.
+///
+/// `start` seeds the flood unconditionally — its own passability is the caller's
+/// concern (a caller may flood outward from a cell masked solid in play), matching
+/// how [`first_step_toward`] lets a guard be sent onto a cell it cannot enter. Only
+/// the cells stepped *into* are gated on `passable`, and any neighbour off the
+/// `width × height` grid is skipped.
+pub(crate) fn flood_from(
+    start: Cell,
+    width: u32,
+    height: u32,
+    passable: impl Fn(Cell) -> bool,
+) -> Vec<Cell> {
+    let mut reached = Vec::new();
+    let mut seen = vec![false; (width * height) as usize];
+    let idx = |c: Cell| (c.y * width + c.x) as usize;
+    seen[idx(start)] = true;
+    let mut frontier = VecDeque::new();
+    frontier.push_back(start);
+    while let Some(cell) = frontier.pop_front() {
+        reached.push(cell);
+        for dir in Direction::ALL {
+            let Some(next) = cell.step(dir) else {
+                continue;
+            };
+            if next.x < width && next.y < height && passable(next) && !seen[idx(next)] {
+                seen[idx(next)] = true;
+                frontier.push_back(next);
+            }
+        }
+    }
+    reached
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
