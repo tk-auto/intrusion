@@ -18,9 +18,11 @@
 //! [`State`], `state × input → state, events`, resolving player, sight, and guards in
 //! order with the turn-cost rule and the two win/lose conditions — and the sight phase
 //! is real: the symmetric-shadowcast field of view (§6), the player's half-disc and
-//! the guards' wedges, recomputed every turn. The remaining game systems (guard AI,
-//! sound, abilities) land in their own tickets, in the phase hooks the loop already
-//! calls.
+//! the guards' wedges, recomputed every turn. Sound (§9) has its substrate too: each
+//! action emits a [`Sound`] and [`audible_field`] propagates it cell-to-cell around
+//! walls, the data the presentation and guard-hearing tickets consume. The remaining
+//! game systems (guard AI, abilities) land in their own tickets, in the phase hooks
+//! the loop already calls.
 
 #![forbid(unsafe_code)]
 
@@ -34,6 +36,7 @@ mod place;
 mod region;
 mod render;
 mod rng;
+mod sound;
 mod state;
 mod status;
 mod vision;
@@ -48,6 +51,7 @@ pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{ascii_grid, render, render_screen, GlyphCell, Grid, Visibility, STATUS_ROWS};
 pub use rng::Rng;
+pub use sound::{audible_field, AudibleField, Loudness, Sound, DOOR_ATTENUATION};
 pub use state::{Affordance, Event, Guard, GuardState, Input, Outcome, State};
 pub use status::{message_for, near_line, Message};
 pub use vision::{
