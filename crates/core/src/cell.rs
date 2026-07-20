@@ -77,6 +77,39 @@ impl Direction {
         Direction::South,
         Direction::West,
     ];
+
+    /// The direction facing the opposite way — north↔south, east↔west. Turning
+    /// around, in other words; useful for reasoning about the far side of a panel
+    /// or where a step came from.
+    pub fn opposite(self) -> Direction {
+        match self {
+            Direction::North => Direction::South,
+            Direction::South => Direction::North,
+            Direction::East => Direction::West,
+            Direction::West => Direction::East,
+        }
+    }
+
+    /// The two directions at right angles to this one — the axis this direction
+    /// does *not* lie on. Returned east-then-west for a vertical direction and
+    /// north-then-south for a horizontal one, so the order is fixed and the answer
+    /// reproducible.
+    pub fn perpendicular(self) -> [Direction; 2] {
+        match self {
+            Direction::North | Direction::South => [Direction::East, Direction::West],
+            Direction::East | Direction::West => [Direction::North, Direction::South],
+        }
+    }
+
+    /// The cardinal direction stepping `from` to an orthogonally adjacent `to`, or
+    /// `None` when they are not neighbours. Because [`Cell::step`] and this share the
+    /// same [`Direction::ALL`] ordering, `from.step(dir) == Some(to)` holds exactly
+    /// for the returned `dir`.
+    pub fn between(from: Cell, to: Cell) -> Option<Direction> {
+        Direction::ALL
+            .into_iter()
+            .find(|&dir| from.step(dir) == Some(to))
+    }
 }
 
 #[cfg(test)]
@@ -125,5 +158,82 @@ mod tests {
             Cell::new(0, 0).step(Direction::South),
             Some(Cell::new(0, 1))
         );
+    }
+
+    #[test]
+    fn opposite_flips_each_direction() {
+        assert_eq!(Direction::North.opposite(), Direction::South);
+        assert_eq!(Direction::South.opposite(), Direction::North);
+        assert_eq!(Direction::East.opposite(), Direction::West);
+        assert_eq!(Direction::West.opposite(), Direction::East);
+        // Turning around twice returns you to where you faced.
+        for dir in Direction::ALL {
+            assert_eq!(dir.opposite().opposite(), dir);
+        }
+    }
+
+    #[test]
+    fn perpendicular_gives_the_other_axis() {
+        assert_eq!(
+            Direction::North.perpendicular(),
+            [Direction::East, Direction::West]
+        );
+        assert_eq!(
+            Direction::South.perpendicular(),
+            [Direction::East, Direction::West]
+        );
+        assert_eq!(
+            Direction::East.perpendicular(),
+            [Direction::North, Direction::South]
+        );
+        assert_eq!(
+            Direction::West.perpendicular(),
+            [Direction::North, Direction::South]
+        );
+        // A perpendicular is never the direction itself nor its opposite.
+        for dir in Direction::ALL {
+            for perp in dir.perpendicular() {
+                assert_ne!(perp, dir);
+                assert_ne!(perp, dir.opposite());
+            }
+        }
+    }
+
+    #[test]
+    fn between_names_the_adjacent_step() {
+        let c = Cell::new(3, 3);
+        assert_eq!(
+            Direction::between(c, Cell::new(3, 2)),
+            Some(Direction::North)
+        );
+        assert_eq!(
+            Direction::between(c, Cell::new(3, 4)),
+            Some(Direction::South)
+        );
+        assert_eq!(
+            Direction::between(c, Cell::new(4, 3)),
+            Some(Direction::East)
+        );
+        assert_eq!(
+            Direction::between(c, Cell::new(2, 3)),
+            Some(Direction::West)
+        );
+        // Every step's inverse is named by `between`.
+        for dir in Direction::ALL {
+            let n = c.step(dir).expect("interior cell steps everywhere");
+            assert_eq!(Direction::between(c, n), Some(dir));
+        }
+    }
+
+    #[test]
+    fn between_is_none_for_non_neighbours() {
+        let c = Cell::new(3, 3);
+        assert_eq!(
+            Direction::between(c, c),
+            None,
+            "a cell is not its own neighbour"
+        );
+        assert_eq!(Direction::between(c, Cell::new(3, 5)), None, "two away");
+        assert_eq!(Direction::between(c, Cell::new(4, 4)), None, "diagonal");
     }
 }

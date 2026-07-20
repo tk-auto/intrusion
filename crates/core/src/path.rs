@@ -12,14 +12,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::cell::{Cell, Direction};
 
-/// The cardinal direction from `from` to an orthogonally adjacent `to`, or `None`
-/// if they are not neighbours.
-pub(crate) fn direction_between(from: Cell, to: Cell) -> Option<Direction> {
-    Direction::ALL
-        .into_iter()
-        .find(|&dir| from.step(dir) == Some(to))
-}
-
 /// The first step of the shortest path from `from` to `to` across cells where
 /// `passable` holds, or `None` when they coincide or nothing connects them. A plain
 /// breadth-first search expanding neighbours in [`Direction::ALL`] order, so the
@@ -48,7 +40,7 @@ pub(crate) fn first_step_toward(
             while came_from[&step] != from {
                 step = came_from[&step];
             }
-            return direction_between(from, step);
+            return Direction::between(from, step);
         }
         for dir in Direction::ALL {
             let Some(next) = cell.step(dir) else {
@@ -111,17 +103,6 @@ mod tests {
     fn open_box(w: u32, h: u32, walls: &[Cell]) -> impl Fn(Cell) -> bool {
         let blocked: HashSet<Cell> = walls.iter().copied().collect();
         move |c: Cell| c.x < w && c.y < h && !blocked.contains(&c)
-    }
-
-    #[test]
-    fn direction_between_names_the_adjacent_step() {
-        let c = Cell::new(3, 3);
-        assert_eq!(
-            direction_between(c, Cell::new(3, 2)),
-            Some(Direction::North)
-        );
-        assert_eq!(direction_between(c, Cell::new(4, 3)), Some(Direction::East));
-        assert_eq!(direction_between(c, Cell::new(3, 5)), None, "not adjacent");
     }
 
     #[test]

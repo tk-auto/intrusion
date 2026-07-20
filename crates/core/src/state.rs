@@ -1005,7 +1005,7 @@ mod tests {
 
         // One of the four orthogonal approaches stands on floor and bumps the panel.
         let opened = Direction::ALL.into_iter().any(|dir| {
-            let Some(from) = panel.step(opposite(dir)) else {
+            let Some(from) = panel.step(dir.opposite()) else {
                 return false;
             };
             if !layout.facility().can_enter(from, ACTOR_FILL) {
@@ -1027,15 +1027,6 @@ mod tests {
             opened
         });
         assert!(opened, "one approach must bump the panel open");
-    }
-
-    fn opposite(dir: Direction) -> Direction {
-        match dir {
-            Direction::North => Direction::South,
-            Direction::South => Direction::North,
-            Direction::East => Direction::West,
-            Direction::West => Direction::East,
-        }
     }
 
     /// §10.4: **a door never closes on an actor** — doors don't crush. Standing on a
@@ -1104,36 +1095,21 @@ mod tests {
             else {
                 continue;
             };
-            let Some(hinge_dir) = dir_between(panel, hinge) else {
+            let Some(hinge_dir) = Direction::between(panel, hinge) else {
                 continue;
             };
             // Approach the panel perpendicular to the door line, from floor.
-            for perp in perpendicular(hinge_dir) {
+            for perp in hinge_dir.perpendicular() {
                 let Some(from) = panel.step(perp) else {
                     continue;
                 };
                 let f = layout.facility();
                 if f.terrain(from) == Some(Terrain::Floor) && f.can_enter(from, ACTOR_FILL) {
-                    return Some((id, from, opposite(perp), panel, hinge_dir));
+                    return Some((id, from, perp.opposite(), panel, hinge_dir));
                 }
             }
         }
         None
-    }
-
-    /// The cardinal direction stepping `from` to the adjacent `to`, if they touch.
-    fn dir_between(from: Cell, to: Cell) -> Option<Direction> {
-        Direction::ALL
-            .into_iter()
-            .find(|&d| from.step(d) == Some(to))
-    }
-
-    /// The two directions perpendicular to `dir`.
-    fn perpendicular(dir: Direction) -> [Direction; 2] {
-        match dir {
-            Direction::North | Direction::South => [Direction::East, Direction::West],
-            Direction::East | Direction::West => [Direction::North, Direction::South],
-        }
     }
 
     /// §4.3/§10.3: a hideout is **bump-to-enter**, not a cell you drift onto. Stepping
@@ -1711,7 +1687,7 @@ mod tests {
             // cell to close the door from. `side` steps off the door line back
             // toward `from`'s side.
             let hinge = panel.step(hinge_dir).expect("hinge adjacent to panel");
-            let side = dir_between(panel, from).expect("from is beside the panel");
+            let side = Direction::between(panel, from).expect("from is beside the panel");
             let Some(beside_hinge) = hinge.step(side) else {
                 continue;
             };
@@ -1814,7 +1790,7 @@ mod tests {
 
         // One of the four approaches stands on floor and bumps the panel open.
         let opened = Direction::ALL.into_iter().any(|dir| {
-            let Some(from) = panel.step(opposite(dir)) else {
+            let Some(from) = panel.step(dir.opposite()) else {
                 return false;
             };
             if !layout.facility().can_enter(from, ACTOR_FILL) {
