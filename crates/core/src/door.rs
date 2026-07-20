@@ -117,6 +117,7 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use crate::region::{DoorId, RegionKind};
+    use crate::test_support::seed_sweep;
     use crate::{generate, Cell, DoorAction, Layout, Rng, Terrain};
 
     /// Nothing is ever occupied — the common case for the door-mechanics tests.
@@ -157,7 +158,7 @@ mod tests {
     /// Every door joins a room to a corridor, never a room to a room (§10.1.4).
     #[test]
     fn every_door_joins_a_room_to_a_corridor() {
-        for seed in 0..64 {
+        for seed in seed_sweep(64) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let regions = layout.regions();
             for (_, door) in regions.doors() {

@@ -1416,6 +1416,7 @@ enum Axis {
 mod tests {
     use super::*;
     use crate::region::RegionKind;
+    use crate::test_support::seed_sweep;
     use std::collections::HashSet;
 
     /// The bounding box `(width, height)` of a set of cells.
@@ -1451,7 +1452,7 @@ mod tests {
 
     #[test]
     fn room_count_stays_within_the_budget() {
-        for seed in 0..64 {
+        for seed in seed_sweep(64) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let rooms = regions_of_kind(&layout, RegionKind::Room);
             assert!(
@@ -1465,7 +1466,7 @@ mod tests {
     /// narrow bounding-box dimension is its width (throats only extend its length).
     #[test]
     fn corridor_width_is_always_2_to_4() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (_, region) in layout.regions().regions() {
                 if region.kind() == RegionKind::Corridor {
@@ -1483,7 +1484,7 @@ mod tests {
     /// Every room is a rectangle, always ≥ 6×6 (§10.1).
     #[test]
     fn rooms_are_at_least_6x6() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (_, region) in layout.regions().regions() {
                 if region.kind() == RegionKind::Room {
@@ -1504,7 +1505,7 @@ mod tests {
         // Many seeds, because the sightline pass now *removes* cells from regions
         // (a table turns claimed floor into solid cover) — lockstep must survive
         // that.
-        for seed in 0..64 {
+        for seed in seed_sweep(64) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let facility = layout.facility();
             for y in 0..facility.height() {
@@ -1525,7 +1526,7 @@ mod tests {
     /// The border is enclosed unconditionally (§10.6): every border cell is wall.
     #[test]
     fn the_border_stays_sealed() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let f = layout.facility();
             for x in 0..f.width() {
@@ -1547,7 +1548,7 @@ mod tests {
         // Deliberately `generate_once`: this asserts the *construction* is sound,
         // so the §10.6 gate in `generate` must not get the chance to mask a break
         // by silently rejecting and redrawing.
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
             assert_corridors_connected(&layout, seed);
         }
@@ -1557,7 +1558,7 @@ mod tests {
     #[test]
     fn connectivity_holds_across_sizes() {
         for &(w, h) in &[(18, 18), (24, 40), (40, 24), (33, 51), (60, 60)] {
-            for seed in 0..40 {
+            for seed in seed_sweep(40) {
                 let layout = generate_once(w, h, &mut Rng::new(seed)).unwrap();
                 assert_corridors_connected(&layout, seed);
             }
@@ -1657,7 +1658,7 @@ mod tests {
     #[test]
     fn every_room_reaches_a_corridor_through_a_door() {
         for &(w, h) in &[(18, 18), (40, 40), (24, 40), (60, 60)] {
-            for seed in 0..40 {
+            for seed in seed_sweep(40) {
                 let layout = generate(w, h, &mut Rng::new(seed)).unwrap();
                 let regions = layout.regions();
                 for (id, region) in regions.regions() {
@@ -1682,7 +1683,7 @@ mod tests {
     #[test]
     fn rooms_have_one_to_three_doors() {
         for &(w, h) in &[(18, 18), (40, 40), (24, 40), (60, 60)] {
-            for seed in 0..64 {
+            for seed in seed_sweep(64) {
                 let layout = generate(w, h, &mut Rng::new(seed)).unwrap();
                 let regions = layout.regions();
                 for (id, region) in regions.regions() {
@@ -1705,7 +1706,7 @@ mod tests {
     #[test]
     fn most_rooms_have_one_or_two_doors() {
         let (mut calm, mut total) = (0u32, 0u32);
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let regions = layout.regions();
             for (_, region) in regions.regions() {
@@ -1729,7 +1730,7 @@ mod tests {
     /// total, all lying on a single straight wall line.
     #[test]
     fn doorways_are_well_formed_spans() {
-        for seed in 0..64 {
+        for seed in seed_sweep(64) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (_, door) in layout.regions().doors() {
                 assert_eq!(door.hinges().len(), 2, "seed {seed}: a hinge at each end");
@@ -1780,7 +1781,7 @@ mod tests {
     /// so no pocket of floor is ever cut off (which would also break reachability, #13).
     #[test]
     fn room_floor_stays_connected_after_features() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (id, region) in layout.regions().regions() {
                 if region.kind() != RegionKind::Room {
@@ -1802,7 +1803,7 @@ mod tests {
     #[test]
     fn features_make_rooms_non_rectangular() {
         let (mut carved, mut total) = (0u32, 0u32);
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (_, region) in layout.regions().regions() {
                 if region.kind() != RegionKind::Room {
@@ -1828,7 +1829,7 @@ mod tests {
     /// guards from the other direction.
     #[test]
     fn features_never_touch_the_border() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let f = layout.facility();
             for x in 0..f.width() {
@@ -1907,7 +1908,7 @@ mod tests {
     /// of hideouts every seed, not the one-or-none the old harvester produced.
     #[test]
     fn the_v1_config_gets_a_board_of_hideouts() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let count = hideout_cells(&layout).len();
             assert!(
@@ -1922,7 +1923,7 @@ mod tests {
     /// seed, since a chase can happen in any corridor.
     #[test]
     fn hideouts_land_on_corridors() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let regions = layout.regions();
             let on_corridor = hideout_cells(&layout).into_iter().any(|c| {
@@ -1938,7 +1939,7 @@ mod tests {
     /// never clogging a door throat, and always enterable from open floor.
     #[test]
     fn every_hideout_is_a_wall_backed_cupboard() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let f = layout.facility();
             for c in hideout_cells(&layout) {
@@ -1970,7 +1971,7 @@ mod tests {
     /// cross-section.
     #[test]
     fn hideouts_keep_their_spacing() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let cells = hideout_cells(&generate(40, 40, &mut Rng::new(seed)).unwrap());
             for (i, &a) in cells.iter().enumerate() {
                 for &b in &cells[i + 1..] {
@@ -1992,7 +1993,7 @@ mod tests {
         // `generate_once`, not `generate`: the §10.6 gate checks this exact
         // property, so going through the entry point would mask a regression in
         // `severs_pathing` as silent rejections instead of a red test.
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
             let f = layout.facility();
             let pathable: HashSet<Cell> = (0..f.height())
@@ -2044,7 +2045,7 @@ mod tests {
     #[test]
     fn no_sightline_exceeds_the_cap() {
         for &(w, h) in &[(18, 18), (40, 40), (24, 40), (60, 60)] {
-            for seed in 0..64 {
+            for seed in seed_sweep(64) {
                 let layout = generate(w, h, &mut Rng::new(seed)).unwrap();
                 let run = longest_straight_run(layout.facility());
                 assert!(
@@ -2098,15 +2099,21 @@ mod tests {
     /// at 1-in-1000 on the v1 config when written, budgeted at 2% here.
     #[test]
     fn the_cover_pass_repairs_almost_every_carve() {
-        let unrepaired = (0..200)
-            .filter(|&seed| {
+        // Budget is the 2% rate scaled to the sweep width, floored at 1 so a single
+        // unlucky sampled seed never flakes; the full CI sweep restores the 4/200 pin.
+        let seeds = seed_sweep(200);
+        let budget = (4 * seeds.len() / 200).max(1);
+        let unrepaired = seeds
+            .iter()
+            .filter(|&&seed| {
                 let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
                 !sightlines_bounded(layout.facility())
             })
             .count();
         assert!(
-            unrepaired <= 4,
-            "{unrepaired}/200 carves left unrepaired — the cover pass has degraded"
+            unrepaired <= budget,
+            "{unrepaired}/{} carves left unrepaired (budget {budget}) — the cover pass has degraded",
+            seeds.len()
         );
     }
 
@@ -2187,7 +2194,7 @@ mod tests {
     /// every §10.6 assertion — no caller ever receives an unsolvable level.
     #[test]
     fn accepted_seeds_always_pass_the_gate() {
-        for seed in 0..200 {
+        for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             assert!(passes_guarantees(&layout), "seed {seed}: gate breached");
         }
