@@ -36,7 +36,6 @@ use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::Guard;
-use crate::region::DoorCell;
 use crate::sound::{Loudness, Sound};
 use crate::vision::{
     field_of_view, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
@@ -168,6 +167,67 @@ impl Affordance {
             Affordance::TakeIntel | Affordance::Leave | Affordance::ExitRefused => {
                 Category::Interest
             }
+        }
+    }
+}
+
+/// What bumping an orthogonally adjacent cell would do (§4.3) — the interaction a
+/// cell offers, in the one priority order shared by execution and prediction. This
+/// is the single source of truth [`State::bump_kind`] produces; `resolve_step`
+/// performs the effect and `affordances` labels it, so the usable line can never
+/// drift from the bump (§11.4). Purely a classification: it carries the target's
+/// interaction, never a mutation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BumpKind {
+    /// A guard — bumping is a free no-op until takedowns land (§7.2).
+    Guard,
+    /// The exit; `ready` is true iff every objective is in hand (win vs. refused).
+    Exit { ready: bool },
+    /// An objective console still holding its intel.
+    Intel,
+    /// A door cell whose bump is a real door action (open, close, or a crush-refused
+    /// close). An open panel or closed hinge is *not* a door action — it classifies as
+    /// [`BumpKind::Move`] or [`BumpKind::Solid`] instead, exactly as the bump resolves.
+    Door { action: DoorAction },
+    /// An empty concealment cupboard to climb into (§10.3).
+    Hide,
+    /// A cupboard already holding an actor — solid, a free bump.
+    HideoutBlocked,
+    /// A partial-cover table not already crouched behind (§10.3).
+    Crouch,
+    /// The table already crouched behind — a free bump.
+    CrouchHeld,
+    /// Plain enterable floor — a normal move.
+    Move,
+    /// Anything else solid — a wall or a closed hinge: a free bump (§4.4).
+    Solid,
+}
+
+impl BumpKind {
+    /// The §11.4 usable-line label for this interaction, or `None` when a bump does
+    /// nothing worth offering — a guard, a solid cell, a held pose, or a close that
+    /// would be refused (doors never crush, so it is never promised).
+    fn affordance(self) -> Option<Affordance> {
+        match self {
+            BumpKind::Exit { ready: true } => Some(Affordance::Leave),
+            BumpKind::Exit { ready: false } => Some(Affordance::ExitRefused),
+            BumpKind::Intel => Some(Affordance::TakeIntel),
+            BumpKind::Door {
+                action: DoorAction::Opened,
+            } => Some(Affordance::OpenDoor),
+            BumpKind::Door {
+                action: DoorAction::Closed,
+            } => Some(Affordance::CloseDoor),
+            BumpKind::Hide => Some(Affordance::Hide),
+            BumpKind::Crouch => Some(Affordance::Crouch),
+            BumpKind::Guard
+            | BumpKind::Door {
+                action: DoorAction::Obstructed,
+            }
+            | BumpKind::HideoutBlocked
+            | BumpKind::CrouchHeld
+            | BumpKind::Move
+            | BumpKind::Solid => None,
         }
     }
 }
@@ -444,44 +504,13 @@ impl State {
             let Some(target) = self.player.step(dir) else {
                 continue;
             };
-            if !self.player_fov.contains(target) || self.guard_at(target).is_some() {
+            // The FOV gate is the predictor's alone — the line must never leak what the
+            // fog hides (§11.5a); a bump itself needs no sight. What the *interaction*
+            // is comes from the one shared ladder, so the label can't drift from it.
+            if !self.player_fov.contains(target) {
                 continue;
             }
-            let affordance = if target == self.exit {
-                if self.objectives_remaining() == 0 {
-                    Some(Affordance::Leave)
-                } else {
-                    Some(Affordance::ExitRefused)
-                }
-            } else if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
-                Some(Affordance::TakeIntel)
-            } else if let Some(id) = self.layout.regions().door_at(target) {
-                let door = self.layout.regions().door(id);
-                match (door.role(target), door.is_open()) {
-                    (Some(DoorCell::Panel), false) => Some(Affordance::OpenDoor),
-                    // A close with an actor on a panel would be refused — doors
-                    // never crush (§10.4) — so it is not offered either.
-                    (Some(DoorCell::Hinge), true)
-                        if !door.panels().iter().any(|&c| self.occupied(c)) =>
-                    {
-                        Some(Affordance::CloseDoor)
-                    }
-                    _ => None,
-                }
-            } else if self.layout.facility().terrain(target) == Some(Terrain::Hideout)
-                && !self.occupied(target)
-            {
-                Some(Affordance::Hide)
-            } else if self.layout.facility().terrain(target) == Some(Terrain::PartialCover)
-                && self.crouched_behind != Some(target)
-            {
-                // The table already crouched behind offers nothing: re-bumping
-                // it is a free no-op.
-                Some(Affordance::Crouch)
-            } else {
-                None
-            };
-            if let Some(a) = affordance {
+            if let Some(a) = self.bump_kind(target).affordance() {
                 out.push((dir, a));
             }
         }
@@ -574,124 +603,158 @@ impl State {
             return false;
         };
 
-        // A guard in the way would be a takedown (§7.2), which is its own ticket; for
-        // now bumping a guard is a free no-op, the seam that fills in later.
-        if self.guard_at(target).is_some() {
-            events.push(Event::Bumped { into: target });
-            return false;
-        }
-
-        // The exit: win if the objectives are done, else refuse — free either way, a
-        // refused exit changes nothing (§4.5).
-        if target == self.exit {
-            if self.objectives_remaining() == 0 {
+        // One ladder decides what a bump does — the same `bump_kind` the usable line
+        // reads — so execution and prediction can never disagree (§11.4). This match
+        // performs the effect; the classification and its priority live in one place.
+        match self.bump_kind(target) {
+            // A guard in the way would be a takedown (§7.2), its own ticket; for now
+            // bumping a guard is a free no-op, the seam that fills in later.
+            BumpKind::Guard => {
+                events.push(Event::Bumped { into: target });
+                false
+            }
+            // The exit: win if the objectives are done, else refuse — a refused exit
+            // changes nothing and is free (§4.5).
+            BumpKind::Exit { ready: true } => {
                 self.outcome = Outcome::Won;
                 events.push(Event::Won);
-                return true;
+                true
             }
-            events.push(Event::ExitRefused);
-            return false;
-        }
-
-        // An objective console: take the intel. A console already emptied is just
-        // solid — it falls through to a free bump below.
-        if let Some(obj) = self
-            .objectives
-            .iter_mut()
-            .find(|o| o.cell == target && !o.taken)
-        {
-            obj.taken = true;
-            let remaining = self.objectives.iter().filter(|o| !o.taken).count();
-            // Taking intel is not one of §9.2's noise sources, so it stays silent —
-            // emit nothing rather than invent a level the design didn't name.
-            events.push(Event::IntelTaken { remaining });
-            return true;
-        }
-
-        // A door: bump a closed panel to open it (§4.3, §10.4). Opening or closing a
-        // door changes the world and spends the turn; a close refused by an occupant
-        // changed nothing and is free. The close consults the general occupancy
-        // predicate — any actor on a panel refuses the close, so a door never crushes
-        // (§10.4). Fields are captured so it can borrow them while `layout` is `&mut`.
-        let action = {
-            let player = self.player;
-            let guards = &self.guards;
-            self.layout
-                .bump_door(target, |c| actor_occupies(player, guards, c))
-        };
-        if let Some(action) = action {
-            return match action {
-                // Working a door is Medium noise (§9.2), from the player's own cell:
-                // they stay put operating the handle, so the noise starts beside the
-                // door, not in the doorway. A closed door has no event of its own but
-                // makes the same noise. An obstructed close changed nothing — free
-                // and silent.
+            BumpKind::Exit { ready: false } => {
+                events.push(Event::ExitRefused);
+                false
+            }
+            // An objective console: take the intel.
+            BumpKind::Intel => {
+                let obj = self
+                    .objectives
+                    .iter_mut()
+                    .find(|o| o.cell == target && !o.taken)
+                    .expect("bump_kind classified an untaken console here");
+                obj.taken = true;
+                let remaining = self.objectives.iter().filter(|o| !o.taken).count();
+                // Taking intel is not one of §9.2's noise sources, so it stays silent —
+                // emit nothing rather than invent a level the design didn't name.
+                events.push(Event::IntelTaken { remaining });
+                true
+            }
+            // A door (§4.3, §10.4): opening or closing spends the turn and makes Medium
+            // noise (§9.2) from the player's own cell — they stay put working the
+            // handle, so the noise starts beside the door, not in the doorway. An
+            // obstructed close changed nothing — free and silent; doors never crush.
+            BumpKind::Door { action } => match action {
                 DoorAction::Opened => {
+                    self.operate_door(target);
                     events.push(Event::DoorOpened { at: target });
                     self.emit(self.player, Loudness::Medium);
                     true
                 }
                 DoorAction::Closed => {
+                    self.operate_door(target);
                     self.emit(self.player, Loudness::Medium);
                     true
                 }
                 DoorAction::Obstructed => false,
+            },
+            // A hideout: bump the empty cupboard to climb in (§4.3, §10.3). Unlike
+            // floor, you do not drift onto it — entering is a *decision*. It moves you
+            // into the cell, spends the turn, and conceals you ([`hidden`](Self::hidden));
+            // climbing out is an ordinary step off, no special case. Its whole cost is
+            // time: while you hide you make no progress and the clock keeps ticking (§2.3).
+            BumpKind::Hide => {
+                self.player = target;
+                self.facing = dir; // facing follows the last successful step (§5)
+                                   // Climbing into a cupboard is still a step — Low footstep noise (§9.2),
+                                   // from the cell just entered. Only once you *wait* inside it are you
+                                   // silent. A judgment call worth a later playtest: scrambling into cover
+                                   // isn't free of sound the way holding still is.
+                self.emit(target, Loudness::Low);
+                events.push(Event::EnteredHideout { at: target });
+                true
+            }
+            // A table: bump it to crouch behind it (§4.3, §10.3). Ducking is a
+            // *decision*, aimed at a specific table — concealment is across that table
+            // only. The player does not move; the table stays solid furniture. Silent
+            // (§9.2, the "camouflaged" row): the whole point is to go unnoticed.
+            BumpKind::Crouch => {
+                self.crouched_behind = Some(target);
+                events.push(Event::Crouched { behind: target });
+                true
+            }
+            // Plain movement into a cell that admits the player — Low noise (§9.2) from
+            // the cell just stepped into.
+            BumpKind::Move => {
+                self.player = target;
+                self.facing = dir; // facing follows the last successful step (§5)
+                self.emit(target, Loudness::Low);
+                events.push(Event::Moved { to: target });
+                true
+            }
+            // A cupboard already holding an actor, the table already crouched behind, or
+            // anything else solid (a wall, a closed hinge): a free bump (§4.4).
+            BumpKind::HideoutBlocked | BumpKind::CrouchHeld | BumpKind::Solid => {
+                events.push(Event::Bumped { into: target });
+                false
+            }
+        }
+    }
+
+    /// Apply the door operation a bump triggers at `target` — the mutation half of a
+    /// [`BumpKind::Door`] classification (the read-only verdict came from
+    /// [`bump_kind`](Self::bump_kind)). Fields are captured so the occupancy predicate
+    /// can borrow them while `layout` is borrowed `&mut`.
+    fn operate_door(&mut self, target: Cell) {
+        let player = self.player;
+        let guards = &self.guards;
+        self.layout
+            .bump_door(target, |c| actor_occupies(player, guards, c));
+    }
+
+    /// What bumping the orthogonally adjacent `target` would do (§4.3) — the **single**
+    /// interaction ladder, read-only, that both [`resolve_step`](Self::resolve_step)
+    /// (which executes) and [`affordances`](Self::affordances) (which labels the §11.4
+    /// usable line) consume. Naming the interaction in one place is what keeps the
+    /// arrow labels from ever promising what a bump won't deliver.
+    ///
+    /// The arms below are in priority order — exit → intel → door → hideout → table →
+    /// move → bump. A new interaction is added as one [`BumpKind`] variant classified
+    /// here; Rust's exhaustive matching then forces *both* consumers — the executor in
+    /// `resolve_step` and the label in [`BumpKind::affordance`] — to handle it, so
+    /// neither can silently drift (the §7.2 takedown slots in exactly this way). This
+    /// classifies only; the mutation lives in `resolve_step`, so it can stay `&self`.
+    fn bump_kind(&self, target: Cell) -> BumpKind {
+        if self.guard_at(target).is_some() {
+            return BumpKind::Guard;
+        }
+        if target == self.exit {
+            return BumpKind::Exit {
+                ready: self.objectives_remaining() == 0,
             };
         }
-
-        // A hideout: bump the empty cupboard to climb in (§4.3, §10.3). Unlike
-        // floor, you do not drift onto it — entering is a *decision*. It moves you
-        // into the cell, spends the turn, and conceals you ([`hidden`](Self::hidden));
-        // climbing out is an ordinary step off the cell, no special case. Its whole
-        // cost is time: while you hide you make no progress and the clock keeps
-        // ticking (§2.3). A cupboard already holding an actor refuses — a free bump.
-        if self.layout.facility().terrain(target) == Some(Terrain::Hideout) {
-            if self.occupied(target) {
-                events.push(Event::Bumped { into: target });
-                return false;
+        if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
+            return BumpKind::Intel;
+        }
+        if let Some(action) = self.layout.preview_door_bump(target, |c| self.occupied(c)) {
+            return BumpKind::Door { action };
+        }
+        match self.layout.facility().terrain(target) {
+            Some(Terrain::Hideout) => {
+                if self.occupied(target) {
+                    BumpKind::HideoutBlocked
+                } else {
+                    BumpKind::Hide
+                }
             }
-            self.player = target;
-            self.facing = dir; // facing follows the last successful step (§5)
-                               // Climbing into a cupboard is still a step — Low footstep noise (§9.2),
-                               // from the cell just entered. Only once you *wait* inside it are you
-                               // silent. A judgment call worth a later playtest: scrambling into cover
-                               // isn't free of sound the way holding still is.
-            self.emit(target, Loudness::Low);
-            events.push(Event::EnteredHideout { at: target });
-            return true;
-        }
-
-        // A table: bump it to crouch behind it (§4.3, §10.3). Like the cupboard,
-        // ducking is a *decision*, aimed at a specific table — concealment is
-        // across that table only. The crouch spends the turn; re-bumping the
-        // table you are already behind changes nothing and is free (§4.4). The
-        // player does not move — the table stays solid furniture.
-        if self.layout.facility().terrain(target) == Some(Terrain::PartialCover) {
-            if self.crouched_behind == Some(target) {
-                events.push(Event::Bumped { into: target });
-                return false;
+            Some(Terrain::PartialCover) => {
+                if self.crouched_behind == Some(target) {
+                    BumpKind::CrouchHeld
+                } else {
+                    BumpKind::Crouch
+                }
             }
-            self.crouched_behind = Some(target);
-            // Ducking behind cover is a stealth move made in place — Silent (§9.2,
-            // the "camouflaged" row): the whole point is to go unnoticed, so it
-            // emits no sound.
-            events.push(Event::Crouched { behind: target });
-            return true;
+            _ if self.layout.facility().can_enter(target, ACTOR_FILL) => BumpKind::Move,
+            _ => BumpKind::Solid,
         }
-
-        // Plain movement, if the cell admits the player.
-        if self.layout.facility().can_enter(target, ACTOR_FILL) {
-            self.player = target;
-            self.facing = dir; // facing follows the last successful step (§5)
-                               // Moving normally is Low noise (§9.2), from the cell just stepped into.
-            self.emit(target, Loudness::Low);
-            events.push(Event::Moved { to: target });
-            return true;
-        }
-
-        // Anything else solid — a wall, a closed hinge — is a free bump (§4.4).
-        events.push(Event::Bumped { into: target });
-        false
     }
 
     /// Phases 2 and 3 (§4.2): recompute sight, then let the guards act. Shared by the
