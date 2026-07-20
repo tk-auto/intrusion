@@ -183,6 +183,21 @@ go green:
   play the merged change immediately; on failure, diagnose and fix rather than
   handing back a dead link. If the deploy is unusually slow, hand back the URL
   with a note that the deploy is still running rather than blocking forever.
+  > **These `actions_*` results are huge — don't read them raw.** Both
+  > `actions_list` (`list_workflow_runs`) and `actions_get` (`get_workflow_run`)
+  > embed a full `repository` / `head_repository` / `actor` blob **per run**, so
+  > a single call is ~400 KB and blows the tool-result token limit — the harness
+  > spills it to a file instead of returning it. Two lighter moves, in order:
+  > 1. For anything attached to the **PR**, prefer `pull_request_read` with
+  >    `get_check_runs` or `get_status` — those are compact (a handful of fields
+  >    per check), and are all you need to watch the fmt/clippy/test gate.
+  > 2. The Pages deploy runs on `main` post-merge, so it is *not* on the PR head
+  >    and you must use `actions_list` — call it with `per_page: 1` and a
+  >    `{branch: "main"}` filter to fetch just the latest run, then, when the
+  >    result spills to a file, extract only the fields you need with a shell
+  >    one-liner (e.g. `python3 -c "import json;d=json.load(open(F));
+  >    r=d['workflow_runs'][0];print(r['head_sha'],r['status'],r['conclusion'])"`)
+  >    rather than reading the raw payload back into context.
 
 **Do NOT merge — leave the PR open and hand it back — when any of these hold:**
 
