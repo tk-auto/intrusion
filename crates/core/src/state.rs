@@ -35,6 +35,7 @@ use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::region::DoorCell;
+use crate::sound::{Loudness, Sound};
 use crate::vision::{
     field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
     PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
@@ -365,6 +366,13 @@ pub struct State {
     /// exactly one action's events *is* the clearing rule). Empty before the
     /// first input; frozen once the run ends, so the final message stays.
     last_events: Vec<Event>,
+    /// The sounds the most recent *spent* action made (§9.2), for the presentation
+    /// (§9.3) and the guard-hearing check (§9.1) to read via
+    /// [`sounds_this_turn`](Self::sounds_this_turn). Cleared at the start of every
+    /// [`step`], so a free action (which makes no noise) leaves it empty. A `Vec`
+    /// because guards will emit here too once they act (§9.2's last rows); today
+    /// only the player does, so it holds at most one.
+    sounds: Vec<Sound>,
 }
 
 impl State {
@@ -408,6 +416,7 @@ impl State {
             turn: 0,
             outcome: Outcome::Playing,
             last_events: Vec::new(),
+            sounds: Vec::new(),
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -476,6 +485,18 @@ impl State {
     /// [`concealed_from`](Self::concealed_from).
     pub fn crouched_behind(&self) -> Option<Cell> {
         self.crouched_behind
+    }
+
+    /// The sounds the most recent *spent* action made this turn (§9.2) — where each
+    /// noise came from and how loud it started. Empty after a free action (a
+    /// mis-input makes no noise) and after a silent one (waiting, crouching).
+    ///
+    /// This is the raw emission; a consumer spreads it with
+    /// [`audible_field`](crate::audible_field) to learn the intensity at a cell —
+    /// the sound presentation (§9.3) to show the player a noise, and — once guards
+    /// react — the hearing check that flips a guard to Investigating (§9.1).
+    pub fn sounds_this_turn(&self) -> &[Sound] {
+        &self.sounds
     }
 
     /// Whether the player is concealed from a viewer standing at `viewer` — the
@@ -615,6 +636,10 @@ impl State {
             return Vec::new();
         }
 
+        // This action's noise starts fresh (§9.2). A free action emits nothing, so
+        // clearing here leaves `sounds` empty after a mis-input; a spent action fills
+        // it from the branches in `resolve_step` / `player_phase`.
+        self.sounds.clear();
         let mut events = Vec::new();
         // Phase 1. A free action (wall bump, refused exit) does not end the turn.
         let spent = self.player_phase(input, &mut events);
@@ -644,6 +669,9 @@ impl State {
             // It also *holds* a crouch (§10.3): the pose survives exactly the
             // turns spent holding still.
             Input::Wait => {
+                // Waiting is Silent (§9.2's "None" row): it spends the turn but makes
+                // no noise — which is what lets holding still be a way to go unheard,
+                // not just unseen. No `emit`, so `sounds` stays empty.
                 self.waited = true;
                 true
             }
@@ -662,6 +690,17 @@ impl State {
                 }
                 spent
             }
+        }
+    }
+
+    /// Record the noise a spent action made (§9.2): push a [`Sound`] at `source`
+    /// unless the action is [`Loudness::Silent`], in which case there is nothing to
+    /// hear. The turn loop calls this from the world-changing branches; a free
+    /// action never reaches it.
+    fn emit(&mut self, source: Cell, loudness: Loudness) {
+        let intensity = loudness.intensity();
+        if intensity > 0 {
+            self.sounds.push(Sound { source, intensity });
         }
     }
 
@@ -701,6 +740,8 @@ impl State {
         {
             obj.taken = true;
             let remaining = self.objectives.iter().filter(|o| !o.taken).count();
+            // Taking intel is not one of §9.2's noise sources, so it stays silent —
+            // emit nothing rather than invent a level the design didn't name.
             events.push(Event::IntelTaken { remaining });
             return true;
         }
@@ -718,11 +759,20 @@ impl State {
         };
         if let Some(action) = action {
             return match action {
+                // Working a door is Medium noise (§9.2), from the player's own cell:
+                // they stay put operating the handle, so the noise starts beside the
+                // door, not in the doorway. A closed door has no event of its own but
+                // makes the same noise. An obstructed close changed nothing — free
+                // and silent.
                 DoorAction::Opened => {
                     events.push(Event::DoorOpened { at: target });
+                    self.emit(self.player, Loudness::Medium);
                     true
                 }
-                DoorAction::Closed => true,
+                DoorAction::Closed => {
+                    self.emit(self.player, Loudness::Medium);
+                    true
+                }
                 DoorAction::Obstructed => false,
             };
         }
@@ -740,6 +790,11 @@ impl State {
             }
             self.player = target;
             self.facing = dir; // facing follows the last successful step (§5)
+                               // Climbing into a cupboard is still a step — Low footstep noise (§9.2),
+                               // from the cell just entered. Only once you *wait* inside it are you
+                               // silent. A judgment call worth a later playtest: scrambling into cover
+                               // isn't free of sound the way holding still is.
+            self.emit(target, Loudness::Low);
             events.push(Event::EnteredHideout { at: target });
             return true;
         }
@@ -755,6 +810,9 @@ impl State {
                 return false;
             }
             self.crouched_behind = Some(target);
+            // Ducking behind cover is a stealth move made in place — Silent (§9.2,
+            // the "camouflaged" row): the whole point is to go unnoticed, so it
+            // emits no sound.
             events.push(Event::Crouched { behind: target });
             return true;
         }
@@ -763,6 +821,8 @@ impl State {
         if self.layout.facility().can_enter(target, ACTOR_FILL) {
             self.player = target;
             self.facing = dir; // facing follows the last successful step (§5)
+                               // Moving normally is Low noise (§9.2), from the cell just stepped into.
+            self.emit(target, Loudness::Low);
             events.push(Event::Moved { to: target });
             return true;
         }
@@ -1812,5 +1872,113 @@ mod tests {
             return;
         }
         panic!("no usable door scenario found in 64 seeds");
+    }
+
+    /// §9.2 — moving normally makes a **Low** footstep, sourced at the cell just
+    /// stepped into.
+    #[test]
+    fn a_move_emits_a_low_footstep() {
+        let mut s = solo(Cell::new(4, 4));
+        s.step(Input::Step(Direction::East));
+        assert_eq!(
+            s.sounds_this_turn(),
+            &[Sound {
+                source: Cell::new(5, 4),
+                intensity: Loudness::Low.intensity(),
+            }]
+        );
+    }
+
+    /// §9.2's "None" row — waiting spends the turn but emits no sound, so holding
+    /// still is a way to go *unheard*, not only unseen.
+    #[test]
+    fn waiting_makes_no_sound() {
+        let mut s = solo(Cell::new(4, 4));
+        s.step(Input::Wait);
+        assert!(s.sounds_this_turn().is_empty());
+    }
+
+    /// §4.4/§9.2 — a free action (a wall bump) makes no noise, and clearing on every
+    /// action means `sounds_this_turn` reflects only the latest: a footstep is
+    /// replaced by the silence of the bump that follows it.
+    #[test]
+    fn a_free_bump_is_silent_and_replaces_prior_sound() {
+        let mut s = solo(Cell::new(1, 4));
+        assert!(!s.step(Input::Step(Direction::East)).is_empty()); // a Low footstep
+        assert_eq!(s.sounds_this_turn().len(), 1);
+
+        s.step(Input::Step(Direction::West)); // back onto (1,4)
+        let events = s.step(Input::Step(Direction::West)); // into the west wall
+        assert!(matches!(events.as_slice(), [Event::Bumped { .. }]));
+        assert!(
+            s.sounds_this_turn().is_empty(),
+            "a free bump makes no sound and clears the prior footstep"
+        );
+    }
+
+    /// §9.2 — opening a door is **Medium** noise, sourced at the player's own cell:
+    /// they stay put working the handle, so the sound starts beside the doorway.
+    #[test]
+    fn opening_a_door_emits_medium_from_the_player() {
+        let layout = generate(40, 40, &mut Rng::new(7)).unwrap();
+        let panel = layout.regions().doors().next().unwrap().1.panels()[0];
+
+        // One of the four approaches stands on floor and bumps the panel open.
+        let opened = Direction::ALL.into_iter().any(|dir| {
+            let Some(from) = panel.step(opposite(dir)) else {
+                return false;
+            };
+            if !layout.facility().can_enter(from, ACTOR_FILL) {
+                return false;
+            }
+            let mut s = State::new(
+                layout.clone(),
+                from,
+                Direction::North,
+                Vec::new(),
+                Vec::new(),
+                Cell::new(1, 1),
+            );
+            if s.step(Input::Step(dir)) != vec![Event::DoorOpened { at: panel }] {
+                return false;
+            }
+            // Player did not move; the noise is Medium, at their cell.
+            assert_eq!(
+                s.sounds_this_turn(),
+                &[Sound {
+                    source: from,
+                    intensity: Loudness::Medium.intensity(),
+                }]
+            );
+            true
+        });
+        assert!(
+            opened,
+            "one approach must bump the panel open and sound Medium"
+        );
+    }
+
+    /// Determinism (§12.4): the same start and the same inputs produce the same
+    /// sounds, turn for turn — a run is `(seed, [inputs])` and its noise is part of
+    /// what replays identically.
+    #[test]
+    fn identical_runs_make_identical_sounds() {
+        let inputs = [
+            Input::Step(Direction::East),
+            Input::Wait,
+            Input::Step(Direction::South),
+            Input::Step(Direction::East),
+        ];
+        let run = || {
+            let mut s = solo(Cell::new(3, 3));
+            inputs
+                .iter()
+                .map(|&i| {
+                    s.step(i);
+                    s.sounds_this_turn().to_vec()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
     }
 }
