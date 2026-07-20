@@ -1002,7 +1002,7 @@ mod tests {
             Layout::from_facility(Facility::walled_box(24, 6)),
             Cell::new(2, 2),
             Direction::North,
-            vec![Guard::patrolling(Cell::new(2, 4), vec![Direction::North])],
+            vec![Guard::patrolling_to(Cell::new(2, 4), Cell::new(2, 1))],
             Vec::new(),
             Cell::new(22, 4),
         );

@@ -24,15 +24,19 @@
 //! **Sight is real** (§6): phase 2 recomputes every viewer's field of view — the
 //! player's ~180° half-disc (360° on a turn spent waiting, §8.3) and each guard's
 //! ~90° wedge — from its *current* position and facing, which is what designs out the
-//! old one-turn sensory lag (§4.2). **Guards** still move along a scripted route, a
-//! deterministic placeholder for the patrol/chase AI (§7.4–7.6): their cones are
-//! computed and stored, but nothing *reacts* to them yet — detection, chasing and the
-//! state machine are the guard tickets, which will read the sight data this loop
-//! already maintains.
+//! old one-turn sensory lag (§4.2). **Guards patrol** (§7.5): phase 3 runs each
+//! guard's `decide` step, which reads the sight this loop just recomputed and, for a
+//! Calm guard, sweeps its territory toward the farthest cell it has not yet looked at.
+//! The reactive half of the §7.4 state machine — detection, chasing, searching — is
+//! the later guard tickets, which set a guard's destination the same way patrol does
+//! and reuse the same walk-toward-it movement.
+
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
-use crate::facility::Terrain;
+use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
 use crate::region::DoorCell;
 use crate::sound::{Loudness, Sound};
@@ -220,22 +224,40 @@ impl GuardState {
 
 /// A guard on the level.
 ///
-/// Its movement is a **scripted route** walked one step per turn, cycling — the
-/// simplest possible placeholder for the patrol/chase AI (§7.4–7.6). It has a real
-/// field of view — the ~90° cone (§6.2/§7.1), recomputed every sight phase — and a
-/// [`GuardState`], but no transitions and no reactions yet: it does not open doors,
-/// and it exists so that capture (§4.5) is a real, tested consequence rather than
-/// an untriggerable branch. The guard tickets replace the route with the real thing
-/// behind the same phase, reading the sight this loop already maintains.
+/// A Calm guard **patrols** (§7.5): from its station it sweeps toward the farthest
+/// cell in its territory it has not recently looked at, keeping a private memory of
+/// the cells its cone has covered and wiping it to start over once the territory is
+/// exhausted. It has a real field of view — the ~90° cone (§6.2/§7.1), recomputed
+/// every sight phase — a [`GuardState`], and a `destination` it walks to along the
+/// shortest patrollable path (routing *around* furniture, cover and cupboards, and
+/// not through doors it cannot yet open). The reactive §7.4 states (chasing,
+/// investigating, responding) are the later guard tickets: they set `destination`
+/// their own way and reuse this same walk-toward-it movement.
 #[derive(Clone, Debug)]
 pub struct Guard {
     pos: Cell,
     facing: Direction,
-    route: Vec<Direction>,
-    step: usize,
+    /// The spawn cell and the centre of the patrol territory (§7.5).
+    station: Cell,
+    /// Whether this guard patrols. `false` is a held-in-place fixture — a guard that
+    /// only looks, for the sight and placement tests that need a fixed cone; `true`
+    /// is the live §7.5 sweep.
+    patrols: bool,
+    /// Private memory of the cells this guard has looked at (§7.5): the running union
+    /// of its fields of view, accumulated exactly as the player's tile memory is.
+    /// Patrol heads for the farthest cell *not* in here; when the territory is fully
+    /// inspected this is wiped and the sweep restarts.
+    inspected: VisibleSet,
+    /// The cell the guard is walking to, if any. Calm patrol picks it (§7.5); the
+    /// reactive states will set it to their own targets (§7.4).
+    destination: Option<Cell>,
     fov: VisibleSet,
     state: GuardState,
 }
+
+/// Patrol radius (§7.5, **[START] = 15**): a guard sweeps the patrollable cells
+/// within this many steps of its station.
+pub(crate) const PATROL_RADIUS: u32 = 15;
 
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
 /// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
@@ -244,33 +266,43 @@ pub struct Guard {
 pub(crate) const GUARD_INITIAL_FACING: Direction = Direction::South;
 
 impl Guard {
-    /// A guard that holds its cell — no patrol.
+    /// A guard that holds its cell — it looks but never patrols. The fixture for the
+    /// sight and placement tests that pin a fixed, spawn-facing cone.
     pub fn stationary(pos: Cell) -> Self {
         Self {
             pos,
             facing: GUARD_INITIAL_FACING,
-            route: Vec::new(),
-            step: 0,
+            station: pos,
+            patrols: false,
+            inspected: VisibleSet::default(),
+            destination: None,
             fov: VisibleSet::default(),
             state: GuardState::Calm,
         }
     }
 
-    /// A guard that walks `route`, one direction per turn, cycling back to the start.
-    pub fn patrolling(pos: Cell, route: Vec<Direction>) -> Self {
+    /// A guard that patrols its territory around `pos` (§7.5).
+    pub fn patrolling(pos: Cell) -> Self {
         Self {
-            pos,
-            facing: GUARD_INITIAL_FACING,
-            route,
-            step: 0,
-            fov: VisibleSet::default(),
-            state: GuardState::Calm,
+            patrols: true,
+            ..Self::stationary(pos)
         }
     }
 
-    /// The same guard in `state`. The §7.4 transitions are the guard AI tickets'
-    /// job; until they land, this is how a scenario — a test, the sim — puts a
-    /// guard in a non-[`Calm`](GuardState::Calm) state.
+    /// A patrolling guard already walking toward `destination` — the fixture that
+    /// drives a guard along a known line before the §7.4 reactive transitions that
+    /// set destinations themselves land. The guard heads there along the shortest
+    /// patrollable path and, on arrival, resumes picking its own patrol targets.
+    pub fn patrolling_to(pos: Cell, destination: Cell) -> Self {
+        Self {
+            destination: Some(destination),
+            ..Self::patrolling(pos)
+        }
+    }
+
+    /// The same guard in `state`. The §7.4 transitions are the reactive guard AI
+    /// tickets' job; until they land, this is how a scenario — a test, the sim —
+    /// puts a guard in a non-[`Calm`](GuardState::Calm) state.
     pub fn with_state(mut self, state: GuardState) -> Self {
         self.state = state;
         self
@@ -303,21 +335,78 @@ impl Guard {
         self.state
     }
 
-    /// The direction the guard will try this turn, or `None` if it has no route.
-    fn next_dir(&self) -> Option<Direction> {
-        if self.route.is_empty() {
-            None
-        } else {
-            Some(self.route[self.step % self.route.len()])
+    /// The direction the guard will try this turn, or `None` to hold (§7.4 phase 3).
+    ///
+    /// The guard first folds this turn's cone into its inspected-cell memory — it has
+    /// *looked at* everything it can see — then, if Calm, ensures it has a patrol
+    /// destination and returns the first step of the shortest patrollable path to it.
+    /// A held-in-place guard, or one with no reachable destination, holds.
+    fn decide(&mut self, facility: &Facility) -> Option<Direction> {
+        if !self.patrols {
+            return None;
         }
+        self.inspected.absorb(&self.fov);
+        if self.state == GuardState::Calm {
+            self.repick_patrol_target(facility);
+        }
+        let destination = self.destination?;
+        if destination == self.pos {
+            return None;
+        }
+        first_step_toward(facility, self.pos, destination)
     }
 
-    /// Consume this turn's route step, whether or not the move succeeded — a blocked
-    /// guard still advances along its script rather than retrying the same wall.
-    fn advance(&mut self) {
-        if !self.route.is_empty() {
-            self.step = self.step.wrapping_add(1);
+    /// Keep the current patrol destination while it is still worth walking to;
+    /// otherwise choose the next one (§7.5). "Still worth it" means not yet reached
+    /// and still a cell the guard could stand on — a destination it has arrived at,
+    /// or that has become solid, is done, and the sweep picks again.
+    fn repick_patrol_target(&mut self, facility: &Facility) {
+        if let Some(dest) = self.destination {
+            if dest != self.pos && facility.can_enter(dest, ACTOR_FILL) {
+                return;
+            }
         }
+        self.destination = self.farthest_uninspected(facility);
+    }
+
+    /// The farthest cell in territory the guard has not looked at (§7.5) — *farthest*,
+    /// so patrols pace across distances instead of shuffling locally. When every
+    /// reachable cell has been inspected the memory is wiped and the sweep starts
+    /// over, so a Calm guard never runs out of ground to cover.
+    fn farthest_uninspected(&mut self, facility: &Facility) -> Option<Cell> {
+        let territory = self.territory(facility);
+        if let Some(cell) = pick_farthest(&territory, &self.inspected, self.pos) {
+            return Some(cell);
+        }
+        self.inspected = VisibleSet::default();
+        pick_farthest(&territory, &self.inspected, self.pos)
+    }
+
+    /// The guard's patrol territory (§7.5): the patrollable cells reachable from its
+    /// station without leaving the [`PATROL_RADIUS`] disc. A bounded flood fill, so a
+    /// box territory cannot spill through walls into a room the guard can't actually
+    /// walk to — the cheap slice of the §10.5 fix the ticket asks for, short of full
+    /// region assignment.
+    fn territory(&self, facility: &Facility) -> Vec<Cell> {
+        let mut cells = Vec::new();
+        let mut seen = HashSet::new();
+        let mut frontier = VecDeque::new();
+        if patrollable(facility, self.station) {
+            seen.insert(self.station);
+            frontier.push_back(self.station);
+        }
+        while let Some(cell) = frontier.pop_front() {
+            cells.push(cell);
+            for next in facility.neighbors(cell) {
+                if self.station.manhattan_distance(next) <= PATROL_RADIUS
+                    && patrollable(facility, next)
+                    && seen.insert(next)
+                {
+                    frontier.push_back(next);
+                }
+            }
+        }
+        cells
     }
 }
 
@@ -869,29 +958,30 @@ impl State {
         }
     }
 
-    /// Phase 3 (§4.2): each guard acts. A guard moving into the player's cell is a
-    /// capture and ends the run (§4.5). Otherwise it advances along its route onto any
-    /// cell that admits it and holds no other actor; a blocked guard simply holds.
+    /// Phase 3 (§4.2): each guard acts. Every guard `decide`s a step from the sight
+    /// phase 2 just recomputed (§7.5); a guard moving into the player's cell is a
+    /// capture and ends the run (§4.5). Otherwise it moves onto any cell that admits
+    /// it and holds no other actor; a guard with nowhere to go, or whose step is
+    /// blocked, simply holds.
     fn guard_phase(&mut self, events: &mut Vec<Event>) {
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
             }
-            let Some(dir) = self.guards[i].next_dir() else {
+            let facility = self.layout.facility();
+            let Some(dir) = self.guards[i].decide(facility) else {
                 continue;
             };
             let Some(target) = self.guards[i].pos.step(dir) else {
-                self.guards[i].advance();
                 continue;
             };
-            self.guards[i].advance();
 
             if target == self.player {
                 // Capture is contact (§4.5) — but a concealed player is the one
                 // exception: the occupied cupboard is solid and a patrol routes
                 // *around* it, so contact is refused (§10.3, §7.6). The guard cannot
-                // enter; it holds this turn (its route already advanced). This is the
-                // "hold still, watch the cone sweep past" payoff.
+                // enter; it holds this turn. This is the "hold still, watch the cone
+                // sweep past" payoff.
                 if self.hidden() {
                     continue;
                 }
@@ -942,6 +1032,87 @@ impl State {
 /// new actor kinds arrive.
 fn actor_occupies(player: Cell, guards: &[Guard], cell: Cell) -> bool {
     player == cell || guards.iter().any(|g| g.pos == cell)
+}
+
+/// Whether a guard may **patrol through** `cell` (§7.5/§10.3): a cell it can both
+/// stand on and route across. That is floor and open door panels — but *not*
+/// furniture, cover or a cupboard (which patrols flow around, §10.1), and not a
+/// closed door (which this guard cannot yet open). It is deliberately stricter than
+/// [`Facility::can_enter`]: a hideout admits a mover but a patrol routes around it,
+/// so the two predicates must be combined.
+fn patrollable(facility: &Facility, cell: Cell) -> bool {
+    facility
+        .terrain(cell)
+        .is_some_and(|terrain| !terrain.blocks_pathing() && facility.can_enter(cell, ACTOR_FILL))
+}
+
+/// The farthest uninspected cell in `territory` from `origin`, or `None` when every
+/// cell has been looked at (§7.5). Ties are broken deterministically — nearest the
+/// north-west (smallest `y`, then `x`) — so the same board always yields the same
+/// sweep (§12.4). The guard's own cell is never a target.
+fn pick_farthest(territory: &[Cell], inspected: &VisibleSet, origin: Cell) -> Option<Cell> {
+    territory
+        .iter()
+        .copied()
+        .filter(|&cell| cell != origin && !inspected.contains(cell))
+        .min_by_key(|&cell| {
+            (
+                std::cmp::Reverse(origin.manhattan_distance(cell)),
+                cell.y,
+                cell.x,
+            )
+        })
+}
+
+/// The first step of the shortest patrollable path from `from` to `to`, or `None`
+/// when they coincide or nothing connects them. A plain breadth-first search over
+/// [`patrollable`] cells, expanding neighbours in [`Direction::ALL`] order so the
+/// path — and therefore the whole patrol — is deterministic (§12.4). The *goal*
+/// cell is reachable even when it is not itself patrollable, so a guard can be sent
+/// to a cupboard it will be refused entry to (the hidden-player and, later, chase
+/// cases); only the cells walked *through* must be patrollable.
+fn first_step_toward(facility: &Facility, from: Cell, to: Cell) -> Option<Direction> {
+    if from == to {
+        return None;
+    }
+    let mut came_from: HashMap<Cell, Cell> = HashMap::new();
+    came_from.insert(from, from);
+    let mut frontier = VecDeque::new();
+    frontier.push_back(from);
+    while let Some(cell) = frontier.pop_front() {
+        if cell == to {
+            // Walk the parent chain back to the cell one step out of `from`.
+            let mut step = to;
+            while came_from[&step] != from {
+                step = came_from[&step];
+            }
+            return direction_between(from, step);
+        }
+        for dir in Direction::ALL {
+            let Some(next) = cell.step(dir) else {
+                continue;
+            };
+            if next != to && !patrollable(facility, next) {
+                continue;
+            }
+            // Only the *first* time a cell is reached fixes its parent — overwriting
+            // would corrupt the search tree (a later visit could point it back at a
+            // descendant, cycling the reconstruction below).
+            if let Entry::Vacant(slot) = came_from.entry(next) {
+                slot.insert(cell);
+                frontier.push_back(next);
+            }
+        }
+    }
+    None
+}
+
+/// The cardinal direction from `from` to an orthogonally adjacent `to`, or `None`
+/// if they are not neighbours.
+fn direction_between(from: Cell, to: Cell) -> Option<Direction> {
+    Direction::ALL
+        .into_iter()
+        .find(|&dir| from.step(dir) == Some(to))
 }
 
 #[cfg(test)]
@@ -1053,13 +1224,14 @@ mod tests {
     /// detection — the guard need not "see" anything.
     #[test]
     fn a_guard_stepping_into_the_player_captures() {
-        // Guard at (6,4) patrolling west; player at (4,4). After the startup turn the
-        // guard is at (5,4); the player waits, and the guard steps onto (4,4).
+        // Guard at (6,4) heading west across the room; player at (4,4) in its path.
+        // After the startup turn the guard is at (5,4); the player waits, and the
+        // guard steps onto (4,4).
         let mut s = State::new(
             open_room(10, 10),
             Cell::new(4, 4),
             Direction::North,
-            vec![Guard::patrolling(Cell::new(6, 4), vec![Direction::West])],
+            vec![Guard::patrolling_to(Cell::new(6, 4), Cell::new(1, 4))],
             Vec::new(),
             Cell::new(8, 8),
         );
@@ -1080,25 +1252,149 @@ mod tests {
         assert_eq!(s.outcome(), Outcome::Lost);
     }
 
-    /// A guard blocked by a wall holds rather than walking through it, and keeps
-    /// advancing its script so it doesn't wedge.
+    /// A patrolling guard with nowhere to sweep holds rather than wedging or
+    /// panicking (§7.5). A patrol routes *around* walls, so the old "march into the
+    /// wall forever" case cannot arise; the modern equivalent is a guard boxed into
+    /// a single cell — its territory is just itself, so it never leaves.
     #[test]
-    fn a_guard_blocked_by_a_wall_holds() {
-        // Guard one cell from the west wall, marching into it forever.
+    fn a_boxed_in_guard_has_nowhere_to_patrol_and_holds() {
+        // Wall a guard into the single cell (2,2): all four neighbours are solid.
+        let mut layout = open_room(10, 10);
+        for wall in [
+            Cell::new(1, 2),
+            Cell::new(3, 2),
+            Cell::new(2, 1),
+            Cell::new(2, 3),
+        ] {
+            layout.place(wall, Terrain::Wall);
+        }
         let mut s = State::new(
-            open_room(10, 10),
-            Cell::new(5, 5),
+            layout,
+            Cell::new(6, 6),
             Direction::North,
-            vec![Guard::patrolling(Cell::new(1, 1), vec![Direction::West])],
+            vec![Guard::patrolling(Cell::new(2, 2))],
             Vec::new(),
             Cell::new(8, 8),
         );
-        // Startup already tried once; a few more waits never move it off (1,1).
+        // Startup already ran a decide; a few more waits never move it off (2,2).
         for _ in 0..3 {
             s.step(Input::Wait);
         }
-        assert_eq!(s.guards()[0].pos(), Cell::new(1, 1));
+        assert_eq!(s.guards()[0].pos(), Cell::new(2, 2));
         assert_eq!(s.outcome(), Outcome::Playing);
+    }
+
+    /// §7.5: patrol territory is the patrollable cells within [`PATROL_RADIUS`] of the
+    /// station. The radius is pinned here so a later change to the **[START] = 15**
+    /// value is visible — a floor cell exactly at the radius is in, one step past is
+    /// out.
+    #[test]
+    fn patrol_territory_is_bounded_by_the_radius() {
+        // A room large enough that the radius, not a wall, is what bounds it.
+        let facility = Facility::walled_box(60, 60);
+        let station = Cell::new(30, 30);
+        let territory = Guard::patrolling(station).territory(&facility);
+
+        assert_eq!(PATROL_RADIUS, 15, "the [START] patrol radius");
+        assert!(
+            territory
+                .iter()
+                .all(|&c| station.manhattan_distance(c) <= PATROL_RADIUS),
+            "no cell beyond the radius is in territory",
+        );
+        assert!(
+            territory.contains(&Cell::new(30 + PATROL_RADIUS, 30)),
+            "a floor cell exactly at the radius is in territory",
+        );
+        assert!(
+            !territory.contains(&Cell::new(30 + PATROL_RADIUS + 1, 30)),
+            "one step past the radius is out",
+        );
+    }
+
+    /// §7.5: with no destination a Calm guard walks to the **farthest** uninspected
+    /// cell in its territory — *farthest*, not nearest, so patrols pace across
+    /// distances. Ties resolve toward the north-west, deterministically (§12.4).
+    #[test]
+    fn patrol_picks_the_farthest_uninspected_cell() {
+        let nothing_seen = VisibleSet::default();
+        let origin = Cell::new(1, 1);
+
+        // (1,4) at distance 3 beats (3,1) at distance 2 — farthest, not nearest.
+        let spread = [Cell::new(3, 1), Cell::new(1, 4)];
+        assert_eq!(
+            pick_farthest(&spread, &nothing_seen, origin),
+            Some(Cell::new(1, 4)),
+        );
+
+        // Equidistant cells (both at distance 3) break toward the smaller y, then x.
+        let tied = [Cell::new(1, 4), Cell::new(4, 1)];
+        assert_eq!(
+            pick_farthest(&tied, &nothing_seen, origin),
+            Some(Cell::new(4, 1)),
+        );
+    }
+
+    /// §7.5: when every cell in reach has been looked at, the inspected-cell memory
+    /// is wiped and the sweep starts over — a Calm guard never runs out of ground.
+    #[test]
+    fn patrol_memory_wipes_when_the_territory_is_exhausted() {
+        let facility = Facility::walled_box(5, 5); // a 3×3 interior
+        let mut guard = Guard::patrolling(Cell::new(2, 2));
+        // The guard has looked at its whole territory: fold a full-circle view in.
+        let whole_room = field_of_view(
+            &facility,
+            Cell::new(2, 2),
+            Direction::South,
+            WAIT_SIGHT_ARC,
+            2,
+        );
+        guard.inspected.absorb(&whole_room);
+
+        let territory = guard.territory(&facility);
+        assert!(
+            pick_farthest(&territory, &guard.inspected, guard.pos()).is_none(),
+            "precondition: nothing is left uninspected",
+        );
+
+        // Asking for the next target wipes the exhausted memory and finds one again.
+        assert!(
+            guard.farthest_uninspected(&facility).is_some(),
+            "the sweep restarts instead of stalling",
+        );
+        assert!(
+            pick_farthest(&guard.territory(&facility), &guard.inspected, guard.pos()).is_some(),
+            "memory was wiped — cells read as uninspected again",
+        );
+    }
+
+    /// §7.5: a Calm guard genuinely paces across its territory rather than shuffling
+    /// by its spawn — over a patrol it reaches a cell well away from its station.
+    #[test]
+    fn a_calm_guard_paces_across_its_territory() {
+        let station = Cell::new(15, 15);
+        let mut s = State::new(
+            open_room(30, 30),
+            Cell::new(1, 28), // player parked in a far corner, out of the territory
+            Direction::North,
+            vec![Guard::patrolling(station)],
+            Vec::new(),
+            Cell::new(1, 1),
+        );
+        let mut farthest = 0;
+        for _ in 0..40 {
+            s.step(Input::Wait);
+            farthest = farthest.max(station.manhattan_distance(s.guards()[0].pos()));
+        }
+        assert!(
+            farthest > PATROL_RADIUS / 2,
+            "the guard paced across its territory (reached {farthest} from station)",
+        );
+        assert_eq!(
+            s.outcome(),
+            Outcome::Playing,
+            "the far player is never reached"
+        );
     }
 
     /// Bumping a closed door opens it and spends the turn (§4.3, §10.4). Uses a
@@ -1312,13 +1608,14 @@ mod tests {
     fn a_guard_cannot_capture_a_hidden_player() {
         let mut layout = open_room(10, 10);
         layout.place(Cell::new(4, 4), Terrain::Hideout);
-        // Guard at (6,4) marching west; player hidden in the cupboard at (4,4). After
-        // the startup turn the guard is at (5,4), one step from the player's cell.
+        // Guard at (6,4) sent to the cupboard cell (4,4) where the player hides.
+        // After the startup turn the guard is at (5,4), one step from the player's
+        // cell — the destination it will be refused entry to.
         let mut s = State::new(
             layout,
             Cell::new(4, 4),
             Direction::North,
-            vec![Guard::patrolling(Cell::new(6, 4), vec![Direction::West])],
+            vec![Guard::patrolling_to(Cell::new(6, 4), Cell::new(4, 4))],
             Vec::new(),
             Cell::new(8, 8),
         );
@@ -1500,7 +1797,7 @@ mod tests {
             layout,
             Cell::new(4, 4),
             Direction::North,
-            vec![Guard::patrolling(Cell::new(6, 4), vec![Direction::West])],
+            vec![Guard::patrolling_to(Cell::new(6, 4), Cell::new(1, 4))],
             Vec::new(),
             Cell::new(8, 8),
         );
@@ -1633,7 +1930,7 @@ mod tests {
             open_room(12, 12),
             Cell::new(1, 1),
             Direction::South,
-            vec![Guard::patrolling(Cell::new(8, 8), vec![Direction::West])],
+            vec![Guard::patrolling_to(Cell::new(8, 8), Cell::new(1, 8))],
             Vec::new(),
             Cell::new(10, 10),
         );
@@ -1713,10 +2010,7 @@ mod tests {
                 open_room(12, 12),
                 Cell::new(5, 5),
                 Direction::North,
-                vec![Guard::patrolling(
-                    Cell::new(8, 5),
-                    vec![Direction::North, Direction::West],
-                )],
+                vec![Guard::patrolling(Cell::new(8, 5))],
                 [Cell::new(6, 5)],
                 Cell::new(5, 6),
             );
