@@ -37,8 +37,7 @@
 
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
-use crate::facility::{Facility, SoundBlocking, Terrain};
-use crate::sound::{audible_field, AudibleField};
+use crate::facility::{Facility, Terrain};
 use crate::state::State;
 use crate::status::near_line;
 
@@ -109,65 +108,6 @@ impl Grid {
             .map(|y| (0..self.width).map(|x| self.get(x, y).glyph).collect())
             .collect()
     }
-}
-
-/// "How far you were just heard" (§9.3): the frontier of the player's *own* noise
-/// this turn — the outermost cells it carries to, the range at which a guard could
-/// still have heard them. This is the *perception* half of the sound seam, between
-/// the pure sound model ([`audible_field`]) and however a frame draws it; swapping
-/// the presentation (an outline now; a filled wash, an edge arrow, §15.3) is a
-/// change to the drawing alone, never to this or to the model.
-///
-/// Only the player's own emissions count — a footfall, a worked door; waiting and
-/// crouching are silent (§9.2) and yield an empty range. A guard's noise, once
-/// guards make it, emits from the guard's cell and is *not* the player's
-/// audibility, so it is excluded here.
-///
-/// The frontier is where the sound **fades out in open space**, not where a wall
-/// clips it — the wall already draws that boundary. A reached cell is on the range
-/// when a neighbour the sound could have flowed into (open floor, or a door it only
-/// attenuated across) stays silent; a cell whose sole silent neighbours are solid
-/// walls is interior, not edge. So closing a door pulls the visible range in, which
-/// is the whole point of "close the door behind you" (§9.1).
-pub fn audibility_range(state: &State) -> Vec<Cell> {
-    let facility = state.layout().facility();
-    let player = state.player();
-    // The audibility of each noise the player themselves made — usually just one
-    // per turn; a cell is within earshot if any of them reaches it.
-    let fields: Vec<AudibleField> = state
-        .sounds_this_turn()
-        .iter()
-        .filter(|s| s.source == player)
-        .map(|&s| audible_field(facility, s))
-        .collect();
-    if fields.is_empty() {
-        return Vec::new();
-    }
-    let audible = |c: Cell| fields.iter().any(|f| f.is_audible_at(c));
-
-    let mut frontier = Vec::new();
-    for y in 0..facility.height() {
-        for x in 0..facility.width() {
-            let cell = Cell::new(x, y);
-            if !audible(cell) {
-                continue;
-            }
-            // On the range iff some neighbour the sound *could* have flowed into
-            // (anything but a solid wall/hinge) stayed silent — an open fade, not a
-            // wall clip.
-            let on_range_edge = facility.neighbors(cell).any(|n| {
-                !audible(n)
-                    && !matches!(
-                        facility.terrain(n).map(Terrain::sound),
-                        Some(SoundBlocking::Blocks) | None
-                    )
-            });
-            if on_range_edge {
-                frontier.push(cell);
-            }
-        }
-    }
-    frontier
 }
 
 /// Render `state` to a full [`Grid`] (§11.1): terrain through the §11.5a fog first,
@@ -286,19 +226,6 @@ pub fn render(state: &State) -> Grid {
     // uses, so the picture cannot disagree with the rules.
     if let Some(cover) = state.crouched_behind() {
         cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
-    }
-
-    // The audibility range (§9.3): outline how far the player's own noise this turn
-    // carried — the frontier of the cells it reaches ([`audibility_range`]) — so
-    // they can see the range a guard would have heard them at, and watch it swell
-    // when they run and pull in when they close a door. A quiet turn draws nothing.
-    // It is a *category* on the background, so the shell colours it through the one
-    // §11.2 table, and this whole block is the swappable presentation (§15.3) — a
-    // filled wash or an edge arrow replaces it without touching the model. Painted
-    // before the danger overlay so a watched cell still reads danger first: being
-    // seen outranks having been heard.
-    for cell in audibility_range(state) {
-        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Noise);
     }
 
     // The danger overlay (§11.5), last, across terrain and entities alike: the
@@ -1126,111 +1053,5 @@ mod tests {
                 assert_eq!(g.get(x, y).bg, None, "no red anywhere for ({x},{y})");
             }
         }
-    }
-
-    /// §9.3: the audibility range outlines how far a footfall carried — the ring at
-    /// the edge of earshot. A plain step is Low noise (intensity 3, §9.2), audible
-    /// out to path-distance 2 in the open, so the frontier is that diamond; the
-    /// source and the cells one in are interior, and three out is beyond earshot.
-    #[test]
-    fn audibility_range_outlines_how_far_a_footfall_carried() {
-        let mut s = state(20, 20, Cell::new(10, 10), Vec::new());
-        s.step(Input::Step(Direction::North)); // to (10,9): a Low footfall there
-        let range = audibility_range(&s);
-
-        // The edge of earshot, two steps out on the open floor.
-        assert!(
-            range.contains(&Cell::new(10, 11)),
-            "two south is on the range"
-        );
-        assert!(
-            range.contains(&Cell::new(12, 9)),
-            "two east is on the range"
-        );
-        // Interior: the source and one step in are ringed by audible cells.
-        assert!(
-            !range.contains(&Cell::new(10, 9)),
-            "the source is interior, not the edge"
-        );
-        assert!(
-            !range.contains(&Cell::new(10, 10)),
-            "one step in is interior"
-        );
-        // Beyond earshot: three out never reaches, so it is not on the range.
-        assert!(
-            !range.contains(&Cell::new(10, 12)),
-            "three out is past the range"
-        );
-
-        // Waiting is silent (§9.2) — there is no range at all.
-        s.step(Input::Wait);
-        assert!(audibility_range(&s).is_empty(), "silence has no range");
-    }
-
-    /// §9.1/§9.3: a wall clips the range — the sound cannot cross it, so nothing
-    /// beyond it is on the audibility outline, while the open side still carries.
-    /// This is the "out of range" half of the acceptance test.
-    #[test]
-    fn a_wall_clips_the_audibility_range() {
-        // A wall column one east of where the player steps seals that side.
-        let mut layout = open_room(20, 20);
-        for y in 8..=12 {
-            layout.place(Cell::new(12, y), Terrain::Wall);
-        }
-        let mut s = State::new(
-            layout,
-            Cell::new(10, 10),
-            Direction::North,
-            Vec::new(),
-            Vec::new(),
-            Cell::new(18, 18),
-        );
-        s.step(Input::Step(Direction::East)); // to (11,10): a Low footfall beside the wall
-        let range = audibility_range(&s);
-
-        assert!(
-            range.contains(&Cell::new(9, 10)),
-            "the range carries into the open floor"
-        );
-        assert!(
-            !range.contains(&Cell::new(13, 10)),
-            "nothing crosses the wall — the far side is out of range"
-        );
-    }
-
-    /// A watched cell reads danger first (§11.5): the audibility outline is painted
-    /// before the danger overlay, so a range cell inside a visible guard's cone
-    /// still shows red — being seen outranks having been heard.
-    #[test]
-    fn the_danger_overlay_wins_over_a_coincident_range_cell() {
-        // Guard at (10,8) looking south (spawn facing, §7.1); the north-facing
-        // player at (10,10) steps toward it to (10,9). The footfall's range reaches
-        // (10,11), two south — a cell the guard's cone also watches.
-        let mut s = State::new(
-            open_room(20, 20),
-            Cell::new(10, 10),
-            Direction::North,
-            vec![Guard::stationary(Cell::new(10, 8))],
-            Vec::new(),
-            Cell::new(18, 18),
-        );
-        s.step(Input::Step(Direction::North)); // to (10,9): a Low footfall
-        assert!(
-            audibility_range(&s).contains(&Cell::new(10, 11)),
-            "the range reaches the watched cell"
-        );
-        assert!(
-            s.player_fov().contains(s.guards()[0].pos()),
-            "the guard is in view, so its cone paints"
-        );
-        assert!(
-            s.guards()[0].fov().contains(Cell::new(10, 11)),
-            "the cone watches that cell"
-        );
-        assert_eq!(
-            render(&s).get(10, 11).bg,
-            Some(Category::Danger),
-            "danger paints over the audibility outline on a watched cell"
-        );
     }
 }
