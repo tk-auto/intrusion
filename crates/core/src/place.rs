@@ -27,7 +27,7 @@
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
-use crate::guard::GUARD_INITIAL_FACING;
+use crate::guard::{Guard, GUARD_INITIAL_FACING};
 use crate::path;
 use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
@@ -66,9 +66,13 @@ impl LevelConfig {
     };
 }
 
-/// Where everything starts: the output of §10.1 steps 7–9. Cells only — the
-/// *placement* is generation's concern; constructing actors from it (stationary
-/// guards today, patrols when the guard AI lands) belongs to the caller.
+/// Where everything starts: the output of §10.1 steps 7–9 — the cell each piece
+/// spawns on. The player, exit and intel are cells a caller feeds straight into
+/// [`State::new`](crate::State::new); the guards become live actors through
+/// [`guards`](Self::guards), which spawns the patrolling §7.5 sweepers a real run
+/// uses. Keeping that one constructor here is deliberate: "a placed guard patrols"
+/// is a fact about the game, not about any one shell, so the web build and the sim
+/// spawn the *same* guard rather than each re-deciding.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Placement {
     player: Cell,
@@ -94,10 +98,24 @@ impl Placement {
         &self.intel
     }
 
-    /// The guard spawns — never the start room, never eyeing the player's spawn
-    /// on turn one (§10.1.9, §10.6).
-    pub fn guards(&self) -> &[Cell] {
+    /// The guard spawn cells — never the start room, never eyeing the player's
+    /// spawn on turn one (§10.1.9, §10.6). These are the geometric facts the
+    /// placement guarantees are about; [`guards`](Self::guards) turns them into the
+    /// actors a run plays.
+    pub fn guard_cells(&self) -> &[Cell] {
         &self.guards
+    }
+
+    /// The guards as the live actors a real run spawns — the patrolling §7.5
+    /// sweepers (§7.4's reactive states ride on the same seam). Placement records
+    /// guard *cells* because the §10.6 guarantees are about where a guard *stands*;
+    /// turning a spawn into a behaving guard is a single decision, and it lives here
+    /// so every caller — the web build, the sim — spawns the same patrolling guard.
+    pub fn guards(&self) -> Vec<Guard> {
+        self.guard_cells()
+            .iter()
+            .map(|&cell| Guard::patrolling(cell))
+            .collect()
     }
 }
 
@@ -361,12 +379,12 @@ mod tests {
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             assert_eq!(p.intel().len(), LevelConfig::V1.intel, "seed {seed}");
-            assert_eq!(p.guards().len(), LevelConfig::V1.guards, "seed {seed}");
+            assert_eq!(p.guard_cells().len(), LevelConfig::V1.guards, "seed {seed}");
 
             // Every piece on its own plain floor cell — no stacking, no walls.
             let mut all = vec![p.player(), p.exit()];
             all.extend_from_slice(p.intel());
-            all.extend_from_slice(p.guards());
+            all.extend_from_slice(p.guard_cells());
             for &c in &all {
                 assert_eq!(
                     layout.facility().terrain(c),
@@ -446,7 +464,7 @@ mod tests {
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             let start = room_of(&layout, p.player());
-            for &g in p.guards() {
+            for &g in p.guard_cells() {
                 assert_ne!(
                     room_of(&layout, g),
                     start,
@@ -454,7 +472,15 @@ mod tests {
                 );
             }
 
-            let guards = p.guards().iter().map(|&c| Guard::stationary(c)).collect();
+            // Stationary fixtures on purpose: this asserts the *turn-one spawn cone*
+            // (§10.6), the static geometry placement guarantees — a patrolling guard
+            // would have swept off its spawn during the startup turn and we'd be
+            // checking a different cone than the one the guarantee is about.
+            let guards = p
+                .guard_cells()
+                .iter()
+                .map(|&c| Guard::stationary(c))
+                .collect();
             let state = State::new(
                 layout,
                 p.player(),
