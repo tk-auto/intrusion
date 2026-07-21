@@ -1,10 +1,11 @@
 //! Sound: emission and propagation (§9.1–9.2).
 //!
-//! **Guards were deaf — this is the substrate that ends that** (§9). The design
+//! **Guards were deaf — this is the substrate that ended that** (§9). The design
 //! calls sound "the single largest missing system": it is how the player steers
-//! guard attention, and how haste is punished. This module is the *data* half —
-//! it does **not** wire guards, which have no reactions yet (`state.rs`, the
-//! guard-AI tickets own that). It gives the world two things:
+//! guard attention, and how haste is punished. This module is the *data* half — the
+//! vocabulary and the field; the reaction (a guard hearing a field above
+//! [`HEARING_THRESHOLD`] and turning to Investigating) is wired in the turn loop
+//! (`state.rs`). It gives the world two things:
 //!
 //! - **Emission** — the [`Loudness`] vocabulary and the [`Sound`] an action makes.
 //!   Which action makes which noise lives in the turn loop ([`crate::State::step`]);
@@ -69,6 +70,17 @@ impl Loudness {
 /// numbers above a closed door swallows a whole [`Low`](Loudness::Low) sound and
 /// heavily muffles the rest — the point of "close the door behind you".
 pub const DOOR_ATTENUATION: u32 = 4;
+
+/// The intensity a sound must **exceed** at a guard's own cell for the guard to
+/// hear it and react (§9.1 **[START]**). Strictly greater, in the same
+/// cells-of-reach unit as [`Loudness`]: at `1`, a guard hears a sound only where at
+/// least `2` intensity survives — so a [`Low`](Loudness::Low) footstep (emitted at
+/// `3`) reaches only a guard **one cell away** ("audible only very close", §9.2), a
+/// [`Medium`](Loudness::Medium) door (`6`) carries about four open cells, and a
+/// closed door's [`DOOR_ATTENUATION`] swallows a whole Low sound. A wall drops the
+/// field to `0`, always below the threshold, so a sound behind a wall is never heard
+/// — hearing inherits "flows around, not through" from the propagation for free.
+pub const HEARING_THRESHOLD: u32 = 1;
 
 /// One noise made this turn (§9.2): where it came from and how loud it started.
 ///

@@ -58,7 +58,9 @@ pub use render::{
     ascii_grid, audibility_range, render, render_screen, GlyphCell, Grid, Visibility, STATUS_ROWS,
 };
 pub use rng::Rng;
-pub use sound::{audible_field, AudibleField, Loudness, Sound, DOOR_ATTENUATION};
+pub use sound::{
+    audible_field, AudibleField, Loudness, Sound, DOOR_ATTENUATION, HEARING_THRESHOLD,
+};
 pub use state::{Affordance, Event, Input, Outcome, State};
 pub use status::{message_for, near_line, Message};
 pub use vision::{
