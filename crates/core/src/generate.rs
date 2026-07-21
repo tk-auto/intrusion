@@ -1476,14 +1476,20 @@ fn place_blocker(
 
     let mut order: Vec<u32> = (run.start..run.start + run.len).collect();
     order.sort_by_key(|&i| (i.abs_diff(aim), i));
-    // The one-usable preference (§11.4) is *not* applied to sightline cover: the
+    // The full one-usable preference (§11.4) is *not* applied to sightline cover: the
     // §10.1a rule puts tables squarely in corridors, which are door-rich by
-    // construction, so a table doubling with a nearby door is often unavoidable
-    // — and steering the blocker off the centre to dodge it only shortens the
-    // run instead of splitting it, forcing many more break passes (each a full
-    // grid re-scan). The blocker takes the best split; the arrow on the usable
-    // line keeps the rare doubled cell unambiguous. Cupboards and consoles/exit,
-    // which have plentiful sites, do honour the preference (see their passes).
+    // construction, so a table doubling with a nearby *door* is often unavoidable
+    // — and steering the blocker off centre to dodge it only shortens the run instead
+    // of splitting it. Table-beside-door is left as the design accepts it.
+    //
+    // But two tables flanking one floor cell are avoidable clutter: that cell's usable
+    // line shows the *same* `crouch` hint twice, once per arrow (§11.4). So among the
+    // centre-out candidates the blocker prefers one that makes no such table+table
+    // double, and only falls back to a doubling cell when nothing else breaks the run
+    // — the §10.1a rule still wins when it must. The arrow keeps any residual double
+    // unambiguous.
+    let mut fallback = None;
+    let mut chosen = None;
     for i in order {
         let cell = run.line.cell(i);
         if facility.terrain(cell) != Some(Terrain::Floor)
@@ -1492,11 +1498,33 @@ fn place_blocker(
         {
             continue;
         }
-        facility.set_terrain(cell.x, cell.y, Terrain::PartialCover);
-        regions.remove_cell(cell);
-        return true;
+        fallback.get_or_insert(i);
+        if !creates_table_double(facility, cell) {
+            chosen = Some(i);
+            break;
+        }
     }
-    false
+    let Some(i) = chosen.or(fallback) else {
+        return false;
+    };
+    let cell = run.line.cell(i);
+    facility.set_terrain(cell.x, cell.y, Terrain::PartialCover);
+    regions.remove_cell(cell);
+    true
+}
+
+/// Whether stamping a table at `cell` would give some floor neighbour a **second**
+/// adjacent table — the §11.4 doubled-crouch case, where one floor cell shows
+/// `→ table: crouch` *and* `↑ table: crouch`. Table-specific on purpose: a table
+/// beside a *door* is the doubling §11.4 accepts (corridors are door-rich), so this
+/// looks only at partial-cover neighbours, not the whole usable set.
+fn creates_table_double(facility: &Facility, cell: Cell) -> bool {
+    facility.neighbors(cell).any(|f| {
+        facility.terrain(f) == Some(Terrain::Floor)
+            && facility
+                .neighbors(f)
+                .any(|n| facility.terrain(n) == Some(Terrain::PartialCover))
+    })
 }
 
 /// Whether removing `cell` would split the region that owns it into disconnected
@@ -2093,6 +2121,63 @@ mod tests {
             .flat_map(|y| (0..f.width()).map(move |x| Cell::new(x, y)))
             .filter(|&c| f.terrain(c) == Some(Terrain::Hideout))
             .collect()
+    }
+
+    /// The number of floor cells flanked by two or more tables in a layout — the
+    /// §11.4 doubled-crouch clutter the cover pass tries to avoid (#75).
+    fn doubled_crouch_cells(layout: &Layout) -> u32 {
+        let f = layout.facility();
+        let mut doubles = 0;
+        for y in 0..f.height() {
+            for x in 0..f.width() {
+                let c = Cell::new(x, y);
+                if f.terrain(c) == Some(Terrain::Floor)
+                    && f.neighbors(c)
+                        .filter(|&n| f.terrain(n) == Some(Terrain::PartialCover))
+                        .count()
+                        >= 2
+                {
+                    doubles += 1;
+                }
+            }
+        }
+        doubles
+    }
+
+    /// #75: two tables flanking one floor cell put the *same* `crouch` hint on it
+    /// twice (§11.4). [`place_blocker`] steers around that, so doubled-crouch cells
+    /// are vanishingly rare — the residual is forced runs where every legal split
+    /// cell already borders a table (measured at ~30 per 1000 full seeds). This pins
+    /// the preference is working, not that it is a hard guarantee (§11.4 keeps it a
+    /// preference — the arrow disambiguates any survivor).
+    #[test]
+    fn cover_rarely_doubles_the_crouch_hint() {
+        let seeds = seed_sweep(1000);
+        let doubles: u32 = seeds
+            .iter()
+            .map(|&seed| doubled_crouch_cells(&generate(40, 40, &mut Rng::new(seed)).unwrap()))
+            .sum();
+        // ~3% of full seeds carry one forced double; budget 6% of the sampled sweep,
+        // floored so a thin fast-mode sample never flakes.
+        let budget = (seeds.len() as u32 * 6 / 100).max(3);
+        assert!(
+            doubles <= budget,
+            "{doubles} doubled-crouch cells over {} seeds (budget {budget}) — the §11.4 table preference has degraded",
+            seeds.len()
+        );
+    }
+
+    /// [`creates_table_double`] fires only when a candidate table would share a floor
+    /// neighbour with an existing one — the exact table+table adjacency #75 avoids,
+    /// and nothing else (a lone table, or one across the room, is fine).
+    #[test]
+    fn a_table_double_needs_a_shared_floor_neighbour() {
+        let mut f = Facility::walled_box(8, 8);
+        f.set_terrain(3, 3, Terrain::PartialCover);
+        // (3,5)'s north neighbour (3,4) is floor and already borders the (3,3) table.
+        assert!(creates_table_double(&f, Cell::new(3, 5)));
+        // A candidate sharing no floor neighbour with any table does not double.
+        assert!(!creates_table_double(&f, Cell::new(6, 6)));
     }
 
     /// The hiding game needs a *board* (§10.1a): the v1 config gets a healthy spread
