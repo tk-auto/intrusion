@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+mod ability;
 mod category;
 mod cell;
 mod door;
@@ -43,6 +44,7 @@ mod status;
 mod test_support;
 mod vision;
 
+pub use ability::{sample_panel, AbilityState, AbilityStatus};
 pub use category::Category;
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;

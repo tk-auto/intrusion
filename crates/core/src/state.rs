@@ -524,6 +524,17 @@ impl State {
         self.outcome
     }
 
+    /// Whether the player is **waiting** — their last spent turn was a `Wait`
+    /// (§8.3), the same signal that buys the 360° look-around and the widened
+    /// guard-sense. It stays set while the player holds still (another wait, or a
+    /// free mis-input) and clears on the next spent move, so it reads as "the
+    /// player is standing and taking stock right now". The show-on-wait ability
+    /// panel (§11.4) is drawn exactly while this holds — peeking rides on the turn
+    /// the wait already spent (§2.3).
+    pub fn waiting(&self) -> bool {
+        self.waited
+    }
+
     /// The events of the player's most recent action — the near line's source
     /// (§11.7). Empty before the first input; frozen once the run ends.
     pub fn last_events(&self) -> &[Event] {
