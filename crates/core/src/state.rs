@@ -791,10 +791,14 @@ impl State {
         }
     }
 
-    /// Phase 3 (§4.2): the guards *hear*, then *act*, then *sound*. First every guard
-    /// reacts to this turn's noise ([`Guard::hear`], §9.1) — a loud enough sound turns
-    /// it to Investigating toward the source. Then each guard `decide`s a step from
-    /// the sight phase 2 just recomputed (§7.5); a guard moving into the player's cell
+    /// Phase 3 (§4.2): the guards *sense*, then *act*, then *sound*. First every guard
+    /// takes in this turn's information ([`Guard::sense`], §7.6/§9.1) — it hears the
+    /// noise and sees the player from the cone phase 2 just recomputed: a loud enough
+    /// sound turns it to Investigating toward the source, and a player in its cone
+    /// flips it to Chasing (certain zone) or Investigating (glimpse zone), sight
+    /// overriding sound. A player [`concealed_from`](Self::concealed_from) that guard
+    /// is neither seen nor, being silent, heard — the cupboard's payoff (§10.3/§7.6).
+    /// Then each guard `decide`s a step (§7.5); a guard moving into the player's cell
     /// is a capture and ends the run (§4.5). Otherwise it moves onto any cell that
     /// admits it and holds no other actor; a guard with nowhere to go, or whose step
     /// is blocked, simply holds.
@@ -802,12 +806,20 @@ impl State {
     /// Once every guard has resolved its move, each one emits its §9.2 patrol noise
     /// from where it now stands ([`emit_guard_noise`](Self::emit_guard_noise)) — the
     /// "guards make noise too" row that gives the player a second information channel
-    /// working around corners. Hearing runs on `self.sounds` *before* that emission,
+    /// working around corners. Sensing runs on `self.sounds` *before* that emission,
     /// so a guard reacts to the player's noise, never to another guard's footsteps.
     fn guard_phase(&mut self, events: &mut Vec<Event>) {
         let facility = self.layout.facility();
-        for guard in &mut self.guards {
-            guard.hear(facility, &self.sounds);
+        // Whether the player is concealed from each guard is a query over the whole
+        // state (§10.3), so resolve it up front — one immutable read per guard —
+        // before the loop takes each guard mutably to fold the senses in.
+        let concealed: Vec<bool> = self
+            .guards
+            .iter()
+            .map(|guard| self.concealed_from(guard.pos()))
+            .collect();
+        for (guard, &concealed) in self.guards.iter_mut().zip(&concealed) {
+            guard.sense(facility, self.player, concealed, &self.sounds);
         }
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
@@ -1578,7 +1590,9 @@ mod tests {
     fn a_moved_guards_cone_is_current_when_the_turn_ends() {
         let mut s = State::new(
             open_room(12, 12),
-            Cell::new(1, 1),
+            // Parked in the north-east, well behind the westbound guard's cone, so
+            // detection (§7.6) never derails the patrol whose cone this test measures.
+            Cell::new(10, 1),
             Direction::South,
             vec![Guard::patrolling_to(Cell::new(8, 8), Cell::new(1, 8))],
             Vec::new(),
@@ -2087,14 +2101,20 @@ mod tests {
         assert_eq!(run(), run());
     }
 
-    /// §9.1 wired through the real turn loop: a player's footstep beside a guard is
-    /// heard, flipping it to Investigating. A stationary fixture makes the reaction
-    /// observable in isolation — it turns without stepping onto the player (a capture)
-    /// the same turn.
+    /// §9.1 wired through the real turn loop, now that sight rides alongside it
+    /// (§7.6): a footstep is *heard* and turns a guard to Investigating even where the
+    /// guard cannot *see* its source. A player scrambling into a cupboard beside a
+    /// guard emits a Low footstep the guard one cell away hears (3 − 1 = 2 > the
+    /// threshold), yet concealed in the hideout (§10.3) the player is not detected by
+    /// sight — so the reaction is hearing's alone, not a Chase. (A footstep only ever
+    /// carries one cell, and that cell is always in the touching ring; concealment is
+    /// what keeps the two senses separable at such close range.)
     #[test]
-    fn a_guard_hears_the_players_footstep_and_investigates() {
+    fn a_guard_hears_a_scramble_into_cover_it_cannot_see() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 4), Terrain::Hideout);
         let mut s = State::new(
-            open_room(10, 10),
+            layout,
             Cell::new(4, 4),
             Direction::North,
             vec![Guard::stationary(Cell::new(6, 4))],
@@ -2103,30 +2123,78 @@ mod tests {
         );
         assert_eq!(s.guards()[0].state(), GuardState::Calm);
 
-        // Step East to (5,4): a Low footstep there. The guard at (6,4) is one cell
-        // away → intensity 3 − 1 = 2 > threshold, so it hears and turns to the source.
+        // Step East into the cupboard at (5,4): a Low footstep the guard one cell east
+        // hears while the hideout conceals the player from its sight.
         s.step(Input::Step(Direction::East));
-        assert_eq!(s.player(), Cell::new(5, 4));
-        assert_eq!(s.guards()[0].state(), GuardState::Investigating);
+        assert!(s.hidden(), "the player scrambled into the cupboard");
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Investigating,
+            "heard the scramble but never saw the hidden player",
+        );
     }
 
     /// A silent turn alerts no one (§9.2's "None" row): waiting emits nothing, so a
-    /// guard right beside the player hears nothing and stays Calm.
+    /// guard that has no line to the player — it stands two cells behind the guard's
+    /// back, past the touching ring and out of its cone — neither hears nor sees them
+    /// and stays Calm. (Beside the guard, sight would give the player away regardless
+    /// of silence, §7.6 — so silence buys safety only out of view.)
     #[test]
     fn a_silent_turn_alerts_no_one() {
         let mut s = State::new(
             open_room(10, 10),
-            Cell::new(4, 4),
+            Cell::new(5, 2), // two north of the south-facing guard: directly behind it
             Direction::North,
             vec![Guard::stationary(Cell::new(5, 4))],
             Vec::new(),
             Cell::new(8, 8),
+        );
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Calm,
+            "unseen at the start"
         );
         s.step(Input::Wait);
         assert_eq!(
             s.guards()[0].state(),
             GuardState::Calm,
             "a waiting player makes no noise to hear",
+        );
+    }
+
+    /// §7.6 wired end to end: the two detection zones flip a guard between Chasing and
+    /// Investigating as the player's distance crosses the certain→glimpse boundary. A
+    /// stationary fixture isolates the state machine from patrol movement, and the
+    /// footsteps are too far to be heard, so the reaction is sight's alone.
+    #[test]
+    fn detection_flips_between_chasing_and_investigating_by_zone() {
+        // Guard looking straight down a long cone from (6,2); the player starts four
+        // cells in — the certain zone — so the startup turn already has it Chasing.
+        let mut s = State::new(
+            open_room(13, 15),
+            Cell::new(6, 6),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(6, 2))],
+            Vec::new(),
+            Cell::new(11, 12),
+        );
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Chasing,
+            "seen in the certain zone → Chasing",
+        );
+
+        // One step down the cone is still within the certain zone (5): still Chasing.
+        s.step(Input::Step(Direction::South)); // (6,7): 5 cells
+        assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+
+        // A second step crosses into the glimpse zone (6): drops to Investigating —
+        // Run's five-cell gain is exactly this certain→glimpse distance (§7.6).
+        s.step(Input::Step(Direction::South)); // (6,8): 6 cells
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Investigating,
+            "backed out to the glimpse zone → Investigating",
         );
     }
 
