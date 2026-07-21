@@ -99,12 +99,19 @@ const PARTITION_MIN_LEN: u32 = 2;
 const PILLAR_MIN_SIDE: u32 = 2;
 const PILLAR_MAX_SIDE: u32 = 4;
 
-/// Hideouts sit at least this far apart (Manhattan) **[START]**, so the board is
-/// spread *along* a flight path rather than clumped into a bank of cupboards
-/// (§10.1a). Big enough that the facility still reads as a building rather than a
-/// honeycomb; small enough that a fleeing player is rarely more than a few steps from
-/// cover. Density is the open tuning knob here (§10.1a, §15.2) — a single named value.
-const HIDEOUT_MIN_SPACING: u32 = 7;
+/// Hideouts sit at least this far apart (Manhattan), so the board is spread *along*
+/// a flight path rather than clumped into a bank of cupboards (§10.1a). Big enough
+/// that the facility still reads as a building rather than a honeycomb; small enough
+/// that a fleeing player is rarely more than a few steps from cover. Density is the
+/// open tuning knob here (§10.1a, §15.2).
+///
+/// The spacing is now **region-aware** (§10.1.6, #91): the flight path is the
+/// corridor, so corridors host cupboards **denser** than rooms — the cupboard you
+/// vanish into on the run belongs where you run (§7.6). Both are **[START]**.
+const HIDEOUT_MIN_SPACING_CORRIDOR: u32 = 5;
+/// A room's cupboards are spaced wider than a corridor's — a room is where you crouch
+/// behind furniture, not where you dive into a wall to vanish (§10.3). **[START]**
+const HIDEOUT_MIN_SPACING_ROOM: u32 = 10;
 
 /// Roughly one interior wall run in this many is thickened to two cells before the
 /// cover and hideout passes (§10.1.5, the [`thicken_walls`] pass) **[START]**. A
@@ -126,6 +133,45 @@ const WALL_THICKEN_MIN_RUN: u32 = 3;
 /// named knob for the §15.2 how-much-cover experiments — longer than this and
 /// there is no geometry between the player and being seen.
 pub const SIGHTLINE_MAX_RUN: u32 = 11;
+
+/// The §10.1a run limit **inside rooms** — tighter than the corridor floor
+/// [`SIGHTLINE_MAX_RUN`], so a room breaks its straights sooner and carries
+/// **proportionally more tables** (§10.1.6, #91): the room is where you duck behind
+/// furniture and crouch (§10.3). This is a *preference layered on top of* the hard
+/// §10.1a floor — it only ever adds cover, never removes it, so the uniform
+/// guarantee still holds. **[START]** (must stay ≤ [`SIGHTLINE_MAX_RUN`], and above a
+/// room's 6-cell minimum lane so a small room is not needlessly furnished).
+pub const SIGHTLINE_MAX_RUN_ROOM: u32 = 7;
+
+/// The placement-density knobs, region-aware (#91). Kept as a value so the bias can
+/// be A/B'd against the old uniform numbers (a room and a corridor treated alike) —
+/// [`Tuning::UNIFORM`] reproduces pre-#91 behaviour, [`Tuning::BIASED`] is what ships.
+#[derive(Clone, Copy)]
+struct Tuning {
+    /// Minimum Manhattan spacing between cupboards opening onto a corridor.
+    hideout_spacing_corridor: u32,
+    /// Minimum Manhattan spacing between cupboards opening onto a room.
+    hideout_spacing_room: u32,
+    /// The §10.1a run limit applied to room-dominated straights.
+    room_sightline_max_run: u32,
+}
+
+impl Tuning {
+    /// The shipped bias: denser cupboards along corridors, more tables in rooms.
+    const BIASED: Tuning = Tuning {
+        hideout_spacing_corridor: HIDEOUT_MIN_SPACING_CORRIDOR,
+        hideout_spacing_room: HIDEOUT_MIN_SPACING_ROOM,
+        room_sightline_max_run: SIGHTLINE_MAX_RUN_ROOM,
+    };
+    /// The pre-#91 numbers: rooms and corridors treated identically. Retained so the
+    /// bias test can measure the shift against it, not a brittle absolute count.
+    #[cfg(test)]
+    const UNIFORM: Tuning = Tuning {
+        hideout_spacing_corridor: 7,
+        hideout_spacing_room: 7,
+        room_sightline_max_run: SIGHTLINE_MAX_RUN,
+    };
+}
 
 /// The most tables one cover placement clusters into a **bench** (§10.1a) **[START]**.
 /// The §10.1a repair used to stamp a single lone `π` per over-long run, scattering
@@ -222,7 +268,7 @@ impl Layout {
 /// Returns [`GenError::TooSmall`] immediately for a footprint that cannot be
 /// partitioned at all — no amount of redrawing fixes geometry.
 pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenError> {
-    generate_where(width, height, rng, passes_guarantees)
+    generate_where(width, height, rng, passes_guarantees, &Tuning::BIASED)
 }
 
 /// Generate a *placed* level: a carve passing every §10.6 guarantee **and** a
@@ -241,7 +287,7 @@ pub fn generate_level(
     rng: &mut Rng,
 ) -> Result<(Layout, Placement), GenError> {
     for _ in 0..MAX_GEN_ATTEMPTS {
-        let layout = generate_once(config.width, config.height, rng)?;
+        let layout = generate_once(config.width, config.height, rng, &Tuning::BIASED)?;
         if !passes_guarantees(&layout) {
             continue;
         }
@@ -262,9 +308,10 @@ fn generate_where(
     height: u32,
     rng: &mut Rng,
     valid: impl Fn(&Layout) -> bool,
+    tuning: &Tuning,
 ) -> Result<Layout, GenError> {
     for _ in 0..MAX_GEN_ATTEMPTS {
-        let layout = generate_once(width, height, rng)?;
+        let layout = generate_once(width, height, rng, tuning)?;
         if valid(&layout) {
             return Ok(layout);
         }
@@ -278,7 +325,12 @@ fn generate_where(
 ///
 /// All randomness is drawn from `rng` (§12.4). Only [`generate_where`] calls this;
 /// everything downstream receives layouts that have passed the §10.6 gate.
-fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenError> {
+fn generate_once(
+    width: u32,
+    height: u32,
+    rng: &mut Rng,
+    tuning: &Tuning,
+) -> Result<Layout, GenError> {
     // Step 1: one region covering the interior `(W-2) x (H-2)`. Below the minimum,
     // no corridor fits or a room could not reach 6×6 — reject rather than partition
     // into something unplaceable (§10.2).
@@ -359,13 +411,13 @@ fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenEr
     // a run lengthened by one open recess could slip past uncovered. (Ordering is now
     // free to put it here — `recess_site` demands three *wall* neighbours, so a table
     // can never back a cupboard whether it is stamped before or after.)
-    place_hideouts(&mut facility, &mut regions, rng);
+    place_hideouts(&mut facility, &mut regions, rng, tuning);
 
     // §10.1a: break every straight sightline longer than SIGHTLINE_MAX_RUN with
     // stamped partial cover (tables) — last of the sight-affecting passes, so it
     // measures and repairs the final grid, thick walls and open recesses included,
     // and `passes_guarantees` re-asserts the result.
-    break_sightlines(&mut facility, &mut regions, rng);
+    break_sightlines(&mut facility, &mut regions, rng, tuning);
 
     debug_assert!(corridors > 0, "guarded footprint yielded no corridor");
     Ok(Layout { facility, regions })
@@ -732,7 +784,7 @@ struct Candidate {
 }
 
 /// One scan line: a fixed row (varying `x`) or column (varying `y`).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Line {
     Row(u32),
     Col(u32),
@@ -1207,7 +1259,12 @@ fn is_door_terrain(terrain: Terrain) -> bool {
 /// never be walked or seen *through* to the far side; the spacing then keeps a
 /// cupboard's own solid backing intact — the corridor-facing and room-facing cells of
 /// one thickened stretch sit one apart, so taking one bars the other.
-fn place_hideouts(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
+fn place_hideouts(
+    facility: &mut Facility,
+    regions: &mut RegionGraph,
+    rng: &mut Rng,
+    tuning: &Tuning,
+) {
     // Candidate recess sites — wall cells with one floor mouth — split so the flight
     // paths are served first: a cupboard opening onto a corridor outranks one onto a
     // room. Each carries the mouth it opens through, which names its bucket and,
@@ -1233,14 +1290,18 @@ fn place_hideouts(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut 
     shuffle(&mut corridor, rng);
     shuffle(&mut room, rng);
 
+    // Each candidate's required spacing follows the region it opens onto — corridors
+    // pack denser than rooms (#91), the flight path where cover is needed most.
+    let corridor = corridor
+        .into_iter()
+        .map(|cm| (cm, tuning.hideout_spacing_corridor));
+    let room = room.into_iter().map(|cm| (cm, tuning.hideout_spacing_room));
+
     let mut placed: Vec<Cell> = Vec::new();
-    for (cell, mouth) in corridor.into_iter().chain(room) {
+    for ((cell, mouth), spacing) in corridor.chain(room) {
         // Spacing keeps cupboards spread along a path — and, since the two faces of a
         // thickened wall are one cell apart, keeps every cupboard's backing solid.
-        if placed
-            .iter()
-            .any(|&p| p.manhattan_distance(cell) < HIDEOUT_MIN_SPACING)
-        {
+        if placed.iter().any(|&p| p.manhattan_distance(cell) < spacing) {
             continue;
         }
         // Prefer not to crowd the mouth's usable line (§11.4): a cupboard whose mouth
@@ -1383,21 +1444,63 @@ pub(crate) fn shuffle<T>(items: &mut [T], rng: &mut Rng) {
 /// The pass is a *repair*, not a proof: [`passes_guarantees`] re-measures the
 /// finished grid, so a run this pass could not break (every candidate disqualified)
 /// rejects the carve and redraws, exactly like a reachability failure (§10.6).
-fn break_sightlines(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
-    // Take the first still-over-long run in scan order and split it. Every placed
-    // table turns floor into cover, so the loop strictly shrinks the floor and
-    // always terminates.
-    loop {
-        let Some(run) = sight_runs(facility)
-            .into_iter()
-            .find(|r| r.len > SIGHTLINE_MAX_RUN)
-        else {
-            return;
-        };
-        if !place_bench(facility, regions, &run, rng) {
+fn break_sightlines(
+    facility: &mut Facility,
+    regions: &mut RegionGraph,
+    rng: &mut Rng,
+    tuning: &Tuning,
+) {
+    // Phase 1 — the hard §10.1a floor (§10.6): every straight run over
+    // SIGHTLINE_MAX_RUN must break, or this carve is genuinely cornered and is
+    // rejected. Each placed table turns floor into cover, so the loop strictly
+    // shrinks the floor and always terminates. This is exactly the pre-#91 pass, so
+    // the guarantee — and its rng draws — are unchanged.
+    while let Some(run) = sight_runs(facility)
+        .into_iter()
+        .find(|r| r.len > SIGHTLINE_MAX_RUN)
+    {
+        if !place_bench(facility, regions, &run, rng, false) {
             return; // unbreakable — the §10.6 gate rejects this carve
         }
     }
+
+    // Phase 2 — the room preference (#91): break room-dominated runs down to the
+    // tighter room limit, so rooms carry proportionally more tables (§10.3). This
+    // only ever *adds* cover on top of the satisfied floor, so it is best-effort — a
+    // room run no bench can furnish is simply left (it still meets the hard floor)
+    // and never rejects the carve. Retiring such a run keeps the loop terminating.
+    if tuning.room_sightline_max_run >= SIGHTLINE_MAX_RUN {
+        return;
+    }
+    let mut retired: Vec<(Line, u32, u32)> = Vec::new();
+    while let Some(run) = sight_runs(facility).into_iter().find(|r| {
+        r.len > tuning.room_sightline_max_run
+            && r.len <= SIGHTLINE_MAX_RUN
+            && run_is_room_dominant(regions, r)
+            && !retired.contains(&(r.line, r.start, r.len))
+    }) {
+        if !place_bench(facility, regions, &run, rng, true) {
+            retired.push((run.line, run.start, run.len));
+        }
+    }
+}
+
+/// Whether `run` lies mostly inside rooms — the §10.1.6/#91 test deciding whether
+/// the tighter room run-limit applies. A run bounded by walls can still straddle a
+/// doorway into a corridor; the majority of its cells names it.
+fn run_is_room_dominant(regions: &RegionGraph, run: &SightRun) -> bool {
+    let (mut room, mut corridor) = (0u32, 0u32);
+    for i in run.start..run.start + run.len {
+        match regions
+            .region_at(run.line.cell(i))
+            .map(|id| regions.kind(id))
+        {
+            Some(RegionKind::Room) => room += 1,
+            Some(RegionKind::Corridor) => corridor += 1,
+            None => {}
+        }
+    }
+    room > corridor
 }
 
 /// A maximal straight run of counterplay-free cells along one scan line — the
@@ -1485,6 +1588,7 @@ fn place_bench(
     regions: &mut RegionGraph,
     run: &SightRun,
     rng: &mut Rng,
+    strict: bool,
 ) -> bool {
     // Aim at the middle, jittered by up to a sixth of the run either way.
     let jitter = (run.len / 6).max(1) as i32;
@@ -1505,6 +1609,11 @@ fn place_bench(
     // double, falling back to a doubling cell only when nothing else breaks the run.
     // (A bench itself is a straight row, so its own cells never flank a floor cell on
     // two sides — the double the preference guards against is a *neighbouring* bench.)
+    // `strict` (the #91 room-preference pass) never falls back to a doubling seed:
+    // that cover is optional (the run already meets the hard §10.1a floor), so a run
+    // it could only break by doubling a crouch hint (§11.4, #75) is left alone
+    // instead. The mandatory floor pass keeps the fallback — there, breaking the run
+    // is not negotiable.
     let mut fallback = None;
     let mut seed = None;
     for i in order {
@@ -1518,7 +1627,8 @@ fn place_bench(
             break;
         }
     }
-    let Some(i) = seed.or(fallback) else {
+    let chosen = if strict { seed } else { seed.or(fallback) };
+    let Some(i) = chosen else {
         return false;
     };
     let cell = run.line.cell(i);
@@ -1767,6 +1877,95 @@ mod tests {
             .count()
     }
 
+    /// The placement densities over a seed sweep under `tuning`, as
+    /// `(corridor_hideout, room_hideout, corridor_table, room_table)` — cupboards
+    /// or tables per walkable cell of that region kind. The metric behind the #91
+    /// bias, measured against [`Tuning::UNIFORM`] rather than a brittle absolute.
+    fn placement_shares(seeds: &[u64], tuning: &Tuning) -> (f64, f64, f64, f64) {
+        let (mut cc, mut rc) = (0u32, 0u32); // corridor / room walkable cells
+        let (mut ch, mut rh) = (0u32, 0u32); // corridor / room hideouts
+        let (mut ct, mut rt) = (0u32, 0u32); // corridor / room tables
+        for &seed in seeds {
+            let layout =
+                generate_where(40, 40, &mut Rng::new(seed), passes_guarantees, tuning).unwrap();
+            let (f, g) = (layout.facility(), layout.regions());
+            for (_, region) in g.regions() {
+                let hideouts = region
+                    .cells()
+                    .iter()
+                    .filter(|&&c| f.terrain(c) == Some(Terrain::Hideout))
+                    .count() as u32;
+                if region.kind() == RegionKind::Room {
+                    rc += region.cells().len() as u32;
+                    rh += hideouts;
+                } else {
+                    cc += region.cells().len() as u32;
+                    ch += hideouts;
+                }
+            }
+            for y in 0..f.height() {
+                for x in 0..f.width() {
+                    let c = Cell::new(x, y);
+                    if f.terrain(c) != Some(Terrain::PartialCover) {
+                        continue;
+                    }
+                    // A table is region-less (solid cover); name it by an adjacent
+                    // floor cell's region.
+                    match f
+                        .neighbors(c)
+                        .find_map(|n| g.region_at(n).map(|id| g.kind(id)))
+                    {
+                        Some(RegionKind::Room) => rt += 1,
+                        Some(RegionKind::Corridor) => ct += 1,
+                        None => {}
+                    }
+                }
+            }
+        }
+        (
+            ch as f64 / cc.max(1) as f64,
+            rh as f64 / rc.max(1) as f64,
+            ct as f64 / cc.max(1) as f64,
+            rt as f64 / rc.max(1) as f64,
+        )
+    }
+
+    /// #91: placement is biased by region — corridors carry a higher hideout share
+    /// and rooms a higher table share than the pre-#91 uniform numbers. Asserts the
+    /// *direction* of the shift against [`Tuning::UNIFORM`] over a seed sweep (not a
+    /// brittle exact count), and that corridor cover is not starved below the §10.1a
+    /// floor in the process.
+    #[test]
+    fn placement_is_biased_by_region() {
+        let seeds = seed_sweep(48);
+        let (u_ch, _u_rh, u_ct, u_rt) = placement_shares(&seeds, &Tuning::UNIFORM);
+        let (b_ch, b_rh, b_ct, b_rt) = placement_shares(&seeds, &Tuning::BIASED);
+
+        // Hideouts lean harder into corridors than before, and than rooms now do.
+        assert!(
+            b_ch > u_ch,
+            "corridor hideout share should rise vs uniform: {b_ch:.4} vs {u_ch:.4}"
+        );
+        assert!(
+            b_ch > b_rh,
+            "hideouts should favour corridors over rooms: {b_ch:.4} vs {b_rh:.4}"
+        );
+        // Rooms carry markedly more tables than before, overtaking corridors.
+        assert!(
+            b_rt > u_rt,
+            "room table share should rise vs uniform: {b_rt:.4} vs {u_rt:.4}"
+        );
+        assert!(
+            b_rt > b_ct,
+            "tables should favour rooms over corridors: {b_rt:.4} vs {b_ct:.4}"
+        );
+        // But corridors keep their §10.1a cover — the room bias must not starve them.
+        assert!(
+            b_ct > u_ct * 0.8,
+            "corridor cover must not collapse: {b_ct:.4} vs uniform {u_ct:.4}"
+        );
+    }
+
     #[test]
     fn partitions_the_v1_config() {
         let mut rng = Rng::new(7);
@@ -1883,7 +2082,7 @@ mod tests {
         // so the §10.6 gate in `generate` must not get the chance to mask a break
         // by silently rejecting and redrawing.
         for seed in seed_sweep(200) {
-            let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
+            let layout = generate_once(40, 40, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
             assert_corridors_connected(&layout, seed);
         }
     }
@@ -1893,7 +2092,7 @@ mod tests {
     fn connectivity_holds_across_sizes() {
         for &(w, h) in &[(18, 18), (24, 40), (40, 24), (33, 51), (60, 60)] {
             for seed in seed_sweep(40) {
-                let layout = generate_once(w, h, &mut Rng::new(seed)).unwrap();
+                let layout = generate_once(w, h, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
                 assert_corridors_connected(&layout, seed);
             }
         }
@@ -2443,9 +2642,10 @@ mod tests {
         );
     }
 
-    /// Cupboards are spread, not banked: no two hideouts sit within the spacing
-    /// (§10.1a **[START]**), so a 2-wide corridor never has both walls blocked at one
-    /// cross-section.
+    /// Cupboards are spread, not banked: no two hideouts sit closer than the tightest
+    /// (corridor) spacing (§10.1a **[START]**), so a 2-wide corridor never has both
+    /// walls blocked at one cross-section. Room cupboards keep an even wider gap (#91),
+    /// but the corridor spacing is the global floor and the safety guarantee.
     #[test]
     fn hideouts_keep_their_spacing() {
         for seed in seed_sweep(200) {
@@ -2453,7 +2653,7 @@ mod tests {
             for (i, &a) in cells.iter().enumerate() {
                 for &b in &cells[i + 1..] {
                     assert!(
-                        a.manhattan_distance(b) >= HIDEOUT_MIN_SPACING,
+                        a.manhattan_distance(b) >= HIDEOUT_MIN_SPACING_CORRIDOR,
                         "seed {seed}: hideouts {a:?} and {b:?} are too close"
                     );
                 }
@@ -2471,7 +2671,7 @@ mod tests {
         // property, so going through the entry point would mask a regression in
         // `severs_pathing` as silent rejections instead of a red test.
         for seed in seed_sweep(200) {
-            let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
+            let layout = generate_once(40, 40, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
             let f = layout.facility();
             let pathable: HashSet<Cell> = (0..f.height())
                 .flat_map(|y| (0..f.width()).map(move |x| Cell::new(x, y)))
@@ -2546,7 +2746,7 @@ mod tests {
         // the pass releases each stamped cell, and only owned cells release.
         let mut regions = RegionGraph::new(30, 8);
         regions.add_region(RegionKind::Corridor, Rect::new(1, 1, 28, 6).cells());
-        break_sightlines(&mut f, &mut regions, &mut Rng::new(7));
+        break_sightlines(&mut f, &mut regions, &mut Rng::new(7), &Tuning::BIASED);
 
         assert!(sightlines_bounded(&f), "the gallery must be repaired");
         let mut tables = 0;
@@ -2583,7 +2783,7 @@ mod tests {
         let unrepaired = seeds
             .iter()
             .filter(|&&seed| {
-                let layout = generate_once(40, 40, &mut Rng::new(seed)).unwrap();
+                let layout = generate_once(40, 40, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
                 !sightlines_bounded(layout.facility())
             })
             .count();
@@ -2682,7 +2882,7 @@ mod tests {
     /// "fail loudly or retry the seed" — this is both, in order).
     #[test]
     fn an_unsatisfiable_config_fails_loudly() {
-        let err = generate_where(40, 40, &mut Rng::new(0), |_| false).unwrap_err();
+        let err = generate_where(40, 40, &mut Rng::new(0), |_| false, &Tuning::BIASED).unwrap_err();
         assert_eq!(
             err,
             GenError::RetriesExhausted {
