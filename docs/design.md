@@ -731,7 +731,7 @@ between them is the whole design:
 
 | State | When | What the player sees |
 |---|---|---|
-| **Sensed** | In sense range, **not** in the player's field of view | A dim marker at the guard's **exact cell**. No facing, no cone, no danger overlay. You know *where*, not *which way it looks*. |
+| **Sensed** | In sense range, **not** in the player's field of view | An orange **background** highlight on the guard's **exact cell** (no glyph of its own). No facing, no cone, no danger overlay. You know *where*, not *which way it looks*. |
 | **Seen** | In the player's field of view (§6), line of sight clear | The full guard: glyph in its state colour (§11.2/§11.3), **facing, vision cone, and the danger overlay** (§11.5). |
 
 **Knowing where a guard is is not knowing whether it can see you.** The cone — the
@@ -1136,7 +1136,7 @@ one-table edit.
 | **Caution** | Yellow | A threat that is unaware |
 | **Warning** | Orange | A threat that is hunting |
 | **Danger** | Red | A threat that has you |
-| **Sensed** | Cyan | A guard **sensed through a wall** (§9) — position only, mind and facing unknown |
+| **Sensed** | Orange (background) | A guard **sensed through a wall** (§9) — an eye-catching cell highlight, position only, mind and facing unknown |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
 
@@ -1144,12 +1144,14 @@ one-table edit.
 so the player reads the AI state machine directly off the colour of `g`: yellow →
 orange → red *is* the guard's mind, visible. Message colour uses the same table,
 so a red near line (§11.4) and a red `g` reinforce. **A guard the player only
-*senses* (§9.2) has no readable mind** — it renders in the flat **Sensed** colour,
-a bare dot that says *a guard is here* and nothing about what it is doing. The
-colour bloom from cyan-dot to state-coloured `g`-with-cone *is* the seen/sensed
-distinction, made visible. Keep all of this. *(Cyan was the old §9.3 "Noise"
-slot — a heard sound's source; sound is gone, and the slot now carries the sensed
-guard, the thing that channel was really for.)*
+*senses* (§9.2) has no readable mind** — its cell renders with the flat **Sensed**
+**background** highlight (orange), a filled marker that says *a guard is here* and
+nothing about what it is doing — the eye-catching parallel of the red danger
+overlay, orange not red. The bloom from an orange cell to a state-coloured
+`g`-with-cone *is* the seen/sensed distinction, made visible. Keep all of this.
+*(Sensed reuses Warning's orange hue but only ever as a background, never a glyph,
+so the two never collide; the old §9.3 cyan "Noise" slot — a heard sound's source
+— is freed, since sound is gone.)*
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant.
@@ -1167,7 +1169,7 @@ foreground and as a darkened background variant.
 | `@` | Player | Owned |
 | `@` | Decoy | Owned |
 | `g` | Guard, **seen** | Caution / Warning / Danger, by state — plus facing + cone (§9.2) |
-| `g` | Guard, **sensed** (through a wall, §9.2) | **Sensed** — a dim cyan dot at its exact cell, no cone; blooms to the state-coloured guard once seen |
+| *(none)* | Guard, **sensed** (through a wall, §9.2) | **Sensed** — an orange **background** highlight on its exact cell (no glyph of its own), no cone; blooms to the state-coloured `g` once seen |
 | `z` | Body | Caution |
 | `#` | Wall | Neutral |
 | `·` | Floor | Ground — recessive by design; blank until the §11.5 floor dots gave it a glyph |
@@ -1256,12 +1258,12 @@ visibility is drawn.
 | Outside player's FOV | Same glyph, dark gray — dim but legible. Two exceptions: Ground dims further (the dots whisper), and the exit keeps a dark Interest tint — it anchors every escape plan (§7.6) and must not sink into wall gray |
 | Watched by a guard, in player's FOV | **Red background** — the danger overlay |
 | Watched by a guard, outside player's FOV | Dark gray on dark gray — *unreadable* |
-| A guard **sensed but not seen** (§9.2), any FOV | Its cell shows the **Sensed** cyan dot regardless of line of sight; **no cone, no danger overlay** — position is known, attention is not |
+| A guard **sensed but not seen** (§9.2), any FOV | Its cell gets the orange **Sensed** background highlight regardless of line of sight; **no cone, no danger overlay** — position is known, attention is not. Where a *seen* guard's cone also watches the cell, the red danger overlay wins (being seen outranks) |
 
-Note the sensed dot and the danger overlay never coincide: a guard you can only
-sense projects no overlay (you cannot see its cone), and the instant you *can* see
-it the dot blooms into the full state-coloured guard and its cone paints the
-overlay. The overlay stays exactly what §11.5 promises — *the detection set you
+Note the sensed highlight and a guard's *own* danger overlay never coincide: a guard
+you can only sense projects no overlay (you cannot see its cone), and the instant you
+*can* see it the orange highlight blooms into the full state-coloured guard and its
+cone paints the overlay. The overlay stays exactly what §11.5 promises — *the detection set you
 can see* — never a guess.
 
 **The danger overlay is the best idea in the old game.** It paints the *literal*
