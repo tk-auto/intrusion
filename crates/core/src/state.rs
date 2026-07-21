@@ -27,9 +27,12 @@
 //! old one-turn sensory lag (§4.2). **Guards patrol** (§7.5): phase 3 runs each
 //! guard's `decide` step, which reads the sight this loop just recomputed and, for a
 //! Calm guard, sweeps its territory toward the farthest cell it has not yet looked at.
-//! The reactive half of the §7.4 state machine — detection, chasing, searching — is
-//! the later guard tickets, which set a guard's destination the same way patrol does
-//! and reuse the same walk-toward-it movement.
+//! The first reactive transition is wired too — **hearing** (§9.1): a guard that hears
+//! this turn's noise above the threshold turns to Investigating and walks to its
+//! source, then stands back down to patrol once the lead runs out. The rest of the
+//! §7.4 state machine — sight detection, chasing, searching — is the later guard
+//! tickets, which set a guard's destination the same way and reuse the same
+//! walk-toward-it movement.
 
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
@@ -788,17 +791,24 @@ impl State {
         }
     }
 
-    /// Phase 3 (§4.2): each guard acts, then each guard *sounds*. Every guard
-    /// `decide`s a step from the sight phase 2 just recomputed (§7.5); a guard moving
-    /// into the player's cell is a capture and ends the run (§4.5). Otherwise it moves
-    /// onto any cell that admits it and holds no other actor; a guard with nowhere to
-    /// go, or whose step is blocked, simply holds.
+    /// Phase 3 (§4.2): the guards *hear*, then *act*, then *sound*. First every guard
+    /// reacts to this turn's noise ([`Guard::hear`], §9.1) — a loud enough sound turns
+    /// it to Investigating toward the source. Then each guard `decide`s a step from
+    /// the sight phase 2 just recomputed (§7.5); a guard moving into the player's cell
+    /// is a capture and ends the run (§4.5). Otherwise it moves onto any cell that
+    /// admits it and holds no other actor; a guard with nowhere to go, or whose step
+    /// is blocked, simply holds.
     ///
     /// Once every guard has resolved its move, each one emits its §9.2 patrol noise
     /// from where it now stands ([`emit_guard_noise`](Self::emit_guard_noise)) — the
     /// "guards make noise too" row that gives the player a second information channel
-    /// working around corners.
+    /// working around corners. Hearing runs on `self.sounds` *before* that emission,
+    /// so a guard reacts to the player's noise, never to another guard's footsteps.
     fn guard_phase(&mut self, events: &mut Vec<Event>) {
+        let facility = self.layout.facility();
+        for guard in &mut self.guards {
+            guard.hear(facility, &self.sounds);
+        }
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
@@ -2071,6 +2081,110 @@ mod tests {
                 .map(|&i| {
                     s.step(i);
                     s.sounds_this_turn().to_vec()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// §9.1 wired through the real turn loop: a player's footstep beside a guard is
+    /// heard, flipping it to Investigating. A stationary fixture makes the reaction
+    /// observable in isolation — it turns without stepping onto the player (a capture)
+    /// the same turn.
+    #[test]
+    fn a_guard_hears_the_players_footstep_and_investigates() {
+        let mut s = State::new(
+            open_room(10, 10),
+            Cell::new(4, 4),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(6, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert_eq!(s.guards()[0].state(), GuardState::Calm);
+
+        // Step East to (5,4): a Low footstep there. The guard at (6,4) is one cell
+        // away → intensity 3 − 1 = 2 > threshold, so it hears and turns to the source.
+        s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(5, 4));
+        assert_eq!(s.guards()[0].state(), GuardState::Investigating);
+    }
+
+    /// A silent turn alerts no one (§9.2's "None" row): waiting emits nothing, so a
+    /// guard right beside the player hears nothing and stays Calm.
+    #[test]
+    fn a_silent_turn_alerts_no_one() {
+        let mut s = State::new(
+            open_room(10, 10),
+            Cell::new(4, 4),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Wait);
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Calm,
+            "a waiting player makes no noise to hear",
+        );
+    }
+
+    /// Guards make Low noise too (§9.2) but never hear *each other*: hearing runs
+    /// before the guards emit, so `self.sounds` holds only the player's noise. Two
+    /// adjacent guards with a silent player both stay Calm turn after turn.
+    #[test]
+    fn guards_do_not_investigate_each_other() {
+        let mut s = State::new(
+            open_room(10, 10),
+            Cell::new(1, 1),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 5)),
+                Guard::stationary(Cell::new(5, 6)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        for _ in 0..3 {
+            s.step(Input::Wait);
+        }
+        assert!(
+            s.guards().iter().all(|g| g.state() == GuardState::Calm),
+            "one guard's footsteps never trigger another's hearing",
+        );
+    }
+
+    /// Determinism (§12.4) with hearing in play: the same start and inputs reproduce
+    /// the same guard states and positions, reactions included.
+    #[test]
+    fn hearing_is_deterministic() {
+        let inputs = [
+            Input::Step(Direction::East),
+            Input::Step(Direction::East),
+            Input::Wait,
+            Input::Step(Direction::South),
+        ];
+        let run = || {
+            let mut s = State::new(
+                open_room(12, 12),
+                Cell::new(3, 3),
+                Direction::North,
+                vec![
+                    Guard::patrolling(Cell::new(6, 6)),
+                    Guard::patrolling(Cell::new(9, 3)),
+                ],
+                Vec::new(),
+                Cell::new(11, 11),
+            );
+            inputs
+                .iter()
+                .map(|&i| {
+                    s.step(i);
+                    s.guards()
+                        .iter()
+                        .map(|g| (g.pos(), g.state()))
+                        .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>()
         };
