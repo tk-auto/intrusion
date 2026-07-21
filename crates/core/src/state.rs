@@ -684,7 +684,17 @@ impl State {
             // time: while you hide you make no progress and the clock keeps ticking (§2.3).
             BumpKind::Hide => {
                 self.player = target;
-                self.facing = dir; // facing follows the last successful step (§5)
+                // The §5 exception for the hideout interaction (§7.6/§10.3): entry
+                // faces *out* of the cupboard, back toward the corridor — the
+                // opposite of the entry bump, which points into the wall the hideout
+                // is recessed in. So the ~180° half-disc (§6.2, arc 3) watches the
+                // flight path the instant you hide, not the wall behind you, and you
+                // get the "hold still, watch the cone sweep" moment without wasting a
+                // turn re-aiming (there is no turn-in-place, §5). This is *not* a
+                // general turn-in-place: only the Hide entry sets a meaningful facing;
+                // climbing back out is an ordinary step whose facing follows its own
+                // direction (see `BumpKind::Move`).
+                self.facing = dir.opposite();
                 events.push(Event::EnteredHideout { at: target });
                 true
             }
@@ -1187,7 +1197,9 @@ mod tests {
 
     /// §4.3/§10.3: a hideout is **bump-to-enter**, not a cell you drift onto. Stepping
     /// into an empty cupboard climbs in — the player occupies the cell, the turn is
-    /// spent, and they are now [`hidden`](State::hidden). Facing follows the step (§5).
+    /// spent, and they are now [`hidden`](State::hidden). Entry auto-faces *out* of the
+    /// cupboard, back toward the corridor (§7.6, #89) — the opposite of the entry bump —
+    /// not into the wall the cupboard is recessed in.
     #[test]
     fn bumping_an_empty_hideout_enters_it_and_spends_the_turn() {
         let mut layout = open_room(10, 10);
@@ -1210,9 +1222,73 @@ mod tests {
             }]
         );
         assert_eq!(s.player(), Cell::new(5, 4), "the player climbed in");
-        assert_eq!(s.facing(), Direction::East, "facing follows the step");
+        assert_eq!(
+            s.facing(),
+            Direction::West,
+            "entry faces out toward the corridor (§7.6), the opposite of the bump"
+        );
         assert_eq!(s.turn(), 1, "entering spends the turn");
         assert!(s.hidden(), "the player is now concealed");
+    }
+
+    /// §7.6/§10.3/#89: a recessed cupboard's entry auto-faces the exit — the corridor
+    /// side — so the ~180° half-disc (§6.2, arc 3) watches the flight path the moment
+    /// you hide instead of the wall behind you. Fixture: a cupboard recessed into the
+    /// top wall of a corridor, its only open face (the mouth) pointing south into the
+    /// corridor. The player bumps in from the mouth (heading north) and must end facing
+    /// south, seeing the corridor cells on *both* sides of the mouth.
+    #[test]
+    fn entering_a_hideout_faces_out_and_watches_the_corridor() {
+        // Recess the cupboard at (5,3): walls on three sides, mouth (5,4) open to the
+        // corridor row below.
+        let mut layout = open_room(11, 11);
+        for wall in [Cell::new(4, 3), Cell::new(6, 3), Cell::new(5, 2)] {
+            layout.place(wall, Terrain::Wall);
+        }
+        layout.place(Cell::new(5, 3), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 4), // in the corridor, at the cupboard mouth
+            Direction::East, // arbitrary prior facing — entry must override it
+            Vec::new(),
+            Vec::new(),
+            Cell::new(9, 9),
+        );
+
+        let events = s.step(Input::Step(Direction::North)); // bump north into the cupboard
+        assert_eq!(
+            events,
+            vec![Event::EnteredHideout {
+                at: Cell::new(5, 3)
+            }]
+        );
+        assert!(s.hidden(), "the player is concealed");
+        assert_eq!(
+            s.facing(),
+            Direction::South,
+            "entry faces out (south) toward the corridor, not north into the wall"
+        );
+
+        // The 180° half-disc, facing the corridor, covers the mouth and the cells on
+        // both sides of it — the sweep the hiding game is built around.
+        let fov = field_of_view(
+            s.layout.facility(),
+            s.player(),
+            s.facing(),
+            PLAYER_SIGHT_ARC,
+            PLAYER_SIGHT_RANGE,
+        );
+        for corridor_cell in [
+            Cell::new(5, 4), // the mouth
+            Cell::new(4, 4), // west of the mouth
+            Cell::new(6, 4), // east of the mouth
+            Cell::new(5, 5), // straight down the corridor
+        ] {
+            assert!(
+                fov.contains(corridor_cell),
+                "hiding must watch the corridor cell {corridor_cell:?}"
+            );
+        }
     }
 
     /// §4.3/§10.3: "move off to climb out." Stepping from a hideout onto floor is an
@@ -1240,6 +1316,11 @@ mod tests {
             "climbing out is an ordinary move"
         );
         assert_eq!(s.player(), Cell::new(4, 4));
+        assert_eq!(
+            s.facing(),
+            Direction::West,
+            "climbing out follows the step (§5) — only entry auto-faces (#89)"
+        );
         assert!(!s.hidden(), "leaving clears the concealment");
     }
 
