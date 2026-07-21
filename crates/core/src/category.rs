@@ -41,4 +41,12 @@ pub enum Category {
     Interest,
     /// Tan. Doors, hideouts — neutral furniture.
     System,
+    /// Cyan. A guard **sensed through a wall** (§9.2) — the player knows its exact
+    /// cell but not its facing or cone. Its meaning is *position without attention*:
+    /// a bare presence marker, never a threat readout. The dot blooms into the full
+    /// state-coloured guard the moment the player can actually see it, so the
+    /// cyan-dot → `g`-with-cone transition *is* the sensed/seen distinction made
+    /// visible (§11.3). It never carries a danger overlay — knowing where a guard is
+    /// is not knowing whether it can see you (§9.2).
+    Sensed,
 }

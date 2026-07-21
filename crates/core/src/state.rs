@@ -47,6 +47,19 @@ use crate::DoorAction;
 /// already holding one admits no other actor.
 pub(crate) const ACTOR_FILL: f32 = 1.0;
 
+/// The player's **guard-sense** range (§9.1 **[START]**): the player always knows the
+/// exact cell of every guard within this Chebyshev box, **through walls** — a 21×21
+/// box, the same shape as sight (§6.1) at a smaller size. It reveals *position only*;
+/// facing and the cone are shown only for a guard actually seen (§9.2). Pinned by a
+/// test so a later change is a deliberate, visible edit.
+pub const PLAYER_SENSE_RANGE: u32 = 10;
+
+/// The guard-sense range on a turn the player spent **waiting** (§9.1 **[START]**): a
+/// 41×41 box. Wait already buys 360° vision for the turn (§8.3); it now *also* widens
+/// the sense, 10 → 20 — "stop and take stock of the whole area", cost-is-load-bearing
+/// applied to information (§2.3). Pinned by a test.
+pub const PLAYER_SENSE_RANGE_WAITING: u32 = 20;
+
 /// What the player asks to do on their phase. Input mapping (which key is which,
 /// §11.6) lives in the web shell; the loop knows only the actions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -231,6 +244,21 @@ impl BumpKind {
             | BumpKind::Solid => None,
         }
     }
+}
+
+/// How the player perceives a guard this frame (§9.2) — the two states of a
+/// perceived guard, and the gap between them is the whole §9 design. A guard the
+/// player perceives at all is in exactly one; a guard in neither is out of reach and
+/// [`perceive_guard`](State::perceive_guard) returns `None`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GuardPerception {
+    /// In the player's field of view, line of sight clear (§6): the full threat —
+    /// glyph in its state colour, facing, vision cone, and the danger overlay (§11.5).
+    Seen,
+    /// Within the guard-sense box ([`PLAYER_SENSE_RANGE`]), through walls, but **not**
+    /// in the player's FOV: a bare position marker — the exact cell, nothing about
+    /// where it is looking (§9.2). Never carries a danger overlay.
+    Sensed,
 }
 
 /// Whether the run is still going, and if not, how it ended (§4.5).
@@ -443,6 +471,42 @@ impl State {
     /// The guards, for rendering and tests.
     pub fn guards(&self) -> &[Guard] {
         &self.guards
+    }
+
+    /// The player's current guard-sense range (§9.1): [`PLAYER_SENSE_RANGE`] normally,
+    /// widened to [`PLAYER_SENSE_RANGE_WAITING`] on the turn the player's spent action
+    /// was a Wait — the same `waited` signal that buys the 360° look (§8.3). A free
+    /// action changes nothing, so a mis-input never widens or narrows the sense.
+    pub fn sense_range(&self) -> u32 {
+        if self.waited {
+            PLAYER_SENSE_RANGE_WAITING
+        } else {
+            PLAYER_SENSE_RANGE
+        }
+    }
+
+    /// How the player perceives `guard` this frame (§9.2), or `None` if it is neither
+    /// seen nor sensed (out of range — it draws nothing, live, and is not remembered,
+    /// §11.5a). This is the pure §9 classification the renderer reads:
+    ///
+    /// - **Seen** — the guard's cell is in the player's FOV (§6): line of sight is
+    ///   clear, so its facing, cone and danger overlay are all known.
+    /// - **Sensed** — not in the FOV, but within the guard-sense box
+    ///   ([`sense_range`](Self::sense_range)) measured by the §6.1 box metric
+    ///   ([`sight_distance`](Cell::sight_distance)) **through walls**: the exact cell
+    ///   is known, nothing about where it looks.
+    ///
+    /// Seen wins over Sensed by construction — a guard in the FOV is Seen even if it is
+    /// also inside the (larger or smaller) sense box — so the dot never coexists with
+    /// the full guard on the same cell.
+    pub fn perceive_guard(&self, guard: &Guard) -> Option<GuardPerception> {
+        if self.player_fov.contains(guard.pos()) {
+            Some(GuardPerception::Seen)
+        } else if self.player.sight_distance(guard.pos()) <= self.sense_range() {
+            Some(GuardPerception::Sensed)
+        } else {
+            None
+        }
     }
 
     /// How many objectives are still out. The run can be won only at zero (§10.2).
@@ -1902,5 +1966,131 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
+    }
+
+    /// §9.2 classification: from the player's position and facing, each guard is
+    /// **Seen** (in the FOV), **Sensed** (within the guard-sense box but out of FOV),
+    /// or neither (out of range → `None`). A guard in view is Seen even though it also
+    /// sits inside the box — Seen wins, so the dot never doubles the full guard.
+    #[test]
+    fn guards_classify_as_seen_sensed_or_neither() {
+        let seen = Cell::new(20, 16); // 4 north: in the forward half-disc
+        let sensed = Cell::new(20, 25); // 5 south: behind the player, inside the box
+        let gone = Cell::new(20, 33); // 13 south: behind and past the 10-box
+        let s = State::new(
+            open_room(40, 40),
+            Cell::new(20, 20),
+            Direction::North,
+            vec![
+                Guard::stationary(seen),
+                Guard::stationary(sensed),
+                Guard::stationary(gone),
+            ],
+            Vec::new(),
+            Cell::new(38, 38),
+        );
+
+        assert!(
+            s.player_fov().contains(seen),
+            "precondition: seen guard in FOV"
+        );
+        assert!(
+            !s.player_fov().contains(sensed),
+            "precondition: sensed guard out of FOV"
+        );
+        assert_eq!(
+            s.perceive_guard(&s.guards()[0]),
+            Some(GuardPerception::Seen)
+        );
+        assert_eq!(
+            s.perceive_guard(&s.guards()[1]),
+            Some(GuardPerception::Sensed),
+            "in the box but out of view → position only",
+        );
+        assert_eq!(
+            s.perceive_guard(&s.guards()[2]),
+            None,
+            "past the box → nothing"
+        );
+    }
+
+    /// §9.1's headline: the sense **passes through walls** — it is not line of sight.
+    /// A guard sealed behind a wall, with no line to the player but inside the box, is
+    /// **Sensed** (position only), not hidden. A walled-off fixture pins this.
+    #[test]
+    fn the_sense_passes_through_walls() {
+        let mut layout = open_room(20, 20);
+        // Wall the whole row y=8 across the interior, sealing the north strip from the
+        // player's line of sight.
+        for x in 1..=18 {
+            layout.place(Cell::new(x, 8), Terrain::Wall);
+        }
+        let guard = Cell::new(10, 6); // 4 north of the player, behind the wall
+        let s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(guard)],
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+
+        assert!(
+            !s.player_fov().contains(guard),
+            "precondition: the wall blocks line of sight to the guard",
+        );
+        assert_eq!(
+            s.perceive_guard(&s.guards()[0]),
+            Some(GuardPerception::Sensed),
+            "no line of sight but inside the box → sensed through the wall",
+        );
+    }
+
+    /// §9.1 **[START]**: the sense box is **10**, widening to **20** on a turn the
+    /// player spent waiting. Both are pinned so a later change is visible. A walled-off
+    /// guard 11 cells away — just outside the box, no line of sight — is *not* sensed;
+    /// the same guard becomes Sensed the turn the player waits (10 → 20).
+    #[test]
+    fn the_sense_range_is_ten_and_twenty_on_wait() {
+        assert_eq!(PLAYER_SENSE_RANGE, 10, "the [START] sense range");
+        assert_eq!(
+            PLAYER_SENSE_RANGE_WAITING, 20,
+            "the [START] wait sense range"
+        );
+
+        let mut layout = open_room(40, 40);
+        // A full wall row seals the guard from sight, so it can only ever be *sensed*,
+        // never seen — even under the 360° look a wait grants (§8.3).
+        for x in 1..=38 {
+            layout.place(Cell::new(x, 12), Terrain::Wall);
+        }
+        let guard = Cell::new(20, 9); // 11 north of the player: just past the 10-box
+        let mut s = State::new(
+            layout,
+            Cell::new(20, 20),
+            Direction::North,
+            vec![Guard::stationary(guard)],
+            Vec::new(),
+            Cell::new(38, 38),
+        );
+
+        assert_eq!(s.sense_range(), 10, "no wait yet: the base box");
+        assert_eq!(
+            s.perceive_guard(&s.guards()[0]),
+            None,
+            "11 cells away is just outside the 10-box",
+        );
+
+        s.step(Input::Wait);
+        assert_eq!(s.sense_range(), 20, "waiting widens the box");
+        assert!(
+            !s.player_fov().contains(guard),
+            "still walled off from sight"
+        );
+        assert_eq!(
+            s.perceive_guard(&s.guards()[0]),
+            Some(GuardPerception::Sensed),
+            "the wait pulls the guard into the widened box → sensed",
+        );
     }
 }

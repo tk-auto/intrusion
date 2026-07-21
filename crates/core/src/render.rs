@@ -38,8 +38,14 @@
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
-use crate::state::State;
+use crate::state::{GuardPerception, State};
 use crate::status::near_line;
+
+/// The glyph a **sensed** guard draws as (§9.2/§11.3): a bare dot at its exact cell,
+/// coloured [`Category::Sensed`] (cyan) rather than the floor's Ground — position
+/// known, attention unknown. Shares the floor's `·` shape deliberately: it is a
+/// *presence marker*, not the full `g`, and the colour is what tells the two apart.
+const SENSED_MARK: char = '·';
 
 /// How much the player currently knows about what a drawn cell shows — the three
 /// visual states of §11.5a's implementation note (live / remembered / never-seen,
@@ -125,15 +131,20 @@ impl Grid {
 /// alcove — the scouting reward of §11.5a). **Live state** — guards, and a door's
 /// open/closed pose — draws only inside the FOV and is never remembered: an
 /// out-of-view panel always shows its canonical closed `+`, whatever it really is.
+/// The one exception is a guard's *position*, known through walls within the
+/// guard-sense box (§9): a guard out of the FOV but in range draws as the flat cyan
+/// Sensed dot — position only, no cone, and still never remembered once out of range.
 ///
 /// # Glyph priority (§11.3)
 ///
 /// The old renderer was last-writer-wins, so a guard standing in a doorway rendered
 /// arbitrarily. Here the order is **defined**: entities always draw over terrain, and
-/// among entities the ranking is **player > guard** (bodies and decoys slot in when
-/// they exist, §7.2/§8.3). We write terrain, then guards, then the player, so the
-/// highest-priority glyph is the last writer at any cell — a defined order, not an
-/// accident.
+/// among entities the ranking is **player > guard** — where a *sensed* dot (§9.2)
+/// ranks below a *seen* guard and below the player (bodies and decoys slot in when
+/// they exist, §7.2/§8.3). We write terrain, then guards (seen or sensed), then the
+/// player, so the highest-priority glyph is the last writer at any cell — a defined
+/// order, not an accident. A cell never holds both a seen guard and a sensed dot: one
+/// guard occupies one cell, and it is perceived exactly one way (§9.2).
 ///
 /// # The danger overlay (§11.5)
 ///
@@ -198,17 +209,23 @@ pub fn render(state: &State) -> Grid {
         };
     };
 
-    // Entity layers, lowest priority first so the top entity is the last writer.
+    // Entity layers, lowest priority first so the top entity is the last writer. A
+    // guard draws by how the player *perceives* it (§9.2): **seen** (in the FOV) as
+    // the full state-coloured `g`; **sensed** (through a wall, within the guard-sense
+    // box) as a bare cyan `·` at its exact cell — position only, no cone. A guard
+    // perceived neither way draws nothing and is never remembered (§11.5a), so leaving
+    // both view and sense range erases it from the picture.
     for guard in state.guards() {
-        // Live state (§11.5a): a guard exists on screen only while the player sees
-        // it — never remembered, so leaving the FOV erases it from the picture.
-        if !fov.contains(guard.pos()) {
-            continue;
+        match state.perceive_guard(guard) {
+            // The `g` glyph is re-categorised every turn from the guard's state
+            // (§11.2): yellow → orange → red is the guard's mind, made visible.
+            Some(GuardPerception::Seen) => put(guard.pos(), 'g', guard.state().category()),
+            // Position without attention (§9.2): the flat Sensed dot, drawn over
+            // whatever geometry masks the cell (a wall two rooms away), never with a
+            // cone or a danger overlay — the dot blooms to the full `g` once seen.
+            Some(GuardPerception::Sensed) => put(guard.pos(), SENSED_MARK, Category::Sensed),
+            None => {}
         }
-        // The guard glyph is re-categorised every turn from its state (§11.2):
-        // yellow → orange → red is the guard's mind, made visible. The §7.4
-        // transitions are the guard AI tickets; the seam is already honest.
-        put(guard.pos(), 'g', guard.state().category());
     }
     // The player, always Owned — trivially inside their own FOV. Inside a hideout
     // the player is concealed: the cupboard keeps its `}` glyph but recolours to
@@ -703,22 +720,26 @@ mod tests {
     /// The §11.5a golden test: an unseen intel is invisible (its cell reads as
     /// plain floor); after entering the FOV it is live; after leaving it stays,
     /// **remembered** — its own visual state — while a guard, live state, does not
-    /// persist out of the FOV.
+    /// persist out of the FOV. The guard is placed **out of the guard-sense box** too
+    /// (§9), so "not drawn" means neither seen nor sensed — isolating the memory rule
+    /// from the sense (which is exercised in its own tests).
     #[test]
     fn contents_are_remembered_but_live_state_is_not() {
-        // Player at (10,10) facing north; a console and a guard behind them to the
-        // south, outside the half-disc (§6.2 sees at most one row behind — the
-        // touching ring).
+        // Player at (10,10) facing north; a console four cells behind (out of the
+        // half-disc) and a guard far to the south — 14 cells off, past the 10-box, so
+        // out of range entirely until the player faces it and closes in.
+        let guard = Cell::new(10, 24);
         let mut s = State::new(
-            open_room(20, 20),
+            open_room(40, 40),
             Cell::new(10, 10),
             Direction::North,
-            vec![Guard::stationary(Cell::new(12, 14))],
+            vec![Guard::stationary(guard)],
             [Cell::new(10, 14)],
-            Cell::new(18, 18),
+            Cell::new(38, 38),
         );
 
-        // Never seen: the intel masks as plain floor and the guard is not drawn.
+        // Never seen and out of sense range: the intel masks as plain floor and the
+        // guard is not drawn at all.
         let g = render(&s);
         assert_eq!(g.get(10, 14).glyph, '·', "unseen intel is invisible");
         assert_eq!(
@@ -726,7 +747,11 @@ mod tests {
             Category::Ground,
             "…its cell reads as floor"
         );
-        assert_eq!(g.get(12, 14).glyph, '·', "an unseen guard is not drawn");
+        assert_eq!(
+            g.get(guard.x, guard.y).glyph,
+            '·',
+            "an out-of-range guard is not drawn",
+        );
 
         // Turn south: both enter the FOV, live.
         s.step(Input::Step(Direction::South)); // to (10,11), facing south
@@ -736,10 +761,11 @@ mod tests {
             (intel.glyph, intel.fg, intel.vis),
             ('$', Category::Interest, Visibility::Live)
         );
-        let guard = g.get(12, 14);
-        assert_eq!((guard.glyph, guard.vis), ('g', Visibility::Live));
+        let g_cell = g.get(guard.x, guard.y);
+        assert_eq!((g_cell.glyph, g_cell.vis), ('g', Visibility::Live));
 
-        // Turn back north: the intel stays, remembered; the guard vanishes.
+        // Turn back north: the intel stays, remembered; the guard vanishes (it is not
+        // remembered, and out of range it is not sensed either).
         s.step(Input::Step(Direction::North)); // to (10,10), facing north
         let g = render(&s);
         let intel = g.get(10, 14);
@@ -749,11 +775,11 @@ mod tests {
             "seen intel stays on the map after leaving the FOV, as memory"
         );
         assert_eq!(
-            g.get(12, 14).glyph,
+            g.get(guard.x, guard.y).glyph,
             '·',
-            "a guard does not persist out of FOV"
+            "a guard does not persist out of FOV",
         );
-        assert_eq!(g.get(12, 14).vis, Visibility::Dimmed);
+        assert_eq!(g.get(guard.x, guard.y).vis, Visibility::Dimmed);
     }
 
     /// §11.5a's scouting reward: an unscouted hideout reads as plain **wall** — the
@@ -1053,5 +1079,122 @@ mod tests {
                 assert_eq!(g.get(x, y).bg, None, "no red anywhere for ({x},{y})");
             }
         }
+    }
+
+    /// §9.2/§11.3: a guard **sensed** through a wall renders as a bare cyan
+    /// `Category::Sensed` dot at its exact cell — **no** facing, **no** cone, and
+    /// **no** danger overlay. It draws live regardless of line of sight (the dot is
+    /// the whole point of the sense), but paints nothing red: knowing where a guard is
+    /// is not knowing whether it can see you.
+    #[test]
+    fn a_sensed_guard_is_a_cyan_dot_with_no_cone_or_overlay() {
+        // Player at (10,10) facing north; a guard behind them at (10,14) — out of the
+        // half-disc, four cells away, so inside the 10-box: sensed, not seen.
+        let s = State::new(
+            open_room(20, 20),
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(10, 14))],
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        assert!(
+            !s.player_fov().contains(Cell::new(10, 14)),
+            "not in the FOV"
+        );
+        assert_eq!(
+            s.perceive_guard(&s.guards()[0]),
+            Some(GuardPerception::Sensed),
+        );
+
+        let g = render(&s);
+        let dot = g.get(10, 14);
+        assert_eq!(dot.glyph, SENSED_MARK, "a bare dot, not a `g`");
+        assert_eq!(dot.fg, Category::Sensed, "…in the Sensed cyan");
+        assert_eq!(
+            dot.vis,
+            Visibility::Live,
+            "drawn live, over the geometry, regardless of line of sight",
+        );
+        // A sensed guard projects no cone: nothing on the map reads danger.
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                assert_eq!(
+                    g.get(x, y).bg,
+                    None,
+                    "a sensed guard paints no danger overlay ({x},{y})",
+                );
+            }
+        }
+    }
+
+    /// §9.2/§11.3: the dot **blooms** into the full guard as it crosses the FOV
+    /// boundary. Behind the player it is a flat cyan dot with no overlay; the moment
+    /// the player faces it — same guard, same cell — it becomes the state-coloured `g`
+    /// and its cone paints the danger overlay.
+    #[test]
+    fn a_sensed_dot_blooms_to_a_seen_guard_across_the_fov_boundary() {
+        let guard = Cell::new(10, 14);
+        let mut s = State::new(
+            open_room(20, 20),
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(guard)],
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+
+        // North-facing: the guard is behind, only sensed — a cyan dot, no overlay.
+        let g = render(&s);
+        assert_eq!(g.get(guard.x, guard.y).glyph, SENSED_MARK);
+        assert_eq!(g.get(guard.x, guard.y).fg, Category::Sensed);
+        let no_red = (0..g.height()).all(|y| (0..g.width()).all(|x| g.get(x, y).bg.is_none()));
+        assert!(no_red, "sensed: no cone painted");
+
+        // Turn to face it (step south): now seen — the full state-coloured guard, and
+        // its cone paints the danger overlay somewhere.
+        s.step(Input::Step(Direction::South)); // player to (10,11), facing south
+        assert_eq!(
+            s.perceive_guard(&s.guards()[0]),
+            Some(GuardPerception::Seen),
+        );
+        let g = render(&s);
+        let cell = g.get(guard.x, guard.y);
+        assert_eq!(cell.glyph, 'g', "the dot bloomed into the guard");
+        assert_eq!(
+            cell.fg,
+            s.guards()[0].state().category(),
+            "…in its state colour",
+        );
+        let some_red = (0..g.height()).any(|y| (0..g.width()).any(|x| g.get(x, y).bg.is_some()));
+        assert!(some_red, "seen: the guard's cone now paints the overlay");
+    }
+
+    /// §11.5a: a guard neither seen nor sensed — out of both the FOV and the
+    /// guard-sense box — draws **nothing** live. Its cell falls back to the geometry
+    /// in its place (dimmed floor), with no dot and no memory of a guard ever there.
+    #[test]
+    fn an_out_of_range_guard_draws_nothing() {
+        // Player at (5,5) facing north; a guard far to the south-east, out of the FOV
+        // and well past the 10-box (Chebyshev 12).
+        let guard = Cell::new(17, 17);
+        let s = State::new(
+            open_room(24, 24),
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(guard)],
+            Vec::new(),
+            Cell::new(22, 22),
+        );
+        assert_eq!(
+            s.perceive_guard(&s.guards()[0]),
+            None,
+            "out of range entirely"
+        );
+
+        let cell = render(&s).get(guard.x, guard.y);
+        assert_eq!(cell.glyph, '·', "the guard's cell is just dimmed floor");
+        assert_eq!(cell.fg, Category::Ground, "…not a Sensed dot");
+        assert_eq!(cell.vis, Visibility::Dimmed);
     }
 }
