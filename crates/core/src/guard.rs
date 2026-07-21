@@ -287,7 +287,15 @@ impl Guard {
     /// honest end of an investigation: reach the spot, find nothing, resume the sweep.
     /// A **Calm** guard picks its next patrol target and steps toward it (§7.5). A
     /// held-in-place guard, or a Calm one with nowhere to go, holds.
-    pub(crate) fn decide(&mut self, facility: &Facility) -> Option<Direction> {
+    /// `blocked` are the cells other guards currently stand on: guards are solid to
+    /// each other and must **path around** a colleague, not through one (§7.8). A
+    /// route the pass finds steps only into cells no other guard holds, so a guard
+    /// whose direct line is blocked reroutes down the parallel lane (corridors are
+    /// 2–4 wide, §10.1) instead of stalling. When a colleague genuinely seals the
+    /// only route this turn, the guard holds and retries next turn as the colleague
+    /// clears — a local wait-and-retry, no reservation system (§12.3), and no
+    /// deadlock the old path-through-each-other stall produced.
+    pub(crate) fn decide(&mut self, facility: &Facility, blocked: &[Cell]) -> Option<Direction> {
         if !self.patrols {
             return None;
         }
@@ -299,7 +307,7 @@ impl Guard {
             // stands back down to patrol. The bounded search that would fill the
             // gap before giving up (§7.6 fix 2) is a later ticket.
             if self.alert > 0 {
-                if let Some(step) = self.step_toward_destination(facility) {
+                if let Some(step) = self.step_toward_destination(facility, blocked) {
                     return Some(step);
                 }
             }
@@ -307,18 +315,24 @@ impl Guard {
         }
 
         self.repick_patrol_target(facility);
-        self.step_toward_destination(facility)
+        self.step_toward_destination(facility, blocked)
     }
 
-    /// The first step of the shortest patrollable path to the current destination, or
-    /// `None` when there is nothing to walk to — no destination, already stood on it,
-    /// or no patrollable route reaches it.
-    fn step_toward_destination(&self, facility: &Facility) -> Option<Direction> {
+    /// The first step of the shortest patrollable path to the current destination that
+    /// routes **around** the cells in `blocked` (colleagues, §7.8), or `None` when
+    /// there is nothing to walk to — no destination, already stood on it, or no
+    /// unobstructed route reaches it (the guard then holds and retries next turn).
+    /// The destination itself is exempt from `blocked` — as it is from `patrollable`
+    /// (a guard may be sent onto a cell it cannot end on) — so a lead pointing at a
+    /// colleague's cell still draws the guard toward it rather than freezing the sweep.
+    fn step_toward_destination(&self, facility: &Facility, blocked: &[Cell]) -> Option<Direction> {
         let destination = self.destination?;
         if destination == self.pos {
             return None;
         }
-        path::first_step_toward(self.pos, destination, |cell| patrollable(facility, cell))
+        path::first_step_toward(self.pos, destination, |cell| {
+            patrollable(facility, cell) && !blocked.contains(&cell)
+        })
     }
 
     /// Drop back to Calm patrol, clearing the reactive lead — destination, alert
@@ -511,7 +525,7 @@ mod tests {
         // Stand the guard on that destination, then decide with nothing seen: arrived,
         // so the lead is spent and it resumes patrol.
         guard.advance_to(glimpse, Direction::South, &facility);
-        let _ = guard.decide(&facility);
+        let _ = guard.decide(&facility, &[]);
         assert_eq!(
             guard.state(),
             GuardState::Calm,
@@ -633,7 +647,7 @@ mod tests {
         }
 
         // With the lead cold, deciding stands the guard down to patrol.
-        guard.decide(&facility);
+        guard.decide(&facility, &[]);
         assert_eq!(guard.state(), GuardState::Calm, "a cold lead is given up");
     }
 }
