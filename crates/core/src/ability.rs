@@ -84,8 +84,8 @@ pub struct AbilityStatus {
 }
 
 impl AbilityStatus {
-    /// The one line the panel draws for this ability: `<key> <Name>` with the
-    /// state notation tacked on when there is one — `r Run`, `c Camouflage [7]`,
+    /// The one line the deployed panel draws for this ability: `<key> <Name>` with
+    /// the state notation tacked on when there is one — `r Run`, `c Camouflage [7]`,
     /// `d Decoy /12/`, `t Takedown —`.
     pub fn label(&self) -> String {
         let suffix = self.state.suffix();
@@ -93,6 +93,20 @@ impl AbilityStatus {
             format!("{} {}", self.hotkey, self.name)
         } else {
             format!("{} {} {}", self.hotkey, self.name, suffix)
+        }
+    }
+
+    /// The compact readout for the **always-on ability line** (§11.4): just the
+    /// hotkey, with the active/cooling number tucked inline (`c[7]`, `d/12/`).
+    /// Ready and unusable abilities show the bare key — their state is carried by
+    /// colour alone, keeping the strip to one glyph each so the whole set fits a
+    /// single row. The full name lives only in the deployed panel ([`Self::label`]).
+    pub fn compact(&self) -> String {
+        match self.state {
+            AbilityState::Active { .. } | AbilityState::Cooling { .. } => {
+                format!("{}{}", self.hotkey, self.state.suffix())
+            }
+            AbilityState::Ready | AbilityState::Unusable => self.hotkey.to_string(),
         }
     }
 }
@@ -162,6 +176,25 @@ mod tests {
             state: AbilityState::Cooling { remaining: 12 },
         };
         assert_eq!(cooling.label(), "d Decoy /12/");
+    }
+
+    /// The always-on line's compact form (§11.4): active and cooling tuck the
+    /// number against the key, ready and unusable are the bare key (colour carries
+    /// their state) — one glyph-group each so the whole set fits a single row.
+    #[test]
+    fn the_compact_readout_is_the_key_and_any_number() {
+        let compact = |state| {
+            AbilityStatus {
+                hotkey: 'c',
+                name: "Camouflage",
+                state,
+            }
+            .compact()
+        };
+        assert_eq!(compact(AbilityState::Ready), "c");
+        assert_eq!(compact(AbilityState::Unusable), "c");
+        assert_eq!(compact(AbilityState::Active { remaining: 7 }), "c[7]");
+        assert_eq!(compact(AbilityState::Cooling { remaining: 12 }), "c/12/");
     }
 
     /// The hotkey on every panel row is the **explicit** §11.6 assignment, taken

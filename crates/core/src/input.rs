@@ -17,6 +17,32 @@
 use crate::cell::Direction;
 use crate::state::Input;
 
+/// A **shell-level** command a key drives that is *not* a game action (§11.4) —
+/// it changes what the screen shows, never the world, so it never enters the turn
+/// loop, costs no turn, and produces no [`Event`](crate::state::Event). Kept in
+/// the core beside [`input_for_key`] so the binding is pinned by a native test
+/// like every other, even though the state it toggles lives in the shell.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UiCommand {
+    /// Deploy or dismiss the full ability panel (§11.4). The compact ability line
+    /// is always on; this expands it to the named panel and folds it back. The
+    /// on-screen deploy button drives the same toggle for touch and mouse.
+    ToggleAbilityPanel,
+}
+
+/// Map a key to the [`UiCommand`] it drives, or `None` for a key that is not a UI
+/// control. The shell consults this *before* [`input_for_key`]: a key claimed here
+/// toggles view state and redraws without ever touching [`State`](crate::State).
+///
+/// `Tab` deploys the ability panel — a conventional "toggle the HUD" key, and one
+/// that collides with neither a movement key nor an ability hotkey (§11.6).
+pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
+    match key {
+        "Tab" => Some(UiCommand::ToggleAbilityPanel),
+        _ => None,
+    }
+}
+
 /// Map a key (a browser `KeyboardEvent.key` name) to the [`Input`] it drives, or
 /// `None` for a key the game does not own — which the shell must then leave to
 /// the page (scrolling, browser shortcuts).
@@ -88,11 +114,33 @@ mod tests {
     }
 
     /// Keys the game does not own pass through untouched, so the page keeps its
-    /// scrolling and shortcuts.
+    /// scrolling and shortcuts. `Tab` is *not* here: it is a UI control
+    /// ([`ui_command_for_key`]), not a game action, but it still returns `None`
+    /// from [`input_for_key`] — the two tables are disjoint.
     #[test]
     fn unowned_keys_are_left_to_the_page() {
-        for key in ["q", "F5", "Tab", "Meta", " ", "PageDown"] {
+        for key in ["q", "F5", "Meta", " ", "PageDown"] {
             assert_eq!(input_for_key(key), None, "key {key:?}");
+        }
+    }
+
+    /// The UI-command table (§11.4): `Tab` deploys the ability panel, and it is a
+    /// *shell* command, never a game [`Input`] — so `input_for_key("Tab")` stays
+    /// `None` and the toggle never enters the turn loop. Other keys own no UI
+    /// command.
+    #[test]
+    fn tab_toggles_the_ability_panel_and_is_not_a_game_input() {
+        assert_eq!(
+            ui_command_for_key("Tab"),
+            Some(UiCommand::ToggleAbilityPanel)
+        );
+        assert_eq!(input_for_key("Tab"), None, "Tab is not a game action");
+        for key in ["w", "5", "r", "ArrowUp", "Escape"] {
+            assert_eq!(
+                ui_command_for_key(key),
+                None,
+                "key {key:?} owns no UI command"
+            );
         }
     }
 
