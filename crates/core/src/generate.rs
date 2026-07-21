@@ -1338,9 +1338,7 @@ fn severs_pathing(facility: &Facility, cell: Cell) -> bool {
 
 /// Chebyshev (chessboard) distance between two cells — the number of king moves.
 fn chebyshev(a: Cell, b: Cell) -> u32 {
-    let dx = a.x.abs_diff(b.x);
-    let dy = a.y.abs_diff(b.y);
-    dx.max(dy)
+    a.sight_distance(b)
 }
 
 /// A deterministic in-place Fisher–Yates shuffle driven by the run `Rng` (§12.4).

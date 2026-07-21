@@ -310,7 +310,7 @@ mod tests {
 
     /// The Chebyshev (square-box) distance between two cells: the §6.1 range metric.
     fn chebyshev(a: Cell, b: Cell) -> u32 {
-        a.x.abs_diff(b.x).max(a.y.abs_diff(b.y))
+        a.sight_distance(b)
     }
 
     /// Render a field of view as text for golden tests: `@` the viewer, `*` a seen

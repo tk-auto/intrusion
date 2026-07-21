@@ -2,14 +2,17 @@
 //!
 //! A guard is a plain struct the [`State`](crate::State) owns directly (§12.3). Its
 //! sight is recomputed each phase like any viewer's (§6); what lives here is the
-//! *mind* — the [`GuardState`] vocabulary, the Calm patrol (§7.5), and the first
-//! reactive transition: **hearing** ([`hear`](Guard::hear)), a heard noise (§9.1)
-//! turning the guard to Investigating toward its source. Every reactive state (chasing,
-//! investigating, responding) plugs into the same [`decide`](Guard::decide) seam: it
-//! sets a `destination` and reuses the shared walk-toward-it movement, so the
-//! remaining guard tickets add transitions, not new machinery — and a reactive guard
-//! whose lead runs out stands back down to patrol on its own. Movement rides on the
-//! deterministic primitives in [`crate::path`].
+//! *mind* — the [`GuardState`] vocabulary, the Calm patrol (§7.5), and the reactive
+//! transitions folded in each turn by [`sense`](Guard::sense): **sight**
+//! ([`see`](Guard::see)) flipping the guard to Chasing or Investigating by the §7.6
+//! two zones (certain ≤ 5, glimpse ≤ 10), and **hearing** ([`hear`](Guard::hear))
+//! turning it to Investigating toward a noise (§9.1) — sight overriding sound when
+//! both fire. Every reactive state (chasing, investigating, responding) plugs into the
+//! same [`decide`](Guard::decide) seam: it sets a `destination` and reuses the shared
+//! walk-toward-it movement, so the remaining guard tickets add transitions, not new
+//! machinery — and a reactive guard whose lead ([`ALERT_DURATION`]) runs out stands
+//! back down to patrol on its own. Movement rides on the deterministic primitives in
+//! [`crate::path`].
 
 use std::cmp::Reverse;
 
@@ -84,8 +87,19 @@ pub struct Guard {
     /// inspected this is wiped and the sweep restarts.
     inspected: VisibleSet,
     /// The cell the guard is walking to, if any. Calm patrol picks it (§7.5); the
-    /// reactive states will set it to their own targets (§7.4).
+    /// reactive states set it to their own targets (§7.4) — a heard source, a seen
+    /// player's cell.
     destination: Option<Cell>,
+    /// The last cell the player was seen in the **certain** zone (§7.6). A glimpse
+    /// heads *here* — where the guard last knew the player precisely — not toward the
+    /// imprecise glimpse itself; a glimpse never updates it. `None` until the first
+    /// certain sighting, and cleared when the lead runs out ([`stand_down`](Self::stand_down)).
+    last_seen: Option<Cell>,
+    /// How many turns of lead this guard still has (§7.1 alert timer). Refreshed to
+    /// [`ALERT_DURATION`] by any fresh detection — a heard sound or a seen player —
+    /// and decayed by one each turn nothing is sensed ([`sense`](Self::sense)); a
+    /// reactive guard whose lead reaches zero stands back down (§7.4/§7.6).
+    alert: u32,
     fov: VisibleSet,
     state: GuardState,
 }
@@ -93,6 +107,28 @@ pub struct Guard {
 /// Patrol radius (§7.5, **[START] = 15**): a guard sweeps the patrollable cells
 /// within this many steps of its station.
 pub(crate) const PATROL_RADIUS: u32 = 15;
+
+/// How long a detection lead survives with nothing sensed (§7.1 alert duration,
+/// **[START] = 30**). Every fresh detection — sight or sound — resets the alert
+/// timer to this; each quiet turn drops it by one, and a reactive guard gives up
+/// its lead and returns to patrol once it hits zero. The bounded search this timer
+/// will pace (§7.6 fix 2) is a later ticket; here it is the honest backstop that
+/// keeps a guard from pursuing a stale lead forever.
+pub(crate) const ALERT_DURATION: u32 = 30;
+
+/// The **certain** detection zone (§7.6, **[START] = 5**): a player seen within this
+/// Chebyshev range (the §6.1 sight metric) is tracked precisely — the guard Chases
+/// its live cell. This is the range Run is tuned against: its 5-cell gain is exactly
+/// the certain→glimpse distance, so breaking from Chasing to Investigating is
+/// designed to be *achievable* (§7.6 — "it gives Run a job").
+pub(crate) const CERTAIN_RANGE: u32 = 5;
+
+/// The **glimpse** zone's outer edge (§7.6, **[START] = 10**): past [`CERTAIN_RANGE`]
+/// and out to here the guard only catches imprecise movement — it Investigates toward
+/// where it *last knew* the player (the certain cell), not the glimpse. It equals the
+/// guard's sight range ([`GUARD_SIGHT_RANGE`], §7.1): beyond it there is no cone to be
+/// seen in, so "> 10 → detects nothing" falls out of the cone itself.
+pub(crate) const GLIMPSE_RANGE: u32 = GUARD_SIGHT_RANGE;
 
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
 /// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
@@ -111,6 +147,8 @@ impl Guard {
             patrols: false,
             inspected: VisibleSet::default(),
             destination: None,
+            last_seen: None,
+            alert: 0,
             fov: VisibleSet::default(),
             state: GuardState::Calm,
         }
@@ -229,14 +267,68 @@ impl Guard {
     }
 
     /// Turn toward a heard noise (§9.1/§7.4): switch to Investigating with `source` —
-    /// where the noise happened — as the destination, then walk there through the
-    /// same [`decide`](Self::decide) movement as a patrol. It commits to the noise's
-    /// *location*, not the player's live cell, and re-hearing simply re-aims it — so
-    /// sound is a stale, last-known-position lead (§9.1's "best guess"), never a
-    /// tracking turret (§7.6).
+    /// where the noise happened — as the destination and a fresh [`ALERT_DURATION`]
+    /// lead, then walk there through the same [`decide`](Self::decide) movement as a
+    /// patrol. It commits to the noise's *location*, not the player's live cell, and
+    /// re-hearing simply re-aims it — so sound is a stale, last-known-position lead
+    /// (§9.1's "best guess"), never a tracking turret (§7.6).
     fn investigate(&mut self, source: Cell) {
         self.state = GuardState::Investigating;
         self.destination = Some(source);
+        self.alert = ALERT_DURATION;
+    }
+
+    /// The guard's whole turn of sensing (§4.2 phase 3), run before it acts: a lead
+    /// **cools** by one turn, then hearing and sight get their say and refresh it if
+    /// they detect anything. Sight is checked *after* hearing and overrides it — a
+    /// guard that both hears a noise and sees the player is Chasing, not merely
+    /// Investigating: seeing is the more certain sense. `concealed` folds in the one
+    /// concealment query (§10.3): a player in a cupboard or ducked behind the right
+    /// table is neither seen (here) nor, being silent, heard, so the lead just cools —
+    /// which is exactly the "hold still and watch the cone sweep past" payoff (§7.6).
+    pub(crate) fn sense(
+        &mut self,
+        facility: &Facility,
+        player: Cell,
+        concealed: bool,
+        sounds: &[Sound],
+    ) {
+        // A lead cools by default; any detection below resets it to full.
+        self.alert = self.alert.saturating_sub(1);
+        self.hear(facility, sounds);
+        self.see(player, concealed);
+    }
+
+    /// React to seeing the player (§7.6 two-zone detection). Nothing happens if the
+    /// player is [`concealed`](crate::State::concealed_from) from this guard or simply
+    /// not in its cone this turn (the lead cools in [`sense`](Self::sense)). Otherwise
+    /// the Chebyshev range decides:
+    ///
+    /// - **certain** (≤ [`CERTAIN_RANGE`]): Chase the player's *live* cell, and record
+    ///   it as the last cell known precisely.
+    /// - **glimpse** (≤ [`GLIMPSE_RANGE`]): Investigate toward that last-certain cell —
+    ///   where the guard last *knew* the player, not the imprecise glimpse. Before any
+    ///   certain sighting there is no such cell, so it falls back to the glimpse itself
+    ///   — the only position it has.
+    ///
+    /// Either way the alert timer is refreshed. Because [`GLIMPSE_RANGE`] equals the
+    /// cone's own range there is no "seen but past the glimpse" case to handle — a cell
+    /// past 10 is simply not in the cone.
+    fn see(&mut self, player: Cell, concealed: bool) {
+        if concealed || !self.fov.contains(player) {
+            return;
+        }
+        let range = self.pos.sight_distance(player);
+        if range <= CERTAIN_RANGE {
+            self.state = GuardState::Chasing;
+            self.destination = Some(player);
+            self.last_seen = Some(player);
+            self.alert = ALERT_DURATION;
+        } else if range <= GLIMPSE_RANGE {
+            self.state = GuardState::Investigating;
+            self.destination = self.last_seen.or(Some(player));
+            self.alert = ALERT_DURATION;
+        }
     }
 
     /// The direction the guard will try this turn, or `None` to hold (§7.4 phase 3).
@@ -257,8 +349,14 @@ impl Guard {
         self.inspected.absorb(&self.fov);
 
         if self.state != GuardState::Calm {
-            if let Some(step) = self.step_toward_destination(facility) {
-                return Some(step);
+            // Pursue the lead only while it is still warm: a guard that has arrived,
+            // has no route, or whose alert has fully cooled (§7.1) gives it up and
+            // stands back down to patrol. The bounded search that would fill the
+            // gap before giving up (§7.6 fix 2) is a later ticket.
+            if self.alert > 0 {
+                if let Some(step) = self.step_toward_destination(facility) {
+                    return Some(step);
+                }
             }
             self.stand_down();
         }
@@ -278,11 +376,15 @@ impl Guard {
         path::first_step_toward(self.pos, destination, |cell| patrollable(facility, cell))
     }
 
-    /// Drop back to Calm patrol, clearing the reactive destination so the next
-    /// [`repick_patrol_target`](Self::repick_patrol_target) chooses a fresh sweep.
+    /// Drop back to Calm patrol, clearing the reactive lead — destination, alert
+    /// timer and last-known cell — so the next
+    /// [`repick_patrol_target`](Self::repick_patrol_target) chooses a fresh sweep and
+    /// a later encounter starts clean rather than heading for a stale sighting.
     fn stand_down(&mut self) {
         self.state = GuardState::Calm;
         self.destination = None;
+        self.last_seen = None;
+        self.alert = 0;
     }
 
     /// Keep the current patrol destination while it is still worth walking to;
@@ -612,5 +714,123 @@ mod tests {
             GuardState::Calm,
             "arrived with nothing found → resume patrol",
         );
+    }
+
+    /// §7.6 two-zone detection **[START]**: the boundaries and the alert duration are
+    /// pinned so a later change is a visible edit, and the glimpse edge is exactly the
+    /// cone's own range — past it there is no cone to be seen in.
+    #[test]
+    fn the_detection_zones_and_alert_are_pinned() {
+        assert_eq!(CERTAIN_RANGE, 5, "the [START] certain zone");
+        assert_eq!(GLIMPSE_RANGE, 10, "the [START] glimpse-zone edge");
+        assert_eq!(ALERT_DURATION, 30, "the [START] alert duration");
+        assert_eq!(
+            GLIMPSE_RANGE, GUARD_SIGHT_RANGE,
+            "the glimpse edge is the cone's own range",
+        );
+    }
+
+    /// §7.6 certain zone: a player seen within [`CERTAIN_RANGE`] flips the guard to
+    /// Chasing its **live** cell and refreshes the alert timer. The last-known-precise
+    /// cell is recorded for a later glimpse to fall back on.
+    #[test]
+    fn a_player_in_the_certain_zone_is_chased_at_its_live_cell() {
+        let facility = Facility::walled_box(11, 11);
+        let mut guard = Guard::stationary(Cell::new(5, 3)); // faces south (§7.1)
+        guard.look(&facility);
+        let player = Cell::new(5, 7); // 4 cells down the cone: certain
+        assert!(guard.fov.contains(player), "precondition: in the cone");
+
+        guard.see(player, false);
+        assert_eq!(guard.state(), GuardState::Chasing);
+        assert_eq!(guard.destination, Some(player), "tracks the live cell");
+        assert_eq!(guard.last_seen, Some(player), "records the certain cell");
+        assert_eq!(guard.alert, ALERT_DURATION);
+    }
+
+    /// §7.6 glimpse zone: past [`CERTAIN_RANGE`] but within [`GLIMPSE_RANGE`] the guard
+    /// only catches imprecise movement, so it Investigates toward where it *last knew*
+    /// the player — the certain cell — not the imprecise glimpse itself.
+    #[test]
+    fn a_glimpse_investigates_toward_the_last_certain_cell() {
+        let facility = Facility::walled_box(11, 13);
+        let mut guard = Guard::stationary(Cell::new(5, 2)); // faces south
+        guard.look(&facility);
+        let certain = Cell::new(5, 6); // 4 down: certain — sets the precise memory
+        let glimpse = Cell::new(5, 10); // 8 down: glimpse
+        assert!(guard.fov.contains(glimpse), "precondition: in the cone");
+
+        guard.see(certain, false);
+        assert_eq!(guard.last_seen, Some(certain));
+
+        guard.see(glimpse, false);
+        assert_eq!(guard.state(), GuardState::Investigating);
+        assert_eq!(
+            guard.destination,
+            Some(certain),
+            "heads for where it last knew you, not the glimpse",
+        );
+        assert_eq!(guard.alert, ALERT_DURATION);
+    }
+
+    /// §10.3/§7.6: a concealed player — in a cupboard, or ducked behind the right
+    /// table — is not detected by sight even standing in the cone. This is the AND-in
+    /// the danger overlay already honours (§11.5), carried into the guard's mind.
+    #[test]
+    fn a_concealed_player_in_the_cone_is_not_seen() {
+        let facility = Facility::walled_box(11, 11);
+        let mut guard = Guard::stationary(Cell::new(5, 3));
+        guard.look(&facility);
+        let player = Cell::new(5, 7);
+        assert!(guard.fov.contains(player), "precondition: in the cone");
+
+        guard.see(player, true); // concealed from this guard
+        assert_eq!(
+            guard.state(),
+            GuardState::Calm,
+            "concealment blocks detection"
+        );
+        assert_eq!(guard.destination, None);
+        assert_eq!(guard.alert, 0);
+    }
+
+    /// §7.6 "gone" zone: beyond [`GLIMPSE_RANGE`] there is no cone to be seen in, so a
+    /// player past the guard's range is simply not in its FOV and detection does
+    /// nothing this turn.
+    #[test]
+    fn a_player_beyond_the_glimpse_range_is_not_seen() {
+        let facility = Facility::walled_box(11, 20);
+        let mut guard = Guard::stationary(Cell::new(5, 2));
+        guard.look(&facility);
+        let far = Cell::new(5, 2 + GLIMPSE_RANGE + 1); // one past the cone's range
+        assert!(!guard.fov.contains(far), "precondition: out of the cone");
+
+        guard.see(far, false);
+        assert_eq!(guard.state(), GuardState::Calm, "> 10 detects nothing");
+    }
+
+    /// §7.1/§7.6: a lead cools by one each turn nothing is sensed, and a reactive guard
+    /// whose alert reaches zero gives it up and stands back down to patrol — the honest
+    /// end of a chase whose sight was broken, ahead of the bounded search (§7.6 fix 2)
+    /// a later ticket adds. This is the anti-tracking-turret backstop: the guard cannot
+    /// pursue a stale lead forever.
+    #[test]
+    fn a_cold_lead_stands_the_guard_down() {
+        let facility = Facility::walled_box(11, 11);
+        let mut guard = Guard::patrolling(Cell::new(5, 3));
+        guard.look(&facility);
+        guard.see(Cell::new(5, 7), false);
+        assert_eq!(guard.state(), GuardState::Chasing);
+        assert_eq!(guard.alert, ALERT_DURATION);
+
+        // The player vanishes (concealed each turn): the lead cools turn by turn.
+        for remaining in (0..ALERT_DURATION).rev() {
+            guard.sense(&facility, Cell::new(5, 7), true, &[]);
+            assert_eq!(guard.alert, remaining, "the lead cools by one a turn");
+        }
+
+        // With the lead cold, deciding stands the guard down to patrol.
+        guard.decide(&facility);
+        assert_eq!(guard.state(), GuardState::Calm, "a cold lead is given up");
     }
 }

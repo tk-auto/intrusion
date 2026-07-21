@@ -33,6 +33,16 @@ impl Cell {
         self.x.abs_diff(other.x) + self.y.abs_diff(other.y)
     }
 
+    /// The Chebyshev (square-box) distance — the larger of the two axis gaps — to
+    /// `other`. This is the sight metric, not the movement one (§6.1): a viewer of
+    /// range *R* sees the `(2R+1)²` box, so this is the distance the §7.6 detection
+    /// zones (certain ≤ 5, glimpse ≤ 10) are measured in, matching how the cone is
+    /// cast. Use [`manhattan_distance`](Self::manhattan_distance) for anything about
+    /// *walking* — the two differ on diagonals.
+    pub fn sight_distance(self, other: Cell) -> u32 {
+        self.x.abs_diff(other.x).max(self.y.abs_diff(other.y))
+    }
+
     /// The neighbouring cell one step in `dir`, or `None` when that step would
     /// leave the grid's north or west edge — coordinates are unsigned, so there
     /// is no cell there to name. Stepping east or south always yields a `Cell`;
