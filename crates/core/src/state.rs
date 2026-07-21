@@ -838,7 +838,18 @@ impl State {
                 return;
             }
             let facility = self.layout.facility();
-            let Some(dir) = self.guards[i].decide(facility) else {
+            // Guards are solid to each other and path *around* a colleague (§7.8): the
+            // decider routes only through cells no other guard holds. Positions are
+            // read fresh here, so a guard sees where the colleagues that already moved
+            // this turn now stand.
+            let blocked: Vec<Cell> = self
+                .guards
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, g)| g.pos())
+                .collect();
+            let Some(dir) = self.guards[i].decide(facility, &blocked) else {
                 continue;
             };
             let Some(target) = self.guards[i].pos().step(dir) else {
@@ -1363,6 +1374,52 @@ mod tests {
             s.guards()[0].pos(),
             Cell::new(5, 4),
             "the guard cannot enter the occupied cupboard"
+        );
+    }
+
+    /// §7.8: guards are solid to each other but **path around** a colleague instead of
+    /// pathing through, failing the step, and stalling — the old deadlock. Two guards
+    /// sweep a 2-wide corridor toward destinations past one another; they must pass
+    /// (one drops to the parallel lane) without ever sharing a cell. The player waits,
+    /// concealed off the corridor, so the sweep runs untouched.
+    #[test]
+    fn two_guards_meeting_in_a_corridor_pass_without_deadlock() {
+        // A 2-wide corridor (rows 1–2) across a box; row 3 is wall except a recessed
+        // cupboard the player hides in, off the guards' lanes.
+        let mut layout = open_room(12, 5);
+        for x in 1..=10 {
+            layout.place(Cell::new(x, 3), Terrain::Wall);
+        }
+        layout.place(Cell::new(5, 3), Terrain::Hideout);
+        let guards = vec![
+            Guard::patrolling_to(Cell::new(1, 1), Cell::new(10, 1)),
+            Guard::patrolling_to(Cell::new(10, 1), Cell::new(1, 1)),
+        ];
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 3), // concealed in the cupboard, out of the lanes
+            Direction::North,
+            guards,
+            Vec::new(),
+            Cell::new(1, 3),
+        );
+        assert!(s.hidden(), "the player watches from cover");
+
+        let mut passed = false;
+        for turn in 0..40 {
+            s.step(Input::Wait);
+            let (a, b) = (s.guards()[0].pos(), s.guards()[1].pos());
+            assert_ne!(a, b, "turn {turn}: guards must never share a cell (§7.8)");
+            assert_eq!(s.outcome(), Outcome::Playing, "turn {turn}: no capture");
+            // They start with a.x < b.x; passing swaps that order — the proof the
+            // head-on meet resolved instead of deadlocking.
+            if a.x > b.x {
+                passed = true;
+            }
+        }
+        assert!(
+            passed,
+            "the guards deadlocked instead of pathing around each other (§7.8)"
         );
     }
 
