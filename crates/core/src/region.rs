@@ -312,6 +312,28 @@ impl RegionGraph {
         );
     }
 
+    /// Claim `cell` for the existing region `id`, the inverse of
+    /// [`remove_cell`](Self::remove_cell).
+    ///
+    /// The write behind recessing a cupboard into a wall (§10.1.6): a hideout is a
+    /// former *wall* cell, and a wall belongs to no region — but the recessed hideout
+    /// is walkable (the player ducks into it), so it must join the region of the
+    /// space it opens onto, or the "every walkable cell has exactly one region"
+    /// invariant (§10.5) breaks. Crate-internal, like its inverse: only generation
+    /// reshapes regions. Panics if `cell` is off the grid or already claimed by any
+    /// region — a double-claim is a generation bug.
+    pub(crate) fn add_cell(&mut self, id: RegionId, cell: Cell) {
+        let slot = self.slot(cell);
+        assert!(
+            self.index[slot].is_none(),
+            "cell {cell:?} is already claimed by {:?}",
+            self.index[slot]
+        );
+        assert!(self.is_region(id), "unknown region {id:?}");
+        self.index[slot] = Some(id);
+        self.regions[id.0 as usize].cells.push(cell);
+    }
+
     /// The region owning `cell`, or `None` for a wall, doorway, off-grid, or
     /// otherwise unclaimed cell. This is the O(1) lookup (a single indexed read).
     pub fn region_at(&self, cell: Cell) -> Option<RegionId> {
@@ -602,5 +624,30 @@ mod tests {
         let mut g = RegionGraph::new(8, 8);
         g.add_region(RegionKind::Room, [Cell::new(1, 1)]);
         g.remove_cell(Cell::new(5, 5));
+    }
+
+    /// Claiming a cell for a region (a recessed cupboard joining the space it opens
+    /// onto, §10.1.6) is the inverse of `remove_cell`: the index points at the
+    /// region and the cell joins its list. A claim then a release round-trips.
+    #[test]
+    fn add_cell_claims_an_unclaimed_cell_for_a_region() {
+        let mut g = RegionGraph::new(8, 8);
+        let id = g.add_region(RegionKind::Room, [Cell::new(1, 1)]);
+        g.add_cell(id, Cell::new(2, 1));
+        assert_eq!(g.region_at(Cell::new(2, 1)), Some(id));
+        assert!(g.region(id).cells().contains(&Cell::new(2, 1)));
+        // Round-trips with remove_cell.
+        g.remove_cell(Cell::new(2, 1));
+        assert_eq!(g.region_at(Cell::new(2, 1)), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "already claimed")]
+    fn add_cell_rejects_a_double_claim() {
+        let mut g = RegionGraph::new(8, 8);
+        // The room owns (1,1); the corridor then tries to claim it — a generation bug.
+        g.add_region(RegionKind::Room, [Cell::new(1, 1)]);
+        let corridor = g.add_region(RegionKind::Corridor, [Cell::new(3, 1)]);
+        g.add_cell(corridor, Cell::new(1, 1));
     }
 }

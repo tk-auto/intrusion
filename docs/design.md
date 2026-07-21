@@ -747,19 +747,36 @@ plumbing.
      horizontal stubs. Rejected unless its footprint grown by 1 is clear.
    - **Pillar** (needs ≥ 6×6): a freestanding block, random **2–4** by **2–4**.
      Rejected unless its footprint grown by 1 is clear.
-   - **Pillars must come before hideouts** — they are what creates the 2-cell-thick
-     geometry hideouts need.
-6. **Hideouts.** Furnish the hiding-game board with **cupboards**: a floor cell set
-   **against a wall or a pillar face** (protruding, never floating in open ground)
-   becomes a hideout. Place them **along the corridor network and near junctions**,
-   not only in rooms — the flight path is where cover is needed (§7.6, §10.1a) — and
-   **do not stop at the first failure.** Space them out (a single **[START]** knob)
-   so the facility still reads as a building, and never let one wall off a patrol
-   route. Pillars must exist first (step 5), since a pillar face is a valid backing.
-   *(The original rule — "a wall cell with exactly 3 wall neighbours and 1 empty
-   neighbour, one attempt per room" — described a carved 1-deep niche and harvested
-   only the rare natural pockets; that is exactly what left the old game with no
-   board. The cupboard is placed deliberately instead of harvested.)*
+   - **Pillars must come before hideouts** — a pillar is a ready-made ≥2-thick block,
+     so a pillar face is valid backing for a recessed cupboard (step 6).
+
+   **Step 5a — Thicken walls.** Thicken roughly **a third** of the interior walls to
+   two cells (a single **[START]** knob), always growing **into a room, never into a
+   corridor** — a corridor is 2–4 wide and eating a lane could single-file it, whereas
+   a room is ≥6 and only loses an edge strip (never past the 6×6 minimum). Each eaten
+   cell is validated exactly like a sightline blocker (it may not sever a patrol route
+   or split a region) and kept clear of door throats. This gives cupboards their
+   backing (step 6) and the facility some pilasters/buttresses; because it only *adds*
+   wall it can never lengthen a sightline. Runs after doorways (so a thick wall dodges
+   a throat) and before hideouts.
+6. **Hideouts.** Furnish the hiding-game board with **cupboards recessed into the
+   walls**: a wall-line cell with **exactly one floor neighbour (the mouth) and three
+   solid wall neighbours** becomes a hideout — flush with the wall, backed and
+   flanked, so it can be neither walked nor seen *through* to the far side (no cupboard
+   traversal, no peephole). That geometry is what step 5a's two-thick walls and the
+   pillar faces manufacture. Recessing is a **wall → hideout** rewrite, so unlike a
+   floor-cell cupboard it cannot pinch a patrol route (a wall and a hideout both block
+   pathing); the recessed cell joins the region it opens onto so "which room am I in"
+   still answers for a hidden player. Place them **along the corridor network and near
+   junctions**, not only in rooms — the flight path is where cover is needed (§7.6,
+   §10.1a) — and **do not stop at the first failure.** Space them out (a single
+   **[START]** knob) so the facility still reads as a building; the spacing also keeps
+   a cupboard's own backing intact, since the two faces of a thickened wall sit one
+   cell apart. *(The original rule — "a wall cell with exactly 3 wall neighbours and 1
+   empty neighbour, one attempt per room" — harvested only the rare natural pockets,
+   which is what left the old game with no board. Same three-solid-sides geometry now,
+   but the backing is **manufactured** by step 5a and the cupboard placed deliberately
+   rather than harvested.)*
 7. **Entry/exit and player** go in the **largest room**, at random empty cells.
 8. **Objectives** go in any room *except* the start room.
 9. **Guards** go in any room *except* the start room.

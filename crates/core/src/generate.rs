@@ -106,6 +106,19 @@ const PILLAR_MAX_SIDE: u32 = 4;
 /// cover. Density is the open tuning knob here (§10.1a, §15.2) — a single named value.
 const HIDEOUT_MIN_SPACING: u32 = 7;
 
+/// Roughly one interior wall run in this many is thickened to two cells before the
+/// cover and hideout passes (§10.1.5, the [`thicken_walls`] pass) **[START]**. A
+/// two-thick wall is the backing a **recessed** cupboard needs (§10.1.6) and reads
+/// as a pilaster/buttress rather than a bare partition. Not every wall — "a third of
+/// them" keeps the facility from turning fortress-thick; the value is the single
+/// named knob. `1` here would thicken every eligible run, higher numbers fewer.
+const WALL_THICKEN_ONE_IN: u32 = 3;
+
+/// The shortest wall run [`thicken_walls`] will thicken. Below this a thickened
+/// stretch has no flush interior cell (one whose lateral neighbours along the wall
+/// are both solid), so it would seed no recessed cupboard and only eat room floor.
+const WALL_THICKEN_MIN_RUN: u32 = 3;
+
 /// No unbroken straight sightline may exceed this many cells — §10.1a, the
 /// generator's most important job after connectivity. The *rule* is **[SETTLED]**;
 /// the value is **[START]**: the design band is 10–12, "roughly a guard's sight
@@ -321,17 +334,27 @@ fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenEr
     // named (§10.1.4). Runs on the finished grid so it sees the true walls.
     place_doorways(&mut facility, &mut regions, rng);
 
-    // §10.1a: break every straight sightline longer than SIGHTLINE_MAX_RUN with
-    // stamped partial cover (tables) — after doorways so the tables keep clear
-    // of door throats, and before hideouts so the cupboard pass sees the final
-    // floor. (A table does not *back* a cupboard — only walls and pillars do; a
-    // cupboard against see-through furniture would read as standing in the open.)
-    break_sightlines(&mut facility, &mut regions, rng);
+    // Step 5a (§10.1.5): thicken about a third of the interior walls to two cells,
+    // giving recessed cupboards their solid backing (§10.1.6) and the facility some
+    // buttresses. After doorways so a thickened wall steers clear of a throat, and
+    // before the hideout pass so it sees the true, thick walls. Adding wall can only
+    // *shorten* sightlines, never lengthen one, so this never fights the §10.1a rule.
+    thicken_walls(&mut facility, &mut regions, rng);
 
-    // Step 6: the hiding-game board — concealment cupboards set against walls and
-    // pillar faces, spread along the flight paths (§10.1.6, §10.1a). After doorways
-    // so a cupboard can steer clear of a door throat.
-    place_hideouts(&mut facility, &regions, rng);
+    // Step 6: the hiding-game board — concealment cupboards **recessed** into the
+    // two-thick walls and pillar faces, spread along the flight paths (§10.1.6,
+    // §10.1a). Before the sightline pass, not after: a recessed cupboard is
+    // see-through, so it must be on the grid when §10.1a is measured and repaired, or
+    // a run lengthened by one open recess could slip past uncovered. (Ordering is now
+    // free to put it here — `recess_site` demands three *wall* neighbours, so a table
+    // can never back a cupboard whether it is stamped before or after.)
+    place_hideouts(&mut facility, &mut regions, rng);
+
+    // §10.1a: break every straight sightline longer than SIGHTLINE_MAX_RUN with
+    // stamped partial cover (tables) — last of the sight-affecting passes, so it
+    // measures and repairs the final grid, thick walls and open recesses included,
+    // and `passes_guarantees` re-asserts the result.
+    break_sightlines(&mut facility, &mut regions, rng);
 
     debug_assert!(corridors > 0, "guarded footprint yielded no corridor");
     Ok(Layout { facility, regions })
@@ -1004,33 +1027,193 @@ fn offset(cell: Cell, (dx, dy): (i32, i32)) -> Cell {
     Cell::new((cell.x as i32 + dx) as u32, (cell.y as i32 + dy) as u32)
 }
 
-/// Carve the hiding-game board: concealment **cupboards** set against walls and
-/// pillar faces, spread along the flight paths (§10.1.6, §10.1a).
+/// Thicken about a third of the interior walls to two cells (§10.1.5).
 ///
-/// A hideout is a floor cell backed by structure — never floating in open ground —
-/// so it reads as a cupboard the player ducks into. Empty it is walk-through yet
-/// blocks pathing, so a guard patrol routes *around* it while the player slips *in*;
-/// occupied it is solid and conceals its occupant (the vision ticket reads that
-/// concealment, §11.5a). The old generator harvested rare three-walled wall-pockets,
-/// one attempt per room, stopping at the first failure — so during a chase there was
-/// nowhere to hide and the hiding game had no board (§10.1a). This places them
-/// deliberately: **corridors and junctions first** (where the player flees), rooms
-/// after, spaced out, and it never stops at the first failure. Placement keeps guard
-/// pathing connected — a candidate that would wall a patrol route off is skipped
-/// ([`severs_pathing`]).
-fn place_hideouts(facility: &mut Facility, regions: &RegionGraph, rng: &mut Rng) {
-    // Candidate cupboard sites, split so the flight paths are served first: a
-    // structure-backed floor cell in a corridor outranks one in a room.
-    let mut corridor: Vec<Cell> = Vec::new();
-    let mut room: Vec<Cell> = Vec::new();
-    for (id, region) in regions.regions() {
-        let bucket = match regions.kind(id) {
-            RegionKind::Corridor => &mut corridor,
-            RegionKind::Room => &mut room,
-        };
-        for &cell in region.cells() {
-            if is_cupboard_site(facility, cell) {
-                bucket.push(cell);
+/// A one-cell wall backs nothing: a cupboard cut into it would open straight through
+/// to the far side (§10.1.6 forbids that traversal / sight-leak). So before the
+/// hideout pass this thickens roughly `1 / WALL_THICKEN_ONE_IN` of the interior wall
+/// runs to two cells, giving those cupboards solid backing and the facility a few
+/// pilasters. Every thickened run grows **into a room**, never into a corridor — a
+/// corridor is 2–4 wide and eating a lane could single-file it (the [SETTLED]
+/// no-single-file rule), whereas a room is ≥6 and only loses an edge strip. Each
+/// candidate cell is validated exactly like a sightline blocker ([`severs_pathing`],
+/// [`splits_region`]) and kept clear of door throats, so thickening never seals a
+/// route, splits a space, or clogs a doorway. Adding wall only ever shortens
+/// sightlines, so the §10.1a rule below is untouched.
+fn thicken_walls(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
+    let (w, h) = (facility.width(), facility.height());
+    let mut runs: Vec<WallRun> = Vec::new();
+    for y in 1..h - 1 {
+        collect_wall_runs(facility, Line::Row(y), w, &mut runs);
+    }
+    for x in 1..w - 1 {
+        collect_wall_runs(facility, Line::Col(x), h, &mut runs);
+    }
+    for run in runs {
+        if run.len < WALL_THICKEN_MIN_RUN || rng.below(WALL_THICKEN_ONE_IN) != 0 {
+            continue;
+        }
+        thicken_run(facility, regions, &run);
+    }
+}
+
+/// A maximal straight run of plain wall cells along one scan line — the unit
+/// [`thicken_walls`] decides to thicken or leave.
+#[derive(Clone, Copy)]
+struct WallRun {
+    line: Line,
+    start: u32,
+    len: u32,
+}
+
+/// Walk one scan line and push each maximal run of plain [`Terrain::Wall`] cells,
+/// interior only (the caller scans `1..extent-1`, so the border ring is never a run).
+fn collect_wall_runs(facility: &Facility, line: Line, extent: u32, out: &mut Vec<WallRun>) {
+    let mut start: Option<u32> = None;
+    for i in 1..extent - 1 {
+        let is_wall = facility.terrain(line.cell(i)) == Some(Terrain::Wall);
+        match (start, is_wall) {
+            (None, true) => start = Some(i),
+            (Some(s), false) => {
+                out.push(WallRun {
+                    line,
+                    start: s,
+                    len: i - s,
+                });
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        out.push(WallRun {
+            line,
+            start: s,
+            len: extent - 1 - s,
+        });
+    }
+}
+
+/// Thicken one wall run by one cell on its room-facing side. The side is chosen once
+/// for the whole run — whichever flank holds more room floor — so the second course
+/// of wall is a clean parallel line, not a ragged one; a run with no room floor on
+/// either side (both flanks corridor, or one the border) is left alone.
+fn thicken_run(facility: &mut Facility, regions: &mut RegionGraph, run: &WallRun) {
+    let (mut near_room, mut far_room) = (0u32, 0u32);
+    for i in run.start..run.start + run.len {
+        let (near, far) = run.line.flanks(i);
+        near_room += is_room_floor(facility, regions, near) as u32;
+        far_room += is_room_floor(facility, regions, far) as u32;
+    }
+    if near_room == 0 && far_room == 0 {
+        return;
+    }
+    let use_near = near_room >= far_room;
+    for i in run.start..run.start + run.len {
+        let (near, far) = run.line.flanks(i);
+        thicken_cell(facility, regions, if use_near { near } else { far });
+    }
+}
+
+/// Turn one room-floor cell into wall — the atomic thickening step — if it is safe:
+/// the cell must be room floor, clear of any door throat, and its removal must
+/// neither sever a patrol route ([`severs_pathing`]) nor split its room
+/// ([`splits_region`]). Keeps the grid and region graph in lockstep.
+fn thicken_cell(facility: &mut Facility, regions: &mut RegionGraph, cell: Cell) {
+    if !is_room_floor(facility, regions, cell)
+        || facility
+            .neighbors(cell)
+            .any(|n| facility.terrain(n).is_some_and(is_door_terrain))
+        || thinning_underruns_room(facility, regions, cell)
+        || severs_pathing(facility, cell)
+        || splits_region(regions, cell)
+    {
+        return;
+    }
+    facility.set_terrain(cell.x, cell.y, Terrain::Wall);
+    regions.remove_cell(cell);
+}
+
+/// Whether eating `cell` would shrink its room's floor below the §10.1 6×6 minimum.
+///
+/// Thickening erodes a room's edge, and a room is only ever ≥6×6 by construction
+/// (`MIN_LEFTOVER`) — so without this guard a run down a just-minimal room's wall
+/// would thin it to 5. Measures the room's floor bounding box *without* `cell`; the
+/// check is stateful across a run, so thickening eats an edge only while the room
+/// keeps its margin and stops the moment it would breach the minimum.
+fn thinning_underruns_room(facility: &Facility, regions: &RegionGraph, cell: Cell) -> bool {
+    let Some(id) = regions.region_at(cell) else {
+        return false;
+    };
+    let (mut x0, mut x1, mut y0, mut y1) = (u32::MAX, 0u32, u32::MAX, 0u32);
+    let mut any = false;
+    for &c in regions.region(id).cells() {
+        if c == cell || facility.terrain(c) != Some(Terrain::Floor) {
+            continue;
+        }
+        any = true;
+        x0 = x0.min(c.x);
+        x1 = x1.max(c.x);
+        y0 = y0.min(c.y);
+        y1 = y1.max(c.y);
+    }
+    !any || (x1 - x0 + 1) < MIN_LEFTOVER || (y1 - y0 + 1) < MIN_LEFTOVER
+}
+
+/// Whether `cell` is plain floor owned by a **room** (not a corridor). Thickening
+/// only ever grows into rooms, so this is the "may I eat this cell" test.
+fn is_room_floor(facility: &Facility, regions: &RegionGraph, cell: Cell) -> bool {
+    facility.terrain(cell) == Some(Terrain::Floor)
+        && regions.region_at(cell).map(|id| regions.kind(id)) == Some(RegionKind::Room)
+}
+
+/// Whether `terrain` is part of a doorway — a hinge or either panel pose (§10.4).
+fn is_door_terrain(terrain: Terrain) -> bool {
+    matches!(
+        terrain,
+        Terrain::DoorHinge | Terrain::DoorPanelClosed | Terrain::DoorPanelOpen
+    )
+}
+
+/// Carve the hiding-game board: concealment **cupboards recessed into the walls**,
+/// spread along the flight paths (§10.1.6, §10.1a).
+///
+/// A cupboard is a wall-line cell the player *ducks into*: flush with the surrounding
+/// wall, backed by solid structure. Empty it is walk-through yet blocks pathing, so a
+/// guard patrol routes *around* it while the player slips *in*; occupied it is solid
+/// and conceals its occupant (the vision ticket reads that concealment, §11.5a). The
+/// old generator harvested rare three-walled floor pockets, one attempt per room,
+/// stopping at the first failure — so during a chase there was nowhere to hide and
+/// the hiding game had no board (§10.1a). This places them deliberately, into the
+/// backing the thicken pass and the pillars manufacture: **corridors and junctions
+/// first** (where the player flees), rooms after, spaced out, never stopping at the
+/// first failure.
+///
+/// A recess is a **wall → hideout** rewrite, which is why it needs no `severs_pathing`
+/// guard: a wall blocks pathing and so does a hideout, so the walkable graph is
+/// untouched (only the current floor→hideout of the old design could pinch a route).
+/// The site test ([`recess_site`]) demands three solid sides, so the cupboard can
+/// never be walked or seen *through* to the far side; the spacing then keeps a
+/// cupboard's own solid backing intact — the corridor-facing and room-facing cells of
+/// one thickened stretch sit one apart, so taking one bars the other.
+fn place_hideouts(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
+    // Candidate recess sites — wall cells with one floor mouth — split so the flight
+    // paths are served first: a cupboard opening onto a corridor outranks one onto a
+    // room. Each carries the mouth it opens through, which names its bucket and,
+    // later, the region it joins.
+    let (w, h) = (facility.width(), facility.height());
+    let mut corridor: Vec<(Cell, Cell)> = Vec::new();
+    let mut room: Vec<(Cell, Cell)> = Vec::new();
+    for y in 1..h - 1 {
+        for x in 1..w - 1 {
+            let cell = Cell::new(x, y);
+            let Some(mouth) = recess_site(facility, cell) else {
+                continue;
+            };
+            match regions.region_at(mouth).map(|id| regions.kind(id)) {
+                Some(RegionKind::Corridor) => corridor.push((cell, mouth)),
+                Some(RegionKind::Room) => room.push((cell, mouth)),
+                None => {}
             }
         }
     }
@@ -1040,53 +1223,69 @@ fn place_hideouts(facility: &mut Facility, regions: &RegionGraph, rng: &mut Rng)
     shuffle(&mut room, rng);
 
     let mut placed: Vec<Cell> = Vec::new();
-    for cell in corridor.into_iter().chain(room) {
-        // Spacing: keep cupboards spread along a path, and never block both lanes of
-        // a 2-wide corridor at one cross-section.
+    for (cell, mouth) in corridor.into_iter().chain(room) {
+        // Spacing keeps cupboards spread along a path — and, since the two faces of a
+        // thickened wall are one cell apart, keeps every cupboard's backing solid.
         if placed
             .iter()
             .any(|&p| p.manhattan_distance(cell) < HIDEOUT_MIN_SPACING)
         {
             continue;
         }
-        // A cupboard blocks pathing (§10.3); never let one sever a patrol route.
-        if severs_pathing(facility, cell) {
-            continue;
-        }
-        // Prefer not to crowd a floor cell's usable line (§11.4): a cupboard
-        // beside a cell that already borders a door, a table or another cupboard
-        // is skipped. Cupboards are best-effort furniture with plentiful sites
-        // (§10.1.6), so skipping here only improves the spread — nothing depends
-        // on this particular cell taking one.
+        // Prefer not to crowd the mouth's usable line (§11.4): a cupboard whose mouth
+        // already borders a door, a table or another cupboard is skipped. Cupboards
+        // are best-effort furniture with plentiful sites, so skipping only improves
+        // the spread.
         if creates_usable_conflict(facility, cell) {
             continue;
         }
+        // A recessed cupboard is walkable, so it joins the region it opens onto — the
+        // space the player is *in* when ducked inside it (§10.5).
+        let region = regions
+            .region_at(mouth)
+            .expect("a recess mouth is claimed floor");
         facility.set_terrain(cell.x, cell.y, Terrain::Hideout);
+        regions.add_cell(region, cell);
         placed.push(cell);
     }
 }
 
-/// Whether `cell` can hold a cupboard: a floor cell backed by a wall or pillar face
-/// on at least one side — so it never floats in open ground — and clear of any door
-/// cell, so a cupboard never clogs a doorway (§10.1a, §10.4). Pillars are wall
-/// terrain, so a floor cell against a pillar qualifies, which is what gives a pillared
-/// room its hiding spots.
-fn is_cupboard_site(facility: &Facility, cell: Cell) -> bool {
-    if facility.terrain(cell) != Some(Terrain::Floor) {
-        return false;
+/// Whether the wall cell `cell` can host a **recessed** cupboard, and if so the floor
+/// **mouth** the player bumps it from (§10.1.6).
+///
+/// A clean recess is a wall cell with **exactly one floor neighbour and three wall
+/// neighbours** — flush with the wall line, backed and flanked by solid opaque wall.
+/// The three-wall requirement is the safety guarantee: a cupboard cut here can be
+/// neither walked nor seen *through* to whatever is on the far side (§10.1.6). It is
+/// the very geometry a two-thick wall (its inner and outer courses) and a pillar face
+/// both offer — which is why [`thicken_walls`] runs first. Any door cell on a flank
+/// fails the exactly-three-wall count, so doorways stay clear without a special case.
+fn recess_site(facility: &Facility, cell: Cell) -> Option<Cell> {
+    if facility.terrain(cell) != Some(Terrain::Wall) {
+        return None;
     }
-    let mut backed = false;
+    let mut mouth = None;
+    let mut walls = 0;
     for n in facility.neighbors(cell) {
         match facility.terrain(n) {
-            Some(Terrain::Wall) => backed = true,
-            // A door throat on any flank disqualifies the cell — keep doorways clear.
-            Some(Terrain::DoorHinge)
-            | Some(Terrain::DoorPanelClosed)
-            | Some(Terrain::DoorPanelOpen) => return false,
-            _ => {}
+            Some(Terrain::Floor) => {
+                if mouth.is_some() {
+                    return None; // a second opening — not backed on three sides
+                }
+                mouth = Some(n);
+            }
+            Some(Terrain::Wall) => walls += 1,
+            // A hinge, panel, table, hideout or open floor gap on a flank means the
+            // recess is not cleanly walled in — skip it.
+            _ => return None,
         }
     }
-    backed
+    // An interior cell has four neighbours, so this is exactly one floor + three wall.
+    if walls == 3 {
+        mouth
+    } else {
+        None
+    }
 }
 
 /// Whether turning `cell` into a hideout would sever guard pathing (§10.3) — the
@@ -1429,6 +1628,20 @@ mod tests {
         (x1 - x0 + 1, y1 - y0 + 1)
     }
 
+    /// The bounding box of a region's **floor lane** — its cells minus the recessed
+    /// cupboards on the wall line. Room-size and corridor-width are guarantees about
+    /// the walkable lane (§10.1); a cupboard recessed into a wall joins the region it
+    /// opens onto (§10.1.6) but sits *outside* that lane, so it must not count toward
+    /// the lane's extent.
+    fn floor_bbox(facility: &Facility, cells: &[Cell]) -> (u32, u32) {
+        let floor: Vec<Cell> = cells
+            .iter()
+            .copied()
+            .filter(|&c| facility.terrain(c) == Some(Terrain::Floor))
+            .collect();
+        bbox(&floor)
+    }
+
     fn regions_of_kind(layout: &Layout, kind: RegionKind) -> usize {
         layout
             .regions()
@@ -1471,7 +1684,7 @@ mod tests {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (_, region) in layout.regions().regions() {
                 if region.kind() == RegionKind::Corridor {
-                    let (w, h) = bbox(region.cells());
+                    let (w, h) = floor_bbox(layout.facility(), region.cells());
                     let narrow = w.min(h);
                     assert!(
                         (CORRIDOR_MIN_WIDTH..=CORRIDOR_MAX_WIDTH).contains(&narrow),
@@ -1482,14 +1695,15 @@ mod tests {
         }
     }
 
-    /// Every room is a rectangle, always ≥ 6×6 (§10.1).
+    /// Every room's floor lane is always ≥ 6×6 (§10.1) — the thicken pass (§10.1.5)
+    /// may erode a wall inward, but never past the minimum ([`thinning_underruns_room`]).
     #[test]
     fn rooms_are_at_least_6x6() {
         for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (_, region) in layout.regions().regions() {
                 if region.kind() == RegionKind::Room {
-                    let (w, h) = bbox(region.cells());
+                    let (w, h) = floor_bbox(layout.facility(), region.cells());
                     assert!(w >= 6 && h >= 6, "seed {seed}: room {w}x{h} below 6x6");
                 }
             }
@@ -1497,15 +1711,17 @@ mod tests {
     }
 
     /// The §10.6 guarantee, and the reason the graph exists (§10.5): every walkable
-    /// interior cell belongs to exactly one region, every wall to none. A hideout is
-    /// a former floor cell that stays owned by its region — it is a spot *in* the
-    /// room or corridor, so cell → region still answers for someone standing in it —
-    /// so the walkable interior is floor-or-hideout. Nothing is "painted and forgotten".
+    /// interior cell belongs to exactly one region, every wall to none. A recessed
+    /// hideout is a former *wall* cell that the cupboard pass claims for the region it
+    /// opens onto (§10.1.6) — it is a spot *in* that room or corridor, so cell → region
+    /// still answers for someone ducked inside — so the walkable interior is
+    /// floor-or-hideout. Nothing is "painted and forgotten".
     #[test]
     fn every_walkable_cell_belongs_to_exactly_one_region() {
-        // Many seeds, because the sightline pass now *removes* cells from regions
-        // (a table turns claimed floor into solid cover) — lockstep must survive
-        // that.
+        // Many seeds, because generation both *removes* cells from regions (a table
+        // turns claimed floor into solid cover; a thickened wall eats room floor) and
+        // *adds* them (a recessed cupboard claims a wall cell) — lockstep must survive
+        // both.
         for seed in seed_sweep(64) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let facility = layout.facility();
@@ -1910,35 +2126,77 @@ mod tests {
         }
     }
 
-    /// Every hideout is a cupboard: backed by a wall or pillar face, never floating,
-    /// never clogging a door throat, and always enterable from open floor.
+    /// Every hideout is a **flush recess** (§10.1.6): a wall-line cell with **exactly
+    /// one floor neighbour** — the mouth the player bumps it from — and **three solid
+    /// wall neighbours**. The three walls are the safety guarantee: the cupboard is
+    /// backed and flanked, so it can be neither walked nor seen *through* to the far
+    /// side, and it never clogs a door throat (a door cell on a flank would break the
+    /// exactly-three-wall count). This is the geometry the thicken pass and the pillars
+    /// manufacture.
     #[test]
-    fn every_hideout_is_a_wall_backed_cupboard() {
+    fn every_hideout_is_a_flush_recess() {
         for seed in seed_sweep(200) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             let f = layout.facility();
             for c in hideout_cells(&layout) {
-                let mut wall_backed = false;
-                let mut enterable = false;
-                for n in f.neighbors(c) {
-                    match f.terrain(n) {
-                        Some(Terrain::Wall) => wall_backed = true,
-                        Some(Terrain::DoorHinge)
-                        | Some(Terrain::DoorPanelClosed)
-                        | Some(Terrain::DoorPanelOpen) => {
-                            panic!("seed {seed}: hideout {c:?} clogs a door throat")
-                        }
-                        Some(Terrain::Floor) => enterable = true,
-                        _ => {}
-                    }
-                }
-                assert!(wall_backed, "seed {seed}: hideout {c:?} is not wall-backed");
-                assert!(
-                    enterable,
-                    "seed {seed}: hideout {c:?} cannot be stepped into"
+                let neighbours: Vec<Terrain> =
+                    f.neighbors(c).filter_map(|n| f.terrain(n)).collect();
+                assert_eq!(
+                    neighbours.len(),
+                    4,
+                    "seed {seed}: hideout {c:?} is on the border, not an interior recess"
+                );
+                let floors = neighbours.iter().filter(|&&t| t == Terrain::Floor).count();
+                let walls = neighbours.iter().filter(|&&t| t == Terrain::Wall).count();
+                assert_eq!(
+                    (floors, walls),
+                    (1, 3),
+                    "seed {seed}: hideout {c:?} is not a flush recess (1 floor mouth + 3 wall), \
+                     neighbours {neighbours:?}"
                 );
             }
         }
+    }
+
+    /// A corridor-facing cupboard is proof the thicken pass (§10.1.5) did structural
+    /// work: a bare corridor flank is one cell thick, so its wall cell has a corridor
+    /// floor on one side *and a room floor on the other* — two floor neighbours, which
+    /// [`recess_site`] rejects. A cupboard can open onto a corridor **only** where the
+    /// flank was thickened to two, giving the wall cell a solid back. So a corridor
+    /// hideout, backed by wall, with room floor two steps in, could not exist without
+    /// the pass. Asserted in aggregate over the sweep.
+    #[test]
+    fn corridor_cupboards_require_a_thickened_wall() {
+        let mut found = 0;
+        for seed in seed_sweep(200) {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let (f, regions) = (layout.facility(), layout.regions());
+            for c in hideout_cells(&layout) {
+                let opens_on_corridor = regions
+                    .region_at(c)
+                    .is_some_and(|id| regions.kind(id) == RegionKind::Corridor);
+                if !opens_on_corridor {
+                    continue;
+                }
+                // The mouth is the sole floor neighbour; the backing is opposite it.
+                let mouth = f
+                    .neighbors(c)
+                    .find(|&n| f.terrain(n) == Some(Terrain::Floor))
+                    .unwrap();
+                let (dx, dy) = (c.x as i32 - mouth.x as i32, c.y as i32 - mouth.y as i32);
+                let backing = Cell::new((c.x as i32 + dx) as u32, (c.y as i32 + dy) as u32);
+                assert_eq!(
+                    f.terrain(backing),
+                    Some(Terrain::Wall),
+                    "seed {seed}: corridor cupboard {c:?} is not solidly backed"
+                );
+                found += 1;
+            }
+        }
+        assert!(
+            found > 0,
+            "no corridor cupboards over the sweep — the thicken pass is not producing backing"
+        );
     }
 
     /// Cupboards are spread, not banked: no two hideouts sit within the spacing
