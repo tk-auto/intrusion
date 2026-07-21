@@ -187,8 +187,8 @@ not the goal.
 ### 4.1 The grid
 
 - Square grid of integer cells. **[SETTLED]**
-- **Movement is 4-directional.** No diagonals. **[SETTLED]** — it keeps distance,
-  vision and sound coherent, and it is the game's texture.
+- **Movement is 4-directional.** No diagonals. **[SETTLED]** — it keeps distance
+  and vision coherent, and it is the game's texture.
 - Distances are **Manhattan** (steps), except sight range, which is a **square
   box** (see §6.1).
 - The facility is always fully enclosed by an indestructible 1-cell border.
@@ -271,6 +271,7 @@ If you are adding an ability and about to make it free, re-read §2.3.
 |---|---|
 | Sight range | **15** (a 31×31 box) **[START]** |
 | Sight arc | **~180°** forward half-disc **[START]** |
+| **Guard-sense range** | **10** (21×21 box), **20 while waiting** — through walls, position only (§9) **[START]** |
 | Facing | Direction of last successful step |
 | Speed | 1 cell/turn |
 
@@ -278,7 +279,10 @@ If you are adding an ability and about to make it free, re-read §2.3.
 move does not change facing. **[SETTLED]** — this is what makes *Wait* meaningful
 and what makes corners tense.
 
-The player out-senses guards on both range (15 vs 10) and arc (180° vs 90°). This
+The player out-senses guards on both range (15 vs 10) and arc (180° vs 90°), and
+— crucially — **sees them coming through walls** (§9): a guard within the
+guard-sense range shows as a bare dot at its exact cell even with no line of
+sight, though its *cone* stays hidden until you can actually see it. This
 asymmetry is the foundation of the whole game: **avoidance is viable because you
 see them first.** Do not erode it casually.
 
@@ -396,9 +400,13 @@ Why this is the right mechanic:
   down is a future appointment. Three takedowns is three clocks running at once.
   The strategy *scales badly on its own* — no rule is needed to ban a full clear,
   it collapses under its own weight.
-- **It is diegetic and legible.** The player can *hear* the pings (§9), so they
-  know the clock exists and roughly when it fires. That makes it plannable, which
-  is the pillar about giving enough information to strategise.
+- **It is diegetic and legible.** The player can *read* the pings — a near-line
+  message when control pings, and, because guard positions are sensed through
+  walls (§9), the dispatched responder is a **dot that visibly peels off toward
+  the silent post.** So the player knows the clock exists and roughly when it
+  fires. That makes it plannable, which is the pillar about giving enough
+  information to strategise. *(This tell was going to be a **sound** — a ping the
+  player heard, §9. Sound is gone; make the tell visual from the start.)*
 - **It gives hiding a body a real payoff** — a hidden body still misses its ping,
   so hiding buys you the *investigation* being confused rather than the
   investigation not happening.
@@ -415,7 +423,7 @@ See §15.
 | **Calm** | yellow | Default | Patrols (§7.5) |
 | **Alerted** | orange | Alert timer > 0, nothing seen this turn | Walks to its destination, then **searches** it (§7.6) |
 | **Chasing** | red | Player detected this turn | Destination ← player's live cell; alert timer ← 30; step along shortest path |
-| **Investigating** | red | A decoy or a sound detected | As Chasing, but toward the source, and reported at lower severity |
+| **Investigating** | red | A decoy seen, or a glimpse in the outer zone (§7.6) | As Chasing, but toward where it thinks you are, and reported at lower severity |
 | **Responding** | orange | Dispatched by a missed radio ping (§7.3) | Walks to the silent guard's post |
 
 ### 7.5 Patrol
@@ -651,59 +659,116 @@ ability space, and its absence actively distorted the design.
 
 ---
 
-## 9. Sound
+## 9. Sensing guards
 
-**Guards were deaf. This is the single largest missing system, and it is the one
-most likely to make the game good.** A full propagation model existed, was
-serialised into saves, and was never given a single source.
+Sound was meant to be the channel that let the player steer guard attention and
+track threats around corners — *"a second information channel that works around
+corners"*. It was the most-built and most-praised idea in the old design, and it
+was tried in this rebuild: a full cell-to-cell propagation field, guards that
+hear, a loudness ladder, a "how far you were heard" overlay.
 
-Sound is what makes a stealth game a *stealth* game rather than a
-line-of-sight puzzle. It is the channel by which the player has agency over guard
-attention, and the channel by which the player is punished for haste.
+**It came out obscure and not fun.** An invisible field, tuned by numbers with no
+on-screen consequence, doing its work behind the UI. §15 Q3 — *"how is sound
+presented?"* — was never answered because the honest answer is *it wasn't*, and
+**an invisible sound system is a missing one.** The complexity was real; the fun
+was not.
 
-### 9.1 Propagation
+So this rebuild **drops sound entirely** and keeps only the thing sound was
+actually *for*: the player knowing, around corners, where the threats are. That
+channel is now **direct**, and it is the inverse of sound's failure — sound was a
+hidden model with a visible-nowhere presentation; the sense is a **visible model
+with an obvious presentation.**
 
-- Sound spreads **cell to cell through walkable space**, cardinally, losing
-  intensity per step. **[SETTLED]** — this is the key property: **sound flows
-  around walls, not through them.** A sound's reach is its *path* distance, not
-  its straight-line distance. Shouting through a wall does nothing; shouting down
-  a corridor carries.
-- **Closed doors attenuate heavily. Open doors don't.** Which turns every door
-  into a sound decision as well as a sight decision, and gives "close the door
-  behind you" a point.
-- A guard hears a sound if its intensity at the guard's cell exceeds a threshold.
-  It then switches to Investigating with the *source* as its destination —
-  **or, better, with its best guess at the source [OPEN]**, so that sound gives
-  approximate rather than perfect information.
+- **Guards detect only on vision (§6, §7). [SETTLED]** They do not hear. There is
+  no noise, no propagation, no hearing check. Running, slamming a door, dropping a
+  body — none of it draws a guard. **The only thing that gives you away is being
+  *seen*.**
+- **The player senses guards through walls.** Within a range, the player always
+  knows the **exact cell** each guard stands in, wall or no wall — a location
+  *hint*, and nothing more. **Facing and the vision cone are shown only for a
+  guard the player can actually see** (§6). Sensed-not-seen is a dot on the map;
+  seen is the full threat, with its cone and the danger overlay.
 
-### 9.2 What makes noise
+> **Consequence to state, not relitigate.** With guards deaf, **haste has no
+> detection cost of its own** — running and slamming doors no longer draw anyone;
+> the only downside of moving fast or loud is being *seen* doing it. And "close
+> the door behind you" keeps its point through **sight**, not sound: a closed door
+> still blocks line of sight (§10.3) and is still evidence someone passed
+> (§10.4). It simply no longer muffles anything.
 
-**[START]** — this table is the primary tuning surface for the whole game's
-tension. Get it wrong and the game is either trivial or unplayable.
+### 9.1 The sense
 
-| Action | Noise |
+**[START]** — the two numbers below are the tuning surface, pinned by tests so any
+later change is a deliberate, visible edit.
+
+| Property | Value |
 |---|---|
-| Moving normally | **Low** — audible only very close |
-| Running | **High** |
-| Opening/closing a door | **Medium** |
-| A takedown | **Medium** |
-| A body hitting the floor | **Medium** |
-| Dragging a body | **Low, continuous** |
-| Waiting, camouflaged, dephased | **None** |
-| A radio ping (§7.3) | **Low, from the guard's position** — this is how the player learns the clock |
-| Guards talking, patrolling | **Low** — *guards make noise too*, which is how the player tracks them through walls |
+| Range | **10** (a 21×21 box, the shape of sight) **[START]** |
+| Range while **waiting** | **20** (a 41×41 box) **[START]** |
+| Reveals | The guard's **exact cell** |
+| Does **not** reveal | Facing, vision cone — anything about where it is *looking* |
 
-That last row matters: **if guards are audible, the player has a second
-information channel that works around corners**, which is exactly the
-"enough information to plan" pillar, and it gives the 90° cone something to
-trade against.
+- **Range is a square box**, same shape as sight (§6.1) — cheap, consistent, and
+  it makes "within sight range" and "within sense range" the same shape at
+  different sizes. **[START]** — box or circle carries over from §15 Q6.
+- **It passes through walls.** The sense is *not* line-of-sight; that is the entire
+  point. A guard two rooms away, behind three walls, still shows as a dot if it is
+  within range. Line of sight governs only the *cone* (§9.2), never the dot.
+- **Waiting extends it, 10 → 20.** The innate Wait already buys 360° vision for the
+  turn (§5, §8.3); it now *also* widens the sense. "Stop and take stock of the
+  whole area" is the same verb that lets you see behind you, and it costs the turn
+  — §2.3's "cost is load-bearing" applied to *information*. Peeking the ability
+  state on Wait (§11.4) is the same principle; this stacks with it.
+- **The sense is innate**, not salvaged tech — a baseline sense like vision, part
+  of the player's out-senses-the-guards asymmetry (§5). No cost, no cooldown, no
+  toggle; it is simply how the player perceives. It is *body and training* (§1),
+  not hardware you have to find.
 
-### 9.3 Presentation
+### 9.2 Seen vs. sensed — the two states of a perceived guard
 
-The player cannot see a sound. **[OPEN]** — how sound is shown is an unsolved UI
-problem and a genuinely interesting one. Options: a directional indicator at the
-screen edge; a brief flash on the source cell if within some range; a compass
-readout. See §15.
+A guard the player perceives is in exactly one of two display states, and the gap
+between them is the whole design:
+
+| State | When | What the player sees |
+|---|---|---|
+| **Sensed** | In sense range, **not** in the player's field of view | A dim marker at the guard's **exact cell**. No facing, no cone, no danger overlay. You know *where*, not *which way it looks*. |
+| **Seen** | In the player's field of view (§6), line of sight clear | The full guard: glyph in its state colour (§11.2/§11.3), **facing, vision cone, and the danger overlay** (§11.5). |
+
+**Knowing where a guard is is not knowing whether it can see you.** The cone — the
+thing that actually captures you (§4.5) — is shown *only* when you can see the
+guard. So the sense makes **route-planning legible** (read the live threat
+positions, plan around them) without making **stealth trivial** (you still have to
+break line of sight to read a guard's attention, and the danger overlay still
+paints only cones you can see).
+
+This is the §7.6 hiding game intact, and arguably sharper: pinned in a cupboard
+behind a wall you know the hunter's dot is three cells away and closing — but you
+cannot see its cone, so you hold still and hope. Exactly as intended, and now the
+*where* is honest instead of inferred from a sound you couldn't quite place.
+
+### 9.3 Why this is better than sound
+
+- **It is visible.** Sound's fatal flaw was §15 Q3 — no good presentation. The
+  sense's presentation is trivial and obvious: **draw the dot.** There is nothing
+  left to solve.
+- **It is legible without being omniscient.** You get *position*, not *attention*.
+  The dangerous unknown — *is it looking at me?* — is preserved and tied to line of
+  sight, which is where the whole game already lives.
+- **It rewards Wait**, the game's one "spend a turn to know more" verb, instead of
+  bolting on a parallel system.
+- **It deletes a large, obscure subsystem** — propagation, emission, the loudness
+  ladder, the hearing check, the noise overlay — in favour of a range check and a
+  render state. Less code, less tuning surface, more clarity. That trade is the
+  point of §3's "honest pressure systems": a system that isn't fun doesn't earn its
+  complexity.
+
+> **Consequence for guard cooperation (§7.7) and the radio (§7.3).** Both leaned on
+> sound for legibility — the player was meant to *hear* a ping. With sound gone,
+> "call it in" and the radio clock need a **visual / near-line** cue instead. The
+> sense helps for free: a responder peeling off its patrol toward your last
+> position is now **directly readable** as a moving dot on the map. Radio is still
+> unbuilt (§7.3, **[START]**); design its tells visual from the start — a near-line
+> message and the responder's own motion, not a sound.
 
 ---
 
@@ -869,22 +934,22 @@ fail**. Guard the minimum.
 
 ### 10.3 Terrain
 
-| Object | Glyph | Blocks move | Blocks sight | Blocks pathing | Blocks sound |
-|---|---|---|---|---|---|
-| Floor | (blank) | No | No | No | No |
-| **Wall** | `#` | Yes | Yes | Yes | **Yes** |
-| **Door hinge** | `×` | Yes | Yes | Yes | Yes |
-| **Door panel, closed** | `+` | Yes | Yes | **No** — see below | **Mostly** |
-| **Door panel, open** | (blank) | No | No | No | No |
-| **Hideout, empty** | `}` | **Bump** | No | Yes | No |
-| **Hideout, occupied** | `}` **(you)** | Yes | No | Yes | **Partially** |
-| **Partial cover (table)** | `π` | Yes | **No** | Yes | No |
-| **Console** | `$` | Yes | No | No | No |
-| **Exit** | `E` | Yes | No | No | No |
-| **Player** | `@` | Yes | No | No | No |
-| **Guard** | `g` | Yes | No | No | No |
-| **Body** | `z` | Yes | No | No | No |
-| **Decoy** | `@` | **No** | No | No | No |
+| Object | Glyph | Blocks move | Blocks sight | Blocks pathing |
+|---|---|---|---|---|
+| Floor | (blank) | No | No | No |
+| **Wall** | `#` | Yes | Yes | Yes |
+| **Door hinge** | `×` | Yes | Yes | Yes |
+| **Door panel, closed** | `+` | Yes | Yes | **No** — see below |
+| **Door panel, open** | (blank) | No | No | No |
+| **Hideout, empty** | `}` | **Bump** | No | Yes |
+| **Hideout, occupied** | `}` **(you)** | Yes | No | Yes |
+| **Partial cover (table)** | `π` | Yes | **No** | Yes |
+| **Console** | `$` | Yes | No | No |
+| **Exit** | `E` | Yes | No | No |
+| **Player** | `@` | Yes | No | No |
+| **Guard** | `g` | Yes | No | No |
+| **Body** | `z` | Yes | No | No |
+| **Decoy** | `@` | **No** | No | No |
 
 Vision is blocked when a cell's summed opacity reaches 1.0 — opacity itself is
 still all-or-nothing, no half-shadows, no glass. **Partial cover exists as the
@@ -949,8 +1014,8 @@ one unit.
 - **Auto-close.** The old version had none — every door stayed open forever, so
   connectivity only ever increased and the level decayed into an open plan.
   **Doors should close behind their user** **[START]**, which restores the level's
-  structure over time, makes the sound rules meaningful, and turns an open door
-  into evidence that someone passed.
+  structure over time, keeps sightlines from decaying into an open plan, and turns
+  an open door into evidence that someone passed.
 
 ### 10.5 The spatial model — fix this properly
 
@@ -1071,13 +1136,20 @@ one-table edit.
 | **Caution** | Yellow | A threat that is unaware |
 | **Warning** | Orange | A threat that is hunting |
 | **Danger** | Red | A threat that has you |
+| **Sensed** | Cyan | A guard **sensed through a wall** (§9) — position only, mind and facing unknown |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
 
-**The guard glyph is re-categorised every turn from its own state**, so the player
-reads the AI state machine directly off the colour of `g`. Yellow → orange → red
-*is* the guard's mind, visible. Message colour uses the same table, so a red
-near line (§11.4) and a red `g` reinforce. Keep all of this.
+**A guard the player can *see* is re-categorised every turn from its own state**,
+so the player reads the AI state machine directly off the colour of `g`: yellow →
+orange → red *is* the guard's mind, visible. Message colour uses the same table,
+so a red near line (§11.4) and a red `g` reinforce. **A guard the player only
+*senses* (§9.2) has no readable mind** — it renders in the flat **Sensed** colour,
+a bare dot that says *a guard is here* and nothing about what it is doing. The
+colour bloom from cyan-dot to state-coloured `g`-with-cone *is* the seen/sensed
+distinction, made visible. Keep all of this. *(Cyan was the old §9.3 "Noise"
+slot — a heard sound's source; sound is gone, and the slot now carries the sensed
+guard, the thing that channel was really for.)*
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant.
@@ -1094,7 +1166,8 @@ foreground and as a darkened background variant.
 |---|---|---|
 | `@` | Player | Owned |
 | `@` | Decoy | Owned |
-| `g` | Guard | Caution / Warning / Danger, by state |
+| `g` | Guard, **seen** | Caution / Warning / Danger, by state — plus facing + cone (§9.2) |
+| `g` | Guard, **sensed** (through a wall, §9.2) | **Sensed** — a dim cyan dot at its exact cell, no cone; blooms to the state-coloured guard once seen |
 | `z` | Body | Caution |
 | `#` | Wall | Neutral |
 | `·` | Floor | Ground — recessive by design; blank until the §11.5 floor dots gave it a glyph |
@@ -1138,7 +1211,7 @@ backlog until a single screen-bound story proves fun.
 │    ##############        #########                         │
 │                       E                                    │
 ├────────────────────────────────────────────────────────────┤
-│ Radio chatter, north                                       │ ← near line
+│ Radio: a guard has gone silent                             │ ← near line
 │ → door: open                                               │ ← usable line
 └────────────────────────────────────────────────────────────┘
 ```
@@ -1146,8 +1219,8 @@ backlog until a single screen-bound story proves fun.
 - **Map**: the full story, statically fitted to the screen (scaled, aspect
   preserved). No camera.
 - **Near line** — *what is around you*: the highest-priority live message
-  (§11.7) — guard caution, radio chatter, an alert change, intel collected —
-  drawn as a **solid band in the message's category colour**. Threat reads as a
+  (§11.7) — guard caution, a radio event (§7.3), an alert change, intel
+  collected — drawn as a **solid band in the message's category colour**. Threat reads as a
   colour flash across the bottom of the screen, legible without reading the
   words; that's a nice piece of design — keep it. When no message is live, the
   line falls back to quiet **ambient status** (alert level, an active ability's
@@ -1183,6 +1256,13 @@ visibility is drawn.
 | Outside player's FOV | Same glyph, dark gray — dim but legible. Two exceptions: Ground dims further (the dots whisper), and the exit keeps a dark Interest tint — it anchors every escape plan (§7.6) and must not sink into wall gray |
 | Watched by a guard, in player's FOV | **Red background** — the danger overlay |
 | Watched by a guard, outside player's FOV | Dark gray on dark gray — *unreadable* |
+| A guard **sensed but not seen** (§9.2), any FOV | Its cell shows the **Sensed** cyan dot regardless of line of sight; **no cone, no danger overlay** — position is known, attention is not |
+
+Note the sensed dot and the danger overlay never coincide: a guard you can only
+sense projects no overlay (you cannot see its cone), and the instant you *can* see
+it the dot blooms into the full state-coloured guard and its cone paints the
+overlay. The overlay stays exactly what §11.5 promises — *the detection set you
+can see* — never a guess.
 
 **The danger overlay is the best idea in the old game.** It paints the *literal*
 detection set — the same data the AI queries. If your cell isn't red, no guard you
@@ -1207,7 +1287,7 @@ Two problems from the old version to fix:
 |---|---|
 | **Geometry** — walls, corridors, doors, room shapes | **Always visible, from turn one.** Never fogged. |
 | **Contents** — intel, hideouts, equipment, lore | **Hidden until seen.** Once seen, remembered. |
-| **Live state** — guards, bodies, door open/closed, danger cones | **Only what you can see right now.** Never remembered. |
+| **Live state** — guards, bodies, door open/closed, danger cones | **Only what you can see right now.** Never remembered. **One exception: a guard's *position* is also known through walls within the guard-sense range (§9)** — but only its position, never its cone, and never remembered once out of range. |
 
 This resolves the tension between two pillars that pull against each other:
 
@@ -1270,8 +1350,8 @@ system — it is derived from adjacency every frame and carries no state.
 - The near line shows only the **highest-priority** live message.
 - **Messages clear on the player's next action** — a status line, not a
   scrollback — falling back to the ambient status of §11.4, never to an empty
-  row. **[START]** — the old TODO wanted an expandable log, and with sound
-  and radio pings there is much more to say, so this probably needs to grow.
+  row. **[START]** — the old TODO wanted an expandable log, and with radio pings
+  (§7.3) there is more to say, so this probably needs to grow.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
 
@@ -1327,7 +1407,7 @@ A level holds its player, its guards, its doors, its bodies, with generational
 ids for references. At a few dozen entities, archetype storage solves a problem
 this game does not have. More importantly, an ECS's dynamic queries **hide exactly
 the coupling that should be visible** — when an ability touches guards and doors
-and sound, the type system should say so out loud.
+and vision, the type system should say so out loud.
 
 ### 12.4 Determinism
 
@@ -1430,7 +1510,7 @@ Included:
 - **Corridor cover + the sightline assertion (§10.1a)** and reachability (§10.6)
 - Guards: cones, patrols, chasing, **a chase that can end (§7.6)**, searching,
   radio (§7.3), cooperation
-- **Working sound** (§9)
+- **The guard sense** (§9) — vision-only guards, the player senses guard positions through walls
 - Innate abilities + the starting tech set
 - Takedowns, bodies, dragging, hiding
 - The character grid, danger overlay, the near + usable status lines (§11.4)
@@ -1505,7 +1585,7 @@ Deliberately parked. Each is an experiment for the loop in §13, not a commitmen
   screen (§11.4). The scale axis once a single screen-bound story is fun. The
   §10.6 solvability flood must then span stories (start → every objective → exit
   *through* the stairs); elevators are the interesting object — a chokepoint, a
-  noise source, maybe a door that moves.
+  sightline that opens and closes, maybe a door that moves.
 - Tiles
 
 ---
@@ -1515,7 +1595,7 @@ Deliberately parked. Each is an experiment for the loop in §13, not a commitmen
 Genuinely undecided. Listed so they get decided deliberately rather than by
 default.
 
-**The first three gate the fun. The rest can wait for play evidence.**
+**The first two gate the fun. The rest can wait for play evidence.**
 
 1. **How does a chase actually end?** (§7.6) The two-zone proposal — certain ≤ 5,
    glimpse 6–10 — is a *proposal*, not a decision. Alternatives worth trying:
@@ -1528,10 +1608,16 @@ default.
    (§10.1a) The *L* ≤ 10–12 sightline rule is a guess. Jogs vs. features vs. both
    is untested. Too much cover and the building stops reading as a building; too
    little and §7.6 comes back. **Directly gates whether the hiding game exists.**
-3. **How is sound presented?** (§9.3) Unsolved and genuinely interesting. Edge
-   indicators? Source flashes? A compass readout? A real UI research problem, and
-   it gates how good the whole sound system feels. Sound is the #1 missing system;
-   an invisible sound system is a missing one.
+3. **How much does the guard sense give, and how does it tune?** (§9) The mechanic
+   is settled — vision-only guards, the player senses positions through walls — but
+   the dials are open. Range `10`, `20` on wait: on a 40×40 map, does waiting come
+   too close to omniscient (every guard a dot for one turn's cost)? Should the
+   sensed dot stay a **flat presence marker**, or convey *some* state — say, a
+   distinct tint when a guard is Chasing — trading legibility for tension? Does it
+   name *which* guard, or just "a guard"? *(This slot used to be "how is sound
+   presented?" — the deepest UI problem in the old design. Dropping sound for the
+   sense (§9) dissolved it: the sense's presentation is "draw the dot." What's left
+   is tuning, not a research problem — which is why this no longer gates the fun.)*
 4. **Run score.** Does a run have a score? If so, takedowns cost score — giving
    "no killing" mechanical teeth via a leaderboard rather than a rule, and creating
    a ghost↔aggressive play spectrum. If not, the radio clock (§7.3) is the only
@@ -1542,8 +1628,11 @@ default.
    **only when alerted, and only if they saw you go in or found a body nearby.**
    Interacts hard with §7.6 — a hideout that gets checked during a search is a much
    more interesting object than one that doesn't.
-6. **Guard sight: box or circle?** The box is cheap and nobody noticed. A circle is
-   more natural and slightly less exploitable at the diagonals.
+6. **Sight and sense: box or circle?** The box is cheap and nobody noticed. A
+   circle is more natural and slightly less exploitable at the diagonals. Whatever
+   wins should apply to **both** the vision box (§6.1) and the guard-sense box (§9.1)
+   — they are the same shape at different sizes, and splitting them would be a
+   needless inconsistency.
 7. **Does the one-turn cone lag come back?** (§4.2) It was a bug that created a
    real mechanic — a *moving* guard checks stale ground, giving a reliable one-turn
    window that a *stationary* guard doesn't. Note this would partially address §7.6
