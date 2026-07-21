@@ -813,11 +813,17 @@ same way reachability is asserted (§10.6):
 Ways to satisfy it — all **[START]**, and worth experimenting with, which is
 exactly what §13 is for:
 
-- **Stamp tables.** *(Implemented — the current mechanism.)* A repair pass scans
-  the finished grid and stamps a partial-cover table near the middle of every
-  over-long run — rooms and corridors alike — skipping any cell that would sever
-  guard pathing or split a region; a run the pass cannot break rejects the carve
-  like a reachability failure.
+- **Stamp benches of tables.** *(Implemented — the current mechanism.)* A repair
+  pass scans the finished grid and, near the middle of every over-long run, stamps a
+  partial-cover table and extends it into a short **bench** *across* the space — up to
+  a `[START]` cap — but only into lanes that are themselves over-long, and never into
+  a cell that would sever guard pathing or split a region (so a pathing gap, the
+  1-cell squeeze, always survives). One bench breaks every lane it spans, so the same
+  sightline guarantee costs **far fewer, organized pieces** — benches, not a haze of
+  lone cells. (The first version stamped one lone table per run, which read as
+  scattered confetti; benches are the same assertion machinery, furniture that reads
+  as furniture.) A run the pass cannot break rejects the carve like a reachability
+  failure.
 - **Jog the corridors.** Offset a corridor mid-span by a cell or two, so it bends.
   Breaks the sightline and costs nothing structurally.
 - **Give corridors features too.** The room-feature step (partition stubs, pillars)

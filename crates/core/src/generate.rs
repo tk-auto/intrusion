@@ -127,6 +127,17 @@ const WALL_THICKEN_MIN_RUN: u32 = 3;
 /// there is no geometry between the player and being seen.
 pub const SIGHTLINE_MAX_RUN: u32 = 11;
 
+/// The most tables one cover placement clusters into a **bench** (§10.1a) **[START]**.
+/// The §10.1a repair used to stamp a single lone `π` per over-long run, scattering
+/// isolated cells that read as noise rather than furniture. Instead each placement
+/// extends its table into a short row *across* the space — up to this many cells,
+/// stopping at a wall or a cell that would seal the passage (so a pathing gap always
+/// survives). One bench breaks every lane it spans at once, so the whole facility
+/// carries **fewer, organized** pieces — benches, not confetti — for the same
+/// sightline guarantee. This is the single named knob for the §15.2 cover-density
+/// experiments; `1` restores the old lone-stamp behaviour.
+const COVER_BENCH_MAX: u32 = 4;
+
 /// How many carve attempts [`generate`] makes before giving up on the footprint
 /// (§10.6: reject the seed, retry, but never loop forever). Rejection is rare —
 /// the partition is connected by construction and the property tests below have
@@ -386,7 +397,7 @@ fn generate_once(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenEr
 /// constants before any wall is stamped, and the property tests below pin them.
 ///
 /// **One usable per cell is a preference, not a guarantee** (§11.4): the
-/// stamping passes ([`place_blocker`], [`place_hideouts`]) and placement
+/// stamping passes ([`place_bench`], [`place_hideouts`]) and placement
 /// (`crate::place`) *avoid* crowding a floor cell with a second adjacent usable
 /// wherever a free alternative exists, but two of the guarantees here —
 /// connectivity and the sightline rule — outrank it, and structural doors can
@@ -1348,11 +1359,14 @@ pub(crate) fn shuffle<T>(items: &mut [T], rng: &mut Rng) {
 /// (§7.6): it produces long, dead-straight, full-span corridors — and the
 /// corridors are where the player flees. The rooms get features; the corridors got
 /// nothing. So this pass scans the whole grid for straight runs longer than
-/// [`SIGHTLINE_MAX_RUN`] with no counterplay in them and stamps a 1-cell **table**
-/// ([`Terrain::PartialCover`]) near the middle of each. The table is furniture,
-/// not a wall stub: it blocks movement and pathing but a guard sees straight over
-/// it — the counterplay it plants is the *crouch* (§10.3), not a shadow — so the
-/// facility keeps reading as a building instead of sprouting orphan wall cells.
+/// [`SIGHTLINE_MAX_RUN`] with no counterplay in them and, near the middle of each,
+/// stamps a **bench** of partial-cover **tables** ([`Terrain::PartialCover`]) *across*
+/// the space (see [`place_bench`]) — one piece that breaks every lane it spans, so the
+/// facility carries a few benches instead of a haze of lone cells (§10.1a, #74). A
+/// table is furniture, not a wall stub: it blocks movement and pathing but a guard
+/// sees straight over it — the counterplay it plants is the *crouch* (§10.3), not a
+/// shadow — so the facility keeps reading as a building instead of sprouting orphan
+/// wall cells.
 /// Rooms are treated exactly like corridors: the §10.1a rule is per-cell over the
 /// level, and a long room gallery is as much a sightline as a corridor. (Jogging
 /// the corridors mid-carve is the other §10.1a technique; if the §15.2
@@ -1382,7 +1396,7 @@ fn break_sightlines(facility: &mut Facility, regions: &mut RegionGraph, rng: &mu
         else {
             return;
         };
-        if !place_blocker(facility, regions, &run, rng) {
+        if !place_bench(facility, regions, &run, rng) {
             return; // unbreakable — the §10.6 gate rejects this carve
         }
     }
@@ -1455,15 +1469,20 @@ fn sightlines_bounded(facility: &Facility) -> bool {
         .all(|r| r.len <= SIGHTLINE_MAX_RUN)
 }
 
-/// Stamp one table into `run` and release its cell from the region graph,
-/// keeping grid and graph in lockstep. Returns whether a table landed.
+/// Break `run` with a **bench** of cover — a short row of tables *across* the space —
+/// and release its cells from the region graph, keeping grid and graph in lockstep.
+/// Returns whether any table landed.
 ///
-/// Candidates are tried centre-out — the middle splits the run most evenly — from
-/// a seeded jittered aim point, so cover varies by seed instead of forming a
-/// metronomic grid. A candidate is skipped if it is no longer plain floor, would
-/// sever guard pathing, or would split its region; a table near an end merely
-/// shortens the run, and the [`break_sightlines`] loop comes back for the rest.
-fn place_blocker(
+/// The seed cell is chosen along the run centre-out from a seeded jittered aim point,
+/// so cover varies by seed instead of forming a metronomic grid; it is skipped if it
+/// is no longer plain floor, would sever guard pathing, or would split its region.
+/// The bench then extends **perpendicular** to the run — across the corridor or room
+/// — up to [`COVER_BENCH_MAX`] cells, stamping each while it stays legal and stopping
+/// at a wall or at a cell that would seal the passage (so a pathing gap always
+/// survives, the §10.1a "1-cell squeeze"). One bench breaks every lane it spans, so
+/// the facility carries a few benches instead of a haze of lone tables; the
+/// [`break_sightlines`] loop comes back for whatever a bench did not reach.
+fn place_bench(
     facility: &mut Facility,
     regions: &mut RegionGraph,
     run: &SightRun,
@@ -1483,34 +1502,106 @@ fn place_blocker(
     // of splitting it. Table-beside-door is left as the design accepts it.
     //
     // But two tables flanking one floor cell are avoidable clutter: that cell's usable
-    // line shows the *same* `crouch` hint twice, once per arrow (§11.4). So among the
-    // centre-out candidates the blocker prefers one that makes no such table+table
-    // double, and only falls back to a doubling cell when nothing else breaks the run
-    // — the §10.1a rule still wins when it must. The arrow keeps any residual double
-    // unambiguous.
+    // line shows the *same* `crouch` hint twice, once per arrow (§11.4, #75). So among
+    // the centre-out candidates the seed prefers one that makes no such table+table
+    // double, falling back to a doubling cell only when nothing else breaks the run.
+    // (A bench itself is a straight row, so its own cells never flank a floor cell on
+    // two sides — the double the preference guards against is a *neighbouring* bench.)
     let mut fallback = None;
-    let mut chosen = None;
+    let mut seed = None;
     for i in order {
         let cell = run.line.cell(i);
-        if facility.terrain(cell) != Some(Terrain::Floor)
-            || severs_pathing(facility, cell)
-            || splits_region(regions, cell)
-        {
+        if !can_take_table(facility, regions, cell) {
             continue;
         }
         fallback.get_or_insert(i);
         if !creates_table_double(facility, cell) {
-            chosen = Some(i);
+            seed = Some(i);
             break;
         }
     }
-    let Some(i) = chosen.or(fallback) else {
+    let Some(i) = seed.or(fallback) else {
         return false;
     };
     let cell = run.line.cell(i);
+    stamp_table(facility, regions, cell);
+
+    // Extend the bench across the run — perpendicular to it — but *only* into a cell
+    // whose own parallel lane is itself over-long, so a bench forms where several lanes
+    // need breaking at one column (a wide corridor) and never blankets a room where a
+    // single table suffices. Stops at a wall, at the length cap, or at a cell that
+    // would seal the passage (`can_take_table` runs `severs_pathing`), so a pathing gap
+    // — the §10.1a squeeze — always survives.
+    let perp = match run.line {
+        Line::Row(_) => [Direction::North, Direction::South],
+        Line::Col(_) => [Direction::East, Direction::West],
+    };
+    let mut placed = 1;
+    for dir in perp {
+        let mut c = cell;
+        while placed < COVER_BENCH_MAX {
+            let Some(n) = c.step(dir) else { break };
+            // Stop where the next lane doesn't need cover, where a table would seal the
+            // passage, or where it would touch a *crossing* bench (a straight bench never
+            // doubles its own cells, so this only trims a table+table meeting — #75).
+            if !can_take_table(facility, regions, n)
+                || !overlong_parallel(facility, n, run)
+                || creates_table_double(facility, n)
+            {
+                break;
+            }
+            stamp_table(facility, regions, n);
+            placed += 1;
+            c = n;
+        }
+    }
+    true
+}
+
+/// Whether a table may be stamped on `cell`: it is plain floor, and turning it solid
+/// severs no patrol route ([`severs_pathing`]) and splits no region ([`splits_region`]).
+fn can_take_table(facility: &Facility, regions: &RegionGraph, cell: Cell) -> bool {
+    facility.terrain(cell) == Some(Terrain::Floor)
+        && !severs_pathing(facility, cell)
+        && !splits_region(regions, cell)
+}
+
+/// Whether `cell` lies in a straight sightline run **parallel to `run`** that is
+/// itself over-long — the test a bench uses to decide whether the next lane across
+/// genuinely needs cover here, or the bench should stop. Measures the maximal
+/// counterplay-free run (§10.1a: not sight-blocking, not cover) through `cell` along
+/// `run`'s axis.
+fn overlong_parallel(facility: &Facility, cell: Cell, run: &SightRun) -> bool {
+    let clear = |c: Cell| {
+        facility
+            .terrain(c)
+            .is_some_and(|t| !t.blocks_sight() && !t.provides_cover())
+    };
+    if !clear(cell) {
+        return false;
+    }
+    let dirs = match run.line {
+        Line::Row(_) => [Direction::West, Direction::East],
+        Line::Col(_) => [Direction::North, Direction::South],
+    };
+    let mut len = 1;
+    for dir in dirs {
+        let mut c = cell;
+        while let Some(n) = c.step(dir) {
+            if !facility.in_bounds(n) || !clear(n) {
+                break;
+            }
+            len += 1;
+            c = n;
+        }
+    }
+    len > SIGHTLINE_MAX_RUN
+}
+
+/// Stamp a table on `cell` and drop it from its region, in lockstep (§10.5).
+fn stamp_table(facility: &mut Facility, regions: &mut RegionGraph, cell: Cell) {
     facility.set_terrain(cell.x, cell.y, Terrain::PartialCover);
     regions.remove_cell(cell);
-    true
 }
 
 /// Whether stamping a table at `cell` would give some floor neighbour a **second**
@@ -2123,6 +2214,75 @@ mod tests {
             .collect()
     }
 
+    /// The cover cells of a layout, grouped into 4-connected clusters — returns
+    /// `(total tables, cluster count, largest cluster)`. A lone stamp is a
+    /// one-cell cluster; a bench is a multi-cell one.
+    fn cover_clustering(layout: &Layout) -> (u32, u32, u32) {
+        let f = layout.facility();
+        let mut seen: HashSet<Cell> = HashSet::new();
+        let (mut tables, mut clusters, mut largest) = (0u32, 0u32, 0u32);
+        for y in 0..f.height() {
+            for x in 0..f.width() {
+                let c = Cell::new(x, y);
+                if f.terrain(c) != Some(Terrain::PartialCover) {
+                    continue;
+                }
+                tables += 1;
+                if !seen.insert(c) {
+                    continue;
+                }
+                clusters += 1;
+                let (mut size, mut stack) = (0u32, vec![c]);
+                while let Some(p) = stack.pop() {
+                    size += 1;
+                    for nb in f.neighbors(p) {
+                        if f.terrain(nb) == Some(Terrain::PartialCover) && seen.insert(nb) {
+                            stack.push(nb);
+                        }
+                    }
+                }
+                largest = largest.max(size);
+            }
+        }
+        (tables, clusters, largest)
+    }
+
+    /// #74: the §10.1a repair used to drop a lone `π` per over-long run — scattered
+    /// confetti. Now each placement extends into a **bench** across the space, so the
+    /// same cover reads as far fewer, organized pieces. Asserted in aggregate: distinct
+    /// cover clusters are markedly fewer than cover cells (benches formed), and a
+    /// multi-cell bench genuinely appears.
+    #[test]
+    fn cover_clusters_into_benches() {
+        let seeds = seed_sweep(200);
+        let (mut tables, mut clusters, mut largest) = (0u32, 0u32, 0u32);
+        for &seed in &seeds {
+            let (t, c, l) = cover_clustering(&generate(40, 40, &mut Rng::new(seed)).unwrap());
+            tables += t;
+            clusters += c;
+            largest = largest.max(l);
+        }
+        assert!(tables > 0, "no cover placed at all");
+        assert!(
+            clusters * 10 < tables * 9,
+            "cover barely clusters: {clusters} clusters over {tables} cells — benches are not forming"
+        );
+        assert!(
+            largest >= 2,
+            "no bench longer than a single cell formed over the sweep"
+        );
+    }
+
+    /// The bench-length knob stays a sane §10.1a **[START]** value — at least a
+    /// two-cell bench, and not so long it walls a wide space (`COVER_BENCH_MAX`).
+    #[test]
+    fn the_bench_cap_is_a_sane_start_value() {
+        assert!(
+            (2..=6).contains(&COVER_BENCH_MAX),
+            "COVER_BENCH_MAX {COVER_BENCH_MAX} left the sane 2..=6 range"
+        );
+    }
+
     /// The number of floor cells flanked by two or more tables in a layout — the
     /// §11.4 doubled-crouch clutter the cover pass tries to avoid (#75).
     fn doubled_crouch_cells(layout: &Layout) -> u32 {
@@ -2145,11 +2305,12 @@ mod tests {
     }
 
     /// #75: two tables flanking one floor cell put the *same* `crouch` hint on it
-    /// twice (§11.4). [`place_blocker`] steers around that, so doubled-crouch cells
-    /// are vanishingly rare — the residual is forced runs where every legal split
-    /// cell already borders a table (measured at ~30 per 1000 full seeds). This pins
+    /// twice (§11.4). Both the bench seed and its extension steer around that, so
+    /// doubled-crouch cells stay rare — the residual (~0.13/level over the full sweep)
+    /// is forced seeds and the odd spot where a bench meets a crossing one. This pins
     /// the preference is working, not that it is a hard guarantee (§11.4 keeps it a
-    /// preference — the arrow disambiguates any survivor).
+    /// preference — the arrow disambiguates any survivor); the gross-regression class
+    /// (a bench that over-covers into a haze of doubles) ran ~15/level and is caught.
     #[test]
     fn cover_rarely_doubles_the_crouch_hint() {
         let seeds = seed_sweep(1000);
@@ -2157,9 +2318,9 @@ mod tests {
             .iter()
             .map(|&seed| doubled_crouch_cells(&generate(40, 40, &mut Rng::new(seed)).unwrap()))
             .sum();
-        // ~3% of full seeds carry one forced double; budget 6% of the sampled sweep,
-        // floored so a thin fast-mode sample never flakes.
-        let budget = (seeds.len() as u32 * 6 / 100).max(3);
+        // Ceiling of 0.3 doubled cells per level — ~2× the measured rate, floored so a
+        // thin fast-mode sample never flakes, and far under the ~15/level regression class.
+        let budget = (seeds.len() as u32 * 3 / 10).max(3);
         assert!(
             doubles <= budget,
             "{doubles} doubled-crouch cells over {} seeds (budget {budget}) — the §11.4 table preference has degraded",
