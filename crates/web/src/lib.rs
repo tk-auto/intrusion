@@ -24,9 +24,13 @@
 //! tinted for the exit), muted slate remembered, and two red background shades for
 //! the danger overlay. Colours come from the §11.2 base palette below — a full-range,
 //! colour-blind-safe 16-colour set behind a single category→swatch table. The frame
-//! is the full §11.4 *screen* — the map plus the near and usable status lines, all
-//! composed by `core::render_screen` — and keys map through `core::input_for_key`
-//! (§11.6), so both the picture and the bindings are pinned by native tests.
+//! is the full §11.4 *screen* — the always-on ability line on top, the map, and the
+//! near and usable status lines beneath, all composed by `core::render_screen` from
+//! the game state plus the shell's `ScreenUi` view state. Keys map through
+//! `core::input_for_key` (§11.6) for game actions and `core::ui_command_for_key` for
+//! view toggles (`Tab` deploys the ability panel); a tap on the deploy button
+//! (`core::is_ability_button`) does the same for touch — so the picture, the
+//! bindings, and the button's geometry are all pinned by native tests.
 //! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
 //! and player in the largest room, intel spread across rooms, guards seated where
 //! none eyes the spawn on turn one — and the guards arrive as live patrolling
@@ -37,8 +41,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    generate_level, input_for_key, render_screen, Category, Direction, Grid, Input, LevelConfig,
-    Rng, State, Visibility, STATUS_ROWS,
+    generate_level, input_for_key, is_ability_button, render_screen, ui_command_for_key, Category,
+    Direction, Grid, Input, LevelConfig, Rng, ScreenUi, State, UiCommand, Visibility, HEADER_ROWS,
+    STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -202,6 +207,7 @@ pub fn start() -> Result<(), JsValue> {
         canvas,
         ctx,
         metrics: Metrics::base(),
+        ui: ScreenUi::default(),
     }));
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
     install_input(&document, &game)?;
@@ -230,12 +236,16 @@ impl Metrics {
     }
 }
 
-/// The running game, its canvas, and the current fit — the shell's whole mutable world.
+/// The running game, its canvas, the current fit, and the transient view state —
+/// the shell's whole mutable world.
 struct Game {
     state: State,
     canvas: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
     metrics: Metrics,
+    /// View state the shell owns (§11.4): whether the ability panel is deployed.
+    /// Not part of [`State`] — it changes no world and costs no turn (§12.1).
+    ui: ScreenUi,
 }
 
 impl Game {
@@ -245,6 +255,13 @@ impl Game {
     /// `core::input_for_key` where native tests pin every binding — this shell
     /// never interprets a key.
     fn handle_key(&mut self, key: &str) -> bool {
+        // UI commands (§11.4) come first: they toggle view state and redraw without
+        // ever touching the turn loop. `Tab` deploys the ability panel.
+        if let Some(command) = ui_command_for_key(key) {
+            self.apply_ui_command(command);
+            self.draw();
+            return true;
+        }
         let Some(input) = input_for_key(key) else {
             return false;
         };
@@ -253,16 +270,55 @@ impl Game {
         true
     }
 
+    /// Apply a shell-level [`UiCommand`] (§11.4) — a view toggle, never a game
+    /// action, so it changes no [`State`].
+    fn apply_ui_command(&mut self, command: UiCommand) {
+        match command {
+            UiCommand::ToggleAbilityPanel => {
+                self.ui.ability_panel_open = !self.ui.ability_panel_open;
+            }
+        }
+    }
+
     /// Feed one tap/click at viewport point `(x, y)` to the loop: map it through
     /// [`tap_input`] and, if the viewport was sane, step and redraw (§11.6's touch
     /// slice — the mobile counterpart of [`Self::handle_key`]).
     fn handle_tap(&mut self, x: f64, y: f64, w: f64, h: f64) -> bool {
+        // A tap on the deploy button (§11.4) toggles the ability panel — checked
+        // first, so the button never doubles as a movement tap.
+        if self.hit_deploy_button(x, y) {
+            self.apply_ui_command(UiCommand::ToggleAbilityPanel);
+            self.draw();
+            return true;
+        }
         let Some(input) = tap_input(x, y, w, h) else {
             return false;
         };
         self.state.step(input);
         self.draw();
         true
+    }
+
+    /// Whether the viewport point `(client_x, client_y)` lands on the deploy button
+    /// (§11.4). Maps the point into the canvas, converts it to a screen cell at the
+    /// current fit, and asks the core ([`is_ability_button`]) — the one owner of the
+    /// button's geometry, so a click can never miss the button that is drawn.
+    fn hit_deploy_button(&self, client_x: f64, client_y: f64) -> bool {
+        let rect = self.canvas.get_bounding_client_rect();
+        let (rw, rh) = (rect.width(), rect.height());
+        if !(rw > 0.0 && rh > 0.0) {
+            return false;
+        }
+        let (lx, ly) = (client_x - rect.left(), client_y - rect.top());
+        if lx < 0.0 || ly < 0.0 || lx >= rw || ly >= rh {
+            return false; // outside the canvas (a letterbox tap) — not the button
+        }
+        let facility = self.state.layout().facility();
+        let cols = facility.width();
+        let rows = facility.height() + HEADER_ROWS + STATUS_ROWS;
+        let col = (lx / rw * cols as f64).floor() as u32;
+        let row = (ly / rh * rows as f64).floor() as u32;
+        is_ability_button(cols, col, row)
     }
 
     /// Fit the canvas to the viewport and redraw. Compute a uniform scale so the whole
@@ -272,10 +328,11 @@ impl Game {
     /// resize / orientation change.
     fn fit_and_draw(&mut self) {
         let facility = self.state.layout().facility();
-        // The screen is the map plus the §11.4 status lines beneath it.
+        // The screen is the map plus the §11.4 ability line above it and the status
+        // lines beneath it.
         let (cols, rows) = (
             facility.width() as f64,
-            (facility.height() + STATUS_ROWS) as f64,
+            (facility.height() + HEADER_ROWS + STATUS_ROWS) as f64,
         );
         let win = web_sys::window().expect("a window");
 
@@ -308,7 +365,11 @@ impl Game {
     /// line, usable line — glyphs, overlaps and categories all decided there),
     /// then blit it — colour by category, glyph as given.
     fn draw(&self) {
-        paint(&self.ctx, &render_screen(&self.state), &self.metrics);
+        paint(
+            &self.ctx,
+            &render_screen(&self.state, self.ui),
+            &self.metrics,
+        );
     }
 }
 

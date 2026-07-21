@@ -35,6 +35,7 @@
 //! lands the whole cone is one zone. Colour *values* are the shell's table
 //! (§11.2); this module only speaks in categories.
 
+use crate::ability::{sample_panel, AbilityState, AbilityStatus};
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
@@ -306,41 +307,261 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
 }
 
 /// The rows the screen adds beneath the map (§11.4): the near line and the
-/// usable line. A shell fitting the screen sizes for `facility height + this`.
+/// usable line. A shell fitting the screen sizes for `HEADER_ROWS + facility
+/// height + this`.
 pub const STATUS_ROWS: u32 = 2;
 
-/// Render the full §11.4 **screen**: the map ([`render`]) with the two status
-/// lines beneath it — `map height + STATUS_ROWS` rows, same width, one [`Grid`],
-/// so a whole frame is still a pure function of state that prints as text
-/// (§11.1) and golden-testable to the last row.
+/// The row the screen adds **above** the map (§11.4): the always-on ability line.
+/// A shell fits for `this + facility height + STATUS_ROWS`.
+pub const HEADER_ROWS: u32 = 1;
+
+/// The transient **view state** a shell keeps between frames and hands to
+/// [`render_screen`] (§11.4). It is deliberately *not* part of [`State`] — the
+/// core stays pure game logic (§12.1), and what the player has merely chosen to
+/// *look at* changes no world and costs no turn. The shell owns it, toggles it
+/// from [`ui_command_for_key`](crate::input::ui_command_for_key) or a click on the
+/// deploy button ([`is_ability_button`]), and passes it in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ScreenUi {
+    /// Whether the full ability panel is deployed (§11.4). The compact ability
+    /// line is always drawn; this gates only the expanded, named panel.
+    pub ability_panel_open: bool,
+}
+
+/// The deploy button's label on the ability line (§11.4): a downward chevron when
+/// the panel is closed (bump it *open*), an upward one when it is open. Both are
+/// three cells wide, so the button's footprint is fixed regardless of state.
+const BUTTON_CLOSED: &str = "[▾]";
+const BUTTON_OPEN: &str = "[▴]";
+const BUTTON_LEN: u32 = 3;
+
+/// The column the deploy button starts at on a screen `width` wide: right-aligned
+/// with a one-cell margin. Shared by the drawing ([`ability_line`]) and the
+/// hit-test ([`is_ability_button`]) so the button a click lands on is exactly the
+/// button drawn.
+fn button_start(width: u32) -> u32 {
+    width.saturating_sub(1 + BUTTON_LEN)
+}
+
+/// Whether screen cell `(x, y)` is the deploy button (§11.4) — the header row's
+/// right-aligned toggle. A shell maps a click to a screen cell and asks this; a
+/// hit flips [`ScreenUi::ability_panel_open`] instead of stepping. It is the one
+/// piece of the button's geometry the shell needs, kept here beside the drawing so
+/// the two can never disagree.
+pub fn is_ability_button(width: u32, x: u32, y: u32) -> bool {
+    let start = button_start(width);
+    y == 0 && x >= start && x < start + BUTTON_LEN
+}
+
+/// Render the full §11.4 **screen**: the always-on ability line, the map
+/// ([`render`]), and the two status lines beneath it — `HEADER_ROWS + map height +
+/// STATUS_ROWS` rows, same width, one [`Grid`], so a whole frame is still a pure
+/// function of `(state, ui)` that prints as text (§11.1) and golden-testable to
+/// the last row.
 ///
+/// - **Ability line** (row `0`): the always-on compact readout — every ability's
+///   hotkey coloured by state, its active/cooling number inline
+///   ([`AbilityStatus::compact`]) — plus the right-aligned **deploy button**
+///   ([`is_ability_button`]). This is the permanent home for ability state
+///   (§11.4): one row, glanceable, never covering the board.
 /// - **Near line** (row `height-2`): the highest-priority message of the last
-///   action, or the ambient floor ([`near_line`], §11.7) — drawn as a solid
-///   band in the message's category (every cell's `bg`), with the words in
-///   Neutral on top. Threat reads as a colour flash before it reads as words.
+///   action, or the ambient floor ([`near_line`], §11.7) — a solid band in the
+///   message's category with the words in Neutral on top.
 /// - **Usable line** (row `height-1`): the adjacent bump affordances
-///   ([`State::affordances`]), each in its own category, no band — a quiet menu
-///   of what a bump would do, empty when nothing is adjacent.
-pub fn render_screen(state: &State) -> Grid {
-    let mut grid = render(state);
+///   ([`State::affordances`]), each in its own category, no band.
+///
+/// # The deployable ability panel (§11.4, §15 Q9)
+///
+/// When the shell has the panel **deployed** (`ui.ability_panel_open`, driven by
+/// the deploy button or the `Tab` toggle), the full named panel — each ability's
+/// `<key> <Name> <state>` ([`AbilityStatus::label`]) — is overlaid on the map, in
+/// the **corner opposite the player** ([`panel_origin_opposite_player`]) so it
+/// never covers where the action is. It is not tied to waiting: an earlier
+/// experiment showed it on the wait turn, which buried exactly the 360° guard-sense
+/// the wait exists to reveal (§9.1) — so the panel is now on demand, and waiting
+/// stays a clear look around. Contents are still a placeholder ([`sample_panel`])
+/// until the ability model feeds real state; the whole thing stays swappable (§15
+/// Q9).
+pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
+    let statuses = sample_panel();
+
+    // The map layer, with the deployed panel overlaid opposite the player.
+    let mut map = render(state);
+    if ui.ability_panel_open {
+        let origin = panel_origin_opposite_player(&map, state.player(), &statuses);
+        overlay_ability_panel(&mut map, origin, &statuses);
+    }
+    let width = map.width();
+    let height = HEADER_ROWS + map.height() + STATUS_ROWS;
+
+    // One grid, top to bottom: the ability line, the map, the two status lines.
+    let mut cells = ability_line(width, &statuses, ui.ability_panel_open);
+    cells.extend(map.cells);
 
     let message = near_line(state);
-    let band = Some(message.category);
-    grid.cells.extend(status_row(
-        grid.width,
+    cells.extend(status_row(
+        width,
         &[(message.text, Category::Neutral)],
-        band,
+        Some(message.category),
     ));
-
     let usable: Vec<(String, Category)> = state
         .affordances()
         .into_iter()
         .map(|(dir, a)| (format!("{} {}", arrow(dir), a.label()), a.category()))
         .collect();
-    grid.cells.extend(status_row(grid.width, &usable, None));
+    cells.extend(status_row(width, &usable, None));
 
-    grid.height += STATUS_ROWS;
-    grid
+    Grid {
+        width,
+        height,
+        cells,
+    }
+}
+
+/// The always-on ability line (§11.4): one row carrying every ability's compact
+/// readout ([`AbilityStatus::compact`]) from a one-cell left margin, each in its
+/// state colour ([`panel_category`]), with the deploy button
+/// ([`is_ability_button`]) right-aligned. Single spaces between abilities keep the
+/// whole set on one row; the button's chevron points down when closed, up when
+/// open. No band — the line reads as a quiet HUD strip, not a message.
+fn ability_line(width: u32, statuses: &[AbilityStatus], open: bool) -> Vec<GlyphCell> {
+    let blank = GlyphCell {
+        glyph: ' ',
+        fg: Category::Neutral,
+        bg: None,
+        vis: Visibility::Live,
+    };
+    let mut cells = vec![blank; width as usize];
+
+    let put = |cells: &mut [GlyphCell], at: u32, text: &str, category: Category| {
+        for (i, glyph) in text.chars().enumerate() {
+            let x = at + i as u32;
+            if x < width {
+                cells[x as usize] = GlyphCell {
+                    glyph,
+                    fg: category,
+                    ..blank
+                };
+            }
+        }
+    };
+
+    let mut x = 1; // the one-cell left margin
+    for status in statuses {
+        let text = status.compact();
+        // Stop before the strip would run into the deploy button.
+        if x + text.chars().count() as u32 > button_start(width) {
+            break;
+        }
+        put(&mut cells, x, &text, panel_category(status.state));
+        x += text.chars().count() as u32 + 1; // one space between abilities
+    }
+
+    let label = if open { BUTTON_OPEN } else { BUTTON_CLOSED };
+    put(&mut cells, button_start(width), label, Category::System);
+    cells
+}
+
+/// The map-space corner to anchor the deployed panel at, **opposite the player**
+/// (§11.4): a player in the left half puts the panel on the right, a player in the
+/// top half puts it at the bottom, and so on — so the panel is always as far from
+/// the player as the board allows and never covers where they are acting. A
+/// one-cell inset keeps a border of map around it; sizes are clamped so a tiny
+/// hand-built board never underflows (the v1 board is 40×40, §10.2).
+fn panel_origin_opposite_player(
+    map: &Grid,
+    player: Cell,
+    statuses: &[AbilityStatus],
+) -> (u32, u32) {
+    let panel_w = statuses
+        .iter()
+        .map(|s| s.label().chars().count())
+        .max()
+        .unwrap_or(0) as u32
+        + 1;
+    let panel_h = statuses.len() as u32;
+
+    // Player left of centre → panel right; player above centre → panel bottom.
+    let x0 = if player.x < map.width() / 2 {
+        map.width().saturating_sub(panel_w + 1)
+    } else {
+        1
+    };
+    let y0 = if player.y < map.height() / 2 {
+        map.height().saturating_sub(panel_h + 1)
+    } else {
+        1
+    };
+    (x0.max(1).min(map.width().saturating_sub(1)), y0.max(1))
+}
+
+/// Overlay the deployed ability panel onto the map `grid` at `(ox, oy)` (§11.4):
+/// one row per ability, each `<key> <Name> <state>` ([`AbilityStatus::label`])
+/// coloured by state ([`panel_category`]). Every row is cleared to a uniform width
+/// first so the block reads as a solid panel over the board rather than text
+/// tangled with the map beneath.
+///
+/// Bounds are clamped, never asserted: on a board too small to hold every row (only
+/// hand-built test states get that small — the v1 board is 40×40, §10.2) the panel
+/// shows as many abilities as fit and stops. It draws over the map layer only,
+/// before the header and status rows are added, so it can never collide with them.
+fn overlay_ability_panel(grid: &mut Grid, origin: (u32, u32), statuses: &[AbilityStatus]) {
+    let (ox, oy) = origin;
+    // A uniform band, one space wider than the longest label, so the cleared box
+    // has an even right edge and a hair of padding off the map.
+    let width = statuses
+        .iter()
+        .map(|s| s.label().chars().count())
+        .max()
+        .unwrap_or(0) as u32
+        + 1;
+
+    for (i, status) in statuses.iter().enumerate() {
+        let y = oy + i as u32;
+        if y >= grid.height {
+            break; // out the bottom of a tiny board — show what fits, drop the rest
+        }
+        // Clear the row's band to background, then write the label over it.
+        for dx in 0..width {
+            let x = ox + dx;
+            if x >= grid.width {
+                break;
+            }
+            grid.cells[(y * grid.width + x) as usize] = GlyphCell {
+                glyph: ' ',
+                fg: Category::Neutral,
+                bg: None,
+                vis: Visibility::Live,
+            };
+        }
+        let category = panel_category(status.state);
+        for (dx, glyph) in status.label().chars().enumerate() {
+            let x = ox + dx as u32;
+            if x >= grid.width {
+                break;
+            }
+            grid.cells[(y * grid.width + x) as usize] = GlyphCell {
+                glyph,
+                fg: category,
+                bg: None,
+                vis: Visibility::Live,
+            };
+        }
+    }
+}
+
+/// The §11.2 category an ability row reads in, by its state: an available ability
+/// — ready or active — is **Owned** (blue, "yours, in hand"); a cooling one is
+/// **System** (the muted furniture tan, "unavailable, will return"); an unusable
+/// one is **Ground** (dim gray, receding) — discoverable but plainly not an option
+/// now. The `[N]` / `/N/` notation carries the rest, so ready and active share a
+/// colour without ambiguity.
+fn panel_category(state: AbilityState) -> Category {
+    match state {
+        AbilityState::Ready | AbilityState::Active { .. } => Category::Owned,
+        AbilityState::Cooling { .. } => Category::System,
+        AbilityState::Unusable => Category::Ground,
+    }
 }
 
 /// The usable line's direction glyph (§11.4): which way to bump for the
@@ -886,9 +1107,11 @@ mod tests {
         assert_eq!(g.get(12, 8).glyph, ' ', "an open panel renders blank");
     }
 
-    /// The §11.4 golden test, whole screen: map, near line, usable line — one
-    /// grid, printed as text. The near line rests on its ambient floor (no
-    /// action yet) and the usable line offers the adjacent console.
+    /// The §11.4 golden test, whole screen: the always-on ability line on top, the
+    /// map, then the near and usable lines — one grid, printed as text. The header
+    /// carries the compact ability readout and the closed deploy button; with the
+    /// panel not deployed the map is untouched, the near line rests on ambient
+    /// floor, and the usable line offers the adjacent console.
     #[test]
     fn the_full_screen_renders_golden() {
         let s = State::new(
@@ -899,9 +1122,24 @@ mod tests {
             [Cell::new(3, 2)], // a console east of the player
             Cell::new(22, 4),
         );
-        let g = render_screen(&s);
+        let text = render_screen(&s, ScreenUi::default()).to_text();
+        // Row 0 is the always-on ability line: compact keys left, deploy button
+        // (closed chevron) right. (Its exact glyphs are pinned in the ability-line
+        // test; here we assert its shape without pasting the chevron.)
+        assert!(
+            text[0].starts_with(" r t g c[7] d/12/ x"),
+            "the always-on ability line: {:?}",
+            text[0]
+        );
+        assert!(
+            text[0].trim_end().ends_with("[▾]"),
+            "the closed deploy button: {:?}",
+            text[0]
+        );
+        // Below it, the map and the two status lines — the panel is not deployed,
+        // so the board is whole.
         assert_eq!(
-            g.to_text(),
+            text[1..].to_vec(),
             vec![
                 "########################".to_string(),
                 "#······················#".to_string(),
@@ -915,10 +1153,10 @@ mod tests {
         );
     }
 
-    /// The screen is the map plus [`STATUS_ROWS`], same width — and the two
-    /// status rows carry their §11.4 styling: the near line is a full-width
-    /// band in the message's category with Neutral words on top; the usable
-    /// line has no band and speaks each affordance's own category.
+    /// The screen is the map plus the header and status rows, same width — and the
+    /// two status rows carry their §11.4 styling: the near line is a full-width
+    /// band in the message's category with Neutral words on top; the usable line
+    /// has no band and speaks each affordance's own category.
     #[test]
     fn status_rows_carry_the_band_and_the_categories() {
         let mut s = State::new(
@@ -930,11 +1168,11 @@ mod tests {
             Cell::new(22, 4),
         );
         let map = render(&s);
-        let g = render_screen(&s);
+        let g = render_screen(&s, ScreenUi::default());
         assert_eq!(g.width(), map.width());
-        assert_eq!(g.height(), map.height() + STATUS_ROWS);
+        assert_eq!(g.height(), HEADER_ROWS + map.height() + STATUS_ROWS);
 
-        let near_y = map.height();
+        let near_y = HEADER_ROWS + map.height();
         let usable_y = near_y + 1;
         for x in 0..g.width() {
             let cell = g.get(x, near_y);
@@ -963,9 +1201,152 @@ mod tests {
             Cell::new(22, 4),
         );
         s.step(Input::Wait); // the guard steps north into the player: caught
-        let g = render_screen(&s);
+        let g = render_screen(&s, ScreenUi::default());
         assert_eq!(g.get(0, near_y).bg, Some(Category::Danger));
         assert_eq!(g.get(1, near_y).glyph, 'c'); // "caught"
+    }
+
+    /// The permanent home of ability state (§11.4): the **always-on ability line**
+    /// on row 0, present every turn regardless of the panel. Each ability shows its
+    /// compact readout ([`AbilityStatus::compact`]) in its state colour, keyed by
+    /// the explicit §11.6 mapping, with the closed deploy button right-aligned.
+    #[test]
+    fn the_always_on_ability_line_shows_every_ability() {
+        use crate::input::ability_hotkey;
+
+        let s = State::new(
+            open_room(30, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(28, 8),
+        );
+        let g = render_screen(&s, ScreenUi::default());
+
+        // The six abilities laid left to right (width 30 fits them all): the bare
+        // key for ready/unusable, key+number for active/cooling, each in its
+        // state's colour — and every key is its settled §11.6 hotkey.
+        for (col, name, glyph, category) in [
+            (1, "Run", 'r', Category::Owned),        // ready
+            (3, "Takedown", 't', Category::Ground),  // unusable
+            (5, "Drag", 'g', Category::Ground),      // unusable
+            (7, "Camouflage", 'c', Category::Owned), // active
+            (12, "Decoy", 'd', Category::System),    // cooling
+            (18, "Dephase", 'x', Category::Owned),   // ready
+        ] {
+            assert_eq!(g.get(col, 0).glyph, glyph, "{name} at col {col}");
+            assert_eq!(g.get(col, 0).fg, category, "{name} colour");
+            assert_eq!(Some(glyph), ability_hotkey(name), "{name} hotkey");
+        }
+        // The inline numbers: active `c[7]`, cooling `d/12/`.
+        assert_eq!(g.get(8, 0).glyph, '[', "active shows [N]");
+        assert_eq!(g.get(13, 0).glyph, '/', "cooling shows /N/");
+
+        // The deploy button, closed, right-aligned — and `is_ability_button` agrees
+        // with where it is drawn.
+        let start = 30 - 1 - 3;
+        assert!(is_ability_button(30, start, 0));
+        assert!(
+            !is_ability_button(30, start - 1, 0),
+            "just left is not the button"
+        );
+        assert!(
+            !is_ability_button(30, start, 1),
+            "row 1 is the map, not the button"
+        );
+        assert_eq!(g.get(start, 0).glyph, '[');
+        assert_eq!(g.get(start, 0).fg, Category::System);
+    }
+
+    /// Deploying the panel (§11.4) overlays the named ability list in the corner
+    /// **opposite the player**, so it never covers where the action is — and it is
+    /// gone the moment the panel is not deployed. The corner tracks the player: a
+    /// player top-left puts the panel bottom-right, and moving to the bottom-right
+    /// flips it top-left.
+    #[test]
+    fn deploying_shows_the_panel_opposite_the_player() {
+        // Player top-left → panel bottom-right (map origin (12,7), screen row +1).
+        let s = State::new(
+            open_room(30, 14),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(28, 12),
+        );
+        let closed = render_screen(&s, ScreenUi::default());
+        let open = render_screen(
+            &s,
+            ScreenUi {
+                ability_panel_open: true,
+            },
+        );
+        // Closed: that corner is plain map (interior floor). Open: the panel's first
+        // row `r Run` starts there, in Owned.
+        assert_eq!(
+            closed.get(12, 8).glyph,
+            '·',
+            "not deployed: the board is whole"
+        );
+        assert_eq!(
+            open.get(12, 8).glyph,
+            'r',
+            "deployed: panel opposite the player"
+        );
+        assert_eq!(open.get(14, 8).glyph, 'R', "…the label reads `r Run`");
+        assert_eq!(open.get(12, 8).fg, Category::Owned);
+        // The far side (near the player, top-left) stays board even when deployed.
+        assert_eq!(
+            open.get(2, 2).glyph,
+            '·',
+            "the panel never covers the player's corner"
+        );
+
+        // Player bottom-right → panel flips to the top-left corner (map origin
+        // (1,1), screen row 2).
+        let s2 = State::new(
+            open_room(30, 14),
+            Cell::new(24, 11),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(1, 1),
+        );
+        let open2 = render_screen(
+            &s2,
+            ScreenUi {
+                ability_panel_open: true,
+            },
+        );
+        assert_eq!(open2.get(1, 2).glyph, 'r', "the corner tracks the player");
+    }
+
+    /// The deployed panel clamps to a board too small to hold every row rather than
+    /// panicking — only hand-built states get this small (the v1 board is 40×40),
+    /// but the renderer must never index off the grid.
+    #[test]
+    fn the_deployed_panel_clamps_on_a_tiny_board() {
+        let s = State::new(
+            open_room(24, 5),
+            Cell::new(2, 2),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(22, 3),
+        );
+        // A 5-tall map cannot fit the 6-row panel; the render shows what fits and
+        // stops — no panic, and the screen height is intact.
+        let g = render_screen(
+            &s,
+            ScreenUi {
+                ability_panel_open: true,
+            },
+        );
+        assert_eq!(g.height(), HEADER_ROWS + 5 + STATUS_ROWS);
+        // Player top-left → panel top-right; its first row draws at map (6,1),
+        // screen (6,2).
+        assert_eq!(g.get(6, 2).glyph, 'r', "the first row still draws");
     }
 
     /// A message longer than the row truncates at the edge instead of
@@ -981,8 +1362,9 @@ mod tests {
             Cell::new(10, 4),
         );
         s.step(Input::Step(Direction::East)); // take the intel: a long message
-        let g = render_screen(&s);
-        let near: String = (0..g.width()).map(|x| g.get(x, 6).glyph).collect();
+        let g = render_screen(&s, ScreenUi::default());
+        let near_y = HEADER_ROWS + 6; // header + map height
+        let near: String = (0..g.width()).map(|x| g.get(x, near_y).glyph).collect();
         assert_eq!(near.chars().count(), 12, "exactly one grid row wide");
         assert!(
             near.starts_with(" intel in h"),

@@ -26,6 +26,7 @@ features = [
     "Window",
     "Document",
     "Element",
+    "DomRect",
     "EventTarget",
     "KeyboardEvent",
     "MouseEvent",

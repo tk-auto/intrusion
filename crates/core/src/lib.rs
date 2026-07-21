@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+mod ability;
 mod category;
 mod cell;
 mod door;
@@ -43,16 +44,20 @@ mod status;
 mod test_support;
 mod vision;
 
+pub use ability::{sample_panel, AbilityState, AbilityStatus};
 pub use category::Category;
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;
 pub use facility::{Facility, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
 pub use guard::{Guard, GuardState};
-pub use input::{ability_hotkey, input_for_key};
+pub use input::{ability_hotkey, input_for_key, ui_command_for_key, UiCommand};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
-pub use render::{ascii_grid, render, render_screen, GlyphCell, Grid, Visibility, STATUS_ROWS};
+pub use render::{
+    ascii_grid, is_ability_button, render, render_screen, GlyphCell, Grid, ScreenUi, Visibility,
+    HEADER_ROWS, STATUS_ROWS,
+};
 pub use rng::Rng;
 pub use state::{
     Affordance, Event, GuardPerception, Input, Outcome, State, PLAYER_SENSE_RANGE,
