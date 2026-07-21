@@ -29,15 +29,16 @@
 //! (§11.6), so both the picture and the bindings are pinned by native tests.
 //! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
 //! and player in the largest room, intel spread across rooms, guards seated where
-//! none eyes the spawn on turn one. The guards stand still until the guard-AI
-//! tickets give them patrols; the shell just instantiates what placement chose.
+//! none eyes the spawn on turn one — and the guards arrive as live patrolling
+//! actors (§7.5) straight from `Placement::guards`, so the shell never decides what
+//! a placed guard is; it just hands what placement built to the core.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    generate_level, input_for_key, render_screen, Category, Direction, Grid, Guard, Input,
-    LevelConfig, Rng, State, Visibility, STATUS_ROWS,
+    generate_level, input_for_key, render_screen, Category, Direction, Grid, Input, LevelConfig,
+    Rng, State, Visibility, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -174,17 +175,12 @@ pub fn start() -> Result<(), JsValue> {
     // their territories (§7.5); the reactive states ride on the same seam.
     let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(seed))
         .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
-    let guards = placement
-        .guards()
-        .iter()
-        .map(|&c| Guard::patrolling(c))
-        .collect();
 
     let state = State::new(
         layout,
         placement.player(),
         Direction::North,
-        guards,
+        placement.guards(),
         placement.intel().iter().copied(),
         placement.exit(),
     );

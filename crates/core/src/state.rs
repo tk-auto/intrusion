@@ -292,8 +292,8 @@ pub struct State {
     /// (§9.3) and the guard-hearing check (§9.1) to read via
     /// [`sounds_this_turn`](Self::sounds_this_turn). Cleared at the start of every
     /// [`step`], so a free action (which makes no noise) leaves it empty. A `Vec`
-    /// because guards will emit here too once they act (§9.2's last rows); today
-    /// only the player does, so it holds at most one.
+    /// because the guards emit here too (§9.2's last row): a spent turn holds the
+    /// player's own noise, if any, followed by one Low source per guard.
     sounds: Vec<Sound>,
 }
 
@@ -788,11 +788,16 @@ impl State {
         }
     }
 
-    /// Phase 3 (§4.2): each guard acts. Every guard `decide`s a step from the sight
-    /// phase 2 just recomputed (§7.5); a guard moving into the player's cell is a
-    /// capture and ends the run (§4.5). Otherwise it moves onto any cell that admits
-    /// it and holds no other actor; a guard with nowhere to go, or whose step is
-    /// blocked, simply holds.
+    /// Phase 3 (§4.2): each guard acts, then each guard *sounds*. Every guard
+    /// `decide`s a step from the sight phase 2 just recomputed (§7.5); a guard moving
+    /// into the player's cell is a capture and ends the run (§4.5). Otherwise it moves
+    /// onto any cell that admits it and holds no other actor; a guard with nowhere to
+    /// go, or whose step is blocked, simply holds.
+    ///
+    /// Once every guard has resolved its move, each one emits its §9.2 patrol noise
+    /// from where it now stands ([`emit_guard_noise`](Self::emit_guard_noise)) — the
+    /// "guards make noise too" row that gives the player a second information channel
+    /// working around corners.
     fn guard_phase(&mut self, events: &mut Vec<Event>) {
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
@@ -830,6 +835,26 @@ impl State {
                 let facility = self.layout.facility();
                 self.guards[i].advance_to(target, dir, facility);
             }
+        }
+        self.emit_guard_noise();
+    }
+
+    /// Emit each guard's §9.2 patrol/idle noise — a **Low** source at the guard's own
+    /// cell, every turn, whether it moved or held (§9.2 last row, "guards make noise
+    /// too"). This is the payoff that turns an audible guard into a *second
+    /// information channel that works around corners*: because sound flows around
+    /// walls (#58), the player can track a guard through a wall the 90° cone can't
+    /// see past.
+    ///
+    /// It runs after all movement, so a guard sounds from where it now stands, and
+    /// only while the run is live — a capturing guard shares the player's cell, and
+    /// emitting there would masquerade as the *player's* own audibility (which
+    /// [`audibility_range`](crate::audibility_range) reads off `source == player`).
+    /// The guard's own silence has nothing to do with the player's: waiting, hiding
+    /// and crouching keep the *player* unheard (§9.2), and none of that touches this.
+    fn emit_guard_noise(&mut self) {
+        for i in 0..self.guards.len() {
+            self.emit(self.guards[i].pos(), Loudness::Low);
         }
     }
 
@@ -1880,6 +1905,167 @@ mod tests {
         ];
         let run = || {
             let mut s = solo(Cell::new(3, 3));
+            inputs
+                .iter()
+                .map(|&i| {
+                    s.step(i);
+                    s.sounds_this_turn().to_vec()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// §9.2 last row — every guard emits a **Low** source at its own cell each turn,
+    /// held or not: "guards make noise too", the player's second information channel.
+    /// A silent player action (a wait) leaves only the guards' noise, so the sources
+    /// read off directly, one per guard in order; the Low intensity is pinned here so
+    /// a later change to the [START] value is a visible edit.
+    #[test]
+    fn every_guard_emits_low_from_its_cell_each_turn() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(1, 1),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(6, 4)),
+                Guard::stationary(Cell::new(9, 8)),
+            ],
+            Vec::new(),
+            Cell::new(11, 11),
+        );
+
+        s.step(Input::Wait); // silent: only the guards sound this turn
+        assert_eq!(
+            s.sounds_this_turn(),
+            &[
+                Sound {
+                    source: Cell::new(6, 4),
+                    intensity: Loudness::Low.intensity(),
+                },
+                Sound {
+                    source: Cell::new(9, 8),
+                    intensity: Loudness::Low.intensity(),
+                },
+            ],
+        );
+
+        // It recurs every turn — a second wait yields the same two Low sources.
+        s.step(Input::Wait);
+        assert_eq!(s.sounds_this_turn().len(), 2, "both guards sound again");
+        assert!(
+            s.sounds_this_turn()
+                .iter()
+                .all(|snd| snd.intensity == Loudness::Low.intensity()),
+            "each guard's noise stays Low",
+        );
+    }
+
+    /// §9.1/§9.2 — a guard's Low patrol noise rides #58's propagation: it reaches a
+    /// listener sharing open floor with the guard, but a solid wall stops it. Proven
+    /// by comparison — the *same* cell at the *same* path distance is audible with the
+    /// wall gone and silent with it there — so it is the wall that muffles the guard,
+    /// not mere range. This is the payoff: the player hears a guard through a wall the
+    /// cone can't see past.
+    #[test]
+    fn a_guard_is_audible_along_shared_floor_but_not_through_a_wall() {
+        use crate::sound::audible_field;
+        // A 5×5 walled box (interior x∈1..=3, y∈1..=3); wall the whole x=2 interior
+        // column so the guard's west strip (x=1) is sealed from the east strip (x=3).
+        let mut layout = open_room(5, 5);
+        for y in 1..=3 {
+            layout.place(Cell::new(2, y), Terrain::Wall);
+        }
+        let guard = Cell::new(1, 2);
+        let mut s = State::new(
+            layout,
+            Cell::new(3, 3), // player sealed away in the east strip, never captured
+            Direction::North,
+            vec![Guard::stationary(guard)],
+            Vec::new(),
+            Cell::new(3, 1),
+        );
+
+        s.step(Input::Wait);
+        // The one sound this silent turn is the guard's, at its cell.
+        assert_eq!(
+            s.sounds_this_turn(),
+            &[Sound {
+                source: guard,
+                intensity: Loudness::Low.intensity(),
+            }],
+        );
+        let noise = s.sounds_this_turn()[0];
+
+        // Audible one open step away on the guard's own side of the wall.
+        let sealed = audible_field(s.layout().facility(), noise);
+        assert!(
+            sealed.is_audible_at(Cell::new(1, 1)),
+            "heard across shared open floor",
+        );
+        // Silent two cells east — the sealing wall stops it dead.
+        assert_eq!(
+            sealed.intensity_at(Cell::new(3, 2)),
+            0,
+            "the solid wall stops the guard's noise",
+        );
+        // The same cell at the same distance *is* audible with the wall gone, so it is
+        // the wall doing the muffling, not the Low sound simply running out of reach.
+        let open = audible_field(open_room(5, 5).facility(), noise);
+        assert!(
+            open.is_audible_at(Cell::new(3, 2)),
+            "with no wall, two open steps is well within Low's reach",
+        );
+    }
+
+    /// The guard emission is orthogonal to the player's own silence (§9.2): with a
+    /// guard sounding nearby, a waiting player still makes *no* sound of their own —
+    /// only the guard's source appears, never one at the player's cell. Guards emit;
+    /// the player's "hold still to go unheard" rule is untouched.
+    #[test]
+    fn guard_noise_leaves_the_players_own_silence_intact() {
+        let mut s = State::new(
+            open_room(10, 10),
+            Cell::new(3, 3),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(6, 6))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Wait);
+        let player = s.player();
+        assert!(
+            s.sounds_this_turn().iter().all(|snd| snd.source != player),
+            "a waiting player emits nothing of their own",
+        );
+        assert!(
+            s.sounds_this_turn()
+                .iter()
+                .any(|snd| snd.source == Cell::new(6, 6)),
+            "but the guard is still heard",
+        );
+    }
+
+    /// Determinism (§12.4) with guards in play: the same start and inputs reproduce
+    /// the same sounds turn for turn, patrol noise included — a moving guard sounds
+    /// from the same cells on every replay.
+    #[test]
+    fn guard_noise_is_deterministic() {
+        let inputs = [
+            Input::Wait,
+            Input::Wait,
+            Input::Step(Direction::South),
+            Input::Wait,
+        ];
+        let run = || {
+            let mut s = State::new(
+                open_room(20, 20),
+                Cell::new(2, 2),
+                Direction::North,
+                vec![Guard::patrolling(Cell::new(10, 10))],
+                Vec::new(),
+                Cell::new(18, 18),
+            );
             inputs
                 .iter()
                 .map(|&i| {
