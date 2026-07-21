@@ -73,6 +73,14 @@ impl VisibleSet {
         }
     }
 
+    /// Clear `cell` back to unseen — the corner-solidity pass retracting a floor
+    /// tile the raw cast leaked sight into (§6.1). Off-grid is ignored.
+    fn unmark(&mut self, cell: Cell) {
+        if cell.x < self.width && cell.y < self.height {
+            self.seen[(cell.y * self.width + cell.x) as usize] = false;
+        }
+    }
+
     /// Fold another set's seen cells into this one — the accumulation step of the
     /// player's tile memory (§11.5a): memory is the running union of every FOV the
     /// sight phase has produced, so it only ever grows. A default (empty)
@@ -131,7 +139,102 @@ pub fn field_of_view(
     for quadrant in Quadrant::ALL {
         caster.scan(quadrant, &mut fov, 1, Slope::new(-1, 1), Slope::new(1, 1));
     }
+
+    // Corner-solidity (§6.1): the raw shadowcast leaks sight through the pinch
+    // where two walls meet at a diagonal — a viewer looking along the join sees
+    // floor cells whose line of sight is in fact a straight run through a wall's
+    // body. Retract any floor tile the viewer could only reach by crossing an
+    // opaque cell's interior; grazing a bare corner (a single lattice point) is
+    // still allowed, so the arc silhouette and the always-seen touching ring
+    // (§6.1 **[SETTLED]**) are untouched.
+    let leaked: Vec<Cell> = fov
+        .cells()
+        .filter(|&c| {
+            c.sight_distance(origin) > 1
+                && facility.terrain(c).is_some_and(|t| !t.blocks_sight())
+                && sight_crosses_opaque_body(facility, origin, c)
+        })
+        .collect();
+    for c in leaked {
+        fov.unmark(c);
+    }
+
     fov
+}
+
+/// Whether the straight segment between the *centres* of `origin` and `target`
+/// passes through the interior of any sight-blocking cell — i.e. reaching the
+/// target would mean seeing through a wall's body, not around it.
+///
+/// A segment that merely grazes a corner (touching a single lattice point
+/// before continuing into open floor) does **not** count: that graze is the
+/// behaviour the cone silhouette and the touching ring depend on (§6.2), so
+/// only a real crossing of a cell's interior is a block. This is the
+/// corner-solidity rule in its permissive form — two walls touching only at a
+/// diagonal occlude the pinch, but a lone corner never hides what is beside it.
+///
+/// All integer arithmetic (centres and boundaries are exact in doubled
+/// coordinates), so it is deterministic (§12.4). Real terrain opacity only — the
+/// §6.2 artificial ring walls are not consulted, so this never reshapes the arc.
+fn sight_crosses_opaque_body(facility: &Facility, origin: Cell, target: Cell) -> bool {
+    // Doubled cell-centre coordinates: every centre is odd, every boundary even.
+    let ax = 2 * i64::from(origin.x) + 1;
+    let ay = 2 * i64::from(origin.y) + 1;
+    let vx = 2 * (i64::from(target.x) - i64::from(origin.x));
+    let vy = 2 * (i64::from(target.y) - i64::from(origin.y));
+
+    // The parameters t in (0, 1) where the segment crosses a cell boundary, as
+    // fractions num/den (den > 0). Between consecutive crossings the segment
+    // lies wholly inside one cell.
+    let mut crossings: Vec<(i64, i64)> = Vec::new();
+    let mut push = |num: i64, den: i64| {
+        let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
+        if num > 0 && num < den {
+            crossings.push((num, den));
+        }
+    };
+    if vx != 0 {
+        for xb in (origin.x.min(target.x) + 1)..=origin.x.max(target.x) {
+            push(2 * i64::from(xb) - ax, vx);
+        }
+    }
+    if vy != 0 {
+        for yb in (origin.y.min(target.y) + 1)..=origin.y.max(target.y) {
+            push(2 * i64::from(yb) - ay, vy);
+        }
+    }
+    // Sort by value and fold coincident crossings — a corner is one point, not a
+    // sliver of a third cell — so the midpoints below only ever land in cells
+    // the segment truly traverses.
+    crossings.sort_by(|&(an, ad), &(bn, bd)| (an * bd).cmp(&(bn * ad)));
+    crossings.dedup_by(|&mut (an, ad), &mut (bn, bd)| an * bd == bn * ad);
+
+    // Walk each interval's midpoint; the cell it lands in is one the segment
+    // passes through. The origin and target cells are the endpoints, not a
+    // crossing.
+    let mut bounds = Vec::with_capacity(crossings.len() + 2);
+    bounds.push((0, 1));
+    bounds.extend(crossings);
+    bounds.push((1, 1));
+    for pair in bounds.windows(2) {
+        let ((pn, pd), (cn, cd)) = (pair[0], pair[1]);
+        // Midpoint tm = (prev + cur) / 2 = (pn·cd + cn·pd) / (2·pd·cd).
+        let tn = pn * cd + cn * pd;
+        let td = 2 * pd * cd;
+        let cx = (ax * td + vx * tn).div_euclid(2 * td);
+        let cy = (ay * td + vy * tn).div_euclid(2 * td);
+        if cx < 0 || cy < 0 {
+            continue;
+        }
+        let cell = Cell::new(cx as u32, cy as u32);
+        if cell != origin
+            && cell != target
+            && facility.terrain(cell).is_none_or(|t| t.blocks_sight())
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// The §6.2 tier of a viewer's ring neighbour at offset `(dx, dy)`, ranked by
@@ -590,6 +693,139 @@ mod tests {
         );
         assert!(fov.contains(Cell::new(4, 4)));
         assert!(!fov.contains(Cell::new(5, 5).step(Direction::East).unwrap()));
+    }
+
+    /// §6.1 corner-solidity: two walls meeting only at a diagonal must jointly
+    /// occlude the pinch between them. A viewer looking straight along the join
+    /// used to see floor cells whose line of sight is a clean run *through* a
+    /// wall body — the classic diagonal corner peek. Pinned as a golden picture:
+    /// viewer at (1,1) waiting (360°), walls touching at (3,3)+(4,4). The cells
+    /// hidden behind the join — (4,3),(3,4),(5,4),(4,5) — must be dark, while the
+    /// wall faces and everything genuinely in view stay lit.
+    #[test]
+    fn diagonal_corner_does_not_leak_sight_through_the_pinch() {
+        let mut f = open(11, 11);
+        f.set_terrain(3, 3, Terrain::Wall);
+        f.set_terrain(4, 4, Terrain::Wall);
+        let origin = Cell::new(1, 1);
+        let fov = field_of_view(&f, origin, Direction::North, WAIT_SIGHT_ARC, 10);
+        assert_eq!(
+            picture(&f, &fov, origin),
+            vec![
+                "###########",
+                "#@********#",
+                "#*********#",
+                "#**#.*****#",
+                "#**...****#",
+                "#***....**#",
+                "#****.....#",
+                "#****.....#",
+                "#*****....#",
+                "#*****.....",
+                "#########..",
+            ]
+        );
+        // The specific cells behind the diagonal join go dark (they were the leak).
+        for c in [
+            Cell::new(4, 3),
+            Cell::new(3, 4),
+            Cell::new(5, 4),
+            Cell::new(4, 5),
+        ] {
+            assert!(!fov.contains(c), "{c:?} leaked through the corner");
+        }
+        // The near wall face is still seen — corner-solidity hides what is behind
+        // the pinch, never the wall the viewer looks at (§6.1). The far wall
+        // (4,4) is legitimately shadowed by the nearer wall (3,3) directly in
+        // front of it on the diagonal.
+        assert!(fov.contains(Cell::new(3, 3)), "the near wall face is seen");
+        assert!(
+            !fov.contains(Cell::new(4, 4)),
+            "the far wall is shadowed by the near one"
+        );
+    }
+
+    /// The corner fix closes the leak *both* ways: no floor cell the cast lights
+    /// has its centre-to-centre line of sight buried in a wall body, checked
+    /// exhaustively over every two-wall diagonal L-corner and viewer position,
+    /// against an independent floating-point ray as the oracle (tests may use
+    /// floats; the shipped path stays integer, §12.4).
+    #[test]
+    fn no_floor_cell_is_seen_through_a_wall_body() {
+        // Independent oracle (a different method than the shipped integer walk):
+        // clip the centre-to-centre segment against each wall cell's square,
+        // slightly shrunk so a grazed corner or edge does not register — a
+        // positive-length overlap means the line runs through the wall's body.
+        fn body_blocked(walls: &[Cell], a: Cell, c: Cell) -> bool {
+            let (px, py) = (f64::from(a.x) + 0.5, f64::from(a.y) + 0.5);
+            let (dx, dy) = (f64::from(c.x) + 0.5 - px, f64::from(c.y) + 0.5 - py);
+            let e = 0.02;
+            walls.iter().any(|&w| {
+                // Liang–Barsky clip against [wx+e, wx+1-e] × [wy+e, wy+1-e].
+                let edges = [
+                    (-dx, px - (f64::from(w.x) + e)),
+                    (dx, (f64::from(w.x) + 1.0 - e) - px),
+                    (-dy, py - (f64::from(w.y) + e)),
+                    (dy, (f64::from(w.y) + 1.0 - e) - py),
+                ];
+                let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+                for (p, q) in edges {
+                    if p.abs() < 1e-12 {
+                        if q < 0.0 {
+                            return false;
+                        }
+                    } else {
+                        let r = q / p;
+                        if p < 0.0 {
+                            if r > t1 {
+                                return false;
+                            }
+                            t0 = t0.max(r);
+                        } else {
+                            if r < t0 {
+                                return false;
+                            }
+                            t1 = t1.min(r);
+                        }
+                    }
+                }
+                t1 - t0 > 1e-9
+            })
+        }
+        for wx in 3..8 {
+            for wy in 3..8 {
+                for &(ddx, ddy) in &[(1i64, 1i64), (1, -1), (-1, 1), (-1, -1)] {
+                    let mut f = open(11, 11);
+                    f.set_terrain(wx, wy, Terrain::Wall);
+                    let (bx, by) = ((wx as i64 + ddx) as u32, (wy as i64 + ddy) as u32);
+                    f.set_terrain(bx, by, Terrain::Wall);
+                    let walls: Vec<Cell> = (0..f.height())
+                        .flat_map(|y| (0..f.width()).map(move |x| Cell::new(x, y)))
+                        .filter(|&c| f.terrain(c) == Some(Terrain::Wall))
+                        .collect();
+                    for oy in 1..10 {
+                        for ox in 1..10 {
+                            let o = Cell::new(ox, oy);
+                            if f.terrain(o) != Some(Terrain::Floor) {
+                                continue;
+                            }
+                            let fov = field_of_view(&f, o, Direction::North, WAIT_SIGHT_ARC, 7);
+                            for c in fov.cells() {
+                                if f.terrain(c) == Some(Terrain::Floor) {
+                                    assert!(
+                                        !body_blocked(&walls, o, c),
+                                        "viewer {o:?} sees floor {c:?} through walls \
+                                         {:?}+{:?}",
+                                        Cell::new(wx, wy),
+                                        Cell::new(bx, by)
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// A default set is the empty placeholder: it contains nothing.
