@@ -101,7 +101,7 @@ const PALETTE: [Swatch; 16] = [
     sw("#667a8a", STD_DIM, "#293138", "#14181c"),   //  4 slate — tile memory (§11.5a)
     sw("#4ea6ff", STD_DIM, "#1f4266", "#102133"),   //  5 blue — Owned
     sw("#2456b8", STD_DIM, "#0e224a", "#071125"),   //  6 deep blue — spare
-    sw("#2ee6d6", STD_DIM, "#0d2523", "#081413"),   //  7 cyan — spare (guard-sense slot, §9)
+    sw("#2ee6d6", STD_DIM, "#0d2523", "#081413"),   //  7 cyan — spare
     sw("#3ecf5a", STD_DIM, "#195324", "#0c2a12"),   //  8 green — spare
     sw("#157f33", "#0e3f1a", "#083314", "#04190a"), //  9 deep green — spare (darker than STD_DIM)
     sw("#f0e442", STD_DIM, "#605b1a", "#302e0d"),   // 10 yellow — Caution
@@ -154,6 +154,11 @@ fn swatch(category: Category) -> Swatch {
         Category::Danger => RED,      // a threat that has you
         Category::Interest => PURPLE, // goals and rewards
         Category::System => TAN,      // doors, hideouts — neutral furniture
+        // A guard sensed through a wall (§9.2): an orange *background* highlight, the
+        // eye-catching parallel of the red danger overlay. It shares Warning's orange
+        // hue but never its role — Sensed only ever paints a background, never a glyph,
+        // so the two never collide on screen.
+        Category::Sensed => ORANGE,
     }
 }
 
@@ -464,14 +469,21 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
 
 /// Map a background category to a fill through the same table as the glyphs: the
 /// darkened [`Swatch::bg`] variant on a cell the player sees, the further-darkened
-/// [`Swatch::bg_dim`] beyond the FOV. Today only the §11.5 danger overlay paints a
-/// background — Danger's two shades are bright red and darker-but-still-red (fix
-/// #1: watched must never look safe) — but any category a future system declares
-/// arrives with its variants ready. The §7.6 certain/glimpse zones add two
-/// *detection* shades when two-zone detection lands; until then the whole cone is
-/// one zone.
+/// [`Swatch::bg_dim`] beyond the FOV. The §11.5 danger overlay paints two shades —
+/// bright red in view, darker-but-still-red out of it (fix #1: watched must never
+/// look safe) — and any category a future system declares arrives with its variants
+/// ready. The §7.6 certain/glimpse zones add two *detection* shades when two-zone
+/// detection lands; until then the whole cone is one zone.
+///
+/// **Sensed is the exception**: a guard sensed through a wall (§9.2) is *always* out
+/// of the FOV, yet its position is certain knowledge, not fogged — so it paints at
+/// full strength (the bright [`Swatch::bg`]) regardless of `vis`, an eye-catching
+/// orange fill rather than sinking into the dim shade the fog would otherwise pick.
 fn bg_color(bg: Category, vis: Visibility) -> &'static str {
     let swatch = swatch(bg);
+    if bg == Category::Sensed {
+        return swatch.bg;
+    }
     match vis {
         Visibility::Live => swatch.bg,
         Visibility::Dimmed | Visibility::Remembered => swatch.bg_dim,
@@ -582,6 +594,9 @@ mod tests {
     /// threat ladder Caution→Warning→Danger and the furniture brown must stay apart.
     #[test]
     fn category_colours_are_all_visibly_distinct() {
+        // Every category drawn as a *foreground glyph*. `Sensed` is excluded on
+        // purpose: it only ever paints a background (§9.2), and it deliberately shares
+        // Warning's orange — a fg-distinctness check over it would be meaningless.
         let categories = [
             Category::Neutral,
             Category::Ground,
@@ -644,6 +659,47 @@ mod tests {
         }
         let d = dist2(rgb(live), rgb(dimmed));
         assert!(d >= MIN_BG_DIST2, "the two danger shades blur (dist^2 {d})");
+    }
+
+    /// §9.2: the **sensed** background is the eye-catching orange parallel of the red
+    /// danger overlay — it must read on the page background, read as *orange* (not
+    /// red), and stay clearly tellable from the danger fill so a sensed cell is never
+    /// mistaken for a watched one. It is painted at full strength regardless of `vis`
+    /// (the position is certain knowledge, §11.5a), so both visibilities agree.
+    #[test]
+    fn the_sensed_background_is_orange_and_distinct_from_danger() {
+        const MIN_BG_DIST2: i32 = 40 * 40;
+        let sensed = bg_color(Category::Sensed, Visibility::Dimmed);
+        assert_eq!(
+            sensed,
+            bg_color(Category::Sensed, Visibility::Live),
+            "the sensed fill is full-strength in and out of the FOV alike",
+        );
+
+        let d = dist2(rgb(sensed), rgb(BG));
+        assert!(
+            d >= MIN_BG_DIST2,
+            "the sensed fill vanishes into the page background (dist^2 {d})"
+        );
+        // Orange, not red: red and green both present, and green clearly above blue.
+        let (r, g, b) = rgb(sensed);
+        assert!(
+            r > b + 30 && g > b + 20,
+            "the sensed fill must read as orange"
+        );
+
+        // Clearly apart from the danger red, both shades — a sensed cell and a watched
+        // cell must never look alike.
+        for danger in [
+            bg_color(Category::Danger, Visibility::Live),
+            bg_color(Category::Danger, Visibility::Dimmed),
+        ] {
+            let d = dist2(rgb(sensed), rgb(danger));
+            assert!(
+                d >= MIN_BG_DIST2,
+                "the sensed orange blurs into the danger red {danger} (dist^2 {d})"
+            );
+        }
     }
 
     /// The §11.2 [START] promise, pinned: the base palette is **full-range** —
