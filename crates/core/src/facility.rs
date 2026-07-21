@@ -1,6 +1,6 @@
 //! The facility's static geometry: a grid of terrain cells (§4.1, §10).
 //!
-//! This is the substrate every other system will read — vision, sound, guards
+//! This is the substrate every other system will read — vision, guards
 //! and generation all query terrain. Right now it holds the smallest honest
 //! version of that world: a rectangle of floor wrapped in the indestructible
 //! 1-cell border the design guarantees (§4.1, §10.6). The real generator
@@ -18,9 +18,9 @@
 //! bodies, decoys. Those are entities the level owns (§12.3), not terrain stamped
 //! into the grid; they contribute a *fill* to a cell's occupancy, which is what
 //! [`Facility::can_enter`] sums. The "occupied hideout" row is the same story: a
-//! [`Terrain::Hideout`] is the empty alcove, and its occupied properties (solid,
-//! sound only partially muffled) arise when an occupant's fill sits in it — an
-//! occupancy overlay the sound and turn tickets read, not a second terrain kind.
+//! [`Terrain::Hideout`] is the empty alcove, and its occupied property (solid) arises
+//! when an occupant's fill sits in it — an occupancy overlay the turn tickets read,
+//! not a second terrain kind.
 
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
@@ -36,9 +36,9 @@ pub enum Terrain {
     /// A door's frame end — permanently solid and opaque, the handle you bump to
     /// close (§10.4). One at each end of a doorway. Renders `×` (§10.3).
     DoorHinge,
-    /// A closed door panel: solid, opaque, and it attenuates sound — but it is
-    /// deliberately **transparent to pathfinding**, so guards route through a
-    /// closed door and open it by walking in (§10.4). Renders `+` (§10.3).
+    /// A closed door panel: solid and opaque — but it is deliberately **transparent
+    /// to pathfinding**, so guards route through a closed door and open it by walking
+    /// in (§10.4). Renders `+` (§10.3).
     DoorPanelClosed,
     /// An open door panel: walk-through, like floor (§10.4). Renders blank (§10.3).
     DoorPanelOpen,
@@ -57,7 +57,7 @@ pub enum Terrain {
     /// the crouch itself lives on the turn loop). Renders `π` (§10.3).
     PartialCover,
     /// A console — the intel terminal you bump to use (§4.3). Solid (you cannot
-    /// share its cell) but transparent to sight, pathing and sound. Renders `$`
+    /// share its cell) but transparent to sight and pathing. Renders `$`
     /// (§10.3, §11.3).
     Console,
     /// The exit: where a laden player leaves to win (§4.5). Solid but otherwise
@@ -162,37 +162,6 @@ impl Terrain {
             | Terrain::Exit => false,
         }
     }
-
-    /// How this terrain affects sound crossing it (§9.1, §10.3). Sound flows around
-    /// walls, not through them; a closed door only **attenuates**, which is what
-    /// gives "close the door behind you" a point.
-    pub fn sound(self) -> SoundBlocking {
-        match self {
-            // Empty-hideout sound; an *occupied* one only partially muffles, which
-            // the sound system applies from occupancy, not from terrain (§10.3).
-            Terrain::Floor
-            | Terrain::DoorPanelOpen
-            | Terrain::Hideout
-            | Terrain::PartialCover
-            | Terrain::Console
-            | Terrain::Exit => SoundBlocking::Passes,
-            Terrain::DoorPanelClosed => SoundBlocking::Attenuates,
-            Terrain::Wall | Terrain::DoorHinge => SoundBlocking::Blocks,
-        }
-    }
-}
-
-/// How a terrain cell affects sound trying to cross it (§9.1, §10.3). Three levels,
-/// because a closed door is neither transparent nor a wall: it is the "mostly"
-/// column of the terrain table.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SoundBlocking {
-    /// Sound crosses freely — floor, an open door.
-    Passes,
-    /// Sound crosses but loses extra intensity — a closed door panel.
-    Attenuates,
-    /// Sound does not cross at all — wall, door hinge.
-    Blocks,
 }
 
 /// The facility grid: `width × height` terrain cells in row-major order.
@@ -380,10 +349,10 @@ mod tests {
 
     /// The §10.3 terrain table for doors, asserted directly. A closed panel is the
     /// interesting row: solid and opaque like a wall, yet **transparent to
-    /// pathfinding** and only *attenuating* sound.
+    /// pathfinding**.
     #[test]
     fn the_door_terrain_table_matches_10_3() {
-        // Closed panel: fill 1.0, opaque, attenuates sound, transparent to pathing.
+        // Closed panel: fill 1.0, opaque, transparent to pathing.
         let closed = Terrain::DoorPanelClosed;
         assert_eq!(closed.fill(), 1.0);
         assert!(closed.blocks_movement());
@@ -392,7 +361,6 @@ mod tests {
             !closed.blocks_pathing(),
             "closed panel must not block pathing"
         );
-        assert_eq!(closed.sound(), SoundBlocking::Attenuates);
         assert_eq!(closed.glyph(), '+');
 
         // Open panel: fill 0.0, walk-through in every sense.
@@ -401,13 +369,11 @@ mod tests {
         assert!(!open.blocks_movement());
         assert!(!open.blocks_sight());
         assert!(!open.blocks_pathing());
-        assert_eq!(open.sound(), SoundBlocking::Passes);
         assert_eq!(open.glyph(), ' ');
 
         // Hinge: a wall in every column that has a distinct glyph.
         let hinge = Terrain::DoorHinge;
         assert!(hinge.blocks_movement() && hinge.blocks_sight() && hinge.blocks_pathing());
-        assert_eq!(hinge.sound(), SoundBlocking::Blocks);
         assert_eq!(hinge.glyph(), '×');
     }
 
@@ -418,44 +384,40 @@ mod tests {
         assert!(!Terrain::Floor.blocks_movement());
         assert!(!Terrain::Floor.blocks_sight());
         assert!(!Terrain::Floor.blocks_pathing());
-        assert_eq!(Terrain::Floor.sound(), SoundBlocking::Passes);
 
         assert_eq!(Terrain::Wall.fill(), 1.0);
         assert!(Terrain::Wall.blocks_movement());
         assert!(Terrain::Wall.blocks_sight());
         assert!(Terrain::Wall.blocks_pathing());
-        assert_eq!(Terrain::Wall.sound(), SoundBlocking::Blocks);
     }
 
     /// The rest of the static §10.3 table: hideout, console, exit.
     #[test]
     fn hideout_console_and_exit_match_10_3() {
-        // Hideout, empty: walk-through (fill 0.0), sight/sound transparent, yet it
+        // Hideout, empty: walk-through (fill 0.0), sight transparent, yet it
         // *blocks pathing* — guards route around, the player ducks in.
         let h = Terrain::Hideout;
         assert_eq!(h.fill(), 0.0);
         assert!(!h.blocks_movement());
         assert!(!h.blocks_sight());
         assert!(h.blocks_pathing(), "hideout must block pathing");
-        assert_eq!(h.sound(), SoundBlocking::Passes);
         assert_eq!(h.glyph(), '}');
 
         // Console and exit: solid (fill 1.0, blocks movement) but transparent to
-        // sight, pathing and sound — you see past them and route across them.
+        // sight and pathing — you see past them and route across them.
         for (t, glyph) in [(Terrain::Console, '$'), (Terrain::Exit, 'E')] {
             assert_eq!(t.fill(), 1.0);
             assert!(t.blocks_movement());
             assert!(!t.blocks_sight());
             assert!(!t.blocks_pathing());
-            assert_eq!(t.sound(), SoundBlocking::Passes);
             assert_eq!(t.glyph(), glyph);
         }
     }
 
     /// The §10.3 partial-cover row: a table is solid to movement and pathing like
     /// a wall, but **see-through** — the one terrain where "can I walk there" and
-    /// "can I see there" split this way round. It passes sound, and it is the only
-    /// terrain that provides §10.1a cover.
+    /// "can I see there" split this way round. It is the only terrain that provides
+    /// §10.1a cover.
     #[test]
     fn partial_cover_matches_10_3() {
         let t = Terrain::PartialCover;
@@ -463,7 +425,6 @@ mod tests {
         assert!(t.blocks_movement());
         assert!(!t.blocks_sight(), "a guard sees straight over a table");
         assert!(t.blocks_pathing(), "patrols route around furniture");
-        assert_eq!(t.sound(), SoundBlocking::Passes);
         assert_eq!(t.glyph(), 'π');
         assert_eq!(t.category(), Category::System);
 

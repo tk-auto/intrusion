@@ -27,19 +27,17 @@
 //! old one-turn sensory lag (§4.2). **Guards patrol** (§7.5): phase 3 runs each
 //! guard's `decide` step, which reads the sight this loop just recomputed and, for a
 //! Calm guard, sweeps its territory toward the farthest cell it has not yet looked at.
-//! The first reactive transition is wired too — **hearing** (§9.1): a guard that hears
-//! this turn's noise above the threshold turns to Investigating and walks to its
-//! source, then stands back down to patrol once the lead runs out. The rest of the
-//! §7.4 state machine — sight detection, chasing, searching — is the later guard
-//! tickets, which set a guard's destination the same way and reuse the same
-//! walk-toward-it movement.
+//! Guards detect on **vision alone** (§9 **[SETTLED]** — there is no sound, no
+//! hearing): a player in a guard's cone flips it to Chasing or Investigating (§7.6),
+//! and it stands back down to patrol once the lead runs out. The rest of the §7.4
+//! state machine — searching, decoys — is the later guard tickets, which set a
+//! guard's destination the same way and reuse the same walk-toward-it movement.
 
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::Guard;
-use crate::sound::{Loudness, Sound};
 use crate::vision::{
     field_of_view, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
 };
@@ -291,13 +289,6 @@ pub struct State {
     /// exactly one action's events *is* the clearing rule). Empty before the
     /// first input; frozen once the run ends, so the final message stays.
     last_events: Vec<Event>,
-    /// The sounds the most recent *spent* action made (§9.2), for the presentation
-    /// (§9.3) and the guard-hearing check (§9.1) to read via
-    /// [`sounds_this_turn`](Self::sounds_this_turn). Cleared at the start of every
-    /// [`step`], so a free action (which makes no noise) leaves it empty. A `Vec`
-    /// because the guards emit here too (§9.2's last row): a spent turn holds the
-    /// player's own noise, if any, followed by one Low source per guard.
-    sounds: Vec<Sound>,
 }
 
 impl State {
@@ -341,7 +332,6 @@ impl State {
             turn: 0,
             outcome: Outcome::Playing,
             last_events: Vec::new(),
-            sounds: Vec::new(),
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -410,18 +400,6 @@ impl State {
     /// [`concealed_from`](Self::concealed_from).
     pub fn crouched_behind(&self) -> Option<Cell> {
         self.crouched_behind
-    }
-
-    /// The sounds the most recent *spent* action made this turn (§9.2) — where each
-    /// noise came from and how loud it started. Empty after a free action (a
-    /// mis-input makes no noise) and after a silent one (waiting, crouching).
-    ///
-    /// This is the raw emission; a consumer spreads it with
-    /// [`audible_field`](crate::audible_field) to learn the intensity at a cell —
-    /// the sound presentation (§9.3) to show the player a noise, and — once guards
-    /// react — the hearing check that flips a guard to Investigating (§9.1).
-    pub fn sounds_this_turn(&self) -> &[Sound] {
-        &self.sounds
     }
 
     /// Whether the player is concealed from a viewer standing at `viewer` — the
@@ -530,10 +508,6 @@ impl State {
             return Vec::new();
         }
 
-        // This action's noise starts fresh (§9.2). A free action emits nothing, so
-        // clearing here leaves `sounds` empty after a mis-input; a spent action fills
-        // it from the branches in `resolve_step` / `player_phase`.
-        self.sounds.clear();
         let mut events = Vec::new();
         // Phase 1. A free action (wall bump, refused exit) does not end the turn.
         let spent = self.player_phase(input, &mut events);
@@ -563,9 +537,6 @@ impl State {
             // It also *holds* a crouch (§10.3): the pose survives exactly the
             // turns spent holding still.
             Input::Wait => {
-                // Waiting is Silent (§9.2's "None" row): it spends the turn but makes
-                // no noise — which is what lets holding still be a way to go unheard,
-                // not just unseen. No `emit`, so `sounds` stays empty.
                 self.waited = true;
                 true
             }
@@ -584,17 +555,6 @@ impl State {
                 }
                 spent
             }
-        }
-    }
-
-    /// Record the noise a spent action made (§9.2): push a [`Sound`] at `source`
-    /// unless the action is [`Loudness::Silent`], in which case there is nothing to
-    /// hear. The turn loop calls this from the world-changing branches; a free
-    /// action never reaches it.
-    fn emit(&mut self, source: Cell, loudness: Loudness) {
-        let intensity = loudness.intensity();
-        if intensity > 0 {
-            self.sounds.push(Sound { source, intensity });
         }
     }
 
@@ -636,25 +596,19 @@ impl State {
                     .expect("bump_kind classified an untaken console here");
                 obj.taken = true;
                 let remaining = self.objectives.iter().filter(|o| !o.taken).count();
-                // Taking intel is not one of §9.2's noise sources, so it stays silent —
-                // emit nothing rather than invent a level the design didn't name.
                 events.push(Event::IntelTaken { remaining });
                 true
             }
-            // A door (§4.3, §10.4): opening or closing spends the turn and makes Medium
-            // noise (§9.2) from the player's own cell — they stay put working the
-            // handle, so the noise starts beside the door, not in the doorway. An
-            // obstructed close changed nothing — free and silent; doors never crush.
+            // A door (§4.3, §10.4): opening or closing spends the turn. An obstructed
+            // close changed nothing — free; doors never crush.
             BumpKind::Door { action } => match action {
                 DoorAction::Opened => {
                     self.operate_door(target);
                     events.push(Event::DoorOpened { at: target });
-                    self.emit(self.player, Loudness::Medium);
                     true
                 }
                 DoorAction::Closed => {
                     self.operate_door(target);
-                    self.emit(self.player, Loudness::Medium);
                     true
                 }
                 DoorAction::Obstructed => false,
@@ -667,29 +621,21 @@ impl State {
             BumpKind::Hide => {
                 self.player = target;
                 self.facing = dir; // facing follows the last successful step (§5)
-                                   // Climbing into a cupboard is still a step — Low footstep noise (§9.2),
-                                   // from the cell just entered. Only once you *wait* inside it are you
-                                   // silent. A judgment call worth a later playtest: scrambling into cover
-                                   // isn't free of sound the way holding still is.
-                self.emit(target, Loudness::Low);
                 events.push(Event::EnteredHideout { at: target });
                 true
             }
             // A table: bump it to crouch behind it (§4.3, §10.3). Ducking is a
             // *decision*, aimed at a specific table — concealment is across that table
-            // only. The player does not move; the table stays solid furniture. Silent
-            // (§9.2, the "camouflaged" row): the whole point is to go unnoticed.
+            // only. The player does not move; the table stays solid furniture.
             BumpKind::Crouch => {
                 self.crouched_behind = Some(target);
                 events.push(Event::Crouched { behind: target });
                 true
             }
-            // Plain movement into a cell that admits the player — Low noise (§9.2) from
-            // the cell just stepped into.
+            // Plain movement into a cell that admits the player.
             BumpKind::Move => {
                 self.player = target;
                 self.facing = dir; // facing follows the last successful step (§5)
-                self.emit(target, Loudness::Low);
                 events.push(Event::Moved { to: target });
                 true
             }
@@ -791,25 +737,17 @@ impl State {
         }
     }
 
-    /// Phase 3 (§4.2): the guards *sense*, then *act*, then *sound*. First every guard
-    /// takes in this turn's information ([`Guard::sense`], §7.6/§9.1) — it hears the
-    /// noise and sees the player from the cone phase 2 just recomputed: a loud enough
-    /// sound turns it to Investigating toward the source, and a player in its cone
-    /// flips it to Chasing (certain zone) or Investigating (glimpse zone), sight
-    /// overriding sound. A player [`concealed_from`](Self::concealed_from) that guard
-    /// is neither seen nor, being silent, heard — the cupboard's payoff (§10.3/§7.6).
-    /// Then each guard `decide`s a step (§7.5); a guard moving into the player's cell
-    /// is a capture and ends the run (§4.5). Otherwise it moves onto any cell that
-    /// admits it and holds no other actor; a guard with nowhere to go, or whose step
-    /// is blocked, simply holds.
-    ///
-    /// Once every guard has resolved its move, each one emits its §9.2 patrol noise
-    /// from where it now stands ([`emit_guard_noise`](Self::emit_guard_noise)) — the
-    /// "guards make noise too" row that gives the player a second information channel
-    /// working around corners. Sensing runs on `self.sounds` *before* that emission,
-    /// so a guard reacts to the player's noise, never to another guard's footsteps.
+    /// Phase 3 (§4.2): the guards *sense*, then *act*. First every guard takes in this
+    /// turn's information ([`Guard::sense`], §7.6) — it sees the player from the cone
+    /// phase 2 just recomputed: a player in its cone flips it to Chasing (certain zone)
+    /// or Investigating (glimpse zone). Detection is vision alone (§9 **[SETTLED]** —
+    /// guards do not hear). A player [`concealed_from`](Self::concealed_from) that
+    /// guard is not seen — the cupboard's payoff (§10.3/§7.6). Then each guard
+    /// `decide`s a step (§7.5); a guard moving into the player's cell is a capture and
+    /// ends the run (§4.5). Otherwise it moves onto any cell that admits it and holds
+    /// no other actor; a guard with nowhere to go, or whose step is blocked, simply
+    /// holds.
     fn guard_phase(&mut self, events: &mut Vec<Event>) {
-        let facility = self.layout.facility();
         // Whether the player is concealed from each guard is a query over the whole
         // state (§10.3), so resolve it up front — one immutable read per guard —
         // before the loop takes each guard mutably to fold the senses in.
@@ -819,7 +757,7 @@ impl State {
             .map(|guard| self.concealed_from(guard.pos()))
             .collect();
         for (guard, &concealed) in self.guards.iter_mut().zip(&concealed) {
-            guard.sense(facility, self.player, concealed, &self.sounds);
+            guard.sense(self.player, concealed);
         }
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
@@ -857,26 +795,6 @@ impl State {
                 let facility = self.layout.facility();
                 self.guards[i].advance_to(target, dir, facility);
             }
-        }
-        self.emit_guard_noise();
-    }
-
-    /// Emit each guard's §9.2 patrol/idle noise — a **Low** source at the guard's own
-    /// cell, every turn, whether it moved or held (§9.2 last row, "guards make noise
-    /// too"). This is the payoff that turns an audible guard into a *second
-    /// information channel that works around corners*: because sound flows around
-    /// walls (#58), the player can track a guard through a wall the 90° cone can't
-    /// see past.
-    ///
-    /// It runs after all movement, so a guard sounds from where it now stands, and
-    /// only while the run is live — a capturing guard shares the player's cell, and
-    /// emitting there would masquerade as the *player's* own audibility (which
-    /// [`audibility_range`](crate::audibility_range) reads off `source == player`).
-    /// The guard's own silence has nothing to do with the player's: waiting, hiding
-    /// and crouching keep the *player* unheard (§9.2), and none of that touches this.
-    fn emit_guard_noise(&mut self) {
-        for i in 0..self.guards.len() {
-            self.emit(self.guards[i].pos(), Loudness::Low);
         }
     }
 
@@ -1832,285 +1750,13 @@ mod tests {
         panic!("no usable door scenario found in 64 seeds");
     }
 
-    /// §9.2 — moving normally makes a **Low** footstep, sourced at the cell just
-    /// stepped into.
+    /// §9 **[SETTLED]**: guards detect on **vision only** — they do not hear. A player
+    /// who scrambles into a cupboard right beside a guard, concealed from its sight
+    /// (§10.3), is *not* detected: with the old hearing branch gone, a guard the player
+    /// could once "give away a footstep to" now stays **Calm**. This is the inverse of
+    /// the deleted hearing test, pinning the new rule.
     #[test]
-    fn a_move_emits_a_low_footstep() {
-        let mut s = solo(Cell::new(4, 4));
-        s.step(Input::Step(Direction::East));
-        assert_eq!(
-            s.sounds_this_turn(),
-            &[Sound {
-                source: Cell::new(5, 4),
-                intensity: Loudness::Low.intensity(),
-            }]
-        );
-    }
-
-    /// §9.2's "None" row — waiting spends the turn but emits no sound, so holding
-    /// still is a way to go *unheard*, not only unseen.
-    #[test]
-    fn waiting_makes_no_sound() {
-        let mut s = solo(Cell::new(4, 4));
-        s.step(Input::Wait);
-        assert!(s.sounds_this_turn().is_empty());
-    }
-
-    /// §4.4/§9.2 — a free action (a wall bump) makes no noise, and clearing on every
-    /// action means `sounds_this_turn` reflects only the latest: a footstep is
-    /// replaced by the silence of the bump that follows it.
-    #[test]
-    fn a_free_bump_is_silent_and_replaces_prior_sound() {
-        let mut s = solo(Cell::new(1, 4));
-        assert!(!s.step(Input::Step(Direction::East)).is_empty()); // a Low footstep
-        assert_eq!(s.sounds_this_turn().len(), 1);
-
-        s.step(Input::Step(Direction::West)); // back onto (1,4)
-        let events = s.step(Input::Step(Direction::West)); // into the west wall
-        assert!(matches!(events.as_slice(), [Event::Bumped { .. }]));
-        assert!(
-            s.sounds_this_turn().is_empty(),
-            "a free bump makes no sound and clears the prior footstep"
-        );
-    }
-
-    /// §9.2 — opening a door is **Medium** noise, sourced at the player's own cell:
-    /// they stay put working the handle, so the sound starts beside the doorway.
-    #[test]
-    fn opening_a_door_emits_medium_from_the_player() {
-        let layout = generate(40, 40, &mut Rng::new(7)).unwrap();
-        let panel = layout.regions().doors().next().unwrap().1.panels()[0];
-
-        // One of the four approaches stands on floor and bumps the panel open.
-        let opened = Direction::ALL.into_iter().any(|dir| {
-            let Some(from) = panel.step(dir.opposite()) else {
-                return false;
-            };
-            if !layout.facility().can_enter(from, ACTOR_FILL) {
-                return false;
-            }
-            let mut s = State::new(
-                layout.clone(),
-                from,
-                Direction::North,
-                Vec::new(),
-                Vec::new(),
-                Cell::new(1, 1),
-            );
-            if s.step(Input::Step(dir)) != vec![Event::DoorOpened { at: panel }] {
-                return false;
-            }
-            // Player did not move; the noise is Medium, at their cell.
-            assert_eq!(
-                s.sounds_this_turn(),
-                &[Sound {
-                    source: from,
-                    intensity: Loudness::Medium.intensity(),
-                }]
-            );
-            true
-        });
-        assert!(
-            opened,
-            "one approach must bump the panel open and sound Medium"
-        );
-    }
-
-    /// Determinism (§12.4): the same start and the same inputs produce the same
-    /// sounds, turn for turn — a run is `(seed, [inputs])` and its noise is part of
-    /// what replays identically.
-    #[test]
-    fn identical_runs_make_identical_sounds() {
-        let inputs = [
-            Input::Step(Direction::East),
-            Input::Wait,
-            Input::Step(Direction::South),
-            Input::Step(Direction::East),
-        ];
-        let run = || {
-            let mut s = solo(Cell::new(3, 3));
-            inputs
-                .iter()
-                .map(|&i| {
-                    s.step(i);
-                    s.sounds_this_turn().to_vec()
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(run(), run());
-    }
-
-    /// §9.2 last row — every guard emits a **Low** source at its own cell each turn,
-    /// held or not: "guards make noise too", the player's second information channel.
-    /// A silent player action (a wait) leaves only the guards' noise, so the sources
-    /// read off directly, one per guard in order; the Low intensity is pinned here so
-    /// a later change to the [START] value is a visible edit.
-    #[test]
-    fn every_guard_emits_low_from_its_cell_each_turn() {
-        let mut s = State::new(
-            open_room(12, 12),
-            Cell::new(1, 1),
-            Direction::North,
-            vec![
-                Guard::stationary(Cell::new(6, 4)),
-                Guard::stationary(Cell::new(9, 8)),
-            ],
-            Vec::new(),
-            Cell::new(11, 11),
-        );
-
-        s.step(Input::Wait); // silent: only the guards sound this turn
-        assert_eq!(
-            s.sounds_this_turn(),
-            &[
-                Sound {
-                    source: Cell::new(6, 4),
-                    intensity: Loudness::Low.intensity(),
-                },
-                Sound {
-                    source: Cell::new(9, 8),
-                    intensity: Loudness::Low.intensity(),
-                },
-            ],
-        );
-
-        // It recurs every turn — a second wait yields the same two Low sources.
-        s.step(Input::Wait);
-        assert_eq!(s.sounds_this_turn().len(), 2, "both guards sound again");
-        assert!(
-            s.sounds_this_turn()
-                .iter()
-                .all(|snd| snd.intensity == Loudness::Low.intensity()),
-            "each guard's noise stays Low",
-        );
-    }
-
-    /// §9.1/§9.2 — a guard's Low patrol noise rides #58's propagation: it reaches a
-    /// listener sharing open floor with the guard, but a solid wall stops it. Proven
-    /// by comparison — the *same* cell at the *same* path distance is audible with the
-    /// wall gone and silent with it there — so it is the wall that muffles the guard,
-    /// not mere range. This is the payoff: the player hears a guard through a wall the
-    /// cone can't see past.
-    #[test]
-    fn a_guard_is_audible_along_shared_floor_but_not_through_a_wall() {
-        use crate::sound::audible_field;
-        // A 5×5 walled box (interior x∈1..=3, y∈1..=3); wall the whole x=2 interior
-        // column so the guard's west strip (x=1) is sealed from the east strip (x=3).
-        let mut layout = open_room(5, 5);
-        for y in 1..=3 {
-            layout.place(Cell::new(2, y), Terrain::Wall);
-        }
-        let guard = Cell::new(1, 2);
-        let mut s = State::new(
-            layout,
-            Cell::new(3, 3), // player sealed away in the east strip, never captured
-            Direction::North,
-            vec![Guard::stationary(guard)],
-            Vec::new(),
-            Cell::new(3, 1),
-        );
-
-        s.step(Input::Wait);
-        // The one sound this silent turn is the guard's, at its cell.
-        assert_eq!(
-            s.sounds_this_turn(),
-            &[Sound {
-                source: guard,
-                intensity: Loudness::Low.intensity(),
-            }],
-        );
-        let noise = s.sounds_this_turn()[0];
-
-        // Audible one open step away on the guard's own side of the wall.
-        let sealed = audible_field(s.layout().facility(), noise);
-        assert!(
-            sealed.is_audible_at(Cell::new(1, 1)),
-            "heard across shared open floor",
-        );
-        // Silent two cells east — the sealing wall stops it dead.
-        assert_eq!(
-            sealed.intensity_at(Cell::new(3, 2)),
-            0,
-            "the solid wall stops the guard's noise",
-        );
-        // The same cell at the same distance *is* audible with the wall gone, so it is
-        // the wall doing the muffling, not the Low sound simply running out of reach.
-        let open = audible_field(open_room(5, 5).facility(), noise);
-        assert!(
-            open.is_audible_at(Cell::new(3, 2)),
-            "with no wall, two open steps is well within Low's reach",
-        );
-    }
-
-    /// The guard emission is orthogonal to the player's own silence (§9.2): with a
-    /// guard sounding nearby, a waiting player still makes *no* sound of their own —
-    /// only the guard's source appears, never one at the player's cell. Guards emit;
-    /// the player's "hold still to go unheard" rule is untouched.
-    #[test]
-    fn guard_noise_leaves_the_players_own_silence_intact() {
-        let mut s = State::new(
-            open_room(10, 10),
-            Cell::new(3, 3),
-            Direction::North,
-            vec![Guard::stationary(Cell::new(6, 6))],
-            Vec::new(),
-            Cell::new(8, 8),
-        );
-        s.step(Input::Wait);
-        let player = s.player();
-        assert!(
-            s.sounds_this_turn().iter().all(|snd| snd.source != player),
-            "a waiting player emits nothing of their own",
-        );
-        assert!(
-            s.sounds_this_turn()
-                .iter()
-                .any(|snd| snd.source == Cell::new(6, 6)),
-            "but the guard is still heard",
-        );
-    }
-
-    /// Determinism (§12.4) with guards in play: the same start and inputs reproduce
-    /// the same sounds turn for turn, patrol noise included — a moving guard sounds
-    /// from the same cells on every replay.
-    #[test]
-    fn guard_noise_is_deterministic() {
-        let inputs = [
-            Input::Wait,
-            Input::Wait,
-            Input::Step(Direction::South),
-            Input::Wait,
-        ];
-        let run = || {
-            let mut s = State::new(
-                open_room(20, 20),
-                Cell::new(2, 2),
-                Direction::North,
-                vec![Guard::patrolling(Cell::new(10, 10))],
-                Vec::new(),
-                Cell::new(18, 18),
-            );
-            inputs
-                .iter()
-                .map(|&i| {
-                    s.step(i);
-                    s.sounds_this_turn().to_vec()
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(run(), run());
-    }
-
-    /// §9.1 wired through the real turn loop, now that sight rides alongside it
-    /// (§7.6): a footstep is *heard* and turns a guard to Investigating even where the
-    /// guard cannot *see* its source. A player scrambling into a cupboard beside a
-    /// guard emits a Low footstep the guard one cell away hears (3 − 1 = 2 > the
-    /// threshold), yet concealed in the hideout (§10.3) the player is not detected by
-    /// sight — so the reaction is hearing's alone, not a Chase. (A footstep only ever
-    /// carries one cell, and that cell is always in the touching ring; concealment is
-    /// what keeps the two senses separable at such close range.)
-    #[test]
-    fn a_guard_hears_a_scramble_into_cover_it_cannot_see() {
+    fn a_guard_that_cannot_see_the_hidden_player_stays_calm() {
         let mut layout = open_room(10, 10);
         layout.place(Cell::new(5, 4), Terrain::Hideout);
         let mut s = State::new(
@@ -2123,24 +1769,23 @@ mod tests {
         );
         assert_eq!(s.guards()[0].state(), GuardState::Calm);
 
-        // Step East into the cupboard at (5,4): a Low footstep the guard one cell east
-        // hears while the hideout conceals the player from its sight.
+        // Step East into the cupboard at (5,4), one cell from the guard: the hideout
+        // conceals the player from its sight, and nothing is heard — so it stays Calm.
         s.step(Input::Step(Direction::East));
         assert!(s.hidden(), "the player scrambled into the cupboard");
         assert_eq!(
             s.guards()[0].state(),
-            GuardState::Investigating,
-            "heard the scramble but never saw the hidden player",
+            GuardState::Calm,
+            "guards detect on vision only — a hidden player is not seen, and not heard",
         );
     }
 
-    /// A silent turn alerts no one (§9.2's "None" row): waiting emits nothing, so a
-    /// guard that has no line to the player — it stands two cells behind the guard's
-    /// back, past the touching ring and out of its cone — neither hears nor sees them
-    /// and stays Calm. (Beside the guard, sight would give the player away regardless
-    /// of silence, §7.6 — so silence buys safety only out of view.)
+    /// A player out of every cone alerts no one: standing two cells behind a
+    /// south-facing guard's back — past the touching ring and out of its wedge — the
+    /// player is not seen, so the guard stays Calm however they act (§9 — there is no
+    /// hearing to give them away either).
     #[test]
-    fn a_silent_turn_alerts_no_one() {
+    fn an_unseen_player_alerts_no_one() {
         let mut s = State::new(
             open_room(10, 10),
             Cell::new(5, 2), // two north of the south-facing guard: directly behind it
@@ -2158,14 +1803,14 @@ mod tests {
         assert_eq!(
             s.guards()[0].state(),
             GuardState::Calm,
-            "a waiting player makes no noise to hear",
+            "a player the guard cannot see stays undetected",
         );
     }
 
     /// §7.6 wired end to end: the two detection zones flip a guard between Chasing and
     /// Investigating as the player's distance crosses the certain→glimpse boundary. A
-    /// stationary fixture isolates the state machine from patrol movement, and the
-    /// footsteps are too far to be heard, so the reaction is sight's alone.
+    /// stationary fixture isolates the state machine from patrol movement; detection is
+    /// sight's alone (§9 — guards do not hear).
     #[test]
     fn detection_flips_between_chasing_and_investigating_by_zone() {
         // Guard looking straight down a long cone from (6,2); the player starts four
@@ -2198,11 +1843,11 @@ mod tests {
         );
     }
 
-    /// Guards make Low noise too (§9.2) but never hear *each other*: hearing runs
-    /// before the guards emit, so `self.sounds` holds only the player's noise. Two
-    /// adjacent guards with a silent player both stay Calm turn after turn.
+    /// Guards do not detect *each other* — detection reads the player alone (§7.8:
+    /// guards cannot hurt each other). Two adjacent guards with the player far out of
+    /// every cone both stay Calm turn after turn.
     #[test]
-    fn guards_do_not_investigate_each_other() {
+    fn guards_do_not_detect_each_other() {
         let mut s = State::new(
             open_room(10, 10),
             Cell::new(1, 1),
@@ -2219,14 +1864,14 @@ mod tests {
         }
         assert!(
             s.guards().iter().all(|g| g.state() == GuardState::Calm),
-            "one guard's footsteps never trigger another's hearing",
+            "a guard never reacts to another guard",
         );
     }
 
-    /// Determinism (§12.4) with hearing in play: the same start and inputs reproduce
+    /// Determinism (§12.4) with detection in play: the same start and inputs reproduce
     /// the same guard states and positions, reactions included.
     #[test]
-    fn hearing_is_deterministic() {
+    fn detection_is_deterministic() {
         let inputs = [
             Input::Step(Direction::East),
             Input::Step(Direction::East),
