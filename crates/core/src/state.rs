@@ -909,7 +909,7 @@ fn actor_occupies(player: Cell, guards: &[Guard], cell: Cell) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guard::{GuardState, PATROL_RADIUS};
+    use crate::guard::{GuardState, PATROL_RADIUS, SEARCH_RADIUS};
     use crate::test_support::{open_room, solo};
     use crate::{generate, DoorId, Rng};
 
@@ -1374,6 +1374,71 @@ mod tests {
             s.guards()[0].pos(),
             Cell::new(5, 4),
             "the guard cannot enter the occupied cupboard"
+        );
+    }
+
+    /// §7.6 fix 2 (Lost → Hunted → Released): a guard that loses sight of the player
+    /// walks to the last-known cell, **searches** the area (Alerted) rather than snapping
+    /// back to patrol, and only then releases to Calm and moves on. The player waits it
+    /// out concealed in a cupboard: it is never captured, watches the guard search, and
+    /// watches it leave — the payoff §14 exists to test.
+    #[test]
+    fn a_hidden_player_waits_out_a_search_and_watches_the_guard_leave() {
+        let mut layout = open_room(16, 12);
+        layout.place(Cell::new(4, 5), Terrain::Hideout); // a cupboard beside the player
+                                                         // Guard at (5,1) facing south: its cone covers the player at (5,5), four cells
+                                                         // down — the certain zone — so it detects and chases at the startup turn.
+        let guards = vec![Guard::patrolling(Cell::new(5, 1))];
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            guards,
+            Vec::new(),
+            Cell::new(14, 10),
+        );
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Chasing,
+            "the guard spots the player at spawn",
+        );
+
+        // The player ducks west into the cupboard and holds. The guard loses sight.
+        s.step(Input::Step(Direction::West));
+        assert!(s.hidden(), "the player is concealed");
+
+        let focus = Cell::new(5, 5); // where the guard last knew the player
+        let (mut searched, mut released, mut left_the_area) = (false, false, false);
+        for _ in 0..60 {
+            s.step(Input::Wait);
+            assert_eq!(
+                s.outcome(),
+                Outcome::Playing,
+                "a hidden player is never caught"
+            );
+            match s.guards()[0].state() {
+                GuardState::Alerted => searched = true,
+                GuardState::Calm if searched => {
+                    released = true;
+                    if s.guards()[0].pos().sight_distance(focus) > SEARCH_RADIUS {
+                        left_the_area = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            searched,
+            "the guard searched the area (Alerted) instead of giving up"
+        );
+        assert!(released, "the search released back to Calm patrol");
+        assert!(
+            left_the_area,
+            "after releasing, the guard leaves the search area"
+        );
+        assert!(
+            s.hidden(),
+            "the player rode the whole search out from cover"
         );
     }
 

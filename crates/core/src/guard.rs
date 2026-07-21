@@ -96,6 +96,20 @@ pub struct Guard {
     /// each turn nothing is sensed ([`sense`](Self::sense)); a reactive guard whose
     /// lead reaches zero stands back down (§7.4/§7.6).
     alert: u32,
+    /// The cell a search/watch centres on — where the lead ran out (§7.6). Set when a
+    /// spent chase turns into a search; drives the [`Alerted`](GuardState::Alerted)
+    /// sweep and, after release, the raised-coverage patrol. `None` when the guard has
+    /// no area of heightened interest.
+    focus: Option<Cell>,
+    /// Turns of active [`Alerted`](GuardState::Alerted) search remaining (§7.6 fix 2).
+    /// Set to [`SEARCH_DURATION`] when a lead is lost on arrival, cooled by one each
+    /// turn in [`sense`](Self::sense); at zero the search releases to Calm patrol.
+    search: u32,
+    /// Turns of post-search raised coverage remaining (§7.6 Released). While positive,
+    /// Calm patrol draws its territory around [`focus`](Self::focus) with the tighter
+    /// [`WATCH_RADIUS`], so the just-searched region is watched harder before the sweep
+    /// widens back to the station territory.
+    watch: u32,
     fov: VisibleSet,
     state: GuardState,
 }
@@ -126,6 +140,30 @@ pub(crate) const CERTAIN_RANGE: u32 = 5;
 /// seen in, so "> 10 → detects nothing" falls out of the cone itself.
 pub(crate) const GLIMPSE_RANGE: u32 = GUARD_SIGHT_RANGE;
 
+/// How many turns a guard **searches** a lost lead before releasing to patrol
+/// (§7.6 fix 2, **[START] = 8**). When a reactive guard reaches its last-known cell
+/// and finds nothing it does not snap back to patrol (the old instant give-up);
+/// it sweeps the area for this many turns first — the Lost → Hunted phase, "the good
+/// part" where the hidden player watches cones pass. Bounded, so a guard never
+/// searches forever; long enough that holding still in a cupboard is a real wait.
+pub(crate) const SEARCH_DURATION: u32 = 8;
+
+/// How far around the last-known cell a searching guard pokes (§7.6, **[START] = 4**):
+/// the radius of the disc its search sweep paces across.
+pub(crate) const SEARCH_RADIUS: u32 = 4;
+
+/// After a search **releases**, the region is watched harder for this many turns
+/// (§7.6 Released row, **[START] = 20**): the guard keeps patrolling — Calm again —
+/// but biased onto the searched area (see [`WATCH_RADIUS`]) rather than its whole
+/// station territory, so coverage there is briefly raised before the sweep drifts
+/// back to normal.
+pub(crate) const WATCH_DURATION: u32 = 20;
+
+/// The radius of the post-search watch territory (§7.6, **[START] = 8**): tighter
+/// than [`PATROL_RADIUS`], so a released guard concentrates its sweep on the area it
+/// just searched instead of ranging its full patrol.
+pub(crate) const WATCH_RADIUS: u32 = 8;
+
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
 /// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
 /// if the spawn facing ever changes, the "no guard eyes the player's spawn"
@@ -145,6 +183,9 @@ impl Guard {
             destination: None,
             last_seen: None,
             alert: 0,
+            focus: None,
+            search: 0,
+            watch: 0,
             fov: VisibleSet::default(),
             state: GuardState::Calm,
         }
@@ -239,8 +280,11 @@ impl Guard {
     /// cupboard or ducked behind the right table is not seen, so the lead just cools —
     /// which is exactly the "hold still and watch the cone sweep past" payoff (§7.6).
     pub(crate) fn sense(&mut self, player: Cell, concealed: bool) {
-        // A lead cools by default; a sighting below resets it to full.
+        // Every reactive timer cools by default; a sighting below resets the lead to
+        // full and clears the search/watch a fresh detection supersedes.
         self.alert = self.alert.saturating_sub(1);
+        self.search = self.search.saturating_sub(1);
+        self.watch = self.watch.saturating_sub(1);
         self.see(player, concealed);
     }
 
@@ -269,11 +313,21 @@ impl Guard {
             self.destination = Some(player);
             self.last_seen = Some(player);
             self.alert = ALERT_DURATION;
+            self.end_search_and_watch();
         } else if range <= GLIMPSE_RANGE {
             self.state = GuardState::Investigating;
             self.destination = self.last_seen.or(Some(player));
             self.alert = ALERT_DURATION;
+            self.end_search_and_watch();
         }
+    }
+
+    /// A fresh detection supersedes any lingering search or raised-coverage watch
+    /// (§7.6): the guard re-engages the live lead, so the old area of interest is
+    /// dropped rather than pacing on underneath the new chase.
+    fn end_search_and_watch(&mut self) {
+        self.search = 0;
+        self.watch = 0;
     }
 
     /// The direction the guard will try this turn, or `None` to hold (§7.4 phase 3).
@@ -301,21 +355,85 @@ impl Guard {
         }
         self.inspected.absorb(&self.fov);
 
-        if self.state != GuardState::Calm {
-            // Pursue the lead only while it is still warm: a guard that has arrived,
-            // has no route, or whose alert has fully cooled (§7.1) gives it up and
-            // stands back down to patrol. The bounded search that would fill the
-            // gap before giving up (§7.6 fix 2) is a later ticket.
+        // A reactive guard pursues its live lead while the alert is warm. The moment
+        // it can no longer chase, what happens next is the §7.6 fix 2 arc:
+        if matches!(self.state, GuardState::Chasing | GuardState::Investigating) {
             if self.alert > 0 {
                 if let Some(step) = self.step_toward_destination(facility, blocked) {
                     return Some(step);
                 }
+                if self.destination == Some(self.pos) {
+                    // Arrived at the last-known cell with nothing seen: **Lost → Hunted**.
+                    // It searches the area rather than snapping back to patrol.
+                    self.begin_search();
+                } else {
+                    // The route is only blocked this turn (a colleague, §7.8): keep the
+                    // lead and hold, retrying next turn — do not give it up as lost.
+                    return None;
+                }
+            } else {
+                // The lead went cold before the guard ever reached it (§7.1): the
+                // anti-tracking-turret backstop gives it up cleanly, no search.
+                self.stand_down();
             }
-            self.stand_down();
+        }
+
+        // **Hunted**: sweep the focus area for a bounded number of turns, then release.
+        if self.state == GuardState::Alerted {
+            if self.search > 0 {
+                if let Some(step) = self.step_search(facility, blocked) {
+                    return Some(step);
+                }
+                // Nothing left to poke at in the area — end the search early.
+            }
+            self.release_from_search(); // **Released**
         }
 
         self.repick_patrol_target(facility);
         self.step_toward_destination(facility, blocked)
+    }
+
+    /// Begin the §7.6 search: enter [`Alerted`](GuardState::Alerted) for
+    /// [`SEARCH_DURATION`] turns, centred on where the lead ran out — the last cell
+    /// known for certain, or, for a glimpse-only lead, the guard's own cell. The old
+    /// destination is cleared so [`step_search`](Self::step_search) picks sweep targets.
+    fn begin_search(&mut self) {
+        self.state = GuardState::Alerted;
+        self.search = SEARCH_DURATION;
+        self.focus = Some(self.last_seen.unwrap_or(self.pos));
+        self.destination = None;
+    }
+
+    /// One step of the search sweep: pace toward the farthest patrollable cell within
+    /// [`SEARCH_RADIUS`] of the [`focus`](Self::focus). On arrival the next-farthest is
+    /// the far side, so the guard crosses and re-crosses the area, sweeping its cone
+    /// over it (§7.6) — the sweep a hidden player waits out. `None` when the guard
+    /// cannot move (a one-cell pocket, or a colleague blocking), which ends the search.
+    fn step_search(&mut self, facility: &Facility, blocked: &[Cell]) -> Option<Direction> {
+        let focus = self.focus?;
+        let need_target = self
+            .destination
+            .is_none_or(|d| d == self.pos || !facility.can_enter(d, ACTOR_FILL));
+        if need_target {
+            let area = path::reachable_within(focus, SEARCH_RADIUS, |c| patrollable(facility, c));
+            // Farthest from the guard's current cell (no inspected filter): a plain
+            // paced sweep across the neighbourhood, deterministic (§12.4).
+            self.destination = pick_farthest(&area, &VisibleSet::default(), self.pos);
+        }
+        self.step_toward_destination(facility, blocked)
+    }
+
+    /// Release from a search (§7.6 Released): drop to Calm patrol but keep the region
+    /// under raised coverage for [`WATCH_DURATION`] turns — the sweep stays biased onto
+    /// the [`focus`](Self::focus) area (see [`territory`](Self::territory)) before it
+    /// widens back to the station. The live lead — destination, alert, last-known cell
+    /// — is cleared; the focus survives to steer the watch.
+    fn release_from_search(&mut self) {
+        self.state = GuardState::Calm;
+        self.watch = WATCH_DURATION;
+        self.destination = None;
+        self.last_seen = None;
+        self.alert = 0;
     }
 
     /// The first step of the shortest patrollable path to the current destination that
@@ -378,9 +496,14 @@ impl Guard {
     /// walk to — the cheap slice of the §10.5 fix the ticket asks for, short of full
     /// region assignment.
     fn territory(&self, facility: &Facility) -> Vec<Cell> {
-        path::reachable_within(self.station, PATROL_RADIUS, |cell| {
-            patrollable(facility, cell)
-        })
+        // While a released search still watches the region (§7.6), the sweep draws its
+        // territory around the searched area with the tighter [`WATCH_RADIUS`], so
+        // coverage there stays raised; otherwise it is the full station patrol.
+        let (center, radius) = match self.focus {
+            Some(focus) if self.watch > 0 => (focus, WATCH_RADIUS),
+            _ => (self.station, PATROL_RADIUS),
+        };
+        path::reachable_within(center, radius, |cell| patrollable(facility, cell))
     }
 }
 
@@ -504,33 +627,61 @@ mod tests {
         );
     }
 
-    /// §7.6: a reactive guard that reaches its destination and finds nothing — there
-    /// is no search machinery yet — stands back down to patrol rather than freezing on
-    /// the spot. Driven by sight (§9 **[SETTLED]** — guards do not hear): a glimpse
-    /// down the cone sends the guard Investigating toward that cell, and once standing
-    /// on it with nothing more seen the lead is spent.
+    /// §7.6 fix 2 (Lost → Hunted → Released): a reactive guard that reaches its
+    /// last-known cell and finds nothing does **not** snap back to patrol — it enters a
+    /// bounded [`Alerted`](GuardState::Alerted) search, sweeps for exactly
+    /// [`SEARCH_DURATION`] turns, and only then releases to Calm. Driven by sight (§9
+    /// **[SETTLED]**): a glimpse sends the guard Investigating, and once standing on the
+    /// lead with nothing more seen the search begins.
     #[test]
-    fn a_reactive_guard_stands_down_on_arrival() {
-        let facility = Facility::walled_box(11, 13);
-        let mut guard = Guard::patrolling(Cell::new(5, 2)); // faces south (§7.1)
+    fn a_lost_lead_searches_then_releases_to_patrol() {
+        let facility = Facility::walled_box(15, 15);
+        let mut guard = Guard::patrolling(Cell::new(7, 2)); // faces south (§7.1)
         guard.look(&facility);
-        let glimpse = Cell::new(5, 9); // 7 down the cone: the glimpse zone
+        let glimpse = Cell::new(7, 9); // down the cone: the glimpse zone
         assert!(guard.fov().contains(glimpse), "precondition: in the cone");
 
-        // A glimpse with no prior certain sighting Investigates toward the glimpse
-        // itself — the only position the guard has.
         guard.sense(glimpse, false);
         assert_eq!(guard.state(), GuardState::Investigating);
 
-        // Stand the guard on that destination, then decide with nothing seen: arrived,
-        // so the lead is spent and it resumes patrol.
+        // Arrive at the lead with nothing more seen: the search begins, not patrol.
         guard.advance_to(glimpse, Direction::South, &facility);
-        let _ = guard.decide(&facility, &[]);
+        guard.decide(&facility, &[]);
+        assert_eq!(
+            guard.state(),
+            GuardState::Alerted,
+            "arrival begins a bounded search, not an instant give-up",
+        );
+
+        // Wait the search out (player concealed nearby — nothing seen). It stays
+        // Alerted for SEARCH_DURATION turns, then releases to Calm.
+        let mut alerted_turns = 0u32;
+        for _ in 0..SEARCH_DURATION + 2 {
+            guard.sense(glimpse, true);
+            if guard.state() == GuardState::Alerted {
+                alerted_turns += 1;
+            }
+            guard.decide(&facility, &[]);
+        }
+        assert_eq!(
+            alerted_turns, SEARCH_DURATION,
+            "the search lasts exactly SEARCH_DURATION turns",
+        );
         assert_eq!(
             guard.state(),
             GuardState::Calm,
-            "arrived with nothing found → resume patrol",
+            "the search releases back to patrol",
         );
+    }
+
+    /// §7.6 search **[START]** pins: the search duration and its radii, and the
+    /// released-watch window, are named constants a later tune must move deliberately.
+    #[test]
+    fn the_search_constants_are_pinned() {
+        assert_eq!(SEARCH_DURATION, 8, "the [START] search duration");
+        assert_eq!(SEARCH_RADIUS, 4, "the [START] search radius");
+        assert_eq!(WATCH_DURATION, 20, "the [START] released-watch window");
+        assert_eq!(WATCH_RADIUS, 8, "the [START] watch radius");
     }
 
     /// §7.6 two-zone detection **[START]**: the boundaries and the alert duration are
