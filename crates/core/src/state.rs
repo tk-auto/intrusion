@@ -122,6 +122,12 @@ pub enum Event {
     /// fired once per body. The finder's alert is raised harder than a sighting
     /// raises it; the radio escalation is §7.3/§7.7's tickets.
     BodyFound { at: Cell },
+    /// The player took hold of an adjacent body (§8.3): they are now dragging
+    /// it, at half speed, until they release it or the run ends.
+    BodyGrabbed { at: Cell },
+    /// The player let the dragged body go where it lies (§8.3) — free (§4.4),
+    /// and it refunds nothing because there is nothing to refund.
+    BodyReleased { at: Cell },
     /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
     AbilityActivated { ability: AbilityId },
     /// The player toggled an ability off early (§4.4) — free; its cooldown still
@@ -150,8 +156,11 @@ impl Event {
             | Event::AbilityDeactivated { .. }
             | Event::AbilityExpired { .. } => Category::Owned,
             // The takedown is something you did (§7.2) — your one offensive verb,
-            // reading in the same band as your other tools.
-            Event::TakenDown { .. } => Category::Owned,
+            // reading in the same band as your other tools. Handling the body it
+            // left (§8.3) is the same hands: grabbing and releasing are Owned.
+            Event::TakenDown { .. } | Event::BodyGrabbed { .. } | Event::BodyReleased { .. } => {
+                Category::Owned
+            }
             // A found body flips its finder to hunting (§7.2/§7.4): the threat is
             // aroused but does not have you — the Warning band.
             Event::BodyFound { .. } => Category::Warning,
@@ -178,6 +187,10 @@ pub enum Affordance {
     /// take it down (§7.2). Offered only while the takedown would actually
     /// land — an aware guard's cell offers nothing.
     Takedown,
+    /// An adjacent body, hands free: bump to take hold and drag it (§8.3).
+    DragBody,
+    /// The body being dragged: bump it to let go — free (§4.4).
+    ReleaseBody,
     /// A closed door panel: bump to open (§10.4).
     OpenDoor,
     /// An open door's hinge: bump to close (§10.4).
@@ -199,6 +212,8 @@ impl Affordance {
     pub fn label(self) -> &'static str {
         match self {
             Affordance::Takedown => "guard: take down",
+            Affordance::DragBody => "body: drag",
+            Affordance::ReleaseBody => "body: release",
             Affordance::OpenDoor => "door: open",
             Affordance::CloseDoor => "door: close",
             Affordance::TakeIntel => "console: take intel",
@@ -212,10 +227,13 @@ impl Affordance {
     /// What acting on this affordance is *about* (§11.2): doors, cupboards and
     /// tables are System furniture; the console and the exit are the goal,
     /// Interest; a takedown is about the unaware threat it targets — Caution,
-    /// matching the yellow `g` it points at.
+    /// matching the yellow `g` it points at, as grabbing a loose body matches
+    /// its Caution `z`; the body in your hands is Owned, like its recoloured
+    /// glyph (§11.3).
     pub fn category(self) -> Category {
         match self {
-            Affordance::Takedown => Category::Caution,
+            Affordance::Takedown | Affordance::DragBody => Category::Caution,
+            Affordance::ReleaseBody => Category::Owned,
             Affordance::OpenDoor
             | Affordance::CloseDoor
             | Affordance::Hide
@@ -238,9 +256,14 @@ enum BumpKind {
     /// A guard; `aware` is whether it detected the player this turn (§7.2).
     /// Unaware, the bump is the takedown; aware, it is a free no-op.
     Guard { aware: bool },
-    /// A body (§7.2) — solid, and bumping it does nothing yet: grabbing it to
-    /// drag is #103's verb.
-    Body,
+    /// A body, hands free (§8.3): bumping it takes hold — the grab that starts
+    /// the drag.
+    BodyGrab,
+    /// The body currently being dragged: bumping it lets go — free (§4.4).
+    BodyRelease,
+    /// A body while another is already in hand — just solid, a free bump (one
+    /// body at a time; letting go first is free).
+    BodyBlocked,
     /// The exit; `ready` is true iff every objective is in hand (win vs. refused).
     Exit { ready: bool },
     /// An objective console still holding its intel.
@@ -270,6 +293,8 @@ impl BumpKind {
     fn affordance(self) -> Option<Affordance> {
         match self {
             BumpKind::Guard { aware: false } => Some(Affordance::Takedown),
+            BumpKind::BodyGrab => Some(Affordance::DragBody),
+            BumpKind::BodyRelease => Some(Affordance::ReleaseBody),
             BumpKind::Exit { ready: true } => Some(Affordance::Leave),
             BumpKind::Exit { ready: false } => Some(Affordance::ExitRefused),
             BumpKind::Intel => Some(Affordance::TakeIntel),
@@ -282,7 +307,7 @@ impl BumpKind {
             BumpKind::Hide => Some(Affordance::Hide),
             BumpKind::Crouch => Some(Affordance::Crouch),
             BumpKind::Guard { aware: true }
-            | BumpKind::Body
+            | BumpKind::BodyBlocked
             | BumpKind::Door {
                 action: DoorAction::Obstructed,
             }
@@ -358,7 +383,21 @@ pub struct State {
     guards: Vec<Guard>,
     /// The bodies takedowns have left (§7.2) — solid entities the level owns
     /// (§12.3), each remembering its guard's post for the radio net (§7.3).
+    /// Only ever appended, so an index into it is stable for the run.
     bodies: Vec<Body>,
+    /// The body being dragged (§8.3), as an index into [`bodies`](Self::bodies)
+    /// — `None` when the player's hands are free. Set by bumping a body (the
+    /// grab, a spent turn); cleared by bumping it again (free, §4.4) or never.
+    /// One body at a time.
+    dragging: Option<usize>,
+    /// The **half-speed convention** (§8.3: "you move at half speed while
+    /// dragging"), documented here: a successful move while dragging leaves a
+    /// haul debt, and the next spent turn pays it — a Step under debt is spent
+    /// but stationary, and a Wait or an activation absorbs it too (resting
+    /// counts; the §8.2 timing stays exact: N moves cost 2N spent turns at
+    /// worst, and every turn is a real, guard-advancing turn). Free actions
+    /// (§4.4) touch neither the debt nor anything else.
+    drag_debt: bool,
     /// Per-ability economy runtime (§8.2): activation, duration, and cooldown for
     /// each activated ability, stepped by the turn loop. The v1 set is available
     /// from the start (§8.3/#104), so this begins all-ready.
@@ -411,6 +450,8 @@ impl State {
             crouched_behind: None,
             guards,
             bodies: Vec::new(),
+            dragging: None,
+            drag_debt: false,
             abilities: Deck::new(),
             objectives,
             exit,
@@ -535,6 +576,13 @@ impl State {
     /// The bodies takedowns have left (§7.2), for rendering and tests.
     pub fn bodies(&self) -> &[Body] {
         &self.bodies
+    }
+
+    /// The cell of the body the player is dragging (§8.3), if any. The renderer
+    /// recolours that `z` to Owned — the body in your hands, like the cupboard
+    /// you hide in (§11.3) — and the ambient status reads the state from here.
+    pub fn dragging(&self) -> Option<Cell> {
+        self.dragging.map(|i| self.bodies[i].cell())
     }
 
     /// The player's current guard-sense range (§9.1): [`PLAYER_SENSE_RANGE`] normally,
@@ -691,6 +739,9 @@ impl State {
             // turns spent holding still.
             Input::Wait => {
                 self.waited = true;
+                // Resting pays off any haul debt (§8.3 half-speed convention):
+                // the spent turn is the cost either way.
+                self.drag_debt = false;
                 true
             }
             Input::Step(dir) => {
@@ -717,6 +768,8 @@ impl State {
                     events.push(Event::AbilityActivated { ability: id });
                     self.waited = false;
                     self.crouched_behind = None;
+                    // A spent turn pays the haul debt (§8.3), like a Wait.
+                    self.drag_debt = false;
                     true
                 } else {
                     false
@@ -744,7 +797,21 @@ impl State {
         // One ladder decides what a bump does — the same `bump_kind` the usable line
         // reads — so execution and prediction can never disagree (§11.4). This match
         // performs the effect; the classification and its priority live in one place.
-        match self.bump_kind(target) {
+        let kind = self.bump_kind(target);
+
+        // The half-speed drag (§8.3): a step that would *move* the player while a
+        // haul debt is owed pays the debt instead — the turn is spent hauling the
+        // body along, and nothing moves. Interactions (doors, grabs, the exit) are
+        // not movement and stay full price; free bumps stay free.
+        if self.dragging.is_some()
+            && self.drag_debt
+            && matches!(kind, BumpKind::Move | BumpKind::Hide)
+        {
+            self.drag_debt = false;
+            return true;
+        }
+
+        match kind {
             // The takedown (§7.2): adjacent, against a guard that has not detected
             // the player this turn, costing the full turn. Permanent — the guard
             // is gone, and what remains is the body, which is the real cost. No
@@ -762,6 +829,23 @@ impl State {
             // free no-op — no half-takedown, no shove.
             BumpKind::Guard { aware: true } => {
                 events.push(Event::Bumped { into: target });
+                false
+            }
+            // Grabbing an adjacent body (§8.3): the player is now dragging it,
+            // at half speed, and the grab itself is a world-changing, spent turn
+            // (§4.4). No debt is owed yet — the first haul is the first move.
+            BumpKind::BodyGrab => {
+                self.dragging = self.body_at(target);
+                self.drag_debt = false;
+                events.push(Event::BodyGrabbed { at: target });
+                true
+            }
+            // Letting the body go where it lies (§8.3): free, the §4.4 toggle-off
+            // exception — and it refunds nothing, there is nothing to refund.
+            BumpKind::BodyRelease => {
+                self.dragging = None;
+                self.drag_debt = false;
+                events.push(Event::BodyReleased { at: target });
                 false
             }
             // The exit: win if the objectives are done, else refuse — a refused exit
@@ -807,6 +891,7 @@ impl State {
             // climbing out is an ordinary step off, no special case. Its whole cost is
             // time: while you hide you make no progress and the clock keeps ticking (§2.3).
             BumpKind::Hide => {
+                self.haul_body_to(self.player);
                 self.player = target;
                 // The §5 exception for the hideout interaction (§7.6/§10.3): entry
                 // faces *out* of the cupboard, back toward the corridor — the
@@ -832,18 +917,37 @@ impl State {
             }
             // Plain movement into a cell that admits the player.
             BumpKind::Move => {
+                self.haul_body_to(self.player);
                 self.player = target;
                 self.facing = dir; // facing follows the last successful step (§5)
                 events.push(Event::Moved { to: target });
                 true
             }
-            // A body (grabbing it is #103's verb), a cupboard already holding an
+            // A body while one is already in hand, a cupboard already holding an
             // actor, the table already crouched behind, or anything else solid
             // (a wall, a closed hinge): a free bump (§4.4).
-            BumpKind::Body | BumpKind::HideoutBlocked | BumpKind::CrouchHeld | BumpKind::Solid => {
+            BumpKind::BodyBlocked
+            | BumpKind::HideoutBlocked
+            | BumpKind::CrouchHeld
+            | BumpKind::Solid => {
                 events.push(Event::Bumped { into: target });
                 false
             }
+        }
+    }
+
+    /// Haul the dragged body — if any — into `vacated`, the cell the player is
+    /// stepping out of (§8.3). Called by every arm that moves the player, so the
+    /// body follows wherever they go: onto floor, through a doorway, and — the
+    /// §7.2 hide flow — *into a cupboard*, by walking through it and out the
+    /// other side. The vacated cell just admitted the player (fill 1.0), so it
+    /// admits the body; no occupancy re-check is needed. Leaves a haul debt: the
+    /// next spent turn pays for the weight (the half-speed convention on
+    /// [`drag_debt`](Self::drag_debt)).
+    fn haul_body_to(&mut self, vacated: Cell) {
+        if let Some(i) = self.dragging {
+            self.bodies[i].move_to(vacated);
+            self.drag_debt = true;
         }
     }
 
@@ -877,8 +981,12 @@ impl State {
                 aware: self.guards[i].detected_player(),
             };
         }
-        if self.body_at(target).is_some() {
-            return BumpKind::Body;
+        if let Some(i) = self.body_at(target) {
+            return match self.dragging {
+                Some(held) if held == i => BumpKind::BodyRelease,
+                Some(_) => BumpKind::BodyBlocked,
+                None => BumpKind::BodyGrab,
+            };
         }
         if target == self.exit {
             return BumpKind::Exit {
@@ -978,6 +1086,13 @@ impl State {
                 continue;
             }
             let at = self.bodies[body_index].cell();
+            // A body in a hideout is *gone* (§7.2): the cupboard conceals it
+            // completely, like the player it was built for — no cone finds it.
+            // (It still misses its radio pings — that confusion is the §7.3
+            // payoff, delivered by the radio ticket.)
+            if self.layout.facility().terrain(at) == Some(Terrain::Hideout) {
+                continue;
+            }
             let mut seen = false;
             for guard in &mut self.guards {
                 if guard.fov().contains(at) {
@@ -1421,12 +1536,13 @@ mod tests {
             );
         }
 
-        // Solid to the player: stepping into the body is a free bump.
+        // Solid to the player: the step never moves onto the body — the bump is
+        // the grab interaction instead (§8.3).
         let turn = s.turn();
         let events = s.step(Input::Step(Direction::North));
-        assert_eq!(events, vec![Event::Bumped { into: body }]);
+        assert_eq!(events, vec![Event::BodyGrabbed { at: body }]);
         assert_eq!(s.player(), Cell::new(5, 5), "no move onto a body");
-        assert_eq!(s.turn(), turn, "bumping a body is free");
+        assert_eq!(s.turn(), turn + 1, "the grab spends the turn");
     }
 
     /// §7.2: a body is solid to guards too — it blocks their movement and their
@@ -1460,6 +1576,176 @@ mod tests {
             assert_ne!(s.guards()[0].pos(), body, "a body's cell admits no guard");
             assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
         }
+    }
+
+    /// The drag scenario (§8.3): the cupboard takedown, then a walk out and
+    /// around to stand on open floor east of the body, and the grab — the bump
+    /// that takes hold. Ends with the player at (6,4) dragging the body at (5,4).
+    fn dragging_a_body() -> State {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
+        s.step(Input::Step(Direction::East)); // out of the cupboard to (6,5)
+        s.step(Input::Step(Direction::North)); // (6,4), beside the body
+        let events = s.step(Input::Step(Direction::West)); // the grab
+        assert_eq!(
+            events,
+            vec![Event::BodyGrabbed {
+                at: Cell::new(5, 4)
+            }]
+        );
+        assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
+        s
+    }
+
+    /// §8.3: "you move at half speed while dragging", by the documented debt
+    /// convention: a dragging move succeeds and leaves a haul debt, the next
+    /// step is spent but stationary, and the one after moves again — one cell
+    /// per two spent turns, with the body following into each vacated cell.
+    /// Grabbing itself costs the turn; releasing is free.
+    #[test]
+    fn dragging_moves_at_half_speed_and_the_body_follows() {
+        let mut s = dragging_a_body();
+        assert_eq!(s.turn(), 4, "takedown, two steps, and the grab all spend");
+
+        // First drag-move: a full step, the body following into the vacated cell.
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(7, 4)
+            }]
+        );
+        assert_eq!(s.bodies()[0].cell(), Cell::new(6, 4), "the body follows");
+
+        // The next step owes the haul: spent, stationary, and silent.
+        let events = s.step(Input::Step(Direction::East));
+        assert!(events.is_empty(), "the debt turn narrates nothing");
+        assert_eq!(s.player(), Cell::new(7, 4), "no movement on the debt turn");
+        assert_eq!(s.turn(), 6, "but the turn is spent");
+
+        // Debt paid: the next step moves — 2 cells in 4 turns, half speed.
+        s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(8, 4));
+        assert_eq!(s.bodies()[0].cell(), Cell::new(7, 4));
+    }
+
+    /// §8.3/§4.4: release is free and refunds nothing — the bump against the
+    /// held body lets it go where it lies, the turn does not advance, and the
+    /// player moves at full speed again while the body stays put.
+    #[test]
+    fn releasing_the_body_is_free_and_it_stays_where_it_lies() {
+        let mut s = dragging_a_body();
+        s.step(Input::Step(Direction::East)); // body to (6,4), player (7,4)
+        let turn = s.turn();
+
+        let events = s.step(Input::Step(Direction::West)); // bump the held body
+        assert_eq!(
+            events,
+            vec![Event::BodyReleased {
+                at: Cell::new(6, 4)
+            }]
+        );
+        assert_eq!(s.turn(), turn, "release is free");
+        assert_eq!(s.dragging(), None);
+
+        // Full speed again — consecutive steps both move — and the body stays.
+        s.step(Input::Step(Direction::North));
+        s.step(Input::Step(Direction::North));
+        assert_eq!(s.player(), Cell::new(7, 2), "no lingering debt");
+        assert_eq!(s.bodies()[0].cell(), Cell::new(6, 4), "the body stays put");
+    }
+
+    /// While dragging, the usable line offers the release on the held body; a
+    /// second body reads as just solid (one body at a time), and a wall bump
+    /// stays free without moving anything (§4.4 — cannot drag through a wall).
+    #[test]
+    fn dragging_affordances_and_walls() {
+        let mut s = dragging_a_body();
+        assert_eq!(
+            s.affordances(),
+            vec![(Direction::West, Affordance::ReleaseBody)],
+            "the held body offers the release",
+        );
+
+        // Haul north to the border wall: move (debt) — bump — move…
+        s.step(Input::Step(Direction::North)); // (6,3), body (6,4)
+        s.step(Input::Step(Direction::North)); // debt
+        s.step(Input::Step(Direction::North)); // (6,2), body (6,3)
+        s.step(Input::Step(Direction::North)); // debt
+        s.step(Input::Step(Direction::North)); // (6,1), body (6,2)
+        let turn = s.turn();
+        let events = s.step(Input::Step(Direction::North)); // the border wall
+        assert_eq!(
+            events,
+            vec![Event::Bumped {
+                into: Cell::new(6, 0)
+            }]
+        );
+        assert_eq!(s.turn(), turn, "a wall bump while dragging is still free");
+        assert_eq!(s.player(), Cell::new(6, 1));
+        assert_eq!(s.bodies()[0].cell(), Cell::new(6, 2), "the body holds too");
+    }
+
+    /// §7.2's hide payoff, made possible here (§8.3): walk the body through the
+    /// cupboard — it follows into every vacated cell, so stepping out the far
+    /// side deposits it inside — then let go. A hidden body is *gone*: a guard
+    /// whose cone sweeps the cupboard finds nothing, ever.
+    #[test]
+    fn a_body_dragged_into_a_hideout_is_gone() {
+        let mut layout = open_room(12, 24);
+        layout.place(Cell::new(5, 5), Terrain::Hideout); // the body's cupboard
+        layout.place(Cell::new(5, 7), Terrain::Hideout); // the player's own
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 4)), // the victim
+                // A witness marching up the column, far enough that the player
+                // is hidden again before its cone arrives; it ends watching
+                // both cupboards.
+                Guard::patrolling_to(Cell::new(5, 21), Cell::new(5, 9)),
+            ],
+            Vec::new(),
+            Cell::new(10, 22),
+        );
+
+        s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
+        s.step(Input::Step(Direction::North)); // grab it from the cupboard
+        s.step(Input::Step(Direction::South)); // step out: body follows into (5,5)
+        let body = Cell::new(5, 5);
+        assert_eq!(s.bodies()[0].cell(), body, "deposited in the cupboard");
+        assert_eq!(
+            s.layout().facility().terrain(body),
+            Some(Terrain::Hideout),
+            "a body can occupy a hideout cell",
+        );
+
+        let events = s.step(Input::Step(Direction::North)); // let it go — free
+        assert_eq!(events, vec![Event::BodyReleased { at: body }]);
+        s.step(Input::Step(Direction::South)); // duck into the second cupboard
+        assert!(s.hidden());
+
+        // The witness arrives and sweeps both cupboards: the hidden body fires
+        // nothing, the hidden player is not seen, and nothing ever escalates.
+        for _ in 0..12 {
+            let events = s.step(Input::Wait);
+            assert!(
+                !events.iter().any(|e| matches!(e, Event::BodyFound { .. })),
+                "a body in a hideout is gone (§7.2) — no cone finds it",
+            );
+            assert_eq!(s.outcome(), Outcome::Playing);
+        }
+        assert!(!s.bodies()[0].found());
     }
 
     /// A patrolling guard with nowhere to sweep holds rather than wedging or

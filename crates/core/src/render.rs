@@ -209,11 +209,21 @@ pub fn render(state: &State) -> Grid {
     // A body (§7.2) is live state like any entity — drawn only inside the FOV,
     // never remembered — as the `z` a downed guard reads as (§10.3), in Caution:
     // an unaware threat's colour, because what a body *means* is trouble waiting
-    // to be found (§11.3).
+    // to be found (§11.3). Two exceptions speak the Owned vocabulary instead:
+    // the body **in your hands** (§8.3) draws an Owned `z` — like the cupboard
+    // you hide in, it is yours while you hold it — and a body **in a hideout**
+    // is gone (§7.2): no `z` at all (the cupboard keeps its glyph; the recolour
+    // joins the other Owned signals below).
     for body in state.bodies() {
-        if fov.contains(body.cell()) {
-            put(body.cell(), 'z', Category::Caution);
+        if !fov.contains(body.cell()) || facility.terrain(body.cell()) == Some(Terrain::Hideout) {
+            continue;
         }
+        let fg = if state.dragging() == Some(body.cell()) {
+            Category::Owned
+        } else {
+            Category::Caution
+        };
+        put(body.cell(), 'z', fg);
     }
     // A **seen** guard (in the FOV, §9.2) draws as the full state-coloured `g`; the
     // `g` glyph is re-categorised every turn from the guard's state (§11.2): yellow →
@@ -242,6 +252,16 @@ pub fn render(state: &State) -> Grid {
     // uses, so the picture cannot disagree with the rules.
     if let Some(cover) = state.crouched_behind() {
         cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
+    }
+
+    // The hidden-body signal (§7.2/§11.3): a cupboard with a body stowed in it
+    // keeps its `}` glyph — the body is *gone* — but recolours to Owned while
+    // seen, the same "something of yours is in here" vocabulary the occupied
+    // cupboard and the covering table speak.
+    for body in state.bodies() {
+        if fov.contains(body.cell()) && facility.terrain(body.cell()) == Some(Terrain::Hideout) {
+            cells[(body.cell().y * width + body.cell().x) as usize].fg = Category::Owned;
+        }
     }
 
     // The sensed highlight (§9.2): every guard the player *senses* through a wall but
@@ -750,6 +770,35 @@ mod tests {
         let masked = render(&s).get(5, 4);
         assert_eq!(masked.glyph, '·', "an unseen body draws as the floor dot");
         assert_eq!(masked.vis, Visibility::Dimmed);
+    }
+
+    /// §8.3/§11.3: the body speaks the Owned vocabulary when it is yours — an
+    /// Owned `z` while in your hands, and, once stowed in a cupboard, no `z` at
+    /// all: the cupboard keeps its `}` and recolours Owned, the same signal the
+    /// occupied cupboard gives. The body is gone (§7.2).
+    #[test]
+    fn a_dragged_body_reads_owned_and_a_stowed_one_vanishes() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
+        s.step(Input::Step(Direction::North)); // grab it
+
+        let held = render(&s).get(5, 4);
+        assert_eq!(held.glyph, 'z');
+        assert_eq!(held.fg, Category::Owned, "the body in your hands is yours");
+
+        s.step(Input::Step(Direction::South)); // step out: body follows into (5,5)
+        let stowed = render(&s).get(5, 5);
+        assert_eq!(stowed.glyph, '}', "no z: the body is gone (§7.2)");
+        assert_eq!(stowed.fg, Category::Owned, "the cupboard signals the stash");
     }
 
     /// §11.2's payoff, on screen: the `g` glyph is re-categorised every turn from
