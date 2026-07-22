@@ -68,6 +68,17 @@ Follow the architecture in §12:
 - **Rendering is a pure function of state** producing the character grid (§11.1).
 - **Keep the escape hatch honest:** abilities start data-driven; promote to code
   only when the vocabulary genuinely can't express it (§8.1).
+- **Don't clutter the central files.** `crates/web/src/lib.rs` and
+  `crates/core/src/state.rs` are the two gravity wells — everything *can* go
+  there, so without care everything does. When the code you're adding is a
+  coherent subsystem with a natural seam (its own types, its own constants, its
+  own tests — e.g. the input pumps, a generator pass, a guard behaviour), give
+  it its own module file and keep the central file to what it genuinely owns
+  (for `lib.rs`: boot, fit, palette, paint; for `state.rs`: the turn loop and
+  the state it steps). A good tell: if your diff adds a page-plus of code to a
+  central file and none of the existing code needed to change around it, it
+  wanted its own file. Prefer doing the split *in* the feature PR (a separate
+  refactor commit) over leaving it for later.
 - Match the surrounding code's idiom, naming, and comment density.
 
 ## 4. Test — this is not optional
