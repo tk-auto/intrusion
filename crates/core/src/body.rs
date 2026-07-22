@@ -62,4 +62,11 @@ impl Body {
     pub(crate) fn mark_found(&mut self) {
         self.found = true;
     }
+
+    /// Move the body to `cell` — the drag (§8.3, #103): the loop hauls it into
+    /// the cell the dragging player just vacated. The [`post`](Self::post) stays
+    /// where control believes it: dragging fools the radio, not the record.
+    pub(crate) fn move_to(&mut self, cell: Cell) {
+        self.cell = cell;
+    }
 }

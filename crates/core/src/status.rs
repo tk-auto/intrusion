@@ -56,6 +56,10 @@ pub fn message_for(event: Event) -> Option<Message> {
         // The loudest event in the game (§7.2): a hunting-threat message, on the
         // §11.7 threat ladder above a glimpse but below being caught.
         Event::BodyFound { .. } => ("a body has been found".to_string(), 4),
+        // Handling the body (§8.3): quiet self-narration, like the crouch. The
+        // held state itself lives on the ambient floor, not in a message.
+        Event::BodyGrabbed { .. } => ("you take hold of the body".to_string(), 0),
+        Event::BodyReleased { .. } => ("you let the body go".to_string(), 0),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
         Event::AbilityActivated { ability } => (format!("{} active", ability.name()), 0),
@@ -97,6 +101,13 @@ fn ambient(state: &State) -> Message {
         )
     } else if state.crouched() {
         ("crouched behind cover".to_string(), Category::Owned)
+    } else if state.dragging().is_some() {
+        // The held state (§8.3): what shapes every next step while it lasts —
+        // and the standing explanation of the half-speed turns.
+        (
+            "dragging the body — half speed".to_string(),
+            Category::Owned,
+        )
     } else {
         match state.objectives_remaining() {
             0 => (
@@ -222,6 +233,32 @@ mod tests {
 
         s.step(Input::Wait); // holding: no new event, the ambient shows the state
         assert_eq!(near_line(&s).text, "crouched behind cover");
+    }
+
+    /// §8.3: while dragging on open ground, the ambient floor names the held
+    /// state and its cost — the standing explanation of every half-speed turn.
+    #[test]
+    fn ambient_reports_dragging_as_owned() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Step(Direction::North)); // takedown
+        s.step(Input::Step(Direction::East)); // out of the cupboard
+        s.step(Input::Step(Direction::North)); // beside the body
+        s.step(Input::Step(Direction::West)); // grab: the message turn
+        assert_eq!(near_line(&s).text, "you take hold of the body");
+
+        s.step(Input::Wait); // the message clears to the held state
+        let line = near_line(&s);
+        assert_eq!(line.text, "dragging the body — half speed");
+        assert_eq!(line.category, Category::Owned);
     }
 
     /// Once the run ends the loop is inert (§4.5) and the final message stays —
