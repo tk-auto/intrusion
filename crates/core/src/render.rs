@@ -772,6 +772,40 @@ mod tests {
         assert_eq!(masked.vis, Visibility::Dimmed);
     }
 
+    /// §8.3/§11.5: the danger overlay keeps its promise under Camouflage — "red
+    /// under you = detected". A cloaked, still player under a visible guard's
+    /// cone shows no red on their own cell; before cloaking, the same cell is
+    /// red. The cone itself stays painted — the guard watches the ground, it
+    /// just cannot see what stands cloaked on it.
+    #[test]
+    fn the_danger_overlay_spares_a_cloaked_still_player() {
+        use crate::AbilityId;
+        // Guard at (5,2) looking south down the column; the player at (5,6),
+        // facing north so the guard is in view and its cone paints.
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 6),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 2))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        assert_eq!(
+            render(&s).get(5, 6).bg,
+            Some(Category::Danger),
+            "exposed: the watched cell is red",
+        );
+
+        s.step(Input::Activate(AbilityId::Camouflage));
+        let g = render(&s);
+        assert_eq!(g.get(5, 6).bg, None, "cloaked and still: no red under you");
+        assert_eq!(
+            g.get(5, 5).bg,
+            Some(Category::Danger),
+            "the cone itself is still painted",
+        );
+    }
+
     /// §8.3/§11.3: the body speaks the Owned vocabulary when it is yours — an
     /// Owned `z` while in your hands, and, once stowed in a cupboard, no `z` at
     /// all: the cupboard keeps its `}` and recolours Owned, the same signal the
