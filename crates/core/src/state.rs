@@ -33,7 +33,7 @@
 //! state machine — searching, decoys — is the later guard tickets, which set a
 //! guard's destination the same way and reuse the same walk-toward-it movement.
 
-use crate::ability::{AbilityId, AbilityState, Deck};
+use crate::ability::{AbilityId, AbilityState, Deck, Effect};
 use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
@@ -921,6 +921,7 @@ impl State {
                 self.player = target;
                 self.facing = dir; // facing follows the last successful step (§5)
                 events.push(Event::Moved { to: target });
+                self.run_extra_step(dir, events);
                 true
             }
             // A body while one is already in hand, a cupboard already holding an
@@ -934,6 +935,36 @@ impl State {
                 false
             }
         }
+    }
+
+    /// Run's effect (§8.3, [`Effect::ExtraStep`]): while it is active, a
+    /// successful step carries the player one **more** cell the same way in the
+    /// same turn — "stepping N times covers 2N cells". The convention chosen
+    /// here (the §8.3 row reads "one free move per turn"): the extra move is
+    /// **automatic and straight ahead**, and it happens only into a cell that
+    /// admits a plain move — a wall, a door, a cupboard, a guard, a body stops
+    /// the sprint at one cell rather than auto-bumping (no door flung open, no
+    /// takedown, no climb — a sprint never triggers an interaction the player
+    /// didn't aim, the §8.4 no-auto-target spirit). It sets facing like any move
+    /// (trivially: the same direction) and the whole two-cell step is one spent
+    /// turn, so guards still get exactly one turn — the only speed asymmetry in
+    /// the game (§7.1: guards never accelerate; §8.3: watch this pair).
+    ///
+    /// **Dragging suppresses it** (§8.3/#103): Run and Drag must not stack into
+    /// fast body-hauling — while dragging, movement caps at the drag's half
+    /// speed and the extra step simply never fires.
+    fn run_extra_step(&mut self, dir: Direction, events: &mut Vec<Event>) {
+        if self.dragging.is_some() || !self.abilities.effect_active(Effect::ExtraStep) {
+            return;
+        }
+        let Some(target) = self.player.step(dir) else {
+            return;
+        };
+        if !matches!(self.bump_kind(target), BumpKind::Move) {
+            return;
+        }
+        self.player = target;
+        events.push(Event::Moved { to: target });
     }
 
     /// Haul the dragged body — if any — into `vacated`, the cell the player is
@@ -1191,7 +1222,7 @@ fn actor_occupies(player: Cell, guards: &[Guard], bodies: &[Body], cell: Cell) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guard::{GuardState, PATROL_RADIUS, SEARCH_RADIUS};
+    use crate::guard::{GuardState, CERTAIN_RANGE, GLIMPSE_RANGE, PATROL_RADIUS, SEARCH_RADIUS};
     use crate::test_support::{open_room, solo};
     use crate::vision::field_of_view;
     use crate::{generate, DoorId, Rng};
@@ -1576,6 +1607,137 @@ mod tests {
             assert_ne!(s.guards()[0].pos(), body, "a body's cell admits no guard");
             assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
         }
+    }
+
+    /// §7.6's designed relation, asserted so it can never silently drift: Run's
+    /// gain — one extra cell per active turn over its whole duration — is
+    /// exactly the certain→glimpse distance, the 5 cells that turn a Chasing
+    /// guard's certain track into a glimpse. Retuning Run means retuning the
+    /// zones, and vice versa; this test is the tripwire.
+    #[test]
+    fn runs_gain_is_the_certain_to_glimpse_distance() {
+        assert_eq!(
+            AbilityId::Run.def().duration(),
+            GLIMPSE_RANGE - CERTAIN_RANGE,
+            "Run's gain and the §7.6 zones are designed as a pair",
+        );
+    }
+
+    /// The §8.3 golden loop: activating Run and stepping N times covers 2N
+    /// cells — both cells reported, one spent turn each — until the duration
+    /// expires at its §8.2 count (activation turn included), after which a step
+    /// covers 1 cell again and Run is cooling.
+    #[test]
+    fn run_doubles_steps_for_its_duration_then_reverts_and_cools() {
+        let mut s = State::new(
+            open_room(20, 10),
+            Cell::new(2, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 8),
+        );
+        s.step(Input::Activate(AbilityId::Run)); // protected turn 1: no movement
+
+        let mut x = 2;
+        for _ in 0..4 {
+            // Protected turns 2–5: every step is two cells, two Moved events.
+            let turn = s.turn();
+            let events = s.step(Input::Step(Direction::East));
+            x += 2;
+            assert_eq!(s.player(), Cell::new(x, 5));
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, Event::Moved { .. }))
+                    .count(),
+                2,
+                "both cells of the sprint are reported",
+            );
+            assert_eq!(s.turn(), turn + 1, "a sprint step is one spent turn");
+        }
+        assert!(
+            matches!(
+                s.ability_state(AbilityId::Run),
+                AbilityState::Cooling { .. }
+            ),
+            "5 protected turns (activation included) then the cooldown",
+        );
+
+        // Reverted: a step is one cell again.
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(11, 5));
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(11, 5)
+            }]
+        );
+    }
+
+    /// The sprint's second cell must admit a **plain move**: anything else — a
+    /// wall, a cupboard — stops the sprint at one cell rather than auto-bumping.
+    /// A sprint never opens a door, never climbs into a cupboard, never touches
+    /// a guard the player didn't aim at (§8.4's no-auto-target spirit).
+    #[test]
+    fn the_sprint_stops_short_of_anything_it_would_bump() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(3, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Run));
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(4, 4), "the wall stops the sprint");
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(4, 4)
+            }],
+            "one move, and no bump against the wall ahead",
+        );
+
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 8), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(3, 8),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Run));
+        s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(4, 8), "stops beside the cupboard");
+        assert!(!s.hidden(), "a sprint never climbs in unasked");
+    }
+
+    /// §8.3/#103, the interaction stated and pinned: Run and Drag never stack.
+    /// While dragging, the extra step is suppressed — movement caps at the
+    /// drag's half speed, Run active or not.
+    #[test]
+    fn run_never_stacks_with_dragging() {
+        let mut s = dragging_a_body(); // player (6,4), dragging the body at (5,4)
+        s.step(Input::Activate(AbilityId::Run));
+
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(7, 4), "one cell — no fast dragging");
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(7, 4)
+            }]
+        );
+        assert_eq!(s.bodies()[0].cell(), Cell::new(6, 4), "the body follows");
+
+        s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(7, 4), "the haul debt holds under Run");
     }
 
     /// The drag scenario (§8.3): the cupboard takedown, then a walk out and

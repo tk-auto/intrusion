@@ -532,6 +532,18 @@ impl Deck {
         true
     }
 
+    /// Whether any **active** ability declares `effect` (§8.1) — how the turn
+    /// loop asks "is an extra step owed?" without naming an ability: the loop
+    /// interprets the effect vocabulary, so a future ability declaring the same
+    /// effect gets the same behaviour for free, and a `Coded` ability never
+    /// matches (its behaviour lives in code keyed on its id, not here).
+    pub(crate) fn effect_active(&self, effect: Effect) -> bool {
+        AbilityId::ALL.into_iter().any(|id| {
+            matches!(self.slots[id.index()], Slot::Active { .. })
+                && matches!(id.def().behaviour(), Behaviour::Effects(effects) if effects.contains(&effect))
+        })
+    }
+
     /// The **end-of-turn** tick for every ability (§8.2 timing). Pushes one
     /// [`AbilityId`] per ability whose duration ended this tick — in
     /// [`AbilityId::ALL`] order — so the caller can raise its "faded" event (§11.7).
