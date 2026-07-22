@@ -39,7 +39,7 @@ use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::Guard;
 use crate::vision::{
-    field_of_view, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
+    field_of_view_with_peek, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
 };
 use crate::DoorAction;
 
@@ -382,7 +382,9 @@ impl State {
     }
 
     /// The player's field of view (§6): the ~180° forward half-disc, or the full
-    /// 360° on a turn spent waiting — the only way to see behind you (§8.3). What is
+    /// 360° on a turn spent waiting — the only way to see behind you (§8.3) —
+    /// including the auto-peek around adjacent corners (#121,
+    /// [`field_of_view_with_peek`]). What is
     /// in it renders lit and what is not renders dimmed (§11.5); the renderer
     /// reads this set for the live layer, and tile memory
     /// ([`memory`](Self::memory)) accumulates from it.
@@ -499,6 +501,12 @@ impl State {
     /// Seen wins over Sensed by construction — a guard in the FOV is Seen even if it is
     /// also inside the (larger or smaller) sense box — so the dot never coexists with
     /// the full guard on the same cell.
+    ///
+    /// A guard visible only through the auto-peek (#121) is **Seen**, cone and
+    /// all: the lean is a real line of sight, so it earns the full picture, not
+    /// the sensed dot. The overlay that cone paints stays truthful — the guard's
+    /// own detection uses its plain cast, which cannot see around the corner
+    /// back ([`field_of_view_with_peek`]'s one-sidedness).
     pub fn perceive_guard(&self, guard: &Guard) -> Option<GuardPerception> {
         if self.player_fov.contains(guard.pos()) {
             Some(GuardPerception::Seen)
@@ -793,7 +801,11 @@ impl State {
     /// position and facing (§6). Running *after* the player acts and *before* the
     /// guards read it is what designs out the old one-turn sensory lag (§4.2). The
     /// player's arc is the ~180° half-disc — or the full 360° if this turn was spent
-    /// waiting (§8.3). Guards carve their ~90° wedge with the same function (§6.2).
+    /// waiting (§8.3) — and their sight carries the auto-peek (#121): the union
+    /// with the cast from one cell ahead, which reads around adjacent corners and
+    /// out of cupboard mouths. Guards carve their ~90° wedge with the **plain**
+    /// cast (§6.2) — the peek is the player's alone, so a corner the player can
+    /// read still breaks the guard's line (§7.6).
     fn recompute_sight(&mut self) {
         let facility = self.layout.facility();
         let arc = if self.waited {
@@ -802,7 +814,7 @@ impl State {
             PLAYER_SIGHT_ARC
         };
         self.player_fov =
-            field_of_view(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE);
+            field_of_view_with_peek(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE);
         // Tile memory (§11.5a) accumulates here, in the same phase that produced
         // the sight — every cell the player can see now is remembered forever.
         self.memory.absorb(&self.player_fov);
@@ -911,6 +923,7 @@ mod tests {
     use super::*;
     use crate::guard::{GuardState, PATROL_RADIUS, SEARCH_RADIUS};
     use crate::test_support::{open_room, solo};
+    use crate::vision::field_of_view;
     use crate::{generate, DoorId, Rng};
 
     #[test]
@@ -1282,13 +1295,6 @@ mod tests {
 
         // The 180° half-disc, facing the corridor, covers the mouth and the cells on
         // both sides of it — the sweep the hiding game is built around.
-        let fov = field_of_view(
-            s.layout.facility(),
-            s.player(),
-            s.facing(),
-            PLAYER_SIGHT_ARC,
-            PLAYER_SIGHT_RANGE,
-        );
         for corridor_cell in [
             Cell::new(5, 4), // the mouth
             Cell::new(4, 4), // west of the mouth
@@ -1296,10 +1302,90 @@ mod tests {
             Cell::new(5, 5), // straight down the corridor
         ] {
             assert!(
-                fov.contains(corridor_cell),
+                s.player_fov().contains(corridor_cell),
                 "hiding must watch the corridor cell {corridor_cell:?}"
             );
         }
+
+        // The auto-peek (#121): facing out means the head leans through the
+        // mouth, so the corridor reads far past the flanking walls' wedge —
+        // both directions — with no hideout special-case. The plain cast from
+        // inside the recess cannot see these; the live FOV (peek-aware) must.
+        let plain = field_of_view(
+            s.layout.facility(),
+            s.player(),
+            s.facing(),
+            PLAYER_SIGHT_ARC,
+            PLAYER_SIGHT_RANGE,
+        );
+        for far_cell in [Cell::new(1, 4), Cell::new(9, 4)] {
+            assert!(
+                !plain.contains(far_cell),
+                "{far_cell:?} is beyond the mouth's wedge for the plain cast"
+            );
+            assert!(
+                s.player_fov().contains(far_cell),
+                "the peek must read the corridor to {far_cell:?}"
+            );
+            assert!(
+                s.memory().contains(far_cell),
+                "peeked cells feed tile memory like any seen cell (§11.5a)"
+            );
+        }
+    }
+
+    /// #121: the auto-peek is the player's alone — one-sided by design. Around
+    /// an L-corner the player reads the guard (**Seen**, the full picture — the
+    /// lean is a real line of sight), while the guard's own plain cone cannot
+    /// see the player back: no detection, no state change. A corner the player
+    /// can read still breaks the guard's line, which is what keeps corners the
+    /// player's flight tool (§7.6).
+    #[test]
+    fn the_peek_is_the_players_alone_a_guard_never_peeks() {
+        let mut layout = open_room(11, 11);
+        layout.place(Cell::new(4, 4), Terrain::Wall); // the corner block
+        let mut guard = Guard::stationary(Cell::new(6, 3));
+        // Face the guard straight at the corner — the worst case for the player.
+        guard.advance_to(Cell::new(6, 3), Direction::West, layout.facility());
+        let s = State::new(
+            layout,
+            Cell::new(3, 4), // one short of the corner, facing along it
+            Direction::North,
+            vec![guard],
+            Vec::new(),
+            Cell::new(9, 9),
+        );
+
+        let guard = &s.guards()[0];
+        assert!(
+            s.player_fov().contains(guard.pos()),
+            "the peek shows the guard around the corner"
+        );
+        let plain = field_of_view(
+            s.layout.facility(),
+            s.player(),
+            s.facing(),
+            PLAYER_SIGHT_ARC,
+            PLAYER_SIGHT_RANGE,
+        );
+        assert!(
+            !plain.contains(guard.pos()),
+            "the corner hides the guard from the body's own cast — the delta is the peek"
+        );
+        assert_eq!(
+            s.perceive_guard(guard),
+            Some(GuardPerception::Seen),
+            "a peeked guard is Seen, cone and all, not the sensed dot"
+        );
+        assert!(
+            !guard.fov().contains(s.player()),
+            "the guard's plain cone must not read around the corner"
+        );
+        assert_eq!(
+            guard.state(),
+            GuardState::Calm,
+            "seeing a guard through the peek is information, never detection"
+        );
     }
 
     /// §4.3/§10.3: "move off to climb out." Stepping from a hideout onto floor is an

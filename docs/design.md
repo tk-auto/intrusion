@@ -302,6 +302,15 @@ see them first.** Do not erode it casually.
   direction, including directly behind.** **[SETTLED]** — this is load-bearing:
   **you can never stand adjacent to a guard undetected.** Sneaking up behind
   someone is never free. See §7.2 for how this interacts with takedowns.
+- **Auto-peek — the player only.** **[START]** The player's sight is the union
+  of the cast from their cell and a cast from the cell one step ahead along
+  their facing — where the head would be if they leaned forward — clipped to
+  their own range box (on open floor the union adds nothing). It reads around
+  adjacent corners and out of cupboard mouths: a hidden player watches the
+  corridor at ~180°, not the mouth's ~90° wedge. **Guards never peek** — a
+  corner the player can read still breaks a guard's line (§7.6), and detection
+  stays with the guards' own cones, so the peek is an information channel in
+  the §9 spirit, one-sided by design.
 
 ### 6.2 Implementing the cone
 

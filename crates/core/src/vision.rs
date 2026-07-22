@@ -26,6 +26,12 @@
 //! throughout (slopes are rationals), so it is exactly deterministic (§12.4) and has
 //! the fairness property the name promises: between transparent cells, if A can see
 //! B then B — looking that way with the same arc — can see A.
+//!
+//! On top of the plain cast sits one deliberate, player-only exception: the
+//! **auto-peek** ([`field_of_view_with_peek`], #121) — the union of the view from
+//! where the player stands and the view from the cell their head would occupy if
+//! they leaned one step forward. The union steps outside the symmetry property on
+//! purpose; see the function for the rule and the rationale.
 
 use crate::cell::{Cell, Direction};
 use crate::facility::Facility;
@@ -175,6 +181,54 @@ pub fn field_of_view(
         fov.unmark(c);
     }
 
+    fov
+}
+
+/// The player's sight: the §6 cone with the **auto-peek** union (#121). What the
+/// player sees is [`field_of_view`] from `origin` *unioned with* a second cast
+/// from the **head-lean origin** — the cell one step ahead along `facing` — with
+/// the same facing, arc and range, clipped to `origin`'s own range box so the
+/// advertised range never grows. Leaning is how you look past a corner you are
+/// standing against without stepping into the open, and it is not a corner rule:
+/// wherever a corner, a doorway edge or a cupboard mouth (§10.3) happens to be
+/// adjacent, the second viewpoint sees around it naturally. On open floor the
+/// clip means the union adds nothing — the peek only ever re-reveals what
+/// geometry hid, never extends reach.
+///
+/// The lean contributes nothing when the forward cell blocks sight (a wall, a
+/// hinge, a closed panel — you cannot lean into those) or lies off the grid. A
+/// player facing out of a cupboard (the §7.6 auto-face, #89) leans through the
+/// mouth, which is what widens the corridor from the mouth's ~90° wedge to the
+/// full ~180° along its axis.
+///
+/// **This is the player's sight alone, one-sided by design.** Guards keep the
+/// plain cast — a guard that saw around corners could not be *broken* by
+/// corners, and corners are the player's main flight tool (§7.6). The union
+/// therefore deliberately steps outside the module's symmetry property: the
+/// peek can show you a guard that cannot see you. That is an information
+/// channel in the §9 spirit, not a detection change — detection stays with the
+/// guards' own plain cones, so the §11.5 danger overlay (painted from those
+/// cones) never claims a peeked guard sees you.
+pub fn field_of_view_with_peek(
+    facility: &Facility,
+    origin: Cell,
+    facing: Direction,
+    arc_width: u8,
+    range: u32,
+) -> VisibleSet {
+    let mut fov = field_of_view(facility, origin, facing, arc_width, range);
+    let Some(lean) = origin.step(facing) else {
+        return fov;
+    };
+    if facility.terrain(lean).is_none_or(|t| t.blocks_sight()) {
+        return fov;
+    }
+    let leaned = field_of_view(facility, lean, facing, arc_width, range);
+    for cell in leaned.cells() {
+        if cell.sight_distance(origin) <= range {
+            fov.mark(cell);
+        }
+    }
     fov
 }
 
@@ -1102,6 +1156,206 @@ mod tests {
             grazing.contains(Cell::new(6, 6)),
             "a lone corner never hides"
         );
+    }
+
+    /// An interior filled with wall, with corridors carved into it — the pinched
+    /// geometry the #121 auto-peek exists for.
+    fn carved(w: u32, h: u32, floors: &[(u32, u32)]) -> Facility {
+        let mut f = Facility::walled_box(w, h);
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                f.set_terrain(x, y, Terrain::Wall);
+            }
+        }
+        for &(x, y) in floors {
+            f.set_terrain(x, y, Terrain::Floor);
+        }
+        f
+    }
+
+    /// An L-corner: a vertical corridor meeting a horizontal arm at (3,3).
+    fn l_corridor() -> Facility {
+        let mut floors = Vec::new();
+        floors.extend((3..=8).map(|y| (3, y)));
+        floors.extend((3..=8).map(|x| (x, 3)));
+        carved(11, 11, &floors)
+    }
+
+    /// #121 auto-peek: on open floor the union adds nothing. The lean cast is
+    /// clipped to the origin's own range box, so leaning can only re-reveal
+    /// what geometry hides — it never extends reach or widens the arc where
+    /// nothing occludes.
+    #[test]
+    fn on_open_floor_the_peek_changes_nothing() {
+        let f = open(11, 11);
+        let origin = Cell::new(5, 5);
+        for arc in [PLAYER_SIGHT_ARC, WAIT_SIGHT_ARC] {
+            let plain = field_of_view(&f, origin, Direction::North, arc, 4);
+            let peek = field_of_view_with_peek(&f, origin, Direction::North, arc, 4);
+            assert_eq!(
+                picture(&f, &plain, origin),
+                picture(&f, &peek, origin),
+                "arc {arc}: open floor must gain nothing from the peek"
+            );
+        }
+    }
+
+    /// #121 auto-peek at an L-corner, pinned as goldens: standing one cell
+    /// short of the corner and facing it, the head-lean origin *is* the corner
+    /// cell, so the peek reads down the cross arm the corner walls hide from
+    /// the body's own cast. The plain cast keeps only the arm cell diagonally
+    /// ahead (the lean origin's ring reaches no further than the touching
+    /// ring's own reach).
+    #[test]
+    fn peeking_at_an_l_corner_reads_down_the_cross_arm() {
+        let f = l_corridor();
+        let origin = Cell::new(3, 4);
+        let plain = field_of_view(&f, origin, Direction::North, PLAYER_SIGHT_ARC, 8);
+        let peek = field_of_view_with_peek(&f, origin, Direction::North, PLAYER_SIGHT_ARC, 8);
+        assert_eq!(
+            picture(&f, &plain, origin),
+            vec![
+                "...........",
+                "...........",
+                "..####.....",
+                "..#**......",
+                "..#@#......",
+                "..#*#......",
+                "...........",
+                "...........",
+                "...........",
+                "...........",
+                "...........",
+            ]
+        );
+        assert_eq!(
+            picture(&f, &peek, origin),
+            vec![
+                "...........",
+                "...........",
+                "..########.",
+                "..#******#.",
+                "..#@######.",
+                "..#*#......",
+                "...........",
+                "...........",
+                "...........",
+                "...........",
+                "...........",
+            ]
+        );
+        // The cross arm beyond the diagonal is the peek's delta.
+        for x in 5..=8 {
+            let c = Cell::new(x, 3);
+            assert!(!plain.contains(c), "{c:?} hidden from the body's cast");
+            assert!(peek.contains(c), "{c:?} revealed by the lean");
+        }
+    }
+
+    /// #121 auto-peek at a T-junction: one cell short of the junction, facing
+    /// the stem's end, the lean origin sits in the junction and reads both
+    /// arms at once — the ~180° the ticket promises, from a corridor instead
+    /// of a cupboard.
+    #[test]
+    fn peeking_at_a_t_junction_reads_both_arms() {
+        let mut floors = Vec::new();
+        floors.extend((1..=9).map(|x| (x, 3)));
+        floors.extend((3..=8).map(|y| (5, y)));
+        let f = carved(11, 11, &floors);
+        let origin = Cell::new(5, 4);
+        let plain = field_of_view(&f, origin, Direction::North, PLAYER_SIGHT_ARC, 8);
+        let peek = field_of_view_with_peek(&f, origin, Direction::North, PLAYER_SIGHT_ARC, 8);
+        for x in [1, 2, 8, 9] {
+            let c = Cell::new(x, 3);
+            assert!(!plain.contains(c), "{c:?} hidden from the body's cast");
+            assert!(peek.contains(c), "{c:?} revealed by the lean");
+        }
+    }
+
+    /// #121: a sight-blocking forward cell refuses the lean — you cannot put
+    /// your head into a wall or a closed door panel — and the peek collapses to
+    /// the plain cast exactly.
+    #[test]
+    fn a_blocked_forward_cell_means_no_lean() {
+        for terrain in [Terrain::Wall, Terrain::DoorPanelClosed, Terrain::DoorHinge] {
+            let mut f = open(11, 11);
+            f.set_terrain(5, 4, terrain);
+            let origin = Cell::new(5, 5);
+            for arc in [PLAYER_SIGHT_ARC, WAIT_SIGHT_ARC] {
+                let plain = field_of_view(&f, origin, Direction::North, arc, 8);
+                let peek = field_of_view_with_peek(&f, origin, Direction::North, arc, 8);
+                assert_eq!(
+                    picture(&f, &plain, origin),
+                    picture(&f, &peek, origin),
+                    "{terrain:?} arc {arc}: no lean into a blocked cell"
+                );
+            }
+        }
+    }
+
+    /// #121: the peek never escapes the origin's range box — the §6.1 promise
+    /// "range R sees at most the (2R+1)² box" holds for the union too.
+    #[test]
+    fn the_peek_stays_inside_the_origin_range_box() {
+        let f = l_corridor();
+        let origin = Cell::new(3, 4);
+        for arc in [PLAYER_SIGHT_ARC, WAIT_SIGHT_ARC] {
+            let fov = field_of_view_with_peek(&f, origin, Direction::North, arc, 3);
+            for c in fov.cells() {
+                assert!(
+                    chebyshev(origin, c) <= 3,
+                    "arc {arc}: {c:?} escaped the range-3 box"
+                );
+            }
+        }
+    }
+
+    /// #121, the flagship case: hidden in the alcove cupboard, facing out (the
+    /// §7.6 auto-face), the head leans through the mouth and the corridor reads
+    /// at ~180° — both directions to the range box — where the plain cast gets
+    /// only the mouth's ~90° wedge (pinned by
+    /// `a_cupboard_alcove_does_not_leak_sight_into_the_room` above). The room
+    /// behind the backing stays exactly as dark as the plain cast leaves it:
+    /// leaning *out* opens nothing *inward*.
+    #[test]
+    fn hidden_in_a_cupboard_the_peek_reads_the_whole_corridor() {
+        let f = alcove_cupboard();
+        let origin = Cell::new(8, 3);
+        let peek = field_of_view_with_peek(&f, origin, Direction::South, PLAYER_SIGHT_ARC, 15);
+        assert_eq!(
+            picture(&f, &peek, origin),
+            vec![
+                ".................",
+                ".................",
+                ".......*#*.......",
+                "########@########",
+                "#***************#",
+                "#***************#",
+                "#################",
+                ".................",
+            ]
+        );
+        // Both corridor directions, far past the mouth wedge.
+        for c in [
+            Cell::new(1, 4),
+            Cell::new(15, 4),
+            Cell::new(3, 5),
+            Cell::new(13, 5),
+        ] {
+            assert!(peek.contains(c), "{c:?}: the corridor must read both ways");
+        }
+        // The room stays dark — the peek widens the corridor, not the pinch.
+        for c in [
+            Cell::new(6, 1),
+            Cell::new(10, 1),
+            Cell::new(7, 1),
+            Cell::new(9, 1),
+        ] {
+            assert!(
+                !peek.contains(c),
+                "{c:?}: leaning out must not open the room"
+            );
+        }
     }
 
     /// A default set is the empty placeholder: it contains nothing.

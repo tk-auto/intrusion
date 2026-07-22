@@ -65,6 +65,6 @@ pub use state::{
 };
 pub use status::{message_for, near_line, Message};
 pub use vision::{
-    field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
-    PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
+    field_of_view, field_of_view_with_peek, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE,
+    PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
 };
