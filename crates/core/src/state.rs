@@ -374,6 +374,13 @@ pub struct State {
     /// computation to the full 360° (§8.3). A free action (a wall bump) spends
     /// nothing and changes nothing (§4.4), so it does not clear this.
     waited: bool,
+    /// Whether the player's cell changed on the last spent turn — the fact
+    /// Camouflage reads (§8.3: undetectable **while you don't move**; the turn
+    /// you move, you are revealed). Derived in [`step`](Self::step) from the
+    /// position itself, never per-arm bookkeeping, so a sprint's extra cell, a
+    /// hideout entry, or a stationary interaction (a bump, a grab, a wait) can
+    /// never be misclassified. Free actions leave it alone (§4.4).
+    moved_this_turn: bool,
     /// The table the player is crouched behind (§10.3), set by bumping it and
     /// cleared by any spent action other than a Wait (waiting holds the pose).
     /// Always orthogonally adjacent by construction: the bump that sets it is a
@@ -447,6 +454,7 @@ impl State {
             player_fov: VisibleSet::default(),
             memory: VisibleSet::default(),
             waited: false,
+            moved_this_turn: false,
             crouched_behind: None,
             guards,
             bodies: Vec::new(),
@@ -535,9 +543,15 @@ impl State {
     /// danger overlay already honours (§11.5: the overlay must not claim the
     /// player is seen while they are not).
     ///
-    /// Two ways to be concealed:
+    /// Three ways to be concealed:
     /// - **In a cupboard** ([`hidden`](Self::hidden)): omnidirectional — no
     ///   viewer anywhere detects the player (§10.3).
+    /// - **Camouflaged and still** (§8.3, [`Effect::ConcealWhileStill`]):
+    ///   omnidirectional while the ability is active and the last spent turn
+    ///   did not move the player; the turn they move, this clause lapses and
+    ///   they are revealed for that turn. It resumes the next still turn. Like
+    ///   every concealment it blocks *detection* only — never contact (§4.5):
+    ///   invisible is not safe.
     /// - **Crouched behind a table** ([`crouched`](Self::crouched)): directional —
     ///   only from viewers whose line of sight crosses **the table the player
     ///   ducked behind** (not every table they happen to stand beside), i.e.
@@ -553,6 +567,9 @@ impl State {
     /// concealing.
     pub fn concealed_from(&self, viewer: Cell) -> bool {
         if self.hidden() {
+            return true;
+        }
+        if self.abilities.effect_active(Effect::ConcealWhileStill) && !self.moved_this_turn {
             return true;
         }
         let Some(cover) = self.crouched_behind else {
@@ -701,10 +718,14 @@ impl State {
 
         let mut events = Vec::new();
         // Phase 1. A free action (wall bump, refused exit) does not end the turn.
+        let from = self.player;
         let spent = self.player_phase(input, &mut events);
 
         if self.outcome == Outcome::Playing && spent {
             self.turn += 1;
+            // Whether this spent turn moved the player — read straight off the
+            // position, the fact Camouflage's stillness rule consumes (§8.3).
+            self.moved_this_turn = self.player != from;
             // Phases 2 and 3 only happen because the player spent the turn (§4.2/§4.4).
             events.extend(self.run_world_phases());
             // Ability durations tick HERE — at end of turn, after all three phases —
@@ -1607,6 +1628,123 @@ mod tests {
             assert_ne!(s.guards()[0].pos(), body, "a body's cell admits no guard");
             assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
         }
+    }
+
+    /// The §8.2 golden test, through the whole loop (§8.3 Camouflage): a
+    /// standing player under a guard's cone is concealed for **exactly 10
+    /// turns, the activation turn included** — the "advertised 10, concealed 9,
+    /// visible on the activation turn" regression can never return silently —
+    /// and on the 11th the cone has them again.
+    #[test]
+    fn camouflage_conceals_for_its_full_duration_including_activation() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 6),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 2))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        // Control: exposed, the startup turn's cone detects the player.
+        assert!(s.guards()[0].detected_player(), "precondition: in the cone");
+
+        // Protected turn 1 is the activation itself.
+        s.step(Input::Activate(AbilityId::Camouflage));
+        assert!(
+            !s.guards()[0].detected_player(),
+            "the activation turn is protected — the old trap, designed out",
+        );
+
+        // Protected turns 2–10: still, swept every turn, never detected.
+        for turn in 2..=10 {
+            let events = s.step(Input::Wait);
+            assert!(
+                !s.guards()[0].detected_player(),
+                "turn {turn}: still and unseen",
+            );
+            assert_eq!(
+                events.contains(&Event::AbilityExpired {
+                    ability: AbilityId::Camouflage
+                }),
+                turn == 10,
+                "the cloak fades at the end of protected turn 10, no earlier",
+            );
+        }
+
+        // Turn 11: cooling, and the cone has the player again.
+        s.step(Input::Wait);
+        assert!(
+            s.guards()[0].detected_player(),
+            "advertised 10 yields 10 — and not an 11th",
+        );
+        assert!(matches!(
+            s.ability_state(AbilityId::Camouflage),
+            AbilityState::Cooling { .. }
+        ));
+    }
+
+    /// §8.3: moving while camouflaged reveals the player **for that turn** —
+    /// the guard glimpses the movement — and stillness resumes the cloak the
+    /// very next turn.
+    #[test]
+    fn moving_while_camouflaged_reveals_for_that_turn_only() {
+        // A tall room: the player cloaks beyond the cone's range, then walks in.
+        let mut s = State::new(
+            open_room(12, 20),
+            Cell::new(5, 14),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 2))],
+            Vec::new(),
+            Cell::new(10, 18),
+        );
+        assert!(
+            !s.guards()[0].detected_player(),
+            "precondition: out of range"
+        );
+        s.step(Input::Activate(AbilityId::Camouflage));
+
+        s.step(Input::Step(Direction::North)); // (5,13): moving, still out of range
+        assert!(!s.guards()[0].detected_player());
+        s.step(Input::Step(Direction::North)); // (5,12): in range, and moving
+        assert!(
+            s.guards()[0].detected_player(),
+            "the turn you move, you are revealed",
+        );
+
+        s.step(Input::Wait);
+        assert!(
+            !s.guards()[0].detected_player(),
+            "stillness resumes the cloak at once",
+        );
+    }
+
+    /// §8.3/§4.5: camouflage does not stop capture. Capture is contact, not
+    /// detection — a guard walking into the cloaked player's cell catches them
+    /// without ever having seen them.
+    #[test]
+    fn camouflage_does_not_stop_capture_by_contact() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 6),
+            Direction::North,
+            vec![Guard::patrolling_to(Cell::new(5, 2), Cell::new(5, 9))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Camouflage));
+
+        // The guard marches down the column into the standing, cloaked player.
+        for _ in 0..4 {
+            s.step(Input::Wait);
+            if s.outcome() == Outcome::Lost {
+                assert!(
+                    !s.guards()[0].detected_player(),
+                    "captured without ever being detected: invisible is not safe",
+                );
+                return;
+            }
+        }
+        panic!("the guard should have walked into the cloaked player");
     }
 
     /// §7.6's designed relation, asserted so it can never silently drift: Run's
