@@ -143,11 +143,15 @@ pub fn field_of_view(
     // Corner-solidity (§6.1): the raw shadowcast leaks sight through the pinch
     // where two walls meet at a diagonal — a viewer looking along the join sees
     // cells whose line of sight is in fact a straight run through a wall's body,
-    // or exactly through the vertex the two walls jointly seal. Retract any
-    // floor tile the viewer could only reach by crossing an opaque cell's
-    // interior, and any cell (wall faces included) whose centre line threads a
-    // double-walled vertex; grazing a bare corner (a single lattice point with
-    // at most one opaque flank) is still allowed, so the arc silhouette and the
+    // or exactly through the vertex the two walls jointly seal. Transparent
+    // tiles keep the symmetric criterion — retract them when the centre-to-
+    // centre segment is blocked. An opaque cell is seen when any part of its
+    // face is, so it keeps the generous side of "you see the wall face":
+    // retract it only when the segments to its centre *and* all four corners
+    // are blocked — otherwise the cast's fan through a gap paints wall faces
+    // deep in rooms no actual ray reaches (the leak seen through a cupboard
+    // across a corridor). Grazing a bare corner (a vertex with at most one
+    // opaque flank) is still allowed throughout, so the arc silhouette and the
     // always-seen touching ring (§6.1 **[SETTLED]**) are untouched.
     let leaked: Vec<Cell> = fov
         .cells()
@@ -155,11 +159,16 @@ pub fn field_of_view(
             if c.sight_distance(origin) <= 1 {
                 return false;
             }
-            if sight_threads_a_double_corner(facility, origin, c) {
-                return true;
+            let cx2 = 2 * i64::from(c.x);
+            let cy2 = 2 * i64::from(c.y);
+            if facility.terrain(c).is_some_and(|t| !t.blocks_sight()) {
+                segment_is_blocked(facility, origin, cx2 + 1, cy2 + 1, c)
+            } else {
+                // Centre first, then the four corners of the cell's square.
+                [(1, 1), (0, 0), (2, 0), (0, 2), (2, 2)]
+                    .iter()
+                    .all(|&(ox, oy)| segment_is_blocked(facility, origin, cx2 + ox, cy2 + oy, c))
             }
-            facility.terrain(c).is_some_and(|t| !t.blocks_sight())
-                && sight_crosses_opaque_body(facility, origin, c)
         })
         .collect();
     for c in leaked {
@@ -181,81 +190,70 @@ fn blocks_sight_at(facility: &Facility, x: i64, y: i64) -> bool {
         .is_none_or(|t| t.blocks_sight())
 }
 
-/// Whether the straight segment between the *centres* of `origin` and `target`
-/// passes exactly through a grid vertex whose two *flanking* cells — the pair
-/// the segment brushes past without entering — are both sight-blocking. That
-/// vertex is the pinch of two walls meeting at a diagonal, and §6.1 says they
-/// jointly occlude it: every ray but the measure-zero corner line runs through
-/// one wall body or the other, so sight must not thread it. This is the strict
-/// half of the corner-solidity rule; a vertex with at most one opaque flank is
-/// the permissive graze [`sight_crosses_opaque_body`] deliberately allows.
+/// Whether the straight sight segment from `origin`'s centre to the point
+/// `(bx2, by2)` — **doubled** coordinates, so cell centres are odd and cell
+/// corners even — is blocked by real terrain. Two ways to be blocked, both
+/// §6.1 corner-solidity:
 ///
-/// All integer arithmetic (§12.4), symmetric in origin and target.
-fn sight_threads_a_double_corner(facility: &Facility, origin: Cell, target: Cell) -> bool {
-    // Doubled cell-centre coordinates, as in `sight_crosses_opaque_body`.
-    let ax = 2 * i64::from(origin.x) + 1;
-    let ay = 2 * i64::from(origin.y) + 1;
-    let vx = 2 * (i64::from(target.x) - i64::from(origin.x));
-    let vy = 2 * (i64::from(target.y) - i64::from(origin.y));
-    if vx == 0 || vy == 0 {
-        // An axis-parallel centre line runs through cell centres and never
-        // meets a vertex.
-        return false;
-    }
-    let (sx, sy) = (vx.signum(), vy.signum());
-    for xb in (origin.x.min(target.x) + 1)..=origin.x.max(target.x) {
-        let xb = i64::from(xb);
-        // The segment crosses the x-boundary `xb` at t = (2·xb − ax) / vx; the
-        // doubled y there, scaled by vx to stay integer, is ay·vx + vy·num.
-        let num = 2 * xb - ax;
-        let ynum = ay * vx + vy * num;
-        if ynum % vx != 0 {
-            continue;
-        }
-        let y2 = ynum / vx;
-        if y2 % 2 != 0 {
-            // Crosses the boundary mid-edge, not at a vertex.
-            continue;
-        }
-        let yb = y2 / 2;
-        // The two cells framing the vertex diagonally across the segment's
-        // path — sides (sx, −sy) and (−sx, sy) of the vertex.
-        let f1x = if sx > 0 { xb } else { xb - 1 };
-        let f1y = if sy < 0 { yb } else { yb - 1 };
-        let f2x = if sx < 0 { xb } else { xb - 1 };
-        let f2y = if sy > 0 { yb } else { yb - 1 };
-        if blocks_sight_at(facility, f1x, f1y) && blocks_sight_at(facility, f2x, f2y) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Whether the straight segment between the *centres* of `origin` and `target`
-/// passes through the interior of any sight-blocking cell — i.e. reaching the
-/// target would mean seeing through a wall's body, not around it.
+/// - **Body:** the segment crosses the interior of a sight-blocking cell
+///   (other than `target` itself) — seeing through a wall's body, not around
+///   it.
+/// - **Pinch:** the segment passes exactly through a grid vertex whose two
+///   *flanking* cells — the pair it brushes past without entering — are both
+///   sight-blocking. That vertex is two walls meeting at a diagonal, and they
+///   jointly occlude it: every ray but the measure-zero corner line runs
+///   through one wall body or the other.
 ///
-/// A segment that merely grazes a corner (touching a single lattice point
-/// before continuing into open floor) does **not** count: that graze is the
-/// behaviour the cone silhouette and the touching ring depend on (§6.2), so
-/// only a real crossing of a cell's interior is a block. This is the
-/// corner-solidity rule in its permissive form — a lone corner never hides
-/// what is beside it; the pinch of two walls meeting at a diagonal is the
-/// strict counterpart, [`sight_threads_a_double_corner`].
+/// A vertex with at most one opaque flank is grazed freely — the permissive
+/// behaviour the cone silhouette and the touching ring depend on (§6.2): a
+/// lone corner never hides what is beside it.
 ///
-/// All integer arithmetic (centres and boundaries are exact in doubled
-/// coordinates), so it is deterministic (§12.4). Real terrain opacity only — the
-/// §6.2 artificial ring walls are not consulted, so this never reshapes the arc.
-fn sight_crosses_opaque_body(facility: &Facility, origin: Cell, target: Cell) -> bool {
+/// All integer arithmetic (centres, corners and boundaries are exact in
+/// doubled coordinates), so it is deterministic (§12.4), and symmetric in its
+/// endpoints. Real terrain opacity only — the §6.2 artificial ring walls are
+/// not consulted, so this never reshapes the arc.
+fn segment_is_blocked(facility: &Facility, origin: Cell, bx2: i64, by2: i64, target: Cell) -> bool {
     // Doubled cell-centre coordinates: every centre is odd, every boundary even.
     let ax = 2 * i64::from(origin.x) + 1;
     let ay = 2 * i64::from(origin.y) + 1;
-    let vx = 2 * (i64::from(target.x) - i64::from(origin.x));
-    let vy = 2 * (i64::from(target.y) - i64::from(origin.y));
+    let vx = bx2 - ax;
+    let vy = by2 - ay;
 
-    // The parameters t in (0, 1) where the segment crosses a cell boundary, as
-    // fractions num/den (den > 0). Between consecutive crossings the segment
-    // lies wholly inside one cell.
+    // The pinch check: every vertex pass shows up as an x-boundary crossing
+    // whose y lands on a boundary too (a vertical segment runs through cell
+    // interiors and never meets a vertex).
+    if vx != 0 && vy != 0 {
+        let (sx, sy) = (vx.signum(), vy.signum());
+        let (lo, hi) = (ax.min(bx2), ax.max(bx2));
+        // Even (boundary) doubled-x values strictly between the endpoints; an
+        // endpoint sitting on a boundary (a corner sample) is t = 1, excluded.
+        let mut xd = if lo % 2 == 0 { lo + 2 } else { lo + 1 };
+        while xd < hi {
+            // The segment crosses x-boundary xd/2 at t = (xd − ax) / vx; the
+            // doubled y there, scaled by vx to stay integer, is:
+            let ynum = ay * vx + vy * (xd - ax);
+            if ynum % vx == 0 {
+                let y2 = ynum / vx;
+                if y2 % 2 == 0 {
+                    let (xb, yb) = (xd / 2, y2 / 2);
+                    // The two cells framing the vertex diagonally across the
+                    // segment's path — sides (sx, −sy) and (−sx, sy).
+                    let f1x = if sx > 0 { xb } else { xb - 1 };
+                    let f1y = if sy < 0 { yb } else { yb - 1 };
+                    let f2x = if sx < 0 { xb } else { xb - 1 };
+                    let f2y = if sy > 0 { yb } else { yb - 1 };
+                    if blocks_sight_at(facility, f1x, f1y) && blocks_sight_at(facility, f2x, f2y) {
+                        return true;
+                    }
+                }
+            }
+            xd += 2;
+        }
+    }
+
+    // The body check. The parameters t in (0, 1) where the segment crosses a
+    // cell boundary, as fractions num/den (den > 0). Between consecutive
+    // crossings the segment lies wholly inside one cell.
     let mut crossings: Vec<(i64, i64)> = Vec::new();
     let mut push = |num: i64, den: i64| {
         let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
@@ -263,14 +261,14 @@ fn sight_crosses_opaque_body(facility: &Facility, origin: Cell, target: Cell) ->
             crossings.push((num, den));
         }
     };
-    if vx != 0 {
-        for xb in (origin.x.min(target.x) + 1)..=origin.x.max(target.x) {
-            push(2 * i64::from(xb) - ax, vx);
-        }
-    }
-    if vy != 0 {
-        for yb in (origin.y.min(target.y) + 1)..=origin.y.max(target.y) {
-            push(2 * i64::from(yb) - ay, vy);
+    for (v, a, b2) in [(vx, ax, bx2), (vy, ay, by2)] {
+        if v != 0 {
+            let (lo, hi) = (a.min(b2), a.max(b2));
+            let mut bd = if lo % 2 == 0 { lo + 2 } else { lo + 1 };
+            while bd < hi {
+                push(bd - a, v);
+                bd += 2;
+            }
         }
     }
     // Sort by value and fold coincident crossings — a corner is one point, not a
@@ -815,10 +813,10 @@ mod tests {
                 "#**...****#",
                 "#***....**#",
                 "#****.....#",
-                "#****.....#",
-                "#*****....#",
+                "#****......",
                 "#*****.....",
-                "#########..",
+                "#*****.....",
+                "#######....",
             ]
         );
         // The specific cells behind the diagonal join go dark (they were the leak).
@@ -971,7 +969,7 @@ mod tests {
                 ".......#@#.......",
                 ".......***.......",
                 "......*****......",
-                "...###########...",
+                ".....#######.....",
                 ".................",
             ]
         );
@@ -1013,6 +1011,60 @@ mod tests {
         );
         for c in [Cell::new(9, 4), Cell::new(10, 5)] {
             assert!(!fov.contains(c), "{c:?}: the corridor leaked to the guard");
+        }
+    }
+
+    /// The playtest leak that reopened the reopen: two alcove cupboards facing
+    /// each other across a corridor. From inside one, the room behind the
+    /// *opposite* cupboard must stay dark — the alcove is a dead end: its
+    /// backing blocks the straight line and its mouth corners are double-walled
+    /// pinches. The raw cast fans through the one-cell gap and paints the far
+    /// room's wall faces (floors were already retracted); the corner-sampled
+    /// wall retraction now darkens those too. What legitimately remains: the
+    /// opposite alcove's interior and its backing's face — you see into the
+    /// recess, never through it.
+    #[test]
+    fn a_cupboard_across_the_corridor_is_a_dead_end_not_a_window() {
+        let mut f = Facility::walled_box(17, 10);
+        for x in 1..16 {
+            f.set_terrain(x, 3, Terrain::Wall);
+            f.set_terrain(x, 6, Terrain::Wall);
+        }
+        // Top cupboard opens south into the corridor; backing walled up above.
+        f.set_terrain(8, 3, Terrain::Hideout);
+        f.set_terrain(8, 2, Terrain::Wall);
+        // Bottom cupboard opens north; backing walled up below. The viewer.
+        f.set_terrain(8, 6, Terrain::Hideout);
+        f.set_terrain(8, 7, Terrain::Wall);
+        let origin = Cell::new(8, 6);
+        let fov = field_of_view(&f, origin, Direction::North, PLAYER_SIGHT_ARC, 15);
+
+        // Into the recess: the opposite interior and its backing's face.
+        assert!(
+            fov.contains(Cell::new(8, 3)),
+            "the opposite alcove interior"
+        );
+        assert!(fov.contains(Cell::new(8, 2)), "the opposite backing's face");
+        // Never through it: the room beyond stays dark — floors, the walls of
+        // its far border, and the backing's room-side neighbours alike.
+        for c in [
+            Cell::new(7, 1),
+            Cell::new(8, 1),
+            Cell::new(9, 1),
+            Cell::new(6, 1),
+            Cell::new(10, 1),
+            Cell::new(7, 2),
+            Cell::new(9, 2),
+            Cell::new(7, 0),
+            Cell::new(8, 0),
+            Cell::new(9, 0),
+        ] {
+            assert!(!fov.contains(c), "{c:?} shows through the opposite alcove");
+        }
+        // The viewer's own touching ring is intact (§6.1 [SETTLED]), including
+        // the room cells diagonally behind their own backing.
+        for c in [Cell::new(7, 7), Cell::new(9, 7), Cell::new(7, 5)] {
+            assert!(fov.contains(c), "{c:?}: the touching ring must hold");
         }
     }
 
