@@ -50,6 +50,9 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::ExitRefused => ("the exit refuses — intel is still out".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
+        // The other death (§8.3): rematerializing inside something solid. The
+        // top of the threat ladder, like the capture — it ends the run.
+        Event::Entombed { .. } => ("the wall takes you".to_string(), 10),
         // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
         // the loud half is what happens if the body is ever seen.
         Event::TakenDown { .. } => ("the guard drops — a body is left".to_string(), 0),
