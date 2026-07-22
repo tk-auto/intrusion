@@ -135,8 +135,8 @@ impl Grid {
 ///
 /// The old renderer was last-writer-wins, so a guard standing in a doorway rendered
 /// arbitrarily. Here the order is **defined**: entities always draw over terrain, and
-/// among glyphs the ranking is **player > guard > body** (decoys slot in when they
-/// exist, §8.3). We write terrain, then bodies, then seen guards, then the player, so
+/// among glyphs the ranking is **player > guard > body > decoy** (§7.2/§8.3). We
+/// write terrain, then the decoy, then bodies, then seen guards, then the player, so
 /// the highest-priority glyph is the last writer at any cell — a defined order, not an
 /// accident. A *sensed* guard (§9.2) is not a glyph at all — it is an orange
 /// background highlight, painted with the danger overlay below — so it never competes
@@ -206,6 +206,14 @@ pub fn render(state: &State) -> Grid {
     };
 
     // Entity layers, lowest priority first so the top entity is the last writer.
+    // The decoy (§8.3) draws lowest: an Owned `@` — a thing you made wearing
+    // your own glyph, which is the whole trick (§10.3/§11.3). Live state like
+    // every entity: in the FOV or not at all.
+    if let Some(decoy) = state.decoy() {
+        if fov.contains(decoy) {
+            put(decoy, '@', Category::Owned);
+        }
+    }
     // A body (§7.2) is live state like any entity — drawn only inside the FOV,
     // never remembered — as the `z` a downed guard reads as (§10.3), in Caution:
     // an unaware threat's colour, because what a body *means* is trouble waiting
@@ -770,6 +778,21 @@ mod tests {
         let masked = render(&s).get(5, 4);
         assert_eq!(masked.glyph, '·', "an unseen body draws as the floor dot");
         assert_eq!(masked.vis, Visibility::Dimmed);
+    }
+
+    /// §8.3/§10.3/§11.3: the decoy draws as an Owned `@` — a thing you made,
+    /// wearing your own glyph; two identical blue `@`s on screen is the trick
+    /// working as designed.
+    #[test]
+    fn a_decoy_draws_as_an_owned_at_glyph() {
+        use crate::AbilityId;
+        let mut s = state(10, 10, Cell::new(4, 4), Vec::new());
+        s.step(Input::Step(Direction::South)); // (4,5), facing south
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,6)
+        let g = render(&s);
+        assert_eq!(g.get(4, 6).glyph, '@');
+        assert_eq!(g.get(4, 6).fg, Category::Owned);
+        assert_eq!(g.get(4, 5).glyph, '@', "the real player still draws");
     }
 
     /// §8.3/§11.5: the danger overlay keeps its promise under Camouflage — "red
