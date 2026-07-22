@@ -837,7 +837,10 @@ plumbing.
    §10.1a) — and **do not stop at the first failure.** Space them out (a single
    **[START]** knob) so the facility still reads as a building; the spacing also keeps
    a cupboard's own backing intact, since the two faces of a thickened wall sit one
-   cell apart. *(The original rule — "a wall cell with exactly 3 wall neighbours and 1
+   cell apart. *(The §10.1a corridor repair recesses **extra** cupboards mid-run —
+   and carves alcoves into one-thick walls — wherever a corridor sightline demands
+   one; for those, spacing is a preference, not a gate: breaking the run outranks
+   it, and the three-solid-sides geometry alone keeps every backing intact.)* *(The original rule — "a wall cell with exactly 3 wall neighbours and 1
    empty neighbour, one attempt per room" — harvested only the rare natural pockets,
    which is what left the old game with no board. Same three-solid-sides geometry now,
    but the backing is **manufactured** by step 5a and the cupboard placed deliberately
@@ -862,40 +865,61 @@ it is a sightline.
 **The rule: no straight sightline longer than *L* without counterplay in it.**
 **[START]** — *L* around **10–12**, i.e. roughly a guard's sight range. Longer
 than that and there is no geometry between you and being seen. *Counterplay* is
-either an obstruction (a wall, a closed door) **or a partial-cover table
-(§10.3)** — a table does not stop a guard's sight, but it plants the crouch in
-the middle of the straight, which is what the rule actually demands. (The rule
-was first stated as "no unbroken sightline", and the pass stamped 1-cell *wall*
-blockers — which read as floating wall noise, not a building. The table
-restatement replaced them: same assertion machinery, honest furniture.)
+an obstruction (a wall, a closed door), **a partial-cover table (§10.3)** — a
+table does not stop a guard's sight, but it plants the crouch in the middle of
+the straight, which is what the rule actually demands — **or a cupboard within
+two moves**: a cell that is a recessed hideout's mouth (bump to vanish,
+§10.1.6), or one floor step from one. A guard sees straight past a flush
+recess, but the player there is gone before the sight matters; two moves and
+not just the mouth because a corridor is up to four wide, and the lane beside
+the mouth's lane flees to the same cupboard one step later. (The rule was first
+stated as "no unbroken sightline", and the pass stamped 1-cell *wall* blockers
+— which read as floating wall noise, not a building. The table restatement
+replaced them; the cupboard clause came with the no-tables-in-corridors rule
+below: same assertion machinery, honest architecture.)
 
 This is a **testable property of a generated level**, not a vibe. Assert it, the
 same way reachability is asserted (§10.6):
 
 > For every cell, for each of the 4 cardinal directions, the run length without
-> an obstruction or a cover cell is ≤ *L*.
+> an obstruction, a cover cell, or a cupboard within two moves is ≤ *L*.
 
-Ways to satisfy it — all **[START]**, and worth experimenting with, which is
-exactly what §13 is for:
+**Which counterplay a run gets follows its region [SETTLED]: tables are room
+furniture, corridors get architecture.** A lone table read as noise, and a
+table in a corridor read as a barricade in a hallway — so neither is generated,
+and both are asserted away. Concretely:
 
-- **Stamp benches of tables.** *(Implemented — the current mechanism.)* A repair
-  pass scans the finished grid and, near the middle of every over-long run, stamps a
-  partial-cover table and extends it into a short **bench** *across* the space — up to
-  a `[START]` cap — but only into lanes that are themselves over-long, and never into
-  a cell that would sever guard pathing or split a region (so a pathing gap, the
-  1-cell squeeze, always survives). One bench breaks every lane it spans, so the same
-  sightline guarantee costs **far fewer, organized pieces** — benches, not a haze of
-  lone cells. (The first version stamped one lone table per run, which read as
-  scattered confetti; benches are the same assertion machinery, furniture that reads
-  as furniture.) A run the pass cannot break rejects the carve like a reachability
-  failure.
-- **Jog the corridors.** Offset a corridor mid-span by a cell or two, so it bends.
-  Breaks the sightline and costs nothing structurally.
-- **Give corridors features too.** The room-feature step (partition stubs, pillars)
-  should run on corridors as well, sized for a 2–4 wide space: recesses, buttresses,
-  a pillar that forces a 1-cell squeeze.
+- **Rooms: stamp benches of tables.** *(Implemented.)* A repair pass scans the
+  finished grid and, near the middle of every over-long room-dominated run, stamps
+  a **bench**: a straight row of **2 to a `[START]` cap** of partial-cover tables —
+  never a lone cell — grown across the run or along it, never into a cell that
+  would sever guard pathing or split a region (so a pathing gap, the 1-cell
+  squeeze, always survives). A bench must land in a **furniture pose** or the
+  attempt is rolled back and re-sited: **free-standing** (touching no wall — a
+  workbench in the open, cover on every side), **end-on** (square against a wall
+  at exactly one end, a desk jutting into the room), or **along-wall** (flush
+  along one wall, a counter — only its *ends* offer useful crouch cover, since
+  the §10.3 concealment quarter-plane behind its long side is the wall itself).
+  Anything else — a wall stub brushing mid-bench, wall contact at both ends —
+  is not how furniture sits, and is rejected.
+- **Corridors: never a table.** An over-long corridor-dominated run is repaired
+  with the hiding game's own board instead: **one more cupboard recessed
+  mid-run** (its mouth is the counterplay), preferring ready two-thick backing,
+  then an **alcove** (wall up the single cell behind a one-thick flank wall and
+  recess into it), and where a stretch is too open for any recess — a junction
+  plaza, walls all doors and cupboards already — a **2×2 structural pillar**
+  (§10.1.5's column, corridor-sized: it blocks sight outright and forces the
+  squeeze), or, where even a pillar would choke a 2-wide corridor, a 1-cell
+  **buttress** flush against a flank wall (the S-squeeze as a pilaster).
+  Architecture, not furniture; the flight path stays clear. Rooms whose run no
+  bench can furnish — the 1-wide lane behind a partition stub — fall back to the
+  same cupboard repair.
 - **Cover near doors.** A door you burst through should have something to duck
   behind on the other side, or bursting through it accomplishes nothing.
+
+A run none of the repairs can break rejects the carve like a reachability
+failure. (**Jogging the corridors** mid-carve — offsetting a corridor a cell or
+two mid-span — remains the unimplemented alternative if §15.2 wants it.)
 
 **Hideouts must be reachable while fleeing. [SETTLED]**
 
@@ -1081,15 +1105,16 @@ console and exit candidates prefer a clean cell, falling back rather than
 failing the draw.
 
 **Two of the §10.6 guarantees outrank it, so it is not asserted.** Connectivity
-and the sightline rule (§10.1a) come first, and §10.1a puts cover squarely in
-corridors — which are door-rich by construction, so a sightline table doubling
-with a nearby door is often unavoidable. Forcing the blocker off-centre to dodge
-it only shortens the run instead of splitting it, multiplying generation cost
-for a cosmetic win. And structural doors can cluster in a way no carve undoes.
-The honest rule is therefore best-effort placement plus the arrow — *not* a
-flood-fill-style assert-and-redraw. (An earlier draft made it a hard guarantee;
-measured, it rejected ~85% of carves and stalled generation — the arrow already
-buys the legibility the guarantee was chasing.)
+and the sightline rule (§10.1a) come first, and §10.1a's repairs must land where
+the run is — a bench beside a room's door span, a repair cupboard close to an
+existing usable — so a doubling with a nearby door is sometimes unavoidable.
+Forcing the piece off-centre to dodge it only shortens the run instead of
+splitting it, multiplying generation cost for a cosmetic win. And structural
+doors can cluster in a way no carve undoes. The honest rule is therefore
+best-effort placement plus the arrow — *not* a flood-fill-style
+assert-and-redraw. (An earlier draft made it a hard guarantee; measured, it
+rejected ~85% of carves and stalled generation — the arrow already buys the
+legibility the guarantee was chasing.)
 
 Also worth fixing, all real:
 
