@@ -135,9 +135,9 @@ impl Grid {
 ///
 /// The old renderer was last-writer-wins, so a guard standing in a doorway rendered
 /// arbitrarily. Here the order is **defined**: entities always draw over terrain, and
-/// among glyphs the ranking is **player > guard** (bodies and decoys slot in when they
-/// exist, §7.2/§8.3). We write terrain, then seen guards, then the player, so the
-/// highest-priority glyph is the last writer at any cell — a defined order, not an
+/// among glyphs the ranking is **player > guard > body** (decoys slot in when they
+/// exist, §8.3). We write terrain, then bodies, then seen guards, then the player, so
+/// the highest-priority glyph is the last writer at any cell — a defined order, not an
 /// accident. A *sensed* guard (§9.2) is not a glyph at all — it is an orange
 /// background highlight, painted with the danger overlay below — so it never competes
 /// with the glyph layer.
@@ -205,8 +205,17 @@ pub fn render(state: &State) -> Grid {
         };
     };
 
-    // Entity layers, lowest priority first so the top entity is the last writer. A
-    // **seen** guard (in the FOV, §9.2) draws as the full state-coloured `g`; the
+    // Entity layers, lowest priority first so the top entity is the last writer.
+    // A body (§7.2) is live state like any entity — drawn only inside the FOV,
+    // never remembered — as the `z` a downed guard reads as (§10.3), in Caution:
+    // an unaware threat's colour, because what a body *means* is trouble waiting
+    // to be found (§11.3).
+    for body in state.bodies() {
+        if fov.contains(body.cell()) {
+            put(body.cell(), 'z', Category::Caution);
+        }
+    }
+    // A **seen** guard (in the FOV, §9.2) draws as the full state-coloured `g`; the
     // `g` glyph is re-categorised every turn from the guard's state (§11.2): yellow →
     // orange → red is the guard's mind, made visible. A **sensed** guard is a
     // *background* highlight instead, painted below alongside the danger overlay — no
@@ -706,6 +715,41 @@ mod tests {
         // category, so the dots never compete with walls or entities for the eye.
         assert_eq!(g.get(5, 5).glyph, '·');
         assert_eq!(g.get(1, 1).fg, Category::Ground); // interior floor
+    }
+
+    /// §7.2/§10.3: a body in view draws as the Caution `z` — live state, like the
+    /// guard it used to be. Behind the fog it draws nothing: masked as the floor
+    /// naturally in its place, never remembered.
+    #[test]
+    fn a_body_in_view_draws_as_a_caution_z() {
+        // The takedown that makes a body: strike an unaware guard from a cupboard
+        // (concealment is the only way to be adjacent undetected, §6.1/§7.2).
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Step(Direction::North));
+        assert_eq!(s.bodies().len(), 1, "precondition: the takedown landed");
+
+        let body = render(&s).get(5, 4);
+        assert_eq!(body.glyph, 'z');
+        assert_eq!(body.fg, Category::Caution);
+        assert_eq!(body.vis, Visibility::Live);
+
+        // Turn away and walk south until the body's cell leaves the FOV: it is
+        // live state — not remembered — so the cell masks as plain floor again.
+        while s.player_fov().contains(Cell::new(5, 4)) {
+            s.step(Input::Step(Direction::South));
+        }
+        let masked = render(&s).get(5, 4);
+        assert_eq!(masked.glyph, '·', "an unseen body draws as the floor dot");
+        assert_eq!(masked.vis, Visibility::Dimmed);
     }
 
     /// §11.2's payoff, on screen: the `g` glyph is re-categorised every turn from

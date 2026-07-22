@@ -110,6 +110,13 @@ pub struct Guard {
     /// [`WATCH_RADIUS`], so the just-searched region is watched harder before the sweep
     /// widens back to the station territory.
     watch: u32,
+    /// Whether this guard's most recent [`sense`](Self::sense) detected the player —
+    /// the §7.2 takedown gate ("the target has not detected you this turn"
+    /// **[SETTLED]**). Distinct from [`state`](Self::state): a Chasing guard whose
+    /// current look missed the player (concealed, or out of the cone) has *not*
+    /// detected them this turn, and is takedown-able — awareness is per-turn fact,
+    /// the state is the lingering mood.
+    detected: bool,
     fov: VisibleSet,
     state: GuardState,
 }
@@ -164,6 +171,16 @@ pub(crate) const WATCH_DURATION: u32 = 20;
 /// just searched instead of ranging its full patrol.
 pub(crate) const WATCH_RADIUS: u32 = 8;
 
+/// How hard finding a body hits a guard's alert (§7.2, **[START] = 60**): the
+/// lead a found body grants, **stronger than a sighting** ([`ALERT_DURATION`] =
+/// 30) — finding a body is the loudest event in the game. The facility-wide
+/// escalation it feeds is the radio/cooperation tickets (§7.3/§7.7); what lands
+/// here is the finder's own, harder reaction.
+pub(crate) const BODY_ALERT_DURATION: u32 = 60;
+// The §7.2 relation itself, held at compile time: finding a body must always
+// out-alert a sighting, whatever either number is retuned to.
+const _: () = assert!(BODY_ALERT_DURATION > ALERT_DURATION);
+
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
 /// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
 /// if the spawn facing ever changes, the "no guard eyes the player's spawn"
@@ -186,6 +203,7 @@ impl Guard {
             focus: None,
             search: 0,
             watch: 0,
+            detected: false,
             fov: VisibleSet::default(),
             state: GuardState::Calm,
         }
@@ -245,6 +263,23 @@ impl Guard {
         self.state
     }
 
+    /// Whether this guard's most recent look detected the player — the §7.2
+    /// takedown gate: a bump against a guard that **has** detected you this turn
+    /// is a free no-op, one against a guard that has not is the takedown. Because
+    /// of the always-seen touching ring (§6.1 **[SETTLED]**) an adjacent player is
+    /// always in the cone, so this is `false` beside a guard only when something
+    /// else intervened — concealment, a decoy, a distraction — which is exactly
+    /// the puzzle §7.2 wants solved.
+    pub fn detected_player(&self) -> bool {
+        self.detected
+    }
+
+    /// The guard's station (§7.5) — recorded on its body at a takedown as the
+    /// "last known post" the radio net will dispatch a responder to (§7.3).
+    pub(crate) fn station(&self) -> Cell {
+        self.station
+    }
+
     /// Recompute this guard's cone from its current position and facing (§6.2/§7.1).
     /// The sight phase calls this for every guard before any of them act, so the
     /// decisions below read a cone that matches where the guard actually stands.
@@ -281,10 +316,12 @@ impl Guard {
     /// which is exactly the "hold still and watch the cone sweep past" payoff (§7.6).
     pub(crate) fn sense(&mut self, player: Cell, concealed: bool) {
         // Every reactive timer cools by default; a sighting below resets the lead to
-        // full and clears the search/watch a fresh detection supersedes.
+        // full and clears the search/watch a fresh detection supersedes. Awareness
+        // is per-turn (§7.2): each look starts undetected and must re-earn it.
         self.alert = self.alert.saturating_sub(1);
         self.search = self.search.saturating_sub(1);
         self.watch = self.watch.saturating_sub(1);
+        self.detected = false;
         self.see(player, concealed);
     }
 
@@ -313,13 +350,36 @@ impl Guard {
             self.destination = Some(player);
             self.last_seen = Some(player);
             self.alert = ALERT_DURATION;
+            self.detected = true;
             self.end_search_and_watch();
         } else if range <= GLIMPSE_RANGE {
             self.state = GuardState::Investigating;
             self.destination = self.last_seen.or(Some(player));
             self.alert = ALERT_DURATION;
+            self.detected = true;
             self.end_search_and_watch();
         }
+    }
+
+    /// React to finding a body (§7.2) — the loudest event in the game. The lead
+    /// it grants is **harder than a sighting** ([`BODY_ALERT_DURATION`] >
+    /// [`ALERT_DURATION`]), and — unless the guard is busy with the live player,
+    /// who always outranks the dead — it drops straight into the §7.6 search,
+    /// centred on the body: the same bounded Alerted sweep a lost chase ends in
+    /// (a body *is* a lead whose trail is already cold), followed by the released
+    /// watch on the area. Walking a destination would be wrong here — the body
+    /// is solid (§4.3), so a guard can never arrive on it; the search paces
+    /// *around* it instead. The radio broadcast a body-find escalates into is
+    /// the cooperation ticket (§7.7); this is the finder's own reaction.
+    pub(crate) fn find_body(&mut self, at: Cell) {
+        self.alert = self.alert.max(BODY_ALERT_DURATION);
+        if self.detected {
+            return; // the live player outranks the body
+        }
+        self.state = GuardState::Alerted;
+        self.search = SEARCH_DURATION;
+        self.focus = Some(at);
+        self.destination = None;
     }
 
     /// A fresh detection supersedes any lingering search or raised-coverage watch
@@ -775,6 +835,64 @@ mod tests {
 
         guard.see(far, false);
         assert_eq!(guard.state(), GuardState::Calm, "> 10 detects nothing");
+    }
+
+    /// §7.2's takedown gate is **per-turn fact, not mood**: a guard whose latest
+    /// look detected the player is aware; one whose latest look missed them —
+    /// concealment here — is not, even while its Chasing state lingers. That gap
+    /// is the puzzle: arrange to be adjacent while the *current* look misses.
+    #[test]
+    fn detection_is_per_turn_not_state() {
+        let facility = Facility::walled_box(11, 11);
+        let mut guard = Guard::stationary(Cell::new(5, 3)); // faces south (§7.1)
+        guard.look(&facility);
+        let player = Cell::new(5, 5);
+        assert!(!guard.detected_player(), "nothing sensed yet");
+
+        guard.sense(player, false);
+        assert!(guard.detected_player());
+        assert_eq!(guard.state(), GuardState::Chasing);
+
+        guard.sense(player, true); // concealed: this turn's look misses
+        assert!(!guard.detected_player(), "awareness is per-turn");
+        assert_eq!(guard.state(), GuardState::Chasing, "the mood lingers");
+    }
+
+    /// §7.2: finding a body is the loudest event in the game — the lead it grants
+    /// is pinned **stronger than a sighting's**, and the finder drops into the
+    /// §7.6 search centred on the body (a lead whose trail is already cold).
+    #[test]
+    fn finding_a_body_out_alerts_a_sighting_and_begins_the_search() {
+        assert_eq!(BODY_ALERT_DURATION, 60, "the [START] body-found alert");
+        // (That it out-alerts a sighting is a compile-time assert by the const.)
+
+        let facility = Facility::walled_box(15, 15);
+        let mut guard = Guard::patrolling(Cell::new(7, 2));
+        guard.look(&facility);
+        let body = Cell::new(7, 5);
+        guard.find_body(body);
+        assert_eq!(guard.state(), GuardState::Alerted);
+        assert_eq!(guard.alert, BODY_ALERT_DURATION);
+        assert_eq!(guard.search, SEARCH_DURATION);
+        assert_eq!(guard.focus, Some(body), "the search centres on the body");
+    }
+
+    /// §7.2: the live player outranks the dead — a guard that detected the player
+    /// this turn keeps its chase when it also sees a body; only the harder alert
+    /// sticks.
+    #[test]
+    fn a_detecting_guard_keeps_its_chase_over_a_found_body() {
+        let facility = Facility::walled_box(15, 15);
+        let mut guard = Guard::patrolling(Cell::new(7, 2));
+        guard.look(&facility);
+        let player = Cell::new(7, 5);
+        guard.sense(player, false);
+        assert!(guard.detected_player());
+
+        guard.find_body(Cell::new(8, 5));
+        assert_eq!(guard.state(), GuardState::Chasing, "the chase holds");
+        assert_eq!(guard.destination, Some(player), "still after the live cell");
+        assert_eq!(guard.alert, BODY_ALERT_DURATION, "the alert still hardens");
     }
 
     /// §7.1/§7.6: a lead cools by one each turn nothing is sensed, and a reactive guard
