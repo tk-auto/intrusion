@@ -905,11 +905,15 @@ and both are asserted away. Concretely:
 - **Corridors: never a table.** An over-long corridor-dominated run is repaired
   with the hiding game's own board instead: **one more cupboard recessed
   mid-run** (its mouth is the counterplay), preferring ready two-thick backing,
-  then an **alcove** (wall up the single room cell behind a one-thick flank wall
-  and recess into it), and where a stretch is too open for any recess — a
-  junction plaza, walls all doors and cupboards already — a **2×2 structural
-  pillar** (§10.1.5's column, corridor-sized: it blocks sight outright and
-  forces the squeeze). Architecture, not furniture; the flight path stays clear.
+  then an **alcove** (wall up the single cell behind a one-thick flank wall and
+  recess into it), and where a stretch is too open for any recess — a junction
+  plaza, walls all doors and cupboards already — a **2×2 structural pillar**
+  (§10.1.5's column, corridor-sized: it blocks sight outright and forces the
+  squeeze), or, where even a pillar would choke a 2-wide corridor, a 1-cell
+  **buttress** flush against a flank wall (the S-squeeze as a pilaster).
+  Architecture, not furniture; the flight path stays clear. Rooms whose run no
+  bench can furnish — the 1-wide lane behind a partition stub — fall back to the
+  same cupboard repair.
 - **Cover near doors.** A door you burst through should have something to duck
   behind on the other side, or bursting through it accomplishes nothing.
 
