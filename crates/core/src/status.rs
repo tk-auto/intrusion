@@ -50,6 +50,12 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::ExitRefused => ("the exit refuses — intel is still out".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
+        // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
+        // the loud half is what happens if the body is ever seen.
+        Event::TakenDown { .. } => ("the guard drops — a body is left".to_string(), 0),
+        // The loudest event in the game (§7.2): a hunting-threat message, on the
+        // §11.7 threat ladder above a glimpse but below being caught.
+        Event::BodyFound { .. } => ("a body has been found".to_string(), 4),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
         Event::AbilityActivated { ability } => (format!("{} active", ability.name()), 0),

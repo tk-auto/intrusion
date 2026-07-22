@@ -34,6 +34,7 @@
 //! guard's destination the same way and reuse the same walk-toward-it movement.
 
 use crate::ability::{AbilityId, AbilityState, Deck};
+use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
@@ -92,7 +93,7 @@ pub enum Event {
     /// The player stepped to `to`.
     Moved { to: Cell },
     /// A move was refused and nothing changed — a *free* bump (§4.4): a wall, a
-    /// hinge, or (until takedowns land) a guard.
+    /// hinge, a body, or a guard that has detected you (§7.2).
     Bumped { into: Cell },
     /// The player bumped an empty hideout and climbed in (§4.3, §10.3): they now
     /// occupy the cupboard and are concealed. Climbing back out is an ordinary
@@ -114,6 +115,13 @@ pub enum Event {
     Won,
     /// A guard moved into the player's cell: captured (§4.5) — the only loss.
     Captured { by: Cell },
+    /// The player took an unaware adjacent guard down (§7.2): the guard is
+    /// permanently out, and a body now lies at `at`.
+    TakenDown { at: Cell },
+    /// A guard's cone covered a body (§7.2) — the loudest event in the game,
+    /// fired once per body. The finder's alert is raised harder than a sighting
+    /// raises it; the radio escalation is §7.3/§7.7's tickets.
+    BodyFound { at: Cell },
     /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
     AbilityActivated { ability: AbilityId },
     /// The player toggled an ability off early (§4.4) — free; its cooldown still
@@ -141,6 +149,12 @@ impl Event {
             Event::AbilityActivated { .. }
             | Event::AbilityDeactivated { .. }
             | Event::AbilityExpired { .. } => Category::Owned,
+            // The takedown is something you did (§7.2) — your one offensive verb,
+            // reading in the same band as your other tools.
+            Event::TakenDown { .. } => Category::Owned,
+            // A found body flips its finder to hunting (§7.2/§7.4): the threat is
+            // aroused but does not have you — the Warning band.
+            Event::BodyFound { .. } => Category::Warning,
             // Neutral furniture doing furniture things (§10.4).
             Event::DoorOpened { .. } => Category::System,
             // Goals and rewards — including the exit talking about the goal it
@@ -157,10 +171,13 @@ impl Event {
 /// line is a pure view of state, recomputed every frame, with nothing to clear.
 ///
 /// The set is exactly the interactions [`State::step`]'s bump resolution
-/// actually performs — a takedown affordance joins when takedowns land (§7.2),
-/// not before: the line must never offer what a bump will not do (§2.3).
+/// actually performs: the line must never offer what a bump will not do (§2.3).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Affordance {
+    /// An adjacent guard that has not detected the player this turn: bump to
+    /// take it down (§7.2). Offered only while the takedown would actually
+    /// land — an aware guard's cell offers nothing.
+    Takedown,
     /// A closed door panel: bump to open (§10.4).
     OpenDoor,
     /// An open door's hinge: bump to close (§10.4).
@@ -181,6 +198,7 @@ impl Affordance {
     /// The words the usable line shows for this affordance.
     pub fn label(self) -> &'static str {
         match self {
+            Affordance::Takedown => "guard: take down",
             Affordance::OpenDoor => "door: open",
             Affordance::CloseDoor => "door: close",
             Affordance::TakeIntel => "console: take intel",
@@ -193,9 +211,11 @@ impl Affordance {
 
     /// What acting on this affordance is *about* (§11.2): doors, cupboards and
     /// tables are System furniture; the console and the exit are the goal,
-    /// Interest.
+    /// Interest; a takedown is about the unaware threat it targets — Caution,
+    /// matching the yellow `g` it points at.
     pub fn category(self) -> Category {
         match self {
+            Affordance::Takedown => Category::Caution,
             Affordance::OpenDoor
             | Affordance::CloseDoor
             | Affordance::Hide
@@ -215,8 +235,12 @@ impl Affordance {
 /// interaction, never a mutation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum BumpKind {
-    /// A guard — bumping is a free no-op until takedowns land (§7.2).
-    Guard,
+    /// A guard; `aware` is whether it detected the player this turn (§7.2).
+    /// Unaware, the bump is the takedown; aware, it is a free no-op.
+    Guard { aware: bool },
+    /// A body (§7.2) — solid, and bumping it does nothing yet: grabbing it to
+    /// drag is #103's verb.
+    Body,
     /// The exit; `ready` is true iff every objective is in hand (win vs. refused).
     Exit { ready: bool },
     /// An objective console still holding its intel.
@@ -245,6 +269,7 @@ impl BumpKind {
     /// would be refused (doors never crush, so it is never promised).
     fn affordance(self) -> Option<Affordance> {
         match self {
+            BumpKind::Guard { aware: false } => Some(Affordance::Takedown),
             BumpKind::Exit { ready: true } => Some(Affordance::Leave),
             BumpKind::Exit { ready: false } => Some(Affordance::ExitRefused),
             BumpKind::Intel => Some(Affordance::TakeIntel),
@@ -256,7 +281,8 @@ impl BumpKind {
             } => Some(Affordance::CloseDoor),
             BumpKind::Hide => Some(Affordance::Hide),
             BumpKind::Crouch => Some(Affordance::Crouch),
-            BumpKind::Guard
+            BumpKind::Guard { aware: true }
+            | BumpKind::Body
             | BumpKind::Door {
                 action: DoorAction::Obstructed,
             }
@@ -330,6 +356,9 @@ pub struct State {
     /// clears it.
     crouched_behind: Option<Cell>,
     guards: Vec<Guard>,
+    /// The bodies takedowns have left (§7.2) — solid entities the level owns
+    /// (§12.3), each remembering its guard's post for the radio net (§7.3).
+    bodies: Vec<Body>,
     /// Per-ability economy runtime (§8.2): activation, duration, and cooldown for
     /// each activated ability, stepped by the turn loop. The v1 set is available
     /// from the start (§8.3/#104), so this begins all-ready.
@@ -381,6 +410,7 @@ impl State {
             waited: false,
             crouched_behind: None,
             guards,
+            bodies: Vec::new(),
             abilities: Deck::new(),
             objectives,
             exit,
@@ -502,6 +532,11 @@ impl State {
         &self.guards
     }
 
+    /// The bodies takedowns have left (§7.2), for rendering and tests.
+    pub fn bodies(&self) -> &[Body] {
+        &self.bodies
+    }
+
     /// The player's current guard-sense range (§9.1): [`PLAYER_SENSE_RANGE`] normally,
     /// widened to [`PLAYER_SENSE_RANGE_WAITING`] on the turn the player's spent action
     /// was a Wait — the same `waited` signal that buys the 360° look (§8.3). A free
@@ -581,10 +616,10 @@ impl State {
     /// may list more, one per direction.
     ///
     /// This mirrors [`step`](Self::step)'s bump resolution case for case, so
-    /// the line can never promise what a bump won't deliver: a guard is skipped
-    /// (bumping one is a free no-op until takedowns land, §7.2), a spent
-    /// console and an occupied cupboard are just solid, and door poses come
-    /// from the same door graph the bump consults (§10.4). Each target must
+    /// the line can never promise what a bump won't deliver: an **unaware**
+    /// guard offers the takedown while an aware one offers nothing (§7.2), a
+    /// spent console and an occupied cupboard are just solid, and door poses
+    /// come from the same door graph the bump consults (§10.4). Each target must
     /// also be in the player's FOV — which the touching ring always is (§6.2) —
     /// so the line can never leak what the fog still hides (§11.5a).
     pub fn affordances(&self) -> Vec<(Direction, Affordance)> {
@@ -710,9 +745,22 @@ impl State {
         // reads — so execution and prediction can never disagree (§11.4). This match
         // performs the effect; the classification and its priority live in one place.
         match self.bump_kind(target) {
-            // A guard in the way would be a takedown (§7.2), its own ticket; for now
-            // bumping a guard is a free no-op, the seam that fills in later.
-            BumpKind::Guard => {
+            // The takedown (§7.2): adjacent, against a guard that has not detected
+            // the player this turn, costing the full turn. Permanent — the guard
+            // is gone, and what remains is the body, which is the real cost. No
+            // cooldown and no range: the constraints *are* the cost.
+            BumpKind::Guard { aware: false } => {
+                let i = self
+                    .guard_at(target)
+                    .expect("bump_kind classified a guard here");
+                let guard = self.guards.remove(i);
+                self.bodies.push(Body::new(target, guard.station()));
+                events.push(Event::TakenDown { at: target });
+                true
+            }
+            // An aware guard has you in its cone (§7.2's gate): the bump is a
+            // free no-op — no half-takedown, no shove.
+            BumpKind::Guard { aware: true } => {
                 events.push(Event::Bumped { into: target });
                 false
             }
@@ -789,9 +837,10 @@ impl State {
                 events.push(Event::Moved { to: target });
                 true
             }
-            // A cupboard already holding an actor, the table already crouched behind, or
-            // anything else solid (a wall, a closed hinge): a free bump (§4.4).
-            BumpKind::HideoutBlocked | BumpKind::CrouchHeld | BumpKind::Solid => {
+            // A body (grabbing it is #103's verb), a cupboard already holding an
+            // actor, the table already crouched behind, or anything else solid
+            // (a wall, a closed hinge): a free bump (§4.4).
+            BumpKind::Body | BumpKind::HideoutBlocked | BumpKind::CrouchHeld | BumpKind::Solid => {
                 events.push(Event::Bumped { into: target });
                 false
             }
@@ -805,8 +854,9 @@ impl State {
     fn operate_door(&mut self, target: Cell) {
         let player = self.player;
         let guards = &self.guards;
+        let bodies = &self.bodies;
         self.layout
-            .bump_door(target, |c| actor_occupies(player, guards, c));
+            .bump_door(target, |c| actor_occupies(player, guards, bodies, c));
     }
 
     /// What bumping the orthogonally adjacent `target` would do (§4.3) — the **single**
@@ -822,8 +872,13 @@ impl State {
     /// neither can silently drift (the §7.2 takedown slots in exactly this way). This
     /// classifies only; the mutation lives in `resolve_step`, so it can stay `&self`.
     fn bump_kind(&self, target: Cell) -> BumpKind {
-        if self.guard_at(target).is_some() {
-            return BumpKind::Guard;
+        if let Some(i) = self.guard_at(target) {
+            return BumpKind::Guard {
+                aware: self.guards[i].detected_player(),
+            };
+        }
+        if self.body_at(target).is_some() {
+            return BumpKind::Body;
         }
         if target == self.exit {
             return BumpKind::Exit {
@@ -913,21 +968,45 @@ impl State {
         for (guard, &concealed) in self.guards.iter_mut().zip(&concealed) {
             guard.sense(self.player, concealed);
         }
+        // The found-body scan (§7.2): a body is *found* the first time any cone
+        // covers it — a body does not block sight, so the cones just recomputed
+        // decide. Every guard seeing it reacts ([`Guard::find_body`]: the harder
+        // alert, and the search unless the live player has it busy); the loudest
+        // event in the game fires exactly once per body.
+        for body_index in 0..self.bodies.len() {
+            if self.bodies[body_index].found() {
+                continue;
+            }
+            let at = self.bodies[body_index].cell();
+            let mut seen = false;
+            for guard in &mut self.guards {
+                if guard.fov().contains(at) {
+                    guard.find_body(at);
+                    seen = true;
+                }
+            }
+            if seen {
+                self.bodies[body_index].mark_found();
+                events.push(Event::BodyFound { at });
+            }
+        }
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
             }
             let facility = self.layout.facility();
-            // Guards are solid to each other and path *around* a colleague (§7.8): the
-            // decider routes only through cells no other guard holds. Positions are
-            // read fresh here, so a guard sees where the colleagues that already moved
-            // this turn now stand.
+            // Guards are solid to each other and path *around* a colleague (§7.8) —
+            // and around a body (§7.2, solid like any actor): the decider routes only
+            // through cells no other guard or body holds. Positions are read fresh
+            // here, so a guard sees where the colleagues that already moved this turn
+            // now stand.
             let blocked: Vec<Cell> = self
                 .guards
                 .iter()
                 .enumerate()
                 .filter(|(j, _)| *j != i)
                 .map(|(_, g)| g.pos())
+                .chain(self.bodies.iter().map(|b| b.cell()))
                 .collect();
             let Some(dir) = self.guards[i].decide(facility, &blocked) else {
                 continue;
@@ -968,22 +1047,30 @@ impl State {
         self.guards.iter().position(|g| g.pos() == cell)
     }
 
+    /// The index of a body lying on `cell`, if any.
+    fn body_at(&self, cell: Cell) -> Option<usize> {
+        self.bodies.iter().position(|b| b.cell() == cell)
+    }
+
     /// Whether any actor occupies `cell` — the loop's single occupancy predicate.
-    /// Actors are the player and the guards today; bodies, decoys and the rest fold in
-    /// here (§4.3/§12.3) so occupancy is asked in one place and nothing — not the
-    /// player, not guards — is special-cased at the call sites.
+    /// Actors are the player, the guards, and the bodies takedowns leave (§7.2);
+    /// decoys and the rest fold in here (§4.3/§12.3) so occupancy is asked in one
+    /// place and nothing is special-cased at the call sites.
     fn occupied(&self, cell: Cell) -> bool {
-        actor_occupies(self.player, &self.guards, cell)
+        actor_occupies(self.player, &self.guards, &self.bodies, cell)
     }
 }
 
-/// Whether an actor occupies `cell`, given the player and guards directly. The free
+/// Whether an actor occupies `cell`, given the actor fields directly. The free
 /// twin of [`State::occupied`], for callers that must borrow the actor fields apart
 /// from the rest of the state (door closing borrows the layout mutably at the same
 /// time). One definition of "an actor is here" — extend it, not the call sites, when
-/// new actor kinds arrive.
-fn actor_occupies(player: Cell, guards: &[Guard], cell: Cell) -> bool {
-    player == cell || guards.iter().any(|g| g.pos() == cell)
+/// new actor kinds arrive. A body counts (§7.2: solid, fill 1.0), which is also what
+/// keeps a door from ever closing on one (§10.4 — doors never crush).
+fn actor_occupies(player: Cell, guards: &[Guard], bodies: &[Body], cell: Cell) -> bool {
+    player == cell
+        || guards.iter().any(|g| g.pos() == cell)
+        || bodies.iter().any(|b| b.cell() == cell)
 }
 
 #[cfg(test)]
@@ -1210,6 +1297,169 @@ mod tests {
             }]
         );
         assert_eq!(s.outcome(), Outcome::Lost);
+    }
+
+    /// §7.2: the takedown. Bumping an adjacent guard that has not detected the
+    /// player this turn removes it permanently, leaves a body at its cell, and
+    /// costs the full turn. Concealment is how adjacency is arranged undetected —
+    /// the touching ring otherwise always sees an adjacent player (§6.1) — so the
+    /// strike comes from inside a cupboard. The usable line offers exactly this.
+    #[test]
+    fn an_unaware_adjacent_guard_is_taken_down_leaving_a_body() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5), // in the cupboard: concealed from the start
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(s.hidden(), "precondition: concealed");
+        assert!(
+            !s.guards()[0].detected_player(),
+            "precondition: the guard's look missed the hidden player",
+        );
+        assert_eq!(
+            s.affordances(),
+            vec![(Direction::North, Affordance::Takedown)],
+            "the usable line offers the takedown (§11.4)",
+        );
+
+        let events = s.step(Input::Step(Direction::North));
+        assert_eq!(
+            events,
+            vec![Event::TakenDown {
+                at: Cell::new(5, 4)
+            }]
+        );
+        assert!(s.guards().is_empty(), "the takedown is permanent");
+        assert_eq!(s.bodies().len(), 1, "a body is left behind");
+        assert_eq!(s.bodies()[0].cell(), Cell::new(5, 4));
+        assert_eq!(s.turn(), 1, "a takedown costs the full turn");
+        assert_eq!(
+            s.player(),
+            Cell::new(5, 5),
+            "a takedown is a bump, not a move"
+        );
+    }
+
+    /// §7.2's gate, enforced: a guard that **has** detected the player this turn
+    /// refuses the takedown — the bump falls back to the free no-op, and the
+    /// usable line never offered it.
+    #[test]
+    fn an_aware_guard_refuses_the_takedown() {
+        let mut s = State::new(
+            open_room(10, 10),
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        // The startup turn's touching ring saw the adjacent player (§6.1).
+        assert!(s.guards()[0].detected_player(), "precondition: aware");
+        assert_eq!(s.affordances(), Vec::new(), "no takedown is promised");
+
+        let events = s.step(Input::Step(Direction::North));
+        assert_eq!(
+            events,
+            vec![Event::Bumped {
+                into: Cell::new(5, 4)
+            }]
+        );
+        assert_eq!(s.guards().len(), 1, "the guard stands");
+        assert!(s.bodies().is_empty());
+        assert_eq!(s.turn(), 0, "a refused takedown is a free bump");
+    }
+
+    /// §7.2: a body does not block sight, so the first cone to cover it fires
+    /// the found-body event — exactly once, found is found — and the finder goes
+    /// hunting (the §7.6 search). The body is solid to the player: stepping into
+    /// it is a free bump.
+    #[test]
+    fn a_body_is_found_once_by_a_covering_cone() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5), // hidden, striking north
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 4)), // the victim, adjacent
+                // A witness two cells up the column, cone south straight over
+                // the victim's cell: it sees the body the turn it appears.
+                Guard::stationary(Cell::new(5, 2)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+
+        let body = Cell::new(5, 4);
+        let events = s.step(Input::Step(Direction::North));
+        assert_eq!(
+            events,
+            vec![Event::TakenDown { at: body }, Event::BodyFound { at: body }],
+            "the witness's cone covers the fresh body: found the same turn",
+        );
+        assert_eq!(s.bodies()[0].cell(), body);
+        assert!(s.bodies()[0].found());
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Alerted,
+            "the finder drops into the §7.6 search",
+        );
+
+        // Found is found: the cone keeps covering the body every turn, and the
+        // loudest event in the game never repeats.
+        for _ in 0..3 {
+            let events = s.step(Input::Wait);
+            assert!(
+                !events.iter().any(|e| matches!(e, Event::BodyFound { .. })),
+                "the found-body event fires exactly once per body",
+            );
+        }
+
+        // Solid to the player: stepping into the body is a free bump.
+        let turn = s.turn();
+        let events = s.step(Input::Step(Direction::North));
+        assert_eq!(events, vec![Event::Bumped { into: body }]);
+        assert_eq!(s.player(), Cell::new(5, 5), "no move onto a body");
+        assert_eq!(s.turn(), turn, "bumping a body is free");
+    }
+
+    /// §7.2: a body is solid to guards too — it blocks their movement and their
+    /// pathing. A guard sent at the body's cell (and then hunting all around it)
+    /// never stands on it.
+    #[test]
+    fn a_guard_never_enters_a_bodys_cell() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 4)), // the victim
+                // A walker aimed straight at the victim's cell.
+                Guard::patrolling_to(Cell::new(5, 1), Cell::new(5, 4)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+
+        let body = Cell::new(5, 4);
+        s.step(Input::Step(Direction::North)); // the takedown; the body lies
+        assert_eq!(s.bodies()[0].cell(), body);
+
+        // The walker finds the body, searches all around it — and can never
+        // stand on it: not routed through (pathing) and never entered (move).
+        for _ in 0..12 {
+            s.step(Input::Wait);
+            assert_ne!(s.guards()[0].pos(), body, "a body's cell admits no guard");
+            assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
+        }
     }
 
     /// A patrolling guard with nowhere to sweep holds rather than wedging or
@@ -2095,6 +2345,8 @@ mod tests {
         assert_eq!(Event::ExitRefused.category(), Category::Interest);
         assert_eq!(Event::Won.category(), Category::Interest);
         assert_eq!(Event::Captured { by: at }.category(), Category::Danger);
+        assert_eq!(Event::TakenDown { at }.category(), Category::Owned);
+        assert_eq!(Event::BodyFound { at }.category(), Category::Warning);
     }
 
     /// §12.4: the loop is pure and deterministic. The same starting state and the same
@@ -2185,9 +2437,10 @@ mod tests {
         assert_eq!(s.affordances(), Vec::new());
     }
 
-    /// An adjacent guard offers **nothing**: bumping one is a free no-op until
-    /// takedowns land (§7.2), and the usable line must never promise what a bump
-    /// will not do (§2.3). An occupied cupboard is likewise just solid.
+    /// An adjacent **aware** guard offers nothing: its bump is a free no-op
+    /// (§7.2's gate — the unaware case is the takedown test above), and the
+    /// usable line must never promise what a bump will not do (§2.3). An
+    /// occupied cupboard is likewise just solid.
     #[test]
     fn affordances_skip_guards_and_occupied_hideouts() {
         let mut layout = open_room(12, 12);

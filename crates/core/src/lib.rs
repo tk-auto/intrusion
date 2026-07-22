@@ -29,6 +29,7 @@
 #![forbid(unsafe_code)]
 
 mod ability;
+mod body;
 mod category;
 mod cell;
 mod door;
@@ -50,6 +51,7 @@ mod vision;
 pub use ability::{
     sample_panel, Ability, AbilityId, AbilityState, AbilityStatus, Behaviour, Effect, TargetingMode,
 };
+pub use body::Body;
 pub use category::Category;
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;
