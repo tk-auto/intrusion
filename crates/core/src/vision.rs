@@ -142,17 +142,33 @@ pub fn field_of_view(
 
     // Corner-solidity (§6.1): the raw shadowcast leaks sight through the pinch
     // where two walls meet at a diagonal — a viewer looking along the join sees
-    // floor cells whose line of sight is in fact a straight run through a wall's
-    // body. Retract any floor tile the viewer could only reach by crossing an
-    // opaque cell's interior; grazing a bare corner (a single lattice point) is
-    // still allowed, so the arc silhouette and the always-seen touching ring
-    // (§6.1 **[SETTLED]**) are untouched.
+    // cells whose line of sight is in fact a straight run through a wall's body,
+    // or exactly through the vertex the two walls jointly seal. Transparent
+    // tiles keep the symmetric criterion — retract them when the centre-to-
+    // centre segment is blocked. An opaque cell is seen when any part of its
+    // face is, so it keeps the generous side of "you see the wall face":
+    // retract it only when the segments to its centre *and* all four corners
+    // are blocked — otherwise the cast's fan through a gap paints wall faces
+    // deep in rooms no actual ray reaches (the leak seen through a cupboard
+    // across a corridor). Grazing a bare corner (a vertex with at most one
+    // opaque flank) is still allowed throughout, so the arc silhouette and the
+    // always-seen touching ring (§6.1 **[SETTLED]**) are untouched.
     let leaked: Vec<Cell> = fov
         .cells()
         .filter(|&c| {
-            c.sight_distance(origin) > 1
-                && facility.terrain(c).is_some_and(|t| !t.blocks_sight())
-                && sight_crosses_opaque_body(facility, origin, c)
+            if c.sight_distance(origin) <= 1 {
+                return false;
+            }
+            let cx2 = 2 * i64::from(c.x);
+            let cy2 = 2 * i64::from(c.y);
+            if facility.terrain(c).is_some_and(|t| !t.blocks_sight()) {
+                segment_is_blocked(facility, origin, cx2 + 1, cy2 + 1, c)
+            } else {
+                // Centre first, then the four corners of the cell's square.
+                [(1, 1), (0, 0), (2, 0), (0, 2), (2, 2)]
+                    .iter()
+                    .all(|&(ox, oy)| segment_is_blocked(facility, origin, cx2 + ox, cy2 + oy, c))
+            }
         })
         .collect();
     for c in leaked {
@@ -162,30 +178,82 @@ pub fn field_of_view(
     fov
 }
 
-/// Whether the straight segment between the *centres* of `origin` and `target`
-/// passes through the interior of any sight-blocking cell — i.e. reaching the
-/// target would mean seeing through a wall's body, not around it.
+/// Whether the cell at possibly-off-grid coordinates blocks sight — real
+/// terrain opacity only (§10.3), never the §6.2 artificial ring. Off-grid
+/// counts as opaque, matching the caster.
+fn blocks_sight_at(facility: &Facility, x: i64, y: i64) -> bool {
+    if x < 0 || y < 0 {
+        return true;
+    }
+    facility
+        .terrain(Cell::new(x as u32, y as u32))
+        .is_none_or(|t| t.blocks_sight())
+}
+
+/// Whether the straight sight segment from `origin`'s centre to the point
+/// `(bx2, by2)` — **doubled** coordinates, so cell centres are odd and cell
+/// corners even — is blocked by real terrain. Two ways to be blocked, both
+/// §6.1 corner-solidity:
 ///
-/// A segment that merely grazes a corner (touching a single lattice point
-/// before continuing into open floor) does **not** count: that graze is the
-/// behaviour the cone silhouette and the touching ring depend on (§6.2), so
-/// only a real crossing of a cell's interior is a block. This is the
-/// corner-solidity rule in its permissive form — two walls touching only at a
-/// diagonal occlude the pinch, but a lone corner never hides what is beside it.
+/// - **Body:** the segment crosses the interior of a sight-blocking cell
+///   (other than `target` itself) — seeing through a wall's body, not around
+///   it.
+/// - **Pinch:** the segment passes exactly through a grid vertex whose two
+///   *flanking* cells — the pair it brushes past without entering — are both
+///   sight-blocking. That vertex is two walls meeting at a diagonal, and they
+///   jointly occlude it: every ray but the measure-zero corner line runs
+///   through one wall body or the other.
 ///
-/// All integer arithmetic (centres and boundaries are exact in doubled
-/// coordinates), so it is deterministic (§12.4). Real terrain opacity only — the
-/// §6.2 artificial ring walls are not consulted, so this never reshapes the arc.
-fn sight_crosses_opaque_body(facility: &Facility, origin: Cell, target: Cell) -> bool {
+/// A vertex with at most one opaque flank is grazed freely — the permissive
+/// behaviour the cone silhouette and the touching ring depend on (§6.2): a
+/// lone corner never hides what is beside it.
+///
+/// All integer arithmetic (centres, corners and boundaries are exact in
+/// doubled coordinates), so it is deterministic (§12.4), and symmetric in its
+/// endpoints. Real terrain opacity only — the §6.2 artificial ring walls are
+/// not consulted, so this never reshapes the arc.
+fn segment_is_blocked(facility: &Facility, origin: Cell, bx2: i64, by2: i64, target: Cell) -> bool {
     // Doubled cell-centre coordinates: every centre is odd, every boundary even.
     let ax = 2 * i64::from(origin.x) + 1;
     let ay = 2 * i64::from(origin.y) + 1;
-    let vx = 2 * (i64::from(target.x) - i64::from(origin.x));
-    let vy = 2 * (i64::from(target.y) - i64::from(origin.y));
+    let vx = bx2 - ax;
+    let vy = by2 - ay;
 
-    // The parameters t in (0, 1) where the segment crosses a cell boundary, as
-    // fractions num/den (den > 0). Between consecutive crossings the segment
-    // lies wholly inside one cell.
+    // The pinch check: every vertex pass shows up as an x-boundary crossing
+    // whose y lands on a boundary too (a vertical segment runs through cell
+    // interiors and never meets a vertex).
+    if vx != 0 && vy != 0 {
+        let (sx, sy) = (vx.signum(), vy.signum());
+        let (lo, hi) = (ax.min(bx2), ax.max(bx2));
+        // Even (boundary) doubled-x values strictly between the endpoints; an
+        // endpoint sitting on a boundary (a corner sample) is t = 1, excluded.
+        let mut xd = if lo % 2 == 0 { lo + 2 } else { lo + 1 };
+        while xd < hi {
+            // The segment crosses x-boundary xd/2 at t = (xd − ax) / vx; the
+            // doubled y there, scaled by vx to stay integer, is:
+            let ynum = ay * vx + vy * (xd - ax);
+            if ynum % vx == 0 {
+                let y2 = ynum / vx;
+                if y2 % 2 == 0 {
+                    let (xb, yb) = (xd / 2, y2 / 2);
+                    // The two cells framing the vertex diagonally across the
+                    // segment's path — sides (sx, −sy) and (−sx, sy).
+                    let f1x = if sx > 0 { xb } else { xb - 1 };
+                    let f1y = if sy < 0 { yb } else { yb - 1 };
+                    let f2x = if sx < 0 { xb } else { xb - 1 };
+                    let f2y = if sy > 0 { yb } else { yb - 1 };
+                    if blocks_sight_at(facility, f1x, f1y) && blocks_sight_at(facility, f2x, f2y) {
+                        return true;
+                    }
+                }
+            }
+            xd += 2;
+        }
+    }
+
+    // The body check. The parameters t in (0, 1) where the segment crosses a
+    // cell boundary, as fractions num/den (den > 0). Between consecutive
+    // crossings the segment lies wholly inside one cell.
     let mut crossings: Vec<(i64, i64)> = Vec::new();
     let mut push = |num: i64, den: i64| {
         let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
@@ -193,14 +261,14 @@ fn sight_crosses_opaque_body(facility: &Facility, origin: Cell, target: Cell) ->
             crossings.push((num, den));
         }
     };
-    if vx != 0 {
-        for xb in (origin.x.min(target.x) + 1)..=origin.x.max(target.x) {
-            push(2 * i64::from(xb) - ax, vx);
-        }
-    }
-    if vy != 0 {
-        for yb in (origin.y.min(target.y) + 1)..=origin.y.max(target.y) {
-            push(2 * i64::from(yb) - ay, vy);
+    for (v, a, b2) in [(vx, ax, bx2), (vy, ay, by2)] {
+        if v != 0 {
+            let (lo, hi) = (a.min(b2), a.max(b2));
+            let mut bd = if lo % 2 == 0 { lo + 2 } else { lo + 1 };
+            while bd < hi {
+                push(bd - a, v);
+                bd += 2;
+            }
         }
     }
     // Sort by value and fold coincident crossings — a corner is one point, not a
@@ -353,13 +421,39 @@ struct Caster<'a> {
 
 impl Caster<'_> {
     /// Whether `cell` blocks sight from this viewer: real opacity from the terrain
-    /// table (§10.3), or the §6.2 artificial wall — an out-of-arc member of the
-    /// viewer's own touching ring. Off-grid is opaque.
+    /// table (§10.3), the §6.2 artificial wall — an out-of-arc member of the
+    /// viewer's own touching ring — or a pinched ring diagonal. Off-grid is opaque.
     fn opaque(&self, cell: Cell) -> bool {
         let dx = i64::from(cell.x) - i64::from(self.origin.x);
         let dy = i64::from(cell.y) - i64::from(self.origin.y);
-        if dx.abs().max(dy.abs()) == 1 && ring_tier(self.facing, dx, dy) > self.arc_width {
-            return true;
+        if dx.abs().max(dy.abs()) == 1 {
+            if ring_tier(self.facing, dx, dy) > self.arc_width {
+                return true;
+            }
+            // Corner-solidity at the viewer's own ring (§6.1): a diagonal
+            // neighbour whose two shared cardinal neighbours are both real
+            // walls sits behind a pinch. Treating it as opaque keeps it seen —
+            // opaque cells are marked wherever scanned, so the **[SETTLED]**
+            // touching ring holds — while the cast stops at it instead of
+            // spilling floors *and wall faces* into the space beyond, which
+            // only the measure-zero corner line actually reaches. This is the
+            // alcove-cupboard geometry: backing and wall line meet diagonally
+            // at the mouth's corners.
+            if dx != 0
+                && dy != 0
+                && blocks_sight_at(
+                    self.facility,
+                    i64::from(self.origin.x) + dx,
+                    i64::from(self.origin.y),
+                )
+                && blocks_sight_at(
+                    self.facility,
+                    i64::from(self.origin.x),
+                    i64::from(self.origin.y) + dy,
+                )
+            {
+                return true;
+            }
         }
         self.facility.terrain(cell).is_none_or(|t| t.blocks_sight())
     }
@@ -719,10 +813,10 @@ mod tests {
                 "#**...****#",
                 "#***....**#",
                 "#****.....#",
-                "#****.....#",
-                "#*****....#",
+                "#****......",
                 "#*****.....",
-                "#########..",
+                "#*****.....",
+                "#######....",
             ]
         );
         // The specific cells behind the diagonal join go dark (they were the leak).
@@ -826,6 +920,188 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The #88 reopen fixture: the PR #119 alcove cupboard. A room above a
+    /// 1-thick wall line, a corridor below; one room cell walled up as backing
+    /// and the wall cell under it recessed into a cupboard. The backing and the
+    /// wall line meet only diagonally at the mouth's corners — the pinch the
+    /// leak threaded.
+    ///
+    /// ```text
+    /// #################
+    /// #...............#
+    /// #.......#.......#   <- walled-up backing (8,2)
+    /// ########}########   <- wall line, } = cupboard (8,3)
+    /// #...............#
+    /// #...............#
+    /// #################
+    /// #################
+    /// ```
+    fn alcove_cupboard() -> Facility {
+        let mut f = Facility::walled_box(17, 8);
+        for x in 1..16 {
+            f.set_terrain(x, 3, Terrain::Wall);
+            f.set_terrain(x, 6, Terrain::Wall);
+        }
+        f.set_terrain(8, 3, Terrain::Hideout);
+        f.set_terrain(8, 2, Terrain::Wall);
+        f
+    }
+
+    /// §6.1 corner-solidity at the cupboard mouth: a viewer hidden in the
+    /// alcove sees the corridor out the mouth and its own touching ring —
+    /// including the two room cells diagonally behind the backing, which the
+    /// **[SETTLED]** ring keeps lit — but nothing else of the room. Before the
+    /// fix the cast threaded the double-walled corners and lit the room's
+    /// deeper floor and far border even at the 360° wait arc.
+    #[test]
+    fn a_cupboard_alcove_does_not_leak_sight_into_the_room() {
+        let f = alcove_cupboard();
+        let origin = Cell::new(8, 3);
+        let fov = field_of_view(&f, origin, Direction::South, WAIT_SIGHT_ARC, 15);
+        assert_eq!(
+            picture(&f, &fov, origin),
+            vec![
+                ".................",
+                ".................",
+                ".......*#*.......",
+                ".......#@#.......",
+                ".......***.......",
+                "......*****......",
+                ".....#######.....",
+                ".................",
+            ]
+        );
+        // The exact-diagonal cells beyond the pinch were the floor leak.
+        for c in [Cell::new(6, 1), Cell::new(10, 1)] {
+            assert!(!fov.contains(c), "{c:?} leaked through the mouth corner");
+        }
+        // Facing out the mouth (the §7.6 auto-face) shows exactly the same
+        // view: the alcove already contains everything the wait arc can add.
+        let facing = field_of_view(&f, origin, Direction::South, PLAYER_SIGHT_ARC, 15);
+        assert_eq!(picture(&f, &facing, origin), picture(&f, &fov, origin));
+    }
+
+    /// The same pinch closed from the outside: a guard in the room diagonally
+    /// behind the backing still sees the cupboard interior itself — it is in
+    /// the guard's touching ring, and standing next to a guard is never free
+    /// (§6.1 **[SETTLED]**) — but no longer sees the corridor beyond it.
+    #[test]
+    fn a_guard_diagonal_to_the_backing_cannot_see_past_the_cupboard() {
+        let f = alcove_cupboard();
+        let origin = Cell::new(7, 2);
+        let fov = field_of_view(&f, origin, Direction::South, GUARD_SIGHT_ARC, 10);
+        assert_eq!(
+            picture(&f, &fov, origin),
+            vec![
+                ".................",
+                "......***........",
+                "......*@#........",
+                "......##*........",
+                ".................",
+                ".................",
+                ".................",
+                ".................",
+            ]
+        );
+        assert!(
+            fov.contains(Cell::new(8, 3)),
+            "the adjacent cupboard interior stays seen — the touching ring"
+        );
+        for c in [Cell::new(9, 4), Cell::new(10, 5)] {
+            assert!(!fov.contains(c), "{c:?}: the corridor leaked to the guard");
+        }
+    }
+
+    /// The playtest leak that reopened the reopen: two alcove cupboards facing
+    /// each other across a corridor. From inside one, the room behind the
+    /// *opposite* cupboard must stay dark — the alcove is a dead end: its
+    /// backing blocks the straight line and its mouth corners are double-walled
+    /// pinches. The raw cast fans through the one-cell gap and paints the far
+    /// room's wall faces (floors were already retracted); the corner-sampled
+    /// wall retraction now darkens those too. What legitimately remains: the
+    /// opposite alcove's interior and its backing's face — you see into the
+    /// recess, never through it.
+    #[test]
+    fn a_cupboard_across_the_corridor_is_a_dead_end_not_a_window() {
+        let mut f = Facility::walled_box(17, 10);
+        for x in 1..16 {
+            f.set_terrain(x, 3, Terrain::Wall);
+            f.set_terrain(x, 6, Terrain::Wall);
+        }
+        // Top cupboard opens south into the corridor; backing walled up above.
+        f.set_terrain(8, 3, Terrain::Hideout);
+        f.set_terrain(8, 2, Terrain::Wall);
+        // Bottom cupboard opens north; backing walled up below. The viewer.
+        f.set_terrain(8, 6, Terrain::Hideout);
+        f.set_terrain(8, 7, Terrain::Wall);
+        let origin = Cell::new(8, 6);
+        let fov = field_of_view(&f, origin, Direction::North, PLAYER_SIGHT_ARC, 15);
+
+        // Into the recess: the opposite interior and its backing's face.
+        assert!(
+            fov.contains(Cell::new(8, 3)),
+            "the opposite alcove interior"
+        );
+        assert!(fov.contains(Cell::new(8, 2)), "the opposite backing's face");
+        // Never through it: the room beyond stays dark — floors, the walls of
+        // its far border, and the backing's room-side neighbours alike.
+        for c in [
+            Cell::new(7, 1),
+            Cell::new(8, 1),
+            Cell::new(9, 1),
+            Cell::new(6, 1),
+            Cell::new(10, 1),
+            Cell::new(7, 2),
+            Cell::new(9, 2),
+            Cell::new(7, 0),
+            Cell::new(8, 0),
+            Cell::new(9, 0),
+        ] {
+            assert!(!fov.contains(c), "{c:?} shows through the opposite alcove");
+        }
+        // The viewer's own touching ring is intact (§6.1 [SETTLED]), including
+        // the room cells diagonally behind their own backing.
+        for c in [Cell::new(7, 7), Cell::new(9, 7), Cell::new(7, 5)] {
+            assert!(fov.contains(c), "{c:?}: the touching ring must hold");
+        }
+    }
+
+    /// The strictness choice, pinned: a vertex flanked by **two** walls blocks
+    /// the diagonal through it (they jointly occlude the pinch), while a lone
+    /// corner still grazes — the permissive behaviour the cone silhouette and
+    /// the touching ring depend on. And the closure is symmetric: dark from
+    /// one side means dark from the other.
+    #[test]
+    fn a_double_walled_corner_blocks_the_diagonal_a_lone_corner_grazes() {
+        let mut f = open(11, 11);
+        f.set_terrain(5, 4, Terrain::Wall);
+        f.set_terrain(4, 5, Terrain::Wall);
+        let a = Cell::new(2, 2);
+        let from_a = field_of_view(&f, a, Direction::North, WAIT_SIGHT_ARC, 8);
+        for c in [Cell::new(5, 5), Cell::new(6, 6), Cell::new(7, 7)] {
+            assert!(!from_a.contains(c), "{c:?} threaded the double corner");
+        }
+        assert!(from_a.contains(Cell::new(4, 4)), "this side of the pinch");
+        assert!(from_a.contains(Cell::new(5, 4)), "the wall faces are seen");
+        assert!(from_a.contains(Cell::new(4, 5)), "the wall faces are seen");
+        let b = Cell::new(6, 6);
+        let from_b = field_of_view(&f, b, Direction::North, WAIT_SIGHT_ARC, 8);
+        assert!(!from_b.contains(a), "the closure holds both ways");
+
+        // Remove one wall: the vertex has a single opaque flank and the
+        // diagonal grazes it freely again.
+        f.set_terrain(4, 5, Terrain::Floor);
+        let grazing = field_of_view(&f, a, Direction::North, WAIT_SIGHT_ARC, 8);
+        assert!(
+            grazing.contains(Cell::new(5, 5)),
+            "a lone corner never hides"
+        );
+        assert!(
+            grazing.contains(Cell::new(6, 6)),
+            "a lone corner never hides"
+        );
     }
 
     /// A default set is the empty placeholder: it contains nothing.
