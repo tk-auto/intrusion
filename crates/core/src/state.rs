@@ -33,6 +33,7 @@
 //! state machine — searching, decoys — is the later guard tickets, which set a
 //! guard's destination the same way and reuse the same walk-toward-it movement.
 
+use crate::ability::{AbilityId, AbilityState, Deck};
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
@@ -71,6 +72,15 @@ pub enum Input {
     /// waiting is the only way to spend a turn where you stand — which is what makes
     /// holding at a corner a real choice.
     Wait,
+    /// Activate an ability (§8.2). A turn-costing action (§4.4): if the ability is
+    /// ready it switches on and the turn is spent; if it is active or cooling this
+    /// is a mis-input and resolves as a **free** no-op. The shell picks this over
+    /// [`Deactivate`](Input::Deactivate) from the ability's current state (§11.6).
+    Activate(AbilityId),
+    /// Toggle an active ability off early (§4.4's free exception). Always free and
+    /// never refunds — the full cooldown still runs (§8.2). A no-op on an ability
+    /// that is not active.
+    Deactivate(AbilityId),
 }
 
 /// Something the loop did this turn, reported in resolution order. Each event knows
@@ -104,6 +114,13 @@ pub enum Event {
     Won,
     /// A guard moved into the player's cell: captured (§4.5) — the only loss.
     Captured { by: Cell },
+    /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
+    AbilityActivated { ability: AbilityId },
+    /// The player toggled an ability off early (§4.4) — free; its cooldown still
+    /// runs (§8.2).
+    AbilityDeactivated { ability: AbilityId },
+    /// An ability's duration ran out at end of turn and it switched off (§8.2).
+    AbilityExpired { ability: AbilityId },
 }
 
 impl Event {
@@ -119,6 +136,11 @@ impl Event {
             // occupied cupboard and the covering table recolour to Owned; their
             // messages match).
             Event::EnteredHideout { .. } | Event::Crouched { .. } => Category::Owned,
+            // Your abilities are your tools — switching one on or off, or its fading,
+            // is something you did or hold (§8), so it reads in the Owned band.
+            Event::AbilityActivated { .. }
+            | Event::AbilityDeactivated { .. }
+            | Event::AbilityExpired { .. } => Category::Owned,
             // Neutral furniture doing furniture things (§10.4).
             Event::DoorOpened { .. } => Category::System,
             // Goals and rewards — including the exit talking about the goal it
@@ -308,6 +330,10 @@ pub struct State {
     /// clears it.
     crouched_behind: Option<Cell>,
     guards: Vec<Guard>,
+    /// Per-ability economy runtime (§8.2): activation, duration, and cooldown for
+    /// each activated ability, stepped by the turn loop. The v1 set is available
+    /// from the start (§8.3/#104), so this begins all-ready.
+    abilities: Deck,
     objectives: Vec<Objective>,
     exit: Cell,
     turn: u32,
@@ -355,6 +381,7 @@ impl State {
             waited: false,
             crouched_behind: None,
             guards,
+            abilities: Deck::new(),
             objectives,
             exit,
             turn: 0,
@@ -538,6 +565,15 @@ impl State {
         &self.last_events
     }
 
+    /// The economy state of ability `id` (§8.2), as the panel reads it (§11.4):
+    /// `Ready`, `Active` with the duration left, or `Cooling` with the cooldown
+    /// left — the exact number the player gets (§8.2 timing). The show-on-wait
+    /// render ticket wires the panel to this; the display's contextual `Unusable`
+    /// (a missing target) is not an economy state and is never returned here.
+    pub fn ability_state(&self, id: AbilityId) -> AbilityState {
+        self.abilities.state(id)
+    }
+
     /// What a bump would do from here — the **usable line** (§11.4): each
     /// interaction orthogonally adjacent to the player, with the direction to
     /// bump it, in [`Direction::ALL`] order. The §10.6 one-usable guarantee
@@ -588,10 +624,20 @@ impl State {
             self.turn += 1;
             // Phases 2 and 3 only happen because the player spent the turn (§4.2/§4.4).
             events.extend(self.run_world_phases());
-            // Ability durations will tick HERE — at end of turn, after all three
-            // phases — so a freshly activated N-turn ability yields N protected turns
-            // and the activation turn itself is covered (§8.2's N-yields-N−1 trap).
-            // Abilities land in their own ticket; this is the spot the loop reserves.
+            // Ability durations tick HERE — at end of turn, after all three phases —
+            // so a freshly activated N-turn ability yields N protected turns and the
+            // activation turn itself is covered (§8.2's N-yields-N−1 trap): the
+            // activation ran in phase 1 and every phase this turn saw it active; only
+            // now does its remaining count drop. Cooldowns, frozen through the
+            // duration, drain here too, but only for now-inactive abilities. Only a
+            // *spent* turn reaches this, so a free action never advances the clock.
+            let mut expired = Vec::new();
+            self.abilities.tick(&mut expired);
+            events.extend(
+                expired
+                    .into_iter()
+                    .map(|ability| Event::AbilityExpired { ability }),
+            );
         }
 
         // Every action replaces the near line's source, free bumps included —
@@ -626,6 +672,28 @@ impl State {
                     }
                 }
                 spent
+            }
+            // Activating an ability spends the turn (§4.4) — but only if it actually
+            // switched on; activating an unavailable ability is a mis-input and, like
+            // a wall bump, is free and changes nothing. A real activation is a spent
+            // action other than Wait, so it stands the player up and narrows the arc.
+            Input::Activate(id) => {
+                if self.abilities.activate(id) {
+                    events.push(Event::AbilityActivated { ability: id });
+                    self.waited = false;
+                    self.crouched_behind = None;
+                    true
+                } else {
+                    false
+                }
+            }
+            // Toggling an ability off is free (§4.4): it never spends the turn, so —
+            // like every free action — it leaves posture and the waited flag alone.
+            Input::Deactivate(id) => {
+                if self.abilities.deactivate(id) {
+                    events.push(Event::AbilityDeactivated { ability: id });
+                }
+                false
             }
         }
     }
@@ -965,6 +1033,112 @@ mod tests {
         assert!(s.step(Input::Wait).is_empty());
         assert_eq!(s.turn(), 1);
         assert_eq!(s.player(), Cell::new(4, 4));
+    }
+
+    /// §4.4/§8.2: activating an ability is world-changing — it spends the turn and
+    /// reports it (§11.7). By the time the panel reads it, the activation turn's
+    /// end-of-turn tick has run, so 4 of Run's 5 remain — yet the activation turn
+    /// itself was protected (the §8.2 N-yields-N−1 trap, designed out).
+    #[test]
+    fn activating_an_ability_spends_the_turn() {
+        let mut s = solo(Cell::new(4, 4));
+        let events = s.step(Input::Activate(AbilityId::Run));
+        assert_eq!(
+            events,
+            vec![Event::AbilityActivated {
+                ability: AbilityId::Run
+            }]
+        );
+        assert_eq!(s.turn(), 1, "activation spends the turn");
+        assert_eq!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Active { remaining: 4 },
+        );
+    }
+
+    /// §4.4: toggling an ability off is one of the two free actions — the turn does
+    /// not advance — and it still pays the full cooldown (§8.2 refunds nothing).
+    #[test]
+    fn toggling_an_ability_off_is_free() {
+        let mut s = solo(Cell::new(4, 4));
+        s.step(Input::Activate(AbilityId::Run)); // turn 1, Run active
+        let events = s.step(Input::Deactivate(AbilityId::Run));
+        assert_eq!(
+            events,
+            vec![Event::AbilityDeactivated {
+                ability: AbilityId::Run
+            }]
+        );
+        assert_eq!(s.turn(), 1, "toggling off does not spend the turn");
+        assert_eq!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Cooling { remaining: 12 },
+            "early cancel still pays the whole cooldown",
+        );
+    }
+
+    /// Activating an ability that is not ready is a mis-input — free, like a wall
+    /// bump (§4.4): nothing changes and the turn does not advance.
+    #[test]
+    fn activating_an_unavailable_ability_is_free() {
+        let mut s = solo(Cell::new(4, 4));
+        s.step(Input::Activate(AbilityId::Run)); // now active
+        let events = s.step(Input::Activate(AbilityId::Run)); // already active
+        assert!(events.is_empty(), "re-activating does nothing");
+        assert_eq!(s.turn(), 1, "a mis-input is free");
+    }
+
+    /// The §8.2 timing convention through the whole loop: a freshly activated
+    /// N-turn ability is protected for N turns — the activation turn included —
+    /// then fades, and the full lockout is exactly `duration + cooldown` (Run: 5 +
+    /// 12 = 17 turns), Ready again on the 18th.
+    #[test]
+    fn an_ability_is_protected_for_its_full_duration_then_locked_out() {
+        let mut s = solo(Cell::new(4, 4));
+        s.step(Input::Activate(AbilityId::Run)); // protected turn 1; tick 1 of 17
+        assert_eq!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Active { remaining: 4 }
+        );
+
+        // Protected turns 2–4 keep it active; the 4th wait's tick ends the duration.
+        for expected in [3, 2, 1] {
+            assert!(s.step(Input::Wait).is_empty());
+            assert_eq!(
+                s.ability_state(AbilityId::Run),
+                AbilityState::Active {
+                    remaining: expected
+                }
+            );
+        }
+        let events = s.step(Input::Wait); // protected turn 5 ends here
+        assert_eq!(
+            events,
+            vec![Event::AbilityExpired {
+                ability: AbilityId::Run
+            }]
+        );
+        assert_eq!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Cooling { remaining: 12 },
+            "the frozen cooldown starts at its full 12",
+        );
+
+        // Cooldown drains one per turn: 11 more waits leave it locked, the 12th frees it.
+        for _ in 0..11 {
+            s.step(Input::Wait);
+        }
+        assert_ne!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Ready,
+            "still cooling after 16 turns",
+        );
+        s.step(Input::Wait);
+        assert_eq!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Ready,
+            "Ready again after exactly duration + cooldown = 17 turns",
+        );
     }
 
     /// Win path (§4.5): take every objective, then reach the exit. Bumping the exit
