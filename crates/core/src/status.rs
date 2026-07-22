@@ -60,6 +60,9 @@ pub fn message_for(event: Event) -> Option<Message> {
         // held state itself lives on the ambient floor, not in a message.
         Event::BodyGrabbed { .. } => ("you take hold of the body".to_string(), 0),
         Event::BodyReleased { .. } => ("you let the body go".to_string(), 0),
+        // Your fake, trampled (§8.3) — quiet Owned narration; the fade-out by
+        // duration reads as the ability's own expiry message.
+        Event::DecoyDied { .. } => ("the decoy is trampled".to_string(), 0),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
         Event::AbilityActivated { ability } => (format!("{} active", ability.name()), 0),

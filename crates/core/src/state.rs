@@ -33,7 +33,7 @@
 //! state machine — searching, decoys — is the later guard tickets, which set a
 //! guard's destination the same way and reuse the same walk-toward-it movement.
 
-use crate::ability::{AbilityId, AbilityState, Deck, Effect};
+use crate::ability::{AbilityId, AbilityState, Behaviour, Deck, Effect};
 use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
@@ -128,6 +128,10 @@ pub enum Event {
     /// The player let the dragged body go where it lies (§8.3) — free (§4.4),
     /// and it refunds nothing because there is nothing to refund.
     BodyReleased { at: Cell },
+    /// The decoy was stepped on — by anything, the player included — and died
+    /// (§8.3). Its ability drops into the full cooldown, as an early toggle-off
+    /// would. Expiry by duration is [`Event::AbilityExpired`], not this.
+    DecoyDied { at: Cell },
     /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
     AbilityActivated { ability: AbilityId },
     /// The player toggled an ability off early (§4.4) — free; its cooldown still
@@ -151,10 +155,12 @@ impl Event {
             // messages match).
             Event::EnteredHideout { .. } | Event::Crouched { .. } => Category::Owned,
             // Your abilities are your tools — switching one on or off, or its fading,
-            // is something you did or hold (§8), so it reads in the Owned band.
+            // is something you did or hold (§8), so it reads in the Owned band. The
+            // decoy is a thing you made (§11.3): its death reads there too.
             Event::AbilityActivated { .. }
             | Event::AbilityDeactivated { .. }
-            | Event::AbilityExpired { .. } => Category::Owned,
+            | Event::AbilityExpired { .. }
+            | Event::DecoyDied { .. } => Category::Owned,
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it
             // left (§8.3) is the same hands: grabbing and releasing are Owned.
@@ -397,6 +403,12 @@ pub struct State {
     /// grab, a spent turn); cleared by bumping it again (free, §4.4) or never.
     /// One body at a time.
     dragging: Option<usize>,
+    /// The live decoy's cell (§8.3, #105), if one is out. At most one — the
+    /// economy already guarantees it (duration 20 < cooldown 30, so a second
+    /// activation can never overlap the first) — and its lifetime *is* the
+    /// ability's active window, both ways: expiry and early toggle-off remove
+    /// it, and being stepped on ends the ability into its full cooldown.
+    decoy: Option<Cell>,
     /// The **half-speed convention** (§8.3: "you move at half speed while
     /// dragging"), documented here: a successful move while dragging leaves a
     /// haul debt, and the next spent turn pays it — a Step under debt is spent
@@ -459,6 +471,7 @@ impl State {
             guards,
             bodies: Vec::new(),
             dragging: None,
+            decoy: None,
             drag_debt: false,
             abilities: Deck::new(),
             objectives,
@@ -602,6 +615,13 @@ impl State {
         self.dragging.map(|i| self.bodies[i].cell())
     }
 
+    /// The live decoy's cell (§8.3), if one is out — the fake intruder the
+    /// renderer draws as an Owned `@` (§10.3/§11.3: a thing you made, wearing
+    /// your own glyph, which is the whole trick).
+    pub fn decoy(&self) -> Option<Cell> {
+        self.decoy
+    }
+
     /// The player's current guard-sense range (§9.1): [`PLAYER_SENSE_RANGE`] normally,
     /// widened to [`PLAYER_SENSE_RANGE_WAITING`] on the turn the player's spent action
     /// was a Wait — the same `waited` signal that buys the 360° look (§8.3). A free
@@ -737,6 +757,13 @@ impl State {
             // *spent* turn reaches this, so a free action never advances the clock.
             let mut expired = Vec::new();
             self.abilities.tick(&mut expired);
+            for &ability in &expired {
+                // The decoy's lifetime is its ability's active window (§8.3):
+                // expiry takes the fake with it.
+                if declares(ability, Effect::SpawnDecoy) {
+                    self.decoy = None;
+                }
+            }
             events.extend(
                 expired
                     .into_iter()
@@ -782,10 +809,25 @@ impl State {
             }
             // Activating an ability spends the turn (§4.4) — but only if it actually
             // switched on; activating an unavailable ability is a mis-input and, like
-            // a wall bump, is free and changes nothing. A real activation is a spent
-            // action other than Wait, so it stands the player up and narrows the arc.
+            // a wall bump, is free and changes nothing. An ability that spawns into
+            // the world (the decoy's faced cell, §8.4 Direction targeting) must also
+            // have a valid target — a faced cell that could not hold an intruder
+            // refuses the activation as the same free mis-input (§11.4's contextual
+            // Unusable). A real activation is a spent action other than Wait, so it
+            // stands the player up and narrows the arc.
             Input::Activate(id) => {
+                let spawn = if declares(id, Effect::SpawnDecoy) {
+                    match self.decoy_spawn_cell() {
+                        Some(cell) => Some(cell),
+                        None => return false,
+                    }
+                } else {
+                    None
+                };
                 if self.abilities.activate(id) {
+                    if spawn.is_some() {
+                        self.decoy = spawn;
+                    }
                     events.push(Event::AbilityActivated { ability: id });
                     self.waited = false;
                     self.crouched_behind = None;
@@ -798,8 +840,13 @@ impl State {
             }
             // Toggling an ability off is free (§4.4): it never spends the turn, so —
             // like every free action — it leaves posture and the waited flag alone.
+            // Toggling the decoy's ability off takes the decoy with it: its lifetime
+            // is the active window (§8.3).
             Input::Deactivate(id) => {
                 if self.abilities.deactivate(id) {
+                    if declares(id, Effect::SpawnDecoy) {
+                        self.decoy = None;
+                    }
                     events.push(Event::AbilityDeactivated { ability: id });
                 }
                 false
@@ -914,6 +961,7 @@ impl State {
             BumpKind::Hide => {
                 self.haul_body_to(self.player);
                 self.player = target;
+                self.stomp_decoy(target, events);
                 // The §5 exception for the hideout interaction (§7.6/§10.3): entry
                 // faces *out* of the cupboard, back toward the corridor — the
                 // opposite of the entry bump, which points into the wall the hideout
@@ -942,6 +990,9 @@ impl State {
                 self.player = target;
                 self.facing = dir; // facing follows the last successful step (§5)
                 events.push(Event::Moved { to: target });
+                // Stepping onto your own decoy kills it (§8.3) — anything's step
+                // does, the maker's included; a sprint checks its second cell too.
+                self.stomp_decoy(target, events);
                 self.run_extra_step(dir, events);
                 true
             }
@@ -955,6 +1006,34 @@ impl State {
                 events.push(Event::Bumped { into: target });
                 false
             }
+        }
+    }
+
+    /// Where a decoy activated right now would spawn (§8.3): the faced cell —
+    /// [`TargetingMode::Direction`](crate::TargetingMode) resolved against §5's
+    /// facing — provided it could hold an intruder: terrain that admits an
+    /// actor's fill and no actor already on it. `None` refuses the activation
+    /// (a fake standing in a wall or inside a guard would fool no one).
+    fn decoy_spawn_cell(&self) -> Option<Cell> {
+        let target = self.player.step(self.facing)?;
+        (self.layout.facility().can_enter(target, ACTOR_FILL) && !self.occupied(target))
+            .then_some(target)
+    }
+
+    /// The decoy dies when anything steps onto its cell (§8.3) — called after
+    /// every actor arrival, the player's own steps included. Its ability ends
+    /// into the **full** cooldown, exactly as an early toggle-off would (§8.2:
+    /// refunds nothing), and the death is reported (§11.7).
+    fn stomp_decoy(&mut self, at: Cell, events: &mut Vec<Event>) {
+        if self.decoy == Some(at) {
+            self.decoy = None;
+            for id in AbilityId::ALL
+                .into_iter()
+                .filter(|&id| declares(id, Effect::SpawnDecoy))
+            {
+                self.abilities.deactivate(id);
+            }
+            events.push(Event::DecoyDied { at });
         }
     }
 
@@ -986,6 +1065,7 @@ impl State {
         }
         self.player = target;
         events.push(Event::Moved { to: target });
+        self.stomp_decoy(target, events);
     }
 
     /// Haul the dragged body — if any — into `vacated`, the cell the player is
@@ -1157,6 +1237,17 @@ impl State {
                 events.push(Event::BodyFound { at });
             }
         }
+        // The decoy scan (§8.3, #105): a guard whose cone covers the decoy —
+        // and whose look did *not* detect the player this turn — turns to
+        // Investigate it. The precedence is the whole point: a guard that can
+        // see you ignores the fake; decoys work on guards that have lost you.
+        if let Some(decoy) = self.decoy {
+            for guard in &mut self.guards {
+                if !guard.detected_player() && guard.fov().contains(decoy) {
+                    guard.investigate_decoy(decoy);
+                }
+            }
+        }
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
@@ -1205,6 +1296,9 @@ impl State {
             if self.layout.facility().can_enter(target, ACTOR_FILL) && !self.occupied(target) {
                 let facility = self.layout.facility();
                 self.guards[i].advance_to(target, dir, facility);
+                // A guard arriving on the decoy's cell tramples it (§8.3):
+                // walking into the "intruder" is how the fake is found out.
+                self.stomp_decoy(target, events);
             }
         }
     }
@@ -1226,6 +1320,14 @@ impl State {
     fn occupied(&self, cell: Cell) -> bool {
         actor_occupies(self.player, &self.guards, &self.bodies, cell)
     }
+}
+
+/// Whether `id` declares `effect` in its data-driven behaviour (§8.1) — how the
+/// loop asks "does activating this spawn a decoy?" without naming an ability. A
+/// [`Behaviour::Coded`] ability declares nothing here; its behaviour would live
+/// in code keyed on the id.
+fn declares(id: AbilityId, effect: Effect) -> bool {
+    matches!(id.def().behaviour(), Behaviour::Effects(effects) if effects.contains(&effect))
 }
 
 /// Whether an actor occupies `cell`, given the actor fields directly. The free
@@ -1628,6 +1730,155 @@ mod tests {
             assert_ne!(s.guards()[0].pos(), body, "a body's cell admits no guard");
             assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
         }
+    }
+
+    /// §8.3/§8.4: the decoy spawns in the **faced** cell (Direction targeting),
+    /// and a faced cell that could not hold an intruder — a wall — refuses the
+    /// activation as a free mis-input: no turn spent, no cooldown started.
+    #[test]
+    fn a_decoy_spawns_in_the_faced_cell_or_refuses() {
+        let mut s = solo(Cell::new(7, 4));
+        s.step(Input::Step(Direction::East)); // (8,4), facing the border wall
+        let events = s.step(Input::Activate(AbilityId::Decoy));
+        assert!(events.is_empty(), "a faced wall refuses: a free mis-input");
+        assert_eq!(s.turn(), 1, "only the step spent a turn");
+        assert_eq!(s.ability_state(AbilityId::Decoy), AbilityState::Ready);
+        assert_eq!(s.decoy(), None);
+
+        s.step(Input::Step(Direction::West)); // (7,4), facing open floor
+        let events = s.step(Input::Activate(AbilityId::Decoy));
+        assert_eq!(
+            events,
+            vec![Event::AbilityActivated {
+                ability: AbilityId::Decoy
+            }]
+        );
+        assert_eq!(s.decoy(), Some(Cell::new(6, 4)), "the faced cell");
+        assert_eq!(s.turn(), 3, "a real activation spends the turn");
+    }
+
+    /// §8.3: a guard that has lost the player is drawn by the decoy — it flips
+    /// to Investigating toward the fake, walks in, and tramples it: the decoy
+    /// dies under its step, the ability pays the full cooldown, and the guard,
+    /// having found nothing, searches the area.
+    #[test]
+    fn a_guard_that_lost_the_player_investigates_and_tramples_the_decoy() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5), // concealed in the cupboard, facing north
+            Direction::North,
+            vec![Guard::patrolling_to(Cell::new(2, 4), Cell::new(9, 4))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        assert_eq!(s.guards()[0].state(), GuardState::Calm, "nothing seen yet");
+
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake appears at (5,4)
+        assert_eq!(s.decoy(), Some(Cell::new(5, 4)));
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Investigating,
+            "the cone catches the fake: drawn to it, at chase-minus severity",
+        );
+
+        // It walks in and steps on it.
+        let mut died = false;
+        for _ in 0..4 {
+            let events = s.step(Input::Wait);
+            if events.iter().any(|e| matches!(e, Event::DecoyDied { .. })) {
+                died = true;
+                break;
+            }
+        }
+        assert!(died, "anything stepping onto the decoy destroys it");
+        assert_eq!(s.decoy(), None);
+        assert!(
+            matches!(
+                s.ability_state(AbilityId::Decoy),
+                AbilityState::Cooling { .. }
+            ),
+            "a trampled decoy still pays the full cooldown",
+        );
+
+        s.step(Input::Wait);
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Alerted,
+            "the fake found out, the guard searches the area (§7.6)",
+        );
+    }
+
+    /// §8.3's precedence, asserted: a guard that detected the player this turn
+    /// ignores the decoy entirely — decoys work on guards that have lost you,
+    /// never on guards that have you.
+    #[test]
+    fn a_guard_that_sees_the_player_ignores_the_decoy() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 6), // exposed, inside the stationary guard's cone
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 2))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        assert!(s.guards()[0].detected_player(), "precondition: it has you");
+        assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake, inside its cone
+        assert_eq!(s.decoy(), Some(Cell::new(5, 5)));
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Chasing,
+            "a guard that can see you ignores the fake",
+        );
+    }
+
+    /// §8.3: the maker's own step kills the decoy too, into the full cooldown —
+    /// and a decoy left alone fades with its ability's duration, the expiry
+    /// taking the fake with it.
+    #[test]
+    fn a_stepped_on_decoy_dies_and_an_expired_one_fades() {
+        let mut s = solo(Cell::new(4, 4));
+        s.step(Input::Step(Direction::East)); // (5,4), facing east
+        s.step(Input::Activate(AbilityId::Decoy)); // decoy (6,4)
+        let events = s.step(Input::Step(Direction::East)); // walk onto it
+        assert_eq!(
+            events,
+            vec![
+                Event::Moved {
+                    to: Cell::new(6, 4)
+                },
+                Event::DecoyDied {
+                    at: Cell::new(6, 4)
+                },
+            ]
+        );
+        assert_eq!(s.decoy(), None);
+        assert!(
+            matches!(
+                s.ability_state(AbilityId::Decoy),
+                AbilityState::Cooling { .. }
+            ),
+            "trampled: the full cooldown runs (§8.2 refunds nothing)",
+        );
+
+        // Wait out the cooldown, place a fresh one, and let it fade.
+        for _ in 0..29 {
+            s.step(Input::Wait);
+        }
+        assert_eq!(s.ability_state(AbilityId::Decoy), AbilityState::Ready);
+        s.step(Input::Activate(AbilityId::Decoy)); // decoy (7,4), active turn 1
+        assert_eq!(s.decoy(), Some(Cell::new(7, 4)));
+        for _ in 0..18 {
+            assert!(s.step(Input::Wait).is_empty());
+        }
+        let events = s.step(Input::Wait); // the 20th active turn ends here
+        assert!(events.contains(&Event::AbilityExpired {
+            ability: AbilityId::Decoy
+        }));
+        assert_eq!(s.decoy(), None, "expiry takes the fake with it");
     }
 
     /// The §8.2 golden test, through the whole loop (§8.3 Camouflage): a

@@ -361,6 +361,19 @@ impl Guard {
         }
     }
 
+    /// React to seeing a decoy (§8.3, #105): Investigate toward it — the §7.4
+    /// "decoy seen" entry, lower severity than a chase — with a fresh lead. The
+    /// caller enforces §8.3's precedence and never calls this for a guard that
+    /// detected the player this turn: a guard that can see *you* ignores the
+    /// fake entirely. Decoys work on guards that have lost you, not on guards
+    /// that have you.
+    pub(crate) fn investigate_decoy(&mut self, at: Cell) {
+        self.state = GuardState::Investigating;
+        self.destination = Some(at);
+        self.alert = ALERT_DURATION;
+        self.end_search_and_watch();
+    }
+
     /// React to finding a body (§7.2) — the loudest event in the game. The lead
     /// it grants is **harder than a sighting** ([`BODY_ALERT_DURATION`] >
     /// [`ALERT_DURATION`]), and — unless the guard is busy with the live player,
