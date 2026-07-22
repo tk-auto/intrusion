@@ -50,6 +50,11 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::ExitRefused => ("the exit refuses — intel is still out".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
+        // Your own tools (§8), routine self-narration like a bump or a crouch —
+        // low priority, Owned band (from `Event::category`).
+        Event::AbilityActivated { ability } => (format!("{} active", ability.name()), 0),
+        Event::AbilityDeactivated { ability } => (format!("{} off", ability.name()), 0),
+        Event::AbilityExpired { ability } => (format!("{} fades", ability.name()), 0),
     };
     Some(Message {
         text,

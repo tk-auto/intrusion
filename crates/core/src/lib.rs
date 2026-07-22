@@ -20,8 +20,11 @@
 //! is real: the symmetric-shadowcast field of view (§6), the player's half-disc and
 //! the guards' wedges, recomputed every turn. Guards detect on **vision alone** (§9
 //! **[SETTLED]** — there is no sound, no hearing): a guard reacts only to what it
-//! sees. The remaining game systems (guard AI, abilities) land in their own tickets,
-//! in the phase hooks the loop already calls.
+//! sees. On top of the loop sits the **ability economy** (§8.1/§8.2): a data-driven
+//! ability catalog and the time economy — turn cost, duration, cooldown — stepped
+//! at the end-of-turn hook the loop reserves, with the `duration + cooldown` lockout
+//! emergent. The individual ability *effects*, guard AI, and the rest land in their
+//! own tickets, in the phase hooks the loop already calls.
 
 #![forbid(unsafe_code)]
 
@@ -44,7 +47,9 @@ mod status;
 mod test_support;
 mod vision;
 
-pub use ability::{sample_panel, AbilityState, AbilityStatus};
+pub use ability::{
+    sample_panel, Ability, AbilityId, AbilityState, AbilityStatus, Behaviour, Effect, TargetingMode,
+};
 pub use category::Category;
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;
