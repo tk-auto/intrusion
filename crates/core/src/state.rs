@@ -132,6 +132,11 @@ pub enum Event {
     /// (§8.3). Its ability drops into the full cooldown, as an early toggle-off
     /// would. Expiry by duration is [`Event::AbilityExpired`], not this.
     DecoyDied { at: Cell },
+    /// Dephase ran out while the player stood somewhere that cannot admit a
+    /// solid body — inside a wall, a door, furniture, or another actor — and
+    /// rematerializing there is lethal (§8.3): the run ends. A distinct loss
+    /// from [`Event::Captured`], so the game-over reason stays truthful.
+    Entombed { at: Cell },
     /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
     AbilityActivated { ability: AbilityId },
     /// The player toggled an ability off early (§4.4) — free; its cooldown still
@@ -175,8 +180,8 @@ impl Event {
             // Goals and rewards — including the exit talking about the goal it
             // still refuses (§4.5) and the win itself.
             Event::IntelTaken { .. } | Event::ExitRefused | Event::Won => Category::Interest,
-            // A threat that has you, literally (§4.5).
-            Event::Captured { .. } => Category::Danger,
+            // A threat that has you, literally (§4.5) — or the wall does (§8.3).
+            Event::Captured { .. } | Event::Entombed { .. } => Category::Danger,
         }
     }
 }
@@ -757,6 +762,7 @@ impl State {
             // *spent* turn reaches this, so a free action never advances the clock.
             let mut expired = Vec::new();
             self.abilities.tick(&mut expired);
+            let phase_ended = expired.iter().any(|&id| declares(id, Effect::Phase));
             for &ability in &expired {
                 // The decoy's lifetime is its ability's active window (§8.3):
                 // expiry takes the fake with it.
@@ -769,6 +775,15 @@ impl State {
                     .into_iter()
                     .map(|ability| Event::AbilityExpired { ability }),
             );
+            // Dephase expiring somewhere a solid body cannot stand is lethal
+            // (§8.3 — the cost that keeps phasing from being free). No rescue,
+            // no auto-eject to a safe cell: that would rebuild the old
+            // consequence-free version. Skipped if the run already ended this
+            // turn (a capture is its own, truthful loss).
+            if phase_ended && self.outcome == Outcome::Playing && !self.can_rematerialize() {
+                self.outcome = Outcome::Lost;
+                events.push(Event::Entombed { at: self.player });
+            }
         }
 
         // Every action replaces the near line's source, free bumps included —
@@ -841,8 +856,14 @@ impl State {
             // Toggling an ability off is free (§4.4): it never spends the turn, so —
             // like every free action — it leaves posture and the waited flag alone.
             // Toggling the decoy's ability off takes the decoy with it: its lifetime
-            // is the active window (§8.3).
+            // is the active window (§8.3). Toggling Dephase off somewhere a solid
+            // body cannot stand is **refused** (a free no-op): there is nowhere to
+            // rematerialize — the lethal squeeze is the duration's alone (§8.3),
+            // never a mis-pressed key (§2.2: every death traceable to a decision).
             Input::Deactivate(id) => {
+                if declares(id, Effect::Phase) && !self.can_rematerialize() {
+                    return false;
+                }
                 if self.abilities.deactivate(id) {
                     if declares(id, Effect::SpawnDecoy) {
                         self.decoy = None;
@@ -1009,6 +1030,17 @@ impl State {
         }
     }
 
+    /// Whether the player's current cell can admit them as a **solid** body
+    /// again (§8.3): terrain that accepts an actor's fill, and no guard or body
+    /// on it. This is Dephase's rematerialization question — `false` at expiry
+    /// is lethal ([`Event::Entombed`]), and `false` refuses an early toggle-off
+    /// (there is nowhere to solidify).
+    fn can_rematerialize(&self) -> bool {
+        self.layout.facility().can_enter(self.player, ACTOR_FILL)
+            && self.guard_at(self.player).is_none()
+            && self.body_at(self.player).is_none()
+    }
+
     /// Where a decoy activated right now would spawn (§8.3): the faced cell —
     /// [`TargetingMode::Direction`](crate::TargetingMode) resolved against §5's
     /// facing — provided it could hold an intruder: terrain that admits an
@@ -1108,6 +1140,17 @@ impl State {
     /// neither can silently drift (the §7.2 takedown slots in exactly this way). This
     /// classifies only; the mutation lives in `resolve_step`, so it can stay `&self`.
     fn bump_kind(&self, target: Cell) -> BumpKind {
+        // Dephase (§8.3, [`Effect::Phase`]): while phased there *is* no bump —
+        // every in-bounds cell is a plain move, walls, doors, furniture, guards
+        // and bodies included (the player's fill is effectively 0, §4.3). This
+        // one short-circuit is the whole "cannot bump" rule: no door opens, no
+        // intel is taken, the exit does not win, no takedown, no grab, no climb
+        // — you pass straight through everything you came for. And because the
+        // usable line reads this same ladder, it truthfully offers nothing
+        // while phased (§11.4).
+        if self.abilities.effect_active(Effect::Phase) && self.layout.facility().in_bounds(target) {
+            return BumpKind::Move;
+        }
         if let Some(i) = self.guard_at(target) {
             return BumpKind::Guard {
                 aware: self.guards[i].detected_player(),
@@ -1730,6 +1773,234 @@ mod tests {
             assert_ne!(s.guards()[0].pos(), body, "a body's cell admits no guard");
             assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
         }
+    }
+
+    /// §8.3 Dephase: while phased, solids are plain moves — the player walks
+    /// *into* a wall and *onto* a closed door panel without opening it — and
+    /// stepping back onto open floor before the duration ends is safe: the
+    /// expiry on floor is just the ability fading.
+    #[test]
+    fn dephased_movement_passes_through_solids_without_bumping() {
+        // Through a wall (duration 3: activate, in, out — expiring on floor).
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Dephase));
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(5, 4)
+            }],
+            "a wall is a plain move while phased — no bump",
+        );
+        assert_eq!(s.player(), Cell::new(5, 4), "standing inside the wall");
+        let events = s.step(Input::Step(Direction::East)); // out, onto floor
+        assert_eq!(s.player(), Cell::new(6, 4));
+        assert!(
+            events.contains(&Event::AbilityExpired {
+                ability: AbilityId::Dephase
+            }),
+            "the duration ends here",
+        );
+        assert_eq!(
+            s.outcome(),
+            Outcome::Playing,
+            "expiry on open floor is safe"
+        );
+
+        // Onto a closed door panel: the door is not opened by a dephased step.
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::DoorPanelClosed);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Dephase));
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(5, 4)
+            }],
+            "no DoorOpened: you pass through, not into, the door",
+        );
+        assert_eq!(
+            s.layout().facility().terrain(Cell::new(5, 4)),
+            Some(Terrain::DoorPanelClosed),
+            "the door stays closed",
+        );
+    }
+
+    /// §8.3/§4.3: a guard is walk-through too — and the bump suppression means
+    /// no takedown fires on the way through: you pass straight through
+    /// everything, targets included.
+    #[test]
+    fn a_dephased_player_passes_through_a_guard_without_a_takedown() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(4, 4),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Dephase));
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(5, 4)
+            }],
+            "onto the guard's own cell: no takedown, no bump",
+        );
+        assert_eq!(s.guards().len(), 1, "the guard stands untouched");
+        s.step(Input::Step(Direction::East)); // out the far side, expiry on floor
+        assert_eq!(s.player(), Cell::new(6, 4));
+        assert_eq!(s.outcome(), Outcome::Playing);
+    }
+
+    /// §8.3: the cost that keeps Dephase from being free — the duration running
+    /// out while the player stands inside a wall is **lethal**, a distinct loss
+    /// ([`Event::Entombed`], not the capture), with no auto-eject to safety.
+    #[test]
+    fn dephase_expiring_inside_a_wall_is_lethal() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Dephase)); // active turn 1
+        s.step(Input::Step(Direction::East)); // turn 2: into the wall
+        let events = s.step(Input::Wait); // turn 3: the duration ends in there
+        assert_eq!(
+            events,
+            vec![
+                Event::AbilityExpired {
+                    ability: AbilityId::Dephase
+                },
+                Event::Entombed {
+                    at: Cell::new(5, 4)
+                },
+            ]
+        );
+        assert_eq!(
+            s.outcome(),
+            Outcome::Lost,
+            "rematerializing in a wall kills"
+        );
+        assert!(s.step(Input::Wait).is_empty(), "the run is over");
+    }
+
+    /// §8.3/§2.2: toggling Dephase off while inside a solid is **refused** — a
+    /// free no-op, because there is nowhere to rematerialize. The lethal
+    /// squeeze belongs to the duration alone, never to a mis-pressed key.
+    #[test]
+    fn toggling_dephase_off_inside_a_wall_is_refused() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Dephase));
+        s.step(Input::Step(Direction::East)); // inside the wall
+        let turn = s.turn();
+        let events = s.step(Input::Deactivate(AbilityId::Dephase));
+        assert!(events.is_empty(), "nowhere to solidify: refused");
+        assert_eq!(s.turn(), turn, "and free, like every mis-input");
+        assert!(
+            matches!(
+                s.ability_state(AbilityId::Dephase),
+                AbilityState::Active { .. }
+            ),
+            "still phased",
+        );
+        s.step(Input::Step(Direction::East)); // out — the expiry lands on floor
+        assert_eq!(s.outcome(), Outcome::Playing);
+    }
+
+    /// §8.3: dephased on the exit does **not** win — you cannot bump, so you
+    /// pass straight through the thing you came for. The tempting edge case,
+    /// pinned.
+    #[test]
+    fn a_dephased_player_cannot_win_by_standing_on_the_exit() {
+        // No objectives: the exit is open — an ordinary bump here would win.
+        let mut s = State::new(
+            open_room(10, 10),
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(5, 4),
+        );
+        s.step(Input::Activate(AbilityId::Dephase));
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(
+            events,
+            vec![Event::Moved {
+                to: Cell::new(5, 4)
+            }],
+            "onto the exit, not out by it: no Won while phased",
+        );
+        assert_eq!(s.outcome(), Outcome::Playing);
+        s.step(Input::Step(Direction::East)); // step off before the squeeze
+        assert_eq!(s.outcome(), Outcome::Playing, "expiry lands on open floor");
+    }
+
+    /// §8.3: Dephase does not conceal — a guard's cone still detects the
+    /// phased player — and §4.5 contact still captures: a guard walking into
+    /// the phased player ends the run with the ordinary capture, never the
+    /// entombment.
+    #[test]
+    fn dephase_conceals_nothing_and_contact_still_captures() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 6),
+            Direction::North,
+            vec![Guard::patrolling_to(Cell::new(5, 2), Cell::new(5, 9))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Activate(AbilityId::Dephase));
+        assert!(
+            s.guards()[0].detected_player(),
+            "a dephased player in the cone is still seen — no concealment",
+        );
+
+        for _ in 0..4 {
+            let events = s.step(Input::Wait);
+            if s.outcome() == Outcome::Lost {
+                assert!(
+                    events.contains(&Event::Captured {
+                        by: Cell::new(5, 6)
+                    }),
+                    "the capture, not the entombment, is the loss here",
+                );
+                return;
+            }
+        }
+        panic!("the guard should have walked into the phased player");
     }
 
     /// §8.3/§8.4: the decoy spawns in the **faced** cell (Direction targeting),
