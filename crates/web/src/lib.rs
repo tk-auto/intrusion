@@ -12,9 +12,9 @@
 //! the core would stop being the single source of truth for what the game looks like.
 //!
 //! It runs the turn loop (§4.2): boot generates a facility, drops the player in, and
-//! draws it; arrow keys (or WASD / vi keys) drive [`State::step`], as do screen taps
-//! (§11.6's touch slice — edge zones step, the centre waits, see [`tap_input`]), and
-//! every input redraws. The **whole level is always visible with no scrolling**, on desktop and
+//! draws it; arrow keys (or WASD / vi keys) drive [`State::step`], as do touch
+//! gestures (§11.6's touch slice — swipe to walk and keep walking, press to wait,
+//! see [`gesture_input`] and [`GesturePump`]), and every input redraws. The **whole level is always visible with no scrolling**, on desktop and
 //! mobile alike: the canvas is scaled to fit the viewport (aspect preserved) and its
 //! backing store is sized in device pixels so glyphs stay crisp; a resize/orientation
 //! change recomputes and redraws. The grid arrives already fogged (§11.5a) and
@@ -211,7 +211,7 @@ pub fn start() -> Result<(), JsValue> {
     }));
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
     install_input(&document, &game)?;
-    install_tap(&document, &game)?;
+    install_gestures(&document, &game)?;
     install_resize(&game)?;
     Ok(())
 }
@@ -265,9 +265,16 @@ impl Game {
         let Some(input) = input_for_key(key) else {
             return false;
         };
+        self.step_and_draw(input);
+        true
+    }
+
+    /// Feed one [`Input`] to the loop and repaint — the single seam every input
+    /// source (a key, a gesture tick) drives, one ordinary input at a time against
+    /// the current frame's state (§2.2 fairness: never a batched multi-step).
+    fn step_and_draw(&mut self, input: Input) {
         self.state.step(input);
         self.draw();
-        true
     }
 
     /// Apply a shell-level [`UiCommand`] (§11.4) — a view toggle, never a game
@@ -278,25 +285,6 @@ impl Game {
                 self.ui.ability_panel_open = !self.ui.ability_panel_open;
             }
         }
-    }
-
-    /// Feed one tap/click at viewport point `(x, y)` to the loop: map it through
-    /// [`tap_input`] and, if the viewport was sane, step and redraw (§11.6's touch
-    /// slice — the mobile counterpart of [`Self::handle_key`]).
-    fn handle_tap(&mut self, x: f64, y: f64, w: f64, h: f64) -> bool {
-        // A tap on the deploy button (§11.4) toggles the ability panel — checked
-        // first, so the button never doubles as a movement tap.
-        if self.hit_deploy_button(x, y) {
-            self.apply_ui_command(UiCommand::ToggleAbilityPanel);
-            self.draw();
-            return true;
-        }
-        let Some(input) = tap_input(x, y, w, h) else {
-            return false;
-        };
-        self.state.step(input);
-        self.draw();
-        true
     }
 
     /// Whether the viewport point `(client_x, client_y)` lands on the deploy button
@@ -373,25 +361,37 @@ impl Game {
     }
 }
 
-/// Map a tap (or click) at viewport point `(x, y)` in a `w × h` viewport to an
-/// [`Input`] — the touch half of §11.6, pure so the zone rule is testable natively.
+/// How far a drag must travel from its press point — CSS pixels, on either axis —
+/// before it reads as a **swipe** rather than a press held in place. Roughly half
+/// a fingertip: short enough that a flick registers, long enough that the jitter
+/// of a resting finger never walks the player.
+const SWIPE_THRESHOLD_PX: f64 = 24.0;
+
+/// The pause between a gesture's first input and its first repeat — the touch
+/// counterpart of the keyboard's auto-repeat delay (§11.6's reference cadence).
+/// Long enough that one deliberate swipe or press stays a single input.
+const REPEAT_DELAY_MS: i32 = 300;
+
+/// The cadence of repeats while the finger stays down — one ordinary [`Input`]
+/// per tick through the same seam as a held arrow key, never a batch (§4.1/§4.3).
+const REPEAT_INTERVAL_MS: i32 = 120;
+
+/// Map a drag displacement `(dx, dy)` — CSS pixels from where the finger went
+/// down to where it is now — to the [`Input`] a gesture fires: the touch half of
+/// §11.6, pure so the gesture rule is testable natively.
 ///
-/// The screen is zoned: the **middle third** on both axes is Wait, and everything
-/// outside it steps toward the tap's **dominant axis** — left third steps west,
-/// right east, top north, bottom south. Dominant-axis (in viewport-normalised
-/// units) rather than a fixed 3×3 grid so corner taps still act: movement has no
-/// diagonals (§4.1 [SETTLED]), and an exact corner tie goes horizontal. Zones are
-/// screen-relative, not canvas-relative — a tap in the letterbox margin counts.
-/// A degenerate viewport maps to nothing.
-fn tap_input(x: f64, y: f64, w: f64, h: f64) -> Option<Input> {
-    if !(w > 0.0 && h > 0.0) {
+/// Inside [`SWIPE_THRESHOLD_PX`] on both axes the press is a **hold**: Wait.
+/// Past it, the drag is a **swipe**: a `Step` along its dominant axis — movement
+/// has no diagonals (§4.1 [SETTLED]) — with an exact tie going horizontal. The
+/// pump re-reads the live displacement on every repeat tick, so dragging to a
+/// new heading re-aims the walk mid-hold and pulling back inside the threshold
+/// turns it into waiting; nothing is cached but the gesture's origin. A
+/// non-finite displacement maps to nothing rather than a garbage turn.
+fn gesture_input(dx: f64, dy: f64) -> Option<Input> {
+    if !(dx.is_finite() && dy.is_finite()) {
         return None;
     }
-    // Displacement from the screen centre, normalised to [-0.5, 0.5] per axis.
-    let dx = x / w - 0.5;
-    let dy = y / h - 0.5;
-    const WAIT_HALF: f64 = 1.0 / 6.0; // middle third of each axis
-    if dx.abs() < WAIT_HALF && dy.abs() < WAIT_HALF {
+    if dx.abs() < SWIPE_THRESHOLD_PX && dy.abs() < SWIPE_THRESHOLD_PX {
         return Some(Input::Wait);
     }
     let direction = if dx.abs() >= dy.abs() {
@@ -406,6 +406,213 @@ fn tap_input(x: f64, y: f64, w: f64, h: f64) -> Option<Input> {
         Direction::South
     };
     Some(Input::Step(direction))
+}
+
+/// The browser timer currently driving a gesture's repeats: the one-shot initial
+/// delay (`setTimeout`) or the steady cadence (`setInterval`). Whichever is
+/// armed, release clears it by id — that clear is what guarantees no step or
+/// wait ever fires after the finger lifts (§2.2/§4.5 fairness).
+#[derive(Clone, Copy)]
+enum RepeatTimer {
+    Delay(i32),
+    Interval(i32),
+}
+
+/// Clear an armed [`RepeatTimer`] with the browser. Clearing an id that already
+/// fired is a harmless no-op, so teardown never has to know the timer's fate.
+fn clear_timer(timer: RepeatTimer) {
+    let win = web_sys::window().expect("a window");
+    match timer {
+        RepeatTimer::Delay(id) => win.clear_timeout_with_handle(id),
+        RepeatTimer::Interval(id) => win.clear_interval_with_handle(id),
+    }
+}
+
+/// One finger's live gesture: where it pressed, where it is now, and the timer
+/// keeping it repeating. Exists only while that pointer is down — release (or a
+/// browser cancel) destroys it and its timer together.
+struct Gesture {
+    /// The pointer that owns the gesture; other fingers are ignored while it lives.
+    pointer_id: i32,
+    /// Where the pointer went down, in viewport CSS pixels.
+    origin: (f64, f64),
+    /// Live displacement from `origin`, updated on every pointermove. Each repeat
+    /// tick re-reads it through [`gesture_input`], so the heading is never stale.
+    delta: (f64, f64),
+    /// Whether the gesture has produced its first input yet — the threshold-crossing
+    /// step of a swipe, or the first Wait of a matured hold. A release before either
+    /// makes the gesture a tap, resolved at the lift.
+    fired: bool,
+    /// The armed repeat timer, cleared the moment the gesture ends.
+    timer: RepeatTimer,
+}
+
+/// The gesture pump — §11.6's touch half, replacing the old edge-zone tap model.
+///
+/// A **swipe** steps along the drag's dominant axis the instant it crosses
+/// [`SWIPE_THRESHOLD_PX`], and *keeps* stepping while the finger stays down. A
+/// **press held in place** matures into Wait after [`REPEAT_DELAY_MS`], and keeps
+/// waiting. A **quick tap** (released before either) is a single Wait, resolved
+/// at the lift — the gesture's own input, not a repeat. After a gesture's first
+/// input, the next comes [`REPEAT_DELAY_MS`] later for a swipe (a matured hold is
+/// already the delay timer firing), then every [`REPEAT_INTERVAL_MS`] — the held
+/// arrow key's cadence (§11.6). Every tick re-reads the live displacement, so
+/// dragging to a new heading re-aims the walk without lifting.
+///
+/// Fairness (§2.2/§4.5): each tick feeds exactly one ordinary [`Input`] through
+/// [`Game::step_and_draw`] against the current frame — never queued ahead — and
+/// release/cancel clears the timer before anything else can fire, so no step or
+/// wait ever lands after the finger lifts. A cancelled gesture (the browser took
+/// the pointer, or it left the page) emits nothing at all, not even the tap's
+/// Wait — a turn must never burn on a gesture the player didn't finish.
+struct GesturePump {
+    game: Rc<RefCell<Game>>,
+    /// The live gesture, if a finger is down.
+    active: RefCell<Option<Gesture>>,
+    /// The repeat tick — **one closure for the page's lifetime**, registered with
+    /// `setTimeout`/`setInterval` afresh for each gesture. Storing it here (an Rc
+    /// cycle, deliberately never freed) mirrors the `Closure::forget` lifetime
+    /// pattern of the listeners below without leaking a closure per gesture.
+    tick: RefCell<Option<Closure<dyn FnMut()>>>,
+}
+
+impl GesturePump {
+    /// Arm the repeat tick with the browser — the one-shot initial delay or the
+    /// steady interval — and hand back the id for the gesture to own.
+    fn arm(&self, ms: i32, as_interval: bool) -> i32 {
+        let win = web_sys::window().expect("a window");
+        let tick = self.tick.borrow();
+        let f = tick
+            .as_ref()
+            .expect("the tick closure is installed at boot")
+            .as_ref()
+            .unchecked_ref();
+        if as_interval {
+            win.set_interval_with_callback_and_timeout_and_arguments_0(f, ms)
+        } else {
+            win.set_timeout_with_callback_and_timeout_and_arguments_0(f, ms)
+        }
+        .expect("the browser arms a timer")
+    }
+
+    /// A pointer pressed: the deploy button toggles the panel (§11.4 — the button
+    /// never doubles as a gesture), anything else starts the gesture. Only the
+    /// primary button gestures, and a second finger neither starts a second
+    /// gesture nor re-aims the first.
+    fn on_down(&self, e: &PointerEvent) {
+        if e.button() != 0 {
+            return; // secondary mouse buttons keep their browser meaning
+        }
+        let (x, y) = (e.client_x() as f64, e.client_y() as f64);
+        {
+            let mut game = self.game.borrow_mut();
+            if game.hit_deploy_button(x, y) {
+                game.apply_ui_command(UiCommand::ToggleAbilityPanel);
+                game.draw();
+                e.prevent_default();
+                return;
+            }
+        }
+        let mut active = self.active.borrow_mut();
+        if active.is_none() {
+            *active = Some(Gesture {
+                pointer_id: e.pointer_id(),
+                origin: (x, y),
+                delta: (0.0, 0.0),
+                fired: false,
+                timer: RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false)),
+            });
+        }
+        // Consumed either way (§11.6): gestures are game input, and the browser's
+        // follow-ups (double-tap zoom, synthetic clicks) must not fire off them.
+        e.prevent_default();
+    }
+
+    /// The gesture's pointer moved: track the live displacement, and the instant
+    /// the drag first crosses the swipe threshold fire its step — the swipe
+    /// declaring itself — restarting the repeat cadence from that input exactly
+    /// as a fresh keydown would.
+    fn on_move(&self, e: &PointerEvent) {
+        let first_step = {
+            let mut active = self.active.borrow_mut();
+            let Some(g) = active.as_mut().filter(|g| g.pointer_id == e.pointer_id()) else {
+                return;
+            };
+            g.delta = (
+                e.client_x() as f64 - g.origin.0,
+                e.client_y() as f64 - g.origin.1,
+            );
+            let input = gesture_input(g.delta.0, g.delta.1);
+            if !g.fired && matches!(input, Some(Input::Step(_))) {
+                g.fired = true;
+                clear_timer(g.timer);
+                g.timer = RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false));
+                input
+            } else {
+                None
+            }
+        };
+        if let Some(input) = first_step {
+            self.game.borrow_mut().step_and_draw(input);
+        }
+    }
+
+    /// The armed timer fired: feed one input re-read from the live displacement —
+    /// a hold's Wait, a swipe's step, whichever the finger says *now* — and, if
+    /// this was the one-shot delay, settle into the steady cadence.
+    fn on_tick(&self) {
+        let input = {
+            let mut active = self.active.borrow_mut();
+            let Some(g) = active.as_mut() else {
+                return; // released while the tick was in flight — nothing may fire
+            };
+            g.fired = true;
+            if let RepeatTimer::Delay(_) = g.timer {
+                g.timer = RepeatTimer::Interval(self.arm(REPEAT_INTERVAL_MS, true));
+            }
+            gesture_input(g.delta.0, g.delta.1)
+        };
+        if let Some(input) = input {
+            self.game.borrow_mut().step_and_draw(input);
+        }
+    }
+
+    /// The gesture's pointer lifted: stop every repeat immediately, and if the
+    /// gesture never fired, resolve it as the tap it was — at the lift point, so
+    /// a press in place is one Wait and a flick too fast for a pointermove still
+    /// steps. That input is the gesture's own, not a repeat leaking past the lift.
+    fn on_up(&self, e: &PointerEvent) {
+        let tap = {
+            let mut active = self.active.borrow_mut();
+            if !matches!(active.as_ref(), Some(g) if g.pointer_id == e.pointer_id()) {
+                return;
+            }
+            let g = active.take().expect("matched just above");
+            clear_timer(g.timer);
+            if g.fired {
+                None
+            } else {
+                gesture_input(
+                    e.client_x() as f64 - g.origin.0,
+                    e.client_y() as f64 - g.origin.1,
+                )
+            }
+        };
+        e.prevent_default();
+        if let Some(input) = tap {
+            self.game.borrow_mut().step_and_draw(input);
+        }
+    }
+
+    /// The browser took the gesture away (`pointercancel`) or the pointer left the
+    /// page (`pointerleave`): tear down without emitting anything — not even the
+    /// tap's Wait. A turn must never burn on a gesture the player didn't end.
+    fn on_abort(&self, e: &PointerEvent) {
+        let mut active = self.active.borrow_mut();
+        if matches!(active.as_ref(), Some(g) if g.pointer_id == e.pointer_id()) {
+            clear_timer(active.take().expect("matched just above").timer);
+        }
+    }
 }
 
 /// Read a viewport dimension (`inner_width` / `inner_height`) as an `f64`, if the
@@ -445,31 +652,35 @@ fn install_input(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), Js
     Ok(())
 }
 
-/// Install the tap pump: each pointerdown (touch tap or mouse click, anywhere on
-/// the page — the letterbox margins count too) drives one [`Game::handle_tap`]
-/// against the current viewport size, so the zones track a rotation the same way
-/// [`Game::fit_and_draw`] does. `preventDefault` on the consumed tap stops the
-/// browser's gesture follow-ups (double-tap zoom, synthetic mouse events);
-/// `touch-action: none` on the page covers the rest (see `web/index.html`).
-fn install_tap(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
-    let game = game.clone();
-    let cb = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
-        let win = web_sys::window().expect("a window");
-        let (Some(w), Some(h)) = (
-            viewport(&win, Window::inner_width),
-            viewport(&win, Window::inner_height),
-        ) else {
-            return;
-        };
-        if game
-            .borrow_mut()
-            .handle_tap(e.client_x() as f64, e.client_y() as f64, w, h)
-        {
-            e.prevent_default();
-        }
+/// Install the gesture pump (§11.6's touch half): pointer listeners anywhere on
+/// the page — the letterbox margins count too — feed one [`GesturePump`], which
+/// owns the repeat timer and the live gesture. `preventDefault` on the consumed
+/// press stops the browser's gesture follow-ups (double-tap zoom, synthetic mouse
+/// events); `touch-action: none` on the page covers the rest (see `web/index.html`).
+/// Each listener closure is `forget`ed for the page's lifetime, like the key pump.
+fn install_gestures(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
+    let pump = Rc::new(GesturePump {
+        game: game.clone(),
+        active: RefCell::new(None),
+        tick: RefCell::new(None),
     });
-    document.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
-    cb.forget();
+    let p = pump.clone();
+    *pump.tick.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || p.on_tick()));
+
+    type Handler = fn(&GesturePump, &PointerEvent);
+    let listeners: [(&str, Handler); 5] = [
+        ("pointerdown", GesturePump::on_down),
+        ("pointermove", GesturePump::on_move),
+        ("pointerup", GesturePump::on_up),
+        ("pointercancel", GesturePump::on_abort),
+        ("pointerleave", GesturePump::on_abort),
+    ];
+    for (event, handler) in listeners {
+        let p = pump.clone();
+        let cb = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| handler(&p, &e));
+        document.add_event_listener_with_callback(event, cb.as_ref().unchecked_ref())?;
+        cb.forget();
+    }
     Ok(())
 }
 
@@ -577,76 +788,80 @@ mod tests {
         dr * dr + dg * dg + db * db
     }
 
-    /// The four edge zones step their direction and the exact screen centre waits,
-    /// on both a square and a phone-portrait viewport (zones are viewport-normalised,
-    /// so aspect must not matter).
+    /// §11.6's hold rule: a press that never crosses the swipe threshold is Wait —
+    /// from the zero-displacement press up to the last sub-threshold pixel, on
+    /// both axes and in every quadrant. The resting-finger jitter of a hold must
+    /// never walk the player.
     #[test]
-    fn tap_zones_map_edges_to_steps_and_centre_to_wait() {
-        for &(w, h) in &[(600.0, 600.0), (390.0, 844.0)] {
-            let mid = |n: f64| n / 2.0;
-            let cases = [
-                (1.0, mid(h), Input::Step(Direction::West)),
-                (w - 1.0, mid(h), Input::Step(Direction::East)),
-                (mid(w), 1.0, Input::Step(Direction::North)),
-                (mid(w), h - 1.0, Input::Step(Direction::South)),
-                (mid(w), mid(h), Input::Wait),
-            ];
-            for (x, y, expected) in cases {
-                assert_eq!(
-                    tap_input(x, y, w, h),
-                    Some(expected),
-                    "tap at ({x}, {y}) in {w}x{h}"
-                );
-            }
+    fn a_press_inside_the_threshold_holds_to_wait() {
+        let just_under = SWIPE_THRESHOLD_PX - 0.5;
+        for (dx, dy) in [
+            (0.0, 0.0),
+            (just_under, 0.0),
+            (0.0, -just_under),
+            (-just_under, just_under),
+            (just_under, just_under),
+        ] {
+            assert_eq!(
+                gesture_input(dx, dy),
+                Some(Input::Wait),
+                "drag of ({dx}, {dy})"
+            );
         }
     }
 
-    /// The Wait box is the middle third of each axis: just inside its corner still
-    /// waits, just outside steps.
+    /// A swipe resolves to the nearest cardinal: the dominant axis of the drag,
+    /// in all four directions, including well off-axis drags — movement has no
+    /// diagonals (§4.1).
     #[test]
-    fn tap_wait_box_is_the_middle_third() {
-        let (w, h) = (900.0, 600.0);
-        // The box spans [w/3, 2w/3] × [h/3, 2h/3]; probe around its top-left corner.
-        assert_eq!(tap_input(301.0, 201.0, w, h), Some(Input::Wait));
-        assert_eq!(
-            tap_input(299.0, 201.0, w, h),
-            Some(Input::Step(Direction::West))
-        );
-        assert_eq!(
-            tap_input(301.0, 199.0, w, h),
-            Some(Input::Step(Direction::North))
-        );
+    fn a_swipe_steps_its_dominant_axis() {
+        for ((dx, dy), direction) in [
+            ((-40.0, 10.0), Direction::West),
+            ((40.0, -10.0), Direction::East),
+            ((10.0, -40.0), Direction::North),
+            ((-10.0, 40.0), Direction::South),
+        ] {
+            assert_eq!(
+                gesture_input(dx, dy),
+                Some(Input::Step(direction)),
+                "drag of ({dx}, {dy})"
+            );
+        }
     }
 
-    /// Corner taps resolve by dominant axis — there are no diagonals (§4.1) — and
-    /// an exact corner tie goes horizontal.
+    /// The threshold itself swipes — reaching it is crossing it — and an exact
+    /// diagonal tie goes horizontal, the old tap model's convention kept.
     #[test]
-    fn tap_corners_resolve_by_dominant_axis() {
-        let (w, h) = (600.0, 600.0);
-        // Exact ties at the corners go horizontal.
+    fn the_threshold_boundary_swipes_and_ties_go_horizontal() {
+        let t = SWIPE_THRESHOLD_PX;
         assert_eq!(
-            tap_input(0.0, 0.0, w, h),
-            Some(Input::Step(Direction::West))
+            gesture_input(t, 0.0),
+            Some(Input::Step(Direction::East)),
+            "the boundary is a swipe"
         );
-        assert_eq!(tap_input(w, h, w, h), Some(Input::Step(Direction::East)));
-        // Off the diagonal, the larger displacement wins.
-        assert_eq!(
-            tap_input(100.0, 40.0, w, h),
-            Some(Input::Step(Direction::North))
-        );
-        assert_eq!(
-            tap_input(40.0, 100.0, w, h),
-            Some(Input::Step(Direction::West))
-        );
+        assert_eq!(gesture_input(t, t), Some(Input::Step(Direction::East)));
+        assert_eq!(gesture_input(-t, -t), Some(Input::Step(Direction::West)));
     }
 
-    /// A degenerate viewport (zero, negative, or NaN dimensions) maps to nothing
-    /// rather than dividing into garbage.
+    /// The live re-evaluation contract: the function is pure in the displacement,
+    /// so a repeat tick re-reading the drag changes heading with the finger — a
+    /// swipe dragged to a new quadrant re-aims, and one pulled back inside the
+    /// threshold becomes a hold. No direction is ever cached.
     #[test]
-    fn tap_in_degenerate_viewport_is_ignored() {
-        assert_eq!(tap_input(10.0, 10.0, 0.0, 600.0), None);
-        assert_eq!(tap_input(10.0, 10.0, 600.0, -1.0), None);
-        assert_eq!(tap_input(10.0, 10.0, f64::NAN, 600.0), None);
+    fn a_dragging_finger_re_aims_the_repeat_live() {
+        assert_eq!(gesture_input(40.0, 0.0), Some(Input::Step(Direction::East)));
+        assert_eq!(
+            gesture_input(6.0, -35.0),
+            Some(Input::Step(Direction::North))
+        );
+        assert_eq!(gesture_input(3.0, -3.0), Some(Input::Wait));
+    }
+
+    /// A non-finite displacement maps to nothing rather than a garbage turn.
+    #[test]
+    fn a_non_finite_drag_is_ignored() {
+        assert_eq!(gesture_input(f64::NAN, 0.0), None);
+        assert_eq!(gesture_input(0.0, f64::NEG_INFINITY), None);
     }
 
     /// Every category must map to a **visibly distinct** colour. The regression this
