@@ -1,0 +1,73 @@
+# intrusion-sim — the headless harness (design §13.2)
+
+Runs *N* seeded games natively — no browser, no canvas — with a player policy
+behind a trait, and emits machine-readable metrics. A run boots exactly as the
+web build does (`Rng::new(seed)` → `generate_level(V1)` → `State::new`), so a
+seed here is the same level that seed gives a player, and every metric is
+counted from the core's `Event` stream (§12.1), never scraped from state or
+the rendered grid.
+
+The sim reports **numbers, never verdicts** (§13.4): it is a smoke detector,
+not a judge.
+
+## Running
+
+```
+cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--script MOVES]
+```
+
+| Flag | Meaning | Default |
+|---|---|---|
+| `--runs N` | how many runs; seeds are `S, S+1, … S+N-1` | 100 |
+| `--seed S` | the first seed | 0 |
+| `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
+| `--script MOVES` | inputs replayed from the start of every run: `N`/`E`/`S`/`W` step, `.` waits; after the script the player waits out the run | empty |
+
+The cap counts **issued inputs**, not spent turns: free actions (a bump into a
+wall, an idle deactivate) never advance the turn counter (§4.4), so a
+turn-based cap could hang on a stuck policy; an input cap terminates every run.
+
+The empty default script is the idle baseline — how often patrols stumble onto
+a player who never moves. A `(seed, script)` pair is a replay (§12.4): with
+`--runs 1` it reproduces one run exactly, which is also the bug-report format.
+
+## Output schema
+
+One JSON object per line on stdout: one **run row** per run, then one final
+**summary row**. This schema is what the playtest skill parses — field order
+is fixed, the tests in `src/report.rs` pin it byte-for-byte, and any change to
+it is a deliberate, visible break.
+
+### Run row
+
+```json
+{"seed":17,"outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"alert_peak":null}
+```
+
+| Field | Meaning |
+|---|---|
+| `seed` | the run's seed — with the script, the whole replay |
+| `outcome` | `"win"` \| `"capture"` \| `"entombed"` \| `"timeout"` |
+| `turns` | spent turns at the end of the run (free actions excluded) |
+| `detections` | fresh detections (`Event::Detected`): how often stealth broke — a held chase counts once, not once per turn |
+| `takedowns` | takedowns landed (`Event::TakenDown`) |
+| `bodies_found` | bodies found by guards (`Event::BodyFound`) |
+| `alert_peak` | **always `null` for now**: the facility-wide alert is the radio net's value (#107), which does not exist yet — `null` says "not measured", where a `0` would lie that it was quiet |
+
+### Summary row
+
+```json
+{"summary":{"runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"alert_peak":null}}
+```
+
+`win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the
+*winning* runs only and `null` when nothing won. The remaining fields are
+batch totals of the per-run metrics. The §13.2 ability-usage histogram and
+strategy-diversity metrics are a companion ticket (#137) and will extend this
+schema when they land.
+
+## Determinism
+
+Same `(seed, policy)` → byte-identical rows, asserted in `src/harness.rs`.
+That property is what makes the batch a regression instrument: same seeds +
+same script producing different rows means the game changed.
