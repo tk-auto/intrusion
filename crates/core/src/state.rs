@@ -41,6 +41,7 @@ use crate::cover;
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::Guard;
+use crate::region::DoorCell;
 use crate::targeting::Targeting;
 use crate::vision::{
     field_of_view_with_peek, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
@@ -298,8 +299,9 @@ enum BumpKind {
     /// An objective console still holding its intel.
     Intel,
     /// A door cell whose bump is a real door action (open, close, or a crush-refused
-    /// close). An open panel or closed hinge is *not* a door action — it classifies as
-    /// [`BumpKind::Move`] or [`BumpKind::Solid`] instead, exactly as the bump resolves.
+    /// close). Both handles of a closed door open it — a panel and, since #148, a
+    /// hinge. Only an **open panel** is *not* a door action: it classifies as
+    /// [`BumpKind::Move`], the walk-through, exactly as the bump resolves.
     Door { action: DoorAction },
     /// An empty concealment cupboard to climb into (§10.3).
     Hide,
@@ -311,7 +313,8 @@ enum BumpKind {
     CrouchHeld,
     /// Plain enterable floor — a normal move.
     Move,
-    /// Anything else solid — a wall or a closed hinge: a free bump (§4.4).
+    /// Anything else solid — a wall, a pillar: a free bump (§4.4). A closed hinge is
+    /// *not* here anymore — since #148 it opens the door ([`BumpKind::Door`]).
     Solid,
 }
 
@@ -1037,6 +1040,17 @@ impl State {
             BumpKind::Door { action } => match action {
                 DoorAction::Opened => {
                     self.operate_door(target);
+                    // Frame bump (#148): opening from a *hinge* turns the player to
+                    // face along the door line toward the panels, so the recomputed
+                    // FOV + #121 peek leans through the doorway from beside it — the
+                    // "crack the door and peek from cover" move, reading the room
+                    // without ever standing in the new sightline. A §5 exception, on
+                    // the same footing as the #89 hideout-entry auto-face. Opening
+                    // from a panel is not a hinge bump and leaves facing to §5 (an
+                    // open door is not a move).
+                    if let Some(peek) = self.hinge_peek_facing(target) {
+                        self.facing = peek;
+                    }
                     events.push(Event::DoorOpened { at: target });
                     true
                 }
@@ -1092,7 +1106,8 @@ impl State {
             }
             // A body while one is already in hand, a cupboard already holding an
             // actor, the table already crouched behind, or anything else solid
-            // (a wall, a closed hinge): a free bump (§4.4).
+            // (a wall, a pillar): a free bump (§4.4). A closed hinge is no longer
+            // here — it opens the door now (#148, `BumpKind::Door`).
             BumpKind::BodyBlocked
             | BumpKind::HideoutBlocked
             | BumpKind::CrouchHeld
@@ -1198,6 +1213,29 @@ impl State {
         let bodies = &self.bodies;
         self.layout
             .bump_door(target, |c| actor_occupies(player, guards, bodies, c));
+    }
+
+    /// The facing a **frame bump** (#148) turns the player to: from the bumped
+    /// `hinge`, the direction toward the door's panels — the cell one step *into*
+    /// the doorway. Facing along the door line, the ~180° half-disc and its #121
+    /// peek lean through the opening, so the player reads the room they just cracked
+    /// from beside it (§6, §10.4). `None` when `target` is not a hinge — a panel
+    /// open (or any non-door cell) leaves facing to §5, so the caller applies this
+    /// only for the hinge case.
+    fn hinge_peek_facing(&self, target: Cell) -> Option<Direction> {
+        let regions = self.layout.regions();
+        let door = regions.door(regions.door_at(target)?);
+        if door.role(target)? != DoorCell::Hinge {
+            return None;
+        }
+        // A door is a straight line of hinges around panels, so exactly one panel is
+        // orthogonally adjacent to each end hinge: that neighbour is the way in.
+        let panel = door
+            .panels()
+            .iter()
+            .copied()
+            .find(|&p| target.manhattan_distance(p) == 1)?;
+        Direction::between(target, panel)
     }
 
     /// What bumping the orthogonally adjacent `target` would do (§4.3) — the **single**
@@ -3092,6 +3130,71 @@ mod tests {
             }
         }
         None
+    }
+
+    /// #148: bumping a *closed hinge* from beside the frame opens the door and turns
+    /// the player to face **along the door line, toward the panels**, so the #121
+    /// head-lean peek reads through the doorway from cover — you crack the door and
+    /// see the room beyond without ever stepping into the new sightline.
+    #[test]
+    fn a_frame_bump_opens_the_door_and_auto_faces_the_peek() {
+        // region_strip: a vertical door in column 4 joins room A (cols 1–3) to
+        // corridor C (cols 5–6); hinges at (4,1) and (4,3), panel at (4,2).
+        let hinge = Cell::new(4, 1);
+        let panel = Cell::new(4, 2);
+        let mut s = State::new(
+            region_strip(),
+            Cell::new(3, 1), // beside the top hinge, in room A
+            Direction::East, // arbitrary prior facing — the frame bump overrides it
+            Vec::new(),
+            Vec::new(),
+            Cell::new(0, 0), // exit parked on the border corner, never touched
+        );
+
+        // With the door closed, the corridor beyond it is unseen.
+        assert!(
+            !s.player_fov().contains(Cell::new(5, 2)),
+            "the closed door hides the corridor",
+        );
+
+        // The usable line predicts the frame open (§11.4): the closed hinge to the
+        // east now offers `door: open`, in step with what the bump will do.
+        assert!(
+            s.affordances()
+                .iter()
+                .any(|&(dir, a)| dir == Direction::East && a == Affordance::OpenDoor),
+            "a closed hinge offers door: open on the usable line",
+        );
+
+        // Bump the closed hinge to the east: the door opens, spending the turn.
+        let events = s.step(Input::Step(Direction::East));
+        assert_eq!(events, vec![Event::DoorOpened { at: hinge }]);
+        assert_eq!(s.turn(), 1, "opening spends the turn (§4.3)");
+        assert_eq!(
+            s.player(),
+            Cell::new(3, 1),
+            "the player did not move to open"
+        );
+        assert_eq!(
+            s.layout().facility().terrain(panel),
+            Some(Terrain::DoorPanelOpen),
+            "every panel swung open",
+        );
+
+        // Facing turned along the door line, toward the panel (south).
+        assert_eq!(
+            s.facing(),
+            Direction::South,
+            "the frame bump faces the player along the door line, toward the panels",
+        );
+
+        // The recomputed FOV + #121 peek now leans through the doorway: the open
+        // panel and a corridor cell on the far side are both seen (#121-style).
+        assert!(s.player_fov().contains(panel), "the open doorway is seen");
+        assert!(
+            s.player_fov().contains(Cell::new(5, 2)),
+            "the peek reads through the doorway into the corridor",
+        );
     }
 
     /// §4.3/§10.3: a hideout is **bump-to-enter**, not a cell you drift onto. Stepping

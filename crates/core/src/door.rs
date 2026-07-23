@@ -8,8 +8,9 @@
 //! sound, and the renderer), so the operations live on [`Layout`], the one type that
 //! owns both.
 //!
-//! **Bump a panel to open, bump a hinge to close** (§10.4). The hinge is the handle,
-//! which is why hinges stay solid forever. A door refuses to close while anything
+//! **Bump a panel to open, bump a hinge to close** (§10.4) — and, since #148, a
+//! *closed* hinge opens the door too, a second way in from beside the frame. The
+//! hinge is the handle, which is why hinges stay solid forever. A door refuses to close while anything
 //! occupies a panel — doors never crush anyone — and, with auto-close on, closes
 //! behind whoever passed through, so an open door becomes evidence that someone did.
 //!
@@ -38,11 +39,14 @@ impl Layout {
     /// door and report what happened.
     ///
     /// - Bumping a **closed panel** opens the door.
+    /// - Bumping a **closed hinge** *also* opens it (#148): the frame is a second
+    ///   way in — you crack the door from beside it without stepping into the new
+    ///   sightline. (The player then auto-faces the opening for a peek; that facing
+    ///   turn is the caller's, §5-exception, not the door's.)
     /// - Bumping an **open hinge** closes it — unless a panel is occupied, which
     ///   refuses the close ([`DoorAction::Obstructed`]).
     /// - Every other case is *not* a door action and returns `None`: an **open
-    ///   panel** you simply walk through, a **closed hinge** that is just solid wall
-    ///   (a free mis-input, §4.4), or a cell that is no door at all.
+    ///   panel** you simply walk through, or a cell that is no door at all.
     ///
     /// `occupied(cell)` reports whether an actor stands on `cell`.
     pub fn bump_door(&mut self, cell: Cell, occupied: impl Fn(Cell) -> bool) -> Option<DoorAction> {
@@ -61,8 +65,7 @@ impl Layout {
     /// What bumping `cell` *would* do to a door, touching nothing — the read-only twin
     /// of [`bump_door`], so the usable line (§11.4) can predict the exact outcome the
     /// bump will produce. Returns `None` for the non-door-action cases `bump_door`
-    /// also declines: an open panel (walked through), a closed hinge (solid wall), or
-    /// a cell that is no door at all.
+    /// also declines: an open panel (walked through) or a cell that is no door at all.
     pub fn preview_door_bump(
         &self,
         cell: Cell,
@@ -71,13 +74,16 @@ impl Layout {
         let id = self.regions().door_at(cell)?;
         let door = self.regions().door(id);
         match (door.role(cell)?, door.is_open()) {
-            (DoorCell::Panel, false) => Some(DoorAction::Opened),
+            // A closed door opens from either handle (#148): a panel (walk in) or a
+            // hinge (crack the frame). All panels swing as one unit regardless.
+            (DoorCell::Panel | DoorCell::Hinge, false) => Some(DoorAction::Opened),
             (DoorCell::Hinge, true) => Some(if door.panels().iter().any(|&c| occupied(c)) {
                 DoorAction::Obstructed
             } else {
                 DoorAction::Closed
             }),
-            _ => None,
+            // An open panel is walked through, not operated.
+            (DoorCell::Panel, true) => None,
         }
     }
 
@@ -246,6 +252,37 @@ mod tests {
         }
     }
 
+    /// #148: a *closed* hinge opens the door too — the frame is a second way in. All
+    /// panels swing as one unit, exactly as a panel bump does, and the preview
+    /// predicts it so the usable line can offer `door: open` (§11.4).
+    #[test]
+    fn bumping_a_closed_hinge_opens_the_door() {
+        let (mut layout, door) = one_door();
+        let hinge = layout.regions().door(door).hinges()[0];
+
+        // The read-only preview agrees with what the bump will do (§11.4).
+        assert_eq!(
+            layout.preview_door_bump(hinge, vacant),
+            Some(DoorAction::Opened),
+            "a closed hinge previews as an open"
+        );
+
+        assert_eq!(layout.bump_door(hinge, vacant), Some(DoorAction::Opened));
+        assert!(layout.regions().door(door).is_open());
+        for &p in layout.regions().door(door).panels() {
+            assert_eq!(
+                layout.facility().terrain_at(p.x, p.y),
+                Some(Terrain::DoorPanelOpen),
+                "every panel swings open as one unit"
+            );
+        }
+
+        // The now-open hinge closes again (the unchanged behaviour) — so the frame is
+        // a toggle: closed→open on this bump, open→closed on the next.
+        assert_eq!(layout.bump_door(hinge, vacant), Some(DoorAction::Closed));
+        assert!(!layout.regions().door(door).is_open());
+    }
+
     #[test]
     fn one_bump_moves_every_panel_as_a_unit() {
         let (mut layout, door) = one_door();
@@ -307,14 +344,6 @@ mod tests {
     fn walking_through_an_open_door_is_not_a_door_action() {
         let (mut layout, door) = one_door();
         let panel = layout.regions().door(door).panels()[0];
-        let hinge = layout.regions().door(door).hinges()[0];
-
-        // Bumping a *closed* hinge is just solid wall — a free mis-input, no action.
-        assert_eq!(
-            layout.bump_door(hinge, vacant),
-            None,
-            "closed hinge is solid"
-        );
 
         // Open it via the panel. An open panel is then walk-through; bumping it is
         // movement, not a door op.
