@@ -53,7 +53,7 @@ mod test_support;
 mod vision;
 
 pub use ability::{
-    sample_panel, Ability, AbilityId, AbilityState, AbilityStatus, Behaviour, Effect, TargetingMode,
+    Ability, AbilityId, AbilityState, AbilityStatus, Behaviour, Effect, TargetingMode,
 };
 pub use body::Body;
 pub use category::Category;
@@ -62,12 +62,14 @@ pub use door::DoorAction;
 pub use facility::{Facility, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
 pub use guard::{Guard, GuardState};
-pub use input::{ability_hotkey, input_for_key, ui_command_for_key, UiCommand};
+pub use input::{
+    ability_hotkey, ability_input_for_key, input_for_key, ui_command_for_key, UiCommand,
+};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{
-    ascii_grid, is_ability_button, render, render_screen, GlyphCell, Grid, ScreenUi, Visibility,
-    HEADER_ROWS, STATUS_ROWS,
+    ability_at, ascii_grid, is_ability_button, render, render_screen, GlyphCell, Grid, ScreenUi,
+    Visibility, HEADER_ROWS, STATUS_ROWS,
 };
 pub use rng::Rng;
 pub use state::{

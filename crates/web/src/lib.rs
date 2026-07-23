@@ -30,10 +30,13 @@
 //! is the full §11.4 *screen* — the always-on ability line on top, the map, and the
 //! near and usable status lines beneath, all composed by `core::render_screen` from
 //! the game state plus the shell's `ScreenUi` view state. Keys map through
-//! `core::input_for_key` (§11.6) for game actions and `core::ui_command_for_key` for
-//! view toggles (`Tab` deploys the ability panel); a tap on the deploy button
-//! (`core::is_ability_button`) does the same for touch — so the picture, the
-//! bindings, and the button's geometry are all pinned by native tests.
+//! `core::input_for_key` (§11.6) for game actions, `core::ability_input_for_key` for
+//! the ability shortcuts, and `core::ui_command_for_key` for view toggles (`Tab`
+//! deploys the ability panel); for pointer and touch, a tap on the deploy button
+//! (`core::is_ability_button`) toggles the panel and a tap on an ability entry
+//! (`core::ability_at`) fires the same `Input::Activate` its hotkey does — so the
+//! picture, the bindings, and every hit-test's geometry are all pinned by native
+//! tests.
 //! Levels come fully placed from the core (`generate_level`, §10.1.7–9): entry/exit
 //! and player in the largest room, intel spread across rooms, guards seated where
 //! none eyes the spawn on turn one — and the guards arrive as live patrolling

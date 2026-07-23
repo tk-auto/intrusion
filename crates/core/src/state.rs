@@ -33,7 +33,9 @@
 //! state machine — searching, decoys — is the later guard tickets, which set a
 //! guard's destination the same way and reuse the same walk-toward-it movement.
 
-use crate::ability::{AbilityId, AbilityState, Behaviour, Deck, Effect, TargetingMode};
+use crate::ability::{
+    AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, TargetingMode,
+};
 use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
@@ -774,6 +776,32 @@ impl State {
     /// (a missing target) is not an economy state and is never returned here.
     pub fn ability_state(&self, id: AbilityId) -> AbilityState {
         self.abilities.state(id)
+    }
+
+    /// The run's ability line/panel (§11.4): one [`AbilityStatus`] per economy
+    /// ability, in the fixed deck order ([`AbilityId::ALL`]), each carrying its
+    /// real slot state ([`ability_state`](Self::ability_state)). This is what the
+    /// always-on line and the deployed panel draw ([`render_screen`]) and what a
+    /// click hit-tests against ([`ability_at`]) — assembled from live runtime, so
+    /// there is no roster to drift from the economy.
+    ///
+    /// The set is exactly the *activated* abilities the time economy governs
+    /// (§8.2). The innate **bump** verbs — Takedown and Drag (§7.2, §8.3) — are
+    /// not here: they have no duration or cooldown to show and are not
+    /// [`Input::Activate`]d but done by walking into their target, so their
+    /// availability already speaks through the **usable line**
+    /// ([`affordances`](Self::affordances)), not this line.
+    ///
+    /// [`render_screen`]: crate::render_screen
+    /// [`ability_at`]: crate::ability_at
+    pub fn ability_statuses(&self) -> Vec<AbilityStatus> {
+        AbilityId::ALL
+            .into_iter()
+            .map(|id| AbilityStatus {
+                id,
+                state: self.ability_state(id),
+            })
+            .collect()
     }
 
     /// What a bump would do from here — the **usable line** (§11.4): each
@@ -1868,6 +1896,31 @@ mod tests {
             s.ability_state(AbilityId::Run),
             AbilityState::Active { remaining: 4 },
         );
+    }
+
+    /// The ability line/panel roster (§11.4): [`ability_statuses`](State::ability_statuses)
+    /// is exactly the economy deck, in deck order, each carrying its live slot state —
+    /// and the innate bump verbs Takedown and Drag are not in it (they speak through
+    /// the usable line, not the ability economy, §7.2/§8.3).
+    #[test]
+    fn ability_statuses_are_the_economy_deck_in_order() {
+        let mut s = solo(Cell::new(4, 4));
+        let ids: Vec<AbilityId> = s.ability_statuses().iter().map(|st| st.id).collect();
+        assert_eq!(
+            ids,
+            AbilityId::ALL.to_vec(),
+            "one row per economy ability, in order"
+        );
+
+        // Each row mirrors the live economy state.
+        s.step(Input::Activate(AbilityId::Run));
+        let run = s
+            .ability_statuses()
+            .into_iter()
+            .find(|st| st.id == AbilityId::Run)
+            .unwrap();
+        assert_eq!(run.state, s.ability_state(AbilityId::Run));
+        assert!(matches!(run.state, AbilityState::Active { .. }));
     }
 
     /// §4.4: toggling an ability off is one of the two free actions — the turn does
