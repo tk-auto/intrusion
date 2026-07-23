@@ -33,7 +33,7 @@
 //! state machine — searching, decoys — is the later guard tickets, which set a
 //! guard's destination the same way and reuse the same walk-toward-it movement.
 
-use crate::ability::{AbilityId, AbilityState, Behaviour, Deck, Effect};
+use crate::ability::{AbilityId, AbilityState, Behaviour, Deck, Effect, TargetingMode};
 use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
@@ -41,6 +41,7 @@ use crate::cover;
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::Guard;
+use crate::targeting::Targeting;
 use crate::vision::{
     field_of_view_with_peek, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
 };
@@ -520,6 +521,24 @@ impl State {
     /// The player's facing — the direction of their last successful step (§5).
     pub fn facing(&self) -> Direction {
         self.facing
+    }
+
+    /// Open a targeting session (§8.4) for `mode`, anchored on the player's cell
+    /// and facing (§5). The shell drives the returned [`Targeting`] — steering the
+    /// cursor with cardinals and confirming — while core owns validity: a `Tile`
+    /// cursor is bounded to the §6.1 range box on this facility, and cancelling is
+    /// just dropping the session (free, no turn — §4.4). Nothing here auto-targets;
+    /// that absence is the whole point of building targeting up front (§8.4).
+    pub fn begin_targeting(&self, mode: TargetingMode) -> Targeting {
+        Targeting::begin(mode, self.player, self.facing)
+    }
+
+    /// Open a targeting session for `ability` by its declared [`TargetingMode`]
+    /// (§8.4) — the seam a hotkey or an ability-panel click resolves an ability's
+    /// target through, so no ability ever falls back to auto-targeting (the exact
+    /// §8.4/§2.3 regression this system exists to prevent).
+    pub fn begin_ability_targeting(&self, ability: AbilityId) -> Targeting {
+        self.begin_targeting(ability.def().targeting())
     }
 
     /// The player's field of view (§6): the ~180° forward half-disc, or the full
@@ -1464,6 +1483,7 @@ fn actor_occupies(player: Cell, guards: &[Guard], bodies: &[Body], cell: Cell) -
 mod tests {
     use super::*;
     use crate::guard::{GuardState, CERTAIN_RANGE, GLIMPSE_RANGE, PATROL_RADIUS, SEARCH_RADIUS};
+    use crate::targeting::Target;
     use crate::test_support::{open_room, region_strip, solo};
     use crate::vision::field_of_view;
     use crate::{generate, generate_level, DoorId, Rng};
@@ -1498,6 +1518,32 @@ mod tests {
         assert_eq!(s.player(), Cell::new(1, 1), "no move");
         assert_eq!(s.facing(), Direction::North, "a blocked move keeps facing");
         assert_eq!(s.turn(), 0, "a free action does not spend the turn");
+    }
+
+    /// The §8.4 seam: opening a targeting session reads the ability's *declared*
+    /// mode (§8.1 catalog) and anchors it on the player's cell and facing (§5) —
+    /// Run self-targets, Decoy targets the faced cardinal — and a `Tile` mode hands
+    /// back a cursor on the player, never an auto-aim (§8.4's whole reason to exist).
+    #[test]
+    fn opening_a_targeting_session_reads_the_ability_mode_and_the_player() {
+        // The solo player starts facing north.
+        let s = solo(Cell::new(4, 4));
+        // Run is self-targeted: resolves straight to the player's cell.
+        assert_eq!(
+            s.begin_ability_targeting(AbilityId::Run).confirm(),
+            Target::Itself(Cell::new(4, 4)),
+        );
+        // Decoy is direction-targeted: defaults to the player's facing.
+        assert_eq!(
+            s.begin_ability_targeting(AbilityId::Decoy).confirm(),
+            Target::Direction(Direction::North),
+        );
+        // A tile session (no v1 ability uses one) starts its cursor on the player.
+        assert_eq!(
+            s.begin_targeting(TargetingMode::Tile { range: 5 })
+                .confirm(),
+            Target::Tile(Cell::new(4, 4)),
+        );
     }
 
     /// Waiting is a real action (§5): it spends the turn even though nothing moves.
