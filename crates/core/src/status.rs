@@ -56,6 +56,10 @@ pub fn message_for(event: Event) -> Option<Message> {
         // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
         // the loud half is what happens if the body is ever seen.
         Event::TakenDown { .. } => ("the guard drops — a body is left".to_string(), 0),
+        // The bottom rung of the §11.7 threat ladder: a guard's look freshly
+        // found you (§7.6). Quieter than a found body, far below being caught —
+        // but a threat message, never self-narration.
+        Event::Detected { .. } => ("a guard has seen you".to_string(), 2),
         // The loudest event in the game (§7.2): a hunting-threat message, on the
         // §11.7 threat ladder above a glimpse but below being caught.
         Event::BodyFound { .. } => ("a body has been found".to_string(), 4),
@@ -265,6 +269,20 @@ mod tests {
         let line = near_line(&s);
         assert_eq!(line.text, "dragging the body — half speed");
         assert_eq!(line.category, Category::Owned);
+    }
+
+    /// The §11.7 threat ladder's bottom rung: a fresh detection (§7.6) is a
+    /// Danger message at priority 2 — above self-narration, below a found body
+    /// (4) and the capture (10) — matching the hunting `g` it announces.
+    #[test]
+    fn a_fresh_detection_reads_as_the_lowest_threat_rung() {
+        let msg = message_for(Event::Detected {
+            by: Cell::new(5, 5),
+        })
+        .expect("a detection is never silent");
+        assert_eq!(msg.text, "a guard has seen you");
+        assert_eq!(msg.category, Category::Danger);
+        assert_eq!(msg.priority, 2);
     }
 
     /// Once the run ends the loop is inert (§4.5) and the final message stays —
