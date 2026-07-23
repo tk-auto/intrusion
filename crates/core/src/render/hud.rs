@@ -39,6 +39,12 @@ pub struct ScreenUi {
     /// list is always the current step's live set — deployed or not, it clears on
     /// the next action (§11.7), never a scrollback.
     pub message_log_open: bool,
+    /// Whether the help overlay is up (§14 v2/#139): the glyph legend, colour key,
+    /// and controls, drawn over the map. A pure view toggle — no world change, no
+    /// turn (§4.4) — driven by the `?` key
+    /// ([`ui_command_for_key`](crate::input::ui_command_for_key)) or the header's
+    /// help button ([`is_help_button`]), and dismissed the same two ways.
+    pub help_open: bool,
 }
 
 /// The deploy button's label on the ability line (§11.4): a downward chevron when
@@ -48,12 +54,35 @@ const BUTTON_CLOSED: &str = "[▾]";
 const BUTTON_OPEN: &str = "[▴]";
 const BUTTON_LEN: u32 = 3;
 
+/// The help toggle on the ability line (§14 v2/#139): a `[?]` immediately left of
+/// the deploy button, three cells wide like it. Opens the help overlay, and — since
+/// the overlay covers the map but not this header row — closes it again, the touch
+/// path that never traps (§11.6).
+const HELP_BUTTON: &str = "[?]";
+const HELP_BUTTON_LEN: u32 = 3;
+
 /// The column the deploy button starts at on a screen `width` wide: right-aligned
 /// with a one-cell margin. Shared by the drawing ([`ability_line`]) and the
 /// hit-test ([`is_ability_button`]) so the button a click lands on is exactly the
 /// button drawn.
 fn button_start(width: u32) -> u32 {
     width.saturating_sub(1 + BUTTON_LEN)
+}
+
+/// The column the help button starts at: immediately left of the deploy button, so
+/// the header's right edge reads `[?][▾]`. Shared by the drawing and the hit-test
+/// ([`is_help_button`]) so a tap lands on exactly the button drawn.
+fn help_button_start(width: u32) -> u32 {
+    button_start(width).saturating_sub(HELP_BUTTON_LEN)
+}
+
+/// Whether screen cell `(x, y)` is the header's help button (§14 v2/#139) — the
+/// `[?]` toggle left of the ability deploy button. A shell maps a click to a screen
+/// cell and asks this; a hit flips [`ScreenUi::help_open`] instead of stepping. Kept
+/// beside the drawing so the button a tap lands on is exactly the one drawn.
+pub fn is_help_button(width: u32, x: u32, y: u32) -> bool {
+    let start = help_button_start(width);
+    y == 0 && x >= start && x < start + HELP_BUTTON_LEN
 }
 
 /// Whether screen cell `(x, y)` is the deploy button (§11.4) — the header row's
@@ -138,17 +167,25 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // The map layer, with any deployed overlays: the ability panel opposite the
     // player, and the near line's message log rising from the bottom.
     let mut map = render(state);
-    if ui.ability_panel_open {
-        let origin =
-            panel_origin_opposite_player(map.width(), map.height(), state.player(), &statuses);
-        overlay_ability_panel(&mut map, origin, &statuses);
-    }
-    // The step's live messages (§11.7), loudest first: the near line speaks the
-    // first, counts the rest, and deploys the whole list over the board here. The
-    // list only earns the board when more than one message is live.
+    // Help is a modal reference card (§14 v2/#139): when it is up it takes the whole
+    // map, so the other overlays are moot — draw it and skip them. It covers the map
+    // only; the header (with the `[?]` toggle) and status lines stay, so it is never
+    // inescapable (§11.6).
     let messages = live_messages(state);
-    if ui.message_log_open && messages.len() > 1 {
-        overlay_message_log(&mut map, &messages);
+    if ui.help_open {
+        super::help::overlay_help(&mut map);
+    } else {
+        if ui.ability_panel_open {
+            let origin =
+                panel_origin_opposite_player(map.width(), map.height(), state.player(), &statuses);
+            overlay_ability_panel(&mut map, origin, &statuses);
+        }
+        // The step's live messages (§11.7), loudest first: the near line speaks the
+        // first, counts the rest, and deploys the whole list over the board here. The
+        // list only earns the board when more than one message is live.
+        if ui.message_log_open && messages.len() > 1 {
+            overlay_message_log(&mut map, &messages);
+        }
     }
     let width = map.width();
     let height = HEADER_ROWS + map.height() + STATUS_ROWS;
@@ -195,7 +232,9 @@ fn ability_line_layout(width: u32, statuses: &[AbilityStatus]) -> Vec<(usize, u3
     let mut x = 1; // the one-cell left margin
     for (i, status) in statuses.iter().enumerate() {
         let len = status.compact().chars().count() as u32;
-        if x + len > button_start(width) {
+        // Stop before the header's button cluster — the help `[?]` and the deploy
+        // `[▾]` are both right-aligned, so the strip ends at the leftmost of them.
+        if x + len > help_button_start(width) {
             break;
         }
         out.push((i, x));
@@ -242,6 +281,12 @@ fn ability_line(width: u32, statuses: &[AbilityStatus], open: bool) -> Vec<Glyph
         );
     }
 
+    put(
+        &mut cells,
+        help_button_start(width),
+        HELP_BUTTON,
+        Category::System,
+    );
     let label = if open { BUTTON_OPEN } else { BUTTON_CLOSED };
     put(&mut cells, button_start(width), label, Category::System);
     cells
@@ -1087,5 +1132,113 @@ mod tests {
             near.starts_with(" intel in h"),
             "the words run to the edge and stop: {near:?}"
         );
+    }
+
+    // --- Help overlay (§14 v2/#139) ------------------------------------------
+
+    /// A plain full board to render the help card over.
+    fn help_board() -> State {
+        State::new(
+            open_room(40, 40),
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(20, 20))],
+            Vec::new(),
+            Cell::new(30, 30),
+        )
+    }
+
+    /// §4.4/#139: opening help is a pure view toggle. It changes the frame while up,
+    /// and **closing restores the exact frame** — the overlay writes no state, so the
+    /// board beneath is byte-identical before and after.
+    #[test]
+    fn help_overlays_the_map_and_closing_restores_it() {
+        let s = help_board();
+        let closed = render_screen(&s, ScreenUi::default());
+        let open = render_screen(
+            &s,
+            ScreenUi {
+                help_open: true,
+                ..ScreenUi::default()
+            },
+        );
+        assert_ne!(open, closed, "the help card changes the frame while up");
+        let reclosed = render_screen(&s, ScreenUi::default());
+        assert_eq!(reclosed, closed, "closing restores the identical frame");
+    }
+
+    /// The card carries the legend and the **live** hotkeys (#139): a glyph derived
+    /// from the terrain table (the duct `=`, new in §10.7), the exit `E`, a colour
+    /// name, and each ability's real §11.6 key.
+    #[test]
+    fn the_help_card_shows_the_legend_the_colours_and_the_hotkeys() {
+        let s = help_board();
+        let g = render_screen(
+            &s,
+            ScreenUi {
+                help_open: true,
+                ..ScreenUi::default()
+            },
+        );
+        let text = g.to_text().join("\n");
+        assert!(text.contains("GLYPHS") && text.contains("COLOURS") && text.contains("CONTROLS"));
+        // Glyphs derived from the real tables, including the duct entry (§10.7).
+        for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
+            assert!(text.contains(glyph), "the legend shows {glyph:?}");
+        }
+        // The live ability hotkeys, straight from the deck.
+        for id in AbilityId::ALL {
+            assert!(
+                text.contains(id.hotkey()),
+                "the controls show {}'s key {}",
+                id.name(),
+                id.hotkey()
+            );
+        }
+    }
+
+    /// §11.6's trap, designed out: the `[?]` button sits in the header and the header
+    /// is **not** covered by the overlay, so a touch user who opened help can always
+    /// close it. The hit-test agrees with the drawn button, open or closed.
+    #[test]
+    fn the_help_button_is_reachable_whether_open_or_closed() {
+        let s = help_board();
+        let width = s.layout().facility().width();
+        let start = help_button_start(width);
+        assert!(is_help_button(width, start, 0), "the [?] cell hit-tests");
+        assert!(
+            !is_help_button(width, start, 1),
+            "only the header row is the button"
+        );
+        for help_open in [false, true] {
+            let g = render_screen(
+                &s,
+                ScreenUi {
+                    help_open,
+                    ..ScreenUi::default()
+                },
+            );
+            let header: String = (0..width).map(|x| g.get(x, 0).glyph).collect();
+            assert!(
+                header.contains("[?]"),
+                "the toggle stays in the header (open={help_open}): {header:?}"
+            );
+        }
+    }
+
+    /// The help button and the ability deploy button do not overlap, and both are
+    /// hit-testable as distinct cells (§11.4/#139): `[?]` sits immediately left of
+    /// `[▾]`.
+    #[test]
+    fn the_header_buttons_are_distinct() {
+        let width = 40;
+        for x in help_button_start(width)..help_button_start(width) + HELP_BUTTON_LEN {
+            assert!(is_help_button(width, x, 0));
+            assert!(!is_ability_button(width, x, 0), "help ≠ deploy at {x}");
+        }
+        for x in button_start(width)..button_start(width) + BUTTON_LEN {
+            assert!(is_ability_button(width, x, 0));
+            assert!(!is_help_button(width, x, 0), "deploy ≠ help at {x}");
+        }
     }
 }

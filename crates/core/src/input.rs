@@ -34,6 +34,11 @@ pub enum UiCommand {
     /// a counter, and this expands the whole list and folds it back. The on-screen
     /// counter drives the same toggle for touch and mouse.
     ToggleMessageLog,
+    /// Open or close the help overlay (§14 v2/#139): the glyph legend, colour key,
+    /// and controls. A pure view toggle — no world change, no turn (§4.4) — so no
+    /// guard moves while it is up. The header's `[?]` button drives the same toggle
+    /// for touch and mouse.
+    ToggleHelp,
 }
 
 /// Map a key to the [`UiCommand`] it drives, or `None` for a key that is not a UI
@@ -48,6 +53,9 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
     match key {
         "Tab" => Some(UiCommand::ToggleAbilityPanel),
         "m" => Some(UiCommand::ToggleMessageLog),
+        // `?` opens the help card (§14 v2/#139): the conventional roguelike help key,
+        // a free character that collides with no movement key or ability hotkey.
+        "?" => Some(UiCommand::ToggleHelp),
         _ => None,
     }
 }
@@ -167,7 +175,10 @@ mod tests {
             Some(UiCommand::ToggleAbilityPanel)
         );
         assert_eq!(ui_command_for_key("m"), Some(UiCommand::ToggleMessageLog));
-        for key in ["Tab", "m"] {
+        // `?` opens the help card (§14 v2/#139) — a view toggle, so it never steps
+        // the world: no turn passes and no guard moves while help is up (§4.4).
+        assert_eq!(ui_command_for_key("?"), Some(UiCommand::ToggleHelp));
+        for key in ["Tab", "m", "?"] {
             assert_eq!(input_for_key(key), None, "{key:?} is not a game action");
             assert_eq!(
                 ability_input_for_key(key),
