@@ -74,7 +74,8 @@ CLI.
 - History convention: one squash-merged commit per issue (`… (#24)`), merged
   deliberately after watching CI go green (see the work-ticket skill).
 - After a merge to `main`, the Pages workflow deploys the playable build to
-  <https://tk-auto.github.io/intrusion/> — wait for it and hand that URL back.
+  <https://tk-auto.github.io/intrusion/> — hand that URL back without waiting for
+  the deploy (the artifact build already gave a playable preview).
 - For a playable preview *before* merge (or while iterating), use the
   artifact-build skill: it packs the wasm build into a Claude Artifact at a
   stable private URL. Player-visible PRs are validated this way before merging
