@@ -45,7 +45,7 @@ use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::path;
 use crate::place::{place, LevelConfig, Placement};
-use crate::region::{RegionGraph, RegionId, RegionKind};
+use crate::region::{DoorId, RegionGraph, RegionId, RegionKind};
 use crate::rng::Rng;
 use std::collections::HashSet;
 
@@ -80,6 +80,15 @@ const AUTO_CLOSE: bool = true;
 /// door, so none is ever sealed off (§10.6). The per-room count is drawn by
 /// [`room_door_budget`].
 const MAX_DOORS_PER_ROOM: u32 = 3;
+
+/// The percentage of doorways that generate already **open** (#145, §10.4/§11.3)
+/// **[START]**. Every door otherwise starts closed; opening ~1-in-5 lets the
+/// facility read lived-in and varies the turn-one sightlines run to run. Kept
+/// deliberately low: an open door is a permanent sightline until a guard closes it
+/// (#146) or an automatic door times out (#147), so until those give the level a
+/// way to heal, few open doors is safer than many. Pinned by a test. Drawn from the
+/// seeded RNG so the same seed opens the same doors (§12.4).
+const OPEN_DOOR_PERCENT: u32 = 20;
 
 /// How many feature attempts each room gets (§10.1.5). Each attempt proposes a
 /// partition wall and a pillar; the viable proposals pool and one is placed.
@@ -299,10 +308,16 @@ pub fn generate_level(
     rng: &mut Rng,
 ) -> Result<(Layout, Placement), GenError> {
     for _ in 0..MAX_GEN_ATTEMPTS {
-        let layout = generate_once(config.width, config.height, rng, &Tuning::BIASED)?;
+        let mut layout = generate_once(config.width, config.height, rng, &Tuning::BIASED)?;
         if !passes_guarantees(&layout) {
             continue;
         }
+        // Layer the #145 initial door state on the *validated* carve, before
+        // placement: the §10.6 guarantees describe the closed-door geometry, and
+        // door open/closed is live state (§11.3), so this comes after the gate and
+        // before `place` — whose §10.1.9 turn-one cone check must see the open
+        // doorways a guard's cone now reaches through.
+        open_initial_doors(&mut layout, rng);
         if let Some(placement) = place(&layout, config, rng) {
             return Ok((layout, placement));
         }
@@ -955,6 +970,26 @@ fn cut_door(
         facility.set_terrain(panel.x, panel.y, Terrain::DoorPanelClosed);
     }
     regions.add_door(room, corridor, hinges, panels, AUTO_CLOSE);
+}
+
+/// Open a deterministic [`OPEN_DOOR_PERCENT`] share of the level's doorways as
+/// initial state (#145, §10.4/§11.3): each door draws once from the seeded `rng`,
+/// and an opened one moves its graph flag and panel terrain to open together via
+/// [`Layout::open_door_initial`]. Same seed → same open doors (§12.4).
+///
+/// Ordering matters and is the caller's contract (see [`generate_level`]): this
+/// runs on a carve that has already passed the §10.6 gate — reachability is
+/// identical whether a door is open or closed (both panels are pathable, §10.3),
+/// and the §10.1a sightline rule describes the carve's geometry, not its live door
+/// poses — and *before* placement, whose §10.1.9 turn-one cone check must account
+/// for the extra sight an open doorway grants a guard.
+fn open_initial_doors(layout: &mut Layout, rng: &mut Rng) {
+    let ids: Vec<DoorId> = layout.regions().doors().map(|(id, _)| id).collect();
+    for id in ids {
+        if rng.below(100) < OPEN_DOOR_PERCENT {
+            layout.open_door_initial(id);
+        }
+    }
 }
 
 /// Carve one room feature — a partition wall or a pillar — into `room` (§10.1.5).
@@ -2693,6 +2728,90 @@ mod tests {
                     straight,
                     "seed {seed}: a door must lie on one straight line"
                 );
+            }
+        }
+    }
+
+    /// #145: in a *placed* level a deterministic share of doorways starts open, and
+    /// the graph pose and panel terrain are stamped together — an open door reads
+    /// `DoorPanelOpen`, a closed one `DoorPanelClosed`, never a mismatch, and hinges
+    /// stay solid whatever the pose (§10.4). Same seed → the same open doors (§12.4).
+    #[test]
+    fn some_doors_start_open_deterministically_and_stamped_together() {
+        for seed in seed_sweep(64) {
+            let (a, _) = generate_level(&LevelConfig::V1, &mut Rng::new(seed)).unwrap();
+            let (b, _) = generate_level(&LevelConfig::V1, &mut Rng::new(seed)).unwrap();
+
+            // Determinism: the same seed opens exactly the same doors.
+            let poses_a: Vec<bool> = a.regions().doors().map(|(_, d)| d.is_open()).collect();
+            let poses_b: Vec<bool> = b.regions().doors().map(|(_, d)| d.is_open()).collect();
+            assert_eq!(
+                poses_a, poses_b,
+                "seed {seed}: open set is not deterministic"
+            );
+
+            // Graph pose and grid terrain agree, cell for cell.
+            for (_, door) in a.regions().doors() {
+                let want = if door.is_open() {
+                    Terrain::DoorPanelOpen
+                } else {
+                    Terrain::DoorPanelClosed
+                };
+                for &p in door.panels() {
+                    assert_eq!(
+                        a.facility().terrain(p),
+                        Some(want),
+                        "seed {seed}: door pose and panel terrain disagree at {p:?}",
+                    );
+                }
+                for &h in door.hinges() {
+                    assert_eq!(
+                        a.facility().terrain(h),
+                        Some(Terrain::DoorHinge),
+                        "seed {seed}: a hinge is not solid",
+                    );
+                }
+            }
+        }
+    }
+
+    /// #145: a named [START] fraction (~20%) of doorways starts open — reliably some
+    /// open and some closed, in the neighbourhood of [`OPEN_DOOR_PERCENT`]. The knob
+    /// itself is pinned so a retune is a visible decision, not a silent drift.
+    #[test]
+    fn about_a_fifth_of_doors_start_open() {
+        assert_eq!(
+            OPEN_DOOR_PERCENT, 20,
+            "the [START] open-door share is pinned"
+        );
+
+        let (mut open, mut total) = (0u32, 0u32);
+        for seed in seed_sweep(128) {
+            let (layout, _) = generate_level(&LevelConfig::V1, &mut Rng::new(seed)).unwrap();
+            for (_, door) in layout.regions().doors() {
+                total += 1;
+                open += u32::from(door.is_open());
+            }
+        }
+        assert!(total > 0, "the sweep generated no doors");
+        assert!(open > 0, "no door ever started open across the sweep");
+        assert!(open < total, "every door started open across the sweep");
+        let frac = f64::from(open) / f64::from(total);
+        assert!(
+            (0.08..0.36).contains(&frac),
+            "open share {frac:.3} strays far from the ~20% [START] target ({open}/{total})",
+        );
+    }
+
+    /// The bare (unplaced) carve is still all-closed — opening is a placement-time
+    /// state layer (#145), so `generate` stays the canonical closed-door primitive
+    /// the door-mechanics tests build on. (The placed path opens doors; see above.)
+    #[test]
+    fn the_bare_carve_leaves_every_door_closed() {
+        for seed in seed_sweep(64) {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            for (_, door) in layout.regions().doors() {
+                assert!(!door.is_open(), "seed {seed}: a bare carve opened a door");
             }
         }
     }

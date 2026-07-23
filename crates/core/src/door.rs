@@ -109,6 +109,17 @@ impl Layout {
         }
     }
 
+    /// Open `door` as an **initial generation state** (#145, §10.4): move the graph
+    /// flag and its panels' terrain to open together, exactly as a bump would. No
+    /// occupancy check — generation opens doors before any actor is placed, so
+    /// there is never anything to crush — and no auto-close side effect: this sets a
+    /// starting *pose*, not a runtime interaction. Door open/closed is live state
+    /// (§11.3), which is why it is layered on here rather than baked into terrain by
+    /// the carve.
+    pub(crate) fn open_door_initial(&mut self, door: DoorId) {
+        self.set_door_open(door, true);
+    }
+
     /// Close `door` unless a panel is occupied, restamping the panels solid. Refuses
     /// (leaving the door open) when an actor stands on a panel — doors never crush.
     fn close_door(&mut self, door: DoorId, occupied: impl Fn(Cell) -> bool) -> DoorAction {
