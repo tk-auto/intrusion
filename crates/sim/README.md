@@ -41,7 +41,7 @@ it is a deliberate, visible break.
 ### Run row
 
 ```json
-{"seed":17,"outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"alert_peak":null}
+{"seed":17,"outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"takedown":1,"drag":1},"alert_peak":null}
 ```
 
 | Field | Meaning |
@@ -52,19 +52,37 @@ it is a deliberate, visible break.
 | `detections` | fresh detections (`Event::Detected`): how often stealth broke — a held chase counts once, not once per turn |
 | `takedowns` | takedowns landed (`Event::TakenDown`) |
 | `bodies_found` | bodies found by guards (`Event::BodyFound`) |
+| `usage` | the **ability-usage histogram** (§13.2): a count per verb spent this run. Keys, in fixed order: `wait`, `run`, `camouflage`, `decoy`, `dephase`, `takedown`, `drag`. Counted from core events — a *refused* activation costs no turn and emits none, so it never counts (§4.4); `wait` is the one verb with no event of its own and is counted from its spent turn. `Move` is not counted (it is the default nothing-else verb). The counts sum to `≤ turns` |
 | `alert_peak` | **always `null` for now**: the facility-wide alert is the radio net's value (#107), which does not exist yet — `null` says "not measured", where a `0` would lie that it was quiet |
 
 ### Summary row
 
 ```json
-{"summary":{"runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"alert_peak":null}}
+{"summary":{"runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"takedown":45,"drag":40},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"takedown":0.0043,"drag":0.0038},"diversity":0.1837,"alert_peak":null}}
 ```
 
 `win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the
-*winning* runs only and `null` when nothing won. The remaining fields are
-batch totals of the per-run metrics. The §13.2 ability-usage histogram and
-strategy-diversity metrics are a companion ticket (#137) and will extend this
-schema when they land.
+*winning* runs only and `null` when nothing won. `detections`/`takedowns`/`bodies_found`
+are batch totals of the per-run metrics.
+
+The §13.2 signature metrics (#137):
+
+- `usage` — the ability-usage histogram summed across every run (same keys and
+  order as the run row). A dominant ability (or a dead one) is legible here.
+- `usage_share` — each verb's **share of turns**: its batch count over the
+  batch's total spent turns (the "used 94% of turns is a scream" number). Shares
+  need not sum to 1, since a `Move` turn is counted for no verb.
+- `diversity` — the batch **strategy-diversity** score `[START]`: the mean
+  pairwise Euclidean distance between the runs' L1-normalised usage signatures.
+  `0` when every run played identically, larger as strategies spread — win rate
+  says whether the game is *hard*, diversity whether it is *interesting* (§13.2).
+
+Both the signature (normalised usage vector) and the diversity distance are
+`[START]` definitions, named in `src/usage.rs` so they are easy to swap.
+
+**Flag, never judge (§13.4):** these are numbers, not verdicts. A histogram spike
+or a near-zero diversity is a seed to *go play*, not a ruling that the game is
+broken — the playtest skill (#140) owns that framing.
 
 ## Determinism
 

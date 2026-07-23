@@ -8,10 +8,11 @@
 //! grid.
 
 use intrusion_core::{
-    generate_level, Direction, Event, GenError, LevelConfig, Outcome, Rng, State,
+    generate_level, Direction, Event, GenError, Input, LevelConfig, Outcome, Rng, State,
 };
 
 use crate::policy::PlayerPolicy;
+use crate::usage::{UsageHistogram, Verb};
 
 /// The default cap on **issued inputs** per run before it is ruled a timeout.
 ///
@@ -50,12 +51,12 @@ impl RunOutcome {
     }
 }
 
-/// One run's metrics — the §13.2 starting table, counted from core events.
+/// One run's metrics — the §13.2 table, counted from core events: the starting
+/// set (#135) plus the ability-usage histogram (#137).
 ///
-/// The ability-usage histogram and strategy diversity are the companion
-/// metrics ticket; the facility-wide alert peak needs the radio net (#107)
-/// before it exists to measure, so it is not a field yet — the JSON row emits
-/// it as `null` (see `crates/sim/README.md`) rather than faking a number.
+/// The facility-wide alert peak needs the radio net (#107) before it exists to
+/// measure, so it is not a field yet — the JSON row emits it as `null` (see
+/// `crates/sim/README.md`) rather than faking a number.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RunRecord {
     /// The seed the run booted from — with the policy's script, the whole replay (§12.4).
@@ -71,6 +72,11 @@ pub struct RunRecord {
     pub takedowns: u32,
     /// Bodies found by guards ([`Event::BodyFound`]) — whether §7.3's clock has teeth.
     pub bodies_found: u32,
+    /// The §13.2 ability-usage histogram (#137): a count per verb — the four
+    /// activated abilities plus Wait/Takedown/Drag — spent this run. Counted from
+    /// core events (a refused activation emits none, so it never counts, §4.4);
+    /// Wait, alone among verbs, has no event and is recorded from its spent turn.
+    pub usage: UsageHistogram,
 }
 
 /// Run one seeded game under `policy`, to a win, a loss, or `input_cap` issued
@@ -99,19 +105,37 @@ pub fn run_one(
         detections: 0,
         takedowns: 0,
         bodies_found: 0,
+        usage: UsageHistogram::new(),
     };
     for _ in 0..input_cap {
         let input = policy.decide(&state);
+        let turns_before = state.turn();
         for event in state.step(input) {
             match event {
                 Event::Detected { .. } => record.detections += 1,
-                Event::TakenDown { .. } => record.takedowns += 1,
+                Event::TakenDown { .. } => {
+                    record.takedowns += 1;
+                    record.usage.record(Verb::Takedown);
+                }
                 Event::BodyFound { .. } => record.bodies_found += 1,
+                // Ability usage counted from the activation event (#137): a refused
+                // activation emits none, so it never counts (§4.4). The grab starts
+                // the drag; its half-speed steps that follow are Moves.
+                Event::AbilityActivated { ability } => {
+                    record.usage.record(Verb::of_ability(ability));
+                }
+                Event::BodyGrabbed { .. } => record.usage.record(Verb::Drag),
                 Event::Won => record.outcome = RunOutcome::Win,
                 Event::Captured { .. } => record.outcome = RunOutcome::Capture,
                 Event::Entombed { .. } => record.outcome = RunOutcome::Entombed,
                 _ => {}
             }
+        }
+        // Wait is the one verb with no event of its own — it spends the turn in
+        // silence (§8.3). A Wait can never be refused, so a spent turn is the whole
+        // truth an event would carry: record it when the turn actually advanced.
+        if matches!(input, Input::Wait) && state.turn() > turns_before {
+            record.usage.record(Verb::Wait);
         }
         if state.outcome() != Outcome::Playing {
             break;
@@ -175,6 +199,80 @@ mod tests {
         let record = run_one(3, &mut policy, cap).expect("generates");
         assert_eq!(record.outcome, RunOutcome::Timeout);
         assert_eq!(record.turns, 0, "free actions never spend a turn");
+    }
+
+    /// #137, §13.2: a scripted policy with known inputs yields the **exact**
+    /// expected histogram, counted from core events. An all-Wait run spends every
+    /// one of its turns waiting, so `wait == turns` and every other verb is 0 — a
+    /// seed-independent invariant, since a Wait always spends the turn and can
+    /// never be refused.
+    #[test]
+    fn an_all_wait_run_counts_a_wait_per_turn() {
+        for seed in [0, 7, 42] {
+            let cap = 60;
+            let record = run_one(
+                seed,
+                &mut Scripted::new(vec![Input::Wait; cap as usize]),
+                cap,
+            )
+            .expect("generates");
+            assert_eq!(
+                record.usage.count(Verb::Wait),
+                record.turns,
+                "seed {seed}: every spent turn was a Wait",
+            );
+            for verb in Verb::ALL {
+                if verb != Verb::Wait {
+                    assert_eq!(record.usage.count(verb), 0, "seed {seed}: {verb:?} unused");
+                }
+            }
+        }
+    }
+
+    /// #137: an ability activation is counted from its event, and exactly once. The
+    /// first input activates Dephase — which happens in the player phase, before any
+    /// guard can act — so `dephase == 1` on every seed, and a *refused* re-activation
+    /// (Dephase is now cooling) counts nothing (§4.4). Wait fills the rest.
+    #[test]
+    fn an_activation_is_counted_once_from_its_event() {
+        for seed in [0, 7, 42] {
+            let cap = 30;
+            let mut script = vec![
+                Input::Activate(AbilityId::Dephase),
+                Input::Activate(AbilityId::Dephase), // refused: cooling — must not count
+            ];
+            script.resize(cap as usize, Input::Wait);
+            let record = run_one(seed, &mut Scripted::new(script), cap).expect("generates");
+            assert_eq!(
+                record.usage.count(Verb::Dephase),
+                1,
+                "seed {seed}: one activation, one count — the refused retry is free",
+            );
+            assert_eq!(
+                record.usage.count(Verb::Run),
+                0,
+                "seed {seed}: Run never fired"
+            );
+        }
+    }
+
+    /// #137 determinism (§12.4): the same batch config produces byte-identical
+    /// metrics, the usage histogram and diversity included.
+    #[test]
+    fn the_usage_metrics_are_deterministic() {
+        let script = vec![
+            Input::Activate(AbilityId::Run),
+            Input::Step(Direction::North),
+            Input::Wait,
+            Input::Step(Direction::East),
+        ];
+        let batch = |()| {
+            crate::Summary::of(
+                &run_batch(0..5, 80, |_| Scripted::new(script.clone())).expect("generates"),
+            )
+            .to_json_line()
+        };
+        assert_eq!(batch(()), batch(()), "same config → byte-identical metrics");
     }
 
     /// An idle run (the empty script: wait to the cap) terminates and reports
