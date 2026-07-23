@@ -1,0 +1,39 @@
+{
+  "_note": "Baseline metrics snapshot the playtest skill diffs against (§13.2, #140). It is a snapshot of the --bot batch below on the commit named. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself), refresh it with the command below and commit the new snapshot in the same PR. A stale baseline compared silently is the anti-pattern this file exists to avoid.",
+  "captured_at_commit": "70c0cad",
+  "command": "cargo run --release -p intrusion-sim -- --bot --runs 100 --seed 0 --cap 1000",
+  "config": { "policy": "bot", "runs": 100, "seed": 0, "cap": 1000 },
+  "summary": {
+    "runs": 100,
+    "wins": 2,
+    "captures": 96,
+    "entombed": 0,
+    "timeouts": 2,
+    "win_rate": 0.0200,
+    "turns_to_win_mean": 455.5,
+    "turns_to_win_median": 455.5,
+    "detections": 754,
+    "takedowns": 28,
+    "bodies_found": 20,
+    "usage": {
+      "wait": 4197,
+      "run": 285,
+      "camouflage": 46,
+      "decoy": 0,
+      "dephase": 0,
+      "takedown": 28,
+      "drag": 0
+    },
+    "usage_share": {
+      "wait": 0.2483,
+      "run": 0.0169,
+      "camouflage": 0.0027,
+      "decoy": 0.0000,
+      "dephase": 0.0000,
+      "takedown": 0.0017,
+      "drag": 0.0000
+    },
+    "diversity": 0.4425,
+    "alert_peak": null
+  }
+}
