@@ -11,9 +11,10 @@
 //!
 //! The harness reports **honest numbers, never verdicts** (§13.4): it is a
 //! smoke detector, not a judge. The scripted policy ([`Scripted`]) replays a
-//! fixed input list; the per-run metrics include the §13.2 ability-usage
-//! histogram and the batch strategy-diversity score ([`UsageHistogram`],
-//! [`diversity`]). The bot policy is its own ticket.
+//! fixed input list — all determinism testing needs — while the baseline stealth
+//! bot ([`StealthBot`]) actually *plays*, which is what turns the per-run metrics
+//! (the §13.2 ability-usage histogram and the batch strategy-diversity score,
+//! [`UsageHistogram`], [`diversity`]) from replay checksums into balance signals.
 //!
 //! The output schema is documented in `crates/sim/README.md` — the playtest
 //! skill parses it, so changes there are breaking changes.
@@ -22,11 +23,13 @@
 
 #![forbid(unsafe_code)]
 
+mod bot;
 mod harness;
 mod policy;
 mod report;
 mod usage;
 
+pub use bot::StealthBot;
 pub use harness::{run_batch, run_one, RunOutcome, RunRecord, DEFAULT_INPUT_CAP};
 pub use policy::{PlayerPolicy, Scripted};
 pub use report::Summary;
