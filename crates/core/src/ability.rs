@@ -207,12 +207,13 @@ impl AbilityId {
 
 /// How an ability picks what it acts on (§8.4).
 ///
-/// **A stub for the targeting ticket (#100).** It is stored as declared data and
-/// nothing here resolves it to a concrete target — the cursor, validation, and the
-/// self/direction/tile resolution are §8.4's own ticket. Range, where an ability
-/// has one, rides in [`TargetingMode::Tile`] as the §6.1 **box** radius, so "within
-/// range" is the single box notion sight already uses (§6.1) rather than a second
-/// field that could disagree.
+/// This is the ability's *declared* targeting, stored as data. Resolving it to a
+/// concrete target — the cursor, validation, and the self/direction/tile resolution
+/// — is the [`Targeting`](crate::Targeting) session's job (shipped in #149), driven
+/// from [`State::begin_ability_targeting`](crate::State::begin_ability_targeting).
+/// Range, where an ability has one, rides in [`TargetingMode::Tile`] as the §6.1
+/// **box** radius, so "within range" is the single box notion sight already uses
+/// (§6.1) rather than a second field that could disagree.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TargetingMode {
     /// The player's own cell — Run, Camouflage, Dephase (§8.3).
@@ -220,7 +221,8 @@ pub enum TargetingMode {
     /// A cardinal from the player, the cell they face — Decoy (§8.3).
     Direction,
     /// A cell within a §6.1 box of `range`. No v1 ability uses it; it is here so the
-    /// vocabulary is complete before #100 fills in the cursor that resolves it.
+    /// vocabulary is complete — the cursor that resolves it lives in the
+    /// [`Targeting`](crate::Targeting) session.
     Tile { range: u32 },
 }
 
