@@ -1007,6 +1007,7 @@ fail**. Guard the minimum.
 | **Door panel, open** | (blank) | No | No | No |
 | **Hideout, empty** | `}` | **Bump** | No | Yes |
 | **Hideout, occupied** | `}` **(you)** | Yes | No | Yes |
+| **Duct entry** | `=` | Yes (**player: Bump**) | Yes | Yes |
 | **Partial cover (table)** | `π` | Yes | **No** | Yes |
 | **Console** | `$` | Yes | No | No |
 | **Exit** | `E` | Yes | No | No |
@@ -1190,6 +1191,73 @@ Also worth fixing, all real:
   100 attempts and then threw. Neither is acceptable: **fail loudly or retry the
   seed.**
 
+### 10.7 Ducts — player-only crawlspace shortcuts
+
+**[START]** A **duct** is a crawlspace threaded through the walls that only the
+player can use: a shortcut between two parts of the facility, paid for not in time
+but in **degraded information**. It extends §10 without touching any existing
+contract — a guard experiences a duct as ordinary wall.
+
+**Shape.** A duct is a path of cells with an **entry at each end, drawn `=`**
+(`DuctEntry`, §10.3/§11.3). Each entry is **recessed like a cupboard** (§10.1.6):
+exactly one floor **mouth** and solid backing on the other three sides, so a duct is
+entered, exited and peeked from that one side. The **interior** cells between the
+entries stay ordinary **wall** — a duct is *routed through wall cells*, and the only
+record that those walls are also a crawl route is the duct list on the layout.
+
+**The entry is wall-like to guards.** A `DuctEntry` blocks movement, sight and
+pathing exactly as a wall does. So a guard never sees *through* an entry, never
+routes *through* a duct, and never *enters* one — and converting a wall into an
+entry changes neither reachability (§10.6) nor a sightline (§10.1a): the crawl route
+is the player's alone. This is what lets the duct pass run last, after the §10.6
+gate's inputs are fixed, and assert only its own geometry.
+
+**Interaction (§4.3, the one verb).**
+
+- **Enter** — from the mouth, **bump** the entry to climb in (a *decision*, like the
+  cupboard; the turn is spent). A **dragging** player is refused: a body cannot
+  follow into the walls — let it go first.
+- **Crawl** — inside, a step moves one cell along the path (one turn, §4.4). You are
+  **confined** to the path: the only way off it is stepping from an entry onto its
+  mouth. A cell that merely touches floor mid-duct is never an exit.
+- **Exit** — crawl to the far entry and step out its mouth: an ordinary move onto the
+  floor.
+
+**Concealment.** Inside a duct the player is concealed from every guard (no cone
+detects a crawler) and **contact-safe**: a guard on the mouth can never step in, so a
+duct is an escape a pursuer cannot follow — the cupboard's payoff, mobile.
+
+**The cost is information (§2.3), and it is load-bearing.** Inside, normal vision is
+off — you perceive only your **memory** of the building (§11.5a) and a **shortened
+guard sense** (`DUCT_SENSE_RANGE`, below), with **one** live window: on an **entry**
+cell the hideout-mouth **auto-peek** (§6.1) casts out the mouth, so you read the room
+before you climb out. **Mid-duct there is no live vision at all**, and **Wait does not
+widen the sense** the way it does on open floor (§9.1) — a crawlspace is exactly where
+you should *not* be able to take stock of the whole area. The counterplay to the
+degraded view is the deliberate pause on the entry cell; crawling straight out
+without peeking is the risk you chose. *(The presentation of all this — the memory
+view, the live peek window, the sensed dots through the reduced radius — is the
+companion render ticket #134; §10.7 owns the model.)*
+
+**Fog (§11.5a).** An **entry** (`=`) is **geometry**: visible from turn one like a
+door, so you can plan a shortcut around it. The **interior path** is **contents**:
+hidden (it reads as plain wall) until crawled, then remembered.
+
+**Generation.** Place a small number of ducts, each connecting two regions **far
+apart on the region graph** (a duct that shortcuts nothing is noise), routed through
+wall cells, deterministic from the seed (§12.4). A candidate is kept only when
+crawling it saves at least `DUCT_MIN_PAYOFF` steps over walking between its mouths.
+The pass asserts the per-entry one-mouth geometry; the §10.6 guarantees hold
+untouched, since an entry is wall-like.
+
+`[START]` knobs (all pinned by tests): **`DUCT_RUNS_PER_LEVEL`** = 2 (a spice, not the
+main route — base solvability never depends on a duct); duct length in
+**`DUCT_MIN_CELLS`** = 4 .. **`DUCT_MAX_CELLS`** = 22 cells; **`DUCT_MIN_PAYOFF`** = 8
+steps saved; and the reduced in-duct sense **`DUCT_SENSE_RANGE`** = 5 (half the §9.1
+floor range, and Wait does not extend it). If playtest shows ducts strictly dominant,
+**add cost** (a longer minimum, a smaller sense, a slower crawl) — don't remove the
+feature; the cost is information and it is meant to be tuned, not deleted.
+
 ---
 
 ## 11. Presentation
@@ -1265,6 +1333,7 @@ foreground and as a darkened background variant.
 | `×` | Door hinge | System |
 | `}` | Hideout (empty) | System |
 | `}` | Hideout (occupied) | **Owned** — you are in it, so it recolours to Owned (blue) like the rest of "things you made"; the colour shift is how you see which cell hides you (§10.3) |
+| `=` | Duct entry | System — a player-only crawlspace mouth (§10.7); wall-like to guards, geometry-visible from turn one |
 | `π` | Partial cover (table) | System |
 | `π` | Partial cover, concealing you | **Owned** — the same convention as the occupied cupboard: while you are crouched behind it, the covering run recolours to Owned, every table of it, so the blue `@`-`π` pair reads as one hidden unit as long as the furniture (§10.3) |
 | `$` | Intel | Interest |

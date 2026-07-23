@@ -45,6 +45,10 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::Bumped { .. } => ("blocked".to_string(), 0),
         Event::Crouched { .. } => ("you duck behind the table".to_string(), 0),
         Event::EnteredHideout { .. } => ("you slip into the cupboard".to_string(), 0),
+        Event::EnteredDuct { .. } => ("you climb into the duct".to_string(), 0),
+        // A crawl is silent like a plain step — narrating every cell would bury the
+        // near line (§11.7).
+        Event::DuctCrawled { .. } => return None,
         Event::DoorOpened { .. } => ("the door opens".to_string(), 0),
         Event::DoorClosed { .. } => ("a door swings shut".to_string(), 0),
         Event::IntelTaken { remaining: 0 } => ("intel in hand — the exit is open".to_string(), 20),

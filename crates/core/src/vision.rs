@@ -240,6 +240,37 @@ pub fn field_of_view_with_peek(
     fov
 }
 
+/// The player's field of view while **inside a duct** (§10.7): the occupied crawl
+/// cell, plus — when it is an **entry** — the live **mouth peek**. `mouth_out` is the
+/// direction out through the mouth (`Some` only on an entry cell, whose recessed
+/// geometry has exactly one floor neighbour); mid-duct it is `None` and the result is
+/// the lone occupied cell — memory only, no live window (§10.7's information cost).
+///
+/// The peek is a [`field_of_view_with_peek`] cast **from the mouth** rather than from
+/// the crawl cell: a duct entry is opaque (wall-like, §10.7), so the live window is
+/// anchored one step out, on the floor, exactly as a cupboard's ~180° mouth peek reads
+/// the corridor (§6.1). It stays one-sided — a guard's own plain cone cannot see the
+/// concealed crawler back.
+pub(crate) fn duct_field_of_view(
+    facility: &Facility,
+    occupied: Cell,
+    mouth_out: Option<Direction>,
+    arc_width: u8,
+    range: u32,
+) -> VisibleSet {
+    let mut fov = VisibleSet::new(facility.width(), facility.height());
+    fov.mark(occupied);
+    if let Some(out) = mouth_out {
+        if let Some(mouth) = occupied.step(out) {
+            let window = field_of_view_with_peek(facility, mouth, out, arc_width, range);
+            for cell in window.cells() {
+                fov.mark(cell);
+            }
+        }
+    }
+    fov
+}
+
 /// A guard's sight for **detection**: the §6 cone with the guard **rear blind
 /// spot** (§155) carved out. The three cells at the guard's back — the two rear
 /// diagonals (tier 4) and directly behind (tier 5) — are dropped from the visible

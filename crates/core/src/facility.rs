@@ -56,6 +56,15 @@ pub enum Terrain {
     /// line of sight crosses the table ([`provides_cover`](Self::provides_cover);
     /// the crouch itself lives on the turn loop). Renders `π` (§10.3).
     PartialCover,
+    /// A duct entry: the mouth-bearing end of a player-only crawlspace threaded
+    /// through the walls (§10.7). Wall-like to everyone but the player — solid,
+    /// opaque, and pathing-blocking, so guards treat it exactly as a wall: they
+    /// never see through it, path through it, or enter it. The player **bumps** it
+    /// from its single floor mouth to climb in (§4.3) and crawls the duct's path
+    /// (recorded on the [`Layout`](crate::Layout), whose interior cells stay
+    /// [`Wall`](Self::Wall)). Recessed like a cupboard (§10.1.6): exactly one floor
+    /// neighbour, solid backing on the rest. Renders `=` (§10.3, §11.3).
+    DuctEntry,
     /// A console — the intel terminal you bump to use (§4.3). Solid (you cannot
     /// share its cell) but transparent to sight and pathing. Renders `$`
     /// (§10.3, §11.3).
@@ -76,6 +85,7 @@ impl Terrain {
             Terrain::DoorPanelClosed => '+',
             Terrain::Hideout => '}',
             Terrain::PartialCover => 'π',
+            Terrain::DuctEntry => '=',
             Terrain::Console => '$',
             Terrain::Exit => 'E',
         }
@@ -94,7 +104,8 @@ impl Terrain {
             Terrain::DoorHinge
             | Terrain::DoorPanelClosed
             | Terrain::Hideout
-            | Terrain::PartialCover => Category::System,
+            | Terrain::PartialCover
+            | Terrain::DuctEntry => Category::System,
             Terrain::Console | Terrain::Exit => Category::Interest,
         }
     }
@@ -109,6 +120,7 @@ impl Terrain {
             | Terrain::DoorHinge
             | Terrain::DoorPanelClosed
             | Terrain::PartialCover
+            | Terrain::DuctEntry
             | Terrain::Console
             | Terrain::Exit => 1.0,
         }
@@ -132,7 +144,11 @@ impl Terrain {
             | Terrain::PartialCover
             | Terrain::Console
             | Terrain::Exit => false,
-            Terrain::Wall | Terrain::DoorHinge | Terrain::DoorPanelClosed => true,
+            // A duct entry is wall-like to every viewer: a guard never sees
+            // *through* it or into the crawlspace behind it (§10.7).
+            Terrain::Wall | Terrain::DoorHinge | Terrain::DoorPanelClosed | Terrain::DuctEntry => {
+                true
+            }
         }
     }
 
@@ -154,7 +170,14 @@ impl Terrain {
             // A hideout blocks pathing too: guard routes flow around it while the
             // player ducks in — the asymmetry that makes it a hiding place (§10.1).
             // A table is solid furniture: patrols route around it like a wall.
-            Terrain::Wall | Terrain::DoorHinge | Terrain::Hideout | Terrain::PartialCover => true,
+            // A duct entry blocks pathing like a wall: a guard route never runs
+            // through it, and it is never pathed *into* — a duct is player-only
+            // (§10.7).
+            Terrain::Wall
+            | Terrain::DoorHinge
+            | Terrain::Hideout
+            | Terrain::PartialCover
+            | Terrain::DuctEntry => true,
             Terrain::Floor
             | Terrain::DoorPanelClosed
             | Terrain::DoorPanelOpen
@@ -437,11 +460,36 @@ mod tests {
             Terrain::DoorPanelClosed,
             Terrain::DoorPanelOpen,
             Terrain::Hideout,
+            Terrain::DuctEntry,
             Terrain::Console,
             Terrain::Exit,
         ] {
             assert!(!other.provides_cover(), "{other:?} must not provide cover");
         }
+    }
+
+    /// The §10.3/§10.7 duct-entry row: `=`, System furniture, and **wall-like to
+    /// every viewer** — solid (fill 1.0), opaque, and pathing-blocking — so a guard
+    /// treats it exactly as a wall. The player-only crawl that makes it special is
+    /// a turn-loop interaction (§10.7), not a terrain property; the grid just knows
+    /// it is a solid, opaque, unpathable cell that happens to render `=`.
+    #[test]
+    fn duct_entry_matches_10_7() {
+        let d = Terrain::DuctEntry;
+        assert_eq!(d.glyph(), '=');
+        assert_eq!(d.category(), Category::System);
+        assert_eq!(d.fill(), 1.0);
+        assert!(d.blocks_movement());
+        assert!(d.blocks_sight(), "a guard never sees through a duct entry");
+        assert!(d.blocks_pathing(), "a guard never routes through a duct");
+        assert!(!d.provides_cover());
+        // Every guard-facing property matches a plain wall: converting Wall →
+        // DuctEntry cannot change reachability or a sightline (§10.7).
+        let w = Terrain::Wall;
+        assert_eq!(d.fill(), w.fill());
+        assert_eq!(d.blocks_movement(), w.blocks_movement());
+        assert_eq!(d.blocks_sight(), w.blocks_sight());
+        assert_eq!(d.blocks_pathing(), w.blocks_pathing());
     }
 
     /// §4.3 occupancy through the grid: a solid mover is admitted onto floor and an

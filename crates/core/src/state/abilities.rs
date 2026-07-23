@@ -15,7 +15,12 @@ impl State {
     /// is lethal ([`Event::Entombed`]), and `false` refuses an early toggle-off
     /// (there is nowhere to solidify).
     pub(super) fn can_rematerialize(&self) -> bool {
-        self.layout.facility().can_enter(self.player, ACTOR_FILL)
+        // A duct cell is a legal place to be (§10.7): the player already stands there
+        // as a solid body, so Dephase expiring inside a duct is *not* the lethal
+        // in-wall case — solidifying back into a crawlspace is fine, and the crawl
+        // resumes. Terrain `can_enter` rejects it (a duct cell is solid), so it is
+        // admitted here explicitly.
+        (self.layout.facility().can_enter(self.player, ACTOR_FILL) || self.in_duct())
             && self.guard_at(self.player).is_none()
             && self.body_at(self.player).is_none()
     }
