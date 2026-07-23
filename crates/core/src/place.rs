@@ -30,6 +30,7 @@ use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
 use crate::guard::{Guard, GUARD_INITIAL_FACING};
 use crate::path;
+use crate::radio::RadioClock;
 use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
 use crate::vision::{field_of_view, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
@@ -80,6 +81,11 @@ pub struct Placement {
     exit: Cell,
     intel: Vec<Cell>,
     guards: Vec<Cell>,
+    /// Each guard's radio ping cadence (§7.3), parallel to `guards` and drawn from
+    /// the run seed in [`place`] so the whole ping schedule is deterministic
+    /// (§12.4). Carried here rather than derived in [`guards`](Self::guards) so it
+    /// comes off the real seed stream, not a fresh source (§7.3/§12.4 anti-pattern).
+    guard_clocks: Vec<RadioClock>,
 }
 
 impl Placement {
@@ -118,8 +124,11 @@ impl Placement {
     pub fn guards(&self, layout: &Layout) -> Vec<Guard> {
         self.guard_cells()
             .iter()
-            .map(|&cell| {
-                Guard::patrolling(cell).with_beat(beat_cells(layout.regions(), cell, BEAT_REGIONS))
+            .zip(&self.guard_clocks)
+            .map(|(&cell, &clock)| {
+                Guard::patrolling(cell)
+                    .with_beat(beat_cells(layout.regions(), cell, BEAT_REGIONS))
+                    .with_radio_clock(clock)
             })
             .collect()
     }
@@ -250,18 +259,31 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         return None;
     }
 
-    let placement = Placement {
-        player,
-        exit,
-        intel,
-        guards,
-    };
     // The post-placement solvability assertion: on the grid as it will actually
     // be played (consoles and exit solid), the player still reaches every
     // objective and the way out. §10.6's "assert it, don't argue it", applied
     // once more after the last pieces land. The one-usable preference (§11.4) is
     // best-effort, not asserted — the placements above honour it where they can.
-    solvable(facility, &placement).then_some(placement)
+    // Solvability is geometric — it does not read the radio clocks — so check it
+    // on a clockless placement first, and only draw the clocks once it passes.
+    let mut placement = Placement {
+        player,
+        exit,
+        intel,
+        guards,
+        guard_clocks: Vec::new(),
+    };
+    if !solvable(facility, &placement) {
+        return None;
+    }
+    // Each guard's radio ping cadence (§7.3), drawn once from the run stream —
+    // strictly *after* every rejection point, and after all geometry is fixed, so
+    // the level a seed produces is byte-identical to before and only an accepted
+    // placement consumes these draws (§12.4 determinism). One jittered period per
+    // guard: the clock a takedown will later start.
+    let guard_count = placement.guards.len();
+    placement.guard_clocks = (0..guard_count).map(|_| RadioClock::draw(rng)).collect();
+    Some(placement)
 }
 
 /// Whether placing a usable (a console, the exit) at `cell` would give some
@@ -543,6 +565,7 @@ mod tests {
             exit: Cell::new(8, 8),
             intel: vec![intel],
             guards: Vec::new(),
+            guard_clocks: Vec::new(),
         };
 
         let mut sealed = Facility::walled_box(10, 10);

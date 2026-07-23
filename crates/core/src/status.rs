@@ -63,6 +63,13 @@ pub fn message_for(event: Event) -> Option<Message> {
         // The loudest event in the game (§7.2): a hunting-threat message, on the
         // §11.7 threat ladder above a glimpse but below being caught.
         Event::BodyFound { .. } => ("a body has been found".to_string(), 4),
+        // A guard stopped answering the radio (§7.3): control is dispatching a
+        // responder. A hunting-threat message — above a fresh glimpse, below a
+        // found body: a silence is suspicion, a body is proof.
+        Event::RadioSilence { .. } => ("a guard has gone silent".to_string(), 3),
+        // The facility alert stepped (§7.3): the loudest radio event, a
+        // facility-wide escalation — above a found body, below being caught.
+        Event::AlertRaised { level } => (format!("the facility is on alert — level {level}"), 5),
         // Handling the body (§8.3): quiet self-narration, like the crouch. The
         // held state itself lives on the ambient floor, not in a message.
         Event::BodyGrabbed { .. } => ("you take hold of the body".to_string(), 0),
@@ -98,11 +105,13 @@ pub fn near_line(state: &State) -> Message {
 }
 
 /// The ambient floor (§11.4): the quiet status the near line rests on between
-/// messages, so it never sits empty. Concealment first — while hidden or
-/// crouched, *that* is the fact shaping the player's next decision (and the
-/// Owned band matches the recoloured cupboard or table, §10.3) — then the
-/// objective tally. Alert level and active-ability turns join as those systems
-/// land.
+/// messages, so it never sits empty. Concealment first — while hidden, crouched
+/// or dragging, *that* is the fact shaping the player's next decision (and the
+/// Owned band matches the recoloured cupboard or table, §10.3). Otherwise, when
+/// the facility is on alert (§7.3), the standing alert level — a raised alert is
+/// the thing reshaping every choice out in the open, and this is where it stays
+/// *visible* rather than written-but-unseen (§2.3). Failing all that, the
+/// objective tally.
 fn ambient(state: &State) -> Message {
     let (text, category) = if state.hidden() {
         (
@@ -117,6 +126,14 @@ fn ambient(state: &State) -> Message {
         (
             "dragging the body — half speed".to_string(),
             Category::Owned,
+        )
+    } else if state.alert() > 0 {
+        // The alert indicator (§7.3/§11.4): the escalation the radio net wrote,
+        // read here whenever no louder message is live — a Warning-band fact, not
+        // a threat that has you (Danger).
+        (
+            format!("facility alert — level {}", state.alert()),
+            Category::Warning,
         )
     } else {
         match state.objectives_remaining() {
@@ -283,6 +300,65 @@ mod tests {
         assert_eq!(msg.text, "a guard has seen you");
         assert_eq!(msg.category, Category::Danger);
         assert_eq!(msg.priority, 2);
+    }
+
+    /// §7.3/§11.7: the radio events read as Warning-band threat messages — a
+    /// silence (a guard stopped answering) below a found body, an alert step (the
+    /// facility-wide escalation) above it, both below being caught.
+    #[test]
+    fn the_radio_events_read_on_the_threat_ladder() {
+        let silence = message_for(Event::RadioSilence {
+            post: Cell::new(3, 3),
+        })
+        .expect("a radio silence is never silent");
+        assert_eq!(silence.text, "a guard has gone silent");
+        assert_eq!(silence.category, Category::Warning);
+        assert_eq!(silence.priority, 3);
+
+        let alert = message_for(Event::AlertRaised { level: 2 }).expect("an alert step speaks");
+        assert_eq!(alert.text, "the facility is on alert — level 2");
+        assert_eq!(alert.category, Category::Warning);
+        assert_eq!(alert.priority, 5);
+    }
+
+    /// §7.3/§11.4: once the radio has stepped the facility alert, the value is
+    /// *readable* — with no louder message live, the ambient floor surfaces it in
+    /// the Warning band, never written-but-invisible (§2.3).
+    #[test]
+    fn ambient_surfaces_the_facility_alert() {
+        use crate::radio::RadioClock;
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 5), Terrain::Hideout); // conceal the takedown
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            // A lone victim on a 2-turn clock: no responder needed for the alert
+            // to step (both missed pings still land).
+            vec![Guard::stationary(Cell::new(5, 4)).with_radio_clock(RadioClock::from_period(2))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Step(Direction::North)); // take the victim down (concealed)
+        s.step(Input::Step(Direction::South)); // step out of the cupboard: no longer hidden
+        for _ in 0..6 {
+            s.step(Input::Wait); // wait out both pings; the last waits are quiet
+        }
+        assert!(s.alert() >= 1, "the second missed ping stepped the alert");
+        assert!(
+            !s.hidden(),
+            "out of the cupboard, so the alert is the ambient fact"
+        );
+
+        // No message is live after the quiet waits: the near line rests on the alert.
+        let line = near_line(&s);
+        assert_eq!(line.text, format!("facility alert — level {}", s.alert()));
+        assert_eq!(line.category, Category::Warning);
+        assert_eq!(
+            line.priority,
+            i32::MIN,
+            "it is the ambient floor, not a message"
+        );
     }
 
     /// Once the run ends the loop is inert (§4.5) and the final message stays —
