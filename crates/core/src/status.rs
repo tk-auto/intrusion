@@ -1,13 +1,14 @@
 //! The near line's message system (§11.7) — what the bottom-but-one row says.
 //!
-//! The loop reports facts as [`Event`]s; this module turns them into the one
-//! message the **near line** (§11.4) shows: each event becomes at most one
+//! The loop reports facts as [`Event`]s; this module turns them into the
+//! messages the **near line** (§11.4) shows: each event becomes at most one
 //! [`Message`] carrying its §11.2 category and its rung on the §11.7 priority
-//! ladder, and [`near_line`] picks the highest-priority message from the *last*
-//! step's events — messages clear on the player's next action (§11.7), a status
-//! line, not a scrollback. When no message is live the line does not sit empty:
-//! it falls back to [`ambient`] status — the quiet floor below every message —
-//! so the row always says something true about now.
+//! ladder. [`live_messages`] is the whole set from the *last* step, loudest
+//! first — what the near line deploys when more than one is live (§11.7) — and
+//! [`near_line`] speaks only its loudest. Messages clear on the player's next
+//! action (§11.7), a status line, not a scrollback. When none is live the line
+//! does not sit empty: it falls back to [`ambient`] status — the quiet floor
+//! below every message — so the row always says something true about now.
 //!
 //! The **usable line** below it is deliberately *not* here: it is no message at
 //! all but a pure derived view of adjacency
@@ -90,17 +91,37 @@ pub fn message_for(event: Event) -> Option<Message> {
     })
 }
 
-/// What the near line shows right now (§11.4/§11.7): the highest-priority
-/// message from the player's last action — ties go to the later event, matching
-/// resolution order — or the [`ambient`] floor when the last action said
-/// nothing. Once the run ends the loop goes inert and the final message
-/// (the win, or `caught`) simply stays.
-pub fn near_line(state: &State) -> Message {
-    state
+/// Every live message from the player's last action (§11.7), **loudest first** —
+/// the full set the deployable near line lists, of which [`near_line`] speaks
+/// only the first. Empty when the last action said nothing: the ambient floor is
+/// not a message (§11.4) and never joins the list. Ties resolve as the near line
+/// does — the later event leads — so the first entry is exactly the band the near
+/// line paints, and the two can never disagree.
+pub fn live_messages(state: &State) -> Vec<Message> {
+    let mut messages: Vec<Message> = state
         .last_events()
         .iter()
         .filter_map(|&e| message_for(e))
-        .max_by_key(|m| m.priority)
+        .collect();
+    // The near line shows the *last* of the top-priority events (`max_by_key`
+    // keeps the later of equal keys). Lead the list with that same message:
+    // reverse to later-first, then a **stable** descending sort by priority keeps
+    // later-first order within each rung.
+    messages.reverse();
+    messages.sort_by_key(|m| std::cmp::Reverse(m.priority));
+    messages
+}
+
+/// What the near line shows right now (§11.4/§11.7): the highest-priority
+/// message from the player's last action — ties go to the later event, matching
+/// resolution order — or the [`ambient`] floor when the last action said
+/// nothing. The loudest of [`live_messages`], so the band and the deployed list
+/// never disagree. Once the run ends the loop goes inert and the final message
+/// (the win, or `caught`) simply stays.
+pub fn near_line(state: &State) -> Message {
+    live_messages(state)
+        .into_iter()
+        .next()
         .unwrap_or_else(|| ambient(state))
 }
 
@@ -388,5 +409,54 @@ mod tests {
         let mut s = s;
         s.step(Input::Wait);
         assert_eq!(near_line(&s).text, "caught");
+    }
+
+    /// §11.7: a single step can raise more than one message — a takedown seen by
+    /// a second guard is `TakenDown` *and* `BodyFound` — and [`live_messages`]
+    /// returns them all, **loudest first**, leading with exactly what
+    /// [`near_line`] speaks so the deployed list and the band never disagree.
+    #[test]
+    fn live_messages_lists_the_whole_step_loudest_first() {
+        // A hidden strike north on an adjacent victim, with a witness two cells up
+        // whose cone covers the fresh body: the same turn yields the takedown
+        // (self-narration, priority 0) and the found body (a threat, priority 4).
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 4)),
+                Guard::stationary(Cell::new(5, 2)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Step(Direction::North));
+
+        let live = live_messages(&s);
+        assert_eq!(
+            live.iter().map(|m| m.priority).collect::<Vec<_>>(),
+            vec![4, 0],
+            "loudest first: the found body outranks the takedown narration",
+        );
+        assert_eq!(live[0].text, "a body has been found");
+        assert_eq!(live[1].text, "the guard drops — a body is left");
+        assert_eq!(
+            live.first().cloned(),
+            Some(near_line(&s)),
+            "the list leads with exactly the near line's band",
+        );
+    }
+
+    /// A quiet action raises no message: [`live_messages`] is empty and the near
+    /// line rests on the ambient floor (§11.4), which is never a list entry.
+    #[test]
+    fn live_messages_is_empty_when_the_action_is_quiet() {
+        let mut s = state(Cell::new(5, 6), Cell::new(3, 3));
+        s.step(Input::Step(Direction::West)); // a plain move narrates nothing
+        assert!(live_messages(&s).is_empty());
+        assert_eq!(near_line(&s).priority, i32::MIN, "the ambient floor");
     }
 }

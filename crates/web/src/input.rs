@@ -19,8 +19,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_at, ability_input_for_key, input_for_key, is_ability_button, ui_command_for_key,
-    AbilityId, Direction, Input, UiCommand, HEADER_ROWS, STATUS_ROWS,
+    ability_at, ability_input_for_key, input_for_key, is_ability_button, is_message_button,
+    ui_command_for_key, AbilityId, Direction, Input, UiCommand, HEADER_ROWS, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -70,6 +70,9 @@ impl Game {
             UiCommand::ToggleAbilityPanel => {
                 self.ui.ability_panel_open = !self.ui.ability_panel_open;
             }
+            UiCommand::ToggleMessageLog => {
+                self.ui.message_log_open = !self.ui.message_log_open;
+            }
         }
     }
 
@@ -105,6 +108,17 @@ impl Game {
             return false;
         };
         is_ability_button(self.state.layout().facility().width(), col, row)
+    }
+
+    /// Whether the viewport point lands on the near line's message-log toggle
+    /// (§11.7) — the core ([`is_message_button`]) owns the counter's geometry, and
+    /// whether there is a counter at all, so a click can never miss the toggle
+    /// drawn nor hit one that is not there.
+    fn hit_message_button(&self, client_x: f64, client_y: f64) -> bool {
+        let Some((col, row)) = self.screen_cell(client_x, client_y) else {
+            return false;
+        };
+        is_message_button(&self.state, col, row)
     }
 
     /// The ability under the viewport point, or `None` (§11.4). Maps the point to a
@@ -281,6 +295,14 @@ impl GesturePump {
             // never falls through to an activation underneath (§11.4).
             if game.hit_deploy_button(x, y) {
                 game.apply_ui_command(UiCommand::ToggleAbilityPanel);
+                game.draw();
+                e.prevent_default();
+                return;
+            }
+            // The near line's message-log counter, likewise a view toggle (§11.7):
+            // a tap deploys or folds the list and never starts a gesture.
+            if game.hit_message_button(x, y) {
+                game.apply_ui_command(UiCommand::ToggleMessageLog);
                 game.draw();
                 e.prevent_default();
                 return;

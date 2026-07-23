@@ -68,15 +68,15 @@ pub use input::{
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{
-    ability_at, ascii_grid, is_ability_button, render, render_screen, GlyphCell, Grid, ScreenUi,
-    Visibility, HEADER_ROWS, STATUS_ROWS,
+    ability_at, ascii_grid, is_ability_button, is_message_button, render, render_screen, GlyphCell,
+    Grid, ScreenUi, Visibility, HEADER_ROWS, STATUS_ROWS,
 };
 pub use rng::Rng;
 pub use state::{
     Affordance, Event, GuardPerception, Input, Outcome, State, PLAYER_SENSE_RANGE,
     PLAYER_SENSE_RANGE_WAITING,
 };
-pub use status::{message_for, near_line, Message};
+pub use status::{live_messages, message_for, near_line, Message};
 pub use targeting::{within_range, Target, Targeting, TileCursor};
 pub use vision::{
     field_of_view, field_of_view_with_peek, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE,

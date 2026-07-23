@@ -40,7 +40,7 @@ use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::state::{GuardPerception, State};
-use crate::status::near_line;
+use crate::status::{live_messages, near_line, Message};
 
 /// How much the player currently knows about what a drawn cell shows — the three
 /// visual states of §11.5a's implementation note (live / remembered / never-seen,
@@ -364,6 +364,12 @@ pub struct ScreenUi {
     /// Whether the full ability panel is deployed (§11.4). The compact ability
     /// line is always drawn; this gates only the expanded, named panel.
     pub ability_panel_open: bool,
+    /// Whether the near line's full message list is deployed (§11.7). The near
+    /// line always speaks the loudest live message; when more than one is live it
+    /// also shows a counter, and this gates the expanded list of them all. The
+    /// list is always the current step's live set — deployed or not, it clears on
+    /// the next action (§11.7), never a scrollback.
+    pub message_log_open: bool,
 }
 
 /// The deploy button's label on the ability line (§11.4): a downward chevron when
@@ -389,6 +395,43 @@ fn button_start(width: u32) -> u32 {
 pub fn is_ability_button(width: u32, x: u32, y: u32) -> bool {
     let start = button_start(width);
     y == 0 && x >= start && x < start + BUTTON_LEN
+}
+
+/// The near line's message-log toggle label (§11.7): when `extra` further messages
+/// are stacked behind the loudest, the count and a chevron — down to deploy the
+/// list, up to fold it back. Both chevrons are one cell, so the label's width
+/// tracks the digit count alone; the drawing ([`draw_message_button`]) and the
+/// hit-test ([`is_message_button`]) share it so a tap lands on exactly what is
+/// drawn.
+fn message_button_label(extra: usize, open: bool) -> String {
+    let chevron = if open { '▴' } else { '▾' };
+    format!("[+{extra} {chevron}]")
+}
+
+/// The column the message-log toggle starts at on a screen `width` wide:
+/// right-aligned with a one-cell margin, like the ability line's deploy button.
+fn message_button_start(width: u32, label_len: u32) -> u32 {
+    width.saturating_sub(1 + label_len)
+}
+
+/// Whether screen cell `(x, y)` is the near line's message-log toggle (§11.7) —
+/// the right-aligned counter that deploys and folds the full live-message list. A
+/// shell maps a click to a screen cell and asks this; a hit flips
+/// [`ScreenUi::message_log_open`] instead of stepping. There is no button unless
+/// **more than one** message is live, so a lone or absent message yields `false`.
+/// The geometry is read from `state` — the count sets the label width, and the
+/// near line is the first status row (`HEADER_ROWS + map height`) — so a click can
+/// never miss the toggle the frame drew.
+pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
+    let extra = live_messages(state).len().saturating_sub(1);
+    if extra == 0 {
+        return false;
+    }
+    let facility = state.layout().facility();
+    let (width, map_h) = (facility.width(), facility.height());
+    let label_len = message_button_label(extra, false).chars().count() as u32;
+    let start = message_button_start(width, label_len);
+    y == HEADER_ROWS + map_h && x >= start && x < start + label_len
 }
 
 /// Render the full §11.4 **screen**: the always-on ability line, the map
@@ -423,12 +466,20 @@ pub fn is_ability_button(width: u32, x: u32, y: u32) -> bool {
 pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     let statuses = state.ability_statuses();
 
-    // The map layer, with the deployed panel overlaid opposite the player.
+    // The map layer, with any deployed overlays: the ability panel opposite the
+    // player, and the near line's message log rising from the bottom.
     let mut map = render(state);
     if ui.ability_panel_open {
         let origin =
             panel_origin_opposite_player(map.width(), map.height(), state.player(), &statuses);
         overlay_ability_panel(&mut map, origin, &statuses);
+    }
+    // The step's live messages (§11.7), loudest first: the near line speaks the
+    // first, counts the rest, and deploys the whole list over the board here. The
+    // list only earns the board when more than one message is live.
+    let messages = live_messages(state);
+    if ui.message_log_open && messages.len() > 1 {
+        overlay_message_log(&mut map, &messages);
     }
     let width = map.width();
     let height = HEADER_ROWS + map.height() + STATUS_ROWS;
@@ -437,12 +488,19 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     let mut cells = ability_line(width, &statuses, ui.ability_panel_open);
     cells.extend(map.cells);
 
-    let message = near_line(state);
-    cells.extend(status_row(
-        width,
-        &[(message.text, Category::Neutral)],
-        Some(message.category),
-    ));
+    // The near line (§11.4/§11.7): the loudest live message as a category band —
+    // or the ambient floor when nothing is live — plus, when more than one message
+    // is live, a right-aligned counter toggling the deployed list.
+    let top = messages
+        .first()
+        .cloned()
+        .unwrap_or_else(|| near_line(state));
+    let extra = messages.len().saturating_sub(1);
+    let mut near = status_row(width, &[(top.text, Category::Neutral)], Some(top.category));
+    if extra > 0 {
+        draw_message_button(&mut near, width, top.category, extra, ui.message_log_open);
+    }
+    cells.extend(near);
     let usable: Vec<(String, Category)> = state
         .affordances()
         .into_iter()
@@ -719,6 +777,84 @@ fn status_row(
         }
     }
     cells
+}
+
+/// Draw the message-log toggle over the already-built near line `row` (§11.7):
+/// the [`message_button_label`] right-aligned, its glyphs in System — the HUD
+/// control colour, like the ability line's deploy button — over the loudest
+/// message's own category band, which keeps painting behind it.
+fn draw_message_button(
+    row: &mut [GlyphCell],
+    width: u32,
+    band: Category,
+    extra: usize,
+    open: bool,
+) {
+    let label = message_button_label(extra, open);
+    let start = message_button_start(width, label.chars().count() as u32);
+    for (i, glyph) in label.chars().enumerate() {
+        let x = start + i as u32;
+        if x < width {
+            row[x as usize] = GlyphCell {
+                glyph,
+                fg: Category::System,
+                bg: Some(band),
+                vis: Visibility::Live,
+            };
+        }
+    }
+}
+
+/// Overlay the deployed message log onto the map `grid` (§11.7): the step's live
+/// messages ([`live_messages`]), one per row, **rising from the near line** — at
+/// the map's bottom-left, the loudest on the last row directly above its own
+/// near-line band, each quieter message one row higher. Every row is cleared to a
+/// uniform band — a one-cell margin, the longest message, a cell of pad — then the
+/// words drawn in the message's own §11.2 category, so the list reads as a solid
+/// block over the board and each entry keeps its threat colour, aligned with the
+/// band beneath.
+///
+/// Bounds are clamped, never asserted: on a board too short to hold every row
+/// (only hand-built test states get that small — the v1 board is 40×40, §10.2)
+/// the block shows as many as fit from the bottom and drops the rest.
+fn overlay_message_log(grid: &mut Grid, messages: &[Message]) {
+    let (width, map_h) = (grid.width, grid.height);
+    let band = (messages
+        .iter()
+        .map(|m| m.text.chars().count())
+        .max()
+        .unwrap_or(0) as u32
+        + 2)
+    .min(width);
+    let blank = GlyphCell {
+        glyph: ' ',
+        fg: Category::Neutral,
+        bg: None,
+        vis: Visibility::Live,
+    };
+    for (i, message) in messages.iter().enumerate() {
+        let i = i as u32;
+        if i >= map_h {
+            break; // out the top of a tiny board — show what fits from the bottom
+        }
+        let y = map_h - 1 - i;
+        for dx in 0..band {
+            grid.cells[(y * width + dx) as usize] = blank;
+        }
+        // A one-cell left margin, matching the near line, so the list lines up
+        // above the band it heads.
+        for (dx, glyph) in message.text.chars().enumerate() {
+            let x = 1 + dx as u32;
+            if x >= band {
+                break;
+            }
+            grid.cells[(y * width + x) as usize] = GlyphCell {
+                glyph,
+                fg: message.category,
+                ..blank
+            };
+        }
+    }
 }
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row
@@ -1098,6 +1234,114 @@ mod tests {
             g.get(5, 5).bg,
             Some(Category::Danger),
             "so does the open cone"
+        );
+    }
+
+    /// §11.7: when one step raises more than one message the near line speaks the
+    /// loudest as its band and shows a right-aligned counter of the rest; deploying
+    /// the list ([`ScreenUi::message_log_open`]) stacks every message over the
+    /// board, loudest on the row directly above the band. A board wide enough that
+    /// the messages are not truncated.
+    #[test]
+    fn the_near_line_counts_extra_messages_and_deploys_the_list() {
+        // The takedown-seen-by-a-witness step: `TakenDown` (priority 0) and
+        // `BodyFound` (priority 4) land the same turn — two live messages.
+        let mut layout = open_room(40, 14);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 4)),
+                Guard::stationary(Cell::new(5, 2)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Step(Direction::North));
+
+        let width = s.layout().facility().width();
+        let near_row = HEADER_ROWS + s.layout().facility().height(); // first status row
+        let row_text = |g: &Grid, y: u32| (0..width).map(|x| g.get(x, y).glyph).collect::<String>();
+
+        // Collapsed: the band speaks the loudest message and the closed counter of
+        // the one further message (a down chevron) sits at the right.
+        let g = render_screen(&s, ScreenUi::default());
+        let near = row_text(&g, near_row);
+        assert!(
+            near.contains("a body has been found"),
+            "the band speaks the loudest message: {near:?}"
+        );
+        assert!(
+            near.contains("[+1 ▾]"),
+            "a closed counter of the rest: {near:?}"
+        );
+
+        // The hit-test agrees with the drawn counter, and there is no button off it.
+        let label_len = "[+1 ▾]".chars().count() as u32;
+        let start = width - 1 - label_len;
+        assert!(
+            is_message_button(&s, start, near_row),
+            "the counter is hittable"
+        );
+        assert!(
+            !is_message_button(&s, start - 1, near_row),
+            "nothing just left of it"
+        );
+
+        // Deployed: the chevron flips up and the whole list stacks over the board —
+        // the loudest directly above the near line, the quieter one above that.
+        let ui = ScreenUi {
+            message_log_open: true,
+            ..ScreenUi::default()
+        };
+        let g = render_screen(&s, ui);
+        assert!(
+            row_text(&g, near_row).contains("[+1 ▴]"),
+            "the deployed counter points up"
+        );
+        assert!(
+            row_text(&g, near_row - 1).contains("a body has been found"),
+            "the loudest sits nearest the band"
+        );
+        assert!(
+            row_text(&g, near_row - 2).contains("the guard drops — a body is left"),
+            "the rest stack above it"
+        );
+    }
+
+    /// §11.7: a single live message shows no counter — the near line is the plain
+    /// band it has always been, and the message-log toggle is not a button.
+    #[test]
+    fn a_lone_message_shows_no_counter() {
+        // Taking the intel is one loud message and nothing else this step.
+        let mut s = State::new(
+            open_room(20, 10),
+            Cell::new(5, 6),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(5, 5)],
+            Cell::new(18, 8),
+        );
+        s.step(Input::Step(Direction::North)); // bump the console: intel taken
+
+        let width = s.layout().facility().width();
+        let near_row = HEADER_ROWS + s.layout().facility().height();
+        let near: String = (0..width)
+            .map(|x| {
+                render_screen(&s, ScreenUi::default())
+                    .get(x, near_row)
+                    .glyph
+            })
+            .collect();
+        assert!(
+            !near.contains('['),
+            "no counter for a lone message: {near:?}"
+        );
+        assert!(
+            (0..width).all(|x| !is_message_button(&s, x, near_row)),
+            "and nothing to click"
         );
     }
 
@@ -1555,6 +1799,7 @@ mod tests {
             &s,
             ScreenUi {
                 ability_panel_open: true,
+                ..ScreenUi::default()
             },
         );
         // Closed: that corner is plain map (interior floor). Open: the panel's first
@@ -1592,6 +1837,7 @@ mod tests {
             &s2,
             ScreenUi {
                 ability_panel_open: true,
+                ..ScreenUi::default()
             },
         );
         assert_eq!(open2.get(1, 2).glyph, 'r', "the corner tracks the player");
@@ -1616,6 +1862,7 @@ mod tests {
             &s,
             ScreenUi {
                 ability_panel_open: true,
+                ..ScreenUi::default()
             },
         );
         assert_eq!(g.height(), HEADER_ROWS + 4 + STATUS_ROWS);
@@ -1685,6 +1932,7 @@ mod tests {
         );
         let open = ScreenUi {
             ability_panel_open: true,
+            ..ScreenUi::default()
         };
 
         // One panel row per economy ability, top to bottom in deck order.

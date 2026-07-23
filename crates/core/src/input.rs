@@ -29,6 +29,11 @@ pub enum UiCommand {
     /// is always on; this expands it to the named panel and folds it back. The
     /// on-screen deploy button drives the same toggle for touch and mouse.
     ToggleAbilityPanel,
+    /// Deploy or dismiss the near line's full message list (§11.7). The near line
+    /// always speaks the loudest live message; when more than one is live it shows
+    /// a counter, and this expands the whole list and folds it back. The on-screen
+    /// counter drives the same toggle for touch and mouse.
+    ToggleMessageLog,
 }
 
 /// Map a key to the [`UiCommand`] it drives, or `None` for a key that is not a UI
@@ -36,10 +41,13 @@ pub enum UiCommand {
 /// toggles view state and redraws without ever touching [`State`](crate::State).
 ///
 /// `Tab` deploys the ability panel — a conventional "toggle the HUD" key, and one
-/// that collides with neither a movement key nor an ability hotkey (§11.6).
+/// that collides with neither a movement key nor an ability hotkey (§11.6). `m`
+/// deploys the message list: a free letter (no movement key, no ability hotkey),
+/// mnemonic for *messages*.
 pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
     match key {
         "Tab" => Some(UiCommand::ToggleAbilityPanel),
+        "m" => Some(UiCommand::ToggleMessageLog),
         _ => None,
     }
 }
@@ -147,17 +155,26 @@ mod tests {
         }
     }
 
-    /// The UI-command table (§11.4): `Tab` deploys the ability panel, and it is a
-    /// *shell* command, never a game [`Input`] — so `input_for_key("Tab")` stays
-    /// `None` and the toggle never enters the turn loop. Other keys own no UI
-    /// command.
+    /// The UI-command table (§11.4/§11.7): `Tab` deploys the ability panel and `m`
+    /// the message list, and both are *shell* commands, never a game [`Input`] — so
+    /// `input_for_key` stays `None` for them and neither toggle enters the turn
+    /// loop. `m` is a UI key, so it also owns no ability activation. Other keys own
+    /// no UI command.
     #[test]
-    fn tab_toggles_the_ability_panel_and_is_not_a_game_input() {
+    fn the_ui_keys_toggle_their_panels_and_are_not_game_inputs() {
         assert_eq!(
             ui_command_for_key("Tab"),
             Some(UiCommand::ToggleAbilityPanel)
         );
-        assert_eq!(input_for_key("Tab"), None, "Tab is not a game action");
+        assert_eq!(ui_command_for_key("m"), Some(UiCommand::ToggleMessageLog));
+        for key in ["Tab", "m"] {
+            assert_eq!(input_for_key(key), None, "{key:?} is not a game action");
+            assert_eq!(
+                ability_input_for_key(key),
+                None,
+                "{key:?} is a UI key, not an ability"
+            );
+        }
         for key in ["w", "5", "r", "ArrowUp", "Escape"] {
             assert_eq!(
                 ui_command_for_key(key),
