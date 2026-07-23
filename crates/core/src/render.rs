@@ -252,13 +252,14 @@ pub fn render(state: &State) -> Grid {
     let player_glyph = if state.hidden() { '}' } else { '@' };
     put(state.player(), player_glyph, Category::Owned);
 
-    // The crouch signal (§10.3/§11.3): while the player is crouched, the table
-    // they ducked behind — that one, not every table they stand beside —
+    // The crouch signal (§10.3/§11.3): while the player is crouched, the whole
+    // run they ducked behind — that bench, not every table they stand beside —
     // recolours to Owned, the same vocabulary the occupied cupboard speaks
     // ("Owned = what is concealing you"), so the blue @-π pair reads as one
-    // hidden unit. Read through the same stored pose the concealment rule
-    // uses, so the picture cannot disagree with the rules.
-    if let Some(cover) = state.crouched_behind() {
+    // hidden unit whose π half is as long as the furniture. Read through the
+    // same anchored run the concealment rule uses, so the picture cannot
+    // disagree with the rules.
+    for cover in state.crouch_cover() {
         cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
     }
 
@@ -943,14 +944,15 @@ mod tests {
     }
 
     /// §10.3/§11.3: the crouch borrows the cupboard's vocabulary — **Owned = what
-    /// is concealing you**. While the player is crouched, the covering table keeps
-    /// its `π` glyph but recolours to Owned; standing back up returns it to System
-    /// furniture. The `@` stays drawn — the player is beside the table, not inside
-    /// it.
+    /// is concealing you**. While the player is crouched, the covering *run* —
+    /// the whole bench, not just the bumped table — keeps its `π` glyphs but
+    /// recolours to Owned; standing back up returns it to System furniture. The
+    /// `@` stays drawn — the player is beside the bench, not inside it.
     #[test]
-    fn a_covering_table_recolours_to_owned_while_crouched() {
+    fn a_covering_bench_recolours_to_owned_while_crouched() {
         let mut layout = open_room(10, 10);
         layout.place(Cell::new(5, 4), Terrain::PartialCover);
+        layout.place(Cell::new(5, 5), Terrain::PartialCover); // a two-table bench
         let mut s = State::new(
             layout,
             Cell::new(4, 4),
@@ -960,18 +962,20 @@ mod tests {
             Cell::new(8, 8),
         );
 
-        // Standing: the table is plain System furniture.
+        // Standing: the bench is plain System furniture.
         let table = render(&s).get(5, 4);
         assert_eq!((table.glyph, table.fg), ('π', Category::System));
 
-        s.step(Input::Step(Direction::East)); // bump the table: crouch (§10.3)
+        s.step(Input::Step(Direction::East)); // bump a table: crouch (§10.3)
         let g = render(&s);
-        let table = g.get(5, 4);
-        assert_eq!(
-            (table.glyph, table.fg),
-            ('π', Category::Owned),
-            "the covering table recolours while crouched"
-        );
+        for y in [4, 5] {
+            let table = g.get(5, y);
+            assert_eq!(
+                (table.glyph, table.fg),
+                ('π', Category::Owned),
+                "the whole covering bench recolours while crouched"
+            );
+        }
         assert_eq!(g.get(4, 4).glyph, '@', "the player stays drawn beside it");
 
         s.step(Input::Step(Direction::West)); // step away: stand up

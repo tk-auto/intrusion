@@ -994,21 +994,35 @@ stay a future axis.
 > movement and pathing like a wall — patrols route around it — but a guard sees
 > straight over it. **Bump the table** (§4.3's one interaction verb, same as
 > the cupboard: ducking is a *decision*, aimed at a specific table) and you
-> crouch behind it: while crouched you still see everything (your own sight is
-> unchanged), but you are **concealed from any viewer whose line of sight
-> crosses that table** — the quarter-plane the cover faces, out to the 45°
-> diagonals. Concealment is directional, per-guard, and per *the table you
-> ducked behind* — not every table you happen to stand beside. The flanks and
-> your back are open, which is what keeps a table weaker than a cupboard
+> crouch behind it — and behind its whole **run**: the contiguous piece of
+> furniture that table belongs to (the §10.1a bench; benches are never a lone
+> cell). While crouched you still see everything (your own sight is
+> unchanged), but you are **concealed from any viewer whose line of sight to
+> you crosses any table of that run** — grazing a table's corner counts, out
+> to the exact 45° diagonal. Concealment is directional, per-guard, and per
+> *the run you ducked behind* — not every table you happen to stand beside; a
+> guard looking straight down the bench cannot see you through its other
+> tables, but the open flanks past the run's ends and your back are exactly as
+> exposed as they look. That is what keeps a bench weaker than a cupboard
 > (omnidirectional, contact-safe) — and a crouched player **can still be
 > captured by contact** (§4.5); unseen is not safe. The crouch spends the turn;
-> **waiting holds it** (hold still, watch the cone sweep past, §7.6); any other
-> spent action stands you up; a free action changes nothing, posture included
-> (§4.4) — re-bumping the table you are already behind is a free no-op.
+> **waiting holds it** (hold still, watch the cone sweep past, §7.6); and so
+> does the **crouch-walk**: a plain step that lands still touching the run —
+> orthogonally or on the diagonal at a corner, so you can round the end of the
+> bench without standing — keeps the pose and moves you at full speed
+> **[START]** (the constraint is hugging the furniture; if playtest shows
+> bench-hugging dominance, the levers are Drag's half speed or Camouflage's
+> reveal-on-move). Any other spent action — an interaction, a step that leaves
+> the run's side — stands you up; a free action changes nothing, posture
+> included (§4.4) — re-bumping any table of the run you are already behind is
+> a free no-op.
 > *(Waiting beside a table used to crouch automatically; that coupling is gone —
 > wait is pure (§5, §8.3's 360° look), and the crouch shows its direction in
-> the usable line (§11.4) like every other bump.)* Legibility rides the same
-> conventions as the cupboard: the covering table recolours to **Owned** while
+> the usable line (§11.4) like every other bump. And concealment used to be the
+> quarter-plane behind the single bumped table — which let a guard look down a
+> bench and see you through its other tables, undercutting the exact cover
+> §10.1a places; the run rule replaced it.)* Legibility rides the same
+> conventions as the cupboard: the covering run recolours to **Owned** while
 > it conceals you (§11.3), the crouch reports itself once as an Owned message,
 > and the §11.5 danger overlay spares your cell — red under you always means
 > *detected*.
@@ -1212,7 +1226,7 @@ foreground and as a darkened background variant.
 | `}` | Hideout (empty) | System |
 | `}` | Hideout (occupied) | **Owned** — you are in it, so it recolours to Owned (blue) like the rest of "things you made"; the colour shift is how you see which cell hides you (§10.3) |
 | `π` | Partial cover (table) | System |
-| `π` | Partial cover, concealing you | **Owned** — the same convention as the occupied cupboard: while you are crouched behind it, the covering table recolours to Owned, so the blue `@`-`π` pair reads as one hidden unit (§10.3) |
+| `π` | Partial cover, concealing you | **Owned** — the same convention as the occupied cupboard: while you are crouched behind it, the covering run recolours to Owned, every table of it, so the blue `@`-`π` pair reads as one hidden unit as long as the furniture (§10.3) |
 | `$` | Intel | Interest |
 | `E` | Exit | Interest |
 

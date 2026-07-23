@@ -32,6 +32,7 @@ mod ability;
 mod body;
 mod category;
 mod cell;
+mod cover;
 mod door;
 mod facility;
 mod generate;
