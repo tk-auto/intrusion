@@ -42,9 +42,10 @@ use crate::cell::{Cell, Direction};
 use crate::cover;
 use crate::facility::Terrain;
 use crate::generate::Layout;
-use crate::guard::Guard;
+use crate::guard::{Guard, GUARD_CLOSE_CHANCE_PERCENT};
 use crate::radio;
-use crate::region::DoorCell;
+use crate::region::{DoorCell, DoorId};
+use crate::rng::Rng;
 use crate::targeting::Targeting;
 use crate::vision::{
     field_of_view_with_peek, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
@@ -117,6 +118,11 @@ pub enum Event {
     /// (§4.3), or a guard's — a guard's route runs straight through closed
     /// doors, and walking into the panel is the bump that opens them.
     DoorOpened { at: Cell },
+    /// A **Calm** guard closed a hinged door behind itself after passing through
+    /// it (§10.4, #146): the counter-pressure to guard traffic's monotonic opening,
+    /// restoring the level's structure and keeping an open door meaningful as
+    /// evidence that someone came this way. `at` is a panel of the shut door.
+    DoorClosed { at: Cell },
     /// The player took the intel at a console; `remaining` objectives are still out.
     IntelTaken { remaining: usize },
     /// The player bumped the exit with objectives still outstanding — refused (§4.5).
@@ -211,8 +217,9 @@ impl Event {
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
             // reinforce (§11.2).
             Event::Detected { .. } => Category::Danger,
-            // Neutral furniture doing furniture things (§10.4).
-            Event::DoorOpened { .. } => Category::System,
+            // Neutral furniture doing furniture things (§10.4) — a door swinging
+            // open or shut is scenery, whoever moved it.
+            Event::DoorOpened { .. } | Event::DoorClosed { .. } => Category::System,
             // Goals and rewards — including the exit talking about the goal it
             // still refuses (§4.5) and the win itself.
             Event::IntelTaken { .. } | Event::ExitRefused | Event::Won => Category::Interest,
@@ -481,6 +488,19 @@ pub struct State {
     /// exactly one action's events *is* the clearing rule). Empty before the
     /// first input; frozen once the run ends, so the final message stays.
     last_events: Vec<Event>,
+    /// The run's seeded random source (§12.4), carried through the turn loop for the
+    /// one thing in the loop that is now stochastic: a Calm guard's chance to close a
+    /// door behind itself (§10.4/#146). It is the *continuation* of the generation
+    /// stream — the same single seed the level was carved from — threaded in via
+    /// [`with_rng`](Self::with_rng), never a fresh source (§12.4 rule 1). A state built
+    /// without one keeps a fixed default stream, which is all a test that never
+    /// exercises the close needs; the real game and the sim thread the run seed.
+    rng: Rng,
+    /// The percentage chance a Calm guard closes a hinged door behind itself
+    /// (§10.4/§7.6), out of 100 — the playtest knob (§7.6 warns against always).
+    /// Defaults to [`GUARD_CLOSE_CHANCE_PERCENT`]; `0` disables the close entirely
+    /// (and draws no RNG, so it perturbs nothing), `100` always closes.
+    close_chance: u32,
 }
 
 impl State {
@@ -531,10 +551,37 @@ impl State {
             alert: 0,
             outcome: Outcome::Playing,
             last_events: Vec::new(),
+            // A fixed default stream until [`with_rng`](Self::with_rng) threads the
+            // run seed. The startup world phase below draws nothing — a guard cannot
+            // have passed through a door before it has taken a step — so setting the
+            // real stream after construction observes the identical stream position.
+            rng: Rng::new(0),
+            close_chance: GUARD_CLOSE_CHANCE_PERCENT,
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
         state
+    }
+
+    /// Thread the run's seeded random source into the state (§12.4) — the
+    /// continuation of the very stream the level was generated from, so a whole run
+    /// is one seed end to end. The loop uses it for the guard close-behind roll
+    /// (§10.4/#146); everything else in the loop stays deterministic without it. The
+    /// real game and the headless sim call this; a test that never exercises the
+    /// close can rely on the fixed default set in [`new`](Self::new).
+    pub fn with_rng(mut self, rng: Rng) -> Self {
+        self.rng = rng;
+        self
+    }
+
+    /// Set the chance a Calm guard closes a hinged door behind itself, as a
+    /// percentage 0–100 (§10.4/§7.6) — the playtest knob this behaviour's
+    /// **[START]** value is tuned with, and the replacement for the old blanket
+    /// auto-close switch. `0` turns the close off, `100` makes it certain; values
+    /// above 100 saturate. Deterministic given the seed threaded by
+    /// [`with_rng`](Self::with_rng).
+    pub fn set_guard_close_chance(&mut self, percent: u32) {
+        self.close_chance = percent.min(100);
     }
 
     /// The level geometry (§10.5) — read-only outside the core.
@@ -1569,8 +1616,9 @@ impl State {
             // A closed door does not stop a guard: its route runs straight through
             // (§10.3's deliberate closed-panel rule), and the walk-in is the bump
             // that opens it (§10.4) — the door is the guard's whole action this
-            // turn; it steps through on a later one. With no auto-close in the
-            // loop, guard traffic monotonically opens the facility up over a level.
+            // turn; it steps through on a later one. Guard traffic opens the facility
+            // up over a level; the Calm close-behind below is the counter-pressure
+            // (§10.4/#146), not a symmetric one — an open door still spreads.
             if self.layout.facility().terrain(target) == Some(Terrain::DoorPanelClosed) {
                 self.operate_door(target);
                 events.push(Event::DoorOpened { at: target });
@@ -1583,13 +1631,73 @@ impl State {
             // frame shows never lags the position it shows (§11.5); the next phase 2
             // recomputes everything anyway.
             if self.layout.facility().can_enter(target, ACTOR_FILL) && !self.occupied(target) {
+                let from = self.guards[i].pos();
                 let facility = self.layout.facility();
                 self.guards[i].advance_to(target, dir, facility);
                 // A guard arriving on the decoy's cell tramples it (§8.3):
                 // walking into the "intruder" is how the fake is found out.
                 self.stomp_decoy(target, events);
+                // §10.4/#146: a Calm guard that has just stepped clear of a doorway
+                // sometimes closes it behind itself. The guard is now off the panel
+                // (it stands on `target`), so the crush check sees only anyone *else*
+                // still in the throat — the player included — and refuses on them.
+                if self.guards[i].closes_doors() {
+                    if let Some(door) = self.door_exited(from, target) {
+                        if self.rolls_a_close() && self.close_behind_door(door) {
+                            events.push(Event::DoorClosed { at: from });
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /// The door a guard just walked *out of*, if its step from `from` to `to` left a
+    /// doorway behind (§10.4/#146): `from` is one of that door's panels and `to` is
+    /// no longer part of the same door. `None` otherwise — the guard was not on a
+    /// panel, or it merely slid along a wide opening from one panel to another and is
+    /// still in the throat. Only a hinged door qualifies (an automatic door has no
+    /// handle to shut, §10.4/#147); every door on a v1 level is hinged, but the check
+    /// is explicit so it stays correct when frameless spans arrive.
+    fn door_exited(&self, from: Cell, to: Cell) -> Option<DoorId> {
+        let regions = self.layout.regions();
+        let id = regions.door_at(from)?;
+        let door = regions.door(id);
+        if door.role(from) != Some(DoorCell::Panel) || door.hinges().is_empty() {
+            return None;
+        }
+        if regions.door_at(to) == Some(id) {
+            return None; // still within the same doorway
+        }
+        Some(id)
+    }
+
+    /// Roll the seeded run RNG (§12.4) against the Calm close-behind chance
+    /// (§10.4/§7.6). Draws nothing at the extremes — a `0` chance never closes and a
+    /// `100` chance always does — so forcing the knob either way (a test, a playtest)
+    /// leaves the rest of the stream untouched; only the tuned middle consumes a draw.
+    fn rolls_a_close(&mut self) -> bool {
+        match self.close_chance {
+            0 => false,
+            c if c >= 100 => true,
+            c => self.rng.below(100) < c,
+        }
+    }
+
+    /// Close `door` behind the guard that just left it (§10.4/#146), reporting whether
+    /// it actually shut. Refuses — and returns `false` — when another actor still
+    /// stands on a panel (the crush rule, §10.4), so a door never shuts on the player
+    /// waiting in the throat. Fields are captured so the occupancy predicate can borrow
+    /// them while `layout` is borrowed `&mut`, exactly as [`operate_door`] does.
+    fn close_behind_door(&mut self, door: DoorId) -> bool {
+        let player = self.player;
+        let guards = &self.guards;
+        let bodies = &self.bodies;
+        matches!(
+            self.layout
+                .close_behind(door, |c| actor_occupies(player, guards, bodies, c)),
+            Some(DoorAction::Closed)
+        )
     }
 
     /// The index of a guard standing on `cell`, if any.
@@ -3198,9 +3306,9 @@ mod tests {
 
     /// §10.4: a closed door does not stop a guard — its route runs straight
     /// through, and walking into the panel is the bump that opens it. The door is
-    /// the guard's whole action that turn; it steps through on the next. And with
-    /// no auto-close in the loop, the door stays open behind it — guard traffic
-    /// monotonically opens the facility up over a level.
+    /// the guard's whole action that turn; it steps through on the next. Guard traffic
+    /// opens the facility up over a level; the close-behind (#146) is exercised on its
+    /// own below, so this test turns it off to isolate the opening and pass-through.
     #[test]
     fn a_guard_walking_its_route_opens_the_door_and_passes_through() {
         let layout = region_strip();
@@ -3214,7 +3322,8 @@ mod tests {
             Vec::new(),
             Cell::new(13, 1),
         );
-        // The startup turn walked the guard up against the closed panel.
+        s.set_guard_close_chance(0); // isolate opening/pass-through from the close (#146)
+                                     // The startup turn walked the guard up against the closed panel.
         assert_eq!(s.guards()[0].pos(), Cell::new(3, 2));
         assert!(!s.layout().regions().door(door).is_open());
 
@@ -3233,7 +3342,10 @@ mod tests {
         assert_eq!(s.guards()[0].pos(), panel, "onto the open panel");
         s.step(Input::Wait);
         assert_eq!(s.guards()[0].pos(), Cell::new(5, 2), "into the corridor");
-        assert!(s.layout().regions().door(door).is_open(), "no auto-close");
+        assert!(
+            s.layout().regions().door(door).is_open(),
+            "close turned off: the door stays open behind the guard",
+        );
         assert_eq!(s.outcome(), Outcome::Playing);
     }
 
@@ -3258,6 +3370,7 @@ mod tests {
             Vec::new(),
             Cell::new(13, 1),
         );
+        s.set_guard_close_chance(0); // isolate beat coverage from the close-behind (#146)
 
         let (mut corridor, mut far_room) = (false, false);
         for _ in 0..80 {
@@ -3284,6 +3397,98 @@ mod tests {
         assert_eq!(s.outcome(), Outcome::Playing, "the parked player is safe");
     }
 
+    /// §10.4/#146: a Calm guard that walks fully through a hinged door closes it
+    /// behind itself — the counter-pressure to guard traffic's monotonic opening, so
+    /// an open door stays evidence someone passed. The close-behind chance is forced
+    /// to 100 to make the *sometimes* certain for the assertion; the probability
+    /// itself is pinned in guard.rs and swept for determinism elsewhere. The shut
+    /// surfaces as a [`DoorClosed`](Event::DoorClosed) event the player can read.
+    #[test]
+    fn a_calm_guard_closes_the_door_behind_itself() {
+        let layout = region_strip();
+        let panel = Cell::new(4, 2);
+        let door = layout.regions().door_at(panel).unwrap();
+        let mut s = State::new(
+            layout,
+            Cell::new(13, 4), // parked in corridor D, well clear of the door
+            Direction::North,
+            vec![Guard::patrolling_to(Cell::new(2, 2), Cell::new(6, 2))],
+            Vec::new(),
+            Cell::new(13, 1),
+        );
+        s.set_guard_close_chance(100); // make the "sometimes" certain for the test
+
+        // Startup parked the guard against the closed panel (§10.4).
+        assert_eq!(s.guards()[0].pos(), Cell::new(3, 2));
+
+        s.step(Input::Wait); // the walk-in opens the door; the guard holds
+        assert!(s.layout().regions().door(door).is_open());
+        s.step(Input::Wait); // steps onto the open panel
+        assert_eq!(s.guards()[0].pos(), panel);
+        assert!(
+            s.layout().regions().door(door).is_open(),
+            "still in the throat: nothing to close behind yet",
+        );
+
+        // Stepping clear of the panel: the Calm guard shuts the door behind itself.
+        let events = s.step(Input::Wait);
+        assert_eq!(s.guards()[0].pos(), Cell::new(5, 2), "into the corridor");
+        assert!(
+            !s.layout().regions().door(door).is_open(),
+            "the guard closed the door behind itself",
+        );
+        assert!(
+            events.contains(&Event::DoorClosed { at: panel }),
+            "the shut surfaces as an event",
+        );
+        assert_eq!(s.outcome(), Outcome::Playing);
+    }
+
+    /// §10.4/#146 end-to-end: on real generated geometry, with the close-behind
+    /// certain, Calm guards patrolling their beats do shut doors behind them — the
+    /// wiring fires on the corridor-first facility, not just the hand-built strip.
+    #[test]
+    fn guard_close_behind_fires_on_generated_levels() {
+        use crate::test_support::seed_sweep;
+        let mut any_close = false;
+        for seed in seed_sweep(32) {
+            let mut rng = Rng::new(seed);
+            let (layout, placement) =
+                generate_level(&crate::LevelConfig::V1, &mut rng).expect("v1 generates");
+            let guards = placement.guards(&layout);
+            let mut s = State::new(
+                layout,
+                placement.player(),
+                Direction::North,
+                guards,
+                placement.intel().iter().copied(),
+                placement.exit(),
+            )
+            .with_rng(rng);
+            s.set_guard_close_chance(100);
+
+            for _ in 0..200 {
+                if s.outcome() != Outcome::Playing {
+                    break;
+                }
+                if s.step(Input::Wait)
+                    .iter()
+                    .any(|e| matches!(e, Event::DoorClosed { .. }))
+                {
+                    any_close = true;
+                    break;
+                }
+            }
+            if any_close {
+                break;
+            }
+        }
+        assert!(
+            any_close,
+            "a Calm patrol closes a door behind itself somewhere in the sweep",
+        );
+    }
+
     /// §12.4: same seed → same beats, same sweeps. Two states built from the same
     /// seed stay in lockstep through a long patrol — guard positions and door
     /// states alike, turn for turn.
@@ -3291,7 +3496,11 @@ mod tests {
     fn beats_and_sweeps_are_deterministic_from_the_seed() {
         for seed in [3, 11] {
             let build = || {
-                let (layout, p) = generate_level(&crate::LevelConfig::V1, &mut Rng::new(seed))
+                // Thread the one seed end to end (§12.4): the carve stream continues
+                // into the loop, so the guard close-behind roll (#146) is part of what
+                // this pins deterministic — same seed → same closes, turn for turn.
+                let mut rng = Rng::new(seed);
+                let (layout, p) = generate_level(&crate::LevelConfig::V1, &mut rng)
                     .expect("the v1 config generates");
                 let guards = p.guards(&layout);
                 State::new(
@@ -3302,6 +3511,7 @@ mod tests {
                     p.intel().iter().copied(),
                     p.exit(),
                 )
+                .with_rng(rng)
             };
             let (mut a, mut b) = (build(), build());
             for turn in 0..60 {
@@ -4290,6 +4500,7 @@ mod tests {
         assert_eq!(Event::EnteredHideout { at }.category(), Category::Owned);
         assert_eq!(Event::Crouched { behind: at }.category(), Category::Owned);
         assert_eq!(Event::DoorOpened { at }.category(), Category::System);
+        assert_eq!(Event::DoorClosed { at }.category(), Category::System);
         assert_eq!(
             Event::IntelTaken { remaining: 1 }.category(),
             Category::Interest
@@ -4303,9 +4514,11 @@ mod tests {
 
     /// §12.4: the loop is pure and deterministic. The same starting state and the same
     /// input sequence produce an identical event stream and identical final state —
-    /// the property that makes a run a `(seed, [inputs])` replay. The loop holds no
-    /// randomness of its own, so this is structural, but the test pins it against a
-    /// future change (a stray `HashMap` order, a clock read) that would break it.
+    /// the property that makes a run a `(seed, [inputs])` replay. The loop's only
+    /// randomness is the seeded stream carried in the state (the guard close-behind,
+    /// #146), which two identically-built states share turn for turn, so this stays a
+    /// clean replay; the test pins it against a future change (a stray `HashMap`
+    /// order, a clock read, a fresh RNG source) that would break it.
     #[test]
     fn same_state_and_inputs_replay_identically() {
         let inputs = [

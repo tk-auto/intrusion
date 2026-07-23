@@ -87,7 +87,11 @@ pub fn run_one(
     policy: &mut dyn PlayerPolicy,
     input_cap: u32,
 ) -> Result<RunRecord, GenError> {
-    let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(seed))?;
+    // One seed per run (§12.4): the carve stream continues into the turn loop, where
+    // the guard close-behind roll draws from it (§10.4/#146), so a sim run is as
+    // deterministic and as faithful to the web build as the rest of the pipeline.
+    let mut rng = Rng::new(seed);
+    let (layout, placement) = generate_level(&LevelConfig::V1, &mut rng)?;
     let guards = placement.guards(&layout);
     let mut state = State::new(
         layout,
@@ -96,7 +100,8 @@ pub fn run_one(
         guards,
         placement.intel().iter().copied(),
         placement.exit(),
-    );
+    )
+    .with_rng(rng);
 
     let mut record = RunRecord {
         seed,

@@ -19,7 +19,7 @@ use rand_pcg::Pcg64Mcg;
 /// Clone it only when you deliberately want two identical streams (e.g. a
 /// speculative lookahead); otherwise pass `&mut Rng` so a single stream advances
 /// in a well-defined order.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Rng {
     inner: Pcg64Mcg,
 }

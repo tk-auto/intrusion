@@ -186,7 +186,10 @@ pub fn start() -> Result<(), JsValue> {
     // The full v1 level (§10.2): a carve passing every §10.6 guarantee, with the
     // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards patrol
     // their territories (§7.5); the reactive states ride on the same seam.
-    let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(seed))
+    // One seed per run (§12.4): the same stream that carves the level continues into
+    // the turn loop, where the guard close-behind roll draws from it (§10.4/#146).
+    let mut rng = Rng::new(seed);
+    let (layout, placement) = generate_level(&LevelConfig::V1, &mut rng)
         .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
 
     // Guards carry their region beats (§7.5/§10.5), grown from the layout's
@@ -199,7 +202,8 @@ pub fn start() -> Result<(), JsValue> {
         guards,
         placement.intel().iter().copied(),
         placement.exit(),
-    );
+    )
+    .with_rng(rng);
 
     let document = web_sys::window()
         .and_then(|w| w.document())

@@ -104,6 +104,27 @@ impl Layout {
         Some(self.close_door(door, occupied))
     }
 
+    /// Close `door` behind a guard that has just walked through it (§10.4, #146):
+    /// a **Calm** guard restoring the level's structure, so an open door stays
+    /// meaningful as evidence someone passed. Closes only a door that is currently
+    /// open, and still refuses on an occupied panel — the crush rule holds for a
+    /// guard-close exactly as for a bump ([`DoorAction::Obstructed`]). Returns
+    /// `None` for a door that is already closed; the caller (the turn loop) owns the
+    /// Calm-only gate and the seeded probability (§7.6/§12.4), so this is just the
+    /// mutation. Distinct from [`auto_close_door`](Self::auto_close_door): that fires
+    /// on a door's own auto-close flag (#147); this is a guard's deliberate act and
+    /// consults no such flag.
+    pub(crate) fn close_behind(
+        &mut self,
+        door: DoorId,
+        occupied: impl Fn(Cell) -> bool,
+    ) -> Option<DoorAction> {
+        if !self.regions().door(door).is_open() {
+            return None;
+        }
+        Some(self.close_door(door, occupied))
+    }
+
     /// Set every door's auto-close behaviour at once — the playtest knob for
     /// comparing a facility that closes behind you against one that stays open
     /// (§10.4 auto-close **[START]**).
@@ -366,6 +387,34 @@ mod tests {
             layout.auto_close_door(door, vacant),
             Some(DoorAction::Closed)
         );
+        assert!(!layout.regions().door(door).is_open());
+    }
+
+    /// §10.4/#146: the guard close-behind shuts an open door and, like every close,
+    /// refuses on an occupied panel — the crush rule holds whoever the occupant is.
+    #[test]
+    fn close_behind_shuts_an_open_door_but_never_crushes() {
+        let (mut layout, door) = one_door();
+        let panel = layout.regions().door(door).panels()[0];
+
+        // A closed door offers nothing to close.
+        assert_eq!(layout.close_behind(door, vacant), None, "already closed");
+
+        layout.bump_door(panel, vacant); // a guard opened it walking through
+        assert!(layout.regions().door(door).is_open());
+
+        // An occupant in the throat refuses the close — the door never crushes.
+        assert_eq!(
+            layout.close_behind(door, |c| c == panel),
+            Some(DoorAction::Obstructed),
+        );
+        assert!(
+            layout.regions().door(door).is_open(),
+            "stays open on an occupant"
+        );
+
+        // The throat clear, the guard's close-behind shuts it.
+        assert_eq!(layout.close_behind(door, vacant), Some(DoorAction::Closed));
         assert!(!layout.regions().door(door).is_open());
     }
 
