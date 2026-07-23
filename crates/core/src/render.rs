@@ -193,6 +193,50 @@ pub fn render(state: &State) -> Grid {
             }
         })
         .collect();
+
+    // The duct interior view (§11.5a/§10.7, #134). While the player **occupies** a
+    // duct, its whole path lights as a connected run of `=` — the crawlspace read as
+    // one space (the player's own cell is overwritten by the `@` below; glyph
+    // priority `@` > `=`). A duct the player has **crawled but since left** keeps its
+    // interior cells **remembered** as `=` rather than reverting to blank wall
+    // (§11.5a: the flight paths you scouted are worth more than the ones you didn't).
+    // An **entry** is geometry — drawn `=` from turn one by the fog above — so only
+    // the interior is treated as remembered contents here.
+    for duct in state.layout().ducts() {
+        let occupied = duct.contains(state.player());
+        let path = duct.cells();
+        for (i, &c) in path.iter().enumerate() {
+            let idx = (c.y * width + c.x) as usize;
+            let is_entry = i == 0 || i == path.len() - 1;
+            let vis = if occupied {
+                // The whole occupied duct is the live layer — you are in it.
+                Some(Visibility::Live)
+            } else if !is_entry && state.duct_memory().contains(&c) {
+                // A **crawled** interior cell is remembered content, exactly like a
+                // seen hideout (§11.5a): drawn live while its face is in view,
+                // remembered once it is not. The signal is duct memory, not sight
+                // memory — looking at the wall band from the room never reveals a
+                // crawlspace you have not been inside, so an un-crawled interior stays
+                // plain wall (its route given away to nobody).
+                Some(if fov.contains(c) {
+                    Visibility::Live
+                } else {
+                    Visibility::Remembered
+                })
+            } else {
+                None
+            };
+            if let Some(vis) = vis {
+                cells[idx] = GlyphCell {
+                    glyph: '=',
+                    fg: Category::System,
+                    bg: None,
+                    vis,
+                };
+            }
+        }
+    }
+
     // Entities are live state: whatever is drawn here is being seen right now.
     let mut put = |cell: Cell, glyph: char, fg: Category| {
         cells[(cell.y * width + cell.x) as usize] = GlyphCell {
@@ -292,6 +336,13 @@ pub fn render(state: &State) -> Grid {
     // across (§10.3): the overlay's promise is "red under you = detected"
     // (§11.5), and a concealed player is not. The table itself stays red — the
     // guard watches the furniture, just not what is ducked behind it.
+    // Inside a duct the only live window is the mouth peek (§6.1/#134): a guard seen
+    // through it is real, but the parts of its cone that fall **beyond** the peek cast
+    // are cells the player perceives only as memory, so the overlay must not paint
+    // them red — everything past the window stays memory (§11.5). On open floor a
+    // seen guard's whole cone paints, as §11.5 intends (knowledge you have); the clip
+    // is the in-duct case alone, and the player FOV *is* the peek there.
+    let in_duct = state.in_duct();
     for guard in state.guards() {
         if !fov.contains(guard.pos()) {
             continue; // an unseen guard's cone is unknown, not safe — just unknown
@@ -300,6 +351,9 @@ pub fn render(state: &State) -> Grid {
         for cell in guard.fov().cells() {
             if spare_player && cell == state.player() {
                 continue;
+            }
+            if in_duct && !fov.contains(cell) {
+                continue; // the peek window only — beyond the cast is memory
             }
             cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
         }
@@ -1197,5 +1251,176 @@ mod tests {
         assert_eq!(cell.fg, Category::Ground, "…not a sensed highlight");
         assert_eq!(cell.bg, None, "…and no orange background");
         assert_eq!(cell.vis, Visibility::Dimmed);
+    }
+
+    // --- Duct interior view (§10.7/#134) -------------------------------------
+
+    /// A `9×9` fixture with a 4-cell duct in the wall band under the top border —
+    /// entries at `(2,1)`/`(5,1)`, interior `(3,1)`/`(4,1)`, mouths `(2,2)`/`(5,2)`
+    /// — opening into an open room below (mirrors the state-test fixture). The
+    /// player starts on the near mouth, facing the entry, with `guards` in the room.
+    fn duct_state(guards: Vec<Guard>) -> State {
+        let mut f = Facility::walled_box(9, 9);
+        for x in 1..=7 {
+            f.set_terrain(x, 1, Terrain::Wall);
+        }
+        f.set_terrain(2, 1, Terrain::DuctEntry);
+        f.set_terrain(5, 1, Terrain::DuctEntry);
+        let duct = crate::Duct::new(vec![
+            Cell::new(2, 1),
+            Cell::new(3, 1),
+            Cell::new(4, 1),
+            Cell::new(5, 1),
+        ]);
+        let layout = crate::Layout::from_facility(f).with_ducts(vec![duct]);
+        State::new(
+            layout,
+            Cell::new(2, 2),
+            Direction::North,
+            guards,
+            Vec::new(),
+            Cell::new(7, 7),
+        )
+    }
+
+    /// With no duct occupied the view is ordinary (§11.5a): an **entry** is geometry,
+    /// drawn `=` from turn one, but the **interior** is contents — plain wall until
+    /// crawled, giving the shortcut's route away to nobody.
+    #[test]
+    fn an_unentered_duct_shows_entries_but_hides_its_path() {
+        let g = render(&duct_state(Vec::new()));
+        assert_eq!(g.get(2, 1).glyph, '=', "the near entry is visible geometry");
+        assert_eq!(g.get(5, 1).glyph, '=', "the far entry is visible geometry");
+        assert_eq!(
+            g.get(3, 1).glyph,
+            '#',
+            "an un-crawled interior cell reads as plain wall"
+        );
+        assert_eq!(g.get(4, 1).glyph, '#');
+    }
+
+    /// While the player occupies a duct its whole path lights as a connected `=` run,
+    /// with the `@` on their own cell (glyph priority `@` > `=`), and the world beyond
+    /// renders as memory — no live guard glyph outside the (absent) mid-duct window.
+    #[test]
+    fn a_mid_duct_view_lights_the_path_and_fogs_the_world() {
+        // A guard far down the room: beyond the reduced in-duct sense and out of any
+        // window, so mid-duct it draws nothing at all.
+        let mut s = duct_state(vec![Guard::stationary(Cell::new(7, 7))]);
+        s.step(Input::Step(Direction::North)); // enter at (2,1)
+        s.step(Input::Step(Direction::East)); // crawl to interior (3,1)
+        let g = render(&s);
+
+        // The occupied duct is one lit path of `=`, the player's cell an Owned `@`.
+        assert_eq!(g.get(3, 1).glyph, '@', "the player's crawl cell");
+        assert_eq!(g.get(3, 1).fg, Category::Owned);
+        for &(x, y) in &[(2, 1), (4, 1), (5, 1)] {
+            let c = g.get(x, y);
+            assert_eq!(c.glyph, '=', "the rest of the path lights as =");
+            assert_eq!(c.fg, Category::System);
+            assert_eq!(
+                c.vis,
+                Visibility::Live,
+                "the occupied duct is the live layer"
+            );
+        }
+        // The far guard is neither seen nor sensed mid-duct: no glyph, no highlight.
+        assert_ne!(g.get(7, 7).glyph, 'g', "no live guard beyond the walls");
+        assert_eq!(
+            g.get(7, 7).bg,
+            None,
+            "no sensed dot beyond the reduced range"
+        );
+    }
+
+    /// On an **entry** the mouth peek is live: a guard down the mouth draws its full
+    /// `g`, while the danger overlay is clipped to the window — every red cell is one
+    /// the player can actually see (§11.5), nothing beyond the cast.
+    #[test]
+    fn an_entry_cell_peeks_live_and_clips_the_overlay_to_the_window() {
+        let guard = Cell::new(2, 5); // straight down the mouth, in the peek
+        let mut s = duct_state(vec![Guard::stationary(guard)]);
+        s.step(Input::Step(Direction::North)); // enter at (2,1), peek out the mouth
+        let g = render(&s);
+
+        assert_eq!(g.get(2, 1).glyph, '@', "the player sits on the entry");
+        assert_eq!(
+            g.get(guard.x, guard.y).glyph,
+            'g',
+            "the peek sees the guard live"
+        );
+
+        // The danger overlay never paints a cell the player cannot see: inside a duct
+        // the FOV is exactly the peek window, so every red cell lies within it.
+        let fov = s.player_fov();
+        for y in 0..9 {
+            for x in 0..9 {
+                if g.get(x, y).bg == Some(Category::Danger) {
+                    assert!(
+                        fov.contains(Cell::new(x, y)),
+                        "a red cell at ({x},{y}) must be inside the peek window",
+                    );
+                }
+            }
+        }
+    }
+
+    /// A guard within the reduced in-duct sense but out of the window still shows as
+    /// the §9.2 orange **Sensed** background through the memory view; one beyond the
+    /// reduced range shows nothing.
+    #[test]
+    fn a_sensed_guard_shows_through_the_memory_view() {
+        let near = Cell::new(3, 4); // Chebyshev 3 from the crawl cell (3,1): sensed
+        let far = Cell::new(7, 7); // Chebyshev 6: beyond DUCT_SENSE_RANGE
+        let mut s = duct_state(vec![Guard::stationary(near), Guard::stationary(far)]);
+        s.step(Input::Step(Direction::North)); // enter
+        s.step(Input::Step(Direction::East)); // crawl to (3,1)
+        let g = render(&s);
+
+        let sensed = g.get(near.x, near.y);
+        assert_eq!(
+            sensed.bg,
+            Some(Category::Sensed),
+            "the near guard is sensed"
+        );
+        assert_ne!(sensed.glyph, 'g', "sensed is a highlight, not a glyph");
+        assert_eq!(
+            g.get(far.x, far.y).bg,
+            None,
+            "the far guard is out of range"
+        );
+    }
+
+    /// After the player crawls a duct and climbs out, its interior cells stay
+    /// **remembered** as `=` rather than reverting to blank wall (§11.5a) — the
+    /// scouted flight path is worth keeping.
+    #[test]
+    fn a_crawled_duct_is_remembered_after_the_player_leaves() {
+        let mut s = duct_state(Vec::new());
+        s.step(Input::Step(Direction::North)); // enter (2,1)
+        for _ in 0..3 {
+            s.step(Input::Step(Direction::East)); // crawl to (5,1)
+        }
+        s.step(Input::Step(Direction::South)); // climb out at (5,2)
+        assert!(!s.in_duct(), "the normal view is restored on the same turn");
+        // Walk down the room until the duct band is out of the forward view.
+        for _ in 0..3 {
+            s.step(Input::Step(Direction::South));
+        }
+        assert!(
+            s.duct_memory().contains(&Cell::new(3, 1)),
+            "the crawl is remembered as duct knowledge",
+        );
+        assert!(
+            !s.player_fov().contains(Cell::new(3, 1)),
+            "…and the duct is now out of view",
+        );
+        let g = render(&s);
+
+        for &(x, y) in &[(3, 1), (4, 1)] {
+            let c = g.get(x, y);
+            assert_eq!(c.glyph, '=', "the crawled interior does not vanish to wall");
+            assert_eq!(c.vis, Visibility::Remembered, "…it is remembered, not live");
+        }
     }
 }
