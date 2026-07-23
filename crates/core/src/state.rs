@@ -108,7 +108,9 @@ pub enum Event {
     /// plain step that lands still hugging the run, its corners included; any
     /// other spent action stands you up, no special event.
     Crouched { behind: Cell },
-    /// The player opened a closed door by bumping a panel (§4.3, §10.4).
+    /// A closed door was opened by a bump on a panel (§10.4): the player's
+    /// (§4.3), or a guard's — a guard's route runs straight through closed
+    /// doors, and walking into the panel is the bump that opens them.
     DoorOpened { at: Cell },
     /// The player took the intel at a console; `remaining` objectives are still out.
     IntelTaken { remaining: usize },
@@ -1393,6 +1395,16 @@ impl State {
                 events.push(Event::Captured { by: target });
                 return;
             }
+            // A closed door does not stop a guard: its route runs straight through
+            // (§10.3's deliberate closed-panel rule), and the walk-in is the bump
+            // that opens it (§10.4) — the door is the guard's whole action this
+            // turn; it steps through on a later one. With no auto-close in the
+            // loop, guard traffic monotonically opens the facility up over a level.
+            if self.layout.facility().terrain(target) == Some(Terrain::DoorPanelClosed) {
+                self.operate_door(target);
+                events.push(Event::DoorOpened { at: target });
+                continue;
+            }
             // A guard moves onto a cell the terrain admits and no actor occupies. Its
             // own cell is a step behind `target`, so the mover is never in the way; the
             // player's cell was captured above but `occupied` still guards it.
@@ -1452,9 +1464,9 @@ fn actor_occupies(player: Cell, guards: &[Guard], bodies: &[Body], cell: Cell) -
 mod tests {
     use super::*;
     use crate::guard::{GuardState, CERTAIN_RANGE, GLIMPSE_RANGE, PATROL_RADIUS, SEARCH_RADIUS};
-    use crate::test_support::{open_room, solo};
+    use crate::test_support::{open_room, region_strip, solo};
     use crate::vision::field_of_view;
-    use crate::{generate, DoorId, Rng};
+    use crate::{generate, generate_level, DoorId, Rng};
 
     #[test]
     fn a_move_into_open_floor_spends_the_turn_and_turns_the_player() {
@@ -2789,6 +2801,131 @@ mod tests {
             Outcome::Playing,
             "the far player is never reached"
         );
+    }
+
+    /// §10.4: a closed door does not stop a guard — its route runs straight
+    /// through, and walking into the panel is the bump that opens it. The door is
+    /// the guard's whole action that turn; it steps through on the next. And with
+    /// no auto-close in the loop, the door stays open behind it — guard traffic
+    /// monotonically opens the facility up over a level.
+    #[test]
+    fn a_guard_walking_its_route_opens_the_door_and_passes_through() {
+        let layout = region_strip();
+        let panel = Cell::new(4, 2);
+        let door = layout.regions().door_at(panel).unwrap();
+        let mut s = State::new(
+            layout,
+            Cell::new(13, 4), // parked in corridor D, two closed doors away
+            Direction::North,
+            vec![Guard::patrolling_to(Cell::new(2, 2), Cell::new(6, 2))],
+            Vec::new(),
+            Cell::new(13, 1),
+        );
+        // The startup turn walked the guard up against the closed panel.
+        assert_eq!(s.guards()[0].pos(), Cell::new(3, 2));
+        assert!(!s.layout().regions().door(door).is_open());
+
+        // Its next step is *into* the panel: the walk-in opens the door instead.
+        let events = s.step(Input::Wait);
+        assert!(events.contains(&Event::DoorOpened { at: panel }));
+        assert_eq!(
+            s.guards()[0].pos(),
+            Cell::new(3, 2),
+            "the door was the turn"
+        );
+        assert!(s.layout().regions().door(door).is_open());
+
+        // Then it walks through the doorway into the corridor, door left open.
+        s.step(Input::Wait);
+        assert_eq!(s.guards()[0].pos(), panel, "onto the open panel");
+        s.step(Input::Wait);
+        assert_eq!(s.guards()[0].pos(), Cell::new(5, 2), "into the corridor");
+        assert!(s.layout().regions().door(door).is_open(), "no auto-close");
+        assert_eq!(s.outcome(), Outcome::Playing);
+    }
+
+    /// §7.5/§10.5 on a fixture level: a guard whose beat is room A, corridor C
+    /// and room B sweeps *through* the corridor into the far room — opening the
+    /// doors on its way — and never leaves its beat: over a bounded number of
+    /// turns its walk covers corridor cells between its rooms, and the door out
+    /// of the beat is never touched.
+    #[test]
+    fn a_region_beat_carries_the_patrol_across_corridors_and_rooms() {
+        let layout = region_strip();
+        let station = Cell::new(2, 2);
+        let beat = crate::beat::beat_cells(layout.regions(), station, 3);
+        let door_a = layout.regions().door_at(Cell::new(4, 2)).unwrap();
+        let door_b = layout.regions().door_at(Cell::new(7, 2)).unwrap();
+        let door_d = layout.regions().door_at(Cell::new(11, 2)).unwrap();
+        let mut s = State::new(
+            layout,
+            Cell::new(13, 4), // parked in corridor D, outside the beat
+            Direction::North,
+            vec![Guard::patrolling(station).with_beat(beat.clone())],
+            Vec::new(),
+            Cell::new(13, 1),
+        );
+
+        let (mut corridor, mut far_room) = (false, false);
+        for _ in 0..80 {
+            s.step(Input::Wait);
+            let pos = s.guards()[0].pos();
+            corridor |= (5..=6).contains(&pos.x);
+            far_room |= (8..=10).contains(&pos.x);
+            assert!(
+                beat.contains(&pos) || pos == Cell::new(4, 2) || pos == Cell::new(7, 2),
+                "the sweep stays on its beat (guard at {pos:?})",
+            );
+        }
+        assert!(corridor, "the sweep covered the corridor between its rooms");
+        assert!(far_room, "the sweep crossed into the far room");
+        assert!(
+            s.layout().regions().door(door_a).is_open()
+                && s.layout().regions().door(door_b).is_open(),
+            "the sweep opened the doors on its beat",
+        );
+        assert!(
+            !s.layout().regions().door(door_d).is_open(),
+            "the door out of the beat is never touched",
+        );
+        assert_eq!(s.outcome(), Outcome::Playing, "the parked player is safe");
+    }
+
+    /// §12.4: same seed → same beats, same sweeps. Two states built from the same
+    /// seed stay in lockstep through a long patrol — guard positions and door
+    /// states alike, turn for turn.
+    #[test]
+    fn beats_and_sweeps_are_deterministic_from_the_seed() {
+        for seed in [3, 11] {
+            let build = || {
+                let (layout, p) = generate_level(&crate::LevelConfig::V1, &mut Rng::new(seed))
+                    .expect("the v1 config generates");
+                let guards = p.guards(&layout);
+                State::new(
+                    layout,
+                    p.player(),
+                    Direction::North,
+                    guards,
+                    p.intel().iter().copied(),
+                    p.exit(),
+                )
+            };
+            let (mut a, mut b) = (build(), build());
+            for turn in 0..60 {
+                a.step(Input::Wait);
+                b.step(Input::Wait);
+                let pos = |s: &State| -> Vec<Cell> { s.guards().iter().map(|g| g.pos()).collect() };
+                assert_eq!(pos(&a), pos(&b), "seed {seed}, turn {turn}: positions");
+                let doors = |s: &State| -> Vec<bool> {
+                    s.layout()
+                        .regions()
+                        .doors()
+                        .map(|(_, d)| d.is_open())
+                        .collect()
+                };
+                assert_eq!(doors(&a), doors(&b), "seed {seed}, turn {turn}: doors");
+            }
+        }
     }
 
     /// Bumping a closed door opens it and spends the turn (§4.3, §10.4). Uses a

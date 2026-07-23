@@ -29,6 +29,7 @@
 #![forbid(unsafe_code)]
 
 mod ability;
+mod beat;
 mod body;
 mod category;
 mod cell;

@@ -24,6 +24,7 @@
 //!   bump-adjacent (§4.3) to it: start → every objective → exit, on the level as
 //!   it will actually be played.
 
+use crate::beat::{beat_cells, BEAT_REGIONS};
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
@@ -107,14 +108,19 @@ impl Placement {
     }
 
     /// The guards as the live actors a real run spawns — the patrolling §7.5
-    /// sweepers (§7.4's reactive states ride on the same seam). Placement records
-    /// guard *cells* because the §10.6 guarantees are about where a guard *stands*;
-    /// turning a spawn into a behaving guard is a single decision, and it lives here
-    /// so every caller — the web build, the sim — spawns the same patrolling guard.
-    pub fn guards(&self) -> Vec<Guard> {
+    /// sweepers (§7.4's reactive states ride on the same seam), each carrying its
+    /// region **beat** (§10.5, [`crate::beat`]): the station's region grown across
+    /// `layout`'s door edges, so a territory is rooms plus the corridors joining
+    /// them and never straddles a wall. Placement records guard *cells* because
+    /// the §10.6 guarantees are about where a guard *stands*; turning a spawn into
+    /// a behaving guard is a single decision, and it lives here so every caller —
+    /// the web build, the sim — spawns the same patrolling guard.
+    pub fn guards(&self, layout: &Layout) -> Vec<Guard> {
         self.guard_cells()
             .iter()
-            .map(|&cell| Guard::patrolling(cell))
+            .map(|&cell| {
+                Guard::patrolling(cell).with_beat(beat_cells(layout.regions(), cell, BEAT_REGIONS))
+            })
             .collect()
     }
 }

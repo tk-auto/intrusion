@@ -186,11 +186,14 @@ pub fn start() -> Result<(), JsValue> {
     let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(seed))
         .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
 
+    // Guards carry their region beats (§7.5/§10.5), grown from the layout's
+    // graph before the layout moves into the state.
+    let guards = placement.guards(&layout);
     let state = State::new(
         layout,
         placement.player(),
         Direction::North,
-        placement.guards(),
+        guards,
         placement.intel().iter().copied(),
         placement.exit(),
     );
