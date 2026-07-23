@@ -270,7 +270,7 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
 /// itself a placed usable does not count (it is not a standing cell).
 fn placement_conflict(layout: &Layout, cell: Cell, placed: &[Cell]) -> bool {
     let facility = layout.facility();
-    facility.neighbors(cell).any(|f| {
+    facility.neighbours(cell).any(|f| {
         facility.terrain(f) == Some(Terrain::Floor)
             && !placed.contains(&f)
             && has_adjacent_usable(facility, f, placed)
@@ -332,7 +332,7 @@ fn solvable(facility: &Facility, placement: &Placement) -> bool {
     // flooded set rather than inside it.
     solid
         .iter()
-        .all(|&target| facility.neighbors(target).any(|n| reached.contains(&n)))
+        .all(|&target| facility.neighbours(target).any(|n| reached.contains(&n)))
 }
 
 #[cfg(test)]

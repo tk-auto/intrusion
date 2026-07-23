@@ -246,7 +246,7 @@ impl Facility {
     /// The in-bounds cardinal neighbours of `cell` (§4.1): up to four, fewer at an
     /// edge. 4-directional by construction — there is no diagonal in the walk, so
     /// nothing built on it (movement, pathfinding, flood fill) can travel one.
-    pub fn neighbors(&self, cell: Cell) -> impl Iterator<Item = Cell> + '_ {
+    pub fn neighbours(&self, cell: Cell) -> impl Iterator<Item = Cell> + '_ {
         Direction::ALL
             .into_iter()
             .filter_map(move |dir| cell.step(dir))
@@ -471,17 +471,17 @@ mod tests {
     /// Neighbours are the ≤4 in-bounds cardinal cells, all one Manhattan unit away
     /// — the "no diagonal path anywhere" guarantee, seen from the grid.
     #[test]
-    fn neighbors_are_cardinal_and_in_bounds() {
+    fn neighbours_are_cardinal_and_in_bounds() {
         let f = Facility::walled_box(5, 5);
 
-        let interior: Vec<Cell> = f.neighbors(Cell::new(2, 2)).collect();
+        let interior: Vec<Cell> = f.neighbours(Cell::new(2, 2)).collect();
         assert_eq!(interior.len(), 4);
         for n in &interior {
             assert_eq!(Cell::new(2, 2).manhattan_distance(*n), 1);
         }
 
         // A corner sees only its two on-grid neighbours; the off-grid steps drop.
-        let corner: Vec<Cell> = f.neighbors(Cell::new(0, 0)).collect();
+        let corner: Vec<Cell> = f.neighbours(Cell::new(0, 0)).collect();
         assert_eq!(corner.len(), 2);
         assert!(corner.contains(&Cell::new(1, 0)));
         assert!(corner.contains(&Cell::new(0, 1)));

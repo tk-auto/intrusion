@@ -47,7 +47,7 @@ impl Cell {
     /// leave the grid's north or west edge — coordinates are unsigned, so there
     /// is no cell there to name. Stepping east or south always yields a `Cell`;
     /// whether *that* cell is in bounds is the grid's call, so callers that need
-    /// bounds should go through [`Facility::neighbors`](crate::Facility::neighbors).
+    /// bounds should go through [`Facility::neighbours`](crate::Facility::neighbours).
     pub fn step(self, dir: Direction) -> Option<Cell> {
         let cell = match dir {
             Direction::North => Cell::new(self.x, self.y.checked_sub(1)?),
@@ -64,7 +64,7 @@ impl Cell {
 /// There is deliberately no diagonal variant: 4-directional movement is
 /// **[SETTLED]**, and the *absence* of a diagonal here is what makes "no diagonal
 /// path anywhere" structural — nothing built on [`Cell::step`] or
-/// [`Facility::neighbors`](crate::Facility::neighbors) can travel diagonally,
+/// [`Facility::neighbours`](crate::Facility::neighbours) can travel diagonally,
 /// because there is no diagonal to travel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Direction {
