@@ -27,7 +27,10 @@
 //!
 //! 1. **Flee** when hunted (§7.6): activate Run to open a gap, make for a known
 //!    hideout, and hold still inside it until the hunt passes — contact cannot
-//!    reach a hidden player (§4.5).
+//!    reach a hidden player (§4.5). With no hideout to reach, cloak with Camouflage
+//!    (a hideout you carry, §8.3) and hold; the exit is never a refuge here — you
+//!    cannot disappear into your own tunnel, nor even step onto it with objectives
+//!    still out.
 //! 2. **Pursue** the objective otherwise: route to the nearest *known* untaken
 //!    console, take it, and once all intel is in hand route back to the exit —
 //!    preferring cells no visible guard is watching, and holding a beat when the
@@ -152,7 +155,11 @@ impl PlayerPolicy for StealthBot {
 
         // The world's own facts, gathered once through the player's channels.
         let danger = danger_cells(state);
-        let blocked = blocked_cells(state);
+        let mut blocked = blocked_cells(state);
+        // Never spring a takedown that would wall you in (§7.2/#170): a guard on the
+        // sole mouth of a dead end is left blocked, not taken down, so the router waits
+        // it out rather than dropping a body across its only way home.
+        blocked.extend(self_sealing_takedowns(state, &blocked));
 
         // 1. Flee first: nothing else matters while a guard has you (§7.6).
         if being_hunted(state, &danger) {
@@ -193,20 +200,29 @@ impl StealthBot {
             return Input::Activate(AbilityId::Run);
         }
 
-        // Aim for the nearest known hideout to disappear into; only if none is known
-        // fall back on the exit — the start room it sits in is the one patch the
-        // generator keeps guard-free (§10.6), so retreating there buys room even
-        // without a cupboard to hand.
-        let mut boltholes = known_hideouts(state);
-        if boltholes.is_empty() {
-            boltholes.extend(exit_cell(state));
-        }
+        // Aim for the nearest known hideout to disappear into — the one place a
+        // guard's contact cannot reach (§4.5).
+        let boltholes = known_hideouts(state);
         if let Some(dir) = self.descend(state, &boltholes, danger, blocked, Descent::flee()) {
             return Input::Step(dir);
         }
 
-        // Nowhere to run to: back away from the nearest guard, off watched cells
-        // when it can, and hold only if truly cornered.
+        // No cupboard within reach: cloak instead. Camouflage is a hideout you carry
+        // (§8.3) — a *still* cloaked player is undetectable — so activate it and then
+        // hold, letting the hunt pass over an intruder it cannot see. The exit is
+        // deliberately *not* a fallback refuge here: you cannot disappear into your own
+        // tunnel, and with objectives still in the facility you cannot even step onto
+        // it (§4.5), so routing there only bumps a door that never opens — a free
+        // action that spends no turn and so never lets the hunt cool, stalling the run
+        // out to the input cap instead of breaking contact.
+        match state.ability_state(AbilityId::Camouflage) {
+            AbilityState::Ready => return Input::Activate(AbilityId::Camouflage),
+            AbilityState::Active { .. } => return Input::Wait,
+            AbilityState::Cooling { .. } | AbilityState::Unusable => {}
+        }
+
+        // Nowhere to run to and nothing to cloak with: back away from the nearest
+        // guard, off watched cells when it can, and hold only if truly cornered.
         retreat_step(state, danger, blocked).map_or(Input::Wait, Input::Step)
     }
 
@@ -479,6 +495,40 @@ fn blocked_cells(state: &State) -> HashSet<Cell> {
     cells
 }
 
+/// Unaware guards the bot must **not** take down because the body would seal it in
+/// (§7.2/#170, from the bot's side). A takedown drops the body on the guard's own
+/// cell; when the player sits in a dead end — a hideout, a one-wide stub — whose
+/// *only* routable way out holds that guard, springing the takedown walls the mouth
+/// and strands the bot for the rest of the run (the exact §10.3 cupboard soft-lock).
+/// The bot leaves such a guard blocked instead, so the router waits rather than
+/// striking: the guard is unaware and the hidden bot is safe (§4.5), so the patrol
+/// steps off the mouth on its own and the exit reopens.
+///
+/// Only a *lone* exit can be a trap — with a second way out, a sealed mouth still
+/// leaves the other — so this fires solely when the player has exactly one routable,
+/// unblocked neighbour and an unaware guard stands on it. A guard the player cannot
+/// even perceive is not planned around (the bot avoids only what it can see or sense).
+fn self_sealing_takedowns(state: &State, blocked: &HashSet<Cell>) -> Vec<Cell> {
+    let facility = state.layout().facility();
+    let player = state.player();
+    let mut exits = Direction::ALL
+        .iter()
+        .filter_map(|&d| player.step(d))
+        .filter(|&n| routable(facility, n) && !blocked.contains(&n));
+    let (Some(mouth), None) = (exits.next(), exits.next()) else {
+        return Vec::new(); // no exit, or more than one — never a single-mouth trap
+    };
+    let sealed = state
+        .guards()
+        .iter()
+        .any(|g| g.pos() == mouth && state.perceive_guard(g).is_some() && !g.detected_player());
+    if sealed {
+        vec![mouth]
+    } else {
+        Vec::new()
+    }
+}
+
 /// The exit cell — the player's own tunnel, known from the start (§4.5). Found by
 /// scanning the always-visible geometry for the one exit tile, so it needs no
 /// fog gate: a player knows the way they came in.
@@ -697,6 +747,34 @@ mod tests {
                 a.to_json_line(),
                 b.to_json_line(),
                 "seed {seed}: identical bytes"
+            );
+        }
+    }
+
+    /// Regression (#171): the endless stalls #165 tipped the bot into now *finish*.
+    /// The close-behind/automatic doors (§10.4) reshaped guard coverage enough to
+    /// surface two self-inflicted stalls, both of which spent the whole input budget
+    /// without the run ending:
+    ///
+    /// - **Marching onto its own exit.** Hunted with no reachable hideout, the flee
+    ///   routine used to fall back on the exit cell; with objectives still out, a step
+    ///   onto the exit is a refused, *free* bump (§4.5), so the turn never advanced and
+    ///   the hunt never cooled (seeds 30, 43). It now cloaks or retreats instead.
+    /// - **Sealing itself into a cupboard.** Waiting out a guard parked on a hideout's
+    ///   only mouth, the bot would eventually push on, take the guard down, and drop
+    ///   the body across that mouth — the §7.2/#170 soft-lock (seeds 33, 34, 44, 58,
+    ///   64, 65). It now leaves such a guard be and waits for the patrol to step off.
+    ///
+    /// Each seed must reach a real end (win or capture), never the input cap.
+    #[test]
+    fn the_close_behind_door_stalls_now_finish() {
+        for seed in [30, 43, 33, 34, 44, 58, 64, 65] {
+            let record =
+                run_one(seed, &mut StealthBot::new(), DEFAULT_INPUT_CAP).expect("generates");
+            assert_ne!(
+                record.outcome,
+                RunOutcome::Timeout,
+                "seed {seed}: the bot should play the run to an end, not stall out",
             );
         }
     }
