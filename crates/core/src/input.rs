@@ -14,6 +14,7 @@
 //! named constant fact: keyed by the ability's *identity*, independent of any
 //! list, and pinned one-by-one in the tests below.
 
+use crate::ability::AbilityId;
 use crate::cell::Direction;
 use crate::state::Input;
 
@@ -81,6 +82,28 @@ pub fn ability_hotkey(ability: &str) -> Option<char> {
         "Dephase" => 'x',
         _ => return None,
     })
+}
+
+/// Map a key to the ability **activation** it drives (§11.6 shortcut), or `None`.
+///
+/// A single-character key is matched by **identity** against the settled hotkey of
+/// each economy ability ([`AbilityId::ALL`]) — never a list position — and resolves
+/// to the one `Input::Activate(id)` the loop already runs (§8.2). This is the
+/// keyboard half of the one activation path a pointer click also drives
+/// ([`ability_at`](crate::ability_at)); the two share the identity resolution so a
+/// key and a click can never disagree on what an ability's shortcut does. The bump
+/// verbs Takedown and Drag are **not** activated (they are done by walking into
+/// their target, §7.2/§8.3), so their letters resolve to nothing here.
+pub fn ability_input_for_key(key: &str) -> Option<Input> {
+    let mut chars = key.chars();
+    let ch = match (chars.next(), chars.next()) {
+        (Some(c), None) => c,
+        _ => return None, // named keys ("Tab", "ArrowUp") are never a hotkey
+    };
+    AbilityId::ALL
+        .into_iter()
+        .find(|id| id.hotkey() == ch)
+        .map(Input::Activate)
 }
 
 #[cfg(test)]
@@ -175,6 +198,33 @@ mod tests {
         }
         // Even with Decoy gone entirely, Dephase keeps its own key.
         assert_eq!(ability_hotkey("Dephase"), Some('x'));
+    }
+
+    /// The keyboard activation shortcut (§11.6): each economy ability's settled
+    /// hotkey resolves to its `Input::Activate` by identity — the same input a
+    /// pointer click fires — while the bump verbs Takedown and Drag, which are not
+    /// activated, resolve to nothing even though they own hotkeys.
+    #[test]
+    fn an_ability_hotkey_activates_by_identity() {
+        use crate::ability::AbilityId;
+        for id in AbilityId::ALL {
+            let key = id.hotkey().to_string();
+            assert_eq!(
+                ability_input_for_key(&key),
+                Some(Input::Activate(id)),
+                "{} shortcut",
+                id.name()
+            );
+        }
+        // The bump verbs own hotkeys but are not activated (§7.2/§8.3): 't' and 'g'
+        // drive no activation.
+        for key in ["t", "g"] {
+            assert_eq!(ability_input_for_key(key), None, "bump verb key {key:?}");
+        }
+        // A movement key and a named key own no ability activation.
+        for key in ["k", "5", "Tab", "ArrowUp"] {
+            assert_eq!(ability_input_for_key(key), None, "key {key:?}");
+        }
     }
 
     /// No two abilities share a key, and no ability claims a movement key — the

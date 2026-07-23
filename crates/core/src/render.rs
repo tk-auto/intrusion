@@ -35,7 +35,7 @@
 //! lands the whole cone is one zone. Colour *values* are the shell's table
 //! (§11.2); this module only speaks in categories.
 
-use crate::ability::{sample_panel, AbilityState, AbilityStatus};
+use crate::ability::{AbilityId, AbilityState, AbilityStatus};
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
@@ -417,16 +417,17 @@ pub fn is_ability_button(width: u32, x: u32, y: u32) -> bool {
 /// never covers where the action is. It is not tied to waiting: an earlier
 /// experiment showed it on the wait turn, which buried exactly the 360° guard-sense
 /// the wait exists to reveal (§9.1) — so the panel is now on demand, and waiting
-/// stays a clear look around. Contents are still a placeholder ([`sample_panel`])
-/// until the ability model feeds real state; the whole thing stays swappable (§15
-/// Q9).
+/// stays a clear look around. Both the line and the panel draw the run's **real**
+/// ability state ([`State::ability_statuses`]); a click on either resolves to the
+/// ability under it ([`ability_at`]) and activates it exactly as its hotkey would.
 pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
-    let statuses = sample_panel();
+    let statuses = state.ability_statuses();
 
     // The map layer, with the deployed panel overlaid opposite the player.
     let mut map = render(state);
     if ui.ability_panel_open {
-        let origin = panel_origin_opposite_player(&map, state.player(), &statuses);
+        let origin =
+            panel_origin_opposite_player(map.width(), map.height(), state.player(), &statuses);
         overlay_ability_panel(&mut map, origin, &statuses);
     }
     let width = map.width();
@@ -454,6 +455,26 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         height,
         cells,
     }
+}
+
+/// Lay the compact ability line out (§11.4): the start column of each entry that
+/// fits before the deploy button, in draw order, as `(status index, start col)`.
+/// Entries begin at a one-cell margin with a single space between; the strip stops
+/// the moment the next entry would run into the button ([`button_start`]). Shared
+/// by [`ability_line`] (drawing) and [`ability_at`] (hit-testing) so a click can
+/// never land on an entry the row did not draw.
+fn ability_line_layout(width: u32, statuses: &[AbilityStatus]) -> Vec<(usize, u32)> {
+    let mut out = Vec::new();
+    let mut x = 1; // the one-cell left margin
+    for (i, status) in statuses.iter().enumerate() {
+        let len = status.compact().chars().count() as u32;
+        if x + len > button_start(width) {
+            break;
+        }
+        out.push((i, x));
+        x += len + 1; // one space between abilities
+    }
+    out
 }
 
 /// The always-on ability line (§11.4): one row carrying every ability's compact
@@ -484,15 +505,14 @@ fn ability_line(width: u32, statuses: &[AbilityStatus], open: bool) -> Vec<Glyph
         }
     };
 
-    let mut x = 1; // the one-cell left margin
-    for status in statuses {
-        let text = status.compact();
-        // Stop before the strip would run into the deploy button.
-        if x + text.chars().count() as u32 > button_start(width) {
-            break;
-        }
-        put(&mut cells, x, &text, panel_category(status.state));
-        x += text.chars().count() as u32 + 1; // one space between abilities
+    for (i, start) in ability_line_layout(width, statuses) {
+        let status = &statuses[i];
+        put(
+            &mut cells,
+            start,
+            &status.compact(),
+            panel_category(status.state),
+        );
     }
 
     let label = if open { BUTTON_OPEN } else { BUTTON_CLOSED };
@@ -500,37 +520,95 @@ fn ability_line(width: u32, statuses: &[AbilityStatus], open: bool) -> Vec<Glyph
     cells
 }
 
+/// The ability entry at screen cell `(x, y)`, or `None` — the **pure**
+/// pointer→identity hit-test for both the always-on line and the deployed panel
+/// (§11.4), the sibling of [`is_ability_button`]. A shell maps a click to a screen
+/// cell and asks this; a hit fires `Input::Activate(id)` on the returned ability,
+/// resolving by **identity**, never by the row it landed on (§11.6) — so it opens
+/// no second activation path (the §8.4 regression) and, on a cooling/active entry,
+/// refuses for free in the economy (§4.4) with no turn spent.
+///
+/// The geometry mirrors [`render_screen`] exactly, drawing from the same shared
+/// layout ([`ability_line_layout`]) and panel origin ([`panel_origin_opposite_player`])
+/// the render draws with, so a click can never miss the entry that is shown. Row 0
+/// is the compact line; when the panel is deployed, its rows are hit-tested on the
+/// map layer beneath the header. The deploy button is never an ability — the line
+/// stops before it and the shell tests the button first — so a tap there toggles the
+/// panel and never falls through to an activation underneath.
+pub fn ability_at(state: &State, ui: ScreenUi, x: u32, y: u32) -> Option<AbilityId> {
+    let statuses = state.ability_statuses();
+    let facility = state.layout().facility();
+    let (map_w, map_h) = (facility.width(), facility.height());
+
+    // Row 0: the always-on compact line.
+    if y == 0 {
+        for (i, start) in ability_line_layout(map_w, &statuses) {
+            let len = statuses[i].compact().chars().count() as u32;
+            if x >= start && x < start + len {
+                return Some(statuses[i].id);
+            }
+        }
+        return None;
+    }
+
+    // The deployed panel, overlaid on the map layer below the header (§11.4).
+    if ui.ability_panel_open && y >= HEADER_ROWS {
+        let (mx, my) = (x, y - HEADER_ROWS);
+        let (ox, oy) = panel_origin_opposite_player(map_w, map_h, state.player(), &statuses);
+        let band = panel_band_width(&statuses);
+        if mx >= ox && mx < ox + band && my >= oy && my < map_h {
+            let row = (my - oy) as usize;
+            if row < statuses.len() {
+                return Some(statuses[row].id);
+            }
+        }
+    }
+    None
+}
+
+/// The width of the deployed panel's cleared band (§11.4): one cell wider than the
+/// longest label, for an even right edge and a hair of padding off the map. Shared
+/// by the origin ([`panel_origin_opposite_player`]), the overlay
+/// ([`overlay_ability_panel`]) and the hit-test ([`ability_at`]) so all three agree
+/// on the block's footprint.
+fn panel_band_width(statuses: &[AbilityStatus]) -> u32 {
+    statuses
+        .iter()
+        .map(|s| s.label().chars().count())
+        .max()
+        .unwrap_or(0) as u32
+        + 1
+}
+
 /// The map-space corner to anchor the deployed panel at, **opposite the player**
 /// (§11.4): a player in the left half puts the panel on the right, a player in the
 /// top half puts it at the bottom, and so on — so the panel is always as far from
 /// the player as the board allows and never covers where they are acting. A
 /// one-cell inset keeps a border of map around it; sizes are clamped so a tiny
-/// hand-built board never underflows (the v1 board is 40×40, §10.2).
+/// hand-built board never underflows (the v1 board is 40×40, §10.2). Takes the map
+/// dimensions rather than the [`Grid`] so the hit-test can reuse it without a
+/// rendered frame.
 fn panel_origin_opposite_player(
-    map: &Grid,
+    map_w: u32,
+    map_h: u32,
     player: Cell,
     statuses: &[AbilityStatus],
 ) -> (u32, u32) {
-    let panel_w = statuses
-        .iter()
-        .map(|s| s.label().chars().count())
-        .max()
-        .unwrap_or(0) as u32
-        + 1;
+    let panel_w = panel_band_width(statuses);
     let panel_h = statuses.len() as u32;
 
     // Player left of centre → panel right; player above centre → panel bottom.
-    let x0 = if player.x < map.width() / 2 {
-        map.width().saturating_sub(panel_w + 1)
+    let x0 = if player.x < map_w / 2 {
+        map_w.saturating_sub(panel_w + 1)
     } else {
         1
     };
-    let y0 = if player.y < map.height() / 2 {
-        map.height().saturating_sub(panel_h + 1)
+    let y0 = if player.y < map_h / 2 {
+        map_h.saturating_sub(panel_h + 1)
     } else {
         1
     };
-    (x0.max(1).min(map.width().saturating_sub(1)), y0.max(1))
+    (x0.max(1).min(map_w.saturating_sub(1)), y0.max(1))
 }
 
 /// Overlay the deployed ability panel onto the map `grid` at `(ox, oy)` (§11.4):
@@ -547,12 +625,7 @@ fn overlay_ability_panel(grid: &mut Grid, origin: (u32, u32), statuses: &[Abilit
     let (ox, oy) = origin;
     // A uniform band, one space wider than the longest label, so the cleared box
     // has an even right edge and a hair of padding off the map.
-    let width = statuses
-        .iter()
-        .map(|s| s.label().chars().count())
-        .max()
-        .unwrap_or(0) as u32
-        + 1;
+    let width = panel_band_width(statuses);
 
     for (i, status) in statuses.iter().enumerate() {
         let y = oy + i as u32;
@@ -1277,11 +1350,12 @@ mod tests {
             Cell::new(22, 4),
         );
         let text = render_screen(&s, ScreenUi::default()).to_text();
-        // Row 0 is the always-on ability line: compact keys left, deploy button
+        // Row 0 is the always-on ability line: on a fresh run every economy ability
+        // is ready, so the compact keys are the four bare hotkeys, deploy button
         // (closed chevron) right. (Its exact glyphs are pinned in the ability-line
         // test; here we assert its shape without pasting the chevron.)
         assert!(
-            text[0].starts_with(" r t g c[7] d/12/ x"),
+            text[0].starts_with(" r c d x"),
             "the always-on ability line: {:?}",
             text[0]
         );
@@ -1361,11 +1435,13 @@ mod tests {
     }
 
     /// The permanent home of ability state (§11.4): the **always-on ability line**
-    /// on row 0, present every turn regardless of the panel. Each ability shows its
-    /// compact readout ([`AbilityStatus::compact`]) in its state colour, keyed by
-    /// the explicit §11.6 mapping, with the closed deploy button right-aligned.
+    /// on row 0, assembled from the run's real economy ([`State::ability_statuses`]).
+    /// A fresh run has every ability ready, so the line is the four economy keys in
+    /// deck order, each the bare §11.6 hotkey in Owned — and the two bump verbs
+    /// (Takedown `t`, Drag `g`) are **not** on it: they live on the usable line, not
+    /// the ability economy (§7.2/§8.3).
     #[test]
-    fn the_always_on_ability_line_shows_every_ability() {
+    fn the_always_on_line_shows_every_economy_ability() {
         use crate::input::ability_hotkey;
 
         let s = State::new(
@@ -1378,24 +1454,22 @@ mod tests {
         );
         let g = render_screen(&s, ScreenUi::default());
 
-        // The six abilities laid left to right (width 30 fits them all): the bare
-        // key for ready/unusable, key+number for active/cooling, each in its
-        // state's colour — and every key is its settled §11.6 hotkey.
-        for (col, name, glyph, category) in [
-            (1, "Run", 'r', Category::Owned),        // ready
-            (3, "Takedown", 't', Category::Ground),  // unusable
-            (5, "Drag", 'g', Category::Ground),      // unusable
-            (7, "Camouflage", 'c', Category::Owned), // active
-            (12, "Decoy", 'd', Category::System),    // cooling
-            (18, "Dephase", 'x', Category::Owned),   // ready
+        // The four economy abilities laid left to right from the one-cell margin,
+        // each ready → the bare key in Owned, each key its settled §11.6 hotkey.
+        for (col, name, glyph) in [
+            (1, "Run", 'r'),
+            (3, "Camouflage", 'c'),
+            (5, "Decoy", 'd'),
+            (7, "Dephase", 'x'),
         ] {
             assert_eq!(g.get(col, 0).glyph, glyph, "{name} at col {col}");
-            assert_eq!(g.get(col, 0).fg, category, "{name} colour");
+            assert_eq!(g.get(col, 0).fg, Category::Owned, "{name} ready colour");
             assert_eq!(Some(glyph), ability_hotkey(name), "{name} hotkey");
         }
-        // The inline numbers: active `c[7]`, cooling `d/12/`.
-        assert_eq!(g.get(8, 0).glyph, '[', "active shows [N]");
-        assert_eq!(g.get(13, 0).glyph, '/', "cooling shows /N/");
+        // The bump verbs never appear on the ability line.
+        let row0: String = (0..g.width()).map(|x| g.get(x, 0).glyph).collect();
+        assert!(!row0.contains('t'), "Takedown is not an economy ability");
+        assert!(!row0.contains('g'), "Drag is not an economy ability");
 
         // The deploy button, closed, right-aligned — and `is_ability_button` agrees
         // with where it is drawn.
@@ -1413,6 +1487,51 @@ mod tests {
         assert_eq!(g.get(start, 0).fg, Category::System);
     }
 
+    /// The line's live states (§11.4): an **active** ability tucks its `[n]` against
+    /// the key in Owned, a **cooling** one its `/n/` in System — the exact numbers
+    /// the economy hands over (§8.2). Driven to Run cooling and Camouflage active,
+    /// with Decoy and Dephase still ready, so all three notations show at once.
+    #[test]
+    fn the_line_shows_active_and_cooling_state() {
+        let mut s = State::new(
+            open_room(30, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(28, 8),
+        );
+        // Run: activate (Active 4 after the turn's tick) then toggle off — a free
+        // action that drops it straight into its full 12 cooldown. Then activate
+        // Camouflage: that turn's tick drains Run's cooldown to 11 and leaves
+        // Camouflage active with 9 of its 10 left.
+        s.step(Input::Activate(AbilityId::Run));
+        s.step(Input::Deactivate(AbilityId::Run));
+        s.step(Input::Activate(AbilityId::Camouflage));
+        assert_eq!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Cooling { remaining: 11 }
+        );
+        assert_eq!(
+            s.ability_state(AbilityId::Camouflage),
+            AbilityState::Active { remaining: 9 }
+        );
+
+        let g = render_screen(&s, ScreenUi::default());
+        let row0: String = (0..g.width()).map(|x| g.get(x, 0).glyph).collect();
+        // `r/11/` cooling (System), `c[9]` active (Owned), then the two ready keys.
+        assert!(
+            row0.starts_with(" r/11/ c[9] d x"),
+            "the live ability line: {row0:?}"
+        );
+        assert_eq!(g.get(1, 0).glyph, 'r');
+        assert_eq!(g.get(1, 0).fg, Category::System, "cooling reads System");
+        assert_eq!(g.get(2, 0).glyph, '/', "cooling shows /N/");
+        assert_eq!(g.get(7, 0).glyph, 'c');
+        assert_eq!(g.get(7, 0).fg, Category::Owned, "active reads Owned");
+        assert_eq!(g.get(8, 0).glyph, '[', "active shows [N]");
+    }
+
     /// Deploying the panel (§11.4) overlays the named ability list in the corner
     /// **opposite the player**, so it never covers where the action is — and it is
     /// gone the moment the panel is not deployed. The corner tracks the player: a
@@ -1420,7 +1539,9 @@ mod tests {
     /// flips it top-left.
     #[test]
     fn deploying_shows_the_panel_opposite_the_player() {
-        // Player top-left → panel bottom-right (map origin (12,7), screen row +1).
+        // Player top-left → panel bottom-right. On a fresh run the widest label is
+        // `c Camouflage` (12) → a 13-wide band, four rows: map origin (16,9), so the
+        // first row sits at screen (16,10) (map row + the header).
         let s = State::new(
             open_room(30, 14),
             Cell::new(5, 5),
@@ -1439,17 +1560,17 @@ mod tests {
         // Closed: that corner is plain map (interior floor). Open: the panel's first
         // row `r Run` starts there, in Owned.
         assert_eq!(
-            closed.get(12, 8).glyph,
+            closed.get(16, 10).glyph,
             '·',
             "not deployed: the board is whole"
         );
         assert_eq!(
-            open.get(12, 8).glyph,
+            open.get(16, 10).glyph,
             'r',
             "deployed: panel opposite the player"
         );
-        assert_eq!(open.get(14, 8).glyph, 'R', "…the label reads `r Run`");
-        assert_eq!(open.get(12, 8).fg, Category::Owned);
+        assert_eq!(open.get(18, 10).glyph, 'R', "…the label reads `r Run`");
+        assert_eq!(open.get(16, 10).fg, Category::Owned);
         // The far side (near the player, top-left) stays board even when deployed.
         assert_eq!(
             open.get(2, 2).glyph,
@@ -1482,25 +1603,155 @@ mod tests {
     #[test]
     fn the_deployed_panel_clamps_on_a_tiny_board() {
         let s = State::new(
-            open_room(24, 5),
+            open_room(24, 4),
             Cell::new(2, 2),
             Direction::North,
             Vec::new(),
             Vec::new(),
-            Cell::new(22, 3),
+            Cell::new(22, 2),
         );
-        // A 5-tall map cannot fit the 6-row panel; the render shows what fits and
-        // stops — no panic, and the screen height is intact.
+        // A 4-tall map cannot fit all four panel rows within its inset; the render
+        // shows what fits and stops — no panic, and the screen height is intact.
         let g = render_screen(
             &s,
             ScreenUi {
                 ability_panel_open: true,
             },
         );
-        assert_eq!(g.height(), HEADER_ROWS + 5 + STATUS_ROWS);
-        // Player top-left → panel top-right; its first row draws at map (6,1),
-        // screen (6,2).
-        assert_eq!(g.get(6, 2).glyph, 'r', "the first row still draws");
+        assert_eq!(g.height(), HEADER_ROWS + 4 + STATUS_ROWS);
+        // Player top-left → panel top-right; its first row draws at map (10,1),
+        // screen (10,2).
+        assert_eq!(g.get(10, 2).glyph, 'r', "the first row still draws");
+    }
+
+    /// The pointer→identity hit-test (§11.4) on the always-on line: each compact
+    /// entry's cells resolve to *that* ability by identity, the gaps and the deploy
+    /// button resolve to nothing (a tap there toggles the panel, it never falls
+    /// through to an activation), and the map below is not the line.
+    #[test]
+    fn ability_at_resolves_the_compact_line() {
+        let s = State::new(
+            open_room(30, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(28, 8),
+        );
+        let ui = ScreenUi::default();
+
+        // r@1 c@3 d@5 x@7 (all ready → one cell each), by identity not position.
+        for (col, id) in [
+            (1, AbilityId::Run),
+            (3, AbilityId::Camouflage),
+            (5, AbilityId::Decoy),
+            (7, AbilityId::Dephase),
+        ] {
+            assert_eq!(ability_at(&s, ui, col, 0), Some(id), "col {col}");
+        }
+        // The space between entries is no ability.
+        assert_eq!(
+            ability_at(&s, ui, 2, 0),
+            None,
+            "the gap resolves to nothing"
+        );
+        // The deploy button is never an ability, even though it is on row 0 — the
+        // line stops before it, so a tap there cannot fall through to an activation.
+        let start = 30 - 1 - 3;
+        assert!(is_ability_button(30, start, 0));
+        assert_eq!(
+            ability_at(&s, ui, start, 0),
+            None,
+            "the button is not an ability"
+        );
+        // The map below the header is not the line while the panel is closed.
+        assert_eq!(ability_at(&s, ui, 1, 1), None, "row 1 is the map");
+    }
+
+    /// The hit-test on the **deployed panel** (§11.4): its rows, overlaid on the map
+    /// beneath the header, resolve by identity to the ability they draw; cells off
+    /// the band are nothing; and with the panel closed the same cells are just map.
+    #[test]
+    fn ability_at_resolves_the_deployed_panel() {
+        // Same geometry as `deploying_shows_the_panel_opposite_the_player`: a fresh
+        // run, player top-left, panel at map origin (16,9) → screen rows from 10.
+        let s = State::new(
+            open_room(30, 14),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(28, 12),
+        );
+        let open = ScreenUi {
+            ability_panel_open: true,
+        };
+
+        // One panel row per economy ability, top to bottom in deck order.
+        for (screen_y, id) in [
+            (10, AbilityId::Run),
+            (11, AbilityId::Camouflage),
+            (12, AbilityId::Decoy),
+            (13, AbilityId::Dephase),
+        ] {
+            assert_eq!(
+                ability_at(&s, open, 16, screen_y),
+                Some(id),
+                "row at y {screen_y}"
+            );
+        }
+        // A cell left of the band is not the panel; nor is it while the panel closes.
+        assert_eq!(ability_at(&s, open, 2, 10), None, "off the band");
+        assert_eq!(
+            ability_at(&s, ScreenUi::default(), 16, 10),
+            None,
+            "closed: the panel is not hit-testable"
+        );
+    }
+
+    /// The click **is** the hotkey (§11.4/§11.6): the id a line cell resolves to is
+    /// the very id its §11.6 shortcut fires, and firing it drives the one
+    /// `Input::Activate` path — so a click activates a ready ability and, on a
+    /// cooling one, refuses for free with no turn spent (§4.4), exactly as the key.
+    #[test]
+    fn a_click_activates_by_the_same_path_as_the_hotkey() {
+        use crate::input::ability_input_for_key;
+
+        let mut s = State::new(
+            open_room(30, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(28, 8),
+        );
+        let ui = ScreenUi::default();
+
+        // The line's Run cell resolves to the same id `r` fires — one path, by identity.
+        let clicked = ability_at(&s, ui, 1, 0).expect("Run under the pointer");
+        assert_eq!(
+            ability_input_for_key("r"),
+            Some(Input::Activate(clicked)),
+            "the click and the shortcut resolve to the same activation",
+        );
+
+        // A click on a ready ability activates it (a spent turn).
+        let events = s.step(Input::Activate(clicked));
+        assert_eq!(s.turn(), 1, "activating spends the turn");
+        assert!(!events.is_empty(), "the ability activated");
+
+        // Drive Run to cooling, then a click on its (now cooling) entry refuses
+        // cleanly: the same `Input::Activate` is a free no-op — no turn, no change.
+        s.step(Input::Deactivate(AbilityId::Run));
+        assert!(matches!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Cooling { .. }
+        ));
+        let cooling = ability_at(&s, ui, 1, 0).expect("Run still under the pointer");
+        let turn_before = s.turn();
+        let refused = s.step(Input::Activate(cooling));
+        assert!(refused.is_empty(), "a cooling entry refuses");
+        assert_eq!(s.turn(), turn_before, "the mis-click spends no turn");
     }
 
     /// A message longer than the row truncates at the edge instead of

@@ -1,18 +1,20 @@
-//! The ability panel's display vocabulary (§11.4) — **what the show-on-wait
-//! panel says**, and, for now, a placeholder that stands in for the runtime the
-//! ability model will eventually feed it.
+//! The ability line/panel's display vocabulary (§11.4) — **what the always-on
+//! ability line and the deployable panel say**, assembled from the run's real
+//! ability economy.
 //!
 //! §11.4 leaves *where* ability state lives on screen **[OPEN]** (§15 Q9). The
-//! first experiment is **show-on-wait**: while the player is waiting — the one
-//! turn they have already spent to look around (§8.3) — the render exposes each
-//! ability's state, so peeking rides on a cost the player already paid (§2.3,
-//! cost is load-bearing). This module owns the *display* half of that: the four
-//! states an ability reads as ([`AbilityState`]) and how each formats, plus the
-//! list the panel draws ([`AbilityStatus`]).
+//! current experiment is the always-on **compact line** plus an on-demand
+//! **deployable panel** (`Tab`, or the deploy button) — both now driven by real
+//! per-ability runtime, and both *actionable*: a click resolves to the ability
+//! under it and activates it exactly as its hotkey would (§11.4, §11.6). This
+//! module owns the *display* half: the four states an ability reads as
+//! ([`AbilityState`]) and how each formats, plus one panel row ([`AbilityStatus`]).
+//! The render composes and hit-tests them
+//! ([`render_screen`](crate::render_screen), [`ability_at`](crate::ability_at)).
 //!
 //! # Two halves: the economy model and its display
 //!
-//! The per-ability **runtime economy** (§8.1/§8.2) now lives in this module too —
+//! The per-ability **runtime economy** (§8.1/§8.2) lives in this module too —
 //! [`AbilityId`] and its data-driven [`Ability`] catalog, the effect vocabulary
 //! ([`Effect`]) and the code escape hatch ([`Behaviour`]), and the [`Deck`] the
 //! turn loop steps: activation, early toggle-off, and the end-of-turn
@@ -20,21 +22,16 @@
 //! the rules rather than stored. The deck reads each ability's state as one of the
 //! display [`AbilityState`]s ([`Deck::state`]) — the number the player actually
 //! gets (§8.2 timing) — which is how the two halves meet.
+//! [`State::ability_statuses`](crate::State::ability_statuses) builds the line and
+//! panel straight from that live state, one row per economy ability.
 //!
-//! Wiring the show-on-wait panel to that real state is the **render** ticket
-//! (§11.4); until it lands, [`sample_panel`] stays a **placeholder** chosen to
-//! exercise all four display states at once, so the panel's *placement and
-//! content* can be judged now (§15 Q9's "first experiment … keep it swappable").
-//! When the panel is wired to
-//! [`State::ability_state`](crate::State::ability_state), the placeholder goes —
-//! the display types below are what stay.
-//!
-//! Two things are already real, not placeholder, and must survive that swap:
+//! Two things are real and load-bearing across the display:
 //!
 //! - **Hotkeys come from [`ability_hotkey`](crate::input::ability_hotkey)**, the
 //!   settled §11.6 identity→letter map — never from the panel's row order. A key
 //!   is a fixed fact about an ability, so reordering or trimming the list can
-//!   never move one (the §11.6 regression this repo already designed out).
+//!   never move one (the §11.6 regression this repo already designed out); and a
+//!   click resolves by that same identity, never by the row it lands on.
 //! - **The number shown is the number the player gets** (§8.2 timing): the panel
 //!   formats exactly the value it is handed and advertises nothing else, so it
 //!   cannot re-introduce the old advertised-vs-real discrepancy.
@@ -78,29 +75,41 @@ impl AbilityState {
     }
 }
 
-/// One row of the show-on-wait panel: an ability's hotkey, its name, and the
-/// state it is in. Assembled by [`sample_panel`] today; assembled from real
-/// per-ability runtime once the ability model lands, unchanged in shape.
+/// One row of the ability line and deployed panel (§11.4): an economy ability's
+/// identity and the state it is in. Assembled from live runtime by
+/// [`State::ability_statuses`](crate::State::ability_statuses); its hotkey and
+/// name come from the [`AbilityId`], never a row position, so reordering the
+/// panel can never move a key (§11.6) and a click resolves by identity.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AbilityStatus {
-    /// The explicit §11.6 hotkey, from [`ability_hotkey`](crate::input::ability_hotkey).
-    pub hotkey: char,
-    /// The ability's display name (§8.3).
-    pub name: &'static str,
+    /// The economy ability this row is for — the identity a click resolves to and
+    /// activates (§11.4), and the source of its hotkey and name.
+    pub id: AbilityId,
     /// What state the ability is in right now (§11.4).
     pub state: AbilityState,
 }
 
 impl AbilityStatus {
+    /// The ability's explicit §11.6 hotkey, by identity ([`AbilityId::hotkey`]) —
+    /// never a row position (the regression [`ability_hotkey`] designs out).
+    pub fn hotkey(&self) -> char {
+        self.id.hotkey()
+    }
+
+    /// The ability's display name (§8.3), by identity ([`AbilityId::name`]).
+    pub fn name(&self) -> &'static str {
+        self.id.name()
+    }
+
     /// The one line the deployed panel draws for this ability: `<key> <Name>` with
     /// the state notation tacked on when there is one — `r Run`, `c Camouflage [7]`,
-    /// `d Decoy /12/`, `t Takedown —`.
+    /// `d Decoy /12/`.
     pub fn label(&self) -> String {
         let suffix = self.state.suffix();
         if suffix.is_empty() {
-            format!("{} {}", self.hotkey, self.name)
+            format!("{} {}", self.hotkey(), self.name())
         } else {
-            format!("{} {} {}", self.hotkey, self.name, suffix)
+            format!("{} {} {}", self.hotkey(), self.name(), suffix)
         }
     }
 
@@ -112,44 +121,11 @@ impl AbilityStatus {
     pub fn compact(&self) -> String {
         match self.state {
             AbilityState::Active { .. } | AbilityState::Cooling { .. } => {
-                format!("{}{}", self.hotkey, self.state.suffix())
+                format!("{}{}", self.hotkey(), self.state.suffix())
             }
-            AbilityState::Ready | AbilityState::Unusable => self.hotkey.to_string(),
+            AbilityState::Ready | AbilityState::Unusable => self.hotkey().to_string(),
         }
     }
-}
-
-/// **PLACEHOLDER (§15 Q9).** The panel the show-on-wait experiment draws, until
-/// the ability model (§8.1/§8.2) exists to supply real runtime state.
-///
-/// The rows are the §8.3 starting set, each keyed by its settled §11.6 hotkey
-/// (looked up by *name*, never derived from this list's order — reordering the
-/// rows below moves no key), with a fixed sample state per ability chosen so the
-/// panel shows **all four** [`AbilityState`]s together: two ready, one active,
-/// one cooling, two unusable. That is the whole point — it makes the panel's
-/// placement and contents concrete enough to judge (§15 Q9) before there is a
-/// model to read. The sample numbers are pinned by a test so a later edit is a
-/// visible decision; the real values arrive with the model, not here.
-pub fn sample_panel() -> Vec<AbilityStatus> {
-    // (name, placeholder state). Names must match the ability_hotkey identities
-    // (§11.6); the key is fetched from that map, so this array's order is display
-    // order only and carries no hotkey meaning.
-    const SAMPLE: [(&str, AbilityState); 6] = [
-        ("Run", AbilityState::Ready),
-        ("Takedown", AbilityState::Unusable),
-        ("Drag", AbilityState::Unusable),
-        ("Camouflage", AbilityState::Active { remaining: 7 }),
-        ("Decoy", AbilityState::Cooling { remaining: 12 }),
-        ("Dephase", AbilityState::Ready),
-    ];
-    SAMPLE
-        .into_iter()
-        .map(|(name, state)| AbilityStatus {
-            hotkey: ability_hotkey(name).expect("every §8.3 ability has a settled §11.6 hotkey"),
-            name,
-            state,
-        })
-        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -574,19 +550,18 @@ mod tests {
     }
 
     /// A status line reads `<key> <Name>` with the notation appended only when
-    /// there is one — a ready ability carries no trailing space or bracket.
+    /// there is one — a ready ability carries no trailing space or bracket. Key
+    /// and name come from the identity, so the row is built from an [`AbilityId`].
     #[test]
     fn a_status_line_joins_key_name_and_notation() {
         let ready = AbilityStatus {
-            hotkey: 'r',
-            name: "Run",
+            id: AbilityId::Run,
             state: AbilityState::Ready,
         };
         assert_eq!(ready.label(), "r Run");
 
         let cooling = AbilityStatus {
-            hotkey: 'd',
-            name: "Decoy",
+            id: AbilityId::Decoy,
             state: AbilityState::Cooling { remaining: 12 },
         };
         assert_eq!(cooling.label(), "d Decoy /12/");
@@ -599,8 +574,7 @@ mod tests {
     fn the_compact_readout_is_the_key_and_any_number() {
         let compact = |state| {
             AbilityStatus {
-                hotkey: 'c',
-                name: "Camouflage",
+                id: AbilityId::Camouflage,
                 state,
             }
             .compact()
@@ -611,44 +585,20 @@ mod tests {
         assert_eq!(compact(AbilityState::Cooling { remaining: 12 }), "c/12/");
     }
 
-    /// The hotkey on every panel row is the **explicit** §11.6 assignment, taken
-    /// from `ability_hotkey` by identity — not the row's position. This is the
-    /// contract the ticket must not break: were the keys derived from list order,
-    /// reordering the sample would shuffle them.
+    /// A row's hotkey and name are the **explicit** §11.6 identity, taken from the
+    /// [`AbilityId`] — not the row's position. Were they derived from list order,
+    /// reordering the panel would shuffle the keys (the regression §11.6 rules out).
     #[test]
-    fn panel_hotkeys_come_from_the_explicit_mapping() {
-        for status in sample_panel() {
-            assert_eq!(
-                Some(status.hotkey),
-                ability_hotkey(status.name),
-                "{}'s key must be its settled hotkey",
-                status.name
-            );
+    fn a_row_takes_its_hotkey_and_name_from_its_identity() {
+        for id in AbilityId::ALL {
+            let status = AbilityStatus {
+                id,
+                state: AbilityState::Ready,
+            };
+            assert_eq!(status.hotkey(), id.hotkey(), "{}'s key", id.name());
+            assert_eq!(status.hotkey(), ability_hotkey(id.name()).unwrap());
+            assert_eq!(status.name(), id.name());
         }
-    }
-
-    /// The placeholder set exercises **all four** display states, so the panel a
-    /// player sees while waiting shows every case at once — the reason the
-    /// placeholder exists (§15 Q9). Pinned so a later edit to the sample is a
-    /// deliberate, visible change, not a silent drift of what the experiment shows.
-    #[test]
-    fn the_sample_panel_shows_every_state() {
-        let panel = sample_panel();
-        assert_eq!(panel.len(), 6);
-        assert!(panel.iter().any(|s| s.state == AbilityState::Ready));
-        assert!(panel
-            .iter()
-            .any(|s| matches!(s.state, AbilityState::Active { .. })));
-        assert!(panel
-            .iter()
-            .any(|s| matches!(s.state, AbilityState::Cooling { .. })));
-        assert!(panel.iter().any(|s| s.state == AbilityState::Unusable));
-
-        // The exact placeholder values, pinned (§8.2: the shown number is the
-        // given number). Real runtime replaces these with the model.
-        let by_name = |name| panel.iter().find(|s| s.name == name).unwrap().state;
-        assert_eq!(by_name("Camouflage"), AbilityState::Active { remaining: 7 });
-        assert_eq!(by_name("Decoy"), AbilityState::Cooling { remaining: 12 });
     }
 }
 
