@@ -55,11 +55,12 @@ mod tests {
     fn any_state() -> State {
         let (layout, placement) =
             generate_level(&LevelConfig::V1, &mut Rng::new(0)).expect("the V1 config generates");
+        let guards = placement.guards(&layout);
         State::new(
             layout,
             placement.player(),
             Direction::North,
-            placement.guards(),
+            guards,
             placement.intel().iter().copied(),
             placement.exit(),
         )

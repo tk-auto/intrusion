@@ -261,6 +261,13 @@ impl Layout {
             regions: RegionGraph::new(w, h),
         }
     }
+
+    /// A hand-made layout from both halves — for fixtures that need real regions
+    /// and doors (a region beat, a guard-opened door) without running the full
+    /// generator. The caller keeps the two in lockstep, as the generator would.
+    pub(crate) fn from_parts(facility: Facility, regions: RegionGraph) -> Self {
+        Self { facility, regions }
+    }
 }
 
 /// Generate a facility that passes every §10.6 guarantee, or fail loudly.

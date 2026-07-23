@@ -82,11 +82,12 @@ pub fn run_one(
     input_cap: u32,
 ) -> Result<RunRecord, GenError> {
     let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(seed))?;
+    let guards = placement.guards(&layout);
     let mut state = State::new(
         layout,
         placement.player(),
         Direction::North,
-        placement.guards(),
+        guards,
         placement.intel().iter().copied(),
         placement.exit(),
     );
