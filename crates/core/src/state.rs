@@ -1434,7 +1434,29 @@ impl State {
         self.recompute_sight();
         self.radio_phase(&mut events);
         self.guard_phase(&mut events);
+        self.door_phase(&mut events);
         events
+    }
+
+    /// The automatic doors' self-close tick (§10.4/#147), run once per world turn
+    /// after everyone has moved so it reads final positions. Each open automatic door
+    /// whose doorway is clear counts down and, when its timer runs out, shuts —
+    /// exactly as a manual close does, panels restamped solid so vision, sound
+    /// occlusion and the renderer all track it. An occupied doorway rearms instead:
+    /// an automatic door never crushes (§10.4). Every shut the player might see is
+    /// reported as a [`DoorClosed`](Event::DoorClosed), the same event a guard-close
+    /// (#146) raises.
+    fn door_phase(&mut self, events: &mut Vec<Event>) {
+        let player = self.player;
+        let guards = &self.guards;
+        let bodies = &self.bodies;
+        let closed = self
+            .layout
+            .tick_auto_doors(|c| actor_occupies(player, guards, bodies, c));
+        for id in closed {
+            let at = self.layout.regions().door(id).panels()[0];
+            events.push(Event::DoorClosed { at });
+        }
     }
 
     /// The radio net (§7.3): control's pings, resolved once per world turn. A
@@ -1656,14 +1678,14 @@ impl State {
     /// doorway behind (§10.4/#146): `from` is one of that door's panels and `to` is
     /// no longer part of the same door. `None` otherwise — the guard was not on a
     /// panel, or it merely slid along a wide opening from one panel to another and is
-    /// still in the throat. Only a hinged door qualifies (an automatic door has no
-    /// handle to shut, §10.4/#147); every door on a v1 level is hinged, but the check
-    /// is explicit so it stays correct when frameless spans arrive.
+    /// still in the throat. Only a **manual** door qualifies: an automatic door has no
+    /// handle for a guard to shut and closes itself on a timer instead (§10.4/#147),
+    /// so a guard passing through one leaves the auto-close to do the work.
     fn door_exited(&self, from: Cell, to: Cell) -> Option<DoorId> {
         let regions = self.layout.regions();
         let id = regions.door_at(from)?;
         let door = regions.door(id);
-        if door.role(from) != Some(DoorCell::Panel) || door.hinges().is_empty() {
+        if door.role(from) != Some(DoorCell::Panel) || door.is_automatic() {
             return None;
         }
         if regions.door_at(to) == Some(id) {
@@ -1742,7 +1764,9 @@ fn actor_occupies(player: Cell, guards: &[Guard], bodies: &[Body], cell: Cell) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::facility::Facility;
     use crate::guard::{GuardState, CERTAIN_RANGE, GLIMPSE_RANGE, PATROL_RADIUS, SEARCH_RADIUS};
+    use crate::region::{DoorKind, RegionGraph, RegionKind};
     use crate::targeting::Target;
     use crate::test_support::{open_room, region_strip, solo};
     use crate::vision::field_of_view;
@@ -3486,6 +3510,125 @@ mod tests {
         assert!(
             any_close,
             "a Calm patrol closes a door behind itself somewhere in the sweep",
+        );
+    }
+
+    /// A hand-built state whose two rooms are joined by one **automatic** door
+    /// (§10.4/#147) with close `delay` — a frameless 3-panel span down wall column 3,
+    /// no hinges. The player starts in the left room facing the door; no guards. The
+    /// fixture for the auto-close timer in the running loop.
+    fn auto_door_state(delay: u32) -> (State, DoorId) {
+        let cells = |xs: std::ops::Range<u32>| {
+            xs.flat_map(|x| (1..4).map(move |y| Cell::new(x, y)))
+                .collect::<Vec<_>>()
+        };
+        let mut f = Facility::walled_box(7, 5);
+        let mut g = RegionGraph::new(7, 5);
+        let left = g.add_region(RegionKind::Room, cells(1..3));
+        let right = g.add_region(RegionKind::Room, cells(4..6));
+        let panels: Vec<Cell> = (1..4).map(|y| Cell::new(3, y)).collect();
+        for &p in &panels {
+            f.set_terrain(p.x, p.y, Terrain::DoorPanelClosed);
+        }
+        let door = g.add_door(left, right, [], panels, DoorKind::Automatic { delay });
+        let s = State::new(
+            Layout::from_parts(f, g),
+            Cell::new(2, 2), // left room, next to the panel at (3,2)
+            Direction::East, // facing the door
+            Vec::new(),
+            Vec::new(),
+            Cell::new(4, 3), // exit parked in the right room, unused
+        );
+        (s, door)
+    }
+
+    /// §10.4/#147 in the loop: an automatic door the player opens shuts itself a few
+    /// turns after the doorway is vacated, with no hand needed — and the shut reaches
+    /// the player as a [`DoorClosed`](Event::DoorClosed) event.
+    #[test]
+    fn an_automatic_door_closes_itself_in_the_loop() {
+        let (mut s, door) = auto_door_state(3);
+        let panel = Cell::new(3, 2);
+
+        // Bump the closed panel: it opens (§4.3), and the countdown is armed.
+        let opened = s.step(Input::Step(Direction::East));
+        assert!(opened.contains(&Event::DoorOpened { at: panel }));
+        assert!(s.layout().regions().door(door).is_open());
+        assert_eq!(s.player(), Cell::new(2, 2), "the bump opened, did not move");
+
+        // Waiting clear of the doorway, it times out and shuts on its own.
+        let e1 = s.step(Input::Wait);
+        assert!(s.layout().regions().door(door).is_open(), "still open");
+        assert!(!e1.iter().any(|e| matches!(e, Event::DoorClosed { .. })));
+        let e2 = s.step(Input::Wait);
+        assert!(
+            !s.layout().regions().door(door).is_open(),
+            "the automatic door timed out and shut itself",
+        );
+        assert!(
+            e2.iter().any(|e| matches!(e, Event::DoorClosed { .. })),
+            "the shut reaches the player as an event",
+        );
+    }
+
+    /// §10.4/#147: an automatic door never crushes — the player standing in the
+    /// doorway holds it open indefinitely, and it only times out once they step clear.
+    #[test]
+    fn an_automatic_door_never_shuts_on_the_player_in_the_doorway() {
+        let (mut s, door) = auto_door_state(2);
+
+        s.step(Input::Step(Direction::East)); // open it
+        s.step(Input::Step(Direction::East)); // step into the doorway (onto the panel)
+        assert_eq!(s.player(), Cell::new(3, 2), "standing on the panel");
+
+        // Wait in the throat far longer than the delay: it will not close on the player.
+        for _ in 0..8 {
+            s.step(Input::Wait);
+            assert!(
+                s.layout().regions().door(door).is_open(),
+                "the door is held open by the player in it",
+            );
+        }
+
+        // Step clear into the far room, and it times out. Leaving the panel is itself
+        // the first vacant tick (delay 2: 2 → 1), so it shuts on the next turn.
+        s.step(Input::Step(Direction::East)); // onto (4,2): vacant tick 1
+        assert!(s.layout().regions().door(door).is_open(), "one tick left");
+        let shut = s.step(Input::Wait); // vacant tick 2 → closes
+        assert!(!s.layout().regions().door(door).is_open());
+        assert!(
+            shut.iter().any(|e| matches!(e, Event::DoorClosed { .. })),
+            "it times out once the doorway is finally clear",
+        );
+    }
+
+    /// §10.4/#147: an automatic door offers **open** from the usable line when closed,
+    /// and *no close affordance* when open (there is no hinge to bump) — you simply
+    /// walk through it. The whole point of the frameless span.
+    #[test]
+    fn an_automatic_door_offers_open_but_never_close() {
+        let (mut s, _door) = auto_door_state(3);
+
+        // Closed and faced: the usable line offers "door: open" to the east.
+        assert!(
+            s.affordances()
+                .contains(&(Direction::East, Affordance::OpenDoor)),
+            "a closed automatic door offers open",
+        );
+
+        s.step(Input::Step(Direction::East)); // open it; the player stays put
+                                              // Open now: the east cell is a walk-through, so no door affordance at all —
+                                              // and a close is never offered, because an automatic door has no handle.
+        let affs = s.affordances();
+        assert!(
+            !affs.iter().any(|(_, a)| *a == Affordance::CloseDoor),
+            "an automatic door never offers close",
+        );
+        assert!(
+            !affs
+                .iter()
+                .any(|(d, a)| *d == Direction::East && *a == Affordance::OpenDoor),
+            "an open automatic door is walked through, not re-opened",
         );
     }
 

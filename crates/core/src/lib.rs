@@ -66,7 +66,7 @@ pub use input::{
     ability_hotkey, ability_input_for_key, input_for_key, ui_command_for_key, UiCommand,
 };
 pub use place::{LevelConfig, Placement};
-pub use region::{Door, DoorCell, DoorId, Region, RegionGraph, RegionId, RegionKind};
+pub use region::{Door, DoorCell, DoorId, DoorKind, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{
     ability_at, ascii_grid, is_ability_button, render, render_screen, GlyphCell, Grid, ScreenUi,
     Visibility, HEADER_ROWS, STATUS_ROWS,

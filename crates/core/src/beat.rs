@@ -84,7 +84,7 @@ pub(crate) fn beat_cells(regions: &RegionGraph, station: Cell, limit: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::region::RegionKind;
+    use crate::region::{DoorKind, RegionKind};
 
     /// A rectangle of cells `[x0, x1) × [y0, y1)`, for building fixtures.
     fn rect(x0: u32, x1: u32, y0: u32, y1: u32) -> Vec<Cell> {
@@ -106,9 +106,9 @@ mod tests {
         let c = g.add_region(RegionKind::Corridor, rect(5, 7, 1, 5));
         let b = g.add_region(RegionKind::Room, rect(8, 11, 1, 5));
         let (hinges, panels) = door_span(4);
-        g.add_door(a, c, hinges, panels, true);
+        g.add_door(a, c, hinges, panels, DoorKind::Manual);
         let (hinges, panels) = door_span(7);
-        g.add_door(c, b, hinges, panels, true);
+        g.add_door(c, b, hinges, panels, DoorKind::Manual);
         (g, a, c, b)
     }
 
@@ -145,9 +145,9 @@ mod tests {
         let room = g.add_region(RegionKind::Room, rect(4, 8, 1, 5));
         let east = g.add_region(RegionKind::Corridor, rect(9, 11, 1, 5));
         let (hinges, panels) = door_span(3);
-        g.add_door(room, west, hinges, panels, true);
+        g.add_door(room, west, hinges, panels, DoorKind::Manual);
         let (hinges, panels) = door_span(8);
-        g.add_door(room, east, hinges, panels, true);
+        g.add_door(room, east, hinges, panels, DoorKind::Manual);
 
         let by_west_door = beat_regions(&g, Cell::new(4, 2), 2);
         let by_east_door = beat_regions(&g, Cell::new(7, 2), 2);
