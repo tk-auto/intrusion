@@ -616,7 +616,7 @@ mod tests {
         for facing in Direction::ALL {
             for arc in 1..=5u8 {
                 let fov = field_of_view(&f, origin, facing, arc, 4);
-                for n in f.neighbors(origin) {
+                for n in f.neighbours(origin) {
                     assert!(fov.contains(n), "{facing:?} arc {arc}: cardinal ring");
                 }
                 for (dx, dy) in [(-1i64, -1i64), (1, -1), (-1, 1), (1, 1)] {

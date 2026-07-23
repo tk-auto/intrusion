@@ -519,7 +519,7 @@ fn is_usable_terrain(terrain: Terrain) -> bool {
 /// door list (which turned the check quadratic).
 pub(crate) fn has_adjacent_usable(facility: &Facility, cell: Cell, extra: &[Cell]) -> bool {
     facility
-        .neighbors(cell)
+        .neighbours(cell)
         .any(|n| extra.contains(&n) || facility.terrain(n).is_some_and(is_usable_terrain))
 }
 
@@ -530,7 +530,7 @@ pub(crate) fn has_adjacent_usable(facility: &Facility, cell: Cell, extra: &[Cell
 /// door cluster), so nothing asserts its absence — the arrow disambiguates a
 /// doubled cell instead.
 fn creates_usable_conflict(facility: &Facility, cell: Cell) -> bool {
-    facility.neighbors(cell).any(|f| {
+    facility.neighbours(cell).any(|f| {
         facility.terrain(f) == Some(Terrain::Floor) && has_adjacent_usable(facility, f, &[])
     })
 }
@@ -1234,7 +1234,7 @@ fn thicken_run(facility: &mut Facility, regions: &mut RegionGraph, run: &WallRun
 fn thicken_cell(facility: &mut Facility, regions: &mut RegionGraph, cell: Cell) {
     if !is_room_floor(facility, regions, cell)
         || facility
-            .neighbors(cell)
+            .neighbours(cell)
             .any(|n| facility.terrain(n).is_some_and(is_door_terrain))
         || thinning_underruns_room(facility, regions, cell)
         || severs_pathing(facility, cell)
@@ -1387,7 +1387,7 @@ fn recess_site(facility: &Facility, cell: Cell) -> Option<Cell> {
     }
     let mut mouth = None;
     let mut walls = 0;
-    for n in facility.neighbors(cell) {
+    for n in facility.neighbours(cell) {
         match facility.terrain(n) {
             Some(Terrain::Floor) => {
                 if mouth.is_some() {
@@ -1424,7 +1424,7 @@ fn recess_site(facility: &Facility, cell: Cell) -> Option<Cell> {
 fn severs_pathing(facility: &Facility, cell: Cell) -> bool {
     let pathable = |c: Cell| facility.terrain(c).is_some_and(|t| !t.blocks_pathing());
     // The pathable orthogonal neighbours — the cells that must stay mutually reachable.
-    let targets: Vec<Cell> = facility.neighbors(cell).filter(|&n| pathable(n)).collect();
+    let targets: Vec<Cell> = facility.neighbours(cell).filter(|&n| pathable(n)).collect();
     if targets.len() <= 1 {
         return false; // nothing to keep connected
     }
@@ -1436,7 +1436,7 @@ fn severs_pathing(facility: &Facility, cell: Cell) -> bool {
     let mut seen = vec![targets[0]];
     let mut stack = vec![targets[0]];
     while let Some(c) = stack.pop() {
-        for n in facility.neighbors(c) {
+        for n in facility.neighbours(c) {
             if in_ring(n) && pathable(n) && !seen.contains(&n) {
                 seen.push(n);
                 stack.push(n);
@@ -1592,12 +1592,12 @@ fn counterplay_at(facility: &Facility, cell: Cell) -> bool {
     }
     let mouth = |c: Cell| {
         facility
-            .neighbors(c)
+            .neighbours(c)
             .any(|n| facility.terrain(n) == Some(Terrain::Hideout))
     };
     mouth(cell)
         || facility
-            .neighbors(cell)
+            .neighbours(cell)
             .any(|n| facility.terrain(n) == Some(Terrain::Floor) && mouth(n))
 }
 
@@ -1810,7 +1810,7 @@ fn recess_run_hideout(
         let cell = run.line.cell(i);
         let touches = |t: Terrain| {
             facility
-                .neighbors(cell)
+                .neighbours(cell)
                 .any(|n| facility.terrain(n) == Some(t))
         };
         if facility.terrain(cell) == Some(Terrain::Floor)
@@ -1858,7 +1858,7 @@ fn place_pillar(
                 .region_at(cell)
                 .is_some_and(|id| regions.kind(id) == RegionKind::Corridor)
             && facility
-                .neighbors(cell)
+                .neighbours(cell)
                 .all(|n| facility.terrain(n) != Some(Terrain::Hideout))
             && !severs_pathing(facility, cell)
             && !splits_region(regions, cell)
@@ -1906,7 +1906,7 @@ fn alcove_site(
     }
     let mut back = None;
     let mut walls = 0;
-    for n in facility.neighbors(wall) {
+    for n in facility.neighbours(wall) {
         match facility.terrain(n) {
             _ if n == mouth => {
                 if facility.terrain(n) != Some(Terrain::Floor) {
@@ -1927,7 +1927,7 @@ fn alcove_site(
     // mid-bench would break its furniture pose after the fact).
     let kind = regions.region_at(back).map(|id| regions.kind(id));
     (matches!(kind, Some(RegionKind::Room | RegionKind::Corridor))
-        && facility.neighbors(back).all(|n| {
+        && facility.neighbours(back).all(|n| {
             !matches!(
                 facility.terrain(n),
                 Some(Terrain::Hideout | Terrain::PartialCover)
@@ -2042,7 +2042,7 @@ fn try_bench(
         can_take_table(facility, regions, cell)
             && (allow_double || !creates_table_double(facility, cell))
             && facility
-                .neighbors(cell)
+                .neighbours(cell)
                 .all(|n| Some(n) == prev || facility.terrain(n) != Some(Terrain::PartialCover))
     };
 
@@ -2162,7 +2162,7 @@ fn can_take_table(facility: &Facility, regions: &RegionGraph, cell: Cell) -> boo
             .region_at(cell)
             .is_some_and(|id| regions.kind(id) == RegionKind::Room)
         && facility
-            .neighbors(cell)
+            .neighbours(cell)
             .all(|n| facility.terrain(n) != Some(Terrain::Hideout))
         && !thinning_underruns_room(facility, regions, cell)
         && !severs_pathing(facility, cell)
@@ -2181,10 +2181,10 @@ fn stamp_table(facility: &mut Facility, regions: &mut RegionGraph, cell: Cell) {
 /// beside a *door* is the doubling §11.4 accepts (corridors are door-rich), so this
 /// looks only at partial-cover neighbours, not the whole usable set.
 fn creates_table_double(facility: &Facility, cell: Cell) -> bool {
-    facility.neighbors(cell).any(|f| {
+    facility.neighbours(cell).any(|f| {
         facility.terrain(f) == Some(Terrain::Floor)
             && facility
-                .neighbors(f)
+                .neighbours(f)
                 .any(|n| facility.terrain(n) == Some(Terrain::PartialCover))
     })
 }
@@ -2375,7 +2375,7 @@ mod tests {
                     // A table is region-less (solid cover); name it by an adjacent
                     // floor cell's region.
                     match f
-                        .neighbors(c)
+                        .neighbours(c)
                         .find_map(|n| g.region_at(n).map(|id| g.kind(id)))
                     {
                         Some(RegionKind::Room) => rt += 1,
@@ -2979,7 +2979,7 @@ mod tests {
                 let (mut size, mut stack) = (0u32, vec![c]);
                 while let Some(p) = stack.pop() {
                     size += 1;
-                    for nb in f.neighbors(p) {
+                    for nb in f.neighbours(p) {
                         if f.terrain(nb) == Some(Terrain::PartialCover) && seen.insert(nb) {
                             stack.push(nb);
                         }
@@ -3053,7 +3053,7 @@ mod tests {
                     let mut bench = vec![c];
                     let mut stack = vec![c];
                     while let Some(p) = stack.pop() {
-                        for nb in f.neighbors(p) {
+                        for nb in f.neighbours(p) {
                             if f.terrain(nb) == Some(Terrain::PartialCover) && seen.insert(nb) {
                                 bench.push(nb);
                                 stack.push(nb);
@@ -3080,7 +3080,7 @@ mod tests {
                     // corridor floor.
                     let kinds: Vec<RegionKind> = bench
                         .iter()
-                        .flat_map(|&p| f.neighbors(p))
+                        .flat_map(|&p| f.neighbours(p))
                         .filter_map(|n| g.region_at(n).map(|id| g.kind(id)))
                         .collect();
                     assert!(
@@ -3105,7 +3105,7 @@ mod tests {
             for x in 0..f.width() {
                 let c = Cell::new(x, y);
                 if f.terrain(c) == Some(Terrain::Floor)
-                    && f.neighbors(c)
+                    && f.neighbours(c)
                         .filter(|&n| f.terrain(n) == Some(Terrain::PartialCover))
                         .count()
                         >= 2
@@ -3199,7 +3199,7 @@ mod tests {
             let f = layout.facility();
             for c in hideout_cells(&layout) {
                 let neighbours: Vec<Terrain> =
-                    f.neighbors(c).filter_map(|n| f.terrain(n)).collect();
+                    f.neighbours(c).filter_map(|n| f.terrain(n)).collect();
                 assert_eq!(
                     neighbours.len(),
                     4,
@@ -3239,7 +3239,7 @@ mod tests {
                 }
                 // The mouth is the sole floor neighbour; the backing is opposite it.
                 let mouth = f
-                    .neighbors(c)
+                    .neighbours(c)
                     .find(|&n| f.terrain(n) == Some(Terrain::Floor))
                     .unwrap();
                 let (dx, dy) = (c.x as i32 - mouth.x as i32, c.y as i32 - mouth.y as i32);
@@ -3326,7 +3326,7 @@ mod tests {
     fn longest_straight_run(f: &Facility) -> u32 {
         let (w, h) = (f.width(), f.height());
         let mouth = |c: Cell| {
-            f.neighbors(c)
+            f.neighbours(c)
                 .any(|n| f.terrain(n) == Some(Terrain::Hideout))
         };
         let clear = |x: u32, y: u32| {
@@ -3335,7 +3335,7 @@ mod tests {
                 .is_some_and(|t| !t.blocks_sight() && !t.provides_cover())
                 && !mouth(c)
                 && !f
-                    .neighbors(c)
+                    .neighbours(c)
                     .any(|n| f.terrain(n) == Some(Terrain::Floor) && mouth(n))
         };
         let mut longest = 0u32;

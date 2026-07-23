@@ -31,7 +31,7 @@ pub(crate) fn cover_run(facility: &Facility, anchor: Cell) -> Vec<Cell> {
     while scan < run.len() {
         let here = run[scan];
         scan += 1;
-        for next in facility.neighbors(here) {
+        for next in facility.neighbours(here) {
             if facility.terrain(next) == Some(Terrain::PartialCover) && !run.contains(&next) {
                 run.push(next);
             }

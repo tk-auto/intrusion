@@ -4,7 +4,11 @@
 
 Instructions may be given in French. Regardless of the language of the
 request, all replies, commit messages, code, comments, and other written
-work must be in English.
+work must be in English — **British English**. Use British spelling
+consistently in identifiers, comments, and prose (`neighbour`, `behaviour`,
+`colour`, `-ise`), so the same concept is never spelled two ways. The sole
+exception is external vocabulary that is fixed by its source — CSS keywords
+such as `color` and `background-color` keep their canonical spelling.
 
 ## Waiting on external state: basic monitors only
 
