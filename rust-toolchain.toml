@@ -1,0 +1,13 @@
+# The one place the Rust version is pinned, so the local fmt/clippy/test gate and
+# CI resolve to the *identical* toolchain. Without this they drift — CI installed
+# a rolling `stable` (a newer clippy) while local dev lagged, so the gate passed
+# locally and then failed CI on lints the older clippy could not see (#167).
+#
+# rustup honours this file for every `cargo`/`clippy`/`rustfmt` invocation and
+# auto-installs the channel, components and targets below. Bumping the version is
+# a deliberate one-file change: run the gate under the new toolchain and fix any
+# fresh lints in the same PR.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

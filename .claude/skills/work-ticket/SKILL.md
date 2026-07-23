@@ -112,6 +112,14 @@ Warnings are errors (`-D warnings`). If the workspace doesn't exist yet, the tic
 you picked is almost certainly the scaffold ticket — set the gate up as part of it.
 Never commit with a red gate; if you can't get it green, stop and report why.
 
+**The gate only bites if it runs the same toolchain as CI.** The Rust version is
+pinned in `rust-toolchain.toml` at the repo root (#167), and both CI and this
+local gate resolve to it via `rustup` — so a green local clippy means a green CI
+clippy. Don't skip or override the pin to "just get it building"; if the local
+run wants a *different* toolchain, that's the bug. Bumping the version is its own
+deliberate change: edit `rust-toolchain.toml`, re-run the gate under the new
+toolchain, and fix any fresh lints in that same PR.
+
 ## 6. Commit
 
 - **Conventional commits:** `<type>(<area>): <imperative summary>` — e.g.
