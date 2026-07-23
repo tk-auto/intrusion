@@ -19,8 +19,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    input_for_key, is_ability_button, ui_command_for_key, Direction, Input, UiCommand, HEADER_ROWS,
-    STATUS_ROWS,
+    ability_at, ability_input_for_key, input_for_key, is_ability_button, ui_command_for_key,
+    AbilityId, Direction, Input, UiCommand, HEADER_ROWS, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -44,7 +44,11 @@ impl Game {
             self.draw();
             return true;
         }
-        let Some(input) = input_for_key(key) else {
+        // A game action (movement/wait) or an ability shortcut (§11.6): both resolve
+        // in the core and drive the one turn seam. An ability hotkey fires the same
+        // `Input::Activate(id)` a click on the ability's row does — one activation
+        // path, resolved by identity.
+        let Some(input) = input_for_key(key).or_else(|| ability_input_for_key(key)) else {
             return false;
         };
         self.step_and_draw(input);
@@ -69,26 +73,47 @@ impl Game {
         }
     }
 
-    /// Whether the viewport point `(client_x, client_y)` lands on the deploy button
-    /// (§11.4). Maps the point into the canvas, converts it to a screen cell at the
-    /// current fit, and asks the core ([`is_ability_button`]) — the one owner of the
-    /// button's geometry, so a click can never miss the button that is drawn.
-    fn hit_deploy_button(&self, client_x: f64, client_y: f64) -> bool {
+    /// Map a viewport point `(client_x, client_y)` to the **screen cell** under it at
+    /// the current fit, or `None` for a point off the canvas (a letterbox tap). The
+    /// screen is `map + HEADER_ROWS + STATUS_ROWS` rows fitted to the canvas, so a
+    /// linear scale from the canvas rect gives the `(col, row)` the core drew — the
+    /// one place the shell turns pixels into a grid coordinate, shared by every
+    /// pointer hit-test so they can never disagree.
+    fn screen_cell(&self, client_x: f64, client_y: f64) -> Option<(u32, u32)> {
         let rect = self.canvas.get_bounding_client_rect();
         let (rw, rh) = (rect.width(), rect.height());
         if !(rw > 0.0 && rh > 0.0) {
-            return false;
+            return None;
         }
         let (lx, ly) = (client_x - rect.left(), client_y - rect.top());
         if lx < 0.0 || ly < 0.0 || lx >= rw || ly >= rh {
-            return false; // outside the canvas (a letterbox tap) — not the button
+            return None; // outside the canvas (a letterbox tap)
         }
         let facility = self.state.layout().facility();
         let cols = facility.width();
         let rows = facility.height() + HEADER_ROWS + STATUS_ROWS;
         let col = (lx / rw * cols as f64).floor() as u32;
         let row = (ly / rh * rows as f64).floor() as u32;
-        is_ability_button(cols, col, row)
+        Some((col, row))
+    }
+
+    /// Whether the viewport point lands on the deploy button (§11.4) — the core
+    /// ([`is_ability_button`]) owns the button's geometry, so a click can never miss
+    /// the button that is drawn.
+    fn hit_deploy_button(&self, client_x: f64, client_y: f64) -> bool {
+        let Some((col, row)) = self.screen_cell(client_x, client_y) else {
+            return false;
+        };
+        is_ability_button(self.state.layout().facility().width(), col, row)
+    }
+
+    /// The ability under the viewport point, or `None` (§11.4). Maps the point to a
+    /// screen cell and asks the core hit-test ([`ability_at`]), which owns both the
+    /// line's and the panel's geometry — so a click resolves to exactly the entry
+    /// drawn, by identity, and fires the one `Input::Activate` path a hotkey does.
+    fn ability_at_point(&self, client_x: f64, client_y: f64) -> Option<AbilityId> {
+        let (col, row) = self.screen_cell(client_x, client_y)?;
+        ability_at(&self.state, self.ui, col, row)
     }
 }
 
@@ -241,10 +266,10 @@ impl GesturePump {
         .expect("the browser arms a timer")
     }
 
-    /// A pointer pressed: the deploy button toggles the panel (§11.4 — the button
-    /// never doubles as a gesture), anything else starts the gesture. Only the
-    /// primary button gestures, and a second finger neither starts a second
-    /// gesture nor re-aims the first.
+    /// A pointer pressed: the deploy button toggles the panel and an ability entry
+    /// activates it (§11.4 — neither doubles as a gesture), anything else starts the
+    /// gesture. Only the primary button gestures, and a second finger neither starts
+    /// a second gesture nor re-aims the first.
     fn on_down(&self, e: &PointerEvent) {
         if e.button() != 0 {
             return; // secondary mouse buttons keep their browser meaning
@@ -252,9 +277,19 @@ impl GesturePump {
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
         {
             let mut game = self.game.borrow_mut();
+            // The deploy button is tested first, so a tap on it toggles the panel and
+            // never falls through to an activation underneath (§11.4).
             if game.hit_deploy_button(x, y) {
                 game.apply_ui_command(UiCommand::ToggleAbilityPanel);
                 game.draw();
+                e.prevent_default();
+                return;
+            }
+            // A tap on a line or panel entry fires the same `Input::Activate(id)` its
+            // hotkey does (§11.4/§11.6); a cooling/active entry refuses for free in the
+            // economy (§4.4). Consumed either way, so it never also walks the player.
+            if let Some(id) = game.ability_at_point(x, y) {
+                game.step_and_draw(Input::Activate(id));
                 e.prevent_default();
                 return;
             }
