@@ -448,6 +448,17 @@ it has not recently looked at.
   across distances instead of shuffling locally, and it is why the emergent
   patrols read as purposeful. Keep it.
 - When no uninspected cell remains, it wipes its memory and starts over.
+- **Dwell (§153).** On reaching a patrol target, a Calm guard **sometimes holds
+  in place for a few turns** before picking the next — facing unchanged, no free
+  re-aim (§5). This is what makes a Takedown (§7.2) approachable: a guard that
+  walks every single turn can never be lined up on, so the pause is the *window
+  to act*, paired with the rear blind spot (§6.1/§155) for the behind-the-back
+  strike. **Calm only** — a Chasing/Investigating/Alerted/Responding guard never
+  dwells and a detection cancels an in-progress dwell the same turn (a hunt never
+  slows, the mirror of §7.1's "guards never accelerate"). The whether-to-dwell
+  roll and the dwell length are drawn from the run seed (§12.4), tuned by
+  **[START]** knobs: dwell chance (**50%**) and dwell length (**2–4** turns).
+  Dwelling lowers patrol coverage on purpose (§7.6/§7.7) — a sim knob to watch.
 
 **Known weakness, worth fixing: territories are boxes around spawn points, which
 have no relationship to the building.** They straddle walls, spill into

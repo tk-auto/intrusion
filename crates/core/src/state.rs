@@ -42,7 +42,7 @@ use crate::cell::{Cell, Direction};
 use crate::cover;
 use crate::facility::Terrain;
 use crate::generate::Layout;
-use crate::guard::{Guard, GUARD_CLOSE_CHANCE_PERCENT};
+use crate::guard::{Guard, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
 use crate::radio;
 use crate::region::{DoorCell, DoorId};
 use crate::rng::Rng;
@@ -491,8 +491,9 @@ pub struct State {
     /// first input; frozen once the run ends, so the final message stays.
     last_events: Vec<Event>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
-    /// one thing in the loop that is now stochastic: a Calm guard's chance to close a
-    /// door behind itself (§10.4/#146). It is the *continuation* of the generation
+    /// two stochastic guard decisions: a Calm guard's chance to close a door behind
+    /// itself (§10.4/#146) and its chance to dwell on reaching a patrol destination
+    /// (§7.5/§153). It is the *continuation* of the generation
     /// stream — the same single seed the level was carved from — threaded in via
     /// [`with_rng`](Self::with_rng), never a fresh source (§12.4 rule 1). A state built
     /// without one keeps a fixed default stream, which is all a test that never
@@ -503,6 +504,11 @@ pub struct State {
     /// Defaults to [`GUARD_CLOSE_CHANCE_PERCENT`]; `0` disables the close entirely
     /// (and draws no RNG, so it perturbs nothing), `100` always closes.
     close_chance: u32,
+    /// The percentage chance a Calm guard dwells on reaching a patrol destination
+    /// (§7.5 dwell, §153), out of 100 — the playtest knob paired with the takedown
+    /// tickets. Defaults to [`GUARD_DWELL_CHANCE_PERCENT`]; `0` disables dwelling
+    /// entirely (and draws no RNG, so it perturbs nothing), `100` always dwells.
+    dwell_chance: u32,
 }
 
 impl State {
@@ -559,6 +565,7 @@ impl State {
             // real stream after construction observes the identical stream position.
             rng: Rng::new(0),
             close_chance: GUARD_CLOSE_CHANCE_PERCENT,
+            dwell_chance: GUARD_DWELL_CHANCE_PERCENT,
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -568,7 +575,8 @@ impl State {
     /// Thread the run's seeded random source into the state (§12.4) — the
     /// continuation of the very stream the level was generated from, so a whole run
     /// is one seed end to end. The loop uses it for the guard close-behind roll
-    /// (§10.4/#146); everything else in the loop stays deterministic without it. The
+    /// (§10.4/#146) and the patrol dwell roll (§7.5/§153); everything else in the
+    /// loop stays deterministic without it. The
     /// real game and the headless sim call this; a test that never exercises the
     /// close can rely on the fixed default set in [`new`](Self::new).
     pub fn with_rng(mut self, rng: Rng) -> Self {
@@ -584,6 +592,16 @@ impl State {
     /// [`with_rng`](Self::with_rng).
     pub fn set_guard_close_chance(&mut self, percent: u32) {
         self.close_chance = percent.min(100);
+    }
+
+    /// Set the chance a Calm guard dwells on reaching a patrol destination, as a
+    /// percentage 0–100 (§7.5 dwell, §153) — the playtest knob this behaviour's
+    /// **[START]** value is tuned with, and the isolation switch a test that wants
+    /// a fixed patrol cadence flips to `0`. `0` turns dwelling off (drawing no RNG,
+    /// so the stream is untouched), `100` makes it certain; values above 100
+    /// saturate. Deterministic given the seed threaded by [`with_rng`](Self::with_rng).
+    pub fn set_guard_dwell_chance(&mut self, percent: u32) {
+        self.dwell_chance = percent.min(100);
     }
 
     /// The level geometry (§10.5) — read-only outside the core.
@@ -1519,7 +1537,9 @@ impl State {
                 .map(|(_, g)| g.pos())
                 .chain(self.bodies.iter().map(|b| b.cell()))
                 .collect();
-            let Some(dir) = self.guards[i].decide(facility, &blocked) else {
+            let Some(dir) =
+                self.guards[i].decide(facility, &blocked, &mut self.rng, self.dwell_chance)
+            else {
                 continue;
             };
             let Some(target) = self.guards[i].pos().step(dir) else {
