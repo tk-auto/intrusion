@@ -2,9 +2,10 @@
 //!
 //! The harness never decides what the player does — a policy does, one
 //! decision per issued input, reading the same pure [`State`] the renderer
-//! draws from. The first policy is [`Scripted`] — replay a fixed input list —
-//! which is all determinism testing needs; the baseline stealth bot is its own
-//! ticket (§13.2's companion).
+//! draws from. [`Scripted`] replays a fixed input list — all determinism testing
+//! needs — while [`StealthBot`](crate::StealthBot) is the baseline bot that
+//! actually plays (§13.2's companion), reading the same [`State`] through the
+//! player's own channels.
 
 use intrusion_core::{Input, State};
 

@@ -13,7 +13,7 @@ not a judge.
 ## Running
 
 ```
-cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--script MOVES]
+cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--bot | --script MOVES]
 ```
 
 | Flag | Meaning | Default |
@@ -21,15 +21,44 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--scrip
 | `--runs N` | how many runs; seeds are `S, S+1, … S+N-1` | 100 |
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
+| `--bot` | play each run with the baseline stealth bot instead of a script | off |
 | `--script MOVES` | inputs replayed from the start of every run: `N`/`E`/`S`/`W` step, `.` waits; after the script the player waits out the run | empty |
 
 The cap counts **issued inputs**, not spent turns: free actions (a bump into a
 wall, an idle deactivate) never advance the turn counter (§4.4), so a
 turn-based cap could hang on a stuck policy; an input cap terminates every run.
 
-The empty default script is the idle baseline — how often patrols stumble onto
-a player who never moves. A `(seed, script)` pair is a replay (§12.4): with
-`--runs 1` it reproduces one run exactly, which is also the bug-report format.
+`--bot` is the **balance-signal mode**: instead of a fixed script, every run is
+played by the baseline stealth bot (below), so the metrics describe a facility
+someone is actually *raiding*. `--bot` and `--script` are mutually exclusive.
+Without either, the empty default script is the idle baseline — how often
+patrols stumble onto a player who never moves. A `(seed, script)` pair is a
+replay (§12.4): with `--runs 1` it reproduces one run exactly, which is also
+the bug-report format.
+
+## The baseline stealth bot (`--bot`, §13.2–§13.4)
+
+A greedy [`StealthBot`](src/bot.rs) that plays each run through the **same
+information a player is shown** — never the raw state. It is a *smoke detector,
+not a good player* (§13.4): the point is that it plays legibly and the same way
+every seed, so the numbers measure the game, not a hand-tuned solver.
+
+- **Geometry** (walls, floors, doors) is always known, and so is the **exit** —
+  it is the player's own tunnel. **Intel** is fogged: the bot cannot route to a
+  console it has never seen (`memory`, §11.5a), so it *explores* to find them.
+- **Guards** are read through `perceive_guard` (§9.2): it routes around the
+  cones of guards it can *see* (the danger overlay, §11.5) and keeps clear of
+  the bare dots of guards it can only *sense*.
+- **Loop:** explore → take each intel → leave by the exit, ducking into a
+  hideout (or cloaking with Camouflage) when a patrol closes, and fleeing to
+  cover when hunted. It uses Run to open a gap, a takedown to clear a guard
+  blocking the only way, and hideouts/Camouflage to wait a hunt out — so the
+  ability histogram has something real to measure.
+
+It plays nothing like a human — no fear, perfect recall of what it has seen —
+so its win rate is not a difficulty verdict (§13.4). **Flag, never judge:** a
+histogram spike or a win-rate cliff under `--bot` is a seed to go *play*, not a
+ruling. The bot is deliberately crude; sharper policies are follow-up work.
 
 ## Output schema
 

@@ -235,5 +235,16 @@ In those cases, report the PR URL, the CI state, and exactly why you're holding.
   don't add it.
 - **Watch the §7.6 trap** when touching guard AI: cone-tracks-free + flat range +
   un-outrunnable escape + straight corridors = the un-fun chase. Don't rebuild it.
+- **A player-facing change may need the sim bot adapted (§13.2).** The `--bot`
+  stealth policy in `crates/sim` plays through the player's own channels — what it
+  perceives (fogged intel, sensed guards, the danger overlay), its abilities, the
+  explore→take→leave loop. If your change touches any of those — perception,
+  vision/guard behaviour, an ability, generation, or the win/lose conditions —
+  **evaluate whether the bot still plays the game** (`cargo run -p intrusion-sim --
+  --bot` and check the outcome profile hasn't gone degenerate: all-timeouts, or a
+  new free win). Adapt it in the *same* PR when your change leaves it blind to the
+  new mechanic or able to exploit it. A bot that no longer plays the game makes its
+  metrics measure the bot, not the game (§13.3) — which is the one thing the sim
+  exists to avoid.
 - Keep the PR scoped to one ticket. New work you discover becomes a new ticket
   (use the create-tickets skill), not scope creep.
