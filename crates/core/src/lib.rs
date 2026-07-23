@@ -41,6 +41,7 @@ mod guard;
 mod input;
 mod path;
 mod place;
+mod radio;
 mod region;
 mod render;
 mod rng;

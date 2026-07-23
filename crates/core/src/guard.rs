@@ -17,6 +17,7 @@ use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::path;
+use crate::radio::RadioClock;
 use crate::state::ACTOR_FILL;
 use crate::vision::{field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
 
@@ -130,6 +131,13 @@ pub struct Guard {
     detected: bool,
     fov: VisibleSet,
     state: GuardState,
+    /// This guard's radio ping cadence (§7.3): how often control pings it, drawn
+    /// once from the run seed at placement ([`RadioClock`]). It has no effect
+    /// while the guard is alive — a live guard always answers — and is handed to
+    /// the [`Body`](crate::body::Body) at a takedown, where a *missed* ping
+    /// finally becomes a dispatch and, on the second, an alert step. Fixtures get
+    /// the un-jittered [`RadioClock::DEFAULT`].
+    radio: RadioClock,
 }
 
 /// Patrol radius (§7.5, **[START] = 15**): how far the *fallback* territory
@@ -221,6 +229,7 @@ impl Guard {
             detected: false,
             fov: VisibleSet::default(),
             state: GuardState::Calm,
+            radio: RadioClock::DEFAULT,
         }
     }
 
@@ -259,6 +268,21 @@ impl Guard {
     pub fn with_beat(mut self, beat: Vec<Cell>) -> Self {
         self.beat = beat;
         self
+    }
+
+    /// The same guard carrying radio cadence `clock` (§7.3): its personal ping
+    /// period, drawn from the run seed by [`Placement::guards`](crate::Placement::guards)
+    /// so the whole schedule is deterministic (§12.4). A guard built without one
+    /// keeps [`RadioClock::DEFAULT`].
+    pub(crate) fn with_radio_clock(mut self, clock: RadioClock) -> Self {
+        self.radio = clock;
+        self
+    }
+
+    /// This guard's radio cadence (§7.3) — read at a takedown to seed the
+    /// [`Body`](crate::body::Body)'s ping schedule.
+    pub(crate) fn radio_clock(&self) -> RadioClock {
+        self.radio
     }
 
     /// Where the guard stands.
@@ -399,6 +423,22 @@ impl Guard {
         self.end_search_and_watch();
     }
 
+    /// React to a radio dispatch (§7.3): a colleague has stopped answering, so
+    /// control sends this guard to the silent guard's last known `post`. It
+    /// switches to [`Responding`](GuardState::Responding) (§7.4) and walks there
+    /// with a fresh lead — the same [`ALERT_DURATION`] backstop every reactive
+    /// state carries, so a responder that cannot reach the post gives up cleanly
+    /// rather than pacing forever. Any lingering search/watch is superseded: the
+    /// dispatch is the new priority. The caller only ever dispatches a guard that
+    /// does not have the live player ([`nearest_respondable`](crate::radio::nearest_respondable)),
+    /// so this never pulls a guard off a chase.
+    pub(crate) fn respond_to(&mut self, post: Cell) {
+        self.state = GuardState::Responding;
+        self.destination = Some(post);
+        self.alert = ALERT_DURATION;
+        self.end_search_and_watch();
+    }
+
     /// React to finding a body (§7.2) — the loudest event in the game. The lead
     /// it grants is **harder than a sighting** ([`BODY_ALERT_DURATION`] >
     /// [`ALERT_DURATION`]), and — unless the guard is busy with the live player,
@@ -472,6 +512,28 @@ impl Guard {
             } else {
                 // The lead went cold before the guard ever reached it (§7.1): the
                 // anti-tracking-turret backstop gives it up cleanly, no search.
+                self.stand_down();
+            }
+        }
+
+        // A **Responding** guard (§7.3/§7.4) walks to the silent guard's post. It
+        // carries a lead like any reactive state: while it is warm it heads for
+        // the post; on arrival with nothing there it stands down to patrol (the
+        // body may have been dragged off, or already found by its own cone en
+        // route — either way the post itself holds no live lead), and if the route
+        // is only blocked this turn it holds and retries. A cold lead — it never
+        // got there — gives up cleanly, the same anti-tracking backstop (§7.6).
+        if self.state == GuardState::Responding {
+            if self.alert > 0 {
+                if let Some(step) = self.step_toward_destination(facility, blocked) {
+                    return Some(step);
+                }
+                if self.destination == Some(self.pos) {
+                    self.stand_down();
+                } else {
+                    return None;
+                }
+            } else {
                 self.stand_down();
             }
         }

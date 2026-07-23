@@ -41,6 +41,7 @@ use crate::cover;
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::Guard;
+use crate::radio;
 use crate::region::DoorCell;
 use crate::targeting::Targeting;
 use crate::vision::{
@@ -137,6 +138,16 @@ pub enum Event {
     /// fired once per body. The finder's alert is raised harder than a sighting
     /// raises it; the radio escalation is §7.3/§7.7's tickets.
     BodyFound { at: Cell },
+    /// A downed guard missed a radio ping (§7.3): control noticed the silence and
+    /// dispatched the nearest active guard to the silent guard's last known
+    /// `post`. The player reads it as a near-line message and as the responder's
+    /// own sensed dot peeling off toward the post (§9) — the visual tell that
+    /// replaces the old sound (§9.3).
+    RadioSilence { post: Cell },
+    /// A second missed radio ping stepped the facility-wide alert to `level`
+    /// (§7.3): the concrete, explainable escalation the alert system was always
+    /// meant to provide (§2.3). Written here, read on the near line (§11.4).
+    AlertRaised { level: u32 },
     /// The player took hold of an adjacent body (§8.3): they are now dragging
     /// it, at half speed, until they release it or the run ends.
     BodyGrabbed { at: Cell },
@@ -188,8 +199,12 @@ impl Event {
                 Category::Owned
             }
             // A found body flips its finder to hunting (§7.2/§7.4): the threat is
-            // aroused but does not have you — the Warning band.
-            Event::BodyFound { .. } => Category::Warning,
+            // aroused but does not have you — the Warning band. A radio silence
+            // and the alert step it can lead to are the same kind of aroused
+            // threat — control knows something is wrong but nothing has you yet.
+            Event::BodyFound { .. } | Event::RadioSilence { .. } | Event::AlertRaised { .. } => {
+                Category::Warning
+            }
             // A guard that sees you is hunting *you* — the same Danger band as
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
             // reinforce (§11.2).
@@ -450,6 +465,14 @@ pub struct State {
     objectives: Vec<Objective>,
     exit: Cell,
     turn: u32,
+    /// The facility-wide alert level (§7.3): a count of escalations, each from a
+    /// concrete source — a guard that stopped answering its radio (the second
+    /// missed ping). Starts at zero and steps up in [`radio_phase`](Self::radio_phase);
+    /// it is *written and read* (the near line surfaces it, §11.4), which is the
+    /// whole point after the old "never written to, never read" failure (§2.3).
+    /// It does not decay within a run yet — coupling it back into guard behaviour
+    /// is the cooperation/tuning work (§7.7); here it first gets teeth.
+    alert: u32,
     outcome: Outcome,
     /// The events of the player's most recent action, free or spent — what the
     /// near line reads (§11.7: messages clear on the next action, so holding
@@ -503,6 +526,7 @@ impl State {
             objectives,
             exit,
             turn: 0,
+            alert: 0,
             outcome: Outcome::Playing,
             last_events: Vec::new(),
         };
@@ -722,6 +746,14 @@ impl State {
     /// The count of completed turns (the startup turn is turn zero).
     pub fn turn(&self) -> u32 {
         self.turn
+    }
+
+    /// The facility-wide alert level (§7.3): how many times the radio net has
+    /// escalated this run (a guard going fully silent). Read by the near line's
+    /// ambient status (§11.4) and available to the shell and the sim's alert-peak
+    /// metric (§13.2).
+    pub fn alert(&self) -> u32 {
+        self.alert
     }
 
     /// Whether the run is live, won, or lost (§4.5).
@@ -985,7 +1017,15 @@ impl State {
                     .guard_at(target)
                     .expect("bump_kind classified a guard here");
                 let guard = self.guards.remove(i);
-                self.bodies.push(Body::new(target, guard.station()));
+                // The body inherits the downed guard's post *and* its radio
+                // cadence (§7.3): the clock that was silent while it lived starts
+                // ticking now, its first missed ping a full period out.
+                self.bodies.push(Body::new(
+                    target,
+                    guard.station(),
+                    guard.radio_clock(),
+                    self.turn,
+                ));
                 events.push(Event::TakenDown { at: target });
                 true
             }
@@ -1308,13 +1348,59 @@ impl State {
         }
     }
 
-    /// Phases 2 and 3 (§4.2): recompute sight, then let the guards act. Shared by the
-    /// startup turn and every spent player turn.
+    /// Phases 2 and 3 (§4.2): recompute sight, run the radio net, then let the
+    /// guards act. Shared by the startup turn and every spent player turn. The
+    /// radio sits between sight and the guards deliberately: a responder it
+    /// dispatches this turn has its cone recomputed (it moved last turn) and then
+    /// senses and steps *this* turn, so the dot peels off the moment control
+    /// notices the silence (§7.3), not a turn late.
     fn run_world_phases(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         self.recompute_sight();
+        self.radio_phase(&mut events);
         self.guard_phase(&mut events);
         events
+    }
+
+    /// The radio net (§7.3): control's pings, resolved once per world turn. A
+    /// downed guard cannot answer, so each body runs a personal clock
+    /// ([`Body::ping_due`](crate::body::Body)); the turn a ping comes due it is
+    /// **missed**:
+    ///
+    /// - **First miss** — control dispatches the nearest still-active guard
+    ///   ([`radio::nearest_respondable`]) to the silent guard's last known post,
+    ///   switching it to [`Responding`](crate::GuardState::Responding). If every
+    ///   guard has the live player, nobody is free and the silence goes
+    ///   un-investigated — the second miss still lands.
+    /// - **Second miss** — the facility-wide alert steps (§7.3); control has
+    ///   escalated as far as the design specifies and stops pinging the corpse
+    ///   ([`MAX_MISSED_PINGS`](crate::radio) caps it).
+    ///
+    /// A **hidden** body still misses its pings (§7.3): hiding a body confuses the
+    /// investigation — the responder walks to a post the body has been dragged
+    /// away from — it does not cancel it. Both events are surfaced (§11.7): the
+    /// silence as a near-line message, the responder as its own sensed dot (§9).
+    fn radio_phase(&mut self, events: &mut Vec<Event>) {
+        // Index-walk: `bodies` is only ever appended to (§7.2), so indices are
+        // stable across the loop, and the dispatch borrows `guards` separately.
+        for i in 0..self.bodies.len() {
+            if !self.bodies[i].ping_due(self.turn) {
+                continue;
+            }
+            let post = self.bodies[i].post();
+            if self.bodies[i].miss_ping() == 1 {
+                // First miss: send the nearest guard who isn't already on the
+                // player. `respond_to` sets its destination and lead (§7.4).
+                if let Some(g) = radio::nearest_respondable(&self.guards, post) {
+                    self.guards[g].respond_to(post);
+                }
+                events.push(Event::RadioSilence { post });
+            } else {
+                // Second (final) miss: the escalation gets a concrete source.
+                self.alert += radio::ALERT_STEP;
+                events.push(Event::AlertRaised { level: self.alert });
+            }
+        }
     }
 
     /// Phase 2 (§4.2): recompute every viewer's field of view from its current
@@ -1525,6 +1611,176 @@ mod tests {
     use crate::test_support::{open_room, region_strip, solo};
     use crate::vision::field_of_view;
     use crate::{generate, generate_level, DoorId, Rng};
+
+    /// §7.3: a downed guard misses its radio ping a period after the takedown, and
+    /// control dispatches the nearest active guard to its last known post (→
+    /// [`Responding`](GuardState::Responding)); a second missed ping a period later
+    /// steps the facility-wide alert. Both surface on the near line (§11.4/§11.7).
+    /// A 1-wide corridor keeps the responder's patrol on a single predictable line.
+    #[test]
+    fn a_downed_guard_pings_a_dispatch_then_an_alert_step() {
+        // The player starts in a cupboard so the adjacent victim's 360° touching
+        // ring (§6.1) does not detect it — the takedown lands, and staying hidden
+        // keeps the player safe while the radio ticks (contact is refused, §7.6).
+        let mut layout = open_room(3, 30);
+        layout.place(Cell::new(1, 1), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 1),
+            Direction::South,
+            vec![
+                // The victim, on a short 3-turn clock so the pings come quickly.
+                Guard::stationary(Cell::new(1, 2))
+                    .with_radio_clock(radio::RadioClock::from_period(3)),
+                // The only other guard: the one control will send.
+                Guard::patrolling(Cell::new(1, 20)),
+            ],
+            Vec::new(),
+            Cell::new(1, 28),
+        );
+
+        let e = s.step(Input::Step(Direction::South)); // take the victim down
+        assert!(e.contains(&Event::TakenDown {
+            at: Cell::new(1, 2)
+        }));
+        assert_eq!(s.guards().len(), 1, "only the responder remains");
+
+        // A period's window, then the miss: no silence on the quiet turn before it.
+        assert!(s
+            .step(Input::Wait)
+            .iter()
+            .all(|e| !matches!(e, Event::RadioSilence { .. })));
+        let dispatch = s.step(Input::Wait);
+        assert!(
+            dispatch.contains(&Event::RadioSilence {
+                post: Cell::new(1, 2)
+            }),
+            "the first missed ping is a silence at the post",
+        );
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Responding,
+            "control dispatched the nearest active guard",
+        );
+        assert_eq!(s.alert(), 0, "one miss does not raise the alert");
+
+        // Three more quiet turns: the second missed ping steps the facility alert.
+        let mut stepped_to = None;
+        for _ in 0..3 {
+            for e in s.step(Input::Wait) {
+                if let Event::AlertRaised { level } = e {
+                    stepped_to = Some(level);
+                }
+            }
+        }
+        assert_eq!(
+            stepped_to,
+            Some(radio::ALERT_STEP),
+            "the second miss steps it"
+        );
+        assert_eq!(
+            s.alert(),
+            radio::ALERT_STEP,
+            "the alert is written and readable"
+        );
+    }
+
+    /// §7.3: the radio net bites only a guard that is *down*. A live guard answers
+    /// its pings, so a run with no takedown never dispatches and never steps the
+    /// alert, however long it runs.
+    #[test]
+    fn a_live_guard_answers_and_never_trips_the_net() {
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(2, 2),
+            Direction::South,
+            vec![Guard::patrolling(Cell::new(9, 9))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        for _ in 0..40 {
+            for e in s.step(Input::Wait) {
+                assert!(
+                    !matches!(e, Event::RadioSilence { .. } | Event::AlertRaised { .. }),
+                    "a live guard never trips the radio net",
+                );
+            }
+        }
+        assert_eq!(s.alert(), 0);
+    }
+
+    /// §7.3: a **hidden** body still misses its ping. Hiding a body confuses the
+    /// investigation — the responder walks to a post the body has left — but does
+    /// not cancel it: the radio never consults concealment. The body is dragged
+    /// into a cupboard (never found, cf. `a_body_dragged_into_a_hideout_is_gone`),
+    /// yet its ping still goes missed.
+    #[test]
+    fn a_hidden_body_still_misses_its_ping() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5), // start hidden, so the victim never sees the takedown coming
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))
+                .with_radio_clock(radio::RadioClock::from_period(5))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
+        s.step(Input::Step(Direction::North)); // grab it
+        s.step(Input::Step(Direction::South)); // step out: body follows into the cupboard (5,5)
+        let body = Cell::new(5, 5);
+        assert_eq!(s.bodies()[0].cell(), body);
+        assert_eq!(
+            s.layout().facility().terrain(body),
+            Some(Terrain::Hideout),
+            "the body is hidden in the cupboard",
+        );
+
+        let mut silenced = false;
+        for _ in 0..4 {
+            for e in s.step(Input::Wait) {
+                if matches!(e, Event::RadioSilence { .. }) {
+                    silenced = true;
+                }
+                assert!(
+                    !matches!(e, Event::BodyFound { .. }),
+                    "a hidden body is never found",
+                );
+            }
+        }
+        assert!(silenced, "the hidden body still missed its ping (§7.3)");
+        assert!(!s.bodies()[0].found(), "confusion, not cancellation");
+    }
+
+    /// §12.4: the radio net is deterministic — the same scenario under the same
+    /// inputs yields the identical event stream and alert level.
+    #[test]
+    fn the_radio_net_is_deterministic() {
+        let build = || {
+            let mut layout = open_room(3, 30);
+            layout.place(Cell::new(1, 1), Terrain::Hideout);
+            State::new(
+                layout,
+                Cell::new(1, 1),
+                Direction::South,
+                vec![
+                    Guard::stationary(Cell::new(1, 2))
+                        .with_radio_clock(radio::RadioClock::from_period(3)),
+                    Guard::patrolling(Cell::new(1, 20)),
+                ],
+                Vec::new(),
+                Cell::new(1, 28),
+            )
+        };
+        let mut script = vec![Input::Step(Direction::South)];
+        script.extend(std::iter::repeat_n(Input::Wait, 8));
+        let run = |mut s: State| -> (Vec<Vec<Event>>, u32) {
+            (script.iter().map(|&i| s.step(i)).collect(), s.alert())
+        };
+        assert_eq!(run(build()), run(build()), "same seed of events → same run");
+    }
 
     #[test]
     fn a_move_into_open_floor_spends_the_turn_and_turns_the_player() {
