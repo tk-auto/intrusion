@@ -18,6 +18,7 @@ use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::path;
 use crate::radio::RadioClock;
+use crate::rng::Rng;
 use crate::state::ACTOR_FILL;
 use crate::vision::{
     field_of_view_with_rear_blind_spot, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE,
@@ -133,6 +134,15 @@ pub struct Guard {
     detected: bool,
     fov: VisibleSet,
     state: GuardState,
+    /// Turns of Calm patrol **dwell** remaining (§7.5 dwell, §153): a guard that has
+    /// reached a patrol destination sometimes holds in place for a few turns —
+    /// facing unchanged (§5) — before picking the next, a stationary window a
+    /// Takedown (§7.2) can exploit. Set on arrival by the seeded roll
+    /// ([`GUARD_DWELL_CHANCE_PERCENT`]); counted down each Calm turn; **cleared the
+    /// instant the guard turns reactive**, so a chase or search never pauses (§7.1
+    /// "guards never accelerate" cuts one way — a reactive guard never *slows*
+    /// either). `0` means not dwelling.
+    dwell: u32,
     /// This guard's radio ping cadence (§7.3): how often control pings it, drawn
     /// once from the run seed at placement ([`RadioClock`]). It has no effect
     /// while the guard is alive — a live guard always answers — and is handed to
@@ -213,6 +223,24 @@ pub(crate) const BODY_ALERT_DURATION: u32 = 60;
 // out-alert a sighting, whatever either number is retuned to.
 const _: () = assert!(BODY_ALERT_DURATION > ALERT_DURATION);
 
+/// How often a **Calm** guard, on reaching a patrol destination, dwells in place
+/// before picking the next one (§7.5 dwell, §153), as a percentage the seeded run
+/// RNG rolls against (§12.4, **[START] = 50%**). The pause is what makes a Takedown
+/// (§7.2) approachable — a guard that never stops moving cannot be lined up on —
+/// but it also lowers patrol coverage (§7.6/§7.7), so it is a playtest knob (see
+/// `State::set_guard_dwell_chance`). `0` draws no RNG and perturbs nothing.
+pub(crate) const GUARD_DWELL_CHANCE_PERCENT: u32 = 50;
+
+/// The shortest and longest a Calm dwell lasts, in turns (§7.5 dwell, §153,
+/// **[START] = 2–4**): once a guard decides to dwell, its length is drawn
+/// uniformly from this inclusive range on the seeded run RNG (§12.4). Short enough
+/// to leave patrols covering ground, long enough to be a real window to act.
+pub(crate) const GUARD_DWELL_TURNS_MIN: u32 = 2;
+pub(crate) const GUARD_DWELL_TURNS_MAX: u32 = 4;
+// A dwell is always at least one turn and the range is well-formed, whatever the
+// [START] numbers are retuned to.
+const _: () = assert!(GUARD_DWELL_TURNS_MIN >= 1 && GUARD_DWELL_TURNS_MIN <= GUARD_DWELL_TURNS_MAX);
+
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
 /// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
 /// if the spawn facing ever changes, the "no guard eyes the player's spawn"
@@ -239,6 +267,7 @@ impl Guard {
             detected: false,
             fov: VisibleSet::default(),
             state: GuardState::Calm,
+            dwell: 0,
             radio: RadioClock::DEFAULT,
         }
     }
@@ -334,6 +363,15 @@ impl Guard {
     /// puzzle §7.2 wants solved.
     pub fn detected_player(&self) -> bool {
         self.detected
+    }
+
+    /// Whether this guard is holding a §7.5 patrol dwell this turn (§153) — Calm,
+    /// stationary by choice, and lined up for a behind-the-back Takedown (§7.2).
+    /// Test-only: the renderer needs no special glyph, a dwelling guard is a Calm
+    /// guard that simply is not moving.
+    #[cfg(test)]
+    pub(crate) fn is_dwelling(&self) -> bool {
+        self.dwell > 0
     }
 
     /// Whether this guard closes a door it has just walked through (§10.4/§7.6):
@@ -501,8 +539,12 @@ impl Guard {
     /// cannot route to — its lead is spent and it **stands back down to patrol**. With no
     /// search or alert-timer machinery yet (§7.6 fix #2 is a later ticket) that is the
     /// honest end of an investigation: reach the spot, find nothing, resume the sweep.
-    /// A **Calm** guard picks its next patrol target and steps toward it (§7.5). A
-    /// held-in-place guard, or a Calm one with nowhere to go, holds.
+    /// A **Calm** guard picks its next patrol target and steps toward it (§7.5) —
+    /// except that, on reaching a target, it sometimes **dwells** in place for a few
+    /// turns first (§153, the seeded [`roll_dwell`]), a stationary window a Takedown
+    /// (§7.2) can be lined up against. A held-in-place guard, or a Calm one with
+    /// nowhere to go, holds. `rng` and `dwell_chance` drive the dwell roll and are
+    /// the loop's only stochastic input here (§12.4); a `0` chance draws nothing.
     /// `blocked` are the cells other guards currently stand on: guards are solid to
     /// each other and must **path around** a colleague, not through one (§7.8). A
     /// route the pass finds steps only into cells no other guard holds, so a guard
@@ -511,11 +553,25 @@ impl Guard {
     /// only route this turn, the guard holds and retries next turn as the colleague
     /// clears — a local wait-and-retry, no reservation system (§12.3), and no
     /// deadlock the old path-through-each-other stall produced.
-    pub(crate) fn decide(&mut self, facility: &Facility, blocked: &[Cell]) -> Option<Direction> {
+    pub(crate) fn decide(
+        &mut self,
+        facility: &Facility,
+        blocked: &[Cell],
+        rng: &mut Rng,
+        dwell_chance: u32,
+    ) -> Option<Direction> {
         if !self.patrols {
             return None;
         }
         self.inspected.absorb(&self.fov);
+
+        // A dwell belongs to Calm patrol alone (§7.5/§153): the instant a guard is
+        // reactive — chasing, investigating, searching, responding — any pause is
+        // dropped, so a hunt never slows. Clearing it here, before the reactive
+        // branches below, is what makes a detection mid-dwell preempt it at once.
+        if self.state != GuardState::Calm {
+            self.dwell = 0;
+        }
 
         // A reactive guard pursues its live lead while the alert is warm. The moment
         // it can no longer chase, what happens next is the §7.6 fix 2 arc:
@@ -571,6 +627,27 @@ impl Guard {
                 // Nothing left to poke at in the area — end the search early.
             }
             self.release_from_search(); // **Released**
+        }
+
+        // Calm patrol (§7.5). A dwell in progress holds the guard in place — facing
+        // unchanged (§5) — a stationary window a Takedown can exploit (§7.2/§153).
+        // It counts down; the turn it reaches zero the sweep resumes at once.
+        if self.dwell > 0 {
+            self.dwell -= 1;
+            if self.dwell > 0 {
+                return None;
+            }
+            // The dwell just ended — fall through to repick and step this turn.
+        } else if self.destination == Some(self.pos) {
+            // *Arrived* at a sweep target (as opposed to never having had one — a
+            // fresh guard picks and walks without pausing, and this keeps the §4.2
+            // startup turn drawing no RNG, as `State::new` relies on): a new target
+            // is about to be picked, but a Calm guard sometimes dwells first
+            // (§7.5/§153).
+            if let Some(turns) = roll_dwell(rng, dwell_chance) {
+                self.dwell = turns;
+                return None;
+            }
         }
 
         self.repick_patrol_target(facility);
@@ -708,6 +785,24 @@ impl Guard {
             patrollable(facility, cell)
         })
     }
+}
+
+/// Roll the seeded run RNG (§12.4) for a Calm patrol dwell (§7.5/§153): `Some(n)`
+/// to dwell for `n` turns, `None` to walk on. `chance` is the percentage a dwell
+/// starts at all. Mirrors the close-behind discipline
+/// ([`State::rolls_a_close`](crate::State)): the extremes draw nothing against the
+/// *chance* — a `0` never dwells and perturbs no stream, a `100` always does — so
+/// only the tuned middle spends a chance draw; a dwell that *does* start then
+/// spends one more draw for its length in [`GUARD_DWELL_TURNS_MIN`]..=[`GUARD_DWELL_TURNS_MAX`].
+fn roll_dwell(rng: &mut Rng, chance: u32) -> Option<u32> {
+    let dwelling = match chance {
+        0 => false,
+        c if c >= 100 => true,
+        c => rng.below(100) < c,
+    };
+    dwelling.then(|| {
+        rng.range_inclusive(GUARD_DWELL_TURNS_MIN as i32, GUARD_DWELL_TURNS_MAX as i32) as u32
+    })
 }
 
 /// Whether a guard may **patrol through** `cell` (§7.5/§10.3): a cell it can both
@@ -953,6 +1048,77 @@ mod tests {
         );
     }
 
+    /// §7.5/§153: a Calm guard that reaches a patrol target dwells in place for a
+    /// bounded window — holding, position and facing unchanged (§5) — then resumes
+    /// the sweep. Forced on (`dwell_chance` 100) with a fixed seed so the length is
+    /// deterministic; it must land inside the [START] range and the guard must move
+    /// again once it elapses.
+    #[test]
+    fn a_calm_guard_dwells_on_arrival_then_resumes() {
+        let facility = Facility::walled_box(9, 9);
+        // Already standing on its patrol target (destination == pos): the fixture
+        // for "just arrived", the moment a dwell is rolled. (A fresh guard with no
+        // target picks one and walks without pausing.)
+        let mut guard = Guard::patrolling_to(Cell::new(4, 4), Cell::new(4, 4));
+        guard.look(&facility);
+        let (start, facing) = (guard.pos(), guard.facing());
+        let mut rng = Rng::new(7);
+
+        // On arrival, with the chance forced to 100, it begins a dwell rather than
+        // immediately picking the next target.
+        let first = guard.decide(&facility, &[], &mut rng, 100);
+        assert!(
+            first.is_none() && guard.is_dwelling(),
+            "reaching a target begins a dwell",
+        );
+
+        // Hold for the rest of the window: each Calm turn holds, unmoved and
+        // un-re-aimed, until the dwell elapses and the guard steps off.
+        let mut holds = 1;
+        loop {
+            let step = guard.decide(&facility, &[], &mut rng, 100);
+            if !guard.is_dwelling() {
+                assert!(step.is_some(), "the sweep resumes the turn the dwell ends");
+                break;
+            }
+            assert_eq!(step, None, "a dwelling guard holds");
+            assert_eq!(guard.pos(), start, "a dwell does not move");
+            assert_eq!(guard.facing(), facing, "a dwell does not re-aim (§5)");
+            holds += 1;
+        }
+        assert!(
+            (GUARD_DWELL_TURNS_MIN..=GUARD_DWELL_TURNS_MAX).contains(&holds),
+            "the dwell lasted {holds} turns, outside the [START] {GUARD_DWELL_TURNS_MIN}..={GUARD_DWELL_TURNS_MAX} range",
+        );
+    }
+
+    /// §153: a detection cancels an in-progress dwell the same turn — a reactive
+    /// guard never pauses (§7.1). The guard is dwelling; a sighting flips it to
+    /// Chasing via `sense`, and the next `decide` chases instead of holding the
+    /// dwell out.
+    #[test]
+    fn a_detection_cancels_an_in_progress_dwell() {
+        let facility = Facility::walled_box(15, 15);
+        // Arrived at its target (faces south, §7.1), so the first decide dwells.
+        let mut guard = Guard::patrolling_to(Cell::new(7, 2), Cell::new(7, 2));
+        guard.look(&facility);
+        let mut rng = Rng::new(3);
+
+        guard.decide(&facility, &[], &mut rng, 100);
+        assert!(guard.is_dwelling(), "precondition: dwelling");
+
+        // A player appears down the cone (certain zone): the guard turns reactive.
+        let player = Cell::new(7, 5);
+        assert!(guard.fov().contains(player), "precondition: in the cone");
+        guard.sense(player, false);
+        assert_eq!(guard.state(), GuardState::Chasing);
+
+        // The next decision clears the dwell and steps toward the player.
+        let step = guard.decide(&facility, &[], &mut rng, 100);
+        assert!(!guard.is_dwelling(), "going reactive cancels the dwell");
+        assert!(step.is_some(), "a chasing guard moves, it does not dwell");
+    }
+
     /// §7.6 fix 2 (Lost → Hunted → Released): a reactive guard that reaches its
     /// last-known cell and finds nothing does **not** snap back to patrol — it enters a
     /// bounded [`Alerted`](GuardState::Alerted) search, sweeps for exactly
@@ -972,7 +1138,7 @@ mod tests {
 
         // Arrive at the lead with nothing more seen: the search begins, not patrol.
         guard.advance_to(glimpse, Direction::South, &facility);
-        guard.decide(&facility, &[]);
+        guard.decide(&facility, &[], &mut Rng::new(0), 0);
         assert_eq!(
             guard.state(),
             GuardState::Alerted,
@@ -987,7 +1153,7 @@ mod tests {
             if guard.state() == GuardState::Alerted {
                 alerted_turns += 1;
             }
-            guard.decide(&facility, &[]);
+            guard.decide(&facility, &[], &mut Rng::new(0), 0);
         }
         assert_eq!(
             alerted_turns, SEARCH_DURATION,
@@ -1208,7 +1374,7 @@ mod tests {
         }
 
         // With the lead cold, deciding stands the guard down to patrol.
-        guard.decide(&facility, &[]);
+        guard.decide(&facility, &[], &mut Rng::new(0), 0);
         assert_eq!(guard.state(), GuardState::Calm, "a cold lead is given up");
     }
 }

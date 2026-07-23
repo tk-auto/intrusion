@@ -1610,6 +1610,68 @@ fn a_calm_guard_paces_across_its_territory() {
     );
 }
 
+/// §7.5/§153 end to end: through the real turn loop a Calm guard forced to dwell
+/// (the playtest knob at 100) holds its cell without moving on the turns it
+/// dwells; the same guard with the knob at 0 never dwells at all. The player is
+/// parked in a far corner, out of the territory, so the guard stays Calm.
+#[test]
+fn a_calm_guard_dwells_through_the_turn_loop_and_the_knob_disables_it() {
+    let build = |chance: u32| {
+        // A small room so the guard reaches its patrol targets often (frequent
+        // arrivals = frequent dwell rolls), and a concealed player in a cupboard so
+        // the guard stays Calm no matter how close its sweep passes.
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(1, 1), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 1), // hidden in the corner cupboard — never detected
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(6, 6))],
+            Vec::new(),
+            Cell::new(10, 10),
+        )
+        .with_rng(Rng::new(5));
+        s.set_guard_dwell_chance(chance);
+        s
+    };
+
+    // Forced on: the guard dwells at some point, and every turn it dwells it holds
+    // its cell (§5 — no move, no re-aim), staying Calm throughout.
+    let mut s = build(100);
+    let mut dwelt = false;
+    for _ in 0..60 {
+        let before = s.guards()[0].pos();
+        s.step(Input::Wait);
+        assert_eq!(
+            s.guards()[0].state(),
+            GuardState::Calm,
+            "the concealed player never disturbs the patrol",
+        );
+        if s.guards()[0].is_dwelling() {
+            dwelt = true;
+            assert_eq!(
+                s.guards()[0].pos(),
+                before,
+                "a dwelling guard does not move"
+            );
+        }
+    }
+    assert!(
+        dwelt,
+        "with the knob at 100 the guard dwells over its patrol"
+    );
+
+    // Forced off: the guard never dwells.
+    let mut s = build(0);
+    for _ in 0..60 {
+        s.step(Input::Wait);
+        assert!(
+            !s.guards()[0].is_dwelling(),
+            "the knob at 0 disables dwelling entirely",
+        );
+    }
+}
+
 /// §10.4: a closed door does not stop a guard — its route runs straight
 /// through, and walking into the panel is the bump that opens it. The door is
 /// the guard's whole action that turn; it steps through on the next. Guard traffic
@@ -1921,8 +1983,9 @@ fn beats_and_sweeps_are_deterministic_from_the_seed() {
     for seed in [3, 11] {
         let build = || {
             // Thread the one seed end to end (§12.4): the carve stream continues
-            // into the loop, so the guard close-behind roll (#146) is part of what
-            // this pins deterministic — same seed → same closes, turn for turn.
+            // into the loop, so the guard close-behind roll (#146) and the patrol
+            // dwell roll (§153) are part of what this pins deterministic — same seed
+            // → same closes and same dwells, turn for turn.
             let mut rng = Rng::new(seed);
             let (layout, p) =
                 generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
