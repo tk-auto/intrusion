@@ -40,6 +40,17 @@ use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::state::{GuardPerception, State};
 
+/// The entity glyphs (§11.3), named once so the world render and the help legend
+/// (#139) draw the same characters — a legend that hand-copied them could drift from
+/// what the game shows. Terrain glyphs already have their single source in
+/// [`Terrain::glyph`]; these are the entity half of the §11.3 table.
+pub(crate) const PLAYER_GLYPH: char = '@';
+pub(crate) const GUARD_GLYPH: char = 'g';
+pub(crate) const BODY_GLYPH: char = 'z';
+/// Floor draws as a dot, not blank (§11.5): a glyph for the FOV dimming to act on
+/// across open ground. Named so the legend shows the same mark the board does.
+pub(crate) const FLOOR_DOT: char = '·';
+
 /// How much the player currently knows about what a drawn cell shows — the three
 /// visual states of §11.5a's implementation note (live / remembered / never-seen,
 /// where "never-seen" contents are simply not drawn and their cell falls back to
@@ -181,7 +192,7 @@ pub fn render(state: &State) -> Grid {
             // Floor dots (§11.5): give open ground a foreground so the FOV edge
             // reads across it. Masked contents dot too — they *show* floor.
             let glyph = if shown == Terrain::Floor {
-                '·'
+                FLOOR_DOT
             } else {
                 shown.glyph()
             };
@@ -253,7 +264,7 @@ pub fn render(state: &State) -> Grid {
     // every entity: in the FOV or not at all.
     if let Some(decoy) = state.decoy() {
         if fov.contains(decoy) {
-            put(decoy, '@', Category::Owned);
+            put(decoy, PLAYER_GLYPH, Category::Owned);
         }
     }
     // A body (§7.2) is live state like any entity — drawn only inside the FOV,
@@ -273,7 +284,7 @@ pub fn render(state: &State) -> Grid {
         } else {
             Category::Caution
         };
-        put(body.cell(), 'z', fg);
+        put(body.cell(), BODY_GLYPH, fg);
     }
     // A **seen** guard (in the FOV, §9.2) draws as the full state-coloured `g`; the
     // `g` glyph is re-categorised every turn from the guard's state (§11.2): yellow →
@@ -283,7 +294,7 @@ pub fn render(state: &State) -> Grid {
     // remembered (§11.5a), so leaving both view and sense range erases it.
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Seen) {
-            put(guard.pos(), 'g', guard.state().category());
+            put(guard.pos(), GUARD_GLYPH, guard.state().category());
         }
     }
     // The player, always Owned — trivially inside their own FOV. Inside a hideout
@@ -291,7 +302,7 @@ pub fn render(state: &State) -> Grid {
     // Owned (§10.3/§11.3) — the "you are hidden here" signal — instead of drawing
     // the `@`. Read through the same `hidden` query the loop and vision use, so
     // the picture cannot disagree.
-    let player_glyph = if state.hidden() { '}' } else { '@' };
+    let player_glyph = if state.hidden() { '}' } else { PLAYER_GLYPH };
     put(state.player(), player_glyph, Category::Owned);
 
     // The crouch signal (§10.3/§11.3): while the player is crouched, the whole
@@ -401,10 +412,11 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
     }
 }
 
+mod help;
 mod hud;
 pub use hud::{
-    ability_at, is_ability_button, is_message_button, render_screen, ScreenUi, HEADER_ROWS,
-    STATUS_ROWS,
+    ability_at, is_ability_button, is_help_button, is_message_button, render_screen, ScreenUi,
+    HEADER_ROWS, STATUS_ROWS,
 };
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row

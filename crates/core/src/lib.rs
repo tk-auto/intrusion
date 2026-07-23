@@ -70,8 +70,8 @@ pub use input::{
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, DoorKind, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{
-    ability_at, ascii_grid, is_ability_button, is_message_button, render, render_screen, GlyphCell,
-    Grid, ScreenUi, Visibility, HEADER_ROWS, STATUS_ROWS,
+    ability_at, ascii_grid, is_ability_button, is_help_button, is_message_button, render,
+    render_screen, GlyphCell, Grid, ScreenUi, Visibility, HEADER_ROWS, STATUS_ROWS,
 };
 pub use rng::Rng;
 pub use state::{
