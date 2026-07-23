@@ -37,6 +37,8 @@ use crate::ability::{
     AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, TargetingMode,
 };
 use crate::body::Body;
+use std::collections::HashSet;
+
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::cover;
@@ -466,6 +468,15 @@ pub struct State {
     /// sequence. The fog renderer reads it to decide which *contents* are
     /// remembered; live state never consults it (§11.5a keeps those apart).
     memory: VisibleSet,
+    /// The duct cells the player has been **inside** (§10.7), accumulated each turn
+    /// they occupy a duct. This is knowledge that only *crawling* reveals — a duct's
+    /// interior is contents, and unlike a hideout you cannot learn it by looking at
+    /// the wall from the room (its face is in [`memory`](Self::memory) then, but the
+    /// crawlspace behind it is not). The renderer reads it to draw a **remembered**
+    /// duct path (§11.5a/#134); the sight memory cannot answer "have I crawled this",
+    /// so this is tracked apart. Monotonic and derived purely from where the player
+    /// has stood, so it stays deterministic (§12.4).
+    duct_memory: HashSet<Cell>,
     /// Whether the last **spent** turn was a Wait — which widens the next sight
     /// computation to the full 360° (§8.3). A free action (a wall bump) spends
     /// nothing and changes nothing (§4.4), so it does not clear this.
@@ -582,6 +593,7 @@ impl State {
             facing,
             player_fov: VisibleSet::default(),
             memory: VisibleSet::default(),
+            duct_memory: HashSet::new(),
             waited: false,
             moved_this_turn: false,
             crouched_behind: None,
@@ -693,6 +705,15 @@ impl State {
     /// deliberately never consults it, so nothing transient is ever "remembered".
     pub fn memory(&self) -> &VisibleSet {
         &self.memory
+    }
+
+    /// The duct cells the player has crawled (§10.7/#134): the interiors they have
+    /// been *inside*, which is the only way a duct's crawlspace becomes known (looking
+    /// at the wall from the room does not reveal it). The renderer reads this to draw
+    /// a remembered `=` path after the player has left, distinct from the sight memory
+    /// that merely holds the wall's face.
+    pub fn duct_memory(&self) -> &HashSet<Cell> {
+        &self.duct_memory
     }
 
     /// Whether the player is concealed — standing inside a hideout (§10.3).
@@ -1589,6 +1610,17 @@ impl State {
         // Tile memory (§11.5a) accumulates here, in the same phase that produced
         // the sight — every cell the player can see now is remembered forever.
         self.memory.absorb(&self.player_fov);
+        // Duct memory (§10.7/#134): while inside a duct the interior view reveals the
+        // whole occupied crawlspace, so remember all of its cells — the crawled path
+        // the renderer later draws as remembered `=`. This is the knowledge crawling
+        // grants that looking at the wall from the room does not.
+        if let Some(cells) = self
+            .layout
+            .duct_containing(self.player)
+            .map(|d| d.cells().to_vec())
+        {
+            self.duct_memory.extend(cells);
+        }
         for guard in &mut self.guards {
             guard.look(facility);
         }
