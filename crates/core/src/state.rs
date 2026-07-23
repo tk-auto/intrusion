@@ -121,6 +121,14 @@ pub enum Event {
     /// The player took an unaware adjacent guard down (§7.2): the guard is
     /// permanently out, and a body now lies at `at`.
     TakenDown { at: Cell },
+    /// A guard at `by` **freshly** detected the player this turn (§7.6): its
+    /// look found them after a turn (or a lifetime) of not seeing them. Fired on
+    /// the transition only — a chase that holds the player in sight turn after
+    /// turn is one detection, not one per turn — so counting these counts how
+    /// often stealth actually broke (§13.2's "detection events per run"). The
+    /// certain sighting and the glimpse both count: either one turns the guard
+    /// hunting ([`GuardState`](crate::GuardState)).
+    Detected { by: Cell },
     /// A guard's cone covered a body (§7.2) — the loudest event in the game,
     /// fired once per body. The finder's alert is raised harder than a sighting
     /// raises it; the radio escalation is §7.3/§7.7's tickets.
@@ -178,6 +186,10 @@ impl Event {
             // A found body flips its finder to hunting (§7.2/§7.4): the threat is
             // aroused but does not have you — the Warning band.
             Event::BodyFound { .. } => Category::Warning,
+            // A guard that sees you is hunting *you* — the same Danger band as
+            // its Chasing/Investigating glyph (§7.4), so the message and the `g`
+            // reinforce (§11.2).
+            Event::Detected { .. } => Category::Danger,
             // Neutral furniture doing furniture things (§10.4).
             Event::DoorOpened { .. } => Category::System,
             // Goals and rewards — including the exit talking about the goal it
@@ -1292,7 +1304,15 @@ impl State {
             .map(|guard| self.concealed_from(guard.pos()))
             .collect();
         for (guard, &concealed) in self.guards.iter_mut().zip(&concealed) {
+            // Awareness is per-turn, so the pre-sense reading is last turn's: a
+            // guard aware now that was not aware then has *freshly* found the
+            // player — the transition [`Event::Detected`] reports, and the §13.2
+            // sim counts. A held chase re-detects every turn and stays silent.
+            let was_aware = guard.detected_player();
             guard.sense(self.player, concealed);
+            if guard.detected_player() && !was_aware {
+                events.push(Event::Detected { by: guard.pos() });
+            }
         }
         // The found-body scan (§7.2): a body is *found* the first time any cone
         // covers it — a body does not block sight, so the cones just recomputed
@@ -1644,14 +1664,111 @@ mod tests {
         );
         assert_eq!(s.outcome(), Outcome::Playing);
 
+        // The wait turn: the guard's look from (5,4) freshly finds the adjacent
+        // player (the touching ring, §6.1) — the Detected transition — and its
+        // step onto them captures. Both facts are reported, in resolution order.
         let events = s.step(Input::Wait);
         assert_eq!(
             events,
-            vec![Event::Captured {
-                by: Cell::new(4, 4)
-            }]
+            vec![
+                Event::Detected {
+                    by: Cell::new(5, 4)
+                },
+                Event::Captured {
+                    by: Cell::new(4, 4)
+                },
+            ]
         );
         assert_eq!(s.outcome(), Outcome::Lost);
+    }
+
+    /// [`Event::Detected`] fires on the **transition** into being seen (§7.6),
+    /// not per turn of a held gaze: stepping into a guard's sight reports once,
+    /// staying in it reports nothing more, and only breaking contact re-arms it —
+    /// so the §13.2 sim counts broken stealth, never chase length.
+    #[test]
+    fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
+        // A stationary guard facing south; the player starts two cells behind
+        // it — outside the cone, past the touching ring — so the startup turn
+        // sees nothing.
+        let mut s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 3),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 5))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        assert!(
+            !s.guards()[0].detected_player(),
+            "precondition: behind the cone, unseen"
+        );
+
+        // Step to adjacency: the touching ring (§6.1) finds the player — the
+        // transition, reported.
+        let events = s.step(Input::Step(Direction::South));
+        assert!(
+            events.contains(&Event::Detected {
+                by: Cell::new(5, 5)
+            }),
+            "stepping into sight is a detection event: {events:?}"
+        );
+
+        // Held in sight: detected again this turn, but no *fresh* detection.
+        let events = s.step(Input::Wait);
+        assert!(s.guards()[0].detected_player(), "still seen");
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Detected { .. })),
+            "a held gaze is not a new detection: {events:?}"
+        );
+
+        // Break contact — back behind the cone — then re-enter: a second event.
+        let events = s.step(Input::Step(Direction::North));
+        assert!(!s.guards()[0].detected_player(), "contact broken");
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Detected { .. })),
+            "losing the player is not a detection: {events:?}"
+        );
+        let events = s.step(Input::Step(Direction::South));
+        assert!(
+            events.contains(&Event::Detected {
+                by: Cell::new(5, 5)
+            }),
+            "re-entering sight re-fires the event: {events:?}"
+        );
+    }
+
+    /// Concealment gates the event exactly as it gates detection (§10.3): a
+    /// hidden player sweeps through a cone silently, and the event fires only
+    /// when they emerge into sight.
+    #[test]
+    fn concealment_suppresses_the_detection_event_until_the_player_emerges() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 4), // in the cupboard, adjacent to the guard
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 5))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        assert!(s.hidden(), "precondition: concealed");
+
+        let events = s.step(Input::Wait);
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Detected { .. })),
+            "the cupboard conceals: no detection event: {events:?}"
+        );
+
+        // Climb out beside the guard: adjacent, exposed — the transition fires.
+        let events = s.step(Input::Step(Direction::East));
+        assert!(
+            events.contains(&Event::Detected {
+                by: Cell::new(5, 5)
+            }),
+            "emerging into the touching ring is a detection: {events:?}"
+        );
     }
 
     /// §7.2: the takedown. Bumping an adjacent guard that has not detected the
