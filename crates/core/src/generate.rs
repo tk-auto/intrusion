@@ -42,6 +42,7 @@
 //! Downstream code only ever sees a layout that passed.
 
 use crate::cell::{Cell, Direction};
+use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
 use crate::path;
 use crate::place::{place, LevelConfig, Placement};
@@ -54,12 +55,14 @@ use std::collections::HashSet;
 // here so the orchestrator and the tests call its helpers unqualified.
 mod carve;
 mod doors;
+mod ducts;
 mod features;
 mod hideouts;
 mod sightlines;
 mod walls;
 use carve::*;
 use doors::*;
+use ducts::*;
 use features::*;
 use hideouts::*;
 use sightlines::*;
@@ -249,6 +252,12 @@ pub enum GenError {
 pub struct Layout {
     facility: Facility,
     regions: RegionGraph,
+    /// The player-only crawlspace shortcuts threaded through the walls (§10.7). Each
+    /// is an ordered path of cells whose ends are [`Terrain::DuctEntry`] and whose
+    /// interior stays [`Terrain::Wall`]; the list is the only record that those wall
+    /// cells are also a crawl route. Empty on a level the generator placed none on
+    /// (ducts are optional — reachability never depends on one, §10.6/§10.7).
+    ducts: Vec<Duct>,
 }
 
 impl Layout {
@@ -260,6 +269,27 @@ impl Layout {
     /// The region graph over that grid.
     pub fn regions(&self) -> &RegionGraph {
         &self.regions
+    }
+
+    /// The duct crawlspaces on this level (§10.7), for the turn loop and renderer.
+    pub fn ducts(&self) -> &[Duct] {
+        &self.ducts
+    }
+
+    /// The duct `cell` belongs to, if any (§10.7) — the derived "is this a duct
+    /// cell" query. This is the single source the turn loop reads to know the
+    /// player is inside a duct (mirroring [`State::hidden`](crate::State::hidden)),
+    /// so the state can never desync from position.
+    pub fn duct_containing(&self, cell: Cell) -> Option<&Duct> {
+        self.ducts.iter().find(|d| d.contains(cell))
+    }
+
+    /// Whether stepping `from` → `to` is a single legal **crawl** along one duct
+    /// (§10.7): both cells belong to the same duct and are consecutive on its path.
+    pub fn is_duct_step(&self, from: Cell, to: Cell) -> bool {
+        self.ducts
+            .iter()
+            .any(|d| d.contains(from) && d.is_crawl_step(from, to))
     }
 
     /// Mutable access to both halves at once — the grid and its graph. Crate-internal
@@ -290,6 +320,7 @@ impl Layout {
         Self {
             facility,
             regions: RegionGraph::new(w, h),
+            ducts: Vec::new(),
         }
     }
 
@@ -297,7 +328,19 @@ impl Layout {
     /// and doors (a region beat, a guard-opened door) without running the full
     /// generator. The caller keeps the two in lockstep, as the generator would.
     pub(crate) fn from_parts(facility: Facility, regions: RegionGraph) -> Self {
-        Self { facility, regions }
+        Self {
+            facility,
+            regions,
+            ducts: Vec::new(),
+        }
+    }
+
+    /// Attach hand-built ducts to a fixture layout (§10.7) — for turn-loop tests
+    /// that exercise crawl/peek/concealment without running the generator. The
+    /// caller stamps the entry cells as [`Terrain::DuctEntry`] to match.
+    pub(crate) fn with_ducts(mut self, ducts: Vec<Duct>) -> Self {
+        self.ducts = ducts;
+        self
     }
 }
 
@@ -469,8 +512,20 @@ fn generate_once(
     // the result.
     break_sightlines(&mut facility, &mut regions, rng, tuning);
 
+    // Step 7 (§10.7): thread a small number of player-only duct crawlspaces through
+    // the walls, each a shortcut between two regions far apart on the region graph.
+    // Last of all, and deliberately after the §10.6/§10.1a gate's inputs are fixed:
+    // a duct entry is wall-like in every guard-facing property (opaque, solid,
+    // pathing-blocking), so converting a wall to an entry changes neither
+    // reachability nor a sightline — the crawl route it opens is the player's alone.
+    let ducts = place_ducts(&mut facility, &regions, rng);
+
     debug_assert!(corridors > 0, "guarded footprint yielded no corridor");
-    Ok(Layout { facility, regions })
+    Ok(Layout {
+        facility,
+        regions,
+        ducts,
+    })
 }
 
 /// The §10.6 gate: every guarantee that must be *asserted* on a finished carve,
@@ -531,6 +586,9 @@ fn is_usable_terrain(terrain: Terrain) -> bool {
             | Terrain::DoorPanelOpen
             | Terrain::PartialCover
             | Terrain::Hideout
+            // A duct entry is a bumpable usable too (§11.4 "duct: enter"), so
+            // placement avoids crowding its mouth with a second adjacent usable.
+            | Terrain::DuctEntry
     )
 }
 

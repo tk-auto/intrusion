@@ -322,10 +322,15 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
         // the player entered by it (§4.5) and plans escape routes around it (§7.6).
         // A table is geometry too: it replaced a stamped wall (§10.1a), and being
         // surprised by furniture mid-flight is as bad as being surprised by a wall.
+        // A duct **entry** is geometry as well (§10.7): visible from turn one like a
+        // door, an `=` in the wall you can plan a shortcut around. Its interior stays
+        // Wall — the crawl *path* is contents, hidden until crawled then remembered by
+        // the interior view (#134), so nothing here gives the shortcut's route away.
         Terrain::Floor
         | Terrain::Wall
         | Terrain::DoorHinge
         | Terrain::Exit
+        | Terrain::DuctEntry
         | Terrain::PartialCover => (terrain, Visibility::Dimmed),
         // A door's *position* is geometry but its open/closed pose is live state,
         // never remembered: out of view a panel always draws canonically closed.

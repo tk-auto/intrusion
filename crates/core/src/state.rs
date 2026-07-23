@@ -71,6 +71,15 @@ pub const PLAYER_SENSE_RANGE: u32 = 10;
 /// applied to information (§2.3). Pinned by a test.
 pub const PLAYER_SENSE_RANGE_WAITING: u32 = 20;
 
+/// The guard-sense range while **inside a duct** (§10.7 **[START]**): a reduced box,
+/// smaller than the open-floor [`PLAYER_SENSE_RANGE`]. Degraded information is the
+/// duct's whole cost (§2.3): mid-crawl you perceive only your memory of the building
+/// and this shortened sense, and the safe way to resurface is the mouth peek (§6.1).
+/// **Waiting does not widen it** — the [`PLAYER_SENSE_RANGE_WAITING`] extension is an
+/// open-floor affordance; a crawlspace is exactly where you should *not* be able to
+/// take stock of the whole area. Pinned by a test.
+pub const DUCT_SENSE_RANGE: u32 = 5;
+
 /// What the player asks to do on their phase. Input mapping (which key is which,
 /// §11.6) lives in the web shell; the loop knows only the actions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -108,6 +117,14 @@ pub enum Event {
     /// occupy the cupboard and are concealed. Climbing back out is an ordinary
     /// [`Event::Moved`] off the cell.
     EnteredHideout { at: Cell },
+    /// The player bumped a duct entry and climbed into the crawlspace (§4.3, §10.7):
+    /// they now occupy the duct and are concealed, their perception cut to the mouth
+    /// peek and a shortened sense. Crawling along is [`Event::DuctCrawled`]; climbing
+    /// out is an ordinary [`Event::Moved`] off an entry onto its mouth.
+    EnteredDuct { at: Cell },
+    /// The player crawled one cell along a duct (§10.7): a spent turn (§4.4) that
+    /// moves them to `to` but leaves them concealed inside the crawlspace.
+    DuctCrawled { to: Cell },
     /// The player bumped a table and ducked behind it (§4.3, §10.3): they are
     /// now crouched, concealed from any viewer whose line of sight crosses any
     /// table of the run `behind` belongs to (the whole §10.1a bench). Reported
@@ -190,11 +207,16 @@ impl Event {
     pub fn category(self) -> Category {
         match self {
             // Routine self-narration: inert facts about scenery and your own steps.
-            Event::Moved { .. } | Event::Bumped { .. } => Category::Neutral,
+            // Crawling a duct is the same kind of routine movement (§10.7).
+            Event::Moved { .. } | Event::Bumped { .. } | Event::DuctCrawled { .. } => {
+                Category::Neutral
+            }
             // Things you made — including making yourself hidden (§10.3: the
             // occupied cupboard and the covering table recolour to Owned; their
-            // messages match).
-            Event::EnteredHideout { .. } | Event::Crouched { .. } => Category::Owned,
+            // messages match). Vanishing into a duct is the same move (§10.7).
+            Event::EnteredHideout { .. } | Event::EnteredDuct { .. } | Event::Crouched { .. } => {
+                Category::Owned
+            }
             // Your abilities are your tools — switching one on or off, or its fading,
             // is something you did or hold (§8), so it reads in the Owned band. The
             // decoy is a thing you made (§11.3): its death reads there too.
@@ -255,6 +277,8 @@ pub enum Affordance {
     TakeIntel,
     /// An empty cupboard: bump to climb in and be concealed (§10.3).
     Hide,
+    /// A duct entry: bump to climb into the crawlspace shortcut (§10.7).
+    EnterDuct,
     /// A table: bump to crouch behind it (§10.3).
     Crouch,
     /// The exit, with every objective in hand: bump to win (§4.5).
@@ -274,6 +298,7 @@ impl Affordance {
             Affordance::CloseDoor => "door: close",
             Affordance::TakeIntel => "console: take intel",
             Affordance::Hide => "cupboard: hide",
+            Affordance::EnterDuct => "duct: enter",
             Affordance::Crouch => "table: crouch",
             Affordance::Leave => "exit: leave",
             Affordance::ExitRefused => "exit: needs the intel",
@@ -293,6 +318,7 @@ impl Affordance {
             Affordance::OpenDoor
             | Affordance::CloseDoor
             | Affordance::Hide
+            | Affordance::EnterDuct
             | Affordance::Crouch => Category::System,
             Affordance::TakeIntel | Affordance::Leave | Affordance::ExitRefused => {
                 Category::Interest
@@ -333,6 +359,14 @@ enum BumpKind {
     Hide,
     /// A cupboard already holding an actor — solid, a free bump.
     HideoutBlocked,
+    /// A duct entry to climb into from its mouth (§10.7): bumping it enters the
+    /// crawlspace, a spent turn. Offered only when the player is not already in a
+    /// duct and not dragging a body (a body cannot follow into the walls).
+    EnterDuct,
+    /// A crawl one cell along the duct the player is inside (§10.7): a spent turn
+    /// that moves them to the adjacent path cell. Not an interaction offered on the
+    /// usable line — it is movement, like [`BumpKind::Move`].
+    DuctCrawl,
     /// A partial-cover table not already crouched behind (§10.3).
     Crouch,
     /// The table already crouched behind — a free bump.
@@ -363,13 +397,17 @@ impl BumpKind {
                 action: DoorAction::Closed,
             } => Some(Affordance::CloseDoor),
             BumpKind::Hide => Some(Affordance::Hide),
+            BumpKind::EnterDuct => Some(Affordance::EnterDuct),
             BumpKind::Crouch => Some(Affordance::Crouch),
+            // A crawl is movement, not an offered interaction (§10.7) — like a plain
+            // Move it shows nothing on the usable line.
             BumpKind::Guard { aware: true }
             | BumpKind::BodyBlocked
             | BumpKind::Door {
                 action: DoorAction::Obstructed,
             }
             | BumpKind::HideoutBlocked
+            | BumpKind::DuctCrawl
             | BumpKind::CrouchHeld
             | BumpKind::Move
             | BumpKind::Solid => None,
@@ -670,6 +708,26 @@ impl State {
         self.layout.facility().terrain(self.player) == Some(Terrain::Hideout)
     }
 
+    /// Whether the player is **inside a duct** (§10.7) — standing on any cell of a
+    /// crawlspace path, entry or interior. Like [`hidden`](Self::hidden) this is
+    /// *derived* from position ([`Layout::duct_containing`]), never stored, so it can
+    /// never desync: the only way onto a duct cell is to bump an entry and crawl, and
+    /// climbing out the far mouth clears it. Inside, the player is concealed from every
+    /// guard, contact-safe (guards route around the walls the duct threads), and their
+    /// perception is reduced to the mouth peek plus a shortened sense (§9.1/§10.7).
+    pub fn in_duct(&self) -> bool {
+        self.layout.duct_containing(self.player).is_some()
+    }
+
+    /// Whether a guard stepping into the player's cell is **refused**, not a capture
+    /// (§4.5): the player is on a solid cell a patrol routes *around* — an occupied
+    /// cupboard ([`hidden`](Self::hidden)) or a duct ([`in_duct`](Self::in_duct)). In
+    /// both cases the cell blocks movement and pathing, so contact is the one thing a
+    /// guard cannot do; it holds instead (§7.6, §10.7).
+    fn contact_safe(&self) -> bool {
+        self.hidden() || self.in_duct()
+    }
+
     /// Whether the player is **crouched** behind partial cover (§10.3): they
     /// bumped a table to duck behind it and have not spent a turn on anything
     /// but waiting since. Crouching is weaker than the cupboard — concealment
@@ -718,7 +776,9 @@ impl State {
     /// replaces it — a viewer that cannot see the player's cell at all needs no
     /// concealing.
     pub fn concealed_from(&self, viewer: Cell) -> bool {
-        if self.hidden() {
+        if self.hidden() || self.in_duct() {
+            // A cupboard and a duct both conceal omnidirectionally — no viewer
+            // anywhere detects the player through solid wall (§10.3/§10.7).
             return true;
         }
         if self.abilities.effect_active(Effect::ConcealWhileStill) && !self.moved_this_turn {
@@ -769,8 +829,14 @@ impl State {
     /// widened to [`PLAYER_SENSE_RANGE_WAITING`] on the turn the player's spent action
     /// was a Wait — the same `waited` signal that buys the 360° look (§8.3). A free
     /// action changes nothing, so a mis-input never widens or narrows the sense.
+    ///
+    /// **Inside a duct** the sense shrinks to [`DUCT_SENSE_RANGE`] and Wait no longer
+    /// widens it (§10.7): the crawlspace's cost is degraded information, and taking
+    /// stock of the whole area is exactly the open-floor affordance a duct removes.
     pub fn sense_range(&self) -> u32 {
-        if self.waited {
+        if self.in_duct() {
+            DUCT_SENSE_RANGE
+        } else if self.waited {
             PLAYER_SENSE_RANGE_WAITING
         } else {
             PLAYER_SENSE_RANGE
@@ -1218,6 +1284,31 @@ impl State {
                 events.push(Event::EnteredHideout { at: target });
                 true
             }
+            // A duct entry: climb in from the mouth (§4.3, §10.7). Like the hideout
+            // this is a *decision*, not a drift — it moves the player onto the entry
+            // cell, spends the turn, and conceals them. Facing is set out the mouth
+            // (back the way you came, `dir.opposite()`) so the entry-cell peek (§6.1)
+            // leans through the mouth to read the room before you climb out. No body
+            // can be in hand here (`bump_kind` refuses EnterDuct while dragging), so
+            // there is nothing to haul.
+            BumpKind::EnterDuct => {
+                self.player = target;
+                self.facing = dir.opposite();
+                events.push(Event::EnteredDuct { at: target });
+                true
+            }
+            // A crawl one cell along the duct (§10.7): a spent turn that moves the
+            // player to the adjacent path cell, staying concealed. Landing on an
+            // entry re-aims facing out its mouth (the peek); a mid-duct cell just
+            // faces the crawl direction. Guards and bodies can never be inside a
+            // duct, so none of the move-arm side effects (haul, decoy stomp, the
+            // Run extra step) apply.
+            BumpKind::DuctCrawl => {
+                self.player = target;
+                self.facing = self.duct_entry_facing(target).unwrap_or(dir);
+                events.push(Event::DuctCrawled { to: target });
+                true
+            }
             // A table: bump it to crouch behind it (§4.3, §10.3). Ducking is a
             // *decision*, aimed at a specific table — and it anchors the crouch to
             // that table's whole run (the §10.1a bench), which is what conceals.
@@ -1276,6 +1367,23 @@ impl State {
         Direction::between(target, panel)
     }
 
+    /// The direction out the **mouth** of the duct entry at `cell` (§10.7), or `None`
+    /// if `cell` is not a duct entry. An entry has exactly one floor neighbour — the
+    /// mouth — by its recessed geometry (§10.1.6), so this is the direction the
+    /// entry-cell peek (§6.1) leans through and the facing a player landing on the
+    /// entry takes, so the ~180° window watches the room before they climb out.
+    fn duct_entry_facing(&self, cell: Cell) -> Option<Direction> {
+        let duct = self.layout.duct_containing(cell)?;
+        if !duct.is_entry(cell) {
+            return None;
+        }
+        let facility = self.layout.facility();
+        let mouth = facility
+            .neighbours(cell)
+            .find(|&n| facility.can_enter(n, ACTOR_FILL))?;
+        Direction::between(cell, mouth)
+    }
+
     /// What bumping the orthogonally adjacent `target` would do (§4.3) — the **single**
     /// interaction ladder, read-only, that both [`resolve_step`](Self::resolve_step)
     /// (which executes) and [`affordances`](Self::affordances) (which labels the §11.4
@@ -1299,6 +1407,24 @@ impl State {
         // while phased (§11.4).
         if self.abilities.effect_active(Effect::Phase) && self.layout.facility().in_bounds(target) {
             return BumpKind::Move;
+        }
+        // Inside a duct the player is confined to the crawlspace (§10.7): a step to
+        // the next path cell crawls, a step off an **entry** onto its floor mouth
+        // climbs out (a plain Move), and every other step is walled in — a solid
+        // bump. This confinement is what keeps an interior duct cell that happens to
+        // touch floor from ever being an unintended exit; you leave only at a mouth.
+        if self.in_duct() {
+            if self.layout.is_duct_step(self.player, target) {
+                return BumpKind::DuctCrawl;
+            }
+            let on_entry = self
+                .layout
+                .duct_containing(self.player)
+                .is_some_and(|d| d.is_entry(self.player));
+            if on_entry && self.layout.facility().can_enter(target, ACTOR_FILL) {
+                return BumpKind::Move; // climb out through the mouth
+            }
+            return BumpKind::Solid;
         }
         if let Some(i) = self.guard_at(target) {
             return BumpKind::Guard {
@@ -1329,6 +1455,18 @@ impl State {
                     BumpKind::HideoutBlocked
                 } else {
                     BumpKind::Hide
+                }
+            }
+            Some(Terrain::DuctEntry) => {
+                // Standing at the mouth, bump the entry to climb in (§10.7) — a
+                // decision, like the cupboard. A body cannot follow into the walls,
+                // so a dragging player is refused (the entry reads solid); let go
+                // first. (Reached only when *not* already in a duct — the in-duct
+                // confinement above owns crawling and climbing out.)
+                if self.dragging.is_some() {
+                    BumpKind::Solid
+                } else {
+                    BumpKind::EnterDuct
                 }
             }
             Some(Terrain::PartialCover) => {
@@ -1434,19 +1572,44 @@ impl State {
     /// read still breaks the guard's line (§7.6).
     fn recompute_sight(&mut self) {
         let facility = self.layout.facility();
-        let arc = if self.waited {
-            WAIT_SIGHT_ARC
+        // Inside a duct the normal cone is off (§10.7): the player perceives only
+        // their memory of the building and the shortened guard sense, with one live
+        // window — the mouth peek from an entry cell (§6.1). Mid-duct there is no
+        // live vision at all. `duct_fov` builds exactly that restricted set.
+        self.player_fov = if self.in_duct() {
+            self.duct_fov()
         } else {
-            PLAYER_SIGHT_ARC
+            let arc = if self.waited {
+                WAIT_SIGHT_ARC
+            } else {
+                PLAYER_SIGHT_ARC
+            };
+            field_of_view_with_peek(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE)
         };
-        self.player_fov =
-            field_of_view_with_peek(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE);
         // Tile memory (§11.5a) accumulates here, in the same phase that produced
         // the sight — every cell the player can see now is remembered forever.
         self.memory.absorb(&self.player_fov);
         for guard in &mut self.guards {
             guard.look(facility);
         }
+    }
+
+    /// The player's field of view while **inside a duct** (§10.7) — the restricted
+    /// perception a crawlspace grants. Always the player's own cell; and, when they
+    /// stand on an **entry**, the live **mouth peek**: a cast out through the mouth
+    /// (§6.1), the deliberate, safe way to read the room before climbing out. A
+    /// mid-duct cell has no mouth and so no live window — memory only, which is the
+    /// duct's information cost (§2.3). The peek is one-sided like the cupboard's: it
+    /// shows the player a guard, but the guard's own plain cone cannot see a concealed
+    /// crawler back ([`concealed_from`](Self::concealed_from)).
+    fn duct_fov(&self) -> VisibleSet {
+        crate::vision::duct_field_of_view(
+            self.layout.facility(),
+            self.player,
+            self.duct_entry_facing(self.player),
+            PLAYER_SIGHT_ARC,
+            PLAYER_SIGHT_RANGE,
+        )
     }
 
     /// Phase 3 (§4.2): the guards *sense*, then *act*. First every guard takes in this
@@ -1547,12 +1710,12 @@ impl State {
             };
 
             if target == self.player {
-                // Capture is contact (§4.5) — but a concealed player is the one
-                // exception: the occupied cupboard is solid and a patrol routes
-                // *around* it, so contact is refused (§10.3, §7.6). The guard cannot
-                // enter; it holds this turn. This is the "hold still, watch the cone
-                // sweep past" payoff.
-                if self.hidden() {
+                // Capture is contact (§4.5) — but a player on a solid cell a patrol
+                // routes *around* is the exception: the occupied cupboard and a duct
+                // both refuse contact (§10.3/§10.7, §7.6). The guard cannot enter; it
+                // holds this turn. This is the "hold still, watch the cone sweep past"
+                // payoff — a guard on a duct mouth can never follow the player in.
+                if self.contact_safe() {
                     continue;
                 }
                 self.guards[i].place_at(target);
