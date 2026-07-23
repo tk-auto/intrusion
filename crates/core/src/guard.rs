@@ -19,7 +19,9 @@ use crate::facility::{Facility, Terrain};
 use crate::path;
 use crate::radio::RadioClock;
 use crate::state::ACTOR_FILL;
-use crate::vision::{field_of_view, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
+use crate::vision::{
+    field_of_view_with_rear_blind_spot, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE,
+};
 
 /// The guard's mind — the §7.4 state machine's vocabulary.
 ///
@@ -305,10 +307,12 @@ impl Guard {
         self.facing
     }
 
-    /// The guard's field of view — the ~90° forward wedge (§6.2/§7.1), current as of
-    /// the last time this guard stood still or moved. This is the set the danger
-    /// overlay paints (§11.5) and the detection the guard AI will read: one truth,
-    /// so the picture and the rules cannot disagree.
+    /// The guard's field of view — the ~90° forward wedge (§6.2/§7.1) with the rear
+    /// blind spot carved out (§155), current as of the last time this guard stood
+    /// still or moved. This is the set the danger overlay paints (§11.5) and the
+    /// detection the guard AI will read: one truth, so the picture and the rules
+    /// cannot disagree — and the overlay stops reding the three cells at a guard's
+    /// back because they are no longer in it.
     pub fn fov(&self) -> &VisibleSet {
         &self.fov
     }
@@ -322,11 +326,12 @@ impl Guard {
 
     /// Whether this guard's most recent look detected the player — the §7.2
     /// takedown gate: a bump against a guard that **has** detected you this turn
-    /// is a free no-op, one against a guard that has not is the takedown. Because
-    /// of the always-seen touching ring (§6.1 **[SETTLED]**) an adjacent player is
-    /// always in the cone, so this is `false` beside a guard only when something
-    /// else intervened — concealment, a decoy, a distraction — which is exactly
-    /// the puzzle §7.2 wants solved.
+    /// is a free no-op, one against a guard that has not is the takedown. The
+    /// touching ring (§6.1 **[SETTLED]**) sees an adjacent player everywhere except
+    /// the guard's own **rear blind spot** (§155), so this is `false` beside a
+    /// guard either when you are directly behind it, or when something else
+    /// intervened in front — concealment, a decoy, a distraction. Both are the
+    /// puzzle §7.2 wants solved.
     pub fn detected_player(&self) -> bool {
         self.detected
     }
@@ -346,11 +351,13 @@ impl Guard {
         self.station
     }
 
-    /// Recompute this guard's cone from its current position and facing (§6.2/§7.1).
-    /// The sight phase calls this for every guard before any of them act, so the
+    /// Recompute this guard's cone from its current position and facing (§6.2/§7.1),
+    /// with the **rear blind spot** carved out (§155): the three cells at the guard's
+    /// back do not detect, so a takedown can be set up from directly behind. The
+    /// sight phase calls this for every guard before any of them act, so the
     /// decisions below read a cone that matches where the guard actually stands.
     pub(crate) fn look(&mut self, facility: &Facility) {
-        self.fov = field_of_view(
+        self.fov = field_of_view_with_rear_blind_spot(
             facility,
             self.pos,
             self.facing,
@@ -749,7 +756,7 @@ fn pick_farthest(territory: &[Cell], inspected: &VisibleSet, origin: Cell) -> Op
 mod tests {
     use super::*;
     use crate::facility::Facility;
-    use crate::vision::WAIT_SIGHT_ARC;
+    use crate::vision::{field_of_view, WAIT_SIGHT_ARC};
 
     /// §7.5: a *fixture* guard — one built without a region beat — falls back to
     /// the patrollable cells within [`PATROL_RADIUS`] of the station. The radius is

@@ -458,12 +458,13 @@ fn a_guard_stepping_into_the_player_captures() {
 /// so the §13.2 sim counts broken stealth, never chase length.
 #[test]
 fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
-    // A stationary guard facing south; the player starts two cells behind
-    // it — outside the cone, past the touching ring — so the startup turn
-    // sees nothing.
+    // A stationary guard facing south; the player starts two cells to its
+    // west — outside the ~90° wedge and past the touching ring — so the
+    // startup turn sees nothing. (Directly behind would sit in the guard's
+    // rear blind spot, §155, and never detect — hence the side approach.)
     let mut s = State::new(
         open_room(12, 12),
-        Cell::new(5, 3),
+        Cell::new(3, 5),
         Direction::North,
         vec![Guard::stationary(Cell::new(5, 5))],
         Vec::new(),
@@ -471,12 +472,13 @@ fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
     );
     assert!(
         !s.guards()[0].detected_player(),
-        "precondition: behind the cone, unseen"
+        "precondition: beside the cone at range, unseen"
     );
 
-    // Step to adjacency: the touching ring (§6.1) finds the player — the
+    // Step to the guard's side: the touching ring (§6.1) finds the player — a
+    // side cell still detects (only the rear three do not, §155) — the
     // transition, reported.
-    let events = s.step(Input::Step(Direction::South));
+    let events = s.step(Input::Step(Direction::East));
     assert!(
         events.contains(&Event::Detected {
             by: Cell::new(5, 5)
@@ -492,14 +494,15 @@ fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
         "a held gaze is not a new detection: {events:?}"
     );
 
-    // Break contact — back behind the cone — then re-enter: a second event.
-    let events = s.step(Input::Step(Direction::North));
+    // Break contact — back out to the side, past the ring — then re-enter: a
+    // second event.
+    let events = s.step(Input::Step(Direction::West));
     assert!(!s.guards()[0].detected_player(), "contact broken");
     assert!(
         !events.iter().any(|e| matches!(e, Event::Detected { .. })),
         "losing the player is not a detection: {events:?}"
     );
-    let events = s.step(Input::Step(Direction::South));
+    let events = s.step(Input::Step(Direction::East));
     assert!(
         events.contains(&Event::Detected {
             by: Cell::new(5, 5)
@@ -514,10 +517,10 @@ fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
 #[test]
 fn concealment_suppresses_the_detection_event_until_the_player_emerges() {
     let mut layout = open_room(12, 12);
-    layout.place(Cell::new(5, 4), Terrain::Hideout);
+    layout.place(Cell::new(4, 5), Terrain::Hideout);
     let mut s = State::new(
         layout,
-        Cell::new(5, 4), // in the cupboard, adjacent to the guard
+        Cell::new(4, 5), // in a cupboard beside the guard (a side cell)
         Direction::North,
         vec![Guard::stationary(Cell::new(5, 5))],
         Vec::new(),
@@ -531,13 +534,15 @@ fn concealment_suppresses_the_detection_event_until_the_player_emerges() {
         "the cupboard conceals: no detection event: {events:?}"
     );
 
-    // Climb out beside the guard: adjacent, exposed — the transition fires.
-    let events = s.step(Input::Step(Direction::East));
+    // Climb out into the guard's forward view (a forward diagonal, in the wedge):
+    // adjacent, exposed — the transition fires. Emerging into the rear blind spot
+    // (§155) would not detect, so the exit is deliberately toward the front.
+    let events = s.step(Input::Step(Direction::South));
     assert!(
         events.contains(&Event::Detected {
             by: Cell::new(5, 5)
         }),
-        "emerging into the touching ring is a detection: {events:?}"
+        "emerging into the cone is a detection: {events:?}"
     );
 }
 
@@ -614,6 +619,50 @@ fn an_aware_guard_refuses_the_takedown() {
     assert_eq!(s.guards().len(), 1, "the guard stands");
     assert!(s.bodies().is_empty());
     assert_eq!(s.turn(), 0, "a refused takedown is a free bump");
+}
+
+/// §155 + §7.2: the behind-the-back takedown the rear blind spot exists for. A
+/// guard faces south; the player stands directly behind it on **open floor** —
+/// no cupboard, no decoy — and is undetected because the guard's rear three
+/// cells no longer detect (§155). Bumping the guard from behind takes it down,
+/// which the old 360° touching ring made impossible without concealment.
+#[test]
+fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
+    let mut s = State::new(
+        open_room(10, 10),
+        Cell::new(5, 4), // directly behind the south-facing guard, exposed
+        Direction::South,
+        vec![Guard::stationary(Cell::new(5, 5))],
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    assert!(!s.hidden(), "precondition: on open floor, not concealed");
+    assert!(
+        !s.guards()[0].detected_player(),
+        "precondition: the rear blind spot hides the player behind the guard",
+    );
+    assert_eq!(
+        s.affordances(),
+        vec![(Direction::South, Affordance::Takedown)],
+        "the usable line offers the takedown from directly behind (§11.4)",
+    );
+
+    let events = s.step(Input::Step(Direction::South));
+    assert_eq!(
+        events,
+        vec![Event::TakenDown {
+            at: Cell::new(5, 5)
+        }]
+    );
+    assert!(s.guards().is_empty(), "the takedown is permanent");
+    assert_eq!(s.bodies().len(), 1, "a body is left behind");
+    assert_eq!(s.bodies()[0].cell(), Cell::new(5, 5));
+    assert_eq!(s.turn(), 1, "a takedown costs the full turn");
+    assert_eq!(
+        s.player(),
+        Cell::new(5, 4),
+        "a takedown is a bump, not a move"
+    );
 }
 
 /// §7.2: a body does not block sight, so the first cone to cover it fires

@@ -33,7 +33,7 @@ use crate::path;
 use crate::radio::RadioClock;
 use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
-use crate::vision::{field_of_view, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
+use crate::vision::{field_of_view_with_rear_blind_spot, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
 use std::collections::HashSet;
 
 /// The player and the exit spawn at least this far apart (Manhattan) **[START]**.
@@ -229,12 +229,14 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     }
 
     // §10.1.9 + §10.6: guards in any room except the start room, and never where
-    // the turn-one cone — the real §6 field of view from the spawn cell, facing
-    // south as every guard does at spawn (§7.1) — covers the player. This is the
-    // same function the sight phase runs, not a conservative box, so "safe on
-    // turn one" is exact. Candidates pool across all non-start rooms (guards may
-    // share a room; intel cells are already taken), shuffled once; too few safe
-    // cells fails the draw — asked-for-5-got-4 is precisely the old bug (§10.6).
+    // the turn-one detection set — the real §6 field of view from the spawn cell,
+    // facing south as every guard does at spawn (§7.1), with the §155 rear blind
+    // spot carved out — covers the player. This is the same function the sight
+    // phase runs, not a conservative box, so "safe on turn one" is exact: a guard
+    // that only has the player in its rear blind spot is genuinely safe. Candidates
+    // pool across all non-start rooms (guards may share a room; intel cells are
+    // already taken), shuffled once; too few safe cells fails the draw —
+    // asked-for-5-got-4 is precisely the old bug (§10.6).
     let mut guard_pool: Vec<Cell> = others
         .iter()
         .flat_map(|&i| rooms[i].1.iter().copied())
@@ -244,7 +246,7 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     let guards: Vec<Cell> = guard_pool
         .into_iter()
         .filter(|&cell| {
-            let cone = field_of_view(
+            let cone = field_of_view_with_rear_blind_spot(
                 facility,
                 cell,
                 GUARD_INITIAL_FACING,

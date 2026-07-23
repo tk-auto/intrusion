@@ -11,8 +11,11 @@
 //! outward, so those artificial walls cast the shadows that carve the cone — and
 //! because artificial walls are marked seen exactly like real ones, **the 8 cells
 //! around a viewer are always seen, in every direction, including directly behind**
-//! **[SETTLED]**. That touching ring is load-bearing: you can never stand adjacent to
-//! a guard undetected, so sneaking up behind someone is never free (§6.1/§7.2).
+//! **[SETTLED]**. That touching ring is load-bearing for the *player*: you can never
+//! stand adjacent to the player undetected. Guards keep the ring's forward and side
+//! cells but carve out the three at their back — the **rear blind spot** (§6.1/§7.2,
+//! [`field_of_view_with_rear_blind_spot`]) — so a takedown from directly behind an
+//! unaware guard can be set up. Beside or in front of a guard is still never free.
 //!
 //! Which ring cells count as walls is the arc-width ↔ tier rule (§6.2): neighbours
 //! rank 1–5 by angular deviation from facing (ahead, forward diagonal, side, rear
@@ -47,6 +50,11 @@ pub const WAIT_SIGHT_ARC: u8 = 5;
 pub const GUARD_SIGHT_RANGE: u32 = 10;
 /// A guard's sight arc (§7.1/§6.2): width 2, the ~90° forward wedge. **[START]**
 pub const GUARD_SIGHT_ARC: u8 = 2;
+
+/// The lowest §6.2 ring tier a guard's **rear blind spot** (§155) removes from
+/// detection: tiers 4 (the two rear diagonals) and 5 (directly behind) — the three
+/// cells at a guard's back. Tier 3 (the sides) and everything forward still detect.
+const REAR_BLIND_TIER: u8 = 4;
 
 /// The set of cells a viewer can currently see — one viewer's field of view,
 /// recomputed every sight phase (§4.2) and stored on the viewer.
@@ -227,6 +235,46 @@ pub fn field_of_view_with_peek(
     for cell in leaned.cells() {
         if cell.sight_distance(origin) <= range {
             fov.mark(cell);
+        }
+    }
+    fov
+}
+
+/// A guard's sight for **detection**: the §6 cone with the guard **rear blind
+/// spot** (§155) carved out. The three cells at the guard's back — the two rear
+/// diagonals (tier 4) and directly behind (tier 5) — are dropped from the visible
+/// set, so a player standing directly behind or rear-diagonal to an unaware guard
+/// is undetected and a behind-the-back Takedown (§7.2) becomes possible to line
+/// up.
+///
+/// This narrows the **[SETTLED]** 360° touching ring (§6.1) for guards only. The
+/// ring's forward and *side* (tier 3) cells still detect — you can never stand
+/// beside or in front of a guard undetected — and the rear cells **remain the
+/// artificial cone-carving walls** of §6.2: they are removed from the *visible*
+/// set only *after* the cast has run, so every cell beyond the ring is untouched
+/// and the ~90° cone silhouette is exactly [`field_of_view`]'s. The player keeps
+/// the full ring; carving the rear is a property of a guard's attention, not of
+/// sight itself, so it lives here beside the player's one-sided peek rather than
+/// inside the shared cast.
+pub fn field_of_view_with_rear_blind_spot(
+    facility: &Facility,
+    origin: Cell,
+    facing: Direction,
+    arc_width: u8,
+    range: u32,
+) -> VisibleSet {
+    let mut fov = field_of_view(facility, origin, facing, arc_width, range);
+    // The rear three are exactly the ring neighbours of tier 4 (rear diagonals)
+    // and 5 (directly behind). Unmarking them leaves the cast that used them as
+    // walls — and therefore the whole silhouette beyond the ring — intact.
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            if (dx, dy) != (0, 0) && ring_tier(facing, dx, dy) >= REAR_BLIND_TIER {
+                let (x, y) = (i64::from(origin.x) + dx, i64::from(origin.y) + dy);
+                if let (Ok(x), Ok(y)) = (u32::try_from(x), u32::try_from(y)) {
+                    fov.unmark(Cell::new(x, y));
+                }
+            }
         }
     }
     fov
@@ -1355,6 +1403,103 @@ mod tests {
                 !peek.contains(c),
                 "{c:?}: leaning out must not open the room"
             );
+        }
+    }
+
+    /// §155 the guard rear blind spot: the three cells at a guard's back — the
+    /// two rear diagonals (tier 4) and directly behind (tier 5) — are removed
+    /// from the detection set, while the sides (tier 3) and everything forward
+    /// still detect. Facing north here, so the rear three are the row to the
+    /// south; a player directly behind or rear-diagonal is undetected, one
+    /// beside the guard is not.
+    #[test]
+    fn a_guard_is_blind_to_the_three_cells_at_its_back() {
+        let f = open(11, 11);
+        let origin = Cell::new(5, 5);
+        let fov =
+            field_of_view_with_rear_blind_spot(&f, origin, Direction::North, GUARD_SIGHT_ARC, 4);
+
+        // The rear three go dark: rear diagonals and directly behind.
+        for c in [Cell::new(4, 6), Cell::new(5, 6), Cell::new(6, 6)] {
+            assert!(!fov.contains(c), "{c:?}: a rear cell must not detect");
+        }
+        // The sides still detect — you can never stand beside a guard unseen.
+        for c in [Cell::new(4, 5), Cell::new(6, 5)] {
+            assert!(fov.contains(c), "{c:?}: a side cell still detects");
+        }
+        // The forward ring is untouched.
+        for c in [Cell::new(4, 4), Cell::new(5, 4), Cell::new(6, 4)] {
+            assert!(fov.contains(c), "{c:?}: the forward ring still detects");
+        }
+    }
+
+    /// §155 pinned as a golden picture: the guard's ~90° wedge facing north with
+    /// the three cells directly behind now dark where the plain cast lit them —
+    /// compare `golden_cone_shapes_per_arc_width`'s arc-2 shot, whose row below
+    /// the viewer reads `***`. Here it is bare: the blind spot, and nothing else.
+    #[test]
+    fn golden_guard_cone_with_the_rear_blind_spot() {
+        let f = open(11, 11);
+        let origin = Cell::new(5, 5);
+        let fov =
+            field_of_view_with_rear_blind_spot(&f, origin, Direction::North, GUARD_SIGHT_ARC, 4);
+        assert_eq!(
+            picture(&f, &fov, origin),
+            vec![
+                "...........",
+                ".*********.",
+                ".*********.",
+                ".*********.",
+                "...*****...",
+                "....*@*....",
+                "...........",
+                "...........",
+                "...........",
+                "...........",
+                "...........",
+            ]
+        );
+    }
+
+    /// §155: the carve touches only the three rear ring cells. Every cell beyond
+    /// the touching ring — the whole ~90° cone silhouette — is exactly what the
+    /// plain cast produces, because the rear cells still act as artificial walls
+    /// during the cast and are only unmarked afterwards. Checked at every facing.
+    #[test]
+    fn the_rear_blind_spot_leaves_the_cone_silhouette_untouched() {
+        let f = open(11, 11);
+        let origin = Cell::new(5, 5);
+        for facing in Direction::ALL {
+            let plain = field_of_view(&f, origin, facing, GUARD_SIGHT_ARC, 4);
+            let carved = field_of_view_with_rear_blind_spot(&f, origin, facing, GUARD_SIGHT_ARC, 4);
+            // Beyond the ring the two sets agree exactly.
+            for c in plain.cells() {
+                if c.sight_distance(origin) > 1 {
+                    assert!(
+                        carved.contains(c),
+                        "{facing:?} {c:?}: silhouette changed beyond the ring"
+                    );
+                }
+            }
+            // The whole difference is exactly the three rear ring cells.
+            let removed: Vec<Cell> = plain.cells().filter(|&c| !carved.contains(c)).collect();
+            assert_eq!(
+                removed.len(),
+                3,
+                "{facing:?}: exactly the three rear cells are removed"
+            );
+            for c in removed {
+                assert_eq!(
+                    c.sight_distance(origin),
+                    1,
+                    "{facing:?} {c:?}: a removed cell must be a ring cell"
+                );
+                let (dx, dy) = (i64::from(c.x) - 5, i64::from(c.y) - 5);
+                assert!(
+                    ring_tier(facing, dx, dy) >= REAR_BLIND_TIER,
+                    "{facing:?} {c:?}: a removed cell must be a rear cell"
+                );
+            }
         }
     }
 

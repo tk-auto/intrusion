@@ -298,10 +298,20 @@ see them first.** Do not erode it casually.
 - **Range is a square box, not a circle.** Range 10 means a 21×21 box. There is
   no distance falloff. **[START]** — a circle would be more natural; the box is
   cheap and was never noticed. Worth trying.
-- **The 8 cells immediately around any viewer are always seen, in every
-  direction, including directly behind.** **[SETTLED]** — this is load-bearing:
-  **you can never stand adjacent to a guard undetected.** Sneaking up behind
-  someone is never free. See §7.2 for how this interacts with takedowns.
+- **The 8 cells immediately around a viewer are always seen** — with one
+  exception, the guard rear blind spot below. For the **player** this is
+  unqualified and **[SETTLED]**: you can never stand adjacent to the player
+  undetected, in any direction including directly behind.
+- **Guard rear blind spot (§155).** A guard does **not** detect the three cells
+  at its back — the two rear diagonals (tier 4) and directly behind (tier 5) of
+  §6.2. Its *forward* and *side* (tier 3) cells still detect, so you can never
+  stand **beside or in front of** a guard undetected — but you *can* slip
+  **directly behind** an unaware one. This narrows the old blanket 360° ring for
+  guards only; it is the deliberate revision that makes a behind-the-back
+  Takedown (§7.2) approachable. The rear cells stay §6.2 cone-carving walls (the
+  wedge silhouette is unchanged) — only their membership in the *detection* set
+  is dropped. Pairs with the patrol dwell (§7.5): a window to act, and a back to
+  approach.
 - **Auto-peek — the player only.** **[START]** The player's sight is the union
   of the cast from their cell and a cast from the cell one step ahead along
   their facing — where the head would be if they leaned forward — clipped to
@@ -319,6 +329,12 @@ produced by treating the out-of-arc cells of the viewer's own 8-neighbour ring a
 if they were walls.** Shadowcasting propagates outward, so those artificial walls
 cast the shadows that carve the cone. Because artificial walls are still marked
 seen — exactly like real ones — you get the 360° touching ring for free.
+
+For a **guard**, the three rear ring cells (tiers 4–5) are then dropped from the
+detection set — the §6.1 rear blind spot (§155). They still act as artificial
+walls during the cast, so the wedge silhouette is untouched; they are only
+unmarked afterwards, so the guard simply does not *notice* what is at its back.
+The player keeps the full ring.
 
 Rank the 8 neighbours by angular deviation from facing:
 
@@ -374,11 +390,15 @@ on, and the old one was free, unlimited-range and therefore the game.
 | Result | Target is **permanently** out. Leaves a **body**. |
 | Cooldown | None — the constraints *are* the cost |
 
-Because of the 360° touching ring (§6.1), **an aware guard can always see you
-when you are adjacent to it.** So a takedown is only possible against a guard
-that is unaware — which means you had to arrange to be adjacent without ever
-having been in its cone. That is a puzzle you solve with geometry, timing, doors
-and distraction. It is not a button.
+Because of the touching ring (§6.1), **an aware guard can always see you when you
+are adjacent to it — beside it or in front.** The one gap is its **rear blind
+spot** (§6.1/§155): the three cells directly behind and rear-diagonal do not
+detect. So a takedown is possible either against a guard made unaware in front —
+arranging to be adjacent without ever having been in its cone, a puzzle of
+geometry, timing, doors and distraction — or by reaching the cell **directly
+behind** an unaware guard. The rear approach is the intended path, and it needs a
+window: pair it with the patrol dwell (§7.5), because a guard that never stops
+moving cannot be lined up on. Either way it is not a button.
 
 **The body is the cost.** A body is a solid object (fill 1.0) that:
 
