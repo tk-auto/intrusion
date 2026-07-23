@@ -37,6 +37,7 @@ use crate::ability::{AbilityId, AbilityState, Behaviour, Deck, Effect};
 use crate::body::Body;
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
+use crate::cover;
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::Guard;
@@ -100,10 +101,12 @@ pub enum Event {
     /// [`Event::Moved`] off the cell.
     EnteredHideout { at: Cell },
     /// The player bumped a table and ducked behind it (§4.3, §10.3): they are
-    /// now crouched, concealed from any viewer whose line of sight crosses the
-    /// table at `behind`. Reported only when the crouch *engages* — re-bumping
-    /// the table you are already behind is a free no-op. Waiting holds the
-    /// pose; any other spent action stands you up, no special event.
+    /// now crouched, concealed from any viewer whose line of sight crosses any
+    /// table of the run `behind` belongs to (the whole §10.1a bench). Reported
+    /// only when the crouch *engages* — re-bumping any table of that run is a
+    /// free no-op. Waiting holds the pose, and so does a **crouch-walk** — a
+    /// plain step that lands still hugging the run, its corners included; any
+    /// other spent action stands you up, no special event.
     Crouched { behind: Cell },
     /// The player opened a closed door by bumping a panel (§4.3, §10.4).
     DoorOpened { at: Cell },
@@ -548,10 +551,12 @@ impl State {
         self.crouched_behind.is_some()
     }
 
-    /// The table the player is crouched behind (§10.3), if any — always
-    /// orthogonally adjacent. The renderer reads this to recolour the one
-    /// concealing table to Owned (§11.3); everything rule-side goes through
-    /// [`concealed_from`](Self::concealed_from).
+    /// The table the player ducked behind (§10.3), if any — the *anchor* naming
+    /// the crouched-behind run. It stays the originally bumped cell while a
+    /// crouch-walk moves the player along the bench, so it may no longer be the
+    /// nearest table; the run it names is what matters. Rendering reads
+    /// [`crouch_cover`](Self::crouch_cover) for the whole run; everything
+    /// rule-side goes through [`concealed_from`](Self::concealed_from).
     pub fn crouched_behind(&self) -> Option<Cell> {
         self.crouched_behind
     }
@@ -570,14 +575,14 @@ impl State {
     ///   they are revealed for that turn. It resumes the next still turn. Like
     ///   every concealment it blocks *detection* only — never contact (§4.5):
     ///   invisible is not safe.
-    /// - **Crouched behind a table** ([`crouched`](Self::crouched)): directional —
-    ///   only from viewers whose line of sight crosses **the table the player
-    ///   ducked behind** (not every table they happen to stand beside), i.e.
-    ///   viewers in the quarter-plane that table faces: the viewer's offset from
-    ///   the player leans at least as far *along* the player→table direction as
-    ///   it strays perpendicular to it (a viewer exactly on the 45° diagonal
-    ///   grazes the table's corner and still counts). Integer arithmetic
-    ///   throughout, so it is exactly deterministic (§12.4).
+    /// - **Crouched behind a run of tables** ([`crouched`](Self::crouched)):
+    ///   directional — from viewers whose line of sight to the player crosses
+    ///   **any table of the run the player ducked behind** (the whole §10.1a
+    ///   bench, not just the bumped cell — a guard cannot look down a bench and
+    ///   see the player through its other tables), grazing a table's corner
+    ///   included. Other runs the player happens to stand beside cover nothing.
+    ///   Integer arithmetic throughout ([`cover::run_conceals`]), so it is
+    ///   exactly deterministic (§12.4).
     ///
     /// Concealment is not cover from *contact*: a guard can still walk into a
     /// crouched player and capture (§4.5). And it composes with sight, not
@@ -590,17 +595,21 @@ impl State {
         if self.abilities.effect_active(Effect::ConcealWhileStill) && !self.moved_this_turn {
             return true;
         }
-        let Some(cover) = self.crouched_behind else {
+        let Some(anchor) = self.crouched_behind else {
             return false;
         };
-        let (px, py) = (i64::from(self.player.x), i64::from(self.player.y));
-        let (vx, vy) = (i64::from(viewer.x) - px, i64::from(viewer.y) - py);
-        let (dx, dy) = (i64::from(cover.x) - px, i64::from(cover.y) - py);
-        // `(dx, dy)` is a unit cardinal: the viewer's components along and
-        // across the player→table direction.
-        let along = vx * dx + vy * dy;
-        let across = (vx * dy - vy * dx).abs();
-        along >= 1 && along >= across
+        let run = cover::cover_run(self.layout.facility(), anchor);
+        cover::run_conceals(&run, self.player, viewer)
+    }
+
+    /// The cells of the partial-cover run the player is crouched behind (§10.3)
+    /// — the whole §10.1a bench, in flood order — or empty when standing. The
+    /// renderer recolours every cell of it to Owned (§11.3): the run is one
+    /// piece of furniture, so it hides as one.
+    pub fn crouch_cover(&self) -> Vec<Cell> {
+        self.crouched_behind
+            .map(|anchor| cover::cover_run(self.layout.facility(), anchor))
+            .unwrap_or_default()
     }
 
     /// The guards, for rendering and tests.
@@ -811,12 +820,15 @@ impl State {
                 let posture = self.crouched_behind;
                 let spent = self.resolve_step(dir, events);
                 // Only a *spent* action stands the player up / narrows the arc: a
-                // free action changes nothing, not even posture (§4.4). The one
-                // spent action that doesn't stand you up is the crouch itself —
-                // recognisable as the action that changed the pose.
+                // free action changes nothing, not even posture (§4.4). Two spent
+                // actions keep the pose: the crouch itself — recognisable as the
+                // action that changed it — and the **crouch-walk** (§10.3): plain
+                // movement that lands still hugging the anchored run, corners of
+                // the bench included. Any other spent step (an interaction, a
+                // move that leaves the furniture) stands the player up.
                 if spent {
                     self.waited = false;
-                    if self.crouched_behind == posture {
+                    if self.crouched_behind == posture && !self.crouch_walked(posture, events) {
                         self.crouched_behind = None;
                     }
                 }
@@ -873,6 +885,33 @@ impl State {
                 false
             }
         }
+    }
+
+    /// Whether the spent step just resolved was a **crouch-walk** (§10.3): the
+    /// pose survives only plain movement — the turn's events carry a
+    /// [`Event::Moved`], so an interaction that spends the turn in place (a
+    /// door, a grab, a haul-debt payment) still stands the player up — that
+    /// lands still hugging the anchored run ([`cover::run_hugs`]: within one
+    /// cell of any of its tables, the diagonal past a bench's end included, so
+    /// the walk can round the corner). A sprinting step (§8.3 Run) is judged
+    /// where it *ends*, like every other consequence of the two-cell move.
+    fn crouch_walked(&self, posture: Option<Cell>, events: &[Event]) -> bool {
+        let Some(anchor) = posture else {
+            return false;
+        };
+        events.iter().any(|e| matches!(e, Event::Moved { .. }))
+            && cover::run_hugs(
+                &cover::cover_run(self.layout.facility(), anchor),
+                self.player,
+            )
+    }
+
+    /// Whether `table` belongs to the run the player is currently crouched
+    /// behind (§10.3) — the "is this bump the pose I already hold" question the
+    /// interaction ladder asks to keep a held re-bump free (§4.4).
+    fn crouch_covers(&self, table: Cell) -> bool {
+        self.crouched_behind
+            .is_some_and(|anchor| cover::cover_run(self.layout.facility(), anchor).contains(&table))
     }
 
     /// Resolve a step into a move or a bump (§4.3), pushing the event and reporting
@@ -998,8 +1037,9 @@ impl State {
                 true
             }
             // A table: bump it to crouch behind it (§4.3, §10.3). Ducking is a
-            // *decision*, aimed at a specific table — concealment is across that table
-            // only. The player does not move; the table stays solid furniture.
+            // *decision*, aimed at a specific table — and it anchors the crouch to
+            // that table's whole run (the §10.1a bench), which is what conceals.
+            // The player does not move; the tables stay solid furniture.
             BumpKind::Crouch => {
                 self.crouched_behind = Some(target);
                 events.push(Event::Crouched { behind: target });
@@ -1183,7 +1223,10 @@ impl State {
                 }
             }
             Some(Terrain::PartialCover) => {
-                if self.crouched_behind == Some(target) {
+                // Any table of the run already crouched behind is the held pose
+                // (§10.3 — the bench is one piece of furniture); a different
+                // run's table re-anchors the crouch there.
+                if self.crouch_covers(target) {
                     BumpKind::CrouchHeld
                 } else {
                     BumpKind::Crouch
@@ -3157,12 +3200,13 @@ mod tests {
         assert!(s.crouched(), "and it does not break the crouch");
     }
 
-    /// §10.3: **any spent action but a wait stands the player up** — the crouch
-    /// is a posture, not a place — while a *free* action (a wall bump) changes
-    /// nothing, not even posture (§4.4): the world does not move, so neither
-    /// does the crouch.
+    /// §10.3: a spent action other than a wait or a crouch-walk stands the
+    /// player up — the crouch survives *plain movement along its cover*, never
+    /// an interaction — while a *free* action (a wall bump) changes nothing,
+    /// not even posture (§4.4): the world does not move, so neither does the
+    /// crouch.
     #[test]
-    fn a_spent_step_stands_up_but_a_free_bump_does_not() {
+    fn an_interaction_stands_up_but_a_free_bump_does_not() {
         let mut layout = open_room(10, 10);
         layout.place(Cell::new(1, 2), Terrain::PartialCover);
         let mut s = State::new(
@@ -3170,7 +3214,7 @@ mod tests {
             Cell::new(1, 1), // in the corner: west and north are wall
             Direction::North,
             Vec::new(),
-            Vec::new(),
+            vec![Cell::new(2, 1)], // a console east of the player
             Cell::new(8, 8),
         );
         s.step(Input::Step(Direction::South)); // bump the table below: crouch
@@ -3182,14 +3226,102 @@ mod tests {
         assert_eq!(s.turn(), turn, "a wall bump is free");
         assert!(s.crouched(), "a free action does not break the crouch");
 
-        // A real step stands up — even though the new cell is still beside cover.
+        // A spent interaction stands up — taking the intel is not a crouch-walk,
+        // even though the player never left the table's side.
         s.step(Input::Step(Direction::East));
-        assert!(!s.crouched(), "moving stands the player up");
+        assert!(!s.crouched(), "a spent interaction stands the player up");
     }
 
-    /// §10.3: crouch concealment is **directional** — the table covers the
-    /// quarter-plane it faces. A viewer across the cover (straight or leaning up
-    /// to the 45° diagonal) is blinded; a viewer on the flank or behind the
+    /// §10.3: the **crouch-walk** — plain movement that keeps hugging the
+    /// anchored run holds the crouch, including the diagonal corner past the
+    /// bench's end, so the player can round the furniture without standing.
+    /// The first step that leaves the run's side is an ordinary move and
+    /// stands them up.
+    #[test]
+    fn a_crouch_walk_hugs_the_bench_and_rounds_its_end() {
+        let mut layout = open_room(12, 12);
+        for y in 3..=5 {
+            layout.place(Cell::new(5, y), Terrain::PartialCover); // a vertical bench
+        }
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Step(Direction::East)); // bump mid-bench: crouch
+        assert!(s.crouched());
+
+        // Walk the bench's west flank, round its south end on the diagonal,
+        // and come up its east flank: crouched the whole way.
+        for (dir, at) in [
+            (Direction::South, Cell::new(4, 5)), // flush beside the end table
+            (Direction::South, Cell::new(4, 6)), // the corner: diagonal contact
+            (Direction::East, Cell::new(5, 6)),  // square-on below the end
+            (Direction::East, Cell::new(6, 6)),  // the far corner
+            (Direction::North, Cell::new(6, 5)), // up the east flank
+        ] {
+            s.step(Input::Step(dir));
+            assert_eq!(s.player(), at);
+            assert!(s.crouched(), "the walk to {at:?} must hold the crouch");
+        }
+        // The anchor still names the originally bumped table; the cover is the run.
+        assert_eq!(s.crouched_behind(), Some(Cell::new(5, 4)));
+        let mut run = s.crouch_cover();
+        run.sort_by_key(|c| c.y);
+        assert_eq!(run, vec![Cell::new(5, 3), Cell::new(5, 4), Cell::new(5, 5)]);
+        // Cover crossed sides with the player: the bench now blinds the west.
+        assert!(
+            s.concealed_from(Cell::new(2, 5)),
+            "across the bench: covered"
+        );
+        assert!(
+            !s.concealed_from(Cell::new(9, 5)),
+            "the open east flank: seen"
+        );
+
+        // One step away from the furniture is an ordinary move: stand up.
+        s.step(Input::Step(Direction::East));
+        assert!(!s.crouched(), "leaving the run's side stands the player up");
+    }
+
+    /// The #141 report, pinned: a crouched player must not be seen by a guard
+    /// whose sight line crosses *any* table of the bench they are behind. The
+    /// old single-table quarter-plane let a viewer oblique to the anchor look
+    /// straight past it — through the bench's other tables — and see the
+    /// player. The run is the cover now; the flank past its end stays open.
+    #[test]
+    fn a_bench_conceals_across_its_whole_run() {
+        let mut layout = open_room(12, 12);
+        for y in 3..=5 {
+            layout.place(Cell::new(5, y), Terrain::PartialCover);
+        }
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Step(Direction::East)); // crouch, anchored mid-bench
+        assert!(s.crouched());
+
+        // Oblique viewers the anchor's own quarter-plane never covered, but
+        // whose line to the player crosses the bench's outer tables: concealed.
+        assert!(s.concealed_from(Cell::new(6, 7)), "across the south table");
+        assert!(s.concealed_from(Cell::new(6, 1)), "across the north table");
+        // No table on the line: still seen — the bench is cover, not a cloak.
+        assert!(!s.concealed_from(Cell::new(4, 1)), "past the bench's end");
+        assert!(!s.concealed_from(Cell::new(1, 4)), "behind the player");
+    }
+
+    /// §10.3: crouch concealment is **directional** — cover blinds only the
+    /// viewers whose sight line crosses it. Behind a lone table that is the
+    /// quarter-plane it faces: a viewer across the cover (straight or leaning
+    /// up to the 45° graze) is blinded; a viewer on the flank or behind the
     /// player is not; and without the crouch the same table conceals nothing.
     #[test]
     fn crouch_conceals_only_across_the_cover() {
