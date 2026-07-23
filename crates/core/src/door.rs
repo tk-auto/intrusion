@@ -10,17 +10,23 @@
 //!
 //! **Bump a panel to open, bump a hinge to close** (§10.4) — and, since #148, a
 //! *closed* hinge opens the door too, a second way in from beside the frame. The
-//! hinge is the handle, which is why hinges stay solid forever. A door refuses to close while anything
-//! occupies a panel — doors never crush anyone — and, with auto-close on, closes
-//! behind whoever passed through, so an open door becomes evidence that someone did.
+//! hinge is the handle, which is why hinges stay solid forever. A door refuses to
+//! close while anything occupies a panel — doors never crush anyone.
 //!
-//! Occupancy is supplied by the caller. Actors (the player, guards, bodies) are
-//! their own ticket; until they exist, "is a panel occupied?" is a predicate the
-//! caller passes in, which is exactly the seam the turn loop will fill.
+//! Doors also close on their own, two ways (§10.4). A **manual** hinged door is shut
+//! by a Calm guard passing through it ([`close_behind`](Layout::close_behind), #146).
+//! An **automatic** door ([`DoorKind::Automatic`]) has no hinges — the whole span is
+//! panels, so there is no handle — and shuts *itself* a few turns after the doorway is
+//! last vacated ([`tick_auto_doors`](Layout::tick_auto_doors), #147). Both are what
+//! stop an opened door decaying the level into an open plan, and both make an open
+//! door read as evidence someone came this way.
+//!
+//! Occupancy is supplied by the caller: "is a panel occupied?" is a predicate the
+//! turn loop passes in, built from the live actors (the player, guards, bodies).
 
 use crate::cell::Cell;
 use crate::facility::Terrain;
-use crate::region::{DoorCell, DoorId};
+use crate::region::{DoorCell, DoorId, DoorKind};
 use crate::Layout;
 
 /// What operating a door did (§10.4).
@@ -87,32 +93,63 @@ impl Layout {
         }
     }
 
-    /// Try to close `door` behind its user (§10.4 auto-close). Closes only when the
-    /// door is open *and* has auto-close enabled; a panel occupant still refuses the
-    /// close. Any door that is already closed or has auto-close off is left alone
-    /// (`None`). This is the mechanism the turn loop runs for the door a mover just
-    /// stepped out of.
-    pub fn auto_close_door(
+    /// Advance every open **automatic** door's close timer one turn and shut those
+    /// whose countdown reaches zero (§10.4/#147) — the once-per-turn tick the world
+    /// phase runs after everyone has moved. An open automatic door whose doorway is
+    /// **occupied** rearms its timer to the door's `delay` (an actor on a panel holds
+    /// it open — automatic doors never crush); a **vacant** one counts down, and on
+    /// the turn it would reach zero it closes, its panels restamped solid exactly as a
+    /// manual close does. Returns the doors that shut this tick, so the caller can
+    /// surface them as events. Manual doors and closed doors are untouched.
+    pub(crate) fn tick_auto_doors(&mut self, occupied: impl Fn(Cell) -> bool) -> Vec<DoorId> {
+        let ids: Vec<DoorId> = self.regions().doors().map(|(id, _)| id).collect();
+        let mut closed = Vec::new();
+        for id in ids {
+            // Read what the tick needs, then drop the borrow before mutating.
+            let (delay, occupied_now, timer) = {
+                let door = self.regions().door(id);
+                let DoorKind::Automatic { delay } = door.kind() else {
+                    continue;
+                };
+                if !door.is_open() {
+                    continue;
+                }
+                let occupied_now = door.panels().iter().any(|&c| occupied(c));
+                (delay, occupied_now, door.auto_timer())
+            };
+            if occupied_now {
+                // An actor in the doorway holds it open — rearm the full delay.
+                self.parts_mut().1.door_mut(id).set_auto_timer(delay);
+            } else if timer <= 1 {
+                // The countdown is spent and the doorway is clear: shut it.
+                self.set_door_open(id, false);
+                closed.push(id);
+            } else {
+                self.parts_mut().1.door_mut(id).set_auto_timer(timer - 1);
+            }
+        }
+        closed
+    }
+
+    /// Close `door` behind a guard that has just walked through it (§10.4, #146):
+    /// a **Calm** guard restoring the level's structure, so an open door stays
+    /// meaningful as evidence someone passed. Closes only a door that is currently
+    /// open, and still refuses on an occupied panel — the crush rule holds for a
+    /// guard-close exactly as for a bump ([`DoorAction::Obstructed`]). Returns
+    /// `None` for a door that is already closed; the caller (the turn loop) owns the
+    /// Calm-only gate and the seeded probability (§7.6/§12.4), so this is just the
+    /// mutation. Automatic doors are never guard-closed — they have no handle and shut
+    /// themselves ([`tick_auto_doors`](Self::tick_auto_doors)) — so the caller only
+    /// hands manual doors here.
+    pub(crate) fn close_behind(
         &mut self,
         door: DoorId,
         occupied: impl Fn(Cell) -> bool,
     ) -> Option<DoorAction> {
-        let d = self.regions().door(door);
-        if !d.is_open() || !d.auto_close() {
+        if !self.regions().door(door).is_open() {
             return None;
         }
         Some(self.close_door(door, occupied))
-    }
-
-    /// Set every door's auto-close behaviour at once — the playtest knob for
-    /// comparing a facility that closes behind you against one that stays open
-    /// (§10.4 auto-close **[START]**).
-    pub fn set_auto_close_all(&mut self, auto_close: bool) {
-        let (_, regions) = self.parts_mut();
-        let ids: Vec<DoorId> = regions.doors().map(|(id, _)| id).collect();
-        for id in ids {
-            regions.door_mut(id).set_auto_close(auto_close);
-        }
     }
 
     /// Open `door` as an **initial generation state** (#145, §10.4): move the graph
@@ -138,9 +175,16 @@ impl Layout {
     }
 
     /// Move a door's open state and its panels' terrain in one step, so the grid the
-    /// game reads always agrees with the graph.
+    /// game reads always agrees with the graph. Opening an **automatic** door arms its
+    /// close timer to the door's `delay` (§10.4/#147), so the countdown starts the
+    /// moment it opens however that happened — a bump, a guard walking in, or the
+    /// generator's initial pose.
     fn set_door_open(&mut self, door: DoorId, open: bool) {
         let panels: Vec<Cell> = self.regions().door(door).panels().to_vec();
+        let arm = match (open, self.regions().door(door).kind()) {
+            (true, DoorKind::Automatic { delay }) => Some(delay),
+            _ => None,
+        };
         let terrain = if open {
             Terrain::DoorPanelOpen
         } else {
@@ -148,6 +192,9 @@ impl Layout {
         };
         let (facility, regions) = self.parts_mut();
         regions.door_mut(door).set_open(open);
+        if let Some(delay) = arm {
+            regions.door_mut(door).set_auto_timer(delay);
+        }
         for panel in panels {
             facility.set_terrain(panel.x, panel.y, terrain);
         }
@@ -156,7 +203,8 @@ impl Layout {
 
 #[cfg(test)]
 mod tests {
-    use crate::region::{DoorId, RegionKind};
+    use crate::facility::Facility;
+    use crate::region::{DoorId, DoorKind, RegionGraph, RegionKind};
     use crate::test_support::seed_sweep;
     use crate::{generate, Cell, DoorAction, Layout, Rng, Terrain};
 
@@ -165,26 +213,39 @@ mod tests {
         false
     }
 
-    /// A generated 40×40 facility always has doors, and each is a closed span of two
-    /// hinges around 1–4 panels stamped into the grid (§10.1.4, §10.4).
+    /// A generated 40×40 facility always has doors, each a closed span stamped into
+    /// the grid — and its structure follows its kind (§10.1.4, §10.4/#147): a
+    /// **manual** door is two hinges around 1–4 panels, an **automatic** door is 3–6
+    /// panels and *no* hinges (the frameless span).
     #[test]
-    fn generation_places_hinged_closed_doors() {
+    fn generation_places_closed_doors_by_kind() {
         let layout = generate(40, 40, &mut Rng::new(7)).unwrap();
         let regions = layout.regions();
         assert!(regions.door_count() > 0, "a facility must have doorways");
+        let facility = layout.facility();
 
         for (_, door) in regions.doors() {
-            assert_eq!(door.hinges().len(), 2, "a hinge at each end");
-            assert!(
-                (1..=4).contains(&door.panels().len()),
-                "1–4 panels, got {}",
-                door.panels().len()
-            );
             assert!(!door.is_open(), "doors start closed");
-
-            let facility = layout.facility();
-            for &h in door.hinges() {
-                assert_eq!(facility.terrain_at(h.x, h.y), Some(Terrain::DoorHinge));
+            match door.kind() {
+                DoorKind::Manual => {
+                    assert_eq!(door.hinges().len(), 2, "a manual door: a hinge at each end");
+                    assert!(
+                        (1..=4).contains(&door.panels().len()),
+                        "1–4 panels, got {}",
+                        door.panels().len()
+                    );
+                    for &h in door.hinges() {
+                        assert_eq!(facility.terrain_at(h.x, h.y), Some(Terrain::DoorHinge));
+                    }
+                }
+                DoorKind::Automatic { .. } => {
+                    assert!(door.hinges().is_empty(), "an automatic door has no hinges");
+                    assert!(
+                        (3..=6).contains(&door.panels().len()),
+                        "3–6 panels spanning the doorway, got {}",
+                        door.panels().len()
+                    );
+                }
             }
             for &p in door.panels() {
                 assert_eq!(
@@ -212,17 +273,38 @@ mod tests {
         }
     }
 
-    /// A generated facility and the handle of its first door, for the mechanics
-    /// tests. Every generated door is a real room↔corridor doorway, closed to start.
+    /// A generated facility and the handle of its first **manual** door, for the
+    /// hinge/panel mechanics tests. Skips any automatic (frameless) door, which has
+    /// no hinge to bump (§10.4/#147); a generated level always has manual doors too.
     fn one_door() -> (Layout, DoorId) {
         let layout = generate(40, 40, &mut Rng::new(7)).unwrap();
         let door = layout
             .regions()
             .doors()
-            .next()
-            .expect("a facility has doors")
+            .find(|(_, d)| !d.is_automatic())
+            .expect("a facility has manual doors")
             .0;
         (layout, door)
+    }
+
+    /// A tiny two-room layout joined by one **automatic** door with close `delay`:
+    /// no hinges, a 3-cell panel span down wall column 4. The fixture for the
+    /// auto-close timer tests (§10.4/#147).
+    fn one_auto_door(delay: u32) -> (Layout, DoorId) {
+        let cells = |xs: std::ops::Range<u32>| {
+            xs.flat_map(|x| (1..4).map(move |y| Cell::new(x, y)))
+                .collect::<Vec<_>>()
+        };
+        let mut f = Facility::walled_box(9, 5);
+        let mut g = RegionGraph::new(9, 5);
+        let left = g.add_region(RegionKind::Room, cells(1..4));
+        let right = g.add_region(RegionKind::Room, cells(5..8));
+        let panels: Vec<Cell> = (1..4).map(|y| Cell::new(4, y)).collect();
+        for &p in &panels {
+            f.set_terrain(p.x, p.y, Terrain::DoorPanelClosed);
+        }
+        let door = g.add_door(left, right, [], panels, DoorKind::Automatic { delay });
+        (Layout::from_parts(f, g), door)
     }
 
     #[test]
@@ -355,42 +437,93 @@ mod tests {
         );
     }
 
+    /// §10.4/#147: an automatic door opened by a bump arms its close timer and,
+    /// once the doorway is clear, shuts itself after exactly `delay` vacant ticks —
+    /// its panels restamped solid, exactly as a manual close leaves them.
     #[test]
-    fn auto_close_shuts_the_door_behind_its_user() {
+    fn an_automatic_door_shuts_itself_after_the_delay() {
+        let (mut layout, door) = one_auto_door(3);
+        let panel = layout.regions().door(door).panels()[0];
+
+        assert_eq!(layout.bump_door(panel, vacant), Some(DoorAction::Opened));
+        assert!(layout.regions().door(door).is_open());
+
+        // Two vacant ticks keep it open; the third (delay = 3) shuts it.
+        assert!(
+            layout.tick_auto_doors(vacant).is_empty(),
+            "tick 1: still open"
+        );
+        assert!(
+            layout.tick_auto_doors(vacant).is_empty(),
+            "tick 2: still open"
+        );
+        assert!(layout.regions().door(door).is_open());
+        assert_eq!(
+            layout.tick_auto_doors(vacant),
+            vec![door],
+            "tick 3: the door times out",
+        );
+        assert!(!layout.regions().door(door).is_open());
+        for &p in layout.regions().door(door).panels() {
+            assert_eq!(
+                layout.facility().terrain_at(p.x, p.y),
+                Some(Terrain::DoorPanelClosed),
+                "a timed-out door restamps its panels solid",
+            );
+        }
+        // A closed automatic door is inert to further ticks.
+        assert!(layout.tick_auto_doors(vacant).is_empty());
+    }
+
+    /// §10.4/#146: the guard close-behind shuts an open door and, like every close,
+    /// refuses on an occupied panel — the crush rule holds whoever the occupant is.
+    #[test]
+    fn close_behind_shuts_an_open_door_but_never_crushes() {
         let (mut layout, door) = one_door();
         let panel = layout.regions().door(door).panels()[0];
-        layout.bump_door(panel, vacant); // user opens and passes through
 
-        // With auto-close on (the generation default) and the doorway clear, it shuts.
+        // A closed door offers nothing to close.
+        assert_eq!(layout.close_behind(door, vacant), None, "already closed");
+
+        layout.bump_door(panel, vacant); // a guard opened it walking through
+        assert!(layout.regions().door(door).is_open());
+
+        // An occupant in the throat refuses the close — the door never crushes.
         assert_eq!(
-            layout.auto_close_door(door, vacant),
-            Some(DoorAction::Closed)
+            layout.close_behind(door, |c| c == panel),
+            Some(DoorAction::Obstructed),
         );
+        assert!(
+            layout.regions().door(door).is_open(),
+            "stays open on an occupant"
+        );
+
+        // The throat clear, the guard's close-behind shuts it.
+        assert_eq!(layout.close_behind(door, vacant), Some(DoorAction::Closed));
         assert!(!layout.regions().door(door).is_open());
     }
 
+    /// §10.4/#147: an automatic door never shuts on an occupant — an actor on a
+    /// panel rearms the timer every tick, so it holds open indefinitely and only
+    /// times out once the doorway is finally clear.
     #[test]
-    fn auto_close_is_tunable_and_respects_occupants() {
-        let (mut layout, door) = one_door();
+    fn an_automatic_door_never_shuts_on_an_occupant() {
+        let (mut layout, door) = one_auto_door(2);
         let panel = layout.regions().door(door).panels()[0];
+        layout.bump_door(panel, vacant); // open and arm
 
-        // Turn auto-close off (the playtest knob, §10.4 [START]): an open door stays
-        // open even though its user has left.
-        layout.set_auto_close_all(false);
-        layout.bump_door(panel, vacant);
-        assert_eq!(
-            layout.auto_close_door(door, vacant),
-            None,
-            "off: no auto-close"
-        );
-        assert!(layout.regions().door(door).is_open());
+        // Held in the doorway for far longer than the delay: it never closes.
+        for _ in 0..10 {
+            assert!(layout.tick_auto_doors(|c| c == panel).is_empty());
+            assert!(
+                layout.regions().door(door).is_open(),
+                "an occupant holds it open",
+            );
+        }
 
-        // Turn it back on, but with an occupant on a panel: auto-close is refused.
-        layout.set_auto_close_all(true);
-        assert_eq!(
-            layout.auto_close_door(door, |c| c == panel),
-            Some(DoorAction::Obstructed)
-        );
-        assert!(layout.regions().door(door).is_open());
+        // Step clear and it times out after the delay (2 ticks).
+        assert!(layout.tick_auto_doors(vacant).is_empty(), "tick 1 of 2");
+        assert_eq!(layout.tick_auto_doors(vacant), vec![door], "times out");
+        assert!(!layout.regions().door(door).is_open());
     }
 }

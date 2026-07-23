@@ -46,6 +46,7 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::Crouched { .. } => ("you duck behind the table".to_string(), 0),
         Event::EnteredHideout { .. } => ("you slip into the cupboard".to_string(), 0),
         Event::DoorOpened { .. } => ("the door opens".to_string(), 0),
+        Event::DoorClosed { .. } => ("a door swings shut".to_string(), 0),
         Event::IntelTaken { remaining: 0 } => ("intel in hand — the exit is open".to_string(), 20),
         Event::IntelTaken { remaining } => (format!("intel taken — {remaining} to go"), 20),
         Event::ExitRefused => ("the exit refuses — intel is still out".to_string(), 20),

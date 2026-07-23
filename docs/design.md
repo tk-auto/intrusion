@@ -1055,14 +1055,23 @@ one unit.
 - **A door cannot close if anything occupies a panel cell.** Doors never crush
   anyone.
 - **Closed panels do not block pathfinding** — deliberately. Guards route through
-  closed doors and open them by walking into them. **This has a big emergent
-  consequence: guard traffic monotonically opens the facility up over a level, and
-  every opened door is a permanent new sightline.**
-- **Auto-close.** The old version had none — every door stayed open forever, so
-  connectivity only ever increased and the level decayed into an open plan.
-  **Doors should close behind their user** **[START]**, which restores the level's
-  structure over time, keeps sightlines from decaying into an open plan, and turns
-  an open door into evidence that someone passed.
+  closed doors and open them by walking into them (#146). **This opens the facility
+  up over a level, and every opened door is a new sightline** — but no longer a
+  *permanent* one, now that doors close again (below).
+- **Closing — two mechanisms** (§10.4 auto-close **[START]**). The old version had
+  none — every door stayed open forever, so connectivity only ever increased and the
+  level decayed into an open plan. Both restore the level's structure over time and
+  turn an open door into evidence that someone passed:
+  - **Manual (hinged) doors** are closed by hand — bump a hinge — and a **Calm** guard
+    that passes through one *sometimes* closes it behind itself (#146, a seeded
+    **[START]** chance, deliberately not always: §7.6 — a guard that always tidied up
+    would erase the "traffic opens the facility up" pressure).
+  - **Automatic doors** (#147) are a **[START]** fraction of doorways generated
+    *frameless* — no hinges, the whole span is panels — so there is no handle to shut
+    them by hand. They close *themselves* a few turns (**[START] ~3**) after the
+    doorway is last vacated; an actor standing in the throat holds them open (never a
+    crush). The delay is a stealth window: a guard passing through leaves the door open
+    just long enough to slip after them.
 
 ### 10.5 The spatial model — fix this properly
 

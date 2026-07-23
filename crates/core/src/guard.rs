@@ -193,6 +193,14 @@ pub(crate) const WATCH_DURATION: u32 = 20;
 /// just searched instead of ranging its full patrol.
 pub(crate) const WATCH_RADIUS: u32 = 8;
 
+/// How often a **Calm** guard closes a hinged door behind itself after passing
+/// through it (§10.4/§7.6 close-behind, **[START] = 25%**), as a percentage the
+/// seeded run RNG rolls against (§12.4). *Sometimes*, never always: §7.6 warns that
+/// a guard which always tidied up behind itself would make the level too static and
+/// erase the "guard traffic opens the facility up" pressure — so this is a small but
+/// nonzero fraction, and it is the playtest knob (see `State::set_guard_close_chance`).
+pub(crate) const GUARD_CLOSE_CHANCE_PERCENT: u32 = 25;
+
 /// How hard finding a body hits a guard's alert (§7.2, **[START] = 60**): the
 /// lead a found body grants, **stronger than a sighting** ([`ALERT_DURATION`] =
 /// 30) — finding a body is the loudest event in the game. The facility-wide
@@ -321,6 +329,15 @@ impl Guard {
     /// the puzzle §7.2 wants solved.
     pub fn detected_player(&self) -> bool {
         self.detected
+    }
+
+    /// Whether this guard closes a door it has just walked through (§10.4/§7.6):
+    /// **Calm only**. A guard that is chasing, investigating, searching or responding
+    /// is hunting, not tidying — it never pauses to shut a door behind itself, so
+    /// opening a door during a chase leaves a lasting sightline the player can read.
+    /// The turn loop pairs this with the seeded [`GUARD_CLOSE_CHANCE_PERCENT`] roll.
+    pub(crate) fn closes_doors(&self) -> bool {
+        self.state == GuardState::Calm
     }
 
     /// The guard's station (§7.5) — recorded on its body at a takedown as the
@@ -984,6 +1001,32 @@ mod tests {
         assert_eq!(SEARCH_RADIUS, 4, "the [START] search radius");
         assert_eq!(WATCH_DURATION, 20, "the [START] released-watch window");
         assert_eq!(WATCH_RADIUS, 8, "the [START] watch radius");
+        assert_eq!(
+            GUARD_CLOSE_CHANCE_PERCENT, 25,
+            "the [START] guard close-behind chance",
+        );
+    }
+
+    /// §10.4/§7.6: only a Calm guard closes a door behind itself — a hunting guard
+    /// (chasing, investigating, searching, responding) never pauses to tidy up, so
+    /// the door it opened stays a lasting sightline.
+    #[test]
+    fn only_calm_guards_close_doors() {
+        let calm = Guard::patrolling(Cell::new(1, 1));
+        assert!(calm.closes_doors(), "a Calm guard closes behind itself");
+        for hunting in [
+            GuardState::Alerted,
+            GuardState::Chasing,
+            GuardState::Investigating,
+            GuardState::Responding,
+        ] {
+            assert!(
+                !Guard::patrolling(Cell::new(1, 1))
+                    .with_state(hunting)
+                    .closes_doors(),
+                "a {hunting:?} guard never closes doors",
+            );
+        }
     }
 
     /// §7.6 two-zone detection **[START]**: the boundaries and the alert duration are

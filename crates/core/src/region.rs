@@ -78,6 +78,22 @@ pub enum DoorCell {
     Panel,
 }
 
+/// How a door closes (§10.4) — the axis #147 splits the old `auto_close` boolean into.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DoorKind {
+    /// A hinged door: a solid frame end at each side and movable panels between them.
+    /// Opened by bumping a panel, closed by bumping a hinge (§10.4) or by a Calm guard
+    /// passing through it (#146). It has no will of its own — it stays however it was
+    /// last left.
+    Manual,
+    /// A frameless automatic door: the whole span is panels, no hinges, so there is no
+    /// handle to close it by hand. It opens like any door — a bump, or a guard walking
+    /// in — and closes *itself* `delay` turns after the doorway is last vacated
+    /// (§10.4/#147), which is what stops an opened door decaying the level into an open
+    /// plan. It never crushes: an actor on a panel holds it open.
+    Automatic { delay: u32 },
+}
+
 /// One door: the two regions it joins, its hinge/panel structure, and its runtime
 /// open/closed state (§10.4).
 ///
@@ -97,9 +113,14 @@ pub struct Door {
     panels: Vec<Cell>,
     /// Whether the panels are currently open.
     open: bool,
-    /// Whether this door closes behind its user (§10.4 auto-close **[START]**).
-    /// Data-driven so playtest can compare with it on and off.
-    auto_close: bool,
+    /// How this door closes (§10.4/#147): a [`Manual`](DoorKind::Manual) hinged door,
+    /// or an [`Automatic`](DoorKind::Automatic) frameless one that shuts itself.
+    kind: DoorKind,
+    /// Turns until an open automatic door shuts itself (§10.4/#147). Meaningful only
+    /// while an [`Automatic`](DoorKind::Automatic) door is open: armed to its `delay`
+    /// each time it opens or is re-occupied, counted down each vacant turn, and `0`
+    /// otherwise. A manual door ignores it entirely.
+    auto_timer: u32,
 }
 
 impl Door {
@@ -130,15 +151,27 @@ impl Door {
         self.open
     }
 
-    /// Whether this door closes behind its user (§10.4 **[START]**).
-    pub fn auto_close(&self) -> bool {
-        self.auto_close
+    /// How this door closes — manual (hinged) or automatic (frameless) (§10.4/#147).
+    pub fn kind(&self) -> DoorKind {
+        self.kind
     }
 
-    /// Toggle the auto-close behaviour — the tuning knob playtest flips to compare
-    /// "doors stay open" against "doors close behind you" (§10.4 **[START]**).
-    pub fn set_auto_close(&mut self, auto_close: bool) {
-        self.auto_close = auto_close;
+    /// Whether this is a frameless automatic door (§10.4/#147) — the common query,
+    /// so callers need not match the whole [`DoorKind`].
+    pub fn is_automatic(&self) -> bool {
+        matches!(self.kind, DoorKind::Automatic { .. })
+    }
+
+    /// Turns until an open automatic door shuts itself (§10.4/#147); `0` for a closed
+    /// or manual door. See [`auto_timer`](Door::auto_timer) on the field.
+    pub(crate) fn auto_timer(&self) -> u32 {
+        self.auto_timer
+    }
+
+    /// Set the auto-close countdown (§10.4/#147). Crate-internal: the turn loop arms
+    /// it on open, resets it while the doorway is occupied, and counts it down.
+    pub(crate) fn set_auto_timer(&mut self, turns: u32) {
+        self.auto_timer = turns;
     }
 
     /// Which part of the door `cell` is, or `None` if the cell is not on this door.
@@ -248,20 +281,22 @@ impl RegionGraph {
     }
 
     /// Register a door joining regions `a` and `b`, returning its handle. The door
-    /// is recorded on both regions' boundaries, starts **closed**, and takes its
-    /// auto-close behaviour from `auto_close` (§10.4).
+    /// is recorded on both regions' boundaries, starts **closed**, and closes as its
+    /// [`DoorKind`] dictates (§10.4/#147).
     ///
-    /// `hinges` are the frame ends (two, one at each end of the span) and `panels`
-    /// the 1–4 movable cells between them. Panics if `a == b` (a door joins two
-    /// *distinct* regions), if either handle is unknown, or if there are no panels.
-    /// Door cells are *not* claimed as region cells — a doorway belongs to no region.
+    /// `hinges` are the frame ends and `panels` the movable cells between them: a
+    /// [`Manual`](DoorKind::Manual) door has two hinges around 1–4 panels, an
+    /// [`Automatic`](DoorKind::Automatic) door has *no* hinges and 3–6 panels spanning
+    /// the whole doorway. Panics if `a == b` (a door joins two *distinct* regions), if
+    /// either handle is unknown, or if there are no panels. Door cells are *not*
+    /// claimed as region cells — a doorway belongs to no region.
     pub fn add_door(
         &mut self,
         a: RegionId,
         b: RegionId,
         hinges: impl IntoIterator<Item = Cell>,
         panels: impl IntoIterator<Item = Cell>,
-        auto_close: bool,
+        kind: DoorKind,
     ) -> DoorId {
         assert!(
             a != b,
@@ -281,7 +316,8 @@ impl RegionGraph {
             hinges,
             panels,
             open: false,
-            auto_close,
+            kind,
+            auto_timer: 0,
         });
         self.regions[a.0 as usize].doors.push(id);
         self.regions[b.0 as usize].doors.push(id);
@@ -468,14 +504,14 @@ mod tests {
             corridor,
             [Cell::new(4, 1), Cell::new(4, 3)],
             [Cell::new(4, 2)],
-            true,
+            DoorKind::Manual,
         );
         let door_b = g.add_door(
             corridor,
             room_b,
             [Cell::new(7, 1), Cell::new(7, 3)],
             [Cell::new(7, 2)],
-            true,
+            DoorKind::Manual,
         );
         (g, room_a, corridor, room_b, door_a, door_b)
     }
@@ -575,9 +611,10 @@ mod tests {
         assert_eq!(door.role(Cell::new(4, 1)), Some(DoorCell::Hinge));
         assert_eq!(door.role(Cell::new(4, 2)), Some(DoorCell::Panel));
         assert_eq!(door.role(Cell::new(9, 9)), None);
-        // A fresh door is closed, and the fixture asks for auto-close.
+        // A fresh door is closed, and the fixture's is a manual hinged door.
         assert!(!door.is_open());
-        assert!(door.auto_close());
+        assert_eq!(door.kind(), DoorKind::Manual);
+        assert!(!door.is_automatic());
         // door_at finds the door from any of its cells.
         assert_eq!(g.door_at(Cell::new(4, 2)), Some(door_a));
         assert_eq!(g.door_at(Cell::new(4, 1)), Some(door_a));
@@ -594,7 +631,7 @@ mod tests {
             r,
             [Cell::new(4, 1), Cell::new(4, 3)],
             [Cell::new(4, 2)],
-            true,
+            DoorKind::Manual,
         );
     }
 

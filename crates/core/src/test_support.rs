@@ -19,7 +19,7 @@ use std::collections::HashSet;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
-use crate::region::{RegionGraph, RegionKind};
+use crate::region::{DoorKind, RegionGraph, RegionKind};
 use crate::state::State;
 
 /// The default sampled sweep width — small enough to keep the routine gate fast,
@@ -98,7 +98,7 @@ pub(crate) fn region_strip() -> Layout {
             far,
             [Cell::new(x, 1), Cell::new(x, 3)],
             [Cell::new(x, 2)],
-            true,
+            DoorKind::Manual,
         );
     }
     Layout::from_parts(f, g)

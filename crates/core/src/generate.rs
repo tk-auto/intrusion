@@ -45,7 +45,7 @@ use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::path;
 use crate::place::{place, LevelConfig, Placement};
-use crate::region::{DoorId, RegionGraph, RegionId, RegionKind};
+use crate::region::{DoorId, DoorKind, RegionGraph, RegionId, RegionKind};
 use crate::rng::Rng;
 use std::collections::HashSet;
 
@@ -69,11 +69,17 @@ const MAX_ROOMS: usize = 12;
 const MIN_DOOR_RUN: u32 = 3;
 /// The longest a single doorway spans (§10.4): two hinges and up to four panels.
 const MAX_DOOR_LEN: u32 = 6;
-/// New doors close behind their user by default (§10.4 auto-close **[START]**).
-/// Kept as a constant, and per-door mutable via
-/// [`Door::set_auto_close`](crate::Door::set_auto_close), so playtest can compare
-/// the facility with auto-close on and off.
-const AUTO_CLOSE: bool = true;
+/// The share of doorways generated as **automatic** (§10.4/#147) **[START]**:
+/// frameless spans that shut themselves, versus manual hinged doors that a hand or a
+/// passing Calm guard (#146) closes. Drawn per doorway from the seeded RNG (§12.4),
+/// so the same seed makes the same doors automatic. A minority — most doors stay
+/// manual, keeping the hinge/bump vocabulary the common case; the automatics are the
+/// self-healing seam that stops a busy wing propping every door open.
+const AUTO_DOOR_PERCENT: u32 = 30;
+/// How long an automatic door stays open after its doorway is last vacated
+/// (§10.4/#147, **[START] = 3** turns): short but nonzero, so a guard passing through
+/// leaves a real slip-through window before the door shuts (the ticket's stealth knob).
+const AUTO_CLOSE_DELAY: u32 = 3;
 /// The most doorways any one room gets **[START]**. A room with a door on every
 /// wall is a thoroughfare, not a room — most rooms want one or two ways in, and a
 /// three-door hub should be the exception. Every room still keeps at least one
@@ -940,8 +946,10 @@ fn room_door_budget(rng: &mut Rng) -> u32 {
 }
 
 /// Cut the doorway for one chosen `candidate`. Length is random `3..=min(len, 6)`
-/// at a random offset (§10.1.4); the two ends become hinges, the cells between
-/// become closed panels (§10.4).
+/// at a random offset (§10.1.4). A **[START]** [`AUTO_DOOR_PERCENT`] share (drawn
+/// from the seeded RNG, §12.4) become **automatic** — the whole span is closed
+/// panels, no hinges (§10.4/#147) — and the rest are **manual**: the two ends are
+/// hinges, the cells between are closed panels (§10.4).
 fn cut_door(
     facility: &mut Facility,
     regions: &mut RegionGraph,
@@ -960,16 +968,33 @@ fn cut_door(
     let first = start + offset;
     let last = first + door_len - 1;
 
-    let hinges = [line.cell(first), line.cell(last)];
-    let panels: Vec<Cell> = (first + 1..last).map(|i| line.cell(i)).collect();
+    // The automatic/manual draw is made here so the same seed makes the same doors
+    // automatic (§12.4). An automatic door is frameless: every cell of the span is a
+    // panel. A manual door frames the span with a hinge at each end.
+    let automatic = rng.below(100) < AUTO_DOOR_PERCENT;
+    let (hinges, panels): (Vec<Cell>, Vec<Cell>) = if automatic {
+        (Vec::new(), (first..=last).map(|i| line.cell(i)).collect())
+    } else {
+        (
+            vec![line.cell(first), line.cell(last)],
+            (first + 1..last).map(|i| line.cell(i)).collect(),
+        )
+    };
 
-    for hinge in hinges {
+    for &hinge in &hinges {
         facility.set_terrain(hinge.x, hinge.y, Terrain::DoorHinge);
     }
     for &panel in &panels {
         facility.set_terrain(panel.x, panel.y, Terrain::DoorPanelClosed);
     }
-    regions.add_door(room, corridor, hinges, panels, AUTO_CLOSE);
+    let kind = if automatic {
+        DoorKind::Automatic {
+            delay: AUTO_CLOSE_DELAY,
+        }
+    } else {
+        DoorKind::Manual
+    };
+    regions.add_door(room, corridor, hinges, panels, kind);
 }
 
 /// Open a deterministic [`OPEN_DOOR_PERCENT`] share of the level's doorways as
@@ -2708,18 +2733,40 @@ mod tests {
         );
     }
 
-    /// Every doorway is a valid §10.4 span: 2 hinges around 1–4 panels, 3–6 cells
-    /// total, all lying on a single straight wall line.
+    /// Every doorway is a valid §10.4 span of 3–6 cells on one straight wall line,
+    /// shaped by its kind (§10.4/#147): a **manual** door is 2 hinges around 1–4
+    /// panels, an **automatic** door is 3–6 panels and no hinges (the frameless span).
     #[test]
     fn doorways_are_well_formed_spans() {
         for seed in seed_sweep(64) {
             let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
             for (_, door) in layout.regions().doors() {
-                assert_eq!(door.hinges().len(), 2, "seed {seed}: a hinge at each end");
-                let panels = door.panels().len();
+                match door.kind() {
+                    DoorKind::Manual => {
+                        assert_eq!(door.hinges().len(), 2, "seed {seed}: a hinge at each end");
+                        let panels = door.panels().len();
+                        assert!(
+                            (1..=4).contains(&panels),
+                            "seed {seed}: {panels} panels, want 1..=4"
+                        );
+                    }
+                    DoorKind::Automatic { delay } => {
+                        assert!(
+                            door.hinges().is_empty(),
+                            "seed {seed}: automatic: no hinges"
+                        );
+                        let panels = door.panels().len();
+                        assert!(
+                            (3..=6).contains(&panels),
+                            "seed {seed}: {panels} panels, want 3..=6"
+                        );
+                        assert_eq!(delay, AUTO_CLOSE_DELAY, "seed {seed}: the [START] delay");
+                    }
+                }
+                let total = door.cells().count();
                 assert!(
-                    (1..=4).contains(&panels),
-                    "seed {seed}: {panels} panels, want 1..=4"
+                    (3..=6).contains(&total),
+                    "seed {seed}: {total} cells, want a 3..=6 span"
                 );
                 let cells: Vec<Cell> = door.cells().collect();
                 let straight = cells.iter().all(|c| c.x == cells[0].x)
@@ -2730,6 +2777,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// §10.4/#147: generation produces *both* door kinds — most manual, a minority
+    /// automatic (the [`AUTO_DOOR_PERCENT`] share) — and the split is deterministic
+    /// per seed (§12.4). Asserted in aggregate so the distribution, not one door, is
+    /// what's pinned.
+    #[test]
+    fn generation_produces_both_door_kinds_deterministically() {
+        assert_eq!(AUTO_DOOR_PERCENT, 30, "the [START] automatic-door share");
+        let (mut manual, mut automatic) = (0u32, 0u32);
+        for seed in seed_sweep(200) {
+            let a = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let b = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let kinds = |l: &Layout| -> Vec<bool> {
+                l.regions().doors().map(|(_, d)| d.is_automatic()).collect()
+            };
+            assert_eq!(
+                kinds(&a),
+                kinds(&b),
+                "seed {seed}: door kinds are deterministic"
+            );
+            for (_, door) in a.regions().doors() {
+                if door.is_automatic() {
+                    automatic += 1;
+                } else {
+                    manual += 1;
+                }
+            }
+        }
+        assert!(automatic > 0, "some doors are automatic");
+        assert!(manual > automatic, "but most doors are manual");
     }
 
     /// #145: in a *placed* level a deterministic share of doorways starts open, and
