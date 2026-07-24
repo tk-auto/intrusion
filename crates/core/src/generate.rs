@@ -252,11 +252,13 @@ pub enum GenError {
 pub struct Layout {
     facility: Facility,
     regions: RegionGraph,
-    /// The player-only crawlspace shortcuts threaded through the walls (§10.7). Each
-    /// is an ordered path of cells whose ends are [`Terrain::DuctEntry`] and whose
-    /// interior stays [`Terrain::Wall`]; the list is the only record that those wall
-    /// cells are also a crawl route. Empty on a level the generator placed none on
-    /// (ducts are optional — reachability never depends on one, §10.6/§10.7).
+    /// The player-only crawlspace shortcuts that span the facility (§10.7). Each is an
+    /// ordered path of cells whose ends are [`Terrain::DuctEntry`] and whose interior
+    /// cells keep whatever terrain they already had — the path may cross room and
+    /// corridor **floor** to connect two far-apart regions (§10.7 cross-room routing),
+    /// so this list is the *only* record that those cells are also a crawl route;
+    /// nothing on the grid tells. Empty on a level the generator placed none on (ducts
+    /// are optional — reachability never depends on one, §10.6/§10.7).
     ducts: Vec<Duct>,
 }
 
@@ -276,20 +278,14 @@ impl Layout {
         &self.ducts
     }
 
-    /// The duct `cell` belongs to, if any (§10.7) — the derived "is this a duct
-    /// cell" query. This is the single source the turn loop reads to know the
-    /// player is inside a duct (mirroring [`State::hidden`](crate::State::hidden)),
-    /// so the state can never desync from position.
-    pub fn duct_containing(&self, cell: Cell) -> Option<&Duct> {
-        self.ducts.iter().find(|d| d.contains(cell))
-    }
-
-    /// Whether stepping `from` → `to` is a single legal **crawl** along one duct
-    /// (§10.7): both cells belong to the same duct and are consecutive on its path.
-    pub fn is_duct_step(&self, from: Cell, to: Cell) -> bool {
-        self.ducts
-            .iter()
-            .any(|d| d.contains(from) && d.is_crawl_step(from, to))
+    /// The index (into [`ducts`](Self::ducts)) of the duct whose path includes `cell`,
+    /// if any (§10.7). The turn loop reads this at the one moment it needs to bind
+    /// "the player is now inside a duct" to a concrete duct: bumping a mouth to climb
+    /// in ([`State::in_duct`](crate::State)). It is *not* a per-turn "am I in a duct"
+    /// query — that state is stored on the [`State`](crate::State), because a duct's
+    /// interior may overlie ordinary floor and a cell alone can no longer answer it.
+    pub fn duct_index_containing(&self, cell: Cell) -> Option<usize> {
+        self.ducts.iter().position(|d| d.contains(cell))
     }
 
     /// Mutable access to both halves at once — the grid and its graph. Crate-internal

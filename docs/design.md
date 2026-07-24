@@ -1108,8 +1108,8 @@ stay a future axis.
 > cannot climb in, and bumping it is an inert no-op. It shows the body's **`z`** in
 > the Owned colour (not the empty `}`), so a glance tells you which cupboards you
 > have spent this way — and that status is **remembered** (§11.5a): once seen, a
-> locked cupboard stays a remembered `z` out of view, like a crawled duct or a seen
-> console, rather than reverting to the empty `}`. This is the one place a body
+> locked cupboard stays a remembered `z` out of view, like a seen console, rather
+> than reverting to the empty `}`. This is the one place a body
 > vanishes completely; everywhere else it stays visible evidence on the §7.3 clock.
 
 ### 10.4 Doors
@@ -1231,17 +1231,22 @@ Also worth fixing, all real:
 
 ### 10.7 Ducts — player-only crawlspace shortcuts
 
-**[START]** A **duct** is a crawlspace threaded through the walls that only the
-player can use: a shortcut between two parts of the facility, paid for not in time
-but in **degraded information**. It extends §10 without touching any existing
-contract — a guard experiences a duct as ordinary wall.
+**[START]** A **duct** is a crawlspace that spans the facility and only the
+player can use: a shortcut between two far-apart parts, paid for not in time but in
+**degraded information**. It extends §10 without touching any existing contract — a
+guard experiences a duct's **entries** as ordinary wall and never perceives the crawl
+route at all; the interior cells it may pass over keep their own terrain, so nothing a
+guard sees, paths on, or looks through changes.
 
 **Shape.** A duct is a path of cells with an **entry at each end, drawn `=`**
 (`DuctEntry`, §10.3/§11.3). Each entry is **recessed like a cupboard** (§10.1.6):
 exactly one floor **mouth** and solid backing on the other three sides, so a duct is
 entered, exited and peeked from that one side. The **interior** cells between the
-entries stay ordinary **wall** — a duct is *routed through wall cells*, and the only
-record that those walls are also a crawl route is the duct list on the layout.
+entries **route over the building** — the shortest path, free to cross room and
+corridor **floor**, not just wall — so a duct **spans across rooms** to join two
+far-apart regions. Each interior cell keeps whatever terrain it already had (a path
+over floor stays floor to everyone but the crawler); the only record that those cells
+are also a crawl route is the duct list on the layout — nothing on the grid tells.
 
 **The entry is wall-like to guards.** A `DuctEntry` blocks movement, sight and
 pathing exactly as a wall does. So a guard never sees *through* an entry, never
@@ -1278,15 +1283,25 @@ view, the live peek window, the sensed dots through the reduced radius — is th
 companion render ticket #134; §10.7 owns the model.)*
 
 **Fog (§11.5a).** An **entry** (`=`) is **geometry**: visible from turn one like a
-door, so you can plan a shortcut around it. The **interior path** is **contents**:
-hidden (it reads as plain wall) until crawled, then remembered.
+door, so you can plan a shortcut around it. The **interior path** is **not on the base
+map at all** — it carries no tell, so it can cross a room's floor without giving the
+shortcut away — and lives in **its own layer, shown only while you are crawling it**.
+It is **not remembered**: climb out and the path is hidden again. *(This drops the
+earlier "the interior reads as plain wall, remembered once crawled" rule — a stated
+change, not drift: now that the path can overlie floor, "reads as plain wall" is no
+longer even true, and a remembered overlay would paint a tell on the room floor a duct
+crosses. The `=` you plan around is the entry alone.)*
 
 **Generation.** Place a small number of ducts, each connecting two regions **far
-apart on the region graph** (a duct that shortcuts nothing is noise), routed through
-wall cells, deterministic from the seed (§12.4). A candidate is kept only when
-crawling it saves at least `DUCT_MIN_PAYOFF` steps over walking between its mouths.
-The pass asserts the per-entry one-mouth geometry; the §10.6 guarantees hold
-untouched, since an entry is wall-like.
+apart on the region graph** (a duct that shortcuts nothing is noise), routed as the
+shortest cell path **over the building** — across wall *and* floor, forbidding only
+the two mouths so each entry's recessed backing and its single climb-out survive —
+deterministic from the seed (§12.4). A candidate is kept only when crawling it saves
+at least `DUCT_MIN_PAYOFF` steps over walking between its mouths. The pass asserts the
+per-entry one-mouth geometry; the §10.6/§10.1a guarantees hold untouched, since only
+the two entries are restamped (a wall→entry swap that is wall-like both ways) and
+every interior cell keeps its terrain — reachability and sightlines on the finished
+grid are byte-identical with the duct in place or reverted.
 
 `[START]` knobs (all pinned by tests): **`DUCT_RUNS_PER_LEVEL`** = 2 (a spice, not the
 main route — base solvability never depends on a duct); duct length in
@@ -1516,6 +1531,14 @@ finally having a mechanism.
 > distinct from both *live* and *never-seen*. Three states, not two. The old
 > version had no memory system at all, so this is new — don't assume the dimming
 > scheme above covers it.
+
+> **A duct's interior path is its own layer (§10.7).** The crawl path between a
+> duct's two entries is *neither* geometry (it carries no tell on the base map — it
+> can cross a room's floor without giving the shortcut away) *nor* remembered
+> contents (it is never absorbed into tile memory). It is shown **only while the
+> player is crawling that duct**, and hidden again the moment they climb out — a
+> fourth, private layer over the three above. Only the two entries (`=`) are
+> geometry, visible from turn one. See §10.7.
 
 ### 11.6 Input
 

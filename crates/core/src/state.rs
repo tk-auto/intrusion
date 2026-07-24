@@ -37,11 +37,11 @@ use crate::ability::{
     AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, TargetingMode,
 };
 use crate::body::Body;
-use std::collections::HashSet;
 
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::cover;
+use crate::duct::Duct;
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::{Guard, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
@@ -476,15 +476,16 @@ pub struct State {
     /// sequence. The fog renderer reads it to decide which *contents* are
     /// remembered; live state never consults it (§11.5a keeps those apart).
     memory: VisibleSet,
-    /// The duct cells the player has been **inside** (§10.7), accumulated each turn
-    /// they occupy a duct. This is knowledge that only *crawling* reveals — a duct's
-    /// interior is contents, and unlike a hideout you cannot learn it by looking at
-    /// the wall from the room (its face is in [`memory`](Self::memory) then, but the
-    /// crawlspace behind it is not). The renderer reads it to draw a **remembered**
-    /// duct path (§11.5a/#134); the sight memory cannot answer "have I crawled this",
-    /// so this is tracked apart. Monotonic and derived purely from where the player
-    /// has stood, so it stays deterministic (§12.4).
-    duct_memory: HashSet<Cell>,
+    /// Which duct the player is **inside**, as an index into [`Layout::ducts`], or
+    /// `None` on open floor (§10.7). This *is* the "in a duct" state — it must be
+    /// stored, not derived from position, because a duct's interior may now cross
+    /// room and corridor **floor** (§10.7 cross-room routing): those interior cells
+    /// are ordinary walkable floor to a player who is not crawling, so the cell alone
+    /// can no longer tell "walking the room" from "crawling the duct over it". Set
+    /// when the player bumps a mouth to climb in ([`EnterDuct`](BumpKind::EnterDuct))
+    /// and cleared when they step out ([`Move`](BumpKind::Move)); derived purely from
+    /// those transitions, so it stays deterministic (§12.4).
+    in_duct: Option<usize>,
     /// Whether the last **spent** turn was a Wait — which widens the next sight
     /// computation to the full 360° (§8.3). A free action (a wall bump) spends
     /// nothing and changes nothing (§4.4), so it does not clear this.
@@ -601,7 +602,7 @@ impl State {
             facing,
             player_fov: VisibleSet::default(),
             memory: VisibleSet::default(),
-            duct_memory: HashSet::new(),
+            in_duct: None,
             waited: false,
             moved_this_turn: false,
             crouched_behind: None,
@@ -715,13 +716,15 @@ impl State {
         &self.memory
     }
 
-    /// The duct cells the player has crawled (§10.7/#134): the interiors they have
-    /// been *inside*, which is the only way a duct's crawlspace becomes known (looking
-    /// at the wall from the room does not reveal it). The renderer reads this to draw
-    /// a remembered `=` path after the player has left, distinct from the sight memory
-    /// that merely holds the wall's face.
-    pub fn duct_memory(&self) -> &HashSet<Cell> {
-        &self.duct_memory
+    /// The duct the player is currently **inside** (§10.7), or `None` on open floor —
+    /// the one the renderer lights as a connected `=` path while it is occupied. It is
+    /// shown *only* while crawled: the interior path carries no tell on the base map
+    /// and is never remembered once the player climbs out (§11.5a). Distinct from
+    /// [`Layout::duct_containing`], which merely asks whether a *cell* lies on some
+    /// duct's path — a question that no longer answers "is the player crawling", since
+    /// an interior cell may overlie ordinary floor the player is simply walking.
+    pub fn occupied_duct(&self) -> Option<&Duct> {
+        self.in_duct.map(|i| &self.layout.ducts()[i])
     }
 
     /// Whether the player is concealed — standing inside a hideout (§10.3).
@@ -737,15 +740,16 @@ impl State {
         self.layout.facility().terrain(self.player) == Some(Terrain::Hideout)
     }
 
-    /// Whether the player is **inside a duct** (§10.7) — standing on any cell of a
-    /// crawlspace path, entry or interior. Like [`hidden`](Self::hidden) this is
-    /// *derived* from position ([`Layout::duct_containing`]), never stored, so it can
-    /// never desync: the only way onto a duct cell is to bump an entry and crawl, and
-    /// climbing out the far mouth clears it. Inside, the player is concealed from every
-    /// guard, contact-safe (guards route around the walls the duct threads), and their
-    /// perception is reduced to the mouth peek plus a shortened sense (§9.1/§10.7).
+    /// Whether the player is **inside a duct** (§10.7) — crawling a crawlspace, as
+    /// opposed to merely standing on a cell some duct's path happens to overlie. This
+    /// is *stored* ([`in_duct`](Self::in_duct), the field), set by climbing in and
+    /// cleared by climbing out, because a duct's interior may cross ordinary floor
+    /// (§10.7 cross-room routing) and position alone can no longer distinguish the two.
+    /// Inside, the player is concealed from every guard, contact-safe (guards route
+    /// around the entries the duct threads through), and their perception is reduced to
+    /// the mouth peek plus a shortened sense (§9.1/§10.7).
     pub fn in_duct(&self) -> bool {
-        self.layout.duct_containing(self.player).is_some()
+        self.in_duct.is_some()
     }
 
     /// Whether a guard stepping into the player's cell is **refused**, not a capture
@@ -1329,6 +1333,10 @@ impl State {
             BumpKind::EnterDuct => {
                 self.player = target;
                 self.facing = dir.opposite();
+                // Record *which* duct we climbed into — the entry belongs to exactly
+                // one (§10.7), and from here "in a duct" is this stored index, not the
+                // cell (an interior cell may overlie floor the player could also walk).
+                self.in_duct = self.layout.duct_index_containing(target);
                 events.push(Event::EnteredDuct { at: target });
                 true
             }
@@ -1357,6 +1365,11 @@ impl State {
             // doorway, or a cell holding a *loose* body (non-solid, §7.2: you walk
             // over it).
             BumpKind::Move => {
+                // A plain move while inside a duct is the climb-out at a mouth (§10.7)
+                // — the only Move the confinement in `bump_kind` admits — so leaving
+                // the crawlspace clears the stored state. (A phase-out, the one other
+                // way a Move fires from a duct cell, ends the crawl just the same.)
+                self.in_duct = None;
                 let vacated = self.player;
                 self.haul_body_to(vacated);
                 self.player = target;
@@ -1422,7 +1435,11 @@ impl State {
     /// entry-cell peek (§6.1) leans through and the facing a player landing on the
     /// entry takes, so the ~180° window watches the room before they climb out.
     fn duct_entry_facing(&self, cell: Cell) -> Option<Direction> {
-        let duct = self.layout.duct_containing(cell)?;
+        // `cell` is always on the duct the player is currently crawling (this is only
+        // ever called for the occupied duct's cells), so read the mouth from that duct
+        // rather than searching by position — an interior cell may overlie floor that
+        // belongs to no duct's geometry.
+        let duct = self.occupied_duct()?;
         if !duct.is_entry(cell) {
             return None;
         }
@@ -1462,15 +1479,15 @@ impl State {
         // climbs out (a plain Move), and every other step is walled in — a solid
         // bump. This confinement is what keeps an interior duct cell that happens to
         // touch floor from ever being an unintended exit; you leave only at a mouth.
-        if self.in_duct() {
-            if self.layout.is_duct_step(self.player, target) {
+        if let Some(duct) = self.occupied_duct() {
+            if duct.is_crawl_step(self.player, target) {
                 return BumpKind::DuctCrawl;
             }
-            let on_entry = self
-                .layout
-                .duct_containing(self.player)
-                .is_some_and(|d| d.is_entry(self.player));
-            if on_entry && self.layout.facility().can_enter(target, ACTOR_FILL) {
+            // The only way off the path is stepping from an **entry** onto its floor
+            // mouth. An interior cell that happens to overlie floor (§10.7 cross-room
+            // routing) is never an exit — only an entry's mouth is, which the recessed
+            // geometry keeps as the entry's single non-solid neighbour.
+            if duct.is_entry(self.player) && self.layout.facility().can_enter(target, ACTOR_FILL) {
                 return BumpKind::Move; // climb out through the mouth
             }
             return BumpKind::Solid;
@@ -1645,19 +1662,11 @@ impl State {
             field_of_view_with_peek(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE)
         };
         // Tile memory (§11.5a) accumulates here, in the same phase that produced
-        // the sight — every cell the player can see now is remembered forever.
+        // the sight — every cell the player can see now is remembered forever. A
+        // duct's interior path is deliberately *not* accumulated: it lives in its own
+        // layer, shown only while crawled and never remembered (§11.5a/§10.7), so the
+        // crawlspace's route is given away to nobody once the player has left it.
         self.memory.absorb(&self.player_fov);
-        // Duct memory (§10.7/#134): while inside a duct the interior view reveals the
-        // whole occupied crawlspace, so remember all of its cells — the crawled path
-        // the renderer later draws as remembered `=`. This is the knowledge crawling
-        // grants that looking at the wall from the room does not.
-        if let Some(cells) = self
-            .layout
-            .duct_containing(self.player)
-            .map(|d| d.cells().to_vec())
-        {
-            self.duct_memory.extend(cells);
-        }
         for guard in &mut self.guards {
             guard.look(facility);
         }
