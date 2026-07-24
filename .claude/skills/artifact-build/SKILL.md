@@ -105,10 +105,12 @@ build. Key the artifact to *your* ticket, not to the game:
 - **Never publish onto another ticket's artifact**, and never mint a second URL
   for your own — exactly one per ticket. If none of the conflict-avoidance above
   applies, mint a fresh one for this ticket.
-- **At merge the preview is spent** — the Pages deploy becomes canonical. The
-  Artifact tool has no delete action, so republish a short tombstone pointing at
-  <https://tk-auto.github.io/intrusion/> (or simply stop refreshing it); do not
-  leave a stale build masquerading as the merged game.
+- **At merge the preview is spent** — the Pages deploy becomes canonical, and
+  work-ticket step 9 watches the main build to confirm it is clean. Just stop
+  refreshing the artifact; don't try to tombstone it (the Artifact tool has no
+  delete action, and a tombstone republish is more trouble than it's worth). The
+  "say what the snapshot is of" guardrail below already keeps a stale tab from
+  being mistaken for the merged game.
 - Keep the favicon **🕹️** on every publish (a changed favicon reads as a
   different page), and pass a short `label` naming the change (e.g.
   `"guard-cone-fix"`) so the version picker stays navigable.
