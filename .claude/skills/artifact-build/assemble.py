@@ -32,7 +32,14 @@ def main() -> None:
                     help="wasm-bindgen --target web output dir")
     ap.add_argument("--index", required=True, help="path to web/index.html")
     ap.add_argument("--out", required=True, help="output HTML path")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="bake a fixed run seed into the page (a u64). The build "
+                         "boots this facility with no URL and no typing — how a "
+                         "seed-locked artifact pins the exact level the sim played "
+                         "(#110). Omit for the normal random-seed build.")
     args = ap.parse_args()
+    if args.seed is not None and not (0 <= args.seed < 2**64):
+        sys.exit(f"assemble: --seed must be a u64 (0 .. 2^64-1), got {args.seed}")
 
     dist = pathlib.Path(args.dist)
     glue = (dist / "intrusion_web.js").read_text()
@@ -47,9 +54,16 @@ def main() -> None:
     glue = replace_once(glue, "export default __wbg_init;", "",
                         "default export")
 
+    # A baked seed is stamped as a window global before start() runs, so the shell's
+    # initial_seed() reads it ahead of the URL and the clock (crates/web/src/seed.rs).
+    # This is the artifact-safe way to pin a seed: the host strips a `…#seed=N` hash
+    # before the framed page sees it, but a global set inside the page always wins.
+    seed_line = (f'window.__intrusionSeed = "{args.seed}";\n'
+                 if args.seed is not None else "")
+
     boot = f"""
 // --- artifact bootstrap: wasm embedded as base64, no fetch needed ---
-const __b64 = "{wasm_b64}";
+{seed_line}const __b64 = "{wasm_b64}";
 const __bin = Uint8Array.from(atob(__b64), c => c.charCodeAt(0));
 __wbg_init({{ module_or_path: __bin.buffer }}).then(start);
 """

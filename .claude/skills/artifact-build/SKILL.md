@@ -119,29 +119,38 @@ Hand the URL back with one line on what changed and which branch/PR it snapshots
 
 ## 6. Hand off a specific seed (§13.1/#110)
 
-The build carries **seed sharing**: every run boots from a seed, shown in the
-seed bar top-left, and the shell and the headless sim (§13.2) boot the *identical*
-path — so a seed handed over reproduces the **same facility the bot played**. This
-is how a playtest seed (`sim --bot` numbers a batch `S, S+1, …`; `/playtest` flags
-suspicious ones) becomes a level the user can play by hand.
+The shell and the headless sim (§13.2) boot the **identical** path, so a given seed
+reproduces the **same facility the bot played** — how a playtest seed (`sim --bot`
+numbers a batch `S, S+1, …`; `/playtest` flags suspicious ones) becomes a level the
+user can play by hand. There are two seeding channels, split by where the build runs.
 
-Two ways to point the user at one seed — prefer the first for an artifact:
+**A Claude Artifact → bake the seed into the build.** The Artifact host strips a
+`…#seed=N` hash before the framed page ever sees it, so a shared *link* cannot seed
+an artifact. Instead pass the seed to `assemble.py`, which stamps a
+`window.__intrusionSeed` global the shell reads ahead of the URL and clock — the
+page then boots that exact facility with no URL and no typing:
 
-- **The on-page seed box (always works).** Tell the user to type the seed into
-  the box top-left and press *play* (or Enter). Empty or non-numeric input just
-  rolls a fresh random seed. This path needs no URL plumbing, so it is reliable
-  inside the Artifact frame regardless of how the host passes the address.
-- **A `#seed=N` link (best on the canonical URL).** The active seed is mirrored
-  into the page URL as `…#seed=N`, and the shell reads `?seed=N` or `#seed=N` on
-  load. On the **Pages deploy** this is a true deep link — hand over
-  `https://tk-auto.github.io/intrusion/#seed=8371` and it boots that level. For a
-  **Claude Artifact**, whether an appended `#seed=N` reaches the framed document
-  depends on the host, so don't promise it works — hand over the seed *number* and
-  point at the on-page box, and offer the `#seed=` link as the canonical-URL form.
+```
+python3 .claude/skills/artifact-build/assemble.py \
+  --dist "$SCRATCH/dist" --index web/index.html \
+  --out "$SCRATCH/intrusion-8371.html" --seed 8371
+```
 
-When the user's goal is specifically "let me play the seed the bot flagged", hand
-back **the artifact URL plus the seed number**, with a line like "open it and type
-`8371` into the seed box top-left" — not a bare URL.
+Smoke-verify and publish as usual (§§4–5). This is what you hand back when the ask
+is "let me play the seed the bot flagged" — **one artifact per seed**: publish the
+seed-locked build to *its own* URL (title it `Intrusion — #NNN seed 8371`), rather
+than overwriting the ticket's main preview, so both stay reachable. Say plainly in
+the handoff which seed it is locked to.
+
+**The Pages deploy → a `?seed=N` / `#seed=N` URL.** The canonical
+`ci`/`pages` build has no baked seed, and there the URL is the real document URL, so
+`https://tk-auto.github.io/intrusion/?seed=8371` (or `#seed=8371`) boots that level.
+Hand this form over only for the live Pages URL, never for an artifact.
+
+> **The on-page seed box is hidden for now** (it sat over the board's top-left). The
+> wiring is intact behind one CSS rule in `web/index.html`, so seeds currently come
+> from the build (`--seed`) or the URL, not a box. If you re-enable it, the box
+> loads any seed live and this section's "type it in" path returns.
 
 ## Guardrails
 
