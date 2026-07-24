@@ -529,12 +529,9 @@ fn self_sealing_takedowns(state: &State, blocked: &HashSet<Cell>) -> Vec<Cell> {
     let (Some(mouth), None) = (exits.next(), exits.next()) else {
         return Vec::new(); // no exit, or more than one — never a single-mouth trap
     };
-    let sealed = state
-        .guards()
-        .iter()
-        .any(|g| {
-            g.pos() == mouth && state.perceive_guard(g).is_some() && !state.guard_detects_now(g)
-        });
+    let sealed = state.guards().iter().any(|g| {
+        g.pos() == mouth && state.perceive_guard(g).is_some() && !state.guard_detects_now(g)
+    });
     if sealed {
         vec![mouth]
     } else {
