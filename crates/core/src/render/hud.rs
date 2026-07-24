@@ -1129,7 +1129,7 @@ mod tests {
         let near: String = (0..g.width()).map(|x| g.get(x, near_y).glyph).collect();
         assert_eq!(near.chars().count(), 12, "exactly one grid row wide");
         assert!(
-            near.starts_with(" intel in h"),
+            near.starts_with(" all the in"),
             "the words run to the edge and stop: {near:?}"
         );
     }

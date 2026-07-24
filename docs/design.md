@@ -255,8 +255,13 @@ If you are adding an ability and about to make it free, re-read §2.3.
   captures you. That is the only loss condition. There is no health, no combat,
   no damage. **[SETTLED]**
 - **Being seen is not losing.** It is the beginning of a problem.
-- **Win: satisfy the objectives, then return to your entry point.** You leave the
-  way you came in. Bumping the exit early refuses, with a message.
+- **Win: grab the intel, then return to your entry point.** You leave the
+  way you came in. Bumping the exit before you hold any intel refuses, with a
+  message. **[START]** — the gate is **at least one** intel in hand, not the full
+  set (§10.2): one objective is a complete run, and pressing on for more is what an
+  aggressive style trades extra exposure for, not a requirement. The all-intel march
+  kept a run long enough that the §13.2 bot was caught nearly every seed; one-intel
+  keeps the outcome profile mixed (§13.3).
 
 > **Consequence to preserve:** because capture is *contact*, not *detection*,
 > being invisible does not make you safe. A guard patrolling into the cell you
@@ -1060,7 +1065,7 @@ is unclear and probably wants play evidence first.
 | Size | **40 × 40** **[START]** |
 | Guards | **5** **[START]** |
 | Intel | **3** **[START]** |
-| Exit rule | All intel required |
+| Exit rule | **At least one intel required** **[START]** |
 
 Size is **screen-bound**: the whole level renders on screen with no camera
 (§11.4 **[SETTLED]**), so it cannot outgrow what one screen shows legibly. The
@@ -1147,9 +1152,30 @@ stay a future axis.
 > hidden in.
 > Placement is the generator's job (§10.1.6); this behaviour — bump-to-enter, the
 > concealed state, and the occupied glyph — is the hideout **interaction** ticket,
-> which the turn loop, the renderer, and vision (§6) complete together. **Whether a
-> guard can ever flush you out** (search a cupboard when alerted) stays **[OPEN]**
-> (§15 Q5).
+> which the turn loop, the renderer, and vision (§6) complete together.
+
+> **The one exception: a guard that saw you climb in can flush you out. [SETTLED]**
+> (§15 Q5, resolving the "saw you go in" half.) A cupboard refuses contact *unless*
+> a guard **witnessed** the dive — its cone covered the cupboard on the turn you
+> climbed in, **and** it was already **alerted** (any non-Calm state: chasing,
+> investigating, searching, responding). Such a guard re-engages the cupboard itself
+> as a live lead (it Chases the alcove), walks to the mouth, and **captures the
+> hidden player** — diving into a cupboard in plain sight of a hunter is not a free
+> escape. The fact is stored **per guard** and it is the *only* way a cupboard is
+> ever entered: a patrol that never saw you go in still routes around the occupied
+> cupboard forever (§10.3), and a **Calm** guard whose cone merely grazes the
+> cupboard as you enter is *not* alerted, so it does not check — you can still hide
+> from a routine sweep. The witness is dropped when the guard's lead runs cold and
+> it stands down (§7.1 — you waited it out) or when you leave that cell, so hiding
+> still works the moment you **break sight first, then dive** (§7.6): out of every
+> alerted cone on the entry turn, there is no witness. This keeps the §2.2 fairness
+> promise — a cupboard capture is only ever the result of hiding *while watched*, a
+> decision you could read straight off the danger overlay (the cone was on the
+> cupboard, §11.5).
+> *(Deferred: the "found a body nearby" trigger from §15 Q5 — a guard checking a
+> cupboard because a corpse turned up beside it — is a separate follow-up; this rule
+> is the "saw you go in" case only. Ducts are untouched: a duct is an escape a
+> pursuer cannot follow (§10.7), so it stays contact-safe unconditionally.)*
 
 > **A cupboard is also where you hide a body (§7.2), and doing so locks it.** Drag a
 > body to a cupboard and **bump the empty cupboard to stow it inside**: the body
@@ -1904,11 +1930,16 @@ default.
    a ghost↔aggressive play spectrum. If not, the radio clock (§7.3) is the only
    takedown cost, which may well be enough. Note a score also gives the bot in §13
    a far better objective function, which is an argument for it beyond the game.
-5. **Do guards check hideouts?** If never, hideouts are permanent safe rooms and
-   patrol coverage has holes by design. If always, they're death traps. Probably:
-   **only when alerted, and only if they saw you go in or found a body nearby.**
-   Interacts hard with §7.6 — a hideout that gets checked during a search is a much
-   more interesting object than one that doesn't.
+5. **Do guards check hideouts?** *(Resolved for the "saw you go in" half — see
+   §10.3.)* If never, hideouts are permanent safe rooms and patrol coverage has
+   holes by design. If always, they're death traps. The settled answer: **only when
+   alerted, and only if they saw you go in** — a guard that was alerted and whose
+   cone covered the cupboard on the entry turn flushes you out; every other guard
+   still routes around the occupied cupboard forever. This interacts with §7.6 as
+   hoped — a cupboard entered *in* a hunter's cone is now a trap, so the hiding game
+   rewards breaking sight *first*. **Still [OPEN]:** the **"found a body nearby"**
+   trigger (a guard checking a cupboard because a corpse turned up beside it), left
+   as a follow-up.
 6. **Sight and sense: box or circle?** The box is cheap and nobody noticed. A
    circle is more natural and slightly less exploitable at the diagonals. Whatever
    wins should apply to **both** the vision box (§6.1) and the guard-sense box (§9.1)

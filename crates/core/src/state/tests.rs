@@ -2723,12 +2723,21 @@ fn a_guard_cannot_capture_a_hidden_player() {
 /// back to patrol, and only then releases to Calm and moves on. The player waits it
 /// out concealed in a cupboard: it is never captured, watches the guard search, and
 /// watches it leave — the payoff §14 exists to test.
+///
+/// The dive is **unwitnessed** (§15 Q5): a wall recesses the cupboard into the guard's
+/// sight-shadow, so the guard never sees the player climb in and cannot flush them —
+/// exactly the "break sight *first*, then hide" the hiding game now rewards. Diving in
+/// while the chaser's cone still covered the cupboard would (correctly) be caught,
+/// which is its own test below.
 #[test]
 fn a_hidden_player_waits_out_a_search_and_watches_the_guard_leave() {
     let mut layout = open_room(16, 12);
     layout.place(Cell::new(4, 5), Terrain::Hideout); // a cupboard beside the player
-                                                     // Guard at (5,1) facing south: its cone covers the player at (5,5), four cells
-                                                     // down — the certain zone — so it detects and chases at the startup turn.
+                                                     // A wall recessing the cupboard: it blocks the guard's line to (4,5), so the dive
+                                                     // west lands in the guard's sight-shadow and is never witnessed (§15 Q5).
+    layout.place(Cell::new(4, 4), Terrain::Wall);
+    // Guard at (5,1) facing south: its cone covers the player at (5,5), four cells
+    // down — the certain zone — so it detects and chases at the startup turn.
     let guards = vec![Guard::patrolling(Cell::new(5, 1))];
     let mut s = State::new(
         layout,
@@ -2744,9 +2753,15 @@ fn a_hidden_player_waits_out_a_search_and_watches_the_guard_leave() {
         "the guard spots the player at spawn",
     );
 
-    // The player ducks west into the cupboard and holds. The guard loses sight.
+    // The player ducks west into the cupboard and holds. The guard loses sight — and,
+    // with the cupboard walled into its shadow, never saw the dive, so it cannot flush.
     s.step(Input::Step(Direction::West));
     assert!(s.hidden(), "the player is concealed");
+    assert_eq!(
+        s.guards()[0].witnessed_hideout(),
+        None,
+        "the occluded dive is unwitnessed (§15 Q5)",
+    );
 
     let focus = Cell::new(5, 5); // where the guard last knew the player
     let (mut searched, mut released, mut left_the_area) = (false, false, false);
@@ -2781,6 +2796,132 @@ fn a_hidden_player_waits_out_a_search_and_watches_the_guard_leave() {
         s.hidden(),
         "the player rode the whole search out from cover"
     );
+}
+
+/// §15 Q5: **a guard that saw you climb in flushes you out.** A chasing guard whose
+/// cone covers the cupboard on the entry turn witnessed the dive — so it re-engages
+/// the alcove, walks to the mouth, and captures the hidden player, rather than being
+/// refused forever (§10.3). This is the loophole the ticket closes: diving in while a
+/// hunter watches is not a free escape.
+#[test]
+fn a_guard_that_saw_the_dive_flushes_the_hidden_player() {
+    let mut layout = open_room(16, 12);
+    layout.place(Cell::new(4, 5), Terrain::Hideout); // a cupboard beside the player
+    let guards = vec![Guard::patrolling(Cell::new(5, 1))];
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        guards,
+        Vec::new(),
+        Cell::new(14, 10),
+    );
+    assert_eq!(
+        s.guards()[0].state(),
+        GuardState::Chasing,
+        "precondition: the guard is hunting the player",
+    );
+
+    // The player dives west into the cupboard — in plain sight of the chaser, whose
+    // cone covers (4,5) this turn. That is a witnessed dive (§15 Q5).
+    s.step(Input::Step(Direction::West));
+    assert!(s.hidden(), "the player is in the cupboard");
+    assert_eq!(
+        s.guards()[0].witnessed_hideout(),
+        Some(Cell::new(4, 5)),
+        "the chaser witnessed the dive and is flushing this cupboard",
+    );
+
+    // It walks to the mouth and captures — a cupboard is no refuge from a guard that
+    // saw you climb in.
+    let mut captured = false;
+    for _ in 0..10 {
+        let events = s.step(Input::Wait);
+        if events.iter().any(|e| matches!(e, Event::Captured { .. })) {
+            captured = true;
+            break;
+        }
+    }
+    assert!(
+        captured,
+        "the witnessing guard flushed and caught the player"
+    );
+    assert_eq!(s.outcome(), Outcome::Lost, "a witnessed dive is not safe");
+}
+
+/// §15 Q5, the other half: **only an *alerted* guard checks.** A **Calm** patrol whose
+/// cone merely grazes the cupboard as the player climbs in is not hunting — it never
+/// saw the player (they were concealed throughout), so it does not check, and the
+/// cupboard stays the safe room it is (§10.3). The distinction is the guard's *mood*,
+/// not the geometry: the cone covers the entry either way.
+#[test]
+fn a_calm_patrol_that_sees_the_cupboard_does_not_check() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // where the player starts, concealed
+    layout.place(Cell::new(6, 5), Terrain::Hideout); // the cupboard they slip across into
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5), // start hidden, so the guard never detects the player
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 1))], // faces south; cone falls over both cupboards
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+    assert!(s.hidden(), "precondition: the player begins concealed");
+    assert_eq!(
+        s.guards()[0].state(),
+        GuardState::Calm,
+        "precondition: a Calm patrol that never saw the player",
+    );
+    assert!(
+        s.guards()[0].fov().contains(Cell::new(6, 5)),
+        "precondition: the Calm guard's cone does cover the entry cell",
+    );
+
+    // Slip from one cupboard straight into the adjacent one — a fresh entry, in the
+    // Calm guard's cone. It is not alerted, so it does not witness or flush.
+    s.step(Input::Step(Direction::East));
+    assert!(s.hidden(), "the player is in the second cupboard");
+    assert_eq!(
+        s.guards()[0].witnessed_hideout(),
+        None,
+        "a Calm guard does not check a cupboard it saw the player enter",
+    );
+
+    // It stays Calm and never captures — the cupboard is still a safe room.
+    for _ in 0..20 {
+        s.step(Input::Wait);
+        assert_eq!(s.outcome(), Outcome::Playing, "the hidden player is safe");
+    }
+}
+
+/// §10.2 [START]: the exit opens once **at least one** intel is in hand — one objective
+/// is a complete run. Taking a single console of several and reaching the exit wins.
+#[test]
+fn one_intel_opens_the_exit() {
+    let mut s = State::new(
+        open_room(12, 12),
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(5, 4), Cell::new(8, 8)], // two objectives; one is enough
+        Cell::new(5, 6),
+    );
+    assert!(!s.exit_ready(), "empty-handed: the exit is not yet open");
+    // Bumping the exit with no intel refuses (free, §4.5).
+    let events = s.step(Input::Step(Direction::South));
+    assert!(events.contains(&Event::ExitRefused), "refused empty-handed");
+    assert_eq!(s.outcome(), Outcome::Playing);
+
+    // Take one console (bump north), leaving the other out.
+    s.step(Input::Step(Direction::North));
+    assert_eq!(s.objectives_remaining(), 1, "one intel still out");
+    assert!(s.exit_ready(), "one intel in hand opens the exit");
+
+    // Reach the exit and leave — a win on a single objective.
+    let events = s.step(Input::Step(Direction::South));
+    assert!(events.contains(&Event::Won), "one intel + exit is a win");
+    assert_eq!(s.outcome(), Outcome::Won);
 }
 
 /// §7.8: guards are solid to each other but **path around** a colleague instead of

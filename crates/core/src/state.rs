@@ -16,8 +16,9 @@
 //!   end the turn, so the world does not move and the guards do not get a go.
 //! - **Win and lose (§4.5), the only two.** *Lose:* a guard moving into your cell
 //!   captures you — contact, not detection, so being unseen is not being safe. *Win:*
-//!   take every objective, then return to the exit you came in by; bumping it early
-//!   refuses. There is no health, no combat.
+//!   take at least one intel ([`exit_ready`](State::exit_ready), §10.2 [START]), then
+//!   return to the exit you came in by; bumping it empty-handed refuses. There is no
+//!   health, no combat.
 //! - **The startup turn (§4.2).** One full turn runs at level start, before the first
 //!   input, so guards have position and sight established when the player first acts.
 //!
@@ -44,7 +45,7 @@ use crate::cover;
 use crate::duct::Duct;
 use crate::facility::Terrain;
 use crate::generate::Layout;
-use crate::guard::{Guard, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
+use crate::guard::{Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
 use crate::radio;
 use crate::region::{DoorCell, DoorId};
 use crate::rng::Rng;
@@ -189,7 +190,7 @@ pub enum Event {
     IntelTaken { remaining: usize },
     /// The player bumped the exit with objectives still outstanding — refused (§4.5).
     ExitRefused,
-    /// Every objective was in hand and the player reached the exit: the run is won.
+    /// The intel gate was satisfied (§10.2) and the player reached the exit: won.
     Won,
     /// A guard moved into the player's cell: captured (§4.5) — the only loss.
     Captured { by: Cell },
@@ -331,9 +332,9 @@ pub enum Affordance {
     EnterDuct,
     /// A table: bump to crouch behind it (§10.3).
     Crouch,
-    /// The exit, with every objective in hand: bump to win (§4.5).
+    /// The exit, with the intel gate met (§10.2): bump to win (§4.5).
     Leave,
-    /// The exit while intel is still out: bumping it will refuse (§4.5).
+    /// The exit while no intel is yet in hand: bumping it will refuse (§4.5).
     ExitRefused,
 }
 
@@ -397,7 +398,8 @@ enum BumpKind {
     /// body inside and locks the cupboard — it is no longer a hideout. A spent
     /// turn; the player stays put and their hands come free.
     DepositBody,
-    /// The exit; `ready` is true iff every objective is in hand (win vs. refused).
+    /// The exit; `ready` is [`exit_ready`](State::exit_ready) — at least one intel in
+    /// hand (§10.2 [START]): win vs. refused.
     Exit { ready: bool },
     /// An objective console still holding its intel.
     Intel,
@@ -508,7 +510,8 @@ pub enum Outcome {
 }
 
 /// One objective: an intel console and whether it has been taken. The v1 exit rule
-/// is *all intel required* (§10.2), so the run is won only once none remain.
+/// is *at least one intel required* ([`exit_ready`](State::exit_ready), §10.2 [START]),
+/// so the run is won once any objective is in hand.
 #[derive(Clone, Copy, Debug)]
 struct Objective {
     cell: Cell,
@@ -559,6 +562,13 @@ pub struct State {
     /// bump into an adjacent cell, and every action that could move the player
     /// clears it.
     crouched_behind: Option<Cell>,
+    /// The cupboard the player climbed into **this turn**, or `None` — the entry-turn
+    /// signal the §15 Q5 witness check reads. Set in the [`BumpKind::Hide`] arm of
+    /// phase 1 and consumed by [`guard_phase`](Self::guard_phase) the same turn; reset
+    /// at the head of every [`step`](Self::step), so a guard only ever witnesses a dive
+    /// on the turn it actually happens (a guard that later aims its cone at an occupied
+    /// cupboard did not see the player go in, and never gains the flush, §10.3).
+    entered_hideout: Option<Cell>,
     guards: Vec<Guard>,
     /// The bodies takedowns have left (§7.2) — solid entities the level owns
     /// (§12.3), each remembering its guard's post for the radio net (§7.3).
@@ -671,6 +681,7 @@ impl State {
             waited: false,
             moved_this_turn: false,
             crouched_behind: None,
+            entered_hideout: None,
             guards,
             bodies: Vec::new(),
             dragging: None,
@@ -1025,6 +1036,18 @@ impl State {
         self.objectives.iter().filter(|o| !o.taken).count()
     }
 
+    /// Whether the exit will accept the player — the run's intel gate (§10.2/§4.5).
+    /// **[START] — experiment (§15 Q4/§13):** the exit opens once **at least one**
+    /// intel is in hand rather than the full set. Grabbing one objective and leaving
+    /// is a complete run; grabbing more is for the aggressive play (and a future
+    /// score, §15 Q4) to reward, not a requirement. This shortens the baseline §13.2
+    /// bot's exposure — the all-intel march pinned it in the facility long enough to
+    /// be caught nearly every seed — so the outcome profile stays mixed (§13.3). A
+    /// level with no objectives (never generated in v1) is winnable at once.
+    pub fn exit_ready(&self) -> bool {
+        self.objectives.is_empty() || self.objectives.iter().any(|o| o.taken)
+    }
+
     /// The cells of consoles whose intel has been **taken** — spent objectives
     /// (§11.2). Terrain alone can't tell a spent console from a live one (both stay
     /// `Terrain::Console`); the `taken` flag lives here, so the renderer reads it to
@@ -1136,6 +1159,9 @@ impl State {
         }
 
         let mut events = Vec::new();
+        // A fresh turn: no hideout has been climbed into yet. The §15 Q5 witness check
+        // in phase 3 reads whatever the Hide bump sets below, this turn only.
+        self.entered_hideout = None;
         // Phase 1. A free action (wall bump, refused exit) does not end the turn.
         let from = self.player;
         let spent = self.player_phase(input, &mut events);
@@ -1446,6 +1472,9 @@ impl State {
                 // climbing back out is an ordinary step whose facing follows its own
                 // direction (see `BumpKind::Move`).
                 self.facing = dir.opposite();
+                // Mark the entry so phase 3 can decide which guards *witnessed* it
+                // (§15 Q5): an alerted guard whose cone covers this cell saw the dive.
+                self.entered_hideout = Some(target);
                 events.push(Event::EnteredHideout { at: target });
                 true
             }
@@ -1635,7 +1664,7 @@ impl State {
         }
         if target == self.exit {
             return BumpKind::Exit {
-                ready: self.objectives_remaining() == 0,
+                ready: self.exit_ready(),
             };
         }
         if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
@@ -1898,15 +1927,49 @@ impl State {
             .iter()
             .map(|guard| self.concealed_from(guard.pos()))
             .collect();
-        for (guard, &concealed) in self.guards.iter_mut().zip(&concealed) {
+        // §15 Q5 witnessing, resolved up front so the loop can take each guard mutably.
+        // `entered` is `Some(cell)` only on the turn the player climbs in; `hidden_cell`
+        // is where the player now stands hidden (`None` on open floor or in a duct), so
+        // a stored witness that no longer matches it is stale and dropped below.
+        let player = self.player;
+        let entered = self.entered_hideout;
+        let hidden_cell = self.hidden().then_some(player);
+        // A guard may only witness a dive it was in a position for the player to *read*:
+        // one whose cell is in the player's own FOV, so its cone is painted on the danger
+        // overlay (§11.5) and the player saw it cover the cupboard. A guard the player
+        // cannot see cannot flush them — that would be the "captured by something you
+        // couldn't sense" unfairness §2.2 forbids. This is also exactly the channel the
+        // §13.2 bot plans on (`perceive_guard`), so core and bot never disagree.
+        let seen: Vec<bool> = self
+            .guards
+            .iter()
+            .map(|guard| self.perceive_guard(guard) == Some(GuardPerception::Seen))
+            .collect();
+        for ((guard, &concealed), &seen) in self.guards.iter_mut().zip(&concealed).zip(&seen) {
             // Awareness is per-turn, so the pre-sense reading is last turn's: a
             // guard aware now that was not aware then has *freshly* found the
             // player — the transition [`Event::Detected`] reports, and the §13.2
             // sim counts. A held chase re-detects every turn and stays silent.
             let was_aware = guard.detected_player();
-            guard.sense(self.player, concealed);
+            guard.sense(player, concealed);
             if guard.detected_player() && !was_aware {
                 events.push(Event::Detected { by: guard.pos() });
+            }
+            // Witness the dive (§15 Q5): on the entry turn, a guard the player can see
+            // that is *alerted* (any non-Calm mood) and whose cone covers the cupboard
+            // saw the player climb in and may flush them — it re-engages the alcove as a
+            // live lead. A Calm patrol whose cone merely grazes the entry is not alerted,
+            // so it never checks, and the cupboard stays a safe room against it (§10.3).
+            if let Some(cell) = entered {
+                if seen && guard.state() != GuardState::Calm && guard.fov().contains(cell) {
+                    guard.flush_hideout(cell);
+                }
+            } else if guard.witnessed_hideout().is_some()
+                && guard.witnessed_hideout() != hidden_cell
+            {
+                // The player has left the cell this guard was flushing (climbed out, or
+                // moved to another cupboard): the witness is stale, so drop it.
+                guard.forget_hideout();
             }
         }
         // The found-body scan (§7.2): a body is *found* the first time any cone
@@ -1986,8 +2049,11 @@ impl State {
                     // On the floor, contact is capture (§4.5) — unless the player is in
                     // an occupied cupboard, a solid cell the patrol routes *around*
                     // (§10.3/§7.6): the guard cannot enter, so it holds this turn. This
-                    // is the "hold still, watch the cone sweep past" payoff.
-                    if self.hidden() {
+                    // is the "hold still, watch the cone sweep past" payoff — with one
+                    // exception (§15 Q5): a guard that *witnessed* the player climb into
+                    // this cupboard while alerted flushes them out, so its contact is a
+                    // capture like any other. Every other guard is still refused.
+                    if self.hidden() && self.guards[i].witnessed_hideout() != Some(target) {
                         continue;
                     }
                     self.guards[i].place_at(target);
