@@ -232,11 +232,13 @@ const _: () = assert!(BODY_ALERT_DURATION > ALERT_DURATION);
 pub(crate) const GUARD_DWELL_CHANCE_PERCENT: u32 = 50;
 
 /// The shortest and longest a Calm dwell lasts, in turns (§7.5 dwell, §153,
-/// **[START] = 2–4**): once a guard decides to dwell, its length is drawn
+/// **[START] = 3–5**): once a guard decides to dwell, its length is drawn
 /// uniformly from this inclusive range on the seeded run RNG (§12.4). Short enough
-/// to leave patrols covering ground, long enough to be a real window to act.
-pub(crate) const GUARD_DWELL_TURNS_MIN: u32 = 2;
-pub(crate) const GUARD_DWELL_TURNS_MAX: u32 = 4;
+/// to leave patrols covering ground, long enough to be a real window to act — a
+/// touch longer than the original 2–4 to widen the behind-the-back takedown window
+/// (§7.2/§153).
+pub(crate) const GUARD_DWELL_TURNS_MIN: u32 = 3;
+pub(crate) const GUARD_DWELL_TURNS_MAX: u32 = 5;
 // A dwell is always at least one turn and the range is well-formed, whatever the
 // [START] numbers are retuned to.
 const _: () = assert!(GUARD_DWELL_TURNS_MIN >= 1 && GUARD_DWELL_TURNS_MIN <= GUARD_DWELL_TURNS_MAX);
@@ -1087,6 +1089,11 @@ mod tests {
             assert_eq!(guard.facing(), facing, "a dwell does not re-aim (§5)");
             holds += 1;
         }
+        assert_eq!(
+            (GUARD_DWELL_TURNS_MIN, GUARD_DWELL_TURNS_MAX),
+            (3, 5),
+            "the [START] dwell range",
+        );
         assert!(
             (GUARD_DWELL_TURNS_MIN..=GUARD_DWELL_TURNS_MAX).contains(&holds),
             "the dwell lasted {holds} turns, outside the [START] {GUARD_DWELL_TURNS_MIN}..={GUARD_DWELL_TURNS_MAX} range",

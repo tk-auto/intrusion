@@ -496,7 +496,7 @@ it has not recently looked at.
   dwells and a detection cancels an in-progress dwell the same turn (a hunt never
   slows, the mirror of §7.1's "guards never accelerate"). The whether-to-dwell
   roll and the dwell length are drawn from the run seed (§12.4), tuned by
-  **[START]** knobs: dwell chance (**50%**) and dwell length (**2–4** turns).
+  **[START]** knobs: dwell chance (**50%**) and dwell length (**3–5** turns).
   Dwelling lowers patrol coverage on purpose (§7.6/§7.7) — a sim knob to watch.
 
 **Known weakness, worth fixing: territories are boxes around spawn points, which
@@ -1188,7 +1188,7 @@ one unit.
     would erase the "traffic opens the facility up" pressure).
   - **Automatic doors** (#147) are a **[START]** fraction of doorways generated
     *frameless* — no hinges, the whole span is panels — so there is no handle to shut
-    them by hand. They close *themselves* a few turns (**[START] ~3**) after the
+    them by hand. They close *themselves* a few turns (**[START] ~5**) after the
     doorway is last vacated; an actor standing in the throat holds them open (never a
     crush). The delay is a stealth window: a guard passing through leaves the door open
     just long enough to slip after them.
