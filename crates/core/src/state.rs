@@ -997,6 +997,15 @@ impl State {
         self.objectives.iter().filter(|o| !o.taken).count()
     }
 
+    /// The cells of consoles whose intel has been **taken** — spent objectives
+    /// (§11.2). Terrain alone can't tell a spent console from a live one (both stay
+    /// `Terrain::Console`); the `taken` flag lives here, so the renderer reads it to
+    /// draw a collected console as inert Neutral scenery rather than a live Interest
+    /// `$` (§11.2 "spent objectives" = Neutral).
+    pub fn spent_consoles(&self) -> impl Iterator<Item = Cell> + '_ {
+        self.objectives.iter().filter(|o| o.taken).map(|o| o.cell)
+    }
+
     /// The count of completed turns (the startup turn is turn zero).
     pub fn turn(&self) -> u32 {
         self.turn
