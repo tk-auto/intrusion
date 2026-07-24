@@ -209,6 +209,23 @@ pub fn render(state: &State) -> Grid {
         })
         .collect();
 
+    // A spent objective is Neutral scenery (§11.2): once its intel is taken a console
+    // stops being a live goal, so it recolours from Interest to Neutral while keeping
+    // its `$` glyph — "there was intel here, it's collected" — instead of staying
+    // indistinguishable from a live console. Terrain stays `Console` (geometry is
+    // static); only the category changes, so the core stays colour-blind (§11.2) and
+    // the shell's one table owns the actual colour. Runs on the terrain layer, before
+    // the entity/overlay passes, so a guard or the player standing on a spent console
+    // still draws over it. Taking intel requires reaching (thus seeing) the console and
+    // memory is monotonic (§11.5a), so a spent console is always at least remembered —
+    // recolour only where it actually shows, both live and in memory, never a masked
+    // floor dot standing in for a never-seen console.
+    for cell in state.spent_consoles() {
+        if fov.contains(cell) || memory.contains(cell) {
+            cells[(cell.y * width + cell.x) as usize].fg = Category::Neutral;
+        }
+    }
+
     // The duct interior view (§11.5a/§10.7, #134). A duct's path is shown **only
     // while the player is crawling it**: the whole occupied run lights as one
     // connected `=` — the crawlspace read as a single space (the player's own cell is
@@ -452,7 +469,7 @@ mod tests {
     use crate::cell::{Cell, Direction};
     use crate::facility::{Facility, Terrain};
     use crate::guard::Guard;
-    use crate::state::{Input, State};
+    use crate::state::{Event, Input, State};
     use crate::test_support::open_room;
 
     /// A hand-built state on a `w × h` walled box: the player, some guards, and a far
@@ -990,6 +1007,61 @@ mod tests {
             "a guard does not persist out of FOV",
         );
         assert_eq!(g.get(guard.x, guard.y).vis, Visibility::Dimmed);
+    }
+
+    /// §11.2 spent objectives: a live console is Interest `$`; once its intel is
+    /// **taken** the same cell keeps its `$` glyph but recolours to Neutral — inert
+    /// scenery — so the player can tell at a glance what they have already collected.
+    /// The recolour holds in memory too: a spent console you have walked away from
+    /// does not reappear as live Interest.
+    #[test]
+    fn a_spent_console_recolours_to_neutral() {
+        // Player at (10,10) facing east; the console one cell east, in view.
+        let mut s = State::new(
+            open_room(40, 40),
+            Cell::new(10, 10),
+            Direction::East,
+            Vec::new(),
+            [Cell::new(11, 10)],
+            Cell::new(38, 38),
+        );
+
+        // Untaken: a live Interest `$`.
+        let live = render(&s).get(11, 10);
+        assert_eq!(
+            (live.glyph, live.fg, live.vis),
+            ('$', Category::Interest, Visibility::Live),
+            "a live console is Interest",
+        );
+
+        // Bump the console east to take the intel; the player does not move.
+        assert_eq!(
+            s.step(Input::Step(Direction::East)),
+            vec![Event::IntelTaken { remaining: 0 }],
+        );
+        assert_eq!(
+            s.player(),
+            Cell::new(10, 10),
+            "taking intel is a bump, not a move"
+        );
+
+        // Spent: the `$` stays but the category drops to Neutral (§11.2).
+        let spent = render(&s).get(11, 10);
+        assert_eq!(
+            (spent.glyph, spent.fg, spent.vis),
+            ('$', Category::Neutral, Visibility::Live),
+            "a spent console is Neutral scenery, glyph kept",
+        );
+
+        // Leave it behind (face and step west): remembered, and still Neutral —
+        // never a live-purple ghost in memory.
+        s.step(Input::Step(Direction::West)); // to (9,10), facing west
+        let remembered = render(&s).get(11, 10);
+        assert_eq!(
+            (remembered.glyph, remembered.fg, remembered.vis),
+            ('$', Category::Neutral, Visibility::Remembered),
+            "a spent console stays Neutral in memory",
+        );
     }
 
     /// §11.5a's scouting reward: an unscouted hideout reads as plain **wall** — the
