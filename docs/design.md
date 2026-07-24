@@ -845,14 +845,17 @@ closed door and walking it open (§10.4), a Calm guard shutting one behind itsel
 an automatic door timing out — is *evidence that someone passed* (§10.4). As a
 transient near-line word ("the door opens") that evidence was easy to miss, cleared
 on your next action (§11.7), and never said *where*. So it becomes a **positional,
-on-grid cue**, exactly like the sensed guard: a **background highlight on the door
-cell that changed**, readable around a corner and out of FOV.
+on-grid cue**, exactly like the sensed guard.
 
-- **Its own information category, `Trace`** (§11.2) — "a door changed here". Painted
-  as a background (never a glyph), in a hue distinct from the sensed orange and the
-  danger red, and distinct from the door's own tan glyph sitting on it. It says
-  *where*, never *who* passed or *which way they went* — the same restraint the
-  sensed dot keeps (position, never intent).
+- **It is the *same* sense channel — the `Sensed` category (§11.2), the same orange
+  background** as a guard felt through a wall. A door change is "sensed through a
+  wall" just as a guard is, so it reads in one colour, not a second one to learn.
+  It is position only — *where* a door changed, never *who* passed or *which way
+  they went* — the same restraint the sensed dot keeps.
+- **It lights the whole door.** The cue paints the door's **entire footprint** —
+  both hinges and every panel — not just the one panel the guard touched, so the
+  eye reads "that doorway, over there" rather than hunting a single highlighted
+  cell.
 - **It carries farther than the guard sense.** A door change is a louder, coarser
   event than a guard's exact position, so it reaches a new **`DOOR_SENSE_RANGE`
   [START]** that sits **above** the guard sense — `DOOR_SENSE_RANGE = 15 >
@@ -867,15 +870,22 @@ cell that changed**, readable around a corner and out of FOV.
   not a live position, so the cue decays over a short **`DOOR_CUE_DECAY_TURNS`
   [START]** (currently 3) and is then gone — visible while the fact is fresh, not a
   single-frame flash and not a permanent stain.
-- **Open and shut share one cue** — it is the same evidence ("a door changed here"),
-  and both drive it. Where the cue coincides with a sensed guard or the danger
-  overlay, the threat outranks it (§11.5: being seen — and reading a guard's live
-  cell — outranks a fading trace).
+- **Open and shut share one cue** — it is the same evidence, and both drive it.
+  Where the cue coincides with the danger overlay, being seen outranks it (§11.5).
 - **A door *you* operate** keeps its quiet near-line self-narration (§11.7) and
   lights no cue — you already know; the cue is for the doors you did *not* move.
 
-This pairs with the light-mode reskin (§11.2): the `Trace` category must read on both
-backdrops, like every other category.
+> **[OPEN] — the sense channel wants to unify around this fading model.** The door
+> cue fades over a few turns because a door change is discrete. The **guard** sense
+> today is instead a hard on/off dot at the live range. The intended direction is
+> for the guard sense to gain the *same* persistence — a sensed guard leaves a
+> **fading trail** as it moves, the mark decaying a few turns behind its live cell —
+> so the two halves of the sense read as one coherent "sensed, and fading" system.
+> The door cue's decaying-marker machinery (`DOOR_CUE_DECAY_TURNS`, the per-turn
+> decay pass) is the seed of that shared model; unifying them is its own ticket.
+
+This shares the `Sensed` category with the guard sense, so the light-mode reskin
+(§11.2) covers both at once.
 
 ---
 
@@ -1183,9 +1193,10 @@ one unit.
     crush). The delay is a stealth window: a guard passing through leaves the door open
     just long enough to slip after them.
 - **You sense a door change away from you** (§9.4): a door opening or shutting that
-  you did not cause paints a fading on-grid **`Trace`** cue on its cell, at its own
-  longer `DOOR_SENSE_RANGE`, so "someone passed through there" stays legible around a
-  corner rather than living only in a transient near-line word.
+  you did not cause lights a fading on-grid cue over its **whole footprint**, in the
+  same orange **`Sensed`** channel as a guard felt through a wall, at its own longer
+  `DOOR_SENSE_RANGE`, so "someone passed through there" stays legible around a corner
+  rather than living only in a transient near-line word.
 
 ### 10.5 The spatial model — fix this properly
 
@@ -1374,8 +1385,7 @@ one-table edit.
 | **Caution** | Yellow | A threat that is unaware |
 | **Warning** | Orange | A threat that is hunting |
 | **Danger** | Red | A threat that has you |
-| **Sensed** | Orange (background) | A guard **sensed through a wall** (§9) — an eye-catching cell highlight, position only, mind and facing unknown |
-| **Trace** | Cyan (background) | A door that **just changed away from you** (§9.4/§10.4) — a fading cell highlight, "someone passed here", position only |
+| **Sensed** | Orange (background) | **Sensed through a wall** (§9) — a guard, or a door that just changed away from you (§9.4); an eye-catching highlight, position only |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
 
@@ -1389,10 +1399,9 @@ nothing about what it is doing — the eye-catching parallel of the red danger
 overlay, orange not red. The bloom from an orange cell to a state-coloured
 `g`-with-cone *is* the seen/sensed distinction, made visible. Keep all of this.
 *(Sensed reuses Warning's orange hue but only ever as a background, never a glyph,
-so the two never collide; the old §9.3 cyan "Noise" slot — a heard sound's source
-— is freed, since sound is gone, and the **Trace** door cue (§9.4) now claims that
-cyan: a cool background clear of the two warm threat overlays and of the tan door
-glyph that sits on it.)*
+so the two never collide; the door-change cue (§9.4) shares this same Sensed
+background, so a sensed guard and a sensed door change read as one channel. The old
+§9.3 cyan "Noise" slot — a heard sound's source — stays freed, since sound is gone.)*
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant.

@@ -138,10 +138,11 @@ impl Grid {
 /// The one exception is a guard's *position*, known through walls within the
 /// guard-sense box (§9): a guard out of the FOV but in range gets a flat orange
 /// Sensed background on its cell — position only, no cone, and still never remembered
-/// once out of range. A door's *change* is sensed the same way but at its own longer
-/// range (§9.2/§10.4): a door that opens or shuts away from the player leaves a fading
-/// [`Category::Trace`] background on its cell — evidence someone passed, also position
-/// only and also painted through walls.
+/// once out of range. A door's *change* is sensed the same way, in the same
+/// [`Category::Sensed`] channel, but at its own longer range (§9.4/§10.4): a door that
+/// opens or shuts away from the player leaves a fading orange background over its
+/// **whole footprint** — evidence someone passed, also position only and also painted
+/// through walls.
 ///
 /// # Glyph priority (§11.3)
 ///
@@ -342,15 +343,15 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
-    // The door-change cue (§9.2/§10.4): every cell where a door opened or shut away
-    // from the player, within `DOOR_SENSE_RANGE`, gets a `Category::Trace` background
-    // — a filled highlight that fades over a few turns, evidence someone passed,
-    // readable around a corner and out of FOV like the sensed dot (position only,
-    // never who or which way). Painted *first* of the three background overlays, so a
-    // coincident sensed dot or danger cone outranks it (§11.5: being seen — and
-    // knowing a guard's live cell — outranks a fading trace of a past change).
+    // The door-change cue (§9.4/§10.4): the whole footprint of every door that opened
+    // or shut away from the player, within `DOOR_SENSE_RANGE`, gets a
+    // `Category::Sensed` background — the *same* orange "sensed through a wall" channel
+    // as a guard felt through a wall, a filled highlight that fades over a few turns
+    // (evidence someone passed, position only, never who or which way). Painted
+    // *before* the danger overlay so a coincident cone outranks it (§11.5: being seen
+    // outranks). Painted with the sensed-guard pass below, which shares the category.
     for cell in state.door_cues() {
-        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Trace);
+        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Sensed);
     }
 
     // The sensed highlight (§9.2): every guard the player *senses* through a wall but

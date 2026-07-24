@@ -3671,7 +3671,7 @@ fn the_sense_range_is_ten_and_twenty_on_wait() {
     );
 }
 
-// --- Sensing doors (§9.2/§10.4) -----------------------------------------------
+// --- Sensing doors (§9.4/§10.4) -----------------------------------------------
 
 /// A hand-built wide strip: a left room and a right room joined by one **manual**
 /// door at column 6 (hinges at `(6,1)`/`(6,3)`, panel at `(6,2)`), with a guard
@@ -3737,7 +3737,7 @@ fn drive_until_guard_opens(s: &mut State) {
     panic!("the patrolling guard never opened the door");
 }
 
-/// §9.2/§10.4 **[START]**: a door change is a louder, coarser event than a guard's
+/// §9.4/§10.4 **[START]**: a door change is a louder, coarser event than a guard's
 /// exact position, so it is felt **farther** — `DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE`
 /// — and both it and the cue decay are pinned so a later change is a visible edit.
 #[test]
@@ -3745,10 +3745,10 @@ fn the_door_sense_range_exceeds_the_guard_sense() {
     assert_eq!(DOOR_SENSE_RANGE, 15, "the [START] door-sense range");
     assert_eq!(DOOR_CUE_DECAY_TURNS, 3, "the [START] cue decay");
     // The `DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE` asymmetry itself is pinned at compile
-    // time beside the constant (§9.2/§10.4), so it cannot silently invert.
+    // time beside the constant (§9.4/§10.4), so it cannot silently invert.
 }
 
-/// §9.2/§10.4: unlike the guard sense, the door sense is **not** widened by a Wait —
+/// §9.4/§10.4: unlike the guard sense, the door sense is **not** widened by a Wait —
 /// a door change is already loud enough — but it **shrinks inside a duct** with the
 /// rest of the crawlspace's degraded perception (§10.7).
 #[test]
@@ -3776,10 +3776,11 @@ fn the_door_sense_is_not_widened_by_wait_but_shrinks_in_a_duct() {
     );
 }
 
-/// §9.2/§10.4: a door a **guard** opens out of the player's FOV, within
-/// `DOOR_SENSE_RANGE`, lights a `Category::Trace` background on the door cell —
-/// readable around the corner like a sensed dot — and the generic "the door opens"
-/// near-line self-narration is gone for a door the player did not operate.
+/// §9.4/§10.4: a door a **guard** opens out of the player's FOV, within
+/// `DOOR_SENSE_RANGE`, lights the door's **whole footprint** as a `Category::Sensed`
+/// background — the same "sensed through a wall" channel as a guard, readable around
+/// the corner — and the generic "the door opens" near-line self-narration is gone for
+/// a door the player did not operate.
 #[test]
 fn a_guard_door_lights_a_cue_out_of_fov() {
     let (mut s, panel) = guard_door_strip(30, Cell::new(7, 2));
@@ -3794,24 +3795,38 @@ fn a_guard_door_lights_a_cue_out_of_fov() {
     );
 
     // The eastward-facing player has the door behind them: out of the forward FOV,
-    // yet the cue is on the grid, painted as a Trace background (§11.2).
+    // yet the cue is on the grid.
     assert!(
         !s.player_fov().contains(panel),
         "precondition: the changed door is out of the player's forward FOV",
     );
     assert!(
         s.door_cues().any(|c| c == panel),
-        "a guard-opened door lights a cue on its cell, read out of FOV",
+        "a guard-opened door lights a cue read out of FOV",
+    );
+
+    // The cue lights the door's *whole* footprint — both hinges and the panel — in
+    // the Sensed channel, not just the single panel the event named (§9.4).
+    let door_cells: Vec<Cell> = {
+        let regions = s.layout().regions();
+        let id = regions.door_at(panel).expect("the panel belongs to a door");
+        regions.door(id).cells().collect()
+    };
+    assert!(
+        door_cells.len() >= 3,
+        "the strip door is two hinges and a panel",
     );
     let g = crate::render::render(&s);
-    assert_eq!(
-        g.get(panel.x, panel.y).bg,
-        Some(crate::category::Category::Trace),
-        "the cue paints a Trace background on the door cell",
-    );
+    for cell in door_cells {
+        assert_eq!(
+            g.get(cell.x, cell.y).bg,
+            Some(crate::category::Category::Sensed),
+            "the whole door is lit in the sensed channel, cell {cell:?}",
+        );
+    }
 }
 
-/// §9.2/§10.4: the cue is a **fading** mark — a door change is a discrete event, not
+/// §9.4/§10.4: the cue is a **fading** mark — a door change is a discrete event, not
 /// a standing position — so it stays lit for `DOOR_CUE_DECAY_TURNS` turns and is then
 /// gone. Checked on `door_cues` directly, independent of FOV.
 #[test]
@@ -3839,7 +3854,7 @@ fn a_door_cue_fades_over_its_decay() {
     );
 }
 
-/// §9.2/§10.4: a door change **beyond** `DOOR_SENSE_RANGE` is felt as nothing — the
+/// §9.4/§10.4: a door change **beyond** `DOOR_SENSE_RANGE` is felt as nothing — the
 /// same guard-opened door, but with the player parked out past the door-sense box.
 #[test]
 fn a_door_change_beyond_range_lights_no_cue() {
@@ -3856,38 +3871,43 @@ fn a_door_change_beyond_range_lights_no_cue() {
     );
 }
 
-/// §11.5/§10.4: where a door cue and a **sensed** guard fall on the same cell, being
-/// able to read the guard's live position outranks the fading trace (the "being seen
-/// outranks" spirit). The guard opens the door, then steps onto the open panel — the
-/// cue cell — where it is sensed through the wall behind the eastward-facing player:
-/// the cell renders as `Sensed`, not `Trace`, though the cue is still logically lit.
-/// (The danger overlay is painted later still, so it outranks both by the same order.)
+/// §9.4: the door cue and a guard felt through a wall share **one sense channel** —
+/// the same orange `Category::Sensed` background — so they read as one thing, not two
+/// colours to tell apart. The guard opens the door, then steps onto the open panel:
+/// the panel (guard-sensed) and a hinge (door-cued only) both render `Sensed`.
 #[test]
-fn a_sensed_guard_outranks_the_door_cue_on_a_shared_cell() {
+fn the_door_cue_and_the_guard_sense_share_one_channel() {
     let (mut s, panel) = guard_door_strip(30, Cell::new(7, 2));
     drive_until_guard_opens(&mut s);
+    let hinge = Cell::new(panel.x, panel.y - 1); // a frame cell of the same door
     s.step(Input::Step(Direction::East)); // the guard steps onto the open panel
 
     assert_eq!(
         s.guards()[0].pos(),
         panel,
-        "the guard steps through onto the open panel (the cue cell)",
-    );
-    assert!(
-        s.door_cues().any(|c| c == panel),
-        "the cue is still lit under the guard",
+        "the guard steps through onto the open panel",
     );
     assert_eq!(
         s.perceive_guard(&s.guards()[0]),
         Some(GuardPerception::Sensed),
         "the guard on the panel is sensed through the wall, not seen",
     );
+    assert!(
+        s.door_cues().any(|c| c == hinge),
+        "the door cue lights the frame cell too (whole door)",
+    );
 
     let g = crate::render::render(&s);
+    let sensed = Some(crate::category::Category::Sensed);
     assert_eq!(
         g.get(panel.x, panel.y).bg,
-        Some(crate::category::Category::Sensed),
-        "the sensed guard outranks the door cue on the shared cell",
+        sensed,
+        "the guard-sensed panel reads Sensed",
+    );
+    assert_eq!(
+        g.get(hinge.x, hinge.y).bg,
+        sensed,
+        "the door-cued frame reads the *same* Sensed channel — one colour, not two",
     );
 }
 

@@ -52,8 +52,8 @@ pub fn message_for(event: Event) -> Option<Message> {
         // A door *you* operate keeps its quiet self-narration (§11.7), like a bump or
         // a crouch. A door that changes **away** from you (a guard walking through,
         // an automatic door timing shut) says nothing on the near line — the durable
-        // "someone passed here" evidence is the on-grid door cue instead (§9.2/§10.4,
-        // `Category::Trace`), which is positional and survives the next action.
+        // "someone passed here" evidence is the on-grid door cue instead (§9.4/§10.4,
+        // the `Sensed` channel), which is positional and survives the next action.
         Event::DoorOpened {
             by_player: true, ..
         } => ("the door opens".to_string(), 0),

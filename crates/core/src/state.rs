@@ -82,10 +82,11 @@ pub const PLAYER_SENSE_RANGE_WAITING: u32 = 20;
 /// take stock of the whole area. Pinned by a test.
 pub const DUCT_SENSE_RANGE: u32 = 5;
 
-/// The player's **door-sense** range (§9.2/§10.4 **[START]**): a door that opens or
+/// The player's **door-sense** range (§9.4/§10.4 **[START]**): a door that opens or
 /// shuts away from the player — a guard walking through one, or an automatic door
 /// timing shut (§10.4) — is felt at this Chebyshev range, **through walls**, and
-/// leaves a fading on-grid cue ([`Category::Trace`](crate::Category::Trace)). It is a
+/// leaves a fading on-grid cue in the [`Category::Sensed`](crate::Category::Sensed)
+/// channel — the same one as a guard felt through a wall. It is a
 /// louder, coarser event than a guard's exact position, so it carries **farther**
 /// than the guard sense: `DOOR_SENSE_RANGE > `[`PLAYER_SENSE_RANGE`] (pinned by a
 /// test). Doors are the facility breathing around you — you feel that from across a
@@ -100,12 +101,12 @@ pub const DUCT_SENSE_RANGE: u32 = 5;
 /// (§10.7) — see [`door_sense_range`](State::door_sense_range).
 pub const DOOR_SENSE_RANGE: u32 = 15;
 
-/// The door sense reaches **farther** than the guard sense (§9.2/§10.4) — a coarse
+/// The door sense reaches **farther** than the guard sense (§9.4/§10.4) — a coarse
 /// "a door moved over there" carries past the precise "that guard is on that cell".
 /// Pinned at compile time so the asymmetry can never silently invert.
 const _: () = assert!(DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE);
 
-/// How many turns a door-change cue stays lit before it fades (§9.2/§10.4
+/// How many turns a door-change cue stays lit before it fades (§9.4/§10.4
 /// **[START]**): a door open/close is a **discrete** event, not a standing position
 /// like a guard, so its cue is inherently a fading mark. It reads like sensed
 /// evidence — visible while the fact is fresh — rather than a single-frame flash.
@@ -172,8 +173,8 @@ pub enum Event {
     /// doors, and walking into the panel is the bump that opens them. `by_player`
     /// says which: a door *you* opened keeps its quiet near-line self-narration
     /// (§11.7), while a guard-opened one is instead felt on the grid as a §10.4
-    /// door cue ([`Category::Trace`](crate::Category::Trace)) — evidence someone
-    /// passed, readable around a corner.
+    /// door cue in the [`Category::Sensed`](crate::Category::Sensed) channel —
+    /// evidence someone passed, readable around a corner.
     DoorOpened { at: Cell, by_player: bool },
     /// A door shut away from the player: a **Calm** guard closing a hinged door
     /// behind itself after passing through it (§10.4, #146) — the counter-pressure
@@ -480,15 +481,17 @@ pub enum GuardPerception {
     Sensed,
 }
 
-/// A fading door-change cue (§9.2/§10.4): the cell where a door opened or shut away
-/// from the player, and how many more turns the mark shows. A door change is a
-/// **discrete** event — unlike a guard, there is no standing position to re-read each
-/// frame — so the fact is latched here the turn it happens (if within
-/// [`DOOR_SENSE_RANGE`]) and fades over [`DOOR_CUE_DECAY_TURNS`] world turns. The
-/// renderer paints it as a [`Category::Trace`] background ([`State::door_cues`]).
+/// A fading door-change cue (§9.4/§10.4): the door that opened or shut away from the
+/// player, and how many more turns the mark shows. A door change is a **discrete**
+/// event — unlike a guard, there is no standing position to re-read each frame — so
+/// the fact is latched here the turn it happens (if within [`DOOR_SENSE_RANGE`]) and
+/// fades over [`DOOR_CUE_DECAY_TURNS`] world turns. The renderer lights the door's
+/// **whole footprint** as a [`Category::Sensed`] background — the same sense channel
+/// as a guard felt through a wall ([`State::door_cues`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct DoorCue {
-    at: Cell,
+    /// The door whose whole footprint the cue lights.
+    door: DoorId,
     /// Turns of life left; decremented once per world turn and dropped at zero.
     ttl: u32,
 }
@@ -600,13 +603,14 @@ pub struct State {
     /// exactly one action's events *is* the clearing rule). Empty before the
     /// first input; frozen once the run ends, so the final message stays.
     last_events: Vec<Event>,
-    /// The live door-change cues (§9.2/§10.4): cells where a door opened or shut
-    /// away from the player, each fading over [`DOOR_CUE_DECAY_TURNS`] turns. Placed
-    /// in [`record_door_cues`](Self::record_door_cues) for the door events the player
-    /// did not cause, and decayed each world turn in
-    /// [`decay_door_cues`](Self::decay_door_cues); the renderer reads them through
-    /// [`door_cues`](Self::door_cues). A small set — at most a handful of doors change
-    /// in any few-turn window — so a plain `Vec` scan is cheaper than a map.
+    /// The live door-change cues (§9.4/§10.4): doors that opened or shut away from
+    /// the player, each fading over [`DOOR_CUE_DECAY_TURNS`] turns. Placed in
+    /// [`record_door_cues`](Self::record_door_cues) for the door events the player did
+    /// not cause, and decayed each world turn in
+    /// [`decay_door_cues`](Self::decay_door_cues); the renderer reads their whole
+    /// footprint through [`door_cues`](Self::door_cues). A small set — at most a
+    /// handful of doors change in any few-turn window — so a plain `Vec` scan is
+    /// cheaper than a map.
     door_cues: Vec<DoorCue>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
     /// two stochastic guard decisions: a Calm guard's chance to close a door behind
@@ -934,7 +938,7 @@ impl State {
         }
     }
 
-    /// The player's current **door-sense** range (§9.2/§10.4): [`DOOR_SENSE_RANGE`]
+    /// The player's current **door-sense** range (§9.4/§10.4): [`DOOR_SENSE_RANGE`]
     /// on open floor, shrinking to [`DUCT_SENSE_RANGE`] inside a duct with the rest
     /// of the crawlspace's degraded perception (§10.7). Unlike the guard sense, a
     /// **Wait does not widen it** — a door change is already a loud, coarse event, so
@@ -948,15 +952,19 @@ impl State {
         }
     }
 
-    /// The live door-change cues (§9.2/§10.4): the cells where a door opened or shut
-    /// away from the player recently enough to still show, in placement order. The
-    /// renderer paints each as a [`Category::Trace`] background — a fading mark that
-    /// "someone passed here", readable around a corner and out of FOV like the sensed
-    /// dot, position only (§10.4). A guard-driven or automatic door change within
+    /// The cells lit by a live door-change cue (§9.4/§10.4): the **whole footprint**
+    /// of every door that opened or shut away from the player recently enough to still
+    /// show. The renderer paints each as a [`Category::Sensed`] background — the same
+    /// "sensed through a wall" channel as a guard, a fading mark that "someone passed
+    /// here", readable around a corner and out of FOV, position only (§10.4). A
+    /// guard-driven or automatic door change within
     /// [`door_sense_range`](Self::door_sense_range) lights one; a door *you* operate
     /// does not (it keeps its quiet near-line self-narration, §11.7).
     pub fn door_cues(&self) -> impl Iterator<Item = Cell> + '_ {
-        self.door_cues.iter().map(|cue| cue.at)
+        let regions = self.layout.regions();
+        self.door_cues
+            .iter()
+            .flat_map(move |cue| regions.door(cue.door).cells())
     }
 
     /// How the player perceives `guard` this frame (§9.2), or `None` if it is neither
@@ -1641,7 +1649,7 @@ impl State {
     fn run_world_phases(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         // Fade the door cues one turn *before* this turn's door events can relight
-        // them (§9.2/§10.4), so a cue placed this turn keeps its full life and a
+        // them (§9.4/§10.4), so a cue placed this turn keeps its full life and a
         // re-change refreshes rather than double-decrements.
         self.decay_door_cues();
         self.recompute_sight();
@@ -1654,7 +1662,7 @@ impl State {
         events
     }
 
-    /// Fade the door-change cues by one world turn (§9.2/§10.4), dropping any that
+    /// Fade the door-change cues by one world turn (§9.4/§10.4), dropping any that
     /// have burned out. Runs once per spent turn, at the head of the world phases.
     fn decay_door_cues(&mut self) {
         self.door_cues.retain_mut(|cue| {
@@ -1663,11 +1671,13 @@ impl State {
         });
     }
 
-    /// Latch a fading on-grid cue (§9.2/§10.4) on every door that changed state this
+    /// Latch a fading on-grid cue (§9.4/§10.4) on every door that changed state this
     /// turn **away from the player** and within [`door_sense_range`](Self::door_sense_range):
     /// the guard-driven opens and the guard/automatic closes (all `by_player: false`).
     /// A door *you* operated keeps its quiet near-line self-narration (§11.7) and
-    /// lights no cue. A change beyond the door-sense box is felt as nothing.
+    /// lights no cue. A change beyond the door-sense box is felt as nothing. Range is
+    /// measured to the panel the event named; the cue then lights the door's whole
+    /// footprint (§9.4).
     fn record_door_cues(&mut self, events: &[Event]) {
         let range = self.door_sense_range();
         for event in events {
@@ -1682,21 +1692,24 @@ impl State {
                 } => at,
                 _ => continue,
             };
-            if self.player.sight_distance(at) <= range {
-                self.mark_door_cue(at);
+            if self.player.sight_distance(at) > range {
+                continue;
+            }
+            if let Some(door) = self.layout.regions().door_at(at) {
+                self.mark_door_cue(door);
             }
         }
     }
 
-    /// Light or refresh the door cue on `at` to full life (§9.2/§10.4). A door that
-    /// changes again while its mark still shows simply resets the fade — one cell,
-    /// one cue.
-    fn mark_door_cue(&mut self, at: Cell) {
-        if let Some(cue) = self.door_cues.iter_mut().find(|cue| cue.at == at) {
+    /// Light or refresh the cue on `door` to full life (§9.4/§10.4). A door that
+    /// changes again while its mark still shows simply resets the fade — one door,
+    /// one cue, its whole footprint lit.
+    fn mark_door_cue(&mut self, door: DoorId) {
+        if let Some(cue) = self.door_cues.iter_mut().find(|cue| cue.door == door) {
             cue.ttl = DOOR_CUE_DECAY_TURNS;
         } else {
             self.door_cues.push(DoorCue {
-                at,
+                door,
                 ttl: DOOR_CUE_DECAY_TURNS,
             });
         }
