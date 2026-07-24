@@ -117,6 +117,32 @@ build. Key the artifact to *your* ticket, not to the game:
 
 Hand the URL back with one line on what changed and which branch/PR it snapshots.
 
+## 6. Hand off a specific seed (§13.1/#110)
+
+The build carries **seed sharing**: every run boots from a seed, shown in the
+seed bar top-left, and the shell and the headless sim (§13.2) boot the *identical*
+path — so a seed handed over reproduces the **same facility the bot played**. This
+is how a playtest seed (`sim --bot` numbers a batch `S, S+1, …`; `/playtest` flags
+suspicious ones) becomes a level the user can play by hand.
+
+Two ways to point the user at one seed — prefer the first for an artifact:
+
+- **The on-page seed box (always works).** Tell the user to type the seed into
+  the box top-left and press *play* (or Enter). Empty or non-numeric input just
+  rolls a fresh random seed. This path needs no URL plumbing, so it is reliable
+  inside the Artifact frame regardless of how the host passes the address.
+- **A `#seed=N` link (best on the canonical URL).** The active seed is mirrored
+  into the page URL as `…#seed=N`, and the shell reads `?seed=N` or `#seed=N` on
+  load. On the **Pages deploy** this is a true deep link — hand over
+  `https://tk-auto.github.io/intrusion/#seed=8371` and it boots that level. For a
+  **Claude Artifact**, whether an appended `#seed=N` reaches the framed document
+  depends on the host, so don't promise it works — hand over the seed *number* and
+  point at the on-page box, and offer the `#seed=` link as the canonical-URL form.
+
+When the user's goal is specifically "let me play the seed the bot flagged", hand
+back **the artifact URL plus the seed number**, with a line like "open it and type
+`8371` into the seed box top-left" — not a bare URL.
+
 ## Guardrails
 
 - **Never commit build output** — `dist/`, the assembled HTML, and screenshots
