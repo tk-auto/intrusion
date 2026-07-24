@@ -10,10 +10,11 @@ use super::*;
 
 impl State {
     /// Whether the player's current cell can admit them as a **solid** body
-    /// again (§8.3): terrain that accepts an actor's fill, and no guard or body
-    /// on it. This is Dephase's rematerialization question — `false` at expiry
-    /// is lethal ([`Event::Entombed`]), and `false` refuses an early toggle-off
-    /// (there is nowhere to solidify).
+    /// again (§8.3): terrain that accepts an actor's fill, and no guard on it.
+    /// This is Dephase's rematerialization question — `false` at expiry is lethal
+    /// ([`Event::Entombed`]), and `false` refuses an early toggle-off (there is
+    /// nowhere to solidify). A body is non-solid (§7.2), so a cell holding one is
+    /// still a legal place to stand — you rematerialise on top of it, no entomb.
     pub(super) fn can_rematerialize(&self) -> bool {
         // A duct cell is a legal place to be (§10.7): the player already stands there
         // as a solid body, so Dephase expiring inside a duct is *not* the lethal
@@ -22,7 +23,6 @@ impl State {
         // admitted here explicitly.
         (self.layout.facility().can_enter(self.player, ACTOR_FILL) || self.in_duct())
             && self.guard_at(self.player).is_none()
-            && self.body_at(self.player).is_none()
     }
 
     /// Where a decoy activated right now would spawn (§8.3): the faced cell —
@@ -58,10 +58,13 @@ impl State {
     /// same turn — "stepping N times covers 2N cells". The convention chosen
     /// here (the §8.3 row reads "one free move per turn"): the extra move is
     /// **automatic and straight ahead**, and it happens only into a cell that
-    /// admits a plain move — a wall, a door, a cupboard, a guard, a body stops
-    /// the sprint at one cell rather than auto-bumping (no door flung open, no
-    /// takedown, no climb — a sprint never triggers an interaction the player
-    /// didn't aim, the §8.4 no-auto-target spirit). It sets facing like any move
+    /// admits a plain move — a wall, a door, a cupboard, a guard stops the sprint
+    /// at one cell rather than auto-bumping (no door flung open, no takedown, no
+    /// climb — a sprint never triggers an interaction the player didn't aim, the
+    /// §8.4 no-auto-target spirit). A loose body is non-solid (§7.2), so the
+    /// sprint runs straight over it — and never picks it up, since taking hold is
+    /// the deliberate step *off* a body's cell, which the extra step is not. It
+    /// sets facing like any move
     /// (trivially: the same direction) and the whole two-cell step is one spent
     /// turn, so guards still get exactly one turn — the only speed asymmetry in
     /// the game (§7.1: guards never accelerate; §8.3: watch this pair).
@@ -86,12 +89,13 @@ impl State {
 
     /// Haul the dragged body — if any — into `vacated`, the cell the player is
     /// stepping out of (§8.3). Called by every arm that moves the player, so the
-    /// body follows wherever they go: onto floor, through a doorway, and — the
-    /// §7.2 hide flow — *into a cupboard*, by walking through it and out the
-    /// other side. The vacated cell just admitted the player (fill 1.0), so it
-    /// admits the body; no occupancy re-check is needed. Leaves a haul debt: the
-    /// next spent turn pays for the weight (the half-speed convention on
-    /// [`drag_debt`](Self::drag_debt)).
+    /// body follows wherever they go: onto floor and through a doorway. The vacated
+    /// cell just held the player, so it admits the body; no occupancy re-check is
+    /// needed (a body is non-solid anyway, §7.2). Leaves a haul debt: the next spent
+    /// turn pays for the weight (the half-speed convention on
+    /// [`drag_debt`](Self::drag_debt)). Stowing the body *inside* a cupboard is a
+    /// separate, deliberate deposit (§7.2, [`BumpKind::DepositBody`]) — not this
+    /// follow-along haul.
     pub(super) fn haul_body_to(&mut self, vacated: Cell) {
         if let Some(i) = self.dragging {
             self.bodies[i].move_to(vacated);

@@ -267,19 +267,20 @@ pub fn render(state: &State) -> Grid {
             put(decoy, PLAYER_GLYPH, Category::Owned);
         }
     }
-    // A body (§7.2) is live state like any entity — drawn only inside the FOV,
-    // never remembered — as the `z` a downed guard reads as (§10.3), in Caution:
-    // an unaware threat's colour, because what a body *means* is trouble waiting
-    // to be found (§11.3). Two exceptions speak the Owned vocabulary instead:
-    // the body **in your hands** (§8.3) draws an Owned `z` — like the cupboard
-    // you hide in, it is yours while you hold it — and a body **in a hideout**
-    // is gone (§7.2): no `z` at all (the cupboard keeps its glyph; the recolour
-    // joins the other Owned signals below).
+    // A body (§7.2) is live state like any entity — drawn inside the FOV as the `z`
+    // a downed guard reads as (§10.3), in Caution: an unaware threat's colour,
+    // because what a loose body *means* is trouble waiting to be found (§11.3). Two
+    // states speak the Owned vocabulary instead: the body **in your hands** (§8.3),
+    // yours while you hold it, and a body **stowed in a cupboard** (§7.2) — gone to
+    // every guard, but shown to *you* as an Owned `z` marking the **locked** cupboard
+    // (no longer a hideout). A **loose** body is never remembered; the locked-cupboard
+    // status **is**, persisted out of view by the memory pass below.
     for body in state.bodies() {
-        if !fov.contains(body.cell()) || facility.terrain(body.cell()) == Some(Terrain::Hideout) {
+        if !fov.contains(body.cell()) {
             continue;
         }
-        let fg = if state.dragging() == Some(body.cell()) {
+        let stowed = facility.terrain(body.cell()) == Some(Terrain::Hideout);
+        let fg = if stowed || state.dragging() == Some(body.cell()) {
             Category::Owned
         } else {
             Category::Caution
@@ -316,13 +317,25 @@ pub fn render(state: &State) -> Grid {
         cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
     }
 
-    // The hidden-body signal (§7.2/§11.3): a cupboard with a body stowed in it
-    // keeps its `}` glyph — the body is *gone* — but recolours to Owned while
-    // seen, the same "something of yours is in here" vocabulary the occupied
-    // cupboard and the covering table speak.
+    // The locked-cupboard signal persists in memory (§11.5a/§7.2): a cupboard you
+    // have seen with a body stowed in it is a permanent fact — a spent hideout — so
+    // out of view it is **remembered** as an Owned `z`, the same way a crawled duct
+    // or a seen console is remembered (§11.5a), rather than reverting to the empty
+    // `}`. Only the stowed lock persists; a loose body is live state and is never
+    // remembered, so it is not drawn here. Runs after the entity layer, writing only
+    // out-of-FOV cells (in view they are already the live `z` above).
     for body in state.bodies() {
-        if fov.contains(body.cell()) && facility.terrain(body.cell()) == Some(Terrain::Hideout) {
-            cells[(body.cell().y * width + body.cell().x) as usize].fg = Category::Owned;
+        let cell = body.cell();
+        if fov.contains(cell) {
+            continue;
+        }
+        if facility.terrain(cell) == Some(Terrain::Hideout) && memory.contains(cell) {
+            cells[(cell.y * width + cell.x) as usize] = GlyphCell {
+                glyph: BODY_GLYPH,
+                fg: Category::Owned,
+                bg: None,
+                vis: Visibility::Remembered,
+            };
         }
     }
 
@@ -602,13 +615,14 @@ mod tests {
     }
 
     /// §8.3/§11.3: the body speaks the Owned vocabulary when it is yours — an
-    /// Owned `z` while in your hands, and, once stowed in a cupboard, no `z` at
-    /// all: the cupboard keeps its `}` and recolours Owned, the same signal the
-    /// occupied cupboard gives. The body is gone (§7.2).
+    /// Owned `z` while in your hands, and an Owned `z` once stowed in a cupboard,
+    /// marking the **locked** cupboard (§7.2/§10.3). A stowed body is gone to every
+    /// guard, but shown to you so you can read which cupboards you have spent.
     #[test]
-    fn a_dragged_body_reads_owned_and_a_stowed_one_vanishes() {
+    fn a_dragged_body_and_a_stowed_one_both_read_owned_z() {
         let mut layout = open_room(10, 10);
         layout.place(Cell::new(5, 5), Terrain::Hideout);
+        layout.place(Cell::new(3, 4), Terrain::Hideout); // the stow cupboard
         let mut s = State::new(
             layout,
             Cell::new(5, 5),
@@ -618,16 +632,69 @@ mod tests {
             Cell::new(8, 8),
         );
         s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
-        s.step(Input::Step(Direction::North)); // grab it
+        s.step(Input::Step(Direction::North)); // climb out onto the body
+        s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+        assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
 
+        // Look around (Wait's 360°) to see the body behind you: yours, an Owned `z`.
+        s.step(Input::Wait);
         let held = render(&s).get(5, 4);
         assert_eq!(held.glyph, 'z');
         assert_eq!(held.fg, Category::Owned, "the body in your hands is yours");
 
-        s.step(Input::Step(Direction::South)); // step out: body follows into (5,5)
-        let stowed = render(&s).get(5, 5);
-        assert_eq!(stowed.glyph, '}', "no z: the body is gone (§7.2)");
-        assert_eq!(stowed.fg, Category::Owned, "the cupboard signals the stash");
+        // Stow it in the cupboard to the west: the locked cupboard shows an Owned `z`.
+        s.step(Input::Step(Direction::West));
+        let stowed = render(&s).get(3, 4);
+        assert_eq!(
+            stowed.glyph, 'z',
+            "the locked cupboard shows the stowed body"
+        );
+        assert_eq!(stowed.fg, Category::Owned, "stowed and sealed by you");
+    }
+
+    /// §11.5a/§7.2: the locked-cupboard status persists in memory. Once you have
+    /// seen a body stowed in a cupboard, walking away keeps it drawn as a
+    /// **remembered** Owned `z` — a spent hideout you can still read — rather than
+    /// reverting to the empty `}` the terrain fog would show.
+    #[test]
+    fn a_stowed_cupboard_is_remembered_out_of_view() {
+        let mut layout = open_room(10, 10);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        layout.place(Cell::new(3, 4), Terrain::Hideout); // the stow cupboard
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
+        s.step(Input::Step(Direction::North)); // climb out onto the body
+        s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+        s.step(Input::Step(Direction::West)); // stow into the cupboard at (3,4)
+        assert_eq!(
+            s.bodies()[0].cell(),
+            Cell::new(3, 4),
+            "precondition: stowed"
+        );
+
+        // Walk away east until the cupboard leaves the FOV, then it is remembered.
+        s.step(Input::Step(Direction::East));
+        s.step(Input::Step(Direction::East));
+        let g = render(&s);
+        assert!(
+            !s.player_fov().contains(Cell::new(3, 4)),
+            "precondition: the cupboard is out of view",
+        );
+        let remembered = g.get(3, 4);
+        assert_eq!(remembered.glyph, 'z', "the locked cupboard is still a z");
+        assert_eq!(remembered.fg, Category::Owned, "and still Owned");
+        assert_eq!(
+            remembered.vis,
+            Visibility::Remembered,
+            "drawn from memory, not live",
+        );
     }
 
     /// §11.2's payoff, on screen: the `g` glyph is re-categorised every turn from

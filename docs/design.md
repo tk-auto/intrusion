@@ -400,11 +400,30 @@ behind** an unaware guard. The rear approach is the intended path, and it needs 
 window: pair it with the patrol dwell (§7.5), because a guard that never stops
 moving cannot be lined up on. Either way it is not a button.
 
-**The body is the cost.** A body is a solid object (fill 1.0) that:
+**The body is the cost.** A body is a **non-solid** object — it lies on the floor
+and blocks nothing (neither movement, pathing, nor sight). Its cost is not that it
+is a wall; it is that it is **evidence on a clock**:
 
-- **Can be seen.** Any guard whose cone covers a body has *found* it.
-- **Can be moved.** You can drag it (§8.1) — slowly.
-- **Can be hidden.** Put it in a hideout and it is gone.
+- **Can be seen.** Any guard whose cone covers a body has *found* it — the loudest
+  event in the game (below).
+- **Can be moved.** You **drag** it (§8.3) — slowly. You take hold by walking over a
+  body and stepping *off* its cell; you drop it by bumping it.
+- **Can be hidden.** Stow it inside a cupboard (§10.3) and it is **gone** — no cone
+  ever finds it. The cupboard is then **locked**: a body is in it, so it is no longer
+  a hideout.
+- **Runs a clock.** A downed guard misses its radio pings (§7.3); hiding the body
+  confuses that investigation, it does not stop it.
+
+> **Why non-solid `[SETTLED]`.** An earlier rule made a body a solid obstacle
+> (fill 1.0). It read well — the body as a thing in the way — but it manufactured
+> two soft-locks: a body dropped on a chokepoint could permanently freeze a guard
+> pathing past it (#182), and a takedown from a cupboard could drop the body onto
+> the cupboard's only mouth and trap the *player* inside (#170). Both are the same
+> failure — an unmovable body becomes a wall nobody can pass — and §2.2 forbids a
+> run ending to a dead end rather than a decision. Making the body non-solid deletes
+> the whole class at the root; the cost stays real (it is loud evidence, it must be
+> dragged and hidden, and it runs the §7.3 clock), it is just no longer a wall you
+> can build against yourself.
 
 **Finding a body is the loudest event in the game.** It should raise the alert
 harder than being seen does. A guard that finds a body knows there is an intruder,
@@ -657,7 +676,7 @@ whole reason the architecture looks the way it does.
 | **Wait** | 1 turn | — | — | **360° vision for that turn.** The only way to see behind you. |
 | **Run** | 1 turn | 5 | 12 | One free move per turn while active → 2 cells/turn. |
 | **Takedown** | 1 turn | — | — | §7.2. Adjacent, unaware target only. Permanent. Leaves a body. |
-| **Drag** | 1 turn/step | while held | — | Drag an adjacent body. **You move at half speed while dragging.** Release is free. |
+| **Drag** | 1 turn/step | while held | — | A body is non-solid: **walk over it and step off to take hold**; **you move at half speed while dragging**; **bump the held body to release** (free), or **stow it in a cupboard** (§10.3). |
 
 **Salvaged tech** — found in the facility:
 
@@ -684,6 +703,14 @@ Notes carried forward, because they are good and non-obvious:
 - **Decoy draws Investigating, never Chasing** — a guard that can see *you*
   ignores it. Decoys work on guards that have lost you, not on guards that have
   you.
+- **Drag has no grab button.** A body is non-solid (§7.2), so you cross it like
+  floor; the drag begins the moment you step *off* a cell with a body on it and your
+  hands are free, and the body follows into each cell you vacate. **Bump the trailing
+  body to drop it** (free), or **bump an empty cupboard while dragging to stow the
+  body inside and lock it** (§10.3) — the two ways to end a drag. Half speed holds
+  throughout (one cell per two turns), and **Run never stacks with Drag** — picking a
+  body up suppresses the sprint's extra step. Ducts refuse a dragging player: a body
+  cannot follow into the walls (§10.7), so let it go first.
 
 ### 8.4 Targeting
 
@@ -1013,7 +1040,7 @@ fail**. Guard the minimum.
 | **Exit** | `E` | Yes | No | No |
 | **Player** | `@` | Yes | No | No |
 | **Guard** | `g` | Yes | No | No |
-| **Body** | `z` | Yes | No | No |
+| **Body** | `z` | No | No | No |
 | **Decoy** | `@` | **No** | No | No |
 
 Vision is blocked when a cell's summed opacity reaches 1.0 — opacity itself is
@@ -1073,6 +1100,17 @@ stay a future axis.
 > which the turn loop, the renderer, and vision (§6) complete together. **Whether a
 > guard can ever flush you out** (search a cupboard when alerted) stays **[OPEN]**
 > (§15 Q5).
+
+> **A cupboard is also where you hide a body (§7.2), and doing so locks it.** Drag a
+> body to a cupboard and **bump the empty cupboard to stow it inside**: the body
+> slides in and is *gone* — no cone will ever find it — and the cupboard is now
+> **locked**. A locked cupboard is no longer a hideout: it holds a body, so you
+> cannot climb in, and bumping it is an inert no-op. It shows the body's **`z`** in
+> the Owned colour (not the empty `}`), so a glance tells you which cupboards you
+> have spent this way — and that status is **remembered** (§11.5a): once seen, a
+> locked cupboard stays a remembered `z` out of view, like a crawled duct or a seen
+> console, rather than reverting to the empty `}`. This is the one place a body
+> vanishes completely; everywhere else it stays visible evidence on the §7.3 clock.
 
 ### 10.4 Doors
 

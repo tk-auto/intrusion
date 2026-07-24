@@ -111,7 +111,8 @@ fn a_live_guard_answers_and_never_trips_the_net() {
 #[test]
 fn a_hidden_body_still_misses_its_ping() {
     let mut layout = open_room(12, 12);
-    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's start cupboard
+    layout.place(Cell::new(5, 2), Terrain::Hideout); // the stow cupboard
     let mut s = State::new(
         layout,
         Cell::new(5, 5), // start hidden, so the victim never sees the takedown coming
@@ -121,9 +122,10 @@ fn a_hidden_body_still_misses_its_ping() {
         Cell::new(10, 10),
     );
     s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
-    s.step(Input::Step(Direction::North)); // grab it
-    s.step(Input::Step(Direction::South)); // step out: body follows into the cupboard (5,5)
-    let body = Cell::new(5, 5);
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
+    s.step(Input::Step(Direction::North)); // stow the body in the cupboard at (5,2)
+    let body = Cell::new(5, 2);
     assert_eq!(s.bodies()[0].cell(), body);
     assert_eq!(
         s.layout().facility().terrain(body),
@@ -667,8 +669,8 @@ fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
 
 /// §7.2: a body does not block sight, so the first cone to cover it fires
 /// the found-body event — exactly once, found is found — and the finder goes
-/// hunting (the §7.6 search). The body is solid to the player: stepping into
-/// it is a free bump.
+/// hunting (the §7.6 search). The body is non-solid to the player: stepping
+/// onto it is a plain move, and taking hold comes on the way back off.
 #[test]
 fn a_body_is_found_once_by_a_covering_cone() {
     let mut layout = open_room(10, 10);
@@ -712,46 +714,102 @@ fn a_body_is_found_once_by_a_covering_cone() {
         );
     }
 
-    // Solid to the player: the step never moves onto the body — the bump is
-    // the grab interaction instead (§8.3).
-    let turn = s.turn();
-    let events = s.step(Input::Step(Direction::North));
-    assert_eq!(events, vec![Event::BodyGrabbed { at: body }]);
-    assert_eq!(s.player(), Cell::new(5, 5), "no move onto a body");
-    assert_eq!(s.turn(), turn + 1, "the grab spends the turn");
+    // Non-solid to the player (§7.2): stepping onto the body climbs out of the
+    // cupboard and stands on it — a plain move, not a grab.
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    assert_eq!(s.player(), body, "the player stands on the non-solid body");
+    assert_eq!(s.dragging(), None, "standing on a body is not yet a grab");
+    // Taking hold comes on the way *out* of the body's cell (§8.3).
+    s.step(Input::Step(Direction::North));
+    assert_eq!(s.dragging(), Some(body), "stepping off takes hold");
 }
 
-/// §7.2: a body is solid to guards too — it blocks their movement and their
-/// pathing. A guard sent at the body's cell (and then hunting all around it)
-/// never stands on it.
+/// §7.2 (revised): a body is **non-solid** to guards too — a guard routes and
+/// steps straight over one. A walker aimed at the body's cell reaches it and
+/// stands on it, rather than being refused.
 #[test]
-fn a_guard_never_enters_a_bodys_cell() {
+fn a_guard_walks_over_a_bodys_cell() {
     let mut layout = open_room(10, 10);
-    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's hideout
     let mut s = State::new(
         layout,
         Cell::new(5, 5),
         Direction::North,
         vec![
             Guard::stationary(Cell::new(5, 4)), // the victim
-            // A walker aimed straight at the victim's cell.
-            Guard::patrolling_to(Cell::new(5, 1), Cell::new(5, 4)),
+            // A walker aimed straight at the victim's cell, from the north.
+            Guard::patrolling_to(Cell::new(5, 1), Cell::new(5, 6)),
         ],
         Vec::new(),
         Cell::new(8, 8),
     );
 
     let body = Cell::new(5, 4);
-    s.step(Input::Step(Direction::North)); // the takedown; the body lies
+    s.step(Input::Step(Direction::North)); // the takedown; the body lies at (5,4)
     assert_eq!(s.bodies()[0].cell(), body);
 
-    // The walker finds the body, searches all around it — and can never
-    // stand on it: not routed through (pathing) and never entered (move).
+    // The walker heads down the column, over the body's cell — it stands on it
+    // at some point, and the player stays safe in the cupboard throughout.
+    let mut stood_on_body = false;
     for _ in 0..12 {
         s.step(Input::Wait);
-        assert_ne!(s.guards()[0].pos(), body, "a body's cell admits no guard");
+        stood_on_body |= s.guards()[0].pos() == body;
         assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
     }
+    assert!(
+        stood_on_body,
+        "a non-solid body's cell admits a guard (§7.2)"
+    );
+}
+
+/// #182 (§7.2/§7.8): a body dropped in a chokepoint must not freeze a guard. The
+/// only route between the two sides of a 1-wide gap runs through the body's cell;
+/// because the body is non-solid, a guard routes over it and reaches the far side,
+/// rather than stalling forever adjacent to it.
+#[test]
+fn a_body_in_a_chokepoint_does_not_freeze_a_guard() {
+    let mut layout = open_room(9, 11); // interior x 1..7, y 1..9
+                                       // A solid wall row at y=5, with a single gap at (4,5): the chokepoint.
+    for x in 1..8 {
+        if x != 4 {
+            layout.place(Cell::new(x, 5), Terrain::Wall);
+        }
+    }
+    layout.place(Cell::new(3, 4), Terrain::Hideout); // the player's duck, off the route
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4), // just north of the gap
+        Direction::North,
+        vec![
+            Guard::stationary(Cell::new(4, 5)), // the victim, in the gap
+            // An investigator on the south side, patrolling to the north — its only
+            // route is up through the gap the body will occupy.
+            Guard::patrolling_to(Cell::new(4, 8), Cell::new(4, 2)),
+        ],
+        Vec::new(),
+        Cell::new(7, 9),
+    );
+
+    let gap = Cell::new(4, 5);
+    s.step(Input::Step(Direction::South)); // take down the victim in the gap
+    assert_eq!(s.bodies()[0].cell(), gap, "the body lies in the chokepoint");
+    s.step(Input::Step(Direction::West)); // duck into the cupboard, out of the way
+    assert!(s.hidden());
+
+    // The investigator makes it to the north side: it routes over the non-solid
+    // body instead of freezing on the far side of the gap. If the body were a
+    // wall, the only route would be sealed and it could never reach y <= 5.
+    let mut crossed = false;
+    for _ in 0..16 {
+        s.step(Input::Wait);
+        crossed |= s.guards()[0].pos().y <= 5;
+        assert_eq!(
+            s.outcome(),
+            Outcome::Playing,
+            "the player is hidden and safe"
+        );
+    }
+    assert!(crossed, "the guard crosses the body-blocked gap (#182)");
 }
 
 /// §8.3 Dephase: while phased, solids are plain moves — the player walks
@@ -1362,11 +1420,17 @@ fn the_sprint_stops_short_of_anything_it_would_bump() {
 /// drag's half speed, Run active or not.
 #[test]
 fn run_never_stacks_with_dragging() {
-    let mut s = dragging_a_body(); // player (6,4), dragging the body at (5,4)
-    s.step(Input::Activate(AbilityId::Run));
+    let mut s = dragging_a_body(); // player (6,4), dragging the body at (5,4), debt owed
+    s.step(Input::Activate(AbilityId::Run)); // a spent turn — it also pays the pending debt
 
+    // Run is active, but dragging pins movement to half speed: one cell, not two —
+    // the sprint's extra step never fires while a body is in hand.
     let events = s.step(Input::Step(Direction::East));
-    assert_eq!(s.player(), Cell::new(7, 4), "one cell — no fast dragging");
+    assert_eq!(
+        s.player(),
+        Cell::new(7, 4),
+        "one cell only, Run notwithstanding"
+    );
     assert_eq!(
         events,
         vec![Event::Moved {
@@ -1375,13 +1439,15 @@ fn run_never_stacks_with_dragging() {
     );
     assert_eq!(s.bodies()[0].cell(), Cell::new(6, 4), "the body follows");
 
+    // And the next step owes the haul again — still half speed under Run.
     s.step(Input::Step(Direction::East));
-    assert_eq!(s.player(), Cell::new(7, 4), "the haul debt holds under Run");
+    assert_eq!(s.player(), Cell::new(7, 4), "the debt turn holds under Run");
 }
 
-/// The drag scenario (§8.3): the cupboard takedown, then a walk out and
-/// around to stand on open floor east of the body, and the grab — the bump
-/// that takes hold. Ends with the player at (6,4) dragging the body at (5,4).
+/// The drag scenario (§8.3): the cupboard takedown, then climb out onto the body
+/// and step off it to **take hold** — a body is non-solid, so the grab is walking
+/// over it and off its cell, not a bump. Ends with the player at (6,4) dragging the
+/// body at (5,4), a haul debt owed (the pickup rode a full step).
 fn dragging_a_body() -> State {
     let mut layout = open_room(10, 10);
     layout.place(Cell::new(5, 5), Terrain::Hideout);
@@ -1394,16 +1460,21 @@ fn dragging_a_body() -> State {
         Cell::new(8, 8),
     );
     s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
-    s.step(Input::Step(Direction::East)); // out of the cupboard to (6,5)
-    s.step(Input::Step(Direction::North)); // (6,4), beside the body
-    let events = s.step(Input::Step(Direction::West)); // the grab
+    s.step(Input::Step(Direction::North)); // climb out of the cupboard onto the body
+    let events = s.step(Input::Step(Direction::East)); // step off — take hold
     assert_eq!(
         events,
-        vec![Event::BodyGrabbed {
-            at: Cell::new(5, 4)
-        }]
+        vec![
+            Event::Moved {
+                to: Cell::new(6, 4)
+            },
+            Event::BodyGrabbed {
+                at: Cell::new(5, 4)
+            }
+        ]
     );
     assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
+    assert_eq!(s.player(), Cell::new(6, 4));
     s
 }
 
@@ -1411,13 +1482,23 @@ fn dragging_a_body() -> State {
 /// convention: a dragging move succeeds and leaves a haul debt, the next
 /// step is spent but stationary, and the one after moves again — one cell
 /// per two spent turns, with the body following into each vacated cell.
-/// Grabbing itself costs the turn; releasing is free.
+/// Taking hold rides a full step and owes the first debt; releasing is free.
 #[test]
 fn dragging_moves_at_half_speed_and_the_body_follows() {
     let mut s = dragging_a_body();
-    assert_eq!(s.turn(), 4, "takedown, two steps, and the grab all spend");
+    assert_eq!(
+        s.turn(),
+        3,
+        "takedown, the climb-out, and the grab all spend"
+    );
 
-    // First drag-move: a full step, the body following into the vacated cell.
+    // The grab's debt: the first step is spent but stationary and silent.
+    let events = s.step(Input::Step(Direction::East));
+    assert!(events.is_empty(), "the debt turn narrates nothing");
+    assert_eq!(s.player(), Cell::new(6, 4), "no movement on the debt turn");
+    assert_eq!(s.turn(), 4, "but the turn is spent");
+
+    // Debt paid: a full step, the body following into the vacated cell.
     let events = s.step(Input::Step(Direction::East));
     assert_eq!(
         events,
@@ -1425,15 +1506,12 @@ fn dragging_moves_at_half_speed_and_the_body_follows() {
             to: Cell::new(7, 4)
         }]
     );
+    assert_eq!(s.player(), Cell::new(7, 4));
     assert_eq!(s.bodies()[0].cell(), Cell::new(6, 4), "the body follows");
 
-    // The next step owes the haul: spent, stationary, and silent.
-    let events = s.step(Input::Step(Direction::East));
-    assert!(events.is_empty(), "the debt turn narrates nothing");
-    assert_eq!(s.player(), Cell::new(7, 4), "no movement on the debt turn");
-    assert_eq!(s.turn(), 6, "but the turn is spent");
-
-    // Debt paid: the next step moves — 2 cells in 4 turns, half speed.
+    // Half speed holds: the next step owes the debt, the one after moves again.
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), Cell::new(7, 4), "the debt turn holds");
     s.step(Input::Step(Direction::East));
     assert_eq!(s.player(), Cell::new(8, 4));
     assert_eq!(s.bodies()[0].cell(), Cell::new(7, 4));
@@ -1444,45 +1522,50 @@ fn dragging_moves_at_half_speed_and_the_body_follows() {
 /// player moves at full speed again while the body stays put.
 #[test]
 fn releasing_the_body_is_free_and_it_stays_where_it_lies() {
-    let mut s = dragging_a_body();
-    s.step(Input::Step(Direction::East)); // body to (6,4), player (7,4)
+    let mut s = dragging_a_body(); // player (6,4), holding the body at (5,4)
     let turn = s.turn();
 
-    let events = s.step(Input::Step(Direction::West)); // bump the held body
+    let events = s.step(Input::Step(Direction::West)); // bump the held body behind
     assert_eq!(
         events,
         vec![Event::BodyReleased {
-            at: Cell::new(6, 4)
+            at: Cell::new(5, 4)
         }]
     );
     assert_eq!(s.turn(), turn, "release is free");
     assert_eq!(s.dragging(), None);
 
-    // Full speed again — consecutive steps both move — and the body stays.
+    // Full speed again — consecutive steps both move — and the body stays put.
     s.step(Input::Step(Direction::North));
     s.step(Input::Step(Direction::North));
-    assert_eq!(s.player(), Cell::new(7, 2), "no lingering debt");
-    assert_eq!(s.bodies()[0].cell(), Cell::new(6, 4), "the body stays put");
+    assert_eq!(s.player(), Cell::new(6, 2), "no lingering debt");
+    assert_eq!(
+        s.bodies()[0].cell(),
+        Cell::new(5, 4),
+        "the body stays where it lay"
+    );
 }
 
-/// While dragging, the usable line offers the release on the held body; a
-/// second body reads as just solid (one body at a time), and a wall bump
-/// stays free without moving anything (§4.4 — cannot drag through a wall).
+/// While dragging, the usable line offers the release on the held body behind
+/// you, and a wall bump stays free without moving anything (§4.4 — cannot drag
+/// through a wall).
 #[test]
 fn dragging_affordances_and_walls() {
-    let mut s = dragging_a_body();
+    let mut s = dragging_a_body(); // player (6,4), body (5,4) to the west, debt owed
     assert_eq!(
         s.affordances(),
         vec![(Direction::West, Affordance::ReleaseBody)],
         "the held body offers the release",
     );
 
-    // Haul north to the border wall: move (debt) — bump — move…
+    // Haul north to the border wall: debt — move — debt — move…
+    s.step(Input::Step(Direction::North)); // debt
     s.step(Input::Step(Direction::North)); // (6,3), body (6,4)
     s.step(Input::Step(Direction::North)); // debt
     s.step(Input::Step(Direction::North)); // (6,2), body (6,3)
     s.step(Input::Step(Direction::North)); // debt
     s.step(Input::Step(Direction::North)); // (6,1), body (6,2)
+    s.step(Input::Step(Direction::North)); // debt
     let turn = s.turn();
     let events = s.step(Input::Step(Direction::North)); // the border wall
     assert_eq!(
@@ -1496,57 +1579,149 @@ fn dragging_affordances_and_walls() {
     assert_eq!(s.bodies()[0].cell(), Cell::new(6, 2), "the body holds too");
 }
 
-/// §7.2's hide payoff, made possible here (§8.3): walk the body through the
-/// cupboard — it follows into every vacated cell, so stepping out the far
-/// side deposits it inside — then let go. A hidden body is *gone*: a guard
-/// whose cone sweeps the cupboard finds nothing, ever.
+/// §7.2's hide payoff, on the new deposit model (§8.3/§10.3): drag the body to a
+/// cupboard and **bump it to stow the body inside** — a spent turn that leaves the
+/// player outside, hands free. A stowed body is *gone*: a guard whose cone sweeps
+/// the cupboard finds nothing, ever.
 #[test]
-fn a_body_dragged_into_a_hideout_is_gone() {
+fn a_stowed_body_is_gone() {
     let mut layout = open_room(12, 24);
-    layout.place(Cell::new(5, 5), Terrain::Hideout); // the body's cupboard
-    layout.place(Cell::new(5, 7), Terrain::Hideout); // the player's own
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's start cupboard
+    layout.place(Cell::new(5, 2), Terrain::Hideout); // the stow cupboard
+    layout.place(Cell::new(6, 3), Terrain::Hideout); // the player's duck
     let mut s = State::new(
         layout,
-        Cell::new(5, 5),
+        Cell::new(5, 5), // hidden, so the victim never sees the takedown coming
         Direction::North,
         vec![
-            Guard::stationary(Cell::new(5, 4)), // the victim
-            // A witness marching up the column, far enough that the player
-            // is hidden again before its cone arrives; it ends watching
-            // both cupboards.
-            Guard::patrolling_to(Cell::new(5, 21), Cell::new(5, 9)),
+            Guard::stationary(Cell::new(5, 4)), // the victim, adjacent
+            // A witness marching up the column, far enough that the player is
+            // hidden again before its cone arrives; it ends watching the cupboards.
+            Guard::patrolling_to(Cell::new(5, 21), Cell::new(5, 4)),
         ],
         Vec::new(),
         Cell::new(10, 22),
     );
 
-    s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
-    s.step(Input::Step(Direction::North)); // grab it from the cupboard
-    s.step(Input::Step(Direction::South)); // step out: body follows into (5,5)
-    let body = Cell::new(5, 5);
-    assert_eq!(s.bodies()[0].cell(), body, "deposited in the cupboard");
+    s.step(Input::Step(Direction::North)); // takedown from the cupboard: body at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
+    assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
+    let stow = Cell::new(5, 2);
+    let events = s.step(Input::Step(Direction::North)); // bump the cupboard: stow it
+    assert_eq!(events, vec![Event::BodyStored { at: stow }]);
+    assert_eq!(s.bodies()[0].cell(), stow, "stowed in the cupboard");
     assert_eq!(
-        s.layout().facility().terrain(body),
+        s.layout().facility().terrain(stow),
         Some(Terrain::Hideout),
         "a body can occupy a hideout cell",
     );
+    assert_eq!(s.dragging(), None, "hands free after stowing");
+    assert_eq!(s.player(), Cell::new(5, 3), "the player stays outside");
 
-    let events = s.step(Input::Step(Direction::North)); // let it go — free
-    assert_eq!(events, vec![Event::BodyReleased { at: body }]);
-    s.step(Input::Step(Direction::South)); // duck into the second cupboard
+    s.step(Input::Step(Direction::East)); // duck into the player's own cupboard
     assert!(s.hidden());
 
-    // The witness arrives and sweeps both cupboards: the hidden body fires
+    // The witness arrives and sweeps the stow cupboard: the stowed body fires
     // nothing, the hidden player is not seen, and nothing ever escalates.
-    for _ in 0..12 {
+    let mut swept = false;
+    for _ in 0..14 {
         let events = s.step(Input::Wait);
+        swept |= s.guards()[0].fov().contains(stow);
         assert!(
             !events.iter().any(|e| matches!(e, Event::BodyFound { .. })),
-            "a body in a hideout is gone (§7.2) — no cone finds it",
+            "a stowed body is gone (§7.2) — no cone finds it",
         );
         assert_eq!(s.outcome(), Outcome::Playing);
     }
+    assert!(
+        swept,
+        "precondition: a guard's cone did sweep the stow cupboard"
+    );
     assert!(!s.bodies()[0].found());
+}
+
+/// #170 (§7.2/§10.3): a takedown from inside a cupboard can drop the body onto
+/// the cupboard's only mouth — its sole exit. Because the body is non-solid, the
+/// player walks straight out over it, so the run is never soft-locked.
+#[test]
+fn a_takedown_from_a_cupboard_never_traps_the_player() {
+    let mut layout = open_room(10, 10);
+    // A recessed cupboard at (5,5): solid on three sides, one mouth to the south.
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    layout.place(Cell::new(4, 5), Terrain::Wall);
+    layout.place(Cell::new(6, 5), Terrain::Wall);
+    layout.place(Cell::new(5, 4), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),                          // the player, hidden inside
+        Direction::South,                         // facing the mouth
+        vec![Guard::stationary(Cell::new(5, 6))], // a guard on the mouth, facing away
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+
+    let mouth = Cell::new(5, 6);
+    s.step(Input::Step(Direction::South)); // takedown: the body drops on the mouth
+    assert!(s.hidden(), "still in the cupboard");
+    assert_eq!(
+        s.bodies()[0].cell(),
+        mouth,
+        "the body lies on the only exit"
+    );
+
+    // The escape: step onto the non-solid body, out of the cupboard.
+    s.step(Input::Step(Direction::South));
+    assert_eq!(s.player(), mouth, "walked out over the body");
+    assert!(!s.hidden(), "no longer trapped");
+
+    // And free to carry on — the run is not soft-locked (the body comes along).
+    s.step(Input::Step(Direction::South));
+    assert_eq!(
+        s.player(),
+        Cell::new(5, 7),
+        "moving freely away from the cupboard"
+    );
+}
+
+/// §7.2/§10.3: stowing a body in a cupboard **locks** it — it is no longer a
+/// hideout. The player cannot climb into a cupboard that holds a body, and the
+/// usable line stops offering the hide.
+#[test]
+fn stowing_a_body_locks_the_cupboard() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(5, 7), Terrain::Hideout); // the stow cupboard
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 4), // north of the victim
+        Direction::South,
+        vec![Guard::stationary(Cell::new(5, 5))], // faces south, away from the player
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+
+    s.step(Input::Step(Direction::South)); // takedown at (5,5)
+    s.step(Input::Step(Direction::South)); // climb onto the body
+    s.step(Input::Step(Direction::South)); // step off to (5,6) — take hold
+    assert_eq!(s.dragging(), Some(Cell::new(5, 5)));
+    assert_eq!(s.player(), Cell::new(5, 6));
+
+    let stow = Cell::new(5, 7);
+    let events = s.step(Input::Step(Direction::South)); // bump the cupboard: stow
+    assert_eq!(events, vec![Event::BodyStored { at: stow }]);
+    assert_eq!(s.bodies()[0].cell(), stow);
+    assert_eq!(s.dragging(), None, "hands free");
+    assert_eq!(s.player(), Cell::new(5, 6), "the player stayed outside");
+
+    // The cupboard is locked: bumping it does nothing, and no hide is offered.
+    let events = s.step(Input::Step(Direction::South));
+    assert_eq!(events, vec![Event::Bumped { into: stow }]);
+    assert!(!s.hidden(), "cannot climb into a locked cupboard");
+    assert_eq!(s.player(), Cell::new(5, 6));
+    assert!(
+        !s.affordances().iter().any(|(_, a)| *a == Affordance::Hide),
+        "the usable line no longer offers the hide",
+    );
 }
 
 /// A patrolling guard with nowhere to sweep holds rather than wedging or
@@ -3701,9 +3876,8 @@ fn you_cannot_enter_a_duct_while_dragging_a_body() {
     );
     // Take the guard down from concealment, then pick up the body and carry it east.
     s.step(Input::Step(Direction::North)); // takedown at (5,4)
-    s.step(Input::Step(Direction::East)); // out of the cupboard to (6,5)
-    s.step(Input::Step(Direction::North)); // (6,4), beside the body
-    s.step(Input::Step(Direction::West)); // grab it
+    s.step(Input::Step(Direction::North)); // climb out onto the body at (5,4)
+    s.step(Input::Step(Direction::East)); // step off — take hold; player (6,4)
     assert!(s.dragging().is_some());
     assert_eq!(s.player(), Cell::new(6, 4));
 
