@@ -89,22 +89,37 @@ script defaults to those and both can be overridden via `CHROMIUM_PATH` /
 ## 5. Publish (or refresh) the artifact
 
 Publish `intrusion-build.html` with the **Artifact tool**. **One artifact per
-ticket/PR — there is no shared "Intrusion" URL.** Two sessions previewing
+ticket+seed — there is no shared "Intrusion" URL.** Two sessions previewing
 different tickets must never publish onto the same artifact: they would clobber
 each other, and a reviewer would refresh their tab and see the wrong ticket's
-build. Key the artifact to *your* ticket, not to the game:
+build. Key the artifact to *your* ticket, not to the game.
 
-- **Title it by ticket** — e.g. `Intrusion — #181` — so it is identifiable in
-  the list and on the PR.
+**Name every artifact `intrusion-<ticket>-<seed>-<iteration>`** (all lowercase,
+hyphen-separated) so the list is greppable and a build is self-identifying:
+
+- `<ticket>` — the issue number, no `#` (e.g. `110`).
+- `<seed>` — the baked seed for a seed-locked build (e.g. `8371`), or `rand` for
+  the ordinary random-seed preview.
+- `<iteration>` — a 1-based build counter for that ticket+seed; bump it each time
+  you publish a *new* build of the same pair. Find the current highest with the
+  Artifact tool's `action: "list"` (the names share the `intrusion-<ticket>-`
+  prefix) and add one, or just track it within the session.
+
+The name comes from the page **`<title>`**, which the host reads and which
+overrides the Artifact tool's own `title` argument — so **set it at build time**
+with `assemble.py --title intrusion-110-8371-1` (§3), not via the tool arg. Pass a
+short `label` (below) for the version picker as well.
+
 - **Same session:** republish the same file path — the URL stays stable, the
   user just refreshes their tab. `force: true` is correct here: a later build of
-  *your* ticket supersedes its own earlier one.
-- **New session, same ticket:** find *that ticket's* artifact with the Artifact
-  tool's `action: "list"` (match the ticket in the title), and republish with
-  `url` set to it (`force: true`).
+  *your* ticket+seed supersedes its own earlier one (bump `<iteration>` in the
+  `--title` so the newer build is tellable from the older).
+- **New session, same ticket+seed:** find that artifact with the Artifact tool's
+  `action: "list"` (match the `intrusion-<ticket>-<seed>-` prefix), and republish
+  with `url` set to it (`force: true`).
 - **Never publish onto another ticket's artifact**, and never mint a second URL
-  for your own — exactly one per ticket. If none of the conflict-avoidance above
-  applies, mint a fresh one for this ticket.
+  for the same ticket+seed. A *different* seed is a *different* artifact (its own
+  URL). If none of the conflict-avoidance above applies, mint a fresh one.
 - **At merge the preview is spent** — the Pages deploy becomes canonical, and
   work-ticket step 9 watches the main build to confirm it is clean. Just stop
   refreshing the artifact; don't try to tombstone it (the Artifact tool has no
@@ -116,6 +131,42 @@ build. Key the artifact to *your* ticket, not to the game:
   `"guard-cone-fix"`) so the version picker stays navigable.
 
 Hand the URL back with one line on what changed and which branch/PR it snapshots.
+
+## 6. Hand off a specific seed (§13.1/#110)
+
+The shell and the headless sim (§13.2) boot the **identical** path, so a given seed
+reproduces the **same facility the bot played** — how a playtest seed (`sim --bot`
+numbers a batch `S, S+1, …`; `/playtest` flags suspicious ones) becomes a level the
+user can play by hand. There are two seeding channels, split by where the build runs.
+
+**A Claude Artifact → bake the seed into the build.** The Artifact host strips a
+`…#seed=N` hash before the framed page ever sees it, so a shared *link* cannot seed
+an artifact. Instead pass the seed to `assemble.py`, which stamps a
+`window.__intrusionSeed` global the shell reads ahead of the URL and clock — the
+page then boots that exact facility with no URL and no typing:
+
+```
+python3 .claude/skills/artifact-build/assemble.py \
+  --dist "$SCRATCH/dist" --index web/index.html \
+  --out "$SCRATCH/intrusion-8371.html" --seed 8371
+```
+
+Smoke-verify and publish as usual (§§4–5). This is what you hand back when the ask
+is "let me play the seed the bot flagged" — **one artifact per seed**: publish the
+seed-locked build to *its own* URL, named `intrusion-<ticket>-<seed>-<iteration>`
+(the `--seed` above and a matching `--title`, e.g. `--title intrusion-110-8371-1`),
+rather than overwriting the ticket's `rand` preview, so both stay reachable. Say
+plainly in the handoff which seed it is locked to.
+
+**The Pages deploy → a `?seed=N` / `#seed=N` URL.** The canonical
+`ci`/`pages` build has no baked seed, and there the URL is the real document URL, so
+`https://tk-auto.github.io/intrusion/?seed=8371` (or `#seed=8371`) boots that level.
+Hand this form over only for the live Pages URL, never for an artifact.
+
+> **The on-page seed box is hidden for now** (it sat over the board's top-left). The
+> wiring is intact behind one CSS rule in `web/index.html`, so seeds currently come
+> from the build (`--seed`) or the URL, not a box. If you re-enable it, the box
+> loads any seed live and this section's "type it in" path returns.
 
 ## Guardrails
 

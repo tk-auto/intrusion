@@ -44,6 +44,7 @@
 //! a placed guard is; it just hands what placement built to the core.
 
 mod input;
+mod seed;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -173,30 +174,25 @@ fn swatch(category: Category) -> Swatch {
     }
 }
 
-/// Boot the game: generate a facility, place the player, draw it, and start listening
-/// for input and resize (§4.2, §13.1's build→play half).
+/// Build a fresh run from `seed` — the **exact** boot the headless sim uses
+/// (`Rng::new(seed)` → [`generate_level`] with [`LevelConfig::V1`] → [`State::new`]
+/// facing north, §13.2), so a seed here is the very facility a `--bot`/`--script`
+/// run played, and a sim finding reproduces in the browser (§12.4).
 ///
-/// This is the wasm entry point the page calls after the module initialises. The seed
-/// is the one impurity the shell owns (§12.1 keeps the *core* pure): read the clock so
-/// each load is a different facility, and hand the core a plain `u64`. The v1 footprint
-/// is 40×40 (§10.2). Reload for a new seed; explicit seed entry / sharing (§13.1) is a
-/// later ticket.
-#[wasm_bindgen]
-pub fn start() -> Result<(), JsValue> {
-    let seed = js_sys::Date::now() as u64;
+/// One seed per run (§12.4): the same stream that carves the level continues into
+/// the turn loop, where the guard close-behind roll draws from it (§10.4/#146).
+fn new_run(seed: u64) -> Result<State, JsValue> {
+    let mut rng = Rng::new(seed);
     // The full v1 level (§10.2): a carve passing every §10.6 guarantee, with the
     // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards patrol
     // their territories (§7.5); the reactive states ride on the same seam.
-    // One seed per run (§12.4): the same stream that carves the level continues into
-    // the turn loop, where the guard close-behind roll draws from it (§10.4/#146).
-    let mut rng = Rng::new(seed);
     let (layout, placement) = generate_level(&LevelConfig::V1, &mut rng)
         .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
 
     // Guards carry their region beats (§7.5/§10.5), grown from the layout's
     // graph before the layout moves into the state.
     let guards = placement.guards(&layout);
-    let state = State::new(
+    Ok(State::new(
         layout,
         placement.player(),
         Direction::North,
@@ -204,7 +200,22 @@ pub fn start() -> Result<(), JsValue> {
         placement.intel().iter().copied(),
         placement.exit(),
     )
-    .with_rng(rng);
+    .with_rng(rng))
+}
+
+/// Boot the game: pick the run's seed, generate its facility, draw it, and start
+/// listening for input and resize (§4.2, §13.1's build→play half).
+///
+/// This is the wasm entry point the page calls after the module initialises. The
+/// seed is the one impurity the shell owns (§12.1 keeps the *core* pure): it comes
+/// from the URL when a `…#seed=N` link was shared, otherwise off the clock so each
+/// load is a different facility ([`seed::initial_seed`]). The seed is surfaced and
+/// re-enterable through the on-page bar ([`seed::install`]) — the seed-sharing loop
+/// (§13.1/#110).
+#[wasm_bindgen]
+pub fn start() -> Result<(), JsValue> {
+    let seed = seed::initial_seed();
+    let state = new_run(seed)?;
 
     let document = web_sys::window()
         .and_then(|w| w.document())
@@ -221,10 +232,12 @@ pub fn start() -> Result<(), JsValue> {
         ctx,
         metrics: Metrics::base(),
         ui: ScreenUi::default(),
+        seed,
     }));
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
     input::install_input(&document, &game)?;
     input::install_gestures(&document, &game)?;
+    seed::install(&document, &game)?;
     install_resize(&game)?;
     Ok(())
 }
@@ -260,6 +273,10 @@ struct Game {
     /// View state the shell owns (§11.4): whether the ability panel is deployed.
     /// Not part of [`State`] — it changes no world and costs no turn (§12.1).
     ui: ScreenUi,
+    /// The seed the current run booted from (§12.4) — the shell's, not the core's:
+    /// the core derives everything from it but never needs the number back. Held so
+    /// the seed bar can show it and a `…#seed=N` link can carry it ([`seed`]).
+    seed: u64,
 }
 
 impl Game {
@@ -301,6 +318,20 @@ impl Game {
             font: (CELL_H - 2.0) * scale * dpr,
         };
         self.draw();
+    }
+
+    /// Rebuild the run from a new `seed` and repaint (§13.1 seed sharing / #110): a
+    /// fresh facility from the same deterministic boot as [`new_run`], the view state
+    /// reset to a clean default. A pure reset — no world carries over, and the board
+    /// footprint is unchanged (40×40, §10.2), so the existing fit still holds; we
+    /// refit-and-draw anyway to paint the first frame. Returns the generation error
+    /// only if the seed somehow fails to carve (the v1 footprint always does, §10.6).
+    fn reseed(&mut self, seed: u64) -> Result<(), JsValue> {
+        self.state = new_run(seed)?;
+        self.seed = seed;
+        self.ui = ScreenUi::default();
+        self.fit_and_draw();
+        Ok(())
     }
 
     /// Draw one frame: ask the core to render the whole §11.4 screen (map, near

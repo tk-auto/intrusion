@@ -1106,6 +1106,42 @@ mod tests {
         );
     }
 
+    /// #110 / §12.4: the whole **placed** run — the facility a player actually boots
+    /// into, not just the carve — is reproduced exactly by its seed. This is the
+    /// round-trip seed sharing (§13.1) leans on: two boots of the same seed through
+    /// the shell's and the sim's identical path (`Rng::new` → [`generate_level`] with
+    /// [`LevelConfig::V1`] → [`State::new`] facing north → render) render a
+    /// byte-identical screen — same walls, player, exit, intel and guard placement —
+    /// while a neighbouring seed does not. So typing the seed the sim printed, or
+    /// opening a `…#seed=N` link, yields the same level the bot played (§13.2).
+    #[test]
+    fn a_seed_reproduces_the_whole_placed_level() {
+        let boot = |seed: u64| {
+            let mut rng = Rng::new(seed);
+            let (layout, placement) =
+                generate_level(&LevelConfig::V1, &mut rng).expect("the v1 footprint always carves");
+            let guards = placement.guards(&layout);
+            let state = crate::State::new(
+                layout,
+                placement.player(),
+                crate::Direction::North,
+                guards,
+                placement.intel().iter().copied(),
+                placement.exit(),
+            )
+            .with_rng(rng);
+            crate::render::render(&state).to_text().join("\n")
+        };
+        // Seeds are consecutive because that is exactly how `sim --bot` numbers a
+        // batch (S, S+1, …): the neighbour a player is most likely to try next.
+        assert_eq!(boot(8371), boot(8371), "same seed → byte-identical level");
+        assert_ne!(
+            boot(8371),
+            boot(8372),
+            "a different seed → a different level"
+        );
+    }
+
     /// A footprint too small to partition is rejected, not silently shipped as an
     /// unplaceable single-room level (§10.2).
     #[test]

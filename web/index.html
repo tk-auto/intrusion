@@ -33,9 +33,85 @@
            inline-baseline whitespace that could nudge the page into scrolling. */
         display: block;
       }
+      /* Seed sharing (§13.1/#110): a small bar overlaying the top-left corner that
+         shows the run seed and loads another. Fixed, so it never affects the canvas
+         fit; the shell keeps its taps and keystrokes off the game (crates/web/src/
+         seed.rs). Values are its own palette echo of §11.2 (Owned blue, slate). */
+      #seedbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        color: #a8a8a8;
+        background: rgba(11, 11, 11, 0.72);
+        border-bottom-right-radius: 6px;
+        /* The bar is UI, not the board: allow its own touch behaviour (the shell
+           also stops these events reaching the game's document listeners). */
+        touch-action: auto;
+      }
+      #seedbar .lbl {
+        color: #667a8a;
+      }
+      /* The seed value is selectable so it can be copied (#110: readable/copyable),
+         unlike the rest of the page which suppresses selection for touch input. */
+      #seed-value {
+        color: #4ea6ff;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      #seedbar input {
+        width: 8ch;
+        padding: 1px 4px;
+        font: inherit;
+        color: #e8e8e8;
+        background: #1e1e1e;
+        border: 1px solid #434343;
+        border-radius: 3px;
+      }
+      #seedbar button {
+        font: inherit;
+        color: #0b0b0b;
+        background: #4ea6ff;
+        border: 0;
+        border-radius: 3px;
+        padding: 1px 8px;
+        cursor: pointer;
+      }
+      /* HIDDEN FOR NOW: the bar sat over the board's top-left. Until it has a home
+         that doesn't cover play, seeds come from the build (a seed-locked artifact,
+         assemble.py --seed) or the URL (`?seed=N` / `#seed=N` on the Pages deploy),
+         not this box. The wiring above stays live, so re-enabling the bar is
+         deleting just this one rule. */
+      #seedbar {
+        display: none;
+      }
     </style>
   </head>
   <body>
+    <!--
+      Seed sharing (§13.1/#110): the run's seed, and a box to load another. Wired by
+      crates/web/src/seed.rs — it fills #seed-value, and reads #seed-input on the
+      button or Enter. Every element is optional to the shell, so the game still
+      boots if this markup is absent.
+    -->
+    <div id="seedbar">
+      <span class="lbl">seed</span>
+      <span id="seed-value">…</span>
+      <input
+        id="seed-input"
+        inputmode="numeric"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="load…"
+        aria-label="Load a seed"
+      />
+      <button id="seed-go" type="button">play</button>
+    </div>
     <div id="app">
       <!--
         The wasm module (built from crates/web via wasm-bindgen) mounts its
