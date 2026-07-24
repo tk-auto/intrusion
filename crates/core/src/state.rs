@@ -901,7 +901,11 @@ impl State {
     /// range, so cone membership alone settles it. Concealment still defeats the
     /// gate, so a *concealed* front takedown (crouched, cupboard, §7.2) is untouched
     /// — the bump is refused only against a guard that genuinely sees you.
-    fn guard_detects_now(&self, guard: &Guard) -> bool {
+    ///
+    /// Public so the §13.2 sim bot can plan against the *same* gate: an unaware
+    /// guard is a takedown target only while this is `false`, so the bot avoids
+    /// walking into a guard the gate would refuse (#183) and can pick a safe strike.
+    pub fn guard_detects_now(&self, guard: &Guard) -> bool {
         guard.fov().contains(self.player) && !self.concealed_from(guard.pos())
     }
 
