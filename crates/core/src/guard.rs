@@ -507,10 +507,11 @@ impl Guard {
     /// who always outranks the dead — it drops straight into the §7.6 search,
     /// centred on the body: the same bounded Alerted sweep a lost chase ends in
     /// (a body *is* a lead whose trail is already cold), followed by the released
-    /// watch on the area. Walking a destination would be wrong here — the body
-    /// is solid (§4.3), so a guard can never arrive on it; the search paces
-    /// *around* it instead. The radio broadcast a body-find escalates into is
-    /// the cooperation ticket (§7.7); this is the finder's own reaction.
+    /// watch on the area. The body itself is non-solid (§7.2), so the guard can
+    /// route and step straight over it — it never blocks the sweep, which is what
+    /// keeps a body in a chokepoint from freezing an investigation (#182). The
+    /// radio broadcast a body-find escalates into is the cooperation ticket (§7.7);
+    /// this is the finder's own reaction.
     pub(crate) fn find_body(&mut self, at: Cell) {
         self.alert = self.alert.max(BODY_ALERT_DURATION);
         if self.detected {

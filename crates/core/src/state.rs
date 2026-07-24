@@ -177,12 +177,16 @@ pub enum Event {
     /// (§7.3): the concrete, explainable escalation the alert system was always
     /// meant to provide (§2.3). Written here, read on the near line (§11.4).
     AlertRaised { level: u32 },
-    /// The player took hold of an adjacent body (§8.3): they are now dragging
-    /// it, at half speed, until they release it or the run ends.
+    /// The player took hold of a body by stepping off its cell (§8.3): they are
+    /// now dragging it, at half speed, until they release it or the run ends.
     BodyGrabbed { at: Cell },
     /// The player let the dragged body go where it lies (§8.3) — free (§4.4),
     /// and it refunds nothing because there is nothing to refund.
     BodyReleased { at: Cell },
+    /// The player stowed the dragged body inside a cupboard (§7.2): the body is
+    /// *gone* — no cone will ever find it — and the cupboard is **locked**, no
+    /// longer a hideout. A spent turn (§4.4); the player's hands come free.
+    BodyStored { at: Cell },
     /// The decoy was stepped on — by anything, the player included — and died
     /// (§8.3). Its ability drops into the full cooldown, as an early toggle-off
     /// would. Expiry by duration is [`Event::AbilityExpired`], not this.
@@ -229,9 +233,10 @@ impl Event {
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it
             // left (§8.3) is the same hands: grabbing and releasing are Owned.
-            Event::TakenDown { .. } | Event::BodyGrabbed { .. } | Event::BodyReleased { .. } => {
-                Category::Owned
-            }
+            Event::TakenDown { .. }
+            | Event::BodyGrabbed { .. }
+            | Event::BodyReleased { .. }
+            | Event::BodyStored { .. } => Category::Owned,
             // A found body flips its finder to hunting (§7.2/§7.4): the threat is
             // aroused but does not have you — the Warning band. A radio silence
             // and the alert step it can lead to are the same kind of aroused
@@ -267,10 +272,12 @@ pub enum Affordance {
     /// take it down (§7.2). Offered only while the takedown would actually
     /// land — an aware guard's cell offers nothing.
     Takedown,
-    /// An adjacent body, hands free: bump to take hold and drag it (§8.3).
-    DragBody,
-    /// The body being dragged: bump it to let go — free (§4.4).
+    /// The body being dragged: bump it to let go — free (§4.4). (Taking hold is
+    /// not a bump: you drag by walking over a body and off its cell, §8.3.)
     ReleaseBody,
+    /// An empty cupboard while dragging a body: bump to stow the body inside and
+    /// lock the cupboard — it is no longer a hideout (§7.2/§10.3).
+    StoreBody,
     /// A closed door panel: bump to open (§10.4).
     OpenDoor,
     /// An open door's hinge: bump to close (§10.4).
@@ -294,8 +301,8 @@ impl Affordance {
     pub fn label(self) -> &'static str {
         match self {
             Affordance::Takedown => "guard: take down",
-            Affordance::DragBody => "body: drag",
             Affordance::ReleaseBody => "body: release",
+            Affordance::StoreBody => "cupboard: stow body",
             Affordance::OpenDoor => "door: open",
             Affordance::CloseDoor => "door: close",
             Affordance::TakeIntel => "console: take intel",
@@ -310,16 +317,17 @@ impl Affordance {
     /// What acting on this affordance is *about* (§11.2): doors, cupboards and
     /// tables are System furniture; the console and the exit are the goal,
     /// Interest; a takedown is about the unaware threat it targets — Caution,
-    /// matching the yellow `g` it points at, as grabbing a loose body matches
-    /// its Caution `z`; the body in your hands is Owned, like its recoloured
-    /// glyph (§11.3).
+    /// matching the yellow `g` it points at; the body in your hands is Owned,
+    /// like its recoloured glyph (§11.3). Stowing a body is a cupboard
+    /// interaction — System furniture, like hiding in one.
     pub fn category(self) -> Category {
         match self {
-            Affordance::Takedown | Affordance::DragBody => Category::Caution,
+            Affordance::Takedown => Category::Caution,
             Affordance::ReleaseBody => Category::Owned,
             Affordance::OpenDoor
             | Affordance::CloseDoor
             | Affordance::Hide
+            | Affordance::StoreBody
             | Affordance::EnterDuct
             | Affordance::Crouch => Category::System,
             Affordance::TakeIntel | Affordance::Leave | Affordance::ExitRefused => {
@@ -340,14 +348,14 @@ enum BumpKind {
     /// A guard; `aware` is whether it detected the player this turn (§7.2).
     /// Unaware, the bump is the takedown; aware, it is a free no-op.
     Guard { aware: bool },
-    /// A body, hands free (§8.3): bumping it takes hold — the grab that starts
-    /// the drag.
-    BodyGrab,
     /// The body currently being dragged: bumping it lets go — free (§4.4).
+    /// Taking hold is not a bump — a body is non-solid and you grab it by
+    /// walking over it and off its cell (§8.3, the [`BumpKind::Move`] arm).
     BodyRelease,
-    /// A body while another is already in hand — just solid, a free bump (one
-    /// body at a time; letting go first is free).
-    BodyBlocked,
+    /// An empty cupboard while dragging a body (§7.2/§10.3): the bump stows the
+    /// body inside and locks the cupboard — it is no longer a hideout. A spent
+    /// turn; the player stays put and their hands come free.
+    DepositBody,
     /// The exit; `ready` is true iff every objective is in hand (win vs. refused).
     Exit { ready: bool },
     /// An objective console still holding its intel.
@@ -359,7 +367,8 @@ enum BumpKind {
     Door { action: DoorAction },
     /// An empty concealment cupboard to climb into (§10.3).
     Hide,
-    /// A cupboard already holding an actor — solid, a free bump.
+    /// A cupboard that cannot be entered — already holding an actor, or **locked**
+    /// by a body stowed inside (§7.2): a free no-op bump either way.
     HideoutBlocked,
     /// A duct entry to climb into from its mouth (§10.7): bumping it enters the
     /// crawlspace, a spent turn. Offered only when the player is not already in a
@@ -387,8 +396,8 @@ impl BumpKind {
     fn affordance(self) -> Option<Affordance> {
         match self {
             BumpKind::Guard { aware: false } => Some(Affordance::Takedown),
-            BumpKind::BodyGrab => Some(Affordance::DragBody),
             BumpKind::BodyRelease => Some(Affordance::ReleaseBody),
+            BumpKind::DepositBody => Some(Affordance::StoreBody),
             BumpKind::Exit { ready: true } => Some(Affordance::Leave),
             BumpKind::Exit { ready: false } => Some(Affordance::ExitRefused),
             BumpKind::Intel => Some(Affordance::TakeIntel),
@@ -404,7 +413,6 @@ impl BumpKind {
             // A crawl is movement, not an offered interaction (§10.7) — like a plain
             // Move it shows nothing on the usable line.
             BumpKind::Guard { aware: true }
-            | BumpKind::BodyBlocked
             | BumpKind::Door {
                 action: DoorAction::Obstructed,
             }
@@ -1217,15 +1225,6 @@ impl State {
                 events.push(Event::Bumped { into: target });
                 false
             }
-            // Grabbing an adjacent body (§8.3): the player is now dragging it,
-            // at half speed, and the grab itself is a world-changing, spent turn
-            // (§4.4). No debt is owed yet — the first haul is the first move.
-            BumpKind::BodyGrab => {
-                self.dragging = self.body_at(target);
-                self.drag_debt = false;
-                events.push(Event::BodyGrabbed { at: target });
-                true
-            }
             // Letting the body go where it lies (§8.3): free, the §4.4 toggle-off
             // exception — and it refunds nothing, there is nothing to refund.
             BumpKind::BodyRelease => {
@@ -1233,6 +1232,21 @@ impl State {
                 self.drag_debt = false;
                 events.push(Event::BodyReleased { at: target });
                 false
+            }
+            // Stowing the dragged body into a cupboard (§7.2/§10.3): the body slides
+            // inside and is *gone* — no cone finds it (the found-body scan skips a
+            // hideout cell) — and the cupboard is now **locked**, no longer a
+            // hideout. The player does not move (they stow it from the mouth); the
+            // turn is spent (an interaction, not free) and their hands come free.
+            BumpKind::DepositBody => {
+                let i = self
+                    .dragging
+                    .expect("bump_kind classified DepositBody only while dragging");
+                self.bodies[i].move_to(target);
+                self.dragging = None;
+                self.drag_debt = false;
+                events.push(Event::BodyStored { at: target });
+                true
             }
             // The exit: win if the objectives are done, else refuse — a refused exit
             // changes nothing and is free (§4.5).
@@ -1339,26 +1353,40 @@ impl State {
                 events.push(Event::Crouched { behind: target });
                 true
             }
-            // Plain movement into a cell that admits the player.
+            // Plain movement into a cell that admits the player — floor, an open
+            // doorway, or a cell holding a *loose* body (non-solid, §7.2: you walk
+            // over it).
             BumpKind::Move => {
-                self.haul_body_to(self.player);
+                let vacated = self.player;
+                self.haul_body_to(vacated);
                 self.player = target;
                 self.facing = dir; // facing follows the last successful step (§5)
                 events.push(Event::Moved { to: target });
+                // Take hold on the way out (§8.3): stepping *off* a body cell with
+                // free hands starts the drag — the body stays in the vacated cell and
+                // follows from here. The pickup rides this full step; the weight then
+                // catches up at half speed (`drag_debt`), so the next step is spent
+                // hauling. A dragging player never reaches here for a second body
+                // (hands are full), and a sprint's extra step below is suppressed the
+                // instant a grab lands, so Run never stacks with Drag (§8.3/#103).
+                if self.dragging.is_none() {
+                    if let Some(i) = self.body_at(vacated) {
+                        self.dragging = Some(i);
+                        self.drag_debt = true;
+                        events.push(Event::BodyGrabbed { at: vacated });
+                    }
+                }
                 // Stepping onto your own decoy kills it (§8.3) — anything's step
                 // does, the maker's included; a sprint checks its second cell too.
                 self.stomp_decoy(target, events);
                 self.run_extra_step(dir, events);
                 true
             }
-            // A body while one is already in hand, a cupboard already holding an
-            // actor, the table already crouched behind, or anything else solid
-            // (a wall, a pillar): a free bump (§4.4). A closed hinge is no longer
-            // here — it opens the door now (#148, `BumpKind::Door`).
-            BumpKind::BodyBlocked
-            | BumpKind::HideoutBlocked
-            | BumpKind::CrouchHeld
-            | BumpKind::Solid => {
+            // A cupboard already holding an actor or locked by a stowed body, the
+            // table already crouched behind, or anything else solid (a wall, a
+            // pillar): a free bump (§4.4). A closed hinge is no longer here — it
+            // opens the door now (#148, `BumpKind::Door`).
+            BumpKind::HideoutBlocked | BumpKind::CrouchHeld | BumpKind::Solid => {
                 events.push(Event::Bumped { into: target });
                 false
             }
@@ -1452,12 +1480,15 @@ impl State {
                 aware: self.guards[i].detected_player(),
             };
         }
-        if let Some(i) = self.body_at(target) {
-            return match self.dragging {
-                Some(held) if held == i => BumpKind::BodyRelease,
-                Some(_) => BumpKind::BodyBlocked,
-                None => BumpKind::BodyGrab,
-            };
+        // The body **in hand** is the one interaction a body offers: bump it to let
+        // go (§8.3). A body is otherwise non-solid (§7.2) — a *loose* body is not
+        // caught here; it falls through to a plain move (you walk over it, and grab
+        // it by stepping *off* its cell, the [`BumpKind::Move`] arm). Stowing a body
+        // into a cupboard is the Hideout arm below, not a bump on the body itself.
+        if let Some(held) = self.dragging {
+            if self.bodies[held].cell() == target {
+                return BumpKind::BodyRelease;
+            }
         }
         if target == self.exit {
             return BumpKind::Exit {
@@ -1472,8 +1503,14 @@ impl State {
         }
         match self.layout.facility().terrain(target) {
             Some(Terrain::Hideout) => {
-                if self.occupied(target) {
+                // A cupboard holding a stowed body is **locked** — no longer a
+                // hideout (§7.2) — and one holding an actor is occupied: either way
+                // it refuses entry. Empty, a dragging player **stows** their body in
+                // it (deposit-and-lock); hands free, they climb in to hide (§10.3).
+                if self.body_at(target).is_some() || self.occupied(target) {
                     BumpKind::HideoutBlocked
+                } else if self.dragging.is_some() {
+                    BumpKind::DepositBody
                 } else {
                     BumpKind::Hide
                 }
@@ -1719,9 +1756,11 @@ impl State {
                 return;
             }
             let facility = self.layout.facility();
-            // Guards are solid to each other and path *around* a colleague (§7.8) —
-            // and around a body (§7.2, solid like any actor): the decider routes only
-            // through cells no other guard or body holds. Positions are read fresh
+            // Guards are solid to each other and path *around* a colleague (§7.8):
+            // the decider routes only through cells no other guard holds. A body is
+            // **not** an obstacle (§7.2 — non-solid), so a guard routes and steps
+            // straight over one, which is what stops a body in a chokepoint from
+            // freezing an investigation or a patrol (#182). Positions are read fresh
             // here, so a guard sees where the colleagues that already moved this turn
             // now stand.
             let blocked: Vec<Cell> = self
@@ -1730,7 +1769,6 @@ impl State {
                 .enumerate()
                 .filter(|(j, _)| *j != i)
                 .map(|(_, g)| g.pos())
-                .chain(self.bodies.iter().map(|b| b.cell()))
                 .collect();
             let Some(dir) =
                 self.guards[i].decide(facility, &blocked, &mut self.rng, self.dwell_chance)
@@ -1766,13 +1804,16 @@ impl State {
                 events.push(Event::DoorOpened { at: target });
                 continue;
             }
-            // A guard moves onto a cell the terrain admits and no actor occupies. Its
-            // own cell is a step behind `target`, so the mover is never in the way; the
-            // player's cell was captured above but `occupied` still guards it.
-            // `advance_to` refreshes the moved guard's cone at once, so the sight a
-            // frame shows never lags the position it shows (§11.5); the next phase 2
-            // recomputes everything anyway.
-            if self.layout.facility().can_enter(target, ACTOR_FILL) && !self.occupied(target) {
+            // A guard moves onto a cell the terrain admits and no *guard* holds. Its
+            // own cell is a step behind `target`, so the mover is never in the way;
+            // the player's cell was captured above, so target is never the player
+            // here. A body is non-solid (§7.2), so a guard may step onto a body's
+            // cell — the body just lies underneath it (#182). `advance_to` refreshes
+            // the moved guard's cone at once, so the sight a frame shows never lags
+            // the position it shows (§11.5); the next phase 2 recomputes everything.
+            if self.layout.facility().can_enter(target, ACTOR_FILL)
+                && self.guard_at(target).is_none()
+            {
                 let from = self.guards[i].pos();
                 let facility = self.layout.facility();
                 self.guards[i].advance_to(target, dir, facility);
@@ -1852,10 +1893,11 @@ impl State {
         self.bodies.iter().position(|b| b.cell() == cell)
     }
 
-    /// Whether any actor occupies `cell` — the loop's single occupancy predicate.
-    /// Actors are the player, the guards, and the bodies takedowns leave (§7.2);
-    /// decoys and the rest fold in here (§4.3/§12.3) so occupancy is asked in one
-    /// place and nothing is special-cased at the call sites.
+    /// Whether any actor occupies `cell` — the **door-crush** occupancy predicate
+    /// (§10.4: a door never shuts on an actor). Actors are the player, the guards,
+    /// and the bodies takedowns leave (§7.2), so a door refuses to close on a body
+    /// even though a body is otherwise non-solid to movement and pathing. Movement
+    /// checks read the player and guards directly, not this.
     fn occupied(&self, cell: Cell) -> bool {
         actor_occupies(self.player, &self.guards, &self.bodies, cell)
     }
@@ -1873,8 +1915,10 @@ fn declares(id: AbilityId, effect: Effect) -> bool {
 /// twin of [`State::occupied`], for callers that must borrow the actor fields apart
 /// from the rest of the state (door closing borrows the layout mutably at the same
 /// time). One definition of "an actor is here" — extend it, not the call sites, when
-/// new actor kinds arrive. A body counts (§7.2: solid, fill 1.0), which is also what
-/// keeps a door from ever closing on one (§10.4 — doors never crush).
+/// new actor kinds arrive. A body counts here so a door never closes on one (§10.4 —
+/// doors never crush, and a body under a shut door would be unreachable). A body is
+/// otherwise **non-solid** (§7.2): it blocks neither movement nor pathing, so the
+/// loop's movement checks read guards and the player directly, not this predicate.
 fn actor_occupies(player: Cell, guards: &[Guard], bodies: &[Body], cell: Cell) -> bool {
     player == cell
         || guards.iter().any(|g| g.pos() == cell)

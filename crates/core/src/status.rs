@@ -80,6 +80,7 @@ pub fn message_for(event: Event) -> Option<Message> {
         // held state itself lives on the ambient floor, not in a message.
         Event::BodyGrabbed { .. } => ("you take hold of the body".to_string(), 0),
         Event::BodyReleased { .. } => ("you let the body go".to_string(), 0),
+        Event::BodyStored { .. } => ("you stow the body — the cupboard is sealed".to_string(), 0),
         // Your fake, trampled (§8.3) — quiet Owned narration; the fade-out by
         // duration reads as the ability's own expiry message.
         Event::DecoyDied { .. } => ("the decoy is trampled".to_string(), 0),
@@ -303,9 +304,8 @@ mod tests {
             Cell::new(10, 10),
         );
         s.step(Input::Step(Direction::North)); // takedown
-        s.step(Input::Step(Direction::East)); // out of the cupboard
-        s.step(Input::Step(Direction::North)); // beside the body
-        s.step(Input::Step(Direction::West)); // grab: the message turn
+        s.step(Input::Step(Direction::North)); // climb out onto the body
+        s.step(Input::Step(Direction::East)); // step off — take hold: the message turn
         assert_eq!(near_line(&s).text, "you take hold of the body");
 
         s.step(Input::Wait); // the message clears to the held state
