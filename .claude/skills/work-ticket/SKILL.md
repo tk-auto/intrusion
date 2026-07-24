@@ -210,15 +210,24 @@ go green:
     `get_job_logs` and fix it forward on a fresh branch/PR (the merge is already
     in — you can't fix it on the old branch). Surface it to the user; never leave
     a red `main` silently behind.
-  > **Polling the merged runs cheaply.** The PR gate (above) is best watched with
-  > `pull_request_read` → `get_check_runs`, which is compact. The post-merge runs
-  > are on the `main` push, not the PR, so reach for `actions_list`
-  > (`list_workflow_runs`) filtered to `branch: main`, `event: push`, and match
-  > your merge commit by its head SHA. Keep `per_page` at 2–3: those runs embed a
-  > full `repository` / `head_repository` / `actor` blob **each**, so the default
-  > 30-run page is ~400 KB and blows the token limit, while a 2–3 run page does
-  > not. On red, narrow with `list_workflow_jobs` + `get_job_logs` rather than
-  > fetching whole runs.
+  > **These `actions_*` results are huge — don't read them raw.** Both
+  > `actions_list` (`list_workflow_runs`) and `actions_get` (`get_workflow_run`)
+  > embed a full `repository` / `head_repository` / `actor` blob **per run**, so
+  > a single call is ~400 KB and blows the tool-result token limit — the harness
+  > spills it to a file instead of returning it. Two lighter moves, in order:
+  > 1. For anything attached to the **PR** (the fmt/clippy/test gate before you
+  >    merge), prefer `pull_request_read` with `get_check_runs` or `get_status` —
+  >    those are compact (a handful of fields per check).
+  > 2. The post-merge runs are on the `main` push, *not* on the PR head, so you
+  >    must use `actions_list` — call it filtered to `{branch: "main", event:
+  >    "push"}` with a small `per_page` to fetch just the latest runs, then, when
+  >    the result spills to a file, extract only the fields you need with a shell
+  >    one-liner (e.g. `python3 -c "import json;d=json.load(open(F));
+  >    [print(r['name'],r['head_sha'],r['status'],r['conclusion']) for r in
+  >    d['workflow_runs']]"`) rather than reading the raw payload back into
+  >    context. Match `ci.yml` and `pages.yml` to your merge commit by `head_sha`.
+  >    On red, narrow with `list_workflow_jobs` + `get_job_logs` for the failing
+  >    job rather than fetching whole runs.
 
 **Do NOT merge — leave the PR open and hand it back — when any of these hold:**
 
