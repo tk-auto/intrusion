@@ -128,6 +128,7 @@ const BLACK: Swatch = PALETTE[0];
 const WHITE: Swatch = PALETTE[1];
 const DIM_GRAY: Swatch = PALETTE[2];
 const SLATE: Swatch = PALETTE[4];
+const CYAN: Swatch = PALETTE[7];
 const BLUE: Swatch = PALETTE[5];
 const YELLOW: Swatch = PALETTE[10];
 const ORANGE: Swatch = PALETTE[11];
@@ -169,6 +170,12 @@ fn swatch(category: Category) -> Swatch {
         // hue but never its role — Sensed only ever paints a background, never a glyph,
         // so the two never collide on screen.
         Category::Sensed => ORANGE,
+        // A door that just changed state (§9.2/§10.4): a **cyan** background pulse. Like
+        // Sensed it only ever paints a background, never a glyph — so a *cool* cyan sits
+        // clear of the two warm threat overlays (the sensed orange and the danger red)
+        // it must never be mistaken for, and clear of the door's own tan `+`/`}` glyph
+        // sitting on it — where a tan-on-tan System background would have vanished.
+        Category::Trace => CYAN,
     }
 }
 
@@ -399,13 +406,18 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
 /// ready. The §7.6 certain/glimpse zones add two *detection* shades when two-zone
 /// detection lands; until then the whole cone is one zone.
 ///
-/// **Sensed is the exception**: a guard sensed through a wall (§9.2) is *always* out
-/// of the FOV, yet its position is certain knowledge, not fogged — so it paints at
-/// full strength (the bright [`Swatch::bg`]) regardless of `vis`, an eye-catching
-/// orange fill rather than sinking into the dim shade the fog would otherwise pick.
+/// **Sensed and Trace are the exception**: a guard sensed through a wall (§9.2) and a
+/// door-change cue (§10.4) are certain, position-only knowledge, not fogged — so each
+/// paints at full strength (the bright [`Swatch::bg`]) regardless of `vis`, an
+/// eye-catching fill rather than sinking into the dim shade the fog would otherwise
+/// pick.
 fn bg_color(bg: Category, vis: Visibility) -> &'static str {
     let swatch = swatch(bg);
-    if bg == Category::Sensed {
+    // Sensed and Trace are both certain, position-only knowledge painted through walls
+    // (§9.2/§10.4), never fogged — so they paint at full strength (the bright
+    // [`Swatch::bg`]) regardless of `vis`, rather than sinking into the dim shade the
+    // fog would otherwise pick for an out-of-FOV cell.
+    if bg == Category::Sensed || bg == Category::Trace {
         return swatch.bg;
     }
     match vis {
@@ -552,6 +564,49 @@ mod tests {
                 "the sensed orange blurs into the danger red {danger} (dist^2 {d})"
             );
         }
+    }
+
+    /// §9.2/§10.4: the **door-change cue** is a third background overlay, and it must
+    /// stay tellable from the other two — the sensed orange and the danger red — and
+    /// from the door's own tan `System` glyph that sits on top of it (the reason a
+    /// tan `System` background was rejected: it would vanish under the door it marks).
+    /// Like Sensed it paints at full strength in and out of the FOV alike.
+    #[test]
+    fn the_trace_background_reads_and_is_distinct_from_the_other_overlays() {
+        const MIN_BG_DIST2: i32 = 40 * 40;
+        let trace = bg_color(Category::Trace, Visibility::Dimmed);
+        assert_eq!(
+            trace,
+            bg_color(Category::Trace, Visibility::Live),
+            "the trace fill is full-strength in and out of the FOV alike",
+        );
+        // It reads against the page background — a door cue that sank into black would
+        // be no cue at all.
+        let d = dist2(rgb(trace), rgb(BG));
+        assert!(
+            d >= MIN_BG_DIST2,
+            "the trace fill vanishes into the page background (dist^2 {d})"
+        );
+        // Clear of both threat overlays, both shades: a door cue must never read as a
+        // sensed guard or a watched cell.
+        for other in [
+            bg_color(Category::Sensed, Visibility::Live),
+            bg_color(Category::Danger, Visibility::Live),
+            bg_color(Category::Danger, Visibility::Dimmed),
+        ] {
+            let d = dist2(rgb(trace), rgb(other));
+            assert!(
+                d >= MIN_BG_DIST2,
+                "the trace cyan blurs into another overlay {other} (dist^2 {d})"
+            );
+        }
+        // And clear of the door's own tan glyph drawn over it — the collision that
+        // ruled out reusing the System background for this cue.
+        let d = dist2(rgb(trace), rgb(swatch(Category::System).fg));
+        assert!(
+            d >= MIN_BG_DIST2,
+            "the trace fill blurs into the tan door glyph on top of it (dist^2 {d})"
+        );
     }
 
     /// The §11.2 [START] promise, pinned: the base palette is **full-range** —

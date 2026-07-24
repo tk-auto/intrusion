@@ -837,6 +837,46 @@ cannot see its cone, so you hold still and hope. Exactly as intended, and now th
 > unbuilt (§7.3, **[START]**); design its tells visual from the start — a near-line
 > message and the responder's own motion, not a sound.
 
+### 9.4 Sensing doors
+
+The sense has a **second channel**, built the same way (§9.2) and for the same
+reason. A door opening or shutting **away from you** — a guard routing through a
+closed door and walking it open (§10.4), a Calm guard shutting one behind itself,
+an automatic door timing out — is *evidence that someone passed* (§10.4). As a
+transient near-line word ("the door opens") that evidence was easy to miss, cleared
+on your next action (§11.7), and never said *where*. So it becomes a **positional,
+on-grid cue**, exactly like the sensed guard: a **background highlight on the door
+cell that changed**, readable around a corner and out of FOV.
+
+- **Its own information category, `Trace`** (§11.2) — "a door changed here". Painted
+  as a background (never a glyph), in a hue distinct from the sensed orange and the
+  danger red, and distinct from the door's own tan glyph sitting on it. It says
+  *where*, never *who* passed or *which way they went* — the same restraint the
+  sensed dot keeps (position, never intent).
+- **It carries farther than the guard sense.** A door change is a louder, coarser
+  event than a guard's exact position, so it reaches a new **`DOOR_SENSE_RANGE`
+  [START]** that sits **above** the guard sense — `DOOR_SENSE_RANGE = 15 >
+  PLAYER_SENSE_RANGE = 10` (§9.1), pinned by a test. Doors are the facility breathing
+  around you; you feel that from across a wing even when you could not pinpoint the
+  guard that did it. A change beyond that range shows nothing — it is not made so
+  large the whole facility pulses on every guard step (§2.3 in the other direction).
+  **Wait does not widen it** (unlike the guard sense — a door change is already loud
+  enough), and **a duct shrinks it** to `DUCT_SENSE_RANGE` with the rest of the
+  crawlspace's degraded perception (§10.7).
+- **It is a fading mark, not a standing dot.** A door change is a **discrete** event,
+  not a live position, so the cue decays over a short **`DOOR_CUE_DECAY_TURNS`
+  [START]** (currently 3) and is then gone — visible while the fact is fresh, not a
+  single-frame flash and not a permanent stain.
+- **Open and shut share one cue** — it is the same evidence ("a door changed here"),
+  and both drive it. Where the cue coincides with a sensed guard or the danger
+  overlay, the threat outranks it (§11.5: being seen — and reading a guard's live
+  cell — outranks a fading trace).
+- **A door *you* operate** keeps its quiet near-line self-narration (§11.7) and
+  lights no cue — you already know; the cue is for the doors you did *not* move.
+
+This pairs with the light-mode reskin (§11.2): the `Trace` category must read on both
+backdrops, like every other category.
+
 ---
 
 ## 10. The facility
@@ -1142,6 +1182,10 @@ one unit.
     doorway is last vacated; an actor standing in the throat holds them open (never a
     crush). The delay is a stealth window: a guard passing through leaves the door open
     just long enough to slip after them.
+- **You sense a door change away from you** (§9.4): a door opening or shutting that
+  you did not cause paints a fading on-grid **`Trace`** cue on its cell, at its own
+  longer `DOOR_SENSE_RANGE`, so "someone passed through there" stays legible around a
+  corner rather than living only in a transient near-line word.
 
 ### 10.5 The spatial model — fix this properly
 
@@ -1331,6 +1375,7 @@ one-table edit.
 | **Warning** | Orange | A threat that is hunting |
 | **Danger** | Red | A threat that has you |
 | **Sensed** | Orange (background) | A guard **sensed through a wall** (§9) — an eye-catching cell highlight, position only, mind and facing unknown |
+| **Trace** | Cyan (background) | A door that **just changed away from you** (§9.4/§10.4) — a fading cell highlight, "someone passed here", position only |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
 
@@ -1345,7 +1390,9 @@ overlay, orange not red. The bloom from an orange cell to a state-coloured
 `g`-with-cone *is* the seen/sensed distinction, made visible. Keep all of this.
 *(Sensed reuses Warning's orange hue but only ever as a background, never a glyph,
 so the two never collide; the old §9.3 cyan "Noise" slot — a heard sound's source
-— is freed, since sound is gone.)*
+— is freed, since sound is gone, and the **Trace** door cue (§9.4) now claims that
+cyan: a cool background clear of the two warm threat overlays and of the tan door
+glyph that sits on it.)*
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant.

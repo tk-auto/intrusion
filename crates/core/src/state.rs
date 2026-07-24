@@ -82,6 +82,38 @@ pub const PLAYER_SENSE_RANGE_WAITING: u32 = 20;
 /// take stock of the whole area. Pinned by a test.
 pub const DUCT_SENSE_RANGE: u32 = 5;
 
+/// The player's **door-sense** range (§9.2/§10.4 **[START]**): a door that opens or
+/// shuts away from the player — a guard walking through one, or an automatic door
+/// timing shut (§10.4) — is felt at this Chebyshev range, **through walls**, and
+/// leaves a fading on-grid cue ([`Category::Trace`](crate::Category::Trace)). It is a
+/// louder, coarser event than a guard's exact position, so it carries **farther**
+/// than the guard sense: `DOOR_SENSE_RANGE > `[`PLAYER_SENSE_RANGE`] (pinned by a
+/// test). Doors are the facility breathing around you — you feel that from across a
+/// wing even when you could not pinpoint the guard that did it. It is a `[START]`
+/// tuning number: large enough to reach the next wing, small enough that the whole
+/// facility does not pulse on every guard step (§2.3 in the other direction).
+///
+/// **Waiting does not widen it** (unlike the guard sense): the Wait extension is
+/// about taking careful stock of *precise* guard positions, whereas a door change is
+/// already loud enough to feel regardless. **Inside a duct it shrinks** to
+/// [`DUCT_SENSE_RANGE`] with the rest of the crawlspace's degraded perception
+/// (§10.7) — see [`door_sense_range`](State::door_sense_range).
+pub const DOOR_SENSE_RANGE: u32 = 15;
+
+/// The door sense reaches **farther** than the guard sense (§9.2/§10.4) — a coarse
+/// "a door moved over there" carries past the precise "that guard is on that cell".
+/// Pinned at compile time so the asymmetry can never silently invert.
+const _: () = assert!(DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE);
+
+/// How many turns a door-change cue stays lit before it fades (§9.2/§10.4
+/// **[START]**): a door open/close is a **discrete** event, not a standing position
+/// like a guard, so its cue is inherently a fading mark. It reads like sensed
+/// evidence — visible while the fact is fresh — rather than a single-frame flash.
+/// Placed at full life the turn the door changes and decremented once per world
+/// turn, so the cue shows for this many renders and is gone on the next. Pinned by a
+/// test.
+pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
+
 /// What the player asks to do on their phase. Input mapping (which key is which,
 /// §11.6) lives in the web shell; the loop knows only the actions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -137,13 +169,21 @@ pub enum Event {
     Crouched { behind: Cell },
     /// A closed door was opened by a bump on a panel (§10.4): the player's
     /// (§4.3), or a guard's — a guard's route runs straight through closed
-    /// doors, and walking into the panel is the bump that opens them.
-    DoorOpened { at: Cell },
-    /// A **Calm** guard closed a hinged door behind itself after passing through
-    /// it (§10.4, #146): the counter-pressure to guard traffic's monotonic opening,
-    /// restoring the level's structure and keeping an open door meaningful as
-    /// evidence that someone came this way. `at` is a panel of the shut door.
-    DoorClosed { at: Cell },
+    /// doors, and walking into the panel is the bump that opens them. `by_player`
+    /// says which: a door *you* opened keeps its quiet near-line self-narration
+    /// (§11.7), while a guard-opened one is instead felt on the grid as a §10.4
+    /// door cue ([`Category::Trace`](crate::Category::Trace)) — evidence someone
+    /// passed, readable around a corner.
+    DoorOpened { at: Cell, by_player: bool },
+    /// A door shut away from the player: a **Calm** guard closing a hinged door
+    /// behind itself after passing through it (§10.4, #146) — the counter-pressure
+    /// to guard traffic's monotonic opening, restoring the level's structure and
+    /// keeping an open door meaningful as evidence — or an automatic door timing
+    /// shut (#147). `at` is a panel of the shut door; `by_player` mirrors
+    /// [`DoorOpened`](Event::DoorOpened) (always `false` today — the player has no
+    /// close-by-bump — but a door cue is raised for every close the player did not
+    /// cause).
+    DoorClosed { at: Cell, by_player: bool },
     /// The player took the intel at a console; `remaining` objectives are still out.
     IntelTaken { remaining: usize },
     /// The player bumped the exit with objectives still outstanding — refused (§4.5).
@@ -440,6 +480,19 @@ pub enum GuardPerception {
     Sensed,
 }
 
+/// A fading door-change cue (§9.2/§10.4): the cell where a door opened or shut away
+/// from the player, and how many more turns the mark shows. A door change is a
+/// **discrete** event — unlike a guard, there is no standing position to re-read each
+/// frame — so the fact is latched here the turn it happens (if within
+/// [`DOOR_SENSE_RANGE`]) and fades over [`DOOR_CUE_DECAY_TURNS`] world turns. The
+/// renderer paints it as a [`Category::Trace`] background ([`State::door_cues`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct DoorCue {
+    at: Cell,
+    /// Turns of life left; decremented once per world turn and dropped at zero.
+    ttl: u32,
+}
+
 /// Whether the run is still going, and if not, how it ended (§4.5).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Outcome {
@@ -547,6 +600,14 @@ pub struct State {
     /// exactly one action's events *is* the clearing rule). Empty before the
     /// first input; frozen once the run ends, so the final message stays.
     last_events: Vec<Event>,
+    /// The live door-change cues (§9.2/§10.4): cells where a door opened or shut
+    /// away from the player, each fading over [`DOOR_CUE_DECAY_TURNS`] turns. Placed
+    /// in [`record_door_cues`](Self::record_door_cues) for the door events the player
+    /// did not cause, and decayed each world turn in
+    /// [`decay_door_cues`](Self::decay_door_cues); the renderer reads them through
+    /// [`door_cues`](Self::door_cues). A small set — at most a handful of doors change
+    /// in any few-turn window — so a plain `Vec` scan is cheaper than a map.
+    door_cues: Vec<DoorCue>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
     /// two stochastic guard decisions: a Calm guard's chance to close a door behind
     /// itself (§10.4/#146) and its chance to dwell on reaching a patrol destination
@@ -617,6 +678,7 @@ impl State {
             alert: 0,
             outcome: Outcome::Playing,
             last_events: Vec::new(),
+            door_cues: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
             // have passed through a door before it has taken a step — so setting the
@@ -870,6 +932,31 @@ impl State {
         } else {
             PLAYER_SENSE_RANGE
         }
+    }
+
+    /// The player's current **door-sense** range (§9.2/§10.4): [`DOOR_SENSE_RANGE`]
+    /// on open floor, shrinking to [`DUCT_SENSE_RANGE`] inside a duct with the rest
+    /// of the crawlspace's degraded perception (§10.7). Unlike the guard sense, a
+    /// **Wait does not widen it** — a door change is already a loud, coarse event, so
+    /// the "take careful stock" affordance that sharpens precise guard positions
+    /// buys nothing here. A door change beyond this range leaves no cue.
+    pub fn door_sense_range(&self) -> u32 {
+        if self.in_duct() {
+            DUCT_SENSE_RANGE
+        } else {
+            DOOR_SENSE_RANGE
+        }
+    }
+
+    /// The live door-change cues (§9.2/§10.4): the cells where a door opened or shut
+    /// away from the player recently enough to still show, in placement order. The
+    /// renderer paints each as a [`Category::Trace`] background — a fading mark that
+    /// "someone passed here", readable around a corner and out of FOV like the sensed
+    /// dot, position only (§10.4). A guard-driven or automatic door change within
+    /// [`door_sense_range`](Self::door_sense_range) lights one; a door *you* operate
+    /// does not (it keeps its quiet near-line self-narration, §11.7).
+    pub fn door_cues(&self) -> impl Iterator<Item = Cell> + '_ {
+        self.door_cues.iter().map(|cue| cue.at)
     }
 
     /// How the player perceives `guard` this frame (§9.2), or `None` if it is neither
@@ -1287,7 +1374,10 @@ impl State {
                     if let Some(peek) = self.hinge_peek_facing(target) {
                         self.facing = peek;
                     }
-                    events.push(Event::DoorOpened { at: target });
+                    events.push(Event::DoorOpened {
+                        at: target,
+                        by_player: true,
+                    });
                     true
                 }
                 DoorAction::Closed => {
@@ -1550,11 +1640,66 @@ impl State {
     /// notices the silence (§7.3), not a turn late.
     fn run_world_phases(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+        // Fade the door cues one turn *before* this turn's door events can relight
+        // them (§9.2/§10.4), so a cue placed this turn keeps its full life and a
+        // re-change refreshes rather than double-decrements.
+        self.decay_door_cues();
         self.recompute_sight();
         self.radio_phase(&mut events);
         self.guard_phase(&mut events);
         self.door_phase(&mut events);
+        // Latch a fading cue on every door the player did not cause (§10.4) — the
+        // player's own open is emitted in phase 1 and never reaches here.
+        self.record_door_cues(&events);
         events
+    }
+
+    /// Fade the door-change cues by one world turn (§9.2/§10.4), dropping any that
+    /// have burned out. Runs once per spent turn, at the head of the world phases.
+    fn decay_door_cues(&mut self) {
+        self.door_cues.retain_mut(|cue| {
+            cue.ttl -= 1;
+            cue.ttl > 0
+        });
+    }
+
+    /// Latch a fading on-grid cue (§9.2/§10.4) on every door that changed state this
+    /// turn **away from the player** and within [`door_sense_range`](Self::door_sense_range):
+    /// the guard-driven opens and the guard/automatic closes (all `by_player: false`).
+    /// A door *you* operated keeps its quiet near-line self-narration (§11.7) and
+    /// lights no cue. A change beyond the door-sense box is felt as nothing.
+    fn record_door_cues(&mut self, events: &[Event]) {
+        let range = self.door_sense_range();
+        for event in events {
+            let at = match *event {
+                Event::DoorOpened {
+                    at,
+                    by_player: false,
+                }
+                | Event::DoorClosed {
+                    at,
+                    by_player: false,
+                } => at,
+                _ => continue,
+            };
+            if self.player.sight_distance(at) <= range {
+                self.mark_door_cue(at);
+            }
+        }
+    }
+
+    /// Light or refresh the door cue on `at` to full life (§9.2/§10.4). A door that
+    /// changes again while its mark still shows simply resets the fade — one cell,
+    /// one cue.
+    fn mark_door_cue(&mut self, at: Cell) {
+        if let Some(cue) = self.door_cues.iter_mut().find(|cue| cue.at == at) {
+            cue.ttl = DOOR_CUE_DECAY_TURNS;
+        } else {
+            self.door_cues.push(DoorCue {
+                at,
+                ttl: DOOR_CUE_DECAY_TURNS,
+            });
+        }
     }
 
     /// The automatic doors' self-close tick (§10.4/#147), run once per world turn
@@ -1574,7 +1719,10 @@ impl State {
             .tick_auto_doors(|c| actor_occupies(player, guards, bodies, c));
         for id in closed {
             let at = self.layout.regions().door(id).panels()[0];
-            events.push(Event::DoorClosed { at });
+            events.push(Event::DoorClosed {
+                at,
+                by_player: false,
+            });
         }
     }
 
@@ -1801,7 +1949,10 @@ impl State {
             // (§10.4/#146), not a symmetric one — an open door still spreads.
             if self.layout.facility().terrain(target) == Some(Terrain::DoorPanelClosed) {
                 self.operate_door(target);
-                events.push(Event::DoorOpened { at: target });
+                events.push(Event::DoorOpened {
+                    at: target,
+                    by_player: false,
+                });
                 continue;
             }
             // A guard moves onto a cell the terrain admits and no *guard* holds. Its
@@ -1827,7 +1978,10 @@ impl State {
                 if self.guards[i].closes_doors() {
                     if let Some(door) = self.door_exited(from, target) {
                         if self.rolls_a_close() && self.close_behind_door(door) {
-                            events.push(Event::DoorClosed { at: from });
+                            events.push(Event::DoorClosed {
+                                at: from,
+                                by_player: false,
+                            });
                         }
                     }
                 }

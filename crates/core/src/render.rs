@@ -138,7 +138,10 @@ impl Grid {
 /// The one exception is a guard's *position*, known through walls within the
 /// guard-sense box (§9): a guard out of the FOV but in range gets a flat orange
 /// Sensed background on its cell — position only, no cone, and still never remembered
-/// once out of range.
+/// once out of range. A door's *change* is sensed the same way but at its own longer
+/// range (§9.2/§10.4): a door that opens or shuts away from the player leaves a fading
+/// [`Category::Trace`] background on its cell — evidence someone passed, also position
+/// only and also painted through walls.
 ///
 /// # Glyph priority (§11.3)
 ///
@@ -339,13 +342,26 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
+    // The door-change cue (§9.2/§10.4): every cell where a door opened or shut away
+    // from the player, within `DOOR_SENSE_RANGE`, gets a `Category::Trace` background
+    // — a filled highlight that fades over a few turns, evidence someone passed,
+    // readable around a corner and out of FOV like the sensed dot (position only,
+    // never who or which way). Painted *first* of the three background overlays, so a
+    // coincident sensed dot or danger cone outranks it (§11.5: being seen — and
+    // knowing a guard's live cell — outranks a fading trace of a past change).
+    for cell in state.door_cues() {
+        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Trace);
+    }
+
     // The sensed highlight (§9.2): every guard the player *senses* through a wall but
     // cannot see gets an orange `Category::Sensed` background on its exact cell — a
     // filled, eye-catching marker over whatever geometry masks the cell, position only
     // and never a glyph of its own. It carries no cone and no danger overlay: knowing
     // where a guard is is not knowing whether it can see you. Painted *before* the
     // danger overlay so a coincident red still wins — a sensed guard's cell that a
-    // *seen* guard also watches reads danger first (§11.5: being seen outranks).
+    // *seen* guard also watches reads danger first (§11.5: being seen outranks) — and
+    // *after* the door cue, so a sensed guard sitting on a just-changed door reads as
+    // the guard, not the trace.
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Sensed) {
             cells[(guard.pos().y * width + guard.pos().x) as usize].bg = Some(Category::Sensed);

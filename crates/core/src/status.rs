@@ -49,8 +49,23 @@ pub fn message_for(event: Event) -> Option<Message> {
         // A crawl is silent like a plain step — narrating every cell would bury the
         // near line (§11.7).
         Event::DuctCrawled { .. } => return None,
-        Event::DoorOpened { .. } => ("the door opens".to_string(), 0),
-        Event::DoorClosed { .. } => ("a door swings shut".to_string(), 0),
+        // A door *you* operate keeps its quiet self-narration (§11.7), like a bump or
+        // a crouch. A door that changes **away** from you (a guard walking through,
+        // an automatic door timing shut) says nothing on the near line — the durable
+        // "someone passed here" evidence is the on-grid door cue instead (§9.2/§10.4,
+        // `Category::Trace`), which is positional and survives the next action.
+        Event::DoorOpened {
+            by_player: true, ..
+        } => ("the door opens".to_string(), 0),
+        Event::DoorClosed {
+            by_player: true, ..
+        } => ("a door swings shut".to_string(), 0),
+        Event::DoorOpened {
+            by_player: false, ..
+        }
+        | Event::DoorClosed {
+            by_player: false, ..
+        } => return None,
         Event::IntelTaken { remaining: 0 } => ("intel in hand — the exit is open".to_string(), 20),
         Event::IntelTaken { remaining } => (format!("intel taken — {remaining} to go"), 20),
         Event::ExitRefused => ("the exit refuses — intel is still out".to_string(), 20),

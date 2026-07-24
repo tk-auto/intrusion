@@ -51,4 +51,15 @@ pub enum Category {
     /// carries a danger overlay — knowing where a guard is is not knowing whether it
     /// can see you (§9.2).
     Sensed,
+    /// A **door that just changed state** away from the player (§9.2/§10.4) — opened
+    /// or shut by a guard, or timed shut by an automatic door — sensed at its own
+    /// longer range ([`DOOR_SENSE_RANGE`](crate::DOOR_SENSE_RANGE)). Its meaning is
+    /// *evidence someone passed*: a background highlight on the door cell that fades
+    /// over a few turns, readable around a corner and out of FOV like the sensed dot,
+    /// but position only — never who passed or which way (§10.4). Presentation paints
+    /// it as a filled cell (like [`Sensed`](Category::Sensed) and the §11.5 danger
+    /// overlay), in a hue distinct from both the sensed orange and the danger red so
+    /// the three backgrounds never blur; it never carries a glyph of its own, and a
+    /// coincident sensed dot or danger cone outranks it (§11.5: being seen outranks).
+    Trace,
 }
