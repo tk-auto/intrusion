@@ -96,9 +96,10 @@ const MAX_DOOR_LEN: u32 = 6;
 /// self-healing seam that stops a busy wing propping every door open.
 const AUTO_DOOR_PERCENT: u32 = 30;
 /// How long an automatic door stays open after its doorway is last vacated
-/// (§10.4/#147, **[START] = 3** turns): short but nonzero, so a guard passing through
-/// leaves a real slip-through window before the door shuts (the ticket's stealth knob).
-const AUTO_CLOSE_DELAY: u32 = 3;
+/// (§10.4/#147, **[START] = 5** turns): short but nonzero, so a guard passing through
+/// leaves a real slip-through window before the door shuts (the ticket's stealth knob)
+/// — a touch longer than the original 3 to widen that window (§10.4).
+const AUTO_CLOSE_DELAY: u32 = 5;
 /// The most doorways any one room gets **[START]**. A room with a door on every
 /// wall is a thoroughfare, not a room — most rooms want one or two ways in, and a
 /// three-door hub should be the exception. Every room still keeps at least one
@@ -1237,6 +1238,7 @@ mod tests {
                             (3..=6).contains(&panels),
                             "seed {seed}: {panels} panels, want 3..=6"
                         );
+                        assert_eq!(AUTO_CLOSE_DELAY, 5, "the [START] auto-close delay");
                         assert_eq!(delay, AUTO_CLOSE_DELAY, "seed {seed}: the [START] delay");
                     }
                 }
