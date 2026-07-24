@@ -667,6 +667,80 @@ fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
     );
 }
 
+/// §7.2/§6.1 regression: a guard that steps **adjacent to and facing** the player
+/// during its own move phase (phase 3, §4.2) cannot be taken down from the front on
+/// the next turn. The takedown gate must read the guard's *live* cone, not the
+/// [`detected`](Guard::detected_player) latch phase 2 leaves behind — that latch is
+/// a turn stale for a guard whose cone was refreshed by its move but whose detection
+/// was not, so reading it would admit a takedown from directly in front (forbidden:
+/// beside or in front is never a valid takedown, only the rear blind spot, §155).
+///
+/// A guard is driven up a forced L-corridor so that its **arriving** step turns it
+/// to face the player: it walks east with its back to the player's column (the
+/// player sits at perpendicular range 2, outside the ~90° wedge, unseen), then turns
+/// north onto the cell directly below the player — now facing it point-blank, yet
+/// its pre-move look never saw it. The next turn the player's bump must be refused.
+#[test]
+fn a_guard_that_stepped_adjacent_facing_the_player_cannot_be_taken_from_the_front() {
+    // A one-cell-wide elbow forces the guard's path: with the corner cell walled,
+    // the only route from (4,5) to (5,4) is east-then-north, so the guard reaches
+    // (5,4) by turning north — facing the player at (5,3) — on its final step.
+    let mut layout = open_room(9, 9);
+    layout.place(Cell::new(4, 4), Terrain::Wall); // the elbow: no north-then-east cut
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 3), // on open floor, north of the guard's approach
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(4, 5), Cell::new(5, 4))],
+        Vec::new(),
+        Cell::new(7, 7),
+    );
+    // No dwelling, so the walk to (5,4) is deterministic (§12.4).
+    s.set_guard_dwell_chance(0);
+
+    // The §4.2 startup turn already walked the guard its first step, east to (5,5)
+    // with its back to the player. One more turn turns it north onto (5,4) — now
+    // directly below and facing the player, yet its pre-move look (facing east) saw
+    // only perpendicular range-2, outside the wedge, so it never detected them.
+    s.step(Input::Wait);
+
+    let guard = &s.guards()[0];
+    assert_eq!(guard.pos(), Cell::new(5, 4), "the guard is now adjacent");
+    assert_eq!(
+        guard.facing(),
+        Direction::North,
+        "facing the player point-blank"
+    );
+    assert!(
+        !guard.detected_player(),
+        "the stale latch: its pre-move look (facing east) never saw the player",
+    );
+    assert!(
+        guard.fov().contains(Cell::new(5, 3)),
+        "yet its refreshed cone covers the player — a live look detects",
+    );
+    assert_eq!(
+        s.affordances(),
+        Vec::new(),
+        "the usable line offers no takedown against a guard now facing you",
+    );
+
+    // The bump into that guard is refused as a free no-op, not a front takedown.
+    let turn_before = s.turn();
+    let events = s.step(Input::Step(Direction::South));
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(5, 4)
+        }],
+        "a guard facing you refuses the takedown (§6.1/§155)",
+    );
+    assert_eq!(s.guards().len(), 1, "the guard still stands");
+    assert!(s.bodies().is_empty(), "no body — nothing was taken down");
+    assert_eq!(s.turn(), turn_before, "a refused takedown is a free bump");
+    assert_eq!(s.player(), Cell::new(5, 3), "a refused bump does not move");
+}
+
 /// §7.2: a body does not block sight, so the first cone to cover it fires
 /// the found-body event — exactly once, found is found — and the finder goes
 /// hunting (the §7.6 search). The body is non-solid to the player: stepping

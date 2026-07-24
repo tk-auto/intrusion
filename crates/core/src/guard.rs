@@ -355,14 +355,22 @@ impl Guard {
         self.state
     }
 
-    /// Whether this guard's most recent look detected the player — the §7.2
-    /// takedown gate: a bump against a guard that **has** detected you this turn
-    /// is a free no-op, one against a guard that has not is the takedown. The
-    /// touching ring (§6.1 **[SETTLED]**) sees an adjacent player everywhere except
-    /// the guard's own **rear blind spot** (§155), so this is `false` beside a
-    /// guard either when you are directly behind it, or when something else
-    /// intervened in front — concealment, a decoy, a distraction. Both are the
-    /// puzzle §7.2 wants solved.
+    /// Whether this guard's most recent **look** detected the player — the
+    /// per-turn awareness latch (§7.2), set in phase 2's sight pass and cleared at
+    /// the top of the next [`sense`](Self::sense). It drives the [`Detected`] event
+    /// transition (§7.6) and the decoy precedence (a guard that sees you ignores a
+    /// decoy, §8.3) — both read it *within* phase 3, where it is current.
+    ///
+    /// It is **not** the takedown gate. A guard that steps adjacent in phase 3 has
+    /// a refreshed cone but a stale latch, so the gate reads the cone live instead
+    /// ([`guard_detects_now`](crate::State::guard_detects_now)); this latch would
+    /// let such a guard be taken down from directly in front. The touching ring
+    /// (§6.1 **[SETTLED]**) sees an adjacent player everywhere except the guard's
+    /// own **rear blind spot** (§155), so a live look is `false` beside a guard
+    /// only when you are directly behind it, or when something intervened in front
+    /// — concealment, a decoy, a distraction.
+    ///
+    /// [`Detected`]: crate::Event::Detected
     pub fn detected_player(&self) -> bool {
         self.detected
     }
