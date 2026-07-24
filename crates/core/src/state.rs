@@ -752,15 +752,6 @@ impl State {
         self.in_duct.is_some()
     }
 
-    /// Whether a guard stepping into the player's cell is **refused**, not a capture
-    /// (§4.5): the player is on a solid cell a patrol routes *around* — an occupied
-    /// cupboard ([`hidden`](Self::hidden)) or a duct ([`in_duct`](Self::in_duct)). In
-    /// both cases the cell blocks movement and pathing, so contact is the one thing a
-    /// guard cannot do; it holds instead (§7.6, §10.7).
-    fn contact_safe(&self) -> bool {
-        self.hidden() || self.in_duct()
-    }
-
     /// Whether the player is **crouched** behind partial cover (§10.3): they
     /// bumped a table to duck behind it and have not spent a turn on anything
     /// but waiting since. Crouching is weaker than the cupboard — concealment
@@ -1789,18 +1780,23 @@ impl State {
             };
 
             if target == self.player {
-                // Capture is contact (§4.5) — but a player on a solid cell a patrol
-                // routes *around* is the exception: the occupied cupboard and a duct
-                // both refuse contact (§10.3/§10.7, §7.6). The guard cannot enter; it
-                // holds this turn. This is the "hold still, watch the cone sweep past"
-                // payoff — a guard on a duct mouth can never follow the player in.
-                if self.contact_safe() {
-                    continue;
+                // Inside a duct the player is in the crawlspace, not on the floor the
+                // guard walks (§10.7): a duct changes *nothing* guard-facing, so the
+                // guard steps over the cell as if empty — neither capturing the
+                // concealed crawler nor blocked by them. Fall through to the move below.
+                if !self.in_duct() {
+                    // On the floor, contact is capture (§4.5) — unless the player is in
+                    // an occupied cupboard, a solid cell the patrol routes *around*
+                    // (§10.3/§7.6): the guard cannot enter, so it holds this turn. This
+                    // is the "hold still, watch the cone sweep past" payoff.
+                    if self.hidden() {
+                        continue;
+                    }
+                    self.guards[i].place_at(target);
+                    self.outcome = Outcome::Lost;
+                    events.push(Event::Captured { by: target });
+                    return;
                 }
-                self.guards[i].place_at(target);
-                self.outcome = Outcome::Lost;
-                events.push(Event::Captured { by: target });
-                return;
             }
             // A closed door does not stop a guard: its route runs straight through
             // (§10.3's deliberate closed-panel rule), and the walk-in is the bump

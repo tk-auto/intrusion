@@ -1242,11 +1242,13 @@ guard sees, paths on, or looks through changes.
 (`DuctEntry`, §10.3/§11.3). Each entry is **recessed like a cupboard** (§10.1.6):
 exactly one floor **mouth** and solid backing on the other three sides, so a duct is
 entered, exited and peeked from that one side. The **interior** cells between the
-entries **route over the building** — the shortest path, free to cross room and
-corridor **floor**, not just wall — so a duct **spans across rooms** to join two
-far-apart regions. Each interior cell keeps whatever terrain it already had (a path
-over floor stays floor to everyone but the crawler); the only record that those cells
-are also a crawl route is the duct list on the layout — nothing on the grid tells.
+entries **route over the building** — the shortest path across plain **wall or floor**,
+so a duct **spans across rooms** to join two far-apart regions. It crosses *inert*
+geometry only: never a cupboard, door, console or table, since crawling over an
+interactable would collide with the terrain it overlies. Each interior cell keeps
+whatever terrain it already had (a path over floor stays floor to everyone but the
+crawler); the only record that those cells are also a crawl route is the duct list on
+the layout — nothing on the grid tells.
 
 **The entry is wall-like to guards.** A `DuctEntry` blocks movement, sight and
 pathing exactly as a wall does. So a guard never sees *through* an entry, never
@@ -1267,7 +1269,10 @@ gate's inputs are fixed, and assert only its own geometry.
   floor.
 
 **Concealment.** Inside a duct the player is concealed from every guard (no cone
-detects a crawler) and **contact-safe**: a guard on the mouth can never step in, so a
+detects a crawler) and **contact-safe**. The crawler is in the crawlspace, not on the
+floor the guards walk: where a duct passes over room or corridor floor, a guard **walks
+straight over the crawler's cell** — it neither blocks the patrol nor is blocked by it,
+and cannot capture the concealed crawler (a duct changes nothing guard-facing). So a
 duct is an escape a pursuer cannot follow — the cupboard's payoff, mobile.
 
 **The cost is information (§2.3), and it is load-bearing.** Inside, normal vision is
@@ -1294,9 +1299,9 @@ crosses. The `=` you plan around is the entry alone.)*
 
 **Generation.** Place a small number of ducts, each connecting two regions **far
 apart on the region graph** (a duct that shortcuts nothing is noise), routed as the
-shortest cell path **over the building** — across wall *and* floor, forbidding only
-the two mouths so each entry's recessed backing and its single climb-out survive —
-deterministic from the seed (§12.4). A candidate is kept only when crawling it saves
+shortest cell path **over the building** — across plain wall *and* floor only (never an
+interactable cell), forbidding also the two mouths so each entry's recessed backing and
+its single climb-out survive — deterministic from the seed (§12.4). A candidate is kept only when crawling it saves
 at least `DUCT_MIN_PAYOFF` steps over walking between its mouths. The pass asserts the
 per-entry one-mouth geometry; the §10.6/§10.1a guarantees hold untouched, since only
 the two entries are restamped (a wall→entry swap that is wall-like both ways) and

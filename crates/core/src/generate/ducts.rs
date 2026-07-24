@@ -256,10 +256,17 @@ fn hop_distances(regions: &RegionGraph, start: RegionId) -> HashMap<RegionId, u3
 }
 
 /// The shortest **cell** path from entry candidate `wall_a` to `wall_b` (§10.7): a BFS
-/// over the interior of the facility, free to cross **any** terrain — wall *or* floor
-/// — so a duct spans *over the building*, not just along a wall run. Returns the path
-/// inclusive of both ends (which the caller stamps as entries), or `None` if none
-/// connects them within reach.
+/// over the interior of the facility, free to cross plain **wall** *or* **floor** — so
+/// a duct spans *over the building* (across rooms and corridors), not just along a wall
+/// run. Returns the path inclusive of both ends (which the caller stamps as entries),
+/// or `None` if none connects them within reach.
+///
+/// Only [`Terrain::Wall`] and [`Terrain::Floor`] are crawlable. A duct never routes
+/// through an **interactable** cell — a cupboard, a door, a console, a table — because
+/// crawling over one would collide with the terrain it overlies: a hideout cell reads
+/// the crawler as *hidden* (`State::hidden`), a door as a throat to crush, and so on.
+/// Keeping the interior to plain wall and floor keeps the crawl a clean overlay on
+/// inert geometry.
 ///
 /// The border ring is excluded (a duct is internal), as are cells already claimed by
 /// another duct (`used`) and — crucially — the two **mouths** `mouth_a`/`mouth_b`.
@@ -283,6 +290,10 @@ fn route_duct(
             && c.y >= 1
             && c.x < facility.width() - 1
             && c.y < facility.height() - 1
+            && matches!(
+                facility.terrain(c),
+                Some(Terrain::Wall) | Some(Terrain::Floor)
+            )
             && !used.contains(&c)
             && c != mouth_a
             && c != mouth_b
@@ -448,6 +459,19 @@ mod tests {
                         facility.terrain(backing),
                         Some(Terrain::Wall),
                         "seed {seed}: the cell behind an entry must be solid wall"
+                    );
+                }
+                // Every interior cell is plain floor or wall — never a cupboard, door,
+                // console or table: a duct routes over inert geometry only, so the
+                // crawl overlay never collides with an interactable it overlies.
+                for &interior in &cells[1..cells.len() - 1] {
+                    assert!(
+                        matches!(
+                            facility.terrain(interior),
+                            Some(Terrain::Floor) | Some(Terrain::Wall)
+                        ),
+                        "seed {seed}: interior {interior:?} is {:?}, not plain floor/wall",
+                        facility.terrain(interior),
                     );
                 }
                 // A real span: the two mouths open onto two different regions.
