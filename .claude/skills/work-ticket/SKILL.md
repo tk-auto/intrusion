@@ -194,19 +194,31 @@ go green:
   commit per issue, e.g. `… (#24)`).
 - **On red:** diagnose from the failure logs (`get_job_logs`), fix on the same
   branch, push, and re-arm the watcher for the new run.
-- **After the merge, hand back the play URL — don't wait for the deploy.** The
-  merge to `main` kicks the Pages workflow (`pages.yml`), but the artifact build
-  (step 8) already gave the user a playable preview, so there's no need to block
-  on the deploy. Simply report the Pages URL
-  <https://tk-auto.github.io/intrusion/> as the final deliverable, noting that
-  the merged change will be live there once the Pages workflow finishes. Do not
-  poll `actions_list` / `list_workflow_runs` for the `main` deploy.
-  > **On the compact `pull_request_read` checks:** to watch the fmt/clippy/test
-  > gate on the **PR**, prefer `pull_request_read` with `get_check_runs` or
-  > `get_status` — those are compact (a handful of fields per check). Avoid the
-  > `actions_*` tools (`list_workflow_runs` / `get_workflow_run`): they embed a
-  > full `repository` / `head_repository` / `actor` blob **per run**, so a single
-  > call is ~400 KB and blows the tool-result token limit.
+- **After the merge, watch the main build until it's green — then hand back the
+  play URL.** The merge to `main` fires two push-triggered workflows on the merge
+  commit: `ci.yml` (the fmt/clippy/test gate) and `pages.yml` (build + Pages
+  deploy — this one never runs on a PR, so the merge is the first time it builds
+  your change). Two PRs that each passed their own gate can still break `main`
+  together (a semantic conflict, a stale base), so the ticket isn't done until
+  the *merged* commit builds clean. Re-arm the same basic-monitor loop and poll
+  the merge commit's runs until both complete:
+  - **Both green:** report the Pages URL <https://tk-auto.github.io/intrusion/>
+    as the final deliverable, noting the change will be live once `pages.yml`
+    finishes deploying — a green `pages.yml` build is the guarantee, so you don't
+    have to wait out the deploy step itself.
+  - **Either red:** the regression is now in `main`. Diagnose from
+    `get_job_logs` and fix it forward on a fresh branch/PR (the merge is already
+    in — you can't fix it on the old branch). Surface it to the user; never leave
+    a red `main` silently behind.
+  > **Polling the merged runs cheaply.** The PR gate (above) is best watched with
+  > `pull_request_read` → `get_check_runs`, which is compact. The post-merge runs
+  > are on the `main` push, not the PR, so reach for `actions_list`
+  > (`list_workflow_runs`) filtered to `branch: main`, `event: push`, and match
+  > your merge commit by its head SHA. Keep `per_page` at 2–3: those runs embed a
+  > full `repository` / `head_repository` / `actor` blob **each**, so the default
+  > 30-run page is ~400 KB and blows the token limit, while a 2–3 run page does
+  > not. On red, narrow with `list_workflow_jobs` + `get_job_logs` rather than
+  > fetching whole runs.
 
 **Do NOT merge — leave the PR open and hand it back — when any of these hold:**
 
