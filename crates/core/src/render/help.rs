@@ -84,7 +84,7 @@ fn category_meaning(category: Category) -> &'static str {
         Category::Danger => "you're in its cone",
         Category::Interest => "a goal or reward",
         Category::System => "door / cupboard / duct",
-        Category::Sensed => "guard felt through a wall",
+        Category::Sensed => "guard or door, felt through a wall",
     }
 }
 

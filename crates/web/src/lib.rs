@@ -167,7 +167,8 @@ fn swatch(category: Category) -> Swatch {
         // A guard sensed through a wall (§9.2): an orange *background* highlight, the
         // eye-catching parallel of the red danger overlay. It shares Warning's orange
         // hue but never its role — Sensed only ever paints a background, never a glyph,
-        // so the two never collide on screen.
+        // so the two never collide on screen. The door-change cue (§9.4) reuses this
+        // same category, so a sensed guard and a sensed door change share the orange.
         Category::Sensed => ORANGE,
     }
 }
@@ -399,12 +400,17 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
 /// ready. The §7.6 certain/glimpse zones add two *detection* shades when two-zone
 /// detection lands; until then the whole cone is one zone.
 ///
-/// **Sensed is the exception**: a guard sensed through a wall (§9.2) is *always* out
-/// of the FOV, yet its position is certain knowledge, not fogged — so it paints at
-/// full strength (the bright [`Swatch::bg`]) regardless of `vis`, an eye-catching
-/// orange fill rather than sinking into the dim shade the fog would otherwise pick.
+/// **Sensed is the exception**: a guard sensed through a wall (§9.2) and a door-change
+/// cue (§9.4) — the same channel — are certain, position-only knowledge, not fogged,
+/// so Sensed paints at full strength (the bright [`Swatch::bg`]) regardless of `vis`,
+/// an eye-catching fill rather than sinking into the dim shade the fog would otherwise
+/// pick.
 fn bg_color(bg: Category, vis: Visibility) -> &'static str {
     let swatch = swatch(bg);
+    // Sensed is certain, position-only knowledge painted through walls (§9.2/§9.4) —
+    // both a guard and a door change — never fogged, so it paints at full strength
+    // (the bright [`Swatch::bg`]) regardless of `vis`, rather than sinking into the dim
+    // shade the fog would otherwise pick for an out-of-FOV cell.
     if bg == Category::Sensed {
         return swatch.bg;
     }

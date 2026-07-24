@@ -50,5 +50,13 @@ pub enum Category {
     /// transition *is* the sensed/seen distinction made visible (§11.3). It never
     /// carries a danger overlay — knowing where a guard is is not knowing whether it
     /// can see you (§9.2).
+    ///
+    /// The **door-change cue** (§9.4/§10.4) reuses this same category: a door that
+    /// opens or shuts away from the player is *sensed through a wall* exactly as a
+    /// guard is, so it reads in the same orange background — one "sense" channel, not
+    /// two colours to tell apart. It paints the **whole door**, and (unlike a guard's
+    /// standing position) fades over a few turns, since a door change is a discrete
+    /// event; it is still position only, never who passed or which way (§10.4). A
+    /// coincident danger cone still outranks it (§11.5: being seen outranks).
     Sensed,
 }
