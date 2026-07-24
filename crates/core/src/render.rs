@@ -205,46 +205,23 @@ pub fn render(state: &State) -> Grid {
         })
         .collect();
 
-    // The duct interior view (§11.5a/§10.7, #134). While the player **occupies** a
-    // duct, its whole path lights as a connected run of `=` — the crawlspace read as
-    // one space (the player's own cell is overwritten by the `@` below; glyph
-    // priority `@` > `=`). A duct the player has **crawled but since left** keeps its
-    // interior cells **remembered** as `=` rather than reverting to blank wall
-    // (§11.5a: the flight paths you scouted are worth more than the ones you didn't).
-    // An **entry** is geometry — drawn `=` from turn one by the fog above — so only
-    // the interior is treated as remembered contents here.
-    for duct in state.layout().ducts() {
-        let occupied = duct.contains(state.player());
-        let path = duct.cells();
-        for (i, &c) in path.iter().enumerate() {
-            let idx = (c.y * width + c.x) as usize;
-            let is_entry = i == 0 || i == path.len() - 1;
-            let vis = if occupied {
-                // The whole occupied duct is the live layer — you are in it.
-                Some(Visibility::Live)
-            } else if !is_entry && state.duct_memory().contains(&c) {
-                // A **crawled** interior cell is remembered content, exactly like a
-                // seen hideout (§11.5a): drawn live while its face is in view,
-                // remembered once it is not. The signal is duct memory, not sight
-                // memory — looking at the wall band from the room never reveals a
-                // crawlspace you have not been inside, so an un-crawled interior stays
-                // plain wall (its route given away to nobody).
-                Some(if fov.contains(c) {
-                    Visibility::Live
-                } else {
-                    Visibility::Remembered
-                })
-            } else {
-                None
+    // The duct interior view (§11.5a/§10.7, #134). A duct's path is shown **only
+    // while the player is crawling it**: the whole occupied run lights as one
+    // connected `=` — the crawlspace read as a single space (the player's own cell is
+    // overwritten by the `@` below; glyph priority `@` > `=`). The interior carries no
+    // tell on the base map and is never remembered once the player climbs out
+    // (§11.5a): the path lives in its own layer, so the shortcut's route is given away
+    // to nobody. The two **entries** are the exception — they are geometry, drawn `=`
+    // from turn one by the fog above whether occupied or not — so nothing here needs
+    // to draw an unoccupied duct at all.
+    if let Some(duct) = state.occupied_duct() {
+        for &c in duct.cells() {
+            cells[(c.y * width + c.x) as usize] = GlyphCell {
+                glyph: '=',
+                fg: Category::System,
+                bg: None,
+                vis: Visibility::Live,
             };
-            if let Some(vis) = vis {
-                cells[idx] = GlyphCell {
-                    glyph: '=',
-                    fg: Category::System,
-                    bg: None,
-                    vis,
-                };
-            }
         }
     }
 
@@ -319,8 +296,8 @@ pub fn render(state: &State) -> Grid {
 
     // The locked-cupboard signal persists in memory (§11.5a/§7.2): a cupboard you
     // have seen with a body stowed in it is a permanent fact — a spent hideout — so
-    // out of view it is **remembered** as an Owned `z`, the same way a crawled duct
-    // or a seen console is remembered (§11.5a), rather than reverting to the empty
+    // out of view it is **remembered** as an Owned `z`, the same way a seen console
+    // is remembered (§11.5a), rather than reverting to the empty
     // `}`. Only the stowed lock persists; a loose body is live state and is never
     // remembered, so it is not drawn here. Runs after the entity layer, writing only
     // out-of-FOV cells (in view they are already the live `z` above).
@@ -401,9 +378,10 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
         // A table is geometry too: it replaced a stamped wall (§10.1a), and being
         // surprised by furniture mid-flight is as bad as being surprised by a wall.
         // A duct **entry** is geometry as well (§10.7): visible from turn one like a
-        // door, an `=` in the wall you can plan a shortcut around. Its interior stays
-        // Wall — the crawl *path* is contents, hidden until crawled then remembered by
-        // the interior view (#134), so nothing here gives the shortcut's route away.
+        // door, an `=` in the wall you can plan a shortcut around. The crawl *path*
+        // between the entries is not geometry — its interior cells keep their own
+        // terrain (they may cross floor) and the path is drawn only while crawled,
+        // never here (§11.5a/#134), so nothing gives the shortcut's route away.
         Terrain::Floor
         | Terrain::Wall
         | Terrain::DoorHinge
@@ -1470,11 +1448,13 @@ mod tests {
         );
     }
 
-    /// After the player crawls a duct and climbs out, its interior cells stay
-    /// **remembered** as `=` rather than reverting to blank wall (§11.5a) — the
-    /// scouted flight path is worth keeping.
+    /// After the player crawls a duct and climbs out, its interior path is **hidden
+    /// again** — it is shown only while crawled and never remembered (§11.5a/§10.7),
+    /// so the shortcut's route is given away to nobody. The interior cells revert to
+    /// their own terrain (plain wall in this fixture); only the two entries stay `=`,
+    /// as geometry.
     #[test]
-    fn a_crawled_duct_is_remembered_after_the_player_leaves() {
+    fn a_left_duct_hides_its_path_again() {
         let mut s = duct_state(Vec::new());
         s.step(Input::Step(Direction::North)); // enter (2,1)
         for _ in 0..3 {
@@ -1482,24 +1462,19 @@ mod tests {
         }
         s.step(Input::Step(Direction::South)); // climb out at (5,2)
         assert!(!s.in_duct(), "the normal view is restored on the same turn");
-        // Walk down the room until the duct band is out of the forward view.
-        for _ in 0..3 {
-            s.step(Input::Step(Direction::South));
-        }
-        assert!(
-            s.duct_memory().contains(&Cell::new(3, 1)),
-            "the crawl is remembered as duct knowledge",
-        );
-        assert!(
-            !s.player_fov().contains(Cell::new(3, 1)),
-            "…and the duct is now out of view",
-        );
         let g = render(&s);
 
+        // The interior cells are no longer part of the lit path — they read as the
+        // plain wall band they overlie, live memory carries no `=` there.
         for &(x, y) in &[(3, 1), (4, 1)] {
-            let c = g.get(x, y);
-            assert_eq!(c.glyph, '=', "the crawled interior does not vanish to wall");
-            assert_eq!(c.vis, Visibility::Remembered, "…it is remembered, not live");
+            assert_eq!(
+                g.get(x, y).glyph,
+                '#',
+                "a left duct's interior reverts to wall — no remembered `=`",
+            );
         }
+        // The entries remain visible geometry (§11.5a): `=` from turn one, occupied or not.
+        assert_eq!(g.get(2, 1).glyph, '=', "the near entry stays geometry");
+        assert_eq!(g.get(5, 1).glyph, '=', "the far entry stays geometry");
     }
 }

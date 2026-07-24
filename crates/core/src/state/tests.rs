@@ -3814,16 +3814,18 @@ fn a_guard_cannot_capture_or_enter_a_duct() {
     ];
     let layout =
         crate::Layout::from_facility(f).with_ducts(vec![crate::Duct::new(duct_cells.to_vec())]);
-    // Player already inside, at the near entry; a guard patrolling up to the mouth,
-    // its cone falling on the entry cell every time it stands there.
+    // Player at the near mouth; a guard patrolling up to it, its cone falling on the
+    // entry cell every time it stands there. The player climbs into the duct on the
+    // first step — "in a duct" is entered state now (§10.7), not a placement.
     let mut s = State::new(
         layout,
-        Cell::new(2, 1),
-        Direction::South,
+        Cell::new(2, 2),
+        Direction::North,
         vec![Guard::patrolling_to(Cell::new(2, 6), Cell::new(2, 2))],
         Vec::new(),
         Cell::new(7, 7),
     );
+    s.step(Input::Step(Direction::North)); // bump the mouth to climb in at (2,1)
     assert!(s.in_duct());
 
     // Over the patrol the guard reaches the mouth (2,2), adjacent to the entry with
