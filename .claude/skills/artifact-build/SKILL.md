@@ -88,18 +88,32 @@ script defaults to those and both can be overridden via `CHROMIUM_PATH` /
 
 ## 5. Publish (or refresh) the artifact
 
-Publish `intrusion-build.html` with the **Artifact tool**:
+Publish `intrusion-build.html` with the **Artifact tool**. **One artifact per
+ticket/PR — there is no shared "Intrusion" URL.** Two sessions previewing
+different tickets must never publish onto the same artifact: they would clobber
+each other, and a reviewer would refresh their tab and see the wrong ticket's
+build. Key the artifact to *your* ticket, not to the game:
 
+- **Title it by ticket** — e.g. `Intrusion — #181` — so it is identifiable in
+  the list and on the PR.
 - **Same session:** republish the same file path — the URL stays stable, the
-  user just refreshes their tab.
-- **New session, artifact already exists:** don't mint a new URL. Find the
-  existing one with the Artifact tool's `action: "list"` (title "Intrusion")
-  and republish with `url` set to it.
+  user just refreshes their tab. `force: true` is correct here: a later build of
+  *your* ticket supersedes its own earlier one.
+- **New session, same ticket:** find *that ticket's* artifact with the Artifact
+  tool's `action: "list"` (match the ticket in the title), and republish with
+  `url` set to it (`force: true`).
+- **Never publish onto another ticket's artifact**, and never mint a second URL
+  for your own — exactly one per ticket. If none of the conflict-avoidance above
+  applies, mint a fresh one for this ticket.
+- **At merge the preview is spent** — the Pages deploy becomes canonical. The
+  Artifact tool has no delete action, so republish a short tombstone pointing at
+  <https://tk-auto.github.io/intrusion/> (or simply stop refreshing it); do not
+  leave a stale build masquerading as the merged game.
 - Keep the favicon **🕹️** on every publish (a changed favicon reads as a
   different page), and pass a short `label` naming the change (e.g.
   `"guard-cone-fix"`) so the version picker stays navigable.
 
-Hand the URL back with one line on what changed in this build.
+Hand the URL back with one line on what changed and which branch/PR it snapshots.
 
 ## Guardrails
 

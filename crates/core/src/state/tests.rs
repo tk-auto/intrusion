@@ -4127,16 +4127,18 @@ fn a_guard_cannot_capture_or_enter_a_duct() {
     ];
     let layout =
         crate::Layout::from_facility(f).with_ducts(vec![crate::Duct::new(duct_cells.to_vec())]);
-    // Player already inside, at the near entry; a guard patrolling up to the mouth,
-    // its cone falling on the entry cell every time it stands there.
+    // Player at the near mouth; a guard patrolling up to it, its cone falling on the
+    // entry cell every time it stands there. The player climbs into the duct on the
+    // first step — "in a duct" is entered state now (§10.7), not a placement.
     let mut s = State::new(
         layout,
-        Cell::new(2, 1),
-        Direction::South,
+        Cell::new(2, 2),
+        Direction::North,
         vec![Guard::patrolling_to(Cell::new(2, 6), Cell::new(2, 2))],
         Vec::new(),
         Cell::new(7, 7),
     );
+    s.step(Input::Step(Direction::North)); // bump the mouth to climb in at (2,1)
     assert!(s.in_duct());
 
     // Over the patrol the guard reaches the mouth (2,2), adjacent to the entry with
@@ -4164,6 +4166,81 @@ fn a_guard_cannot_capture_or_enter_a_duct() {
     assert!(
         reached_mouth,
         "the guard did come adjacent to the entry, so concealment was tested at contact range",
+    );
+}
+
+/// §10.7 cross-room routing: a duct interior may now overlie **room floor** the guards
+/// walk. A guard crossing that floor must behave as if the duct were not there (nothing
+/// guard-facing changes): it walks straight over the concealed crawler's cell — neither
+/// blocked by them nor capturing them — and never detects the crawler.
+///
+/// The fixture: rows 1–2 are a solid wall band, rows 4–6 another, so **row 3 is a
+/// one-wide floor corridor** the guard is confined to and must sweep end to end. A
+/// duct runs entry `(2,2)` → `(3,2)` → `(3,3)` → `(4,3)` → `(5,3)` → `(5,2)` → entry
+/// `(6,2)`, so its middle three cells `(3,3)`/`(4,3)`/`(5,3)` cross the corridor floor.
+/// The player crawls to `(3,3)`; the guard patrols row 3 straight through it.
+#[test]
+fn a_guard_walks_over_a_crawler_on_a_floor_duct_cell() {
+    let mut f = Facility::walled_box(9, 9);
+    for x in 1..=7 {
+        f.set_terrain(x, 1, Terrain::Wall);
+        f.set_terrain(x, 2, Terrain::Wall); // the wall band the entries recess in
+        f.set_terrain(x, 4, Terrain::Wall); // seal the corridor to one row so the
+        f.set_terrain(x, 5, Terrain::Wall); // guard is confined to row 3 and must
+        f.set_terrain(x, 6, Terrain::Wall); // sweep across the crawler's cell
+    }
+    f.set_terrain(2, 2, Terrain::DuctEntry); // mouth (2,3)
+    f.set_terrain(6, 2, Terrain::DuctEntry); // mouth (6,3)
+    let path = vec![
+        Cell::new(2, 2),
+        Cell::new(3, 2), // wall backing
+        Cell::new(3, 3), // floor — crosses the room
+        Cell::new(4, 3), // floor
+        Cell::new(5, 3), // floor
+        Cell::new(5, 2), // wall backing
+        Cell::new(6, 2),
+    ];
+    let layout = crate::Layout::from_facility(f).with_ducts(vec![crate::Duct::new(path)]);
+    // Player at the near mouth; a guard patrolling row 3, straight across the duct's
+    // floor cells (its start (5,3) is itself one of them — floor to the guard).
+    let mut s = State::new(
+        layout,
+        Cell::new(2, 3),
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(5, 3), Cell::new(1, 3))],
+        Vec::new(),
+        Cell::new(7, 7),
+    );
+    s.step(Input::Step(Direction::North)); // climb in at (2,2)
+    s.step(Input::Step(Direction::East)); // crawl to backing (3,2)
+    s.step(Input::Step(Direction::South)); // crawl onto the floor cell (3,3)
+    assert!(s.in_duct());
+    assert_eq!(s.player(), Cell::new(3, 3));
+
+    // The guard oscillates along row 3 and passes through the crawler's floor cell.
+    let mut guard_stood_on_crawler = false;
+    for _ in 0..16 {
+        let e = s.step(Input::Wait);
+        assert!(
+            !e.iter().any(|e| matches!(e, Event::Captured { .. })),
+            "a crawler on a floor duct cell is never captured",
+        );
+        assert_eq!(s.outcome(), Outcome::Playing);
+        assert!(s.in_duct(), "the crawler stays in the duct throughout");
+        assert_eq!(
+            s.player(),
+            Cell::new(3, 3),
+            "and stays put on the floor cell"
+        );
+        assert!(
+            !s.guards()[0].detected_player(),
+            "the concealed crawler is never detected, even underfoot",
+        );
+        guard_stood_on_crawler |= s.guards()[0].pos() == Cell::new(3, 3);
+    }
+    assert!(
+        guard_stood_on_crawler,
+        "the guard walked straight over the crawler's floor cell — not blocked by it",
     );
 }
 

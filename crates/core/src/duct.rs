@@ -1,23 +1,21 @@
-//! Ducts: player-only crawlspace shortcuts threaded through the walls (§10.7).
+//! Ducts: player-only crawlspace shortcuts that span the facility (§10.7).
 //!
 //! A duct is a **path of cells** with a mouth-bearing **entry at each end**, drawn
 //! `=` ([`Terrain::DuctEntry`](crate::Terrain::DuctEntry)). The player bumps an
 //! entry from its single floor mouth to climb in (§4.3), crawls the path one cell
 //! per turn, and climbs out at the far entry's mouth. Guards never enter or path
-//! through a duct — the entries and the interior are wall-like to everyone else
-//! (§10.7).
+//! through a duct — the entries are wall-like, and the crawl route itself is the
+//! player's alone (§10.7).
 //!
 //! The two *ends* of the path are stamped [`DuctEntry`](crate::Terrain::DuctEntry)
-//! terrain; the **interior stays [`Wall`](crate::Terrain::Wall)** — a duct is
-//! "routed through wall cells", so nothing about the facility's guard-facing
-//! geometry changes when one is placed. This type is the only record that those
-//! wall cells are also a crawlspace: it carries the ordered path so the turn loop
-//! can resolve a crawl and the renderer (#134) can light the occupied run.
-//!
-//! Like [`State::hidden`](crate::State::hidden), "the player is in a duct" is never
-//! stored — it is *derived* from the player's cell being one of these path cells
-//! ([`Layout::duct_containing`](crate::Layout::duct_containing)), so it can never
-//! desync from position.
+//! terrain; the **interior cells keep whatever terrain they already had**. The path
+//! may cross room and corridor floor to connect two far-apart regions (§10.7
+//! cross-room routing), so no terrain change marks the interior and this type is the
+//! *only* record that those cells are also a crawlspace: it carries the ordered path
+//! so the turn loop can resolve a crawl and the renderer (#134) can light the
+//! occupied run. Because the interior may overlie ordinary floor, "the player is in a
+//! duct" cannot be derived from position — it is stored explicitly on the
+//! [`State`](crate::State), set by climbing in and cleared by climbing out.
 
 use crate::cell::Cell;
 
