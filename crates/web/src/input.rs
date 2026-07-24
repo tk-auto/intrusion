@@ -164,17 +164,18 @@ pub(crate) fn install_input(document: &Document, game: &Rc<RefCell<Game>>) -> Re
 /// How far a drag must travel from its press point — CSS pixels, on either axis —
 /// before it reads as a **swipe** rather than a press held in place. Roughly half
 /// a fingertip: short enough that a flick registers, long enough that the jitter
-/// of a resting finger never walks the player.
-const SWIPE_THRESHOLD_PX: f64 = 24.0;
+/// of a resting finger never walks the player. Shared with the replay scrub pump
+/// ([`crate::replay`]) so the touch feel of a swipe is one number across modes.
+pub(crate) const SWIPE_THRESHOLD_PX: f64 = 24.0;
 
 /// The pause between a gesture's first input and its first repeat — the touch
 /// counterpart of the keyboard's auto-repeat delay (§11.6's reference cadence).
 /// Long enough that one deliberate swipe or press stays a single input.
-const REPEAT_DELAY_MS: i32 = 300;
+pub(crate) const REPEAT_DELAY_MS: i32 = 300;
 
 /// The cadence of repeats while the finger stays down — one ordinary [`Input`]
 /// per tick through the same seam as a held arrow key, never a batch (§4.1/§4.3).
-const REPEAT_INTERVAL_MS: i32 = 120;
+pub(crate) const REPEAT_INTERVAL_MS: i32 = 120;
 
 /// Map a drag displacement `(dx, dy)` — CSS pixels from where the finger went
 /// down to where it is now — to the [`Input`] a gesture fires: the touch half of
@@ -211,16 +212,18 @@ fn gesture_input(dx: f64, dy: f64) -> Option<Input> {
 /// The browser timer currently driving a gesture's repeats: the one-shot initial
 /// delay (`setTimeout`) or the steady cadence (`setInterval`). Whichever is
 /// armed, release clears it by id — that clear is what guarantees no step or
-/// wait ever fires after the finger lifts (§2.2/§4.5 fairness).
+/// wait ever fires after the finger lifts (§2.2/§4.5 fairness). Shared with the
+/// replay scrub pump ([`crate::replay`]), which owns the same lift-stops-instantly
+/// contract on the time cursor.
 #[derive(Clone, Copy)]
-enum RepeatTimer {
+pub(crate) enum RepeatTimer {
     Delay(i32),
     Interval(i32),
 }
 
 /// Clear an armed [`RepeatTimer`] with the browser. Clearing an id that already
 /// fired is a harmless no-op, so teardown never has to know the timer's fate.
-fn clear_timer(timer: RepeatTimer) {
+pub(crate) fn clear_timer(timer: RepeatTimer) {
     let win = web_sys::window().expect("a window");
     match timer {
         RepeatTimer::Delay(id) => win.clear_timeout_with_handle(id),

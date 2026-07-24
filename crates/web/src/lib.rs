@@ -44,6 +44,7 @@
 //! a placed guard is; it just hands what placement built to the core.
 
 mod input;
+mod replay;
 mod seed;
 
 use std::cell::RefCell;
@@ -55,7 +56,7 @@ use intrusion_core::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, Window};
+use web_sys::{CanvasRenderingContext2d, Document, Element, HtmlCanvasElement, Window};
 
 /// The glyph cell's base aspect (width:height); a monospace glyph reads best in a
 /// slightly tall box. Actual on-screen cell size is this scaled to fit the viewport.
@@ -181,7 +182,10 @@ fn swatch(category: Category) -> Swatch {
 ///
 /// One seed per run (§12.4): the same stream that carves the level continues into
 /// the turn loop, where the guard close-behind roll draws from it (§10.4/#146).
-fn new_run(seed: u64) -> Result<State, JsValue> {
+///
+/// `pub(crate)` so the replay viewer ([`replay`]) can re-run a seed through
+/// `inputs[0..K]` to derive the state at its cursor (replay-minus-N, §12.4).
+pub(crate) fn new_run(seed: u64) -> Result<State, JsValue> {
     let mut rng = Rng::new(seed);
     // The full v1 level (§10.2): a carve passing every §10.6 guarantee, with the
     // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards patrol
@@ -214,8 +218,18 @@ fn new_run(seed: u64) -> Result<State, JsValue> {
 /// (§13.1/#110).
 #[wasm_bindgen]
 pub fn start() -> Result<(), JsValue> {
+    // The seed comes from #110's surface (baked global, URL, or clock); a replay
+    // widens that payload to `(seed, inputs)` (§12.4/#197). When one is present the
+    // shell boots into the **replay viewer** — a pure playback of the captured run
+    // — otherwise into ordinary live play. The mode is fixed here, at boot, behind
+    // this one flag: the two input maps are wired mutually exclusively below, so a
+    // time-scrub swipe and a movement swipe can never reach the same handler.
     let seed = seed::initial_seed();
-    let state = new_run(seed)?;
+    let replay = replay::initial_replay(seed);
+    let state = match &replay {
+        Some(view) => view.state_at()?,
+        None => new_run(seed)?,
+    };
 
     let document = web_sys::window()
         .and_then(|w| w.document())
@@ -233,11 +247,19 @@ pub fn start() -> Result<(), JsValue> {
         metrics: Metrics::base(),
         ui: ScreenUi::default(),
         seed,
+        replay,
+        replay_hud: None,
     }));
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
-    input::install_input(&document, &game)?;
-    input::install_gestures(&document, &game)?;
-    seed::install(&document, &game)?;
+    if game.borrow().replay.is_some() {
+        // A replay is a pure view: only the scrub pump is wired, never the live
+        // pumps or the seed bar — so the gesture maps cannot collide (§11.6).
+        replay::install(&document, &game)?;
+    } else {
+        input::install_input(&document, &game)?;
+        input::install_gestures(&document, &game)?;
+        seed::install(&document, &game)?;
+    }
     install_resize(&game)?;
     Ok(())
 }
@@ -277,6 +299,13 @@ struct Game {
     /// the core derives everything from it but never needs the number back. Held so
     /// the seed bar can show it and a `…#seed=N` link can carry it ([`seed`]).
     seed: u64,
+    /// The replay being played back, or `None` in ordinary live play (#197). When
+    /// `Some`, the shell is in the pure-view replay mode: [`state`](Game::state) is
+    /// `view.state_at(K)` and input drives the cursor, not the world ([`replay`]).
+    replay: Option<replay::ReplayView>,
+    /// The replay HUD's position element (`K / total`), wired in replay mode only —
+    /// `None` in live play. Held so every redraw can refresh it ([`replay`]).
+    replay_hud: Option<Element>,
 }
 
 impl Game {
@@ -343,6 +372,9 @@ impl Game {
             &render_screen(&self.state, self.ui),
             &self.metrics,
         );
+        // In replay mode, keep the `K / total` HUD in step with the board every
+        // frame; a no-op in live play (§12.4/#197).
+        self.update_replay_hud();
     }
 }
 
