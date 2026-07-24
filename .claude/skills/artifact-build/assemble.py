@@ -14,6 +14,7 @@ version bump changing its export lines) fails the build instead.
 
 import argparse
 import base64
+import json
 import pathlib
 import re
 import sys
@@ -37,6 +38,13 @@ def main() -> None:
                          "boots this facility with no URL and no typing — how a "
                          "seed-locked artifact pins the exact level the sim played "
                          "(#110). Omit for the normal random-seed build.")
+    ap.add_argument("--replay-json", default=None,
+                    help="bake a captured replay into the page: a path (or '-' for "
+                         "stdin) to the `{\"seed\":S,\"inputs\":\"...\"}` line that "
+                         "`sim --bot --emit-replay` prints (#197). The build boots "
+                         "straight into the replay viewer at K=0, playing back the "
+                         "exact run the bot played. It carries its own seed, so do "
+                         "not also pass --seed.")
     ap.add_argument("--title", default=None,
                     help="set the page <title>, which is what NAMES the published "
                          "artifact (the Artifact tool's own title arg is overridden "
@@ -45,6 +53,26 @@ def main() -> None:
     args = ap.parse_args()
     if args.seed is not None and not (0 <= args.seed < 2**64):
         sys.exit(f"assemble: --seed must be a u64 (0 .. 2^64-1), got {args.seed}")
+
+    # A replay carries its own seed (§12.4), so it and --seed are exclusive. Parse
+    # the `{seed, inputs}` pair from --emit-replay's output; the seed pins the
+    # facility and the inputs stream drives the viewer.
+    replay_seed = replay_inputs = None
+    if args.replay_json is not None:
+        if args.seed is not None:
+            sys.exit("assemble: pass --seed or --replay-json, not both "
+                     "(a replay carries its own seed)")
+        raw = (sys.stdin.read() if args.replay_json == "-"
+               else pathlib.Path(args.replay_json).read_text())
+        try:
+            obj = json.loads(raw)
+            replay_seed = int(obj["seed"])
+            replay_inputs = str(obj["inputs"])
+        except (ValueError, KeyError, TypeError) as e:
+            sys.exit(f"assemble: --replay-json is not a {{seed,inputs}} line "
+                     f"(from `sim --emit-replay`): {e}")
+        if not (0 <= replay_seed < 2**64):
+            sys.exit(f"assemble: replay seed must be a u64, got {replay_seed}")
 
     dist = pathlib.Path(args.dist)
     glue = (dist / "intrusion_web.js").read_text()
@@ -71,12 +99,19 @@ def main() -> None:
     glue = replace_once(glue, "export default __wbg_init;", "",
                         "default export")
 
-    # A baked seed is stamped as a window global before start() runs, so the shell's
-    # initial_seed() reads it ahead of the URL and the clock (crates/web/src/seed.rs).
-    # This is the artifact-safe way to pin a seed: the host strips a `…#seed=N` hash
+    # Baked window globals stamped before start() runs, so the shell reads them
+    # ahead of the URL and the clock (crates/web/src/seed.rs, crates/web/src/replay.rs).
+    # This is the artifact-safe carrier: the host strips a `…#seed=N`/`inputs=` URL
     # before the framed page sees it, but a global set inside the page always wins.
-    seed_line = (f'window.__intrusionSeed = "{args.seed}";\n'
-                 if args.seed is not None else "")
+    # A replay bakes both — the seed pins the facility, the inputs boot the viewer
+    # (#197); a bare --seed bakes only the seed (#110).
+    bake_seed = replay_seed if replay_inputs is not None else args.seed
+    globals_js = ""
+    if bake_seed is not None:
+        globals_js += f"window.__intrusionSeed = {json.dumps(str(bake_seed))};\n"
+    if replay_inputs is not None:
+        globals_js += f"window.__intrusionReplay = {json.dumps(replay_inputs)};\n"
+    seed_line = globals_js
 
     boot = f"""
 // --- artifact bootstrap: wasm embedded as base64, no fetch needed ---

@@ -46,6 +46,44 @@ impl PlayerPolicy for Scripted {
     }
 }
 
+/// A policy decorator that **records** every input its inner policy issues while
+/// delegating each decision unchanged (§12.4). Wrapping the bot in one captures
+/// the exact `[inputs]` half of a replay without the bot knowing it is watched;
+/// the run itself is byte-identical to an unwrapped run, so the capture is
+/// faithful. See [`capture_one`](crate::capture_one).
+pub struct Recording<P> {
+    inner: P,
+    inputs: Vec<Input>,
+}
+
+impl<P> Recording<P> {
+    /// Wrap `inner`, recording each input it issues.
+    pub fn new(inner: P) -> Self {
+        Self {
+            inner,
+            inputs: Vec::new(),
+        }
+    }
+
+    /// The inputs recorded so far, in issue order.
+    pub fn inputs(&self) -> &[Input] {
+        &self.inputs
+    }
+
+    /// Consume the decorator and take the recorded inputs.
+    pub fn into_inputs(self) -> Vec<Input> {
+        self.inputs
+    }
+}
+
+impl<P: PlayerPolicy> PlayerPolicy for Recording<P> {
+    fn decide(&mut self, state: &State) -> Input {
+        let input = self.inner.decide(state);
+        self.inputs.push(input);
+        input
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

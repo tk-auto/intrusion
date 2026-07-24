@@ -168,6 +168,38 @@ Hand this form over only for the live Pages URL, never for an artifact.
 > from the build (`--seed`) or the URL, not a box. If you re-enable it, the box
 > loads any seed live and this section's "type it in" path returns.
 
+## 7. Hand off a **bot replay** (§13.3/#197)
+
+A seed hands over the *level*; a replay hands over the **exact run** — you watch
+the bot play it back and scrub through it (tap/→ step, swipe ⇄ scrub). This closes
+the §13.3 loop: the bot flags a suspicious seed, and you inspect precisely what it
+did, not just re-roll the level yourself.
+
+Capture the run (slice A) and bake it into the page (slice C) in **one pipe** —
+`sim --emit-replay` prints the `{seed, inputs}` pair on stdout, `assemble.py
+--replay-json -` reads it from stdin:
+
+```
+cargo run --release -p intrusion-sim -- --bot --seed 8371 --emit-replay 2>/dev/null \
+  | python3 .claude/skills/artifact-build/assemble.py \
+      --dist "$SCRATCH/dist" --index web/index.html \
+      --out "$SCRATCH/intrusion-197-8371.html" \
+      --replay-json - --title intrusion-197-8371-1
+```
+
+`--replay-json` bakes both a `window.__intrusionSeed` and a
+`window.__intrusionReplay` global; the shell reads them at boot and starts in the
+replay viewer at `K=0` (`crates/web/src/replay.rs`). A replay carries its own seed,
+so `--replay-json` and `--seed` are exclusive. The artifact host strips a URL
+before the framed page sees it, so — exactly like a baked seed — the replay must be
+**baked in**, never passed as `?inputs=`.
+
+Smoke-verify and publish as usual (§§4–5): `verify.mjs` auto-detects a replay build
+and checks the scrub HUD (`0 / N`, advance, rewind) instead of the player-move
+check. Name it `intrusion-197-<seed>-<iteration>` and say in the handoff which seed
+the replay is of. To capture a script-driven run instead of the bot's, swap
+`--bot` for `--script <MOVES>` in the `sim` call (same notation, `crates/sim/README.md`).
+
 ## Guardrails
 
 - **Never commit build output** — `dist/`, the assembled HTML, and screenshots

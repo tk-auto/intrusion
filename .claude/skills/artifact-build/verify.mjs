@@ -4,6 +4,10 @@
 // differ from the boot frame — the player always spawns with at least one open
 // neighbour, so an identical frame means input is broken).
 //
+// A replay build (#197) is checked differently: the arrows scrub a time cursor,
+// not the player, so we assert the replay HUD reads `0 / N` at boot, advances on
+// ArrowRight, and rewinds back to `0` on ArrowLeft — the scrub loop actually works.
+//
 // Usage: node verify.mjs <assembled.html> <shots-dir>
 // Env overrides: PLAYWRIGHT_MODULE (index.mjs path), CHROMIUM_PATH.
 
@@ -62,18 +66,48 @@ if (boot.length < 5000) {
   process.exit(1);
 }
 
-// Try one direction at a time (a full right-down-left-up sweep can cancel out
-// and land the player back on the boot square); pass on the first frame change.
+// A replay build reveals a #replaybar HUD; a live build never does. Branch on it.
+const replayPos = await page.$("#replaybar.on #replay-pos");
 let moved = false;
-for (const key of ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"]) {
-  await page.keyboard.press(key);
+if (replayPos) {
+  // Replay viewer (#197): the arrows scrub the time cursor, not the player. Assert
+  // the HUD starts at `0 / N`, advances on ArrowRight, and rewinds back on ArrowLeft.
+  const read = () => page.$eval("#replay-pos", (el) => el.textContent.trim());
+  const at0 = await read();
+  if (!/^0 \/ \d+$/.test(at0)) {
+    console.error(`verify: FAIL — replay HUD did not boot at "0 / N" (got "${at0}")`);
+    await browser.close();
+    process.exit(1);
+  }
+  await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(100);
-  const after = await page.screenshot({
-    path: resolve(shotsDir, "after-input.png"),
-  });
-  if (Buffer.compare(boot, after) !== 0) {
+  const at1 = await read();
+  await page.screenshot({ path: resolve(shotsDir, "after-input.png") });
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForTimeout(100);
+  const back = await read();
+  if (at1 !== at0 && back === at0) {
     moved = true;
-    break;
+  } else {
+    console.error(
+      `verify: FAIL — replay scrub broken (0:"${at0}" → right:"${at1}" → left:"${back}")`,
+    );
+    await browser.close();
+    process.exit(1);
+  }
+} else {
+  // Live build: try one direction at a time (a full right-down-left-up sweep can
+  // cancel out and land the player back on the boot square); pass on the first change.
+  for (const key of ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"]) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(100);
+    const after = await page.screenshot({
+      path: resolve(shotsDir, "after-input.png"),
+    });
+    if (Buffer.compare(boot, after) !== 0) {
+      moved = true;
+      break;
+    }
   }
 }
 await browser.close();

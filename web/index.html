@@ -90,6 +90,42 @@
       #seedbar {
         display: none;
       }
+      /* Replay viewer HUD (§12.4/#197): a small bar centred at the bottom edge that
+         reads the scrub position (K / total) and marks the run as a replay, not live
+         play. Hidden until the shell boots into a replay (crates/web/src/replay.rs
+         adds `.on`). It is a pure indicator: pointer-events:none so a tap on it still
+         passes through to the scrub surface underneath — the whole screen scrubs. */
+      #replaybar {
+        position: fixed;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        display: none;
+        align-items: baseline;
+        gap: 8px;
+        padding: 4px 12px;
+        font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        color: #a8a8a8;
+        background: rgba(11, 11, 11, 0.72);
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+        pointer-events: none;
+      }
+      #replaybar.on {
+        display: flex;
+      }
+      #replaybar .lbl {
+        color: #bd6bd6;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      #replay-pos {
+        color: #4ea6ff;
+      }
+      #replaybar .hint {
+        color: #667a8a;
+      }
     </style>
   </head>
   <body>
@@ -111,6 +147,18 @@
         aria-label="Load a seed"
       />
       <button id="seed-go" type="button">play</button>
+    </div>
+    <!--
+      Replay viewer HUD (§12.4/#197): the scrub position and a "replay" marker,
+      revealed by crates/web/src/replay.rs only when the shell boots into a replay
+      (a baked window.__intrusionReplay or an `inputs=` in the URL). Optional to the
+      shell like the seed bar — a page without it still plays the replay, just with
+      no on-screen counter.
+    -->
+    <div id="replaybar" aria-live="polite">
+      <span class="lbl">replay</span>
+      <span id="replay-pos">0 / 0</span>
+      <span class="hint">tap / → step · swipe ⇄ scrub</span>
     </div>
     <div id="app">
       <!--
