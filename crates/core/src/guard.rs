@@ -150,6 +150,15 @@ pub struct Guard {
     /// finally becomes a dispatch and, on the second, an alert step. Fixtures get
     /// the un-jittered [`RadioClock::DEFAULT`].
     radio: RadioClock,
+    /// The cupboard this guard **saw the player climb into** while alerted, and is
+    /// now flushing (§15 Q5): the one cell a guard may enter an occupied hideout on.
+    /// `None` for a guard that never witnessed a dive — which keeps a cupboard the
+    /// safe room it is against everyone else (§10.3). Set by
+    /// [`flush_hideout`](Self::flush_hideout) on the entry turn, cleared by
+    /// [`forget_hideout`](Self::forget_hideout) when the player leaves the cell and by
+    /// [`stand_down`](Self::stand_down) when the lead runs cold — so a witness is a
+    /// short, live lead, never a permanent grudge.
+    witnessed_hideout: Option<Cell>,
 }
 
 /// Patrol radius (§7.5, **[START] = 15**): how far the *fallback* territory
@@ -271,6 +280,7 @@ impl Guard {
             state: GuardState::Calm,
             dwell: 0,
             radio: RadioClock::DEFAULT,
+            witnessed_hideout: None,
         }
     }
 
@@ -533,6 +543,47 @@ impl Guard {
         self.destination = None;
     }
 
+    /// Act on **witnessing the player climb into a hideout** (§15 Q5) — the one case
+    /// a cupboard does not refuse contact (§10.3/§4.5). The guard saw the dive while
+    /// alerted, so it re-engages the *cupboard itself* as a live lead: it Chases the
+    /// alcove with a fresh [`ALERT_DURATION`] window and walks to the mouth to flush
+    /// the hidden player, capturing on the step in ([`State::guard_phase`]). The cell
+    /// is recorded ([`witnessed_hideout`](Self::witnessed_hideout)) so **only this
+    /// guard** may enter it — a patrol that never saw the entry still routes around
+    /// the occupied cupboard (§10.3). The lead is the ordinary reactive one: if it
+    /// runs cold before the guard reaches the mouth, [`stand_down`](Self::stand_down)
+    /// gives it up and the player has waited it out (§7.1/§7.6).
+    pub(crate) fn flush_hideout(&mut self, cell: Cell) {
+        self.state = GuardState::Chasing;
+        self.destination = Some(cell);
+        self.last_seen = Some(cell);
+        self.alert = ALERT_DURATION;
+        self.witnessed_hideout = Some(cell);
+        self.end_search_and_watch();
+    }
+
+    /// Drop a witnessed-hideout lead because the player is **no longer in that cell**
+    /// (§15 Q5): they climbed out, or slipped to another cupboard. Called by the turn
+    /// loop when the stored cell stops matching the player's live hidden cell. If the
+    /// guard was still marching on the now-empty alcove (its destination is that
+    /// cell), it switches to a §7.6 **search** of the spot rather than stepping into
+    /// the vacated cupboard — the natural "they were just here" sweep. A guard that
+    /// has meanwhile re-acquired the player by sight keeps that fresher lead untouched.
+    pub(crate) fn forget_hideout(&mut self) {
+        let was_flushing = self.destination == self.witnessed_hideout;
+        self.witnessed_hideout = None;
+        if was_flushing {
+            self.begin_search();
+        }
+    }
+
+    /// The cupboard this guard is flushing after witnessing the player climb in
+    /// (§15 Q5), or `None`. The turn loop reads it as the capture gate's one
+    /// exception: a hidden player in *this* cell is caught by *this* guard.
+    pub(crate) fn witnessed_hideout(&self) -> Option<Cell> {
+        self.witnessed_hideout
+    }
+
     /// A fresh detection supersedes any lingering search or raised-coverage watch
     /// (§7.6): the guard re-engages the live lead, so the old area of interest is
     /// dropped rather than pacing on underneath the new chase.
@@ -736,6 +787,9 @@ impl Guard {
         self.destination = None;
         self.last_seen = None;
         self.alert = 0;
+        // A cold lead includes a cupboard the guard saw the player dive into (§15 Q5):
+        // giving up the chase means giving up the flush, so the player waited it out.
+        self.witnessed_hideout = None;
     }
 
     /// Keep the current patrol destination while it is still worth walking to;

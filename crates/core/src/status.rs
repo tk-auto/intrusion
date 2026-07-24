@@ -66,9 +66,15 @@ pub fn message_for(event: Event) -> Option<Message> {
         | Event::DoorClosed {
             by_player: false, ..
         } => return None,
-        Event::IntelTaken { remaining: 0 } => ("intel in hand — the exit is open".to_string(), 20),
-        Event::IntelTaken { remaining } => (format!("intel taken — {remaining} to go"), 20),
-        Event::ExitRefused => ("the exit refuses — intel is still out".to_string(), 20),
+        // The exit opens on the *first* intel (§10.2 [START]); more is optional extra,
+        // not a requirement — so every take reports the exit is open, noting any that
+        // remain only as more to grab, never as a gate still to clear.
+        Event::IntelTaken { remaining: 0 } => ("all the intel — the exit is open".to_string(), 20),
+        Event::IntelTaken { remaining } => (
+            format!("intel in hand — the exit is open ({remaining} more out)"),
+            20,
+        ),
+        Event::ExitRefused => ("the exit needs intel in hand first".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
         // The other death (§8.3): rematerializing inside something solid. The
@@ -177,13 +183,25 @@ fn ambient(state: &State) -> Message {
             format!("facility alert — level {}", state.alert()),
             Category::Warning,
         )
+    } else if !state.exit_ready() {
+        // No intel yet: a plain count of what is still out. Grabbing any one opens the
+        // exit (§10.2 [START]); the take message is what announces that, so this stays
+        // a neutral tally, not a "collect them all" instruction.
+        (
+            format!("intel remaining: {}", state.objectives_remaining()),
+            Category::Interest,
+        )
     } else {
+        // The exit opened on the first intel; anything still out is optional extra.
         match state.objectives_remaining() {
             0 => (
                 "all intel in hand — reach the exit".to_string(),
                 Category::Interest,
             ),
-            n => (format!("intel remaining: {n}"), Category::Interest),
+            _ => (
+                "intel in hand — reach the exit".to_string(),
+                Category::Interest,
+            ),
         }
     };
     Message {
@@ -224,7 +242,7 @@ mod tests {
         let mut s = state(Cell::new(5, 6), Cell::new(5, 5));
         s.step(Input::Step(Direction::North)); // bump the console: intel taken
         let line = near_line(&s);
-        assert_eq!(line.text, "intel in hand — the exit is open");
+        assert_eq!(line.text, "all the intel — the exit is open");
         assert_eq!(line.category, Category::Interest);
         assert_eq!(line.priority, 20);
     }

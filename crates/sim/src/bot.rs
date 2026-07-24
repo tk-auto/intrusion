@@ -207,8 +207,14 @@ impl StealthBot {
         }
 
         // Aim for the nearest known hideout to disappear into — the one place a
-        // guard's contact cannot reach (§4.5).
-        let boltholes = known_hideouts(state);
+        // guard's contact cannot reach (§4.5) — but never one a hunter is watching:
+        // diving in under an alerted cone is witnessed, and a witness flushes you
+        // right back out (§15 Q5). Break its sight first, then the cupboard is safe.
+        let witnessed = witnessed_cone_cells(state);
+        let boltholes: Vec<Cell> = known_hideouts(state)
+            .into_iter()
+            .filter(|h| !witnessed.contains(h))
+            .collect();
         if let Some(dir) = self.descend(state, &boltholes, danger, blocked, Descent::flee()) {
             return Input::Step(dir);
         }
@@ -275,10 +281,13 @@ impl StealthBot {
             return None;
         }
         // Only worth a detour to a hideout that is genuinely close by; a far one is
-        // not cover, it is a march across the guard's path.
+        // not cover, it is a march across the guard's path. And never one an alerted
+        // guard is watching — climbing in there is a witnessed dive the guard flushes
+        // (§15 Q5); a Calm patrol's cone is fine, which is the usual case here.
+        let witnessed = witnessed_cone_cells(state);
         let hideouts: Vec<Cell> = known_hideouts(state)
             .into_iter()
-            .filter(|h| player.manhattan_distance(*h) <= COVER_REACH)
+            .filter(|h| player.manhattan_distance(*h) <= COVER_REACH && !witnessed.contains(h))
             .collect();
         if let Some(dir) = self.descend(state, &hideouts, danger, blocked, Descent::flee()) {
             return Some(Input::Step(dir));
@@ -299,7 +308,11 @@ impl StealthBot {
     /// Pursue the objective — nearest known untaken console, then the exit — or, when
     /// no intel is known yet, explore toward the nearest frontier.
     fn pursue(&mut self, state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Cell>) -> Input {
-        let goals = if state.objectives_remaining() > 0 {
+        let goals = if !state.exit_ready() {
+            // No intel in hand yet: head for the nearest known console, since a single
+            // objective now opens the exit (§10.2 experiment). This baseline grabs the
+            // first intel it can reach and leaves — the shortest honest run; aggressive
+            // profiles (a later ticket, §13.2) are what press on for more.
             let known = self.known_intel(state);
             // Nothing seen to head for: sweep the facility until the consoles show.
             if known.is_empty() {
@@ -308,7 +321,7 @@ impl StealthBot {
                 known
             }
         } else {
-            // Every objective in hand: leave the way we came in (§4.5).
+            // At least one intel in hand: leave the way we came in (§4.5).
             exit_cell(state).into_iter().collect()
         };
 
@@ -476,6 +489,27 @@ fn danger_cells(state: &State) -> HashSet<Cell> {
     let mut cells = HashSet::new();
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Seen) {
+            cells.extend(guard.fov().cells());
+        }
+    }
+    cells
+}
+
+/// Cupboards the bot must **not** dive into this turn: any hideout cell watched by a
+/// guard it can see that is **alerted** (any non-Calm mood). Climbing into a cupboard
+/// under such a cone is *witnessed*, and a witness flushes the hidden player straight
+/// back out (§15 Q5) — so a cupboard in a hunter's cone is a trap, not a refuge, and a
+/// player-honest bot must read that off the danger overlay and route elsewhere. A
+/// **Calm** patrol's cone does not make a cupboard a trap (a Calm guard never checks),
+/// so its watch is deliberately excluded — that keeps the ordinary "duck past a patrol"
+/// cover play (`take_cover`) working. A sensed-only guard projects no cone (§9.2), so
+/// its unknown watch never enters this set, exactly as the overlay paints nothing.
+fn witnessed_cone_cells(state: &State) -> HashSet<Cell> {
+    let mut cells = HashSet::new();
+    for guard in state.guards() {
+        if state.perceive_guard(guard) == Some(GuardPerception::Seen)
+            && guard.state() != GuardState::Calm
+        {
             cells.extend(guard.fov().cells());
         }
     }
