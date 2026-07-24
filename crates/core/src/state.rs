@@ -881,6 +881,30 @@ impl State {
         cover::run_conceals(&run, self.player, viewer)
     }
 
+    /// Whether `guard` would **detect** the player *right now* — the live §7.2
+    /// takedown gate, read from the guard's current cone rather than the
+    /// [`detected`](Guard::detected_player) latch the sight phase leaves behind.
+    ///
+    /// The latch is set in phase 2's look (§4.2) and goes a turn stale for a guard
+    /// that steps adjacent during phase 3: its cone is refreshed at the new cell
+    /// ([`advance_to`](Guard::advance_to)) but its detection is not, so a guard that
+    /// walks up to face the player point-blank still reports `detected_player() ==
+    /// false` at the next player phase. Reading the latch there would wave through a
+    /// takedown from directly in front — which §6.1's touching ring and §155's rear
+    /// blind spot forbid: beside or in front is never a valid takedown, only the
+    /// three rear cells are. Reading the cone live closes that window.
+    ///
+    /// The predicate is exactly [`Guard::see`]'s: the guard detects the player when
+    /// its (rear-blind-spot-carved, §155) cone covers the player's cell and nothing
+    /// [`conceals`](Self::concealed_from) them. Because the glimpse zone spans the
+    /// whole cone (`GLIMPSE_RANGE == GUARD_SIGHT_RANGE`), any cell in the cone is in
+    /// range, so cone membership alone settles it. Concealment still defeats the
+    /// gate, so a *concealed* front takedown (crouched, cupboard, §7.2) is untouched
+    /// — the bump is refused only against a guard that genuinely sees you.
+    fn guard_detects_now(&self, guard: &Guard) -> bool {
+        guard.fov().contains(self.player) && !self.concealed_from(guard.pos())
+    }
+
     /// The cells of the partial-cover run the player is crouched behind (§10.3)
     /// — the whole §10.1a bench, in flood order — or empty when standing. The
     /// renderer recolours every cell of it to Owned (§11.3): the run is one
@@ -1583,7 +1607,7 @@ impl State {
         }
         if let Some(i) = self.guard_at(target) {
             return BumpKind::Guard {
-                aware: self.guards[i].detected_player(),
+                aware: self.guard_detects_now(&self.guards[i]),
             };
         }
         // The body **in hand** is the one interaction a body offers: bump it to let
