@@ -1,21 +1,25 @@
-//! Ducts: player-only crawlspace shortcuts threaded through the walls (§10.7).
+//! Ducts: player-only crawlspace shortcuts that span the facility (§10.7).
 //!
-//! The last carve pass. A duct is a path of wall cells whose two ends are recessed
-//! **entries** — the exact one-mouth geometry a cupboard uses ([`recess_site`], the
-//! §10.1.6 three-solid-sides rule) — connecting two regions that are **far apart on
-//! the region graph**. A duct that shortcuts nothing is noise (§10.7), so a candidate
-//! is kept only when crawling it saves at least [`DUCT_MIN_PAYOFF`] steps over walking
-//! the floor between its mouths.
+//! The last carve pass. A duct is a path whose two ends are recessed **entries** —
+//! the exact one-mouth geometry a cupboard uses ([`recess_site`], the §10.1.6
+//! three-solid-sides rule) — connecting two regions that are **far apart on the
+//! region graph**. The interior between the entries routes *over the building*: the
+//! shortest cell path, free to cross room and corridor **floor**, not just the wall
+//! runs a shortcut would otherwise be confined to. A duct that shortcuts nothing is
+//! noise (§10.7), so a candidate is kept only when crawling it saves at least
+//! [`DUCT_MIN_PAYOFF`] steps over walking the floor between its mouths.
 //!
 //! # Why this changes no §10.6/§10.1a guarantee
 //!
 //! A [`Terrain::DuctEntry`] is wall-like in every guard-facing property — solid,
-//! opaque, pathing-blocking (`facility.rs`) — and the interior stays [`Terrain::Wall`]
-//! untouched. So the finished grid's reachability, enclosure and sightlines are
-//! byte-identical to the pre-duct grid: the crawl route a duct opens is the player's
-//! alone (§10.7), invisible to every check the §10.6 gate runs. That is why this pass
-//! runs *after* the gate's inputs are fixed and needs no re-validation of them; it
-//! asserts only its own invariant — the per-entry one-mouth geometry.
+//! opaque, pathing-blocking (`facility.rs`) — and the interior cells are left with
+//! **whatever terrain they already had**: a path over floor stays floor, a path
+//! through wall stays wall. Nothing but the two entries is restamped, and an entry was
+//! a wall the recess demands. So the finished grid's reachability, enclosure and
+//! sightlines are byte-identical to the pre-duct grid: the crawl route a duct opens is
+//! the player's alone (§10.7), invisible to every check the §10.6 gate runs. That is
+//! why this pass runs *after* the gate's inputs are fixed and needs no re-validation
+//! of them; it asserts only its own invariant — the per-entry one-mouth geometry.
 //!
 //! Everything here is deterministic from the seed (§12.4): region pairs are walked in
 //! a fixed order and entry combinations tried shortest-first, so the same seed threads
@@ -110,16 +114,21 @@ pub(super) fn place_ducts(
         combos.sort_by_key(|&(x, y)| (x.manhattan_distance(y), x.x, x.y, y.x, y.y));
 
         for &(wall_a, wall_b) in combos.iter().take(MAX_ENTRY_TRIES) {
-            if let Some(path) = route_duct(facility, wall_a, wall_b, &used) {
+            // The mouths are needed *before* routing: the path may cross floor now, so
+            // it must be forbidden from stepping onto either mouth — that keeps each
+            // entry's recessed backing intact and its mouth the one and only climb-out.
+            let mouth_a = mouth_of(ea, wall_a);
+            let mouth_b = mouth_of(eb, wall_b);
+            if let Some(path) = route_duct(facility, wall_a, wall_b, mouth_a, mouth_b, &used) {
                 if path.len() < DUCT_MIN_CELLS || path.len() > DUCT_MAX_CELLS {
                     continue;
                 }
-                let mouth_a = mouth_of(ea, wall_a);
-                let mouth_b = mouth_of(eb, wall_b);
                 if !worth_it(facility, mouth_a, mouth_b, path.len()) {
                     continue;
                 }
-                // Commit: the two ends become entries; the interior stays wall.
+                // Commit: the two ends become entries; every interior cell keeps its
+                // own terrain (the path may run over floor), so nothing but the entries
+                // is restamped and the §10.6/§10.1a grid is unchanged.
                 facility.set_terrain(wall_a.x, wall_a.y, Terrain::DuctEntry);
                 facility.set_terrain(wall_b.x, wall_b.y, Terrain::DuctEntry);
                 for &c in &path {
@@ -246,19 +255,27 @@ fn hop_distances(regions: &RegionGraph, start: RegionId) -> HashMap<RegionId, u3
     dist
 }
 
-/// The shortest **wall** path from entry candidate `wall_a` to `wall_b` (§10.7): a
-/// BFS across interior [`Terrain::Wall`] cells only, so the whole interior of the duct
-/// stays solid wall to guards. Returns the path inclusive of both ends (which the
-/// caller stamps as entries), or `None` if no wall corridor connects them within reach.
+/// The shortest **cell** path from entry candidate `wall_a` to `wall_b` (§10.7): a BFS
+/// over the interior of the facility, free to cross **any** terrain — wall *or* floor
+/// — so a duct spans *over the building*, not just along a wall run. Returns the path
+/// inclusive of both ends (which the caller stamps as entries), or `None` if none
+/// connects them within reach.
 ///
 /// The border ring is excluded (a duct is internal), as are cells already claimed by
-/// another duct (`used`). Only the two ends may sit next to floor (their mouths); the
-/// interior may brush floor too, but the turn loop confines the player to the recorded
-/// path, so a wall cell that happens to touch floor is never an exit (§10.7).
+/// another duct (`used`) and — crucially — the two **mouths** `mouth_a`/`mouth_b`.
+/// Forbidding the mouths is what keeps each entry's recessed backing solid (the first
+/// interior cell after an entry is one of its three walls, never its floor mouth) and
+/// keeps the mouth the entry's one climb-out: were a mouth on the path, `is_crawl_step`
+/// would read the entry→mouth step as a crawl, not a climb-out, and confinement would
+/// break. The interior may otherwise brush or cross floor freely; the turn loop
+/// confines the player to the recorded path, so a floor cell mid-duct is never an exit
+/// (§10.7).
 fn route_duct(
     facility: &Facility,
     wall_a: Cell,
     wall_b: Cell,
+    mouth_a: Cell,
+    mouth_b: Cell,
     used: &HashSet<Cell>,
 ) -> Option<Vec<Cell>> {
     let passable = |c: Cell| {
@@ -266,11 +283,12 @@ fn route_duct(
             && c.y >= 1
             && c.x < facility.width() - 1
             && c.y < facility.height() - 1
-            && facility.terrain(c) == Some(Terrain::Wall)
             && !used.contains(&c)
+            && c != mouth_a
+            && c != mouth_b
     };
-    // wall_a / wall_b are themselves plain Wall cells at this point (they become
-    // entries only on commit), so they satisfy `passable`.
+    // wall_a / wall_b are plain Wall cells at this point (they become entries only on
+    // commit) and neither is a mouth, so they satisfy `passable`.
     if !passable(wall_a) || !passable(wall_b) {
         return None;
     }
@@ -396,13 +414,17 @@ mod tests {
 
     /// The §10.7 geometry, asserted on every placed duct: each **entry** is a
     /// `DuctEntry` with exactly one floor mouth and three solid backing sides
-    /// (§10.1.6); the **interior** stays plain `Wall`; and the path is orthogonally
-    /// contiguous end to end.
+    /// (§10.1.6); the cell immediately behind each entry (the **recessed backing**)
+    /// stays `Wall`, since the mouth is forbidden from the route; the two mouths sit in
+    /// two *different* regions (a genuine span); and the path is orthogonally
+    /// contiguous end to end. The mid-path interior is deliberately *not* asserted to
+    /// be wall — it may cross floor now (see `a_duct_spans_across_rooms_over_floor`).
     #[test]
-    fn every_duct_has_recessed_entries_and_a_wall_interior() {
+    fn every_duct_has_recessed_entries_and_a_backed_span() {
         for seed in 0..80 {
             let layout = level(seed);
             let facility = layout.facility();
+            let regions = layout.regions();
             for duct in layout.ducts() {
                 let cells = duct.cells();
                 assert!(cells.len() >= DUCT_MIN_CELLS && cells.len() <= DUCT_MAX_CELLS);
@@ -419,18 +441,93 @@ mod tests {
                         .count();
                     assert_eq!(floors, 1, "seed {seed}: entry {entry:?} needs one mouth");
                 }
-                for &interior in &cells[1..cells.len() - 1] {
+                // The recessed backing — the first interior cell off each entry — is a
+                // solid wall: forbidding the mouth from the route guarantees it.
+                for &backing in &[cells[1], cells[cells.len() - 2]] {
                     assert_eq!(
-                        facility.terrain(interior),
+                        facility.terrain(backing),
                         Some(Terrain::Wall),
-                        "seed {seed}: duct interior {interior:?} must stay Wall"
+                        "seed {seed}: the cell behind an entry must be solid wall"
                     );
                 }
+                // A real span: the two mouths open onto two different regions.
+                let [a, b] = duct.entries();
+                let ra = regions.region_at(mouth(facility, a));
+                let rb = regions.region_at(mouth(facility, b));
+                assert!(ra.is_some() && rb.is_some());
+                assert_ne!(ra, rb, "seed {seed}: a duct must connect two regions");
                 for w in cells.windows(2) {
                     assert_eq!(w[0].manhattan_distance(w[1]), 1);
                 }
             }
         }
+    }
+
+    /// The headline of #181: a duct **spans across rooms**. Its interior path is no
+    /// longer confined to wall cells — it may cross room and corridor **floor** to
+    /// connect two far-apart regions, which the old wall-only BFS could never do.
+    /// Across a sweep, at least one placed duct has an interior cell that overlies
+    /// floor.
+    #[test]
+    fn a_duct_spans_across_rooms_over_floor() {
+        let crossed_floor = (0..80).any(|seed| {
+            let layout = level(seed);
+            let facility = layout.facility();
+            layout.ducts().iter().any(|duct| {
+                let cells = duct.cells();
+                cells[1..cells.len() - 1]
+                    .iter()
+                    .any(|&c| facility.terrain(c) == Some(Terrain::Floor))
+            })
+        });
+        assert!(
+            crossed_floor,
+            "no duct crossed floor — cross-room routing never fired",
+        );
+    }
+
+    /// §10.6/§10.1a invariance (#181): placing a duct changes neither the reachability
+    /// nor the sightline result of the finished grid. Only the two entries are
+    /// restamped (every interior cell keeps its own terrain), and a `DuctEntry` is
+    /// wall-like, so reverting each entry to the wall it was born from must leave both
+    /// checks exactly where they stood — and the ducted grid passes them regardless.
+    #[test]
+    fn a_duct_changes_no_reachability_or_sightline_result() {
+        let mut checked = 0;
+        for seed in 0..80 {
+            let layout = level(seed);
+            if layout.ducts().is_empty() {
+                continue;
+            }
+            let with_ducts = layout.facility();
+            // The pre-duct grid: every entry was a wall before the pass restamped it.
+            let mut without = with_ducts.clone();
+            for duct in layout.ducts() {
+                for entry in duct.entries() {
+                    without.set_terrain(entry.x, entry.y, Terrain::Wall);
+                }
+            }
+            assert_eq!(
+                super::super::fully_enclosed(with_ducts),
+                super::super::fully_enclosed(&without),
+                "seed {seed}: enclosure unchanged",
+            );
+            assert_eq!(
+                super::super::pathable_connected(with_ducts),
+                super::super::pathable_connected(&without),
+                "seed {seed}: reachability unchanged",
+            );
+            assert_eq!(
+                super::super::sightlines_bounded(with_ducts),
+                super::super::sightlines_bounded(&without),
+                "seed {seed}: sightlines unchanged",
+            );
+            // And the ducted grid genuinely still passes both guarantees.
+            assert!(super::super::pathable_connected(with_ducts));
+            assert!(super::super::sightlines_bounded(with_ducts));
+            checked += 1;
+        }
+        assert!(checked > 0, "no seed placed a duct to check");
     }
 
     /// A placed duct is a **real shortcut** (§10.7): crawling it saves at least
