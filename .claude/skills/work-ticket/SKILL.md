@@ -100,13 +100,27 @@ milliseconds. Use it.
 
 ## 5. The quality gate — must be green before you commit
 
-Run all three from the repo root and fix anything they flag:
+Run the one gate script from the repo root and fix anything it flags:
+
+```
+./scripts/gate.sh
+```
+
+It runs, fail-fast, the same three checks CI runs (`.github/workflows/ci.yml`
+calls this exact script):
 
 ```
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
+
+**Trust the gate's exit code, not scraped output — and never pipe a `--check`
+through `tail`/`grep`.** A pipeline's status is the *last* stage's, so
+`cargo fmt --all -- --check | tail && echo OK` prints OK even when fmt failed and
+printed a diff; that false green is exactly what `scripts/gate.sh` (`set -euo
+pipefail`, one check per line) exists to prevent (#201). If you must run a check
+by hand, run it bare and read its exit status.
 
 Warnings are errors (`-D warnings`). If the workspace doesn't exist yet, the ticket
 you picked is almost certainly the scaffold ticket — set the gate up as part of it.

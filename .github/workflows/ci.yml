@@ -40,17 +40,14 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Format
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Test
-        # Run the exhaustive per-seed generation sweeps in CI (issue #60): the
-        # routine local `cargo test` samples seeds to stay fast, this restores the
-        # full §10.6 coverage on every push.
-        run: cargo test --workspace
+      - name: Quality gate (fmt / clippy / test)
+        # The one gate command — the same scripts/gate.sh local dev runs, so the two
+        # can't drift and no check's exit code can be masked by a shell pipe (#201).
+        # INTRUSION_SLOW_TESTS restores the exhaustive per-seed generation sweeps in
+        # CI (issue #60): the routine local `cargo test` samples seeds to stay fast,
+        # this runs the full §10.6 coverage on every push. The script echoes each
+        # check, so this single step's log still shows which one failed.
+        run: ./scripts/gate.sh
         env:
           INTRUSION_SLOW_TESTS: "1"
 
