@@ -1107,8 +1107,10 @@ stay a future axis.
 > **locked**. A locked cupboard is no longer a hideout: it holds a body, so you
 > cannot climb in, and bumping it is an inert no-op. It shows the body's **`z`** in
 > the Owned colour (not the empty `}`), so a glance tells you which cupboards you
-> have spent this way. This is the one place a body vanishes completely; everywhere
-> else it stays visible evidence on the §7.3 clock.
+> have spent this way — and that status is **remembered** (§11.5a): once seen, a
+> locked cupboard stays a remembered `z` out of view, like a crawled duct or a seen
+> console, rather than reverting to the empty `}`. This is the one place a body
+> vanishes completely; everywhere else it stays visible evidence on the §7.3 clock.
 
 ### 10.4 Doors
 
