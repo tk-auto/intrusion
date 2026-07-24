@@ -8,10 +8,15 @@
 //! The seam is deliberately thin (§12.1): the core already guarantees a seed
 //! reproduces a facility (`Rng::new(seed)` → generation → turn loop, one seed per
 //! run) and owns every pixel of the board. This module only **reads and writes the
-//! seed string** — from the URL and the on-page bar — and rebuilds the run through
-//! the same [`Game::reseed`](crate::Game::reseed)/[`new_run`](crate::new_run) the
-//! boot uses. It never touches game logic, and the seed bar's markup and styling
-//! live in `web/index.html`; here is only the wiring.
+//! seed string** — from a baked-in build global, the URL, and the on-page bar — and
+//! rebuilds the run through the same [`Game::reseed`](crate::Game::reseed)/
+//! [`new_run`](crate::new_run) the boot uses. It never touches game logic, and the
+//! seed bar's markup and styling live in `web/index.html`; here is only the wiring.
+//!
+//! Three ways a seed reaches the boot, in priority order (see [`initial_seed`]): a
+//! **baked** `window.__intrusionSeed` the build stamped in (a seed-locked artifact),
+//! then a `?seed=`/`#seed=` in the **URL** (a shared link where the host passes the
+//! hash — e.g. the Pages deploy), then the **clock**. The bar loads any seed live.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,12 +27,39 @@ use web_sys::{Document, HtmlInputElement, KeyboardEvent, MouseEvent, PointerEven
 
 use crate::Game;
 
-/// The seed a fresh load starts from: an explicit `seed=` in the URL (query or hash)
-/// when a shared link carried one, otherwise a fresh one off the clock — the shell's
-/// one impurity (§12.1). An unparseable or absent value falls back to random rather
-/// than erroring (#110: invalid/empty is handled gracefully).
+/// The seed a fresh load starts from, in priority order:
+///
+/// 1. a **baked-in** seed ([`baked_seed`]) — a `window.__intrusionSeed` the build
+///    stamped in, so a seed-locked artifact boots that facility with no URL and no
+///    typing (the artifact host strips a `…#seed=N` hash before the page sees it,
+///    so a shared *link* can't reach the framed page — a baked build can);
+/// 2. an explicit `seed=` in the page **URL** ([`seed_from_url`]) — a shared link on
+///    a host that passes the hash through, e.g. the Pages deploy;
+/// 3. otherwise a fresh one off the **clock** — the shell's one impurity (§12.1).
+///
+/// An unparseable or absent value at every step falls through to the next, and an
+/// empty box later rolls a fresh seed, so the run never errors on a bad seed (#110).
 pub(crate) fn initial_seed() -> u64 {
-    seed_from_url().unwrap_or_else(random_seed)
+    baked_seed()
+        .or_else(seed_from_url)
+        .unwrap_or_else(random_seed)
+}
+
+/// A seed the *build* stamped into the page as a `window.__intrusionSeed` global —
+/// how a seed-locked artifact pins its facility (the artifact-build skill's
+/// `assemble.py --seed N`). Read before the URL and the clock so the baked seed
+/// always wins; absent (the normal build) it is simply `None`. Tolerates the value
+/// being a JS string or a number.
+fn baked_seed() -> Option<u64> {
+    let window = web_sys::window()?;
+    let value = js_sys::Reflect::get(&window, &JsValue::from_str("__intrusionSeed")).ok()?;
+    if let Some(text) = value.as_string() {
+        return parse_seed(&text);
+    }
+    value
+        .as_f64()
+        .filter(|n| n.is_finite() && *n >= 0.0)
+        .map(|n| n as u64)
 }
 
 /// A fresh seed off the wall clock — read **once** here and threaded through the

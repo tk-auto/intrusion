@@ -82,6 +82,14 @@
         padding: 1px 8px;
         cursor: pointer;
       }
+      /* HIDDEN FOR NOW: the bar sat over the board's top-left. Until it has a home
+         that doesn't cover play, seeds come from the build (a seed-locked artifact,
+         assemble.py --seed) or the URL (`?seed=N` / `#seed=N` on the Pages deploy),
+         not this box. The wiring above stays live, so re-enabling the bar is
+         deleting just this one rule. */
+      #seedbar {
+        display: none;
+      }
     </style>
   </head>
   <body>
