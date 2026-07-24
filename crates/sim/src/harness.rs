@@ -11,7 +11,8 @@ use intrusion_core::{
     generate_level, Direction, Event, GenError, Input, LevelConfig, Outcome, Rng, State,
 };
 
-use crate::policy::PlayerPolicy;
+use crate::policy::{PlayerPolicy, Recording};
+use crate::replay::Replay;
 use crate::usage::{UsageHistogram, Verb};
 
 /// The default cap on **issued inputs** per run before it is ruled a timeout.
@@ -148,6 +149,30 @@ pub fn run_one(
     }
     record.turns = state.turn();
     Ok(record)
+}
+
+/// Run one seeded game under `policy` and capture the replay alongside the
+/// metrics (§12.4): the same [`run_one`] loop, but with the policy wrapped so
+/// every issued input is recorded. Returns the run's [`RunRecord`] and the
+/// [`Replay`] — `(seed, [inputs])` — that reproduces it through
+/// [`Scripted`](crate::Scripted).
+///
+/// Recording is a transparent decorator, so the captured run is byte-identical
+/// to an unwrapped one; feeding the returned inputs back on the same seed lands
+/// on the same record. This is the sim half of the replay loop the web viewer
+/// (#197) plays back.
+pub fn capture_one<P: PlayerPolicy>(
+    seed: u64,
+    policy: P,
+    input_cap: u32,
+) -> Result<(RunRecord, Replay), GenError> {
+    let mut recording = Recording::new(policy);
+    let record = run_one(seed, &mut recording, input_cap)?;
+    let replay = Replay {
+        seed,
+        inputs: recording.into_inputs(),
+    };
+    Ok((record, replay))
 }
 
 /// Run a batch: one run per seed, each under a fresh policy from `policy_for`

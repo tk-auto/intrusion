@@ -13,7 +13,7 @@ not a judge.
 ## Running
 
 ```
-cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--bot | --script MOVES]
+cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--bot | --script MOVES] [--emit-replay]
 ```
 
 | Flag | Meaning | Default |
@@ -22,7 +22,25 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--bot |
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
-| `--script MOVES` | inputs replayed from the start of every run: `N`/`E`/`S`/`W` step, `.` waits; after the script the player waits out the run | empty |
+| `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
+| `--emit-replay` | capture one run (seed `S`) and print its `(seed, inputs)` replay instead of the metrics batch | off |
+
+### The script notation
+
+One input per token, the exact string `--emit-replay` prints back:
+
+| Token | Input |
+|---|---|
+| `N` / `E` / `S` / `W` | step north/east/south/west (case-insensitive) |
+| `.` | wait |
+| `+<key>` | activate the ability with §11.6 hotkey `<key>` — `+r` Run, `+c` Camouflage, `+d` Decoy, `+x` Dephase |
+| `-<key>` | deactivate that ability |
+
+The takedown-bump and the drag-grab are steps *into* a target (§7.2/§8.3), so
+they need no token of their own — `N`/`E`/`S`/`W` already spell them. Whitespace
+between tokens is ignored, so a long captured stream can be wrapped for reading.
+An unknown token, or a `+`/`-` with no ability key, is a hard error: a malformed
+replay never silently drops an input (§12.4).
 
 The cap counts **issued inputs**, not spent turns: free actions (a bump into a
 wall, an idle deactivate) never advance the turn counter (§4.4), so a
@@ -35,6 +53,27 @@ Without either, the empty default script is the idle baseline — how often
 patrols stumble onto a player who never moves. A `(seed, script)` pair is a
 replay (§12.4): with `--runs 1` it reproduces one run exactly, which is also
 the bug-report format.
+
+## Capturing a replay (`--emit-replay`, §12.4)
+
+A replay is `(seed, [inputs])` and **nothing else** (§12.4 [SETTLED]).
+`--emit-replay` plays one run — seed `S`, the chosen policy — records the exact
+input stream it issued, and prints that pair on stdout as one JSON line:
+
+```
+$ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
+{"seed":42,"inputs":"NNE+rN..SS-r…"}
+seed 42: win in 214 turns, 187 inputs          # (human summary, on stderr)
+```
+
+The `inputs` string is the script notation above, so it feeds straight back:
+`--script "$(…)" --seed 42 --runs 1` reproduces the run byte-for-byte, and the
+same pair is what the web replay-viewer plays and what an Artifact bakes in
+(#197). stdout carries only the machine-readable pair (the summary goes to
+stderr), so it pipes cleanly into a consumer. The round-trip is asserted
+natively in `src/replay.rs` — capturing a bot run and replaying the emitted
+stream lands on an identical record — which is the §12.4 determinism property
+end to end.
 
 ## The baseline stealth bot (`--bot`, §13.2–§13.4)
 

@@ -26,11 +26,13 @@
 mod bot;
 mod harness;
 mod policy;
+mod replay;
 mod report;
 mod usage;
 
 pub use bot::StealthBot;
-pub use harness::{run_batch, run_one, RunOutcome, RunRecord, DEFAULT_INPUT_CAP};
-pub use policy::{PlayerPolicy, Scripted};
+pub use harness::{capture_one, run_batch, run_one, RunOutcome, RunRecord, DEFAULT_INPUT_CAP};
+pub use policy::{PlayerPolicy, Recording, Scripted};
+pub use replay::Replay;
 pub use report::Summary;
 pub use usage::{diversity, UsageHistogram, Verb};
