@@ -33,4 +33,8 @@ features = [
     "PointerEvent",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    # Seed sharing (§13.1/#110): the on-page seed box reads its value, and the
+    # active seed is read from / reflected into the page URL as `…#seed=N`.
+    "HtmlInputElement",
+    "Location",
 ]
