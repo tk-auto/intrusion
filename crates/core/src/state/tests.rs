@@ -1872,7 +1872,10 @@ fn a_guard_walking_its_route_opens_the_door_and_passes_through() {
 
     // Its next step is *into* the panel: the walk-in opens the door instead.
     let events = s.step(Input::Wait);
-    assert!(events.contains(&Event::DoorOpened { at: panel }));
+    assert!(events.contains(&Event::DoorOpened {
+        at: panel,
+        by_player: false,
+    }));
     assert_eq!(
         s.guards()[0].pos(),
         Cell::new(3, 2),
@@ -1980,7 +1983,10 @@ fn a_calm_guard_closes_the_door_behind_itself() {
         "the guard closed the door behind itself",
     );
     assert!(
-        events.contains(&Event::DoorClosed { at: panel }),
+        events.contains(&Event::DoorClosed {
+            at: panel,
+            by_player: false,
+        }),
         "the shut surfaces as an event",
     );
     assert_eq!(s.outcome(), Outcome::Playing);
@@ -2070,7 +2076,10 @@ fn an_automatic_door_closes_itself_in_the_loop() {
 
     // Bump the closed panel: it opens (§4.3), and the countdown is armed.
     let opened = s.step(Input::Step(Direction::East));
-    assert!(opened.contains(&Event::DoorOpened { at: panel }));
+    assert!(opened.contains(&Event::DoorOpened {
+        at: panel,
+        by_player: true,
+    }));
     assert!(s.layout().regions().door(door).is_open());
     assert_eq!(s.player(), Cell::new(2, 2), "the bump opened, did not move");
 
@@ -2220,7 +2229,11 @@ fn bumping_a_closed_door_opens_it() {
             Vec::new(),
             Cell::new(1, 1),
         );
-        let opened = s.step(Input::Step(dir)) == vec![Event::DoorOpened { at: panel }];
+        let opened = s.step(Input::Step(dir))
+            == vec![Event::DoorOpened {
+                at: panel,
+                by_player: true,
+            }];
         if opened {
             assert!(s.layout().regions().door(id).is_open());
             assert_eq!(s.turn(), 1, "opening a door spends the turn");
@@ -2259,7 +2272,10 @@ fn a_door_will_not_close_on_the_player() {
         // Open the door, then step onto the now-open panel.
         assert_eq!(
             s.step(Input::Step(into)),
-            vec![Event::DoorOpened { at: panel }]
+            vec![Event::DoorOpened {
+                at: panel,
+                by_player: true,
+            }]
         );
         assert_eq!(s.step(Input::Step(into)), vec![Event::Moved { to: panel }]);
         assert_eq!(s.player(), panel);
@@ -2349,7 +2365,13 @@ fn a_frame_bump_opens_the_door_and_auto_faces_the_peek() {
 
     // Bump the closed hinge to the east: the door opens, spending the turn.
     let events = s.step(Input::Step(Direction::East));
-    assert_eq!(events, vec![Event::DoorOpened { at: hinge }]);
+    assert_eq!(
+        events,
+        vec![Event::DoorOpened {
+            at: hinge,
+            by_player: true,
+        }]
+    );
     assert_eq!(s.turn(), 1, "opening spends the turn (§4.3)");
     assert_eq!(
         s.player(),
@@ -3161,8 +3183,22 @@ fn events_declare_their_message_category() {
     assert_eq!(Event::Bumped { into: at }.category(), Category::Neutral);
     assert_eq!(Event::EnteredHideout { at }.category(), Category::Owned);
     assert_eq!(Event::Crouched { behind: at }.category(), Category::Owned);
-    assert_eq!(Event::DoorOpened { at }.category(), Category::System);
-    assert_eq!(Event::DoorClosed { at }.category(), Category::System);
+    assert_eq!(
+        Event::DoorOpened {
+            at,
+            by_player: true,
+        }
+        .category(),
+        Category::System
+    );
+    assert_eq!(
+        Event::DoorClosed {
+            at,
+            by_player: false,
+        }
+        .category(),
+        Category::System
+    );
     assert_eq!(
         Event::IntelTaken { remaining: 1 }.category(),
         Category::Interest
@@ -3632,6 +3668,263 @@ fn the_sense_range_is_ten_and_twenty_on_wait() {
         s.perceive_guard(&s.guards()[0]),
         Some(GuardPerception::Sensed),
         "the wait pulls the guard into the widened box → sensed",
+    );
+}
+
+// --- Sensing doors (§9.2/§10.4) -----------------------------------------------
+
+/// A hand-built wide strip: a left room and a right room joined by one **manual**
+/// door at column 6 (hinges at `(6,1)`/`(6,3)`, panel at `(6,2)`), with a guard
+/// patrolling from the left room through the door — so on its beat it walks the
+/// closed panel open (§10.4), a change the player did not cause. The player starts at
+/// `player` **facing east**, ahead of the door, and the drive below walks it further
+/// east each turn: the guard opens the door *behind* the eastward-facing player, so
+/// the changed cell is reliably out of the forward FOV (a Wait's 360° look would
+/// otherwise see straight through the open doorway — sight and door-sense share the
+/// same range, §9.1/§10.4). The close-behind is disabled so the open is isolated.
+/// Returns the state and the door's panel cell.
+fn guard_door_strip(width: u32, player: Cell) -> (State, Cell) {
+    let mut f = Facility::walled_box(width, 6);
+    let mut g = RegionGraph::new(width, 6);
+    let column =
+        |x0: u32, x1: u32| (1..5).flat_map(move |y| (x0..x1).map(move |x| Cell::new(x, y)));
+    let left = g.add_region(RegionKind::Room, column(1, 6));
+    let right = g.add_region(RegionKind::Room, column(7, width - 1));
+    for y in 1..5 {
+        f.set_terrain(6, y, Terrain::Wall);
+    }
+    f.set_terrain(6, 1, Terrain::DoorHinge);
+    f.set_terrain(6, 2, Terrain::DoorPanelClosed);
+    f.set_terrain(6, 3, Terrain::DoorHinge);
+    g.add_door(
+        left,
+        right,
+        [Cell::new(6, 1), Cell::new(6, 3)],
+        [Cell::new(6, 2)],
+        DoorKind::Manual,
+    );
+    let mut s = State::new(
+        Layout::from_parts(f, g),
+        player,
+        Direction::East,
+        vec![Guard::patrolling_to(Cell::new(4, 2), Cell::new(8, 2))],
+        Vec::new(),
+        Cell::new(width - 2, 4),
+    );
+    s.set_guard_close_chance(0); // isolate the open from the close-behind (#146)
+    (s, Cell::new(6, 2))
+}
+
+/// Walk the player east until the patrolling guard opens the door behind them (the
+/// first `by_player: false` open), returning once it has. Stepping east keeps the
+/// player facing *away* from the door so the changed cell stays out of the forward
+/// FOV. Panics if the guard never opens it.
+fn drive_until_guard_opens(s: &mut State) {
+    for _ in 0..8 {
+        let e = s.step(Input::Step(Direction::East));
+        if e.iter().any(|ev| {
+            matches!(
+                ev,
+                Event::DoorOpened {
+                    by_player: false,
+                    ..
+                }
+            )
+        }) {
+            return;
+        }
+    }
+    panic!("the patrolling guard never opened the door");
+}
+
+/// §9.2/§10.4 **[START]**: a door change is a louder, coarser event than a guard's
+/// exact position, so it is felt **farther** — `DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE`
+/// — and both it and the cue decay are pinned so a later change is a visible edit.
+#[test]
+fn the_door_sense_range_exceeds_the_guard_sense() {
+    assert_eq!(DOOR_SENSE_RANGE, 15, "the [START] door-sense range");
+    assert_eq!(DOOR_CUE_DECAY_TURNS, 3, "the [START] cue decay");
+    // The `DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE` asymmetry itself is pinned at compile
+    // time beside the constant (§9.2/§10.4), so it cannot silently invert.
+}
+
+/// §9.2/§10.4: unlike the guard sense, the door sense is **not** widened by a Wait —
+/// a door change is already loud enough — but it **shrinks inside a duct** with the
+/// rest of the crawlspace's degraded perception (§10.7).
+#[test]
+fn the_door_sense_is_not_widened_by_wait_but_shrinks_in_a_duct() {
+    let mut s = solo(Cell::new(5, 5));
+    assert_eq!(
+        s.door_sense_range(),
+        DOOR_SENSE_RANGE,
+        "the base door-sense box"
+    );
+    s.step(Input::Wait);
+    assert_eq!(
+        s.door_sense_range(),
+        DOOR_SENSE_RANGE,
+        "a wait does not widen the door sense",
+    );
+
+    let mut d = duct_world();
+    d.step(Input::Step(Direction::North)); // climb into the duct
+    assert!(d.in_duct());
+    assert_eq!(
+        d.door_sense_range(),
+        DUCT_SENSE_RANGE,
+        "the door sense shrinks inside a duct, like the guard sense",
+    );
+}
+
+/// §9.2/§10.4: a door a **guard** opens out of the player's FOV, within
+/// `DOOR_SENSE_RANGE`, lights a `Category::Trace` background on the door cell —
+/// readable around the corner like a sensed dot — and the generic "the door opens"
+/// near-line self-narration is gone for a door the player did not operate.
+#[test]
+fn a_guard_door_lights_a_cue_out_of_fov() {
+    let (mut s, panel) = guard_door_strip(30, Cell::new(7, 2));
+    drive_until_guard_opens(&mut s);
+
+    // A door the player did not operate raises no near-line word — the grid cue is
+    // the durable evidence instead (§11.7).
+    assert_ne!(
+        crate::status::near_line(&s).text,
+        "the door opens",
+        "a guard-opened door no longer narrates on the near line",
+    );
+
+    // The eastward-facing player has the door behind them: out of the forward FOV,
+    // yet the cue is on the grid, painted as a Trace background (§11.2).
+    assert!(
+        !s.player_fov().contains(panel),
+        "precondition: the changed door is out of the player's forward FOV",
+    );
+    assert!(
+        s.door_cues().any(|c| c == panel),
+        "a guard-opened door lights a cue on its cell, read out of FOV",
+    );
+    let g = crate::render::render(&s);
+    assert_eq!(
+        g.get(panel.x, panel.y).bg,
+        Some(crate::category::Category::Trace),
+        "the cue paints a Trace background on the door cell",
+    );
+}
+
+/// §9.2/§10.4: the cue is a **fading** mark — a door change is a discrete event, not
+/// a standing position — so it stays lit for `DOOR_CUE_DECAY_TURNS` turns and is then
+/// gone. Checked on `door_cues` directly, independent of FOV.
+#[test]
+fn a_door_cue_fades_over_its_decay() {
+    let (mut s, panel) = guard_door_strip(30, Cell::new(7, 2));
+    drive_until_guard_opens(&mut s);
+    assert!(
+        s.door_cues().any(|c| c == panel),
+        "the cue is lit the turn the door changes",
+    );
+
+    // No further door events fire (one door, close disabled), so the single cue decays
+    // cleanly: lit for DOOR_CUE_DECAY_TURNS turns, then gone.
+    for n in 1..DOOR_CUE_DECAY_TURNS {
+        s.step(Input::Step(Direction::East));
+        assert!(
+            s.door_cues().any(|c| c == panel),
+            "the cue is still lit {n} turn(s) on",
+        );
+    }
+    s.step(Input::Step(Direction::East));
+    assert!(
+        !s.door_cues().any(|c| c == panel),
+        "the cue has faded after DOOR_CUE_DECAY_TURNS turns",
+    );
+}
+
+/// §9.2/§10.4: a door change **beyond** `DOOR_SENSE_RANGE` is felt as nothing — the
+/// same guard-opened door, but with the player parked out past the door-sense box.
+#[test]
+fn a_door_change_beyond_range_lights_no_cue() {
+    let (mut s, panel) = guard_door_strip(30, Cell::new(24, 4));
+    assert!(
+        s.player().sight_distance(panel) > DOOR_SENSE_RANGE,
+        "precondition: the player is beyond the door-sense box",
+    );
+    drive_until_guard_opens(&mut s);
+    assert_eq!(
+        s.door_cues().count(),
+        0,
+        "a change beyond DOOR_SENSE_RANGE lights no cue",
+    );
+}
+
+/// §11.5/§10.4: where a door cue and a **sensed** guard fall on the same cell, being
+/// able to read the guard's live position outranks the fading trace (the "being seen
+/// outranks" spirit). The guard opens the door, then steps onto the open panel — the
+/// cue cell — where it is sensed through the wall behind the eastward-facing player:
+/// the cell renders as `Sensed`, not `Trace`, though the cue is still logically lit.
+/// (The danger overlay is painted later still, so it outranks both by the same order.)
+#[test]
+fn a_sensed_guard_outranks_the_door_cue_on_a_shared_cell() {
+    let (mut s, panel) = guard_door_strip(30, Cell::new(7, 2));
+    drive_until_guard_opens(&mut s);
+    s.step(Input::Step(Direction::East)); // the guard steps onto the open panel
+
+    assert_eq!(
+        s.guards()[0].pos(),
+        panel,
+        "the guard steps through onto the open panel (the cue cell)",
+    );
+    assert!(
+        s.door_cues().any(|c| c == panel),
+        "the cue is still lit under the guard",
+    );
+    assert_eq!(
+        s.perceive_guard(&s.guards()[0]),
+        Some(GuardPerception::Sensed),
+        "the guard on the panel is sensed through the wall, not seen",
+    );
+
+    let g = crate::render::render(&s);
+    assert_eq!(
+        g.get(panel.x, panel.y).bg,
+        Some(crate::category::Category::Sensed),
+        "the sensed guard outranks the door cue on the shared cell",
+    );
+}
+
+/// §11.7/§10.4: a door **you** operate keeps its quiet near-line self-narration and
+/// lights **no** on-grid cue — the cue is only for doors the player did not operate,
+/// which is where the durable "someone passed" evidence belongs.
+#[test]
+fn a_door_you_open_keeps_its_word_and_lights_no_cue() {
+    // Player in room A of the strip, next to the closed door; bump it open.
+    let mut s = State::new(
+        region_strip(),
+        Cell::new(3, 2),
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(13, 1),
+    );
+    let events = s.step(Input::Step(Direction::East)); // bump the panel at (4,2)
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Event::DoorOpened {
+                by_player: true,
+                ..
+            }
+        )),
+        "the player's bump opens the door",
+    );
+    assert_eq!(
+        crate::status::near_line(&s).text,
+        "the door opens",
+        "a door you operate keeps its quiet self-narration (§11.7)",
+    );
+    assert_eq!(
+        s.door_cues().count(),
+        0,
+        "a door you operate lights no on-grid cue",
     );
 }
 

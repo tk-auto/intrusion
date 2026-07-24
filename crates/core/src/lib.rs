@@ -75,8 +75,8 @@ pub use render::{
 };
 pub use rng::Rng;
 pub use state::{
-    Affordance, Event, GuardPerception, Input, Outcome, State, PLAYER_SENSE_RANGE,
-    PLAYER_SENSE_RANGE_WAITING,
+    Affordance, Event, GuardPerception, Input, Outcome, State, DOOR_CUE_DECAY_TURNS,
+    DOOR_SENSE_RANGE, PLAYER_SENSE_RANGE, PLAYER_SENSE_RANGE_WAITING,
 };
 pub use status::{live_messages, message_for, near_line, Message};
 pub use targeting::{within_range, Target, Targeting, TileCursor};

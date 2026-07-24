@@ -59,12 +59,13 @@ fn glyph_rows() -> Vec<(char, Category, &'static str)> {
 /// [`category_meaning`] this is the colour key — the shell draws each name in the
 /// colour the category maps to, so the player sees the colour and its meaning
 /// together.
-const CATEGORIES: [Category; 9] = [
+const CATEGORIES: [Category; 10] = [
     Category::Owned,
     Category::Caution,
     Category::Warning,
     Category::Danger,
     Category::Sensed,
+    Category::Trace,
     Category::Interest,
     Category::System,
     Category::Neutral,
@@ -85,6 +86,7 @@ fn category_meaning(category: Category) -> &'static str {
         Category::Interest => "a goal or reward",
         Category::System => "door / cupboard / duct",
         Category::Sensed => "guard felt through a wall",
+        Category::Trace => "a door just changed here",
     }
 }
 
@@ -185,6 +187,7 @@ fn category_name(category: Category) -> &'static str {
         Category::Interest => "Interest",
         Category::System => "System",
         Category::Sensed => "Sensed",
+        Category::Trace => "Trace",
     }
 }
 
@@ -252,7 +255,7 @@ mod tests {
     /// match guarantees the meaning, and the name list must stay complete too.
     #[test]
     fn every_category_is_documented() {
-        assert_eq!(CATEGORIES.len(), 9, "all nine §11.2 categories are keyed");
+        assert_eq!(CATEGORIES.len(), 10, "all ten §11.2 categories are keyed");
         for &c in &CATEGORIES {
             assert!(!category_meaning(c).is_empty(), "{c:?} has a meaning");
             assert!(!category_name(c).is_empty(), "{c:?} has a name");
