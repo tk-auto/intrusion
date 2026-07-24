@@ -37,6 +37,11 @@ def main() -> None:
                          "boots this facility with no URL and no typing — how a "
                          "seed-locked artifact pins the exact level the sim played "
                          "(#110). Omit for the normal random-seed build.")
+    ap.add_argument("--title", default=None,
+                    help="set the page <title>, which is what NAMES the published "
+                         "artifact (the Artifact tool's own title arg is overridden "
+                         "by this tag). Use the skill's convention, e.g. "
+                         "intrusion-110-8371-1.")
     args = ap.parse_args()
     if args.seed is not None and not (0 <= args.seed < 2**64):
         sys.exit(f"assemble: --seed must be a u64 (0 .. 2^64-1), got {args.seed}")
@@ -46,6 +51,18 @@ def main() -> None:
     wasm_b64 = base64.b64encode(
         (dist / "intrusion_web_bg.wasm").read_bytes()).decode()
     index = pathlib.Path(args.index).read_text()
+
+    # The page <title> names the published artifact (the host reads it from the
+    # content, overriding the Artifact tool's title arg), so set it here when asked —
+    # committing a per-build name into web/index.html would be wrong. The tag is not
+    # inside the stripped skeleton, so it survives packing.
+    if args.title is not None:
+        index, n = re.subn(r"<title>.*?</title>",
+                           lambda m: f"<title>{args.title}</title>",
+                           index, count=1, flags=re.S)
+        if n != 1:
+            sys.exit(f"assemble: expected one <title> in {args.index} to set, "
+                     f"found {n}")
 
     # The glue is an ES module; inlined into one script tag its exports must go.
     glue = replace_once(glue, "export function start()",
