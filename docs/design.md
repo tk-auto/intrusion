@@ -1172,10 +1172,22 @@ stay a future axis.
 > promise — a cupboard capture is only ever the result of hiding *while watched*, a
 > decision you could read straight off the danger overlay (the cone was on the
 > cupboard, §11.5).
-> *(Deferred: the "found a body nearby" trigger from §15 Q5 — a guard checking a
-> cupboard because a corpse turned up beside it — is a separate follow-up; this rule
-> is the "saw you go in" case only. Ducts are untouched: a duct is an escape a
-> pursuer cannot follow (§10.7), so it stays contact-safe unconditionally.)*
+> **The second way in: a guard that finds a body nearby checks the cupboards it
+> searches. [SETTLED]** (§15 Q5, the "found a body nearby" half.) Finding a body is the
+> loudest event in the game (§7.2): the finder is thrown into a §7.6 search of the
+> **area around the corpse** — the `SEARCH_RADIUS` disc it already sweeps — and, because
+> a body is loud evidence the intruder is close, that search now **checks the occupied
+> cupboards inside it**. An occupied hideout within the searched disc is flushed exactly
+> as a witnessed dive is: the finder re-engages the cupboard, walks to the mouth, and
+> captures — the same per-guard capture gate (`witnessed_hideout`), a second way to earn
+> entry, not a new machinery. Only a **body** search checks: a search that began by
+> *losing a chase* never opens a cupboard, so breaking sight and diving still works
+> (§7.6). The readable rule (§2.2): the corpse is the signal. You cannot watch a cone
+> fall on the cupboard here, but you *can* see the body you left — so **hiding within a
+> guard's reach of a body you dropped is the traceable mistake**, and a body far from
+> your cupboard never reaches it. A **stowed** body is *gone* (§7.2 — no cone finds it),
+> so it never starts a search and never checks anything. Ducts are untouched: a duct is
+> an escape a pursuer cannot follow (§10.7), so it stays contact-safe unconditionally.
 
 > **A cupboard is also where you hide a body (§7.2), and doing so locks it.** Drag a
 > body to a cupboard and **bump the empty cupboard to stow it inside**: the body
@@ -1930,16 +1942,19 @@ default.
    a ghost↔aggressive play spectrum. If not, the radio clock (§7.3) is the only
    takedown cost, which may well be enough. Note a score also gives the bot in §13
    a far better objective function, which is an argument for it beyond the game.
-5. **Do guards check hideouts?** *(Resolved for the "saw you go in" half — see
-   §10.3.)* If never, hideouts are permanent safe rooms and patrol coverage has
-   holes by design. If always, they're death traps. The settled answer: **only when
-   alerted, and only if they saw you go in** — a guard that was alerted and whose
-   cone covered the cupboard on the entry turn flushes you out; every other guard
-   still routes around the occupied cupboard forever. This interacts with §7.6 as
-   hoped — a cupboard entered *in* a hunter's cone is now a trap, so the hiding game
-   rewards breaking sight *first*. **Still [OPEN]:** the **"found a body nearby"**
-   trigger (a guard checking a cupboard because a corpse turned up beside it), left
-   as a follow-up.
+5. **Do guards check hideouts?** *(Resolved — see §10.3.)* If never, hideouts are
+   permanent safe rooms and patrol coverage has holes by design. If always, they're
+   death traps. The settled answer: **only when alerted, and only if they saw you go
+   in _or found a body nearby_.** *Saw you go in:* a guard that was alerted and whose
+   cone covered the cupboard on the entry turn flushes you out. *Found a body nearby:*
+   a guard thrown into a §7.6 search by finding a corpse (§7.2) checks the occupied
+   cupboards within the disc it sweeps (`SEARCH_RADIUS`), flushing one the same way —
+   the readable signal being the body you left, not a cone you could watch (§2.2). A
+   search that began by *losing a chase* checks nothing, and a **stowed** body (never
+   found) never triggers a check. Every other guard still routes around the occupied
+   cupboard forever. This interacts with §7.6 as hoped — a cupboard entered *in* a
+   hunter's cone, or beside a body a guard finds, is now a trap, so the hiding game
+   rewards breaking sight *first* and not hiding beside your own handiwork.
 6. **Sight and sense: box or circle?** The box is cheap and nobody noticed. A
    circle is more natural and slightly less exploitable at the diagonals. Whatever
    wins should apply to **both** the vision box (§6.1) and the guard-sense box (§9.1)
