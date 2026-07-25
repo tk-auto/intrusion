@@ -606,17 +606,28 @@ impl Guard {
         self.end_search_and_watch();
     }
 
-    /// Whether this guard's active **body search** (§15 Q5) covers an occupied hideout
-    /// at `cell`: true only while it is sweeping the disc around a found body
-    /// ([`body_search`](Self::body_search), set by [`find_body`](Self::find_body)) and
-    /// `cell` lies within [`SEARCH_RADIUS`] of that [`focus`](Self::focus) — the area
-    /// the guard is already pacing (§7.6, the §6.1 sight metric). A **lost-chase**
-    /// search never checks hideouts, so a cupboard stays the safe wait-out it is against
-    /// a guard that only lost sight of you (§10.3); only a body found nearby earns the
-    /// check. The turn loop reads this each turn and calls
+    /// Whether this guard's active search (§15 Q5) covers an occupied hideout at
+    /// `cell`: true while it is sweeping the disc — `cell` within [`SEARCH_RADIUS`]
+    /// of its [`focus`](Self::focus), the area it is already pacing (§7.6, the §6.1
+    /// sight metric) — *and* it has earned the check.
+    ///
+    /// Baseline, only a **body search** earns it ([`body_search`](Self::body_search),
+    /// set by [`find_body`](Self::find_body)): a body found nearby is loud evidence
+    /// the intruder is close, while a **lost-chase** search never checks, so a
+    /// cupboard stays the safe wait-out it is against a guard that only lost sight of
+    /// you (§10.3). The `guards_always_search_hideouts` level modifier (§12.6) passes
+    /// `always_search`, which earns the check for *any* active search — including a
+    /// lost chase — turning that wait-out off as a harder setting. The `Alerted`
+    /// guard keeps `focus` after it releases to a watch (see
+    /// [`release_from_search`](Self::release_from_search)), so the state gate is what
+    /// stops a Calm watcher with a stale focus from flushing.
+    ///
+    /// The turn loop reads this each turn and calls
     /// [`check_hideout`](Self::check_hideout) when it holds.
-    pub(crate) fn checks_hideout_at(&self, cell: Cell) -> bool {
-        self.body_search
+    pub(crate) fn checks_hideout_at(&self, cell: Cell, always_search: bool) -> bool {
+        let earns_check =
+            self.body_search || (always_search && matches!(self.state, GuardState::Alerted));
+        earns_check
             && self
                 .focus
                 .is_some_and(|focus| focus.sight_distance(cell) <= SEARCH_RADIUS)
@@ -1539,20 +1550,20 @@ mod tests {
         );
         // In range (the §6.1 sight metric): a cupboard inside the swept disc is checked.
         assert!(
-            finder.checks_hideout_at(Cell::new(20, 24)),
+            finder.checks_hideout_at(Cell::new(20, 24), false),
             "a cupboard exactly SEARCH_RADIUS south is in the disc",
         );
         assert!(
-            finder.checks_hideout_at(Cell::new(23, 23)),
+            finder.checks_hideout_at(Cell::new(23, 23), false),
             "a diagonal cupboard within range is checked",
         );
         // Out of range: one step past the disc is never reached — the body was too far.
         assert!(
-            !finder.checks_hideout_at(Cell::new(20, 25)),
+            !finder.checks_hideout_at(Cell::new(20, 25), false),
             "one step past the disc is left safe",
         );
         assert!(
-            !finder.checks_hideout_at(Cell::new(25, 25)),
+            !finder.checks_hideout_at(Cell::new(25, 25), false),
             "a far diagonal cupboard is never checked",
         );
 
@@ -1566,15 +1577,60 @@ mod tests {
             "a lost chase also opens a search"
         );
         assert!(
-            !chaser.checks_hideout_at(body),
+            !chaser.checks_hideout_at(body, false),
             "a lost-chase search never checks a hideout",
         );
 
         // A body search whose lead runs cold stands the guard down and stops checking.
         finder.stand_down();
         assert!(
-            !finder.checks_hideout_at(Cell::new(20, 20)),
+            !finder.checks_hideout_at(Cell::new(20, 20), false),
             "a spent search checks nothing",
+        );
+    }
+
+    /// The `guards_always_search_hideouts` level modifier (§12.6), directional: the
+    /// harder setting must flush at least as much as baseline. With `always_search`
+    /// on, a **lost-chase** search — the one that baseline leaves the safe wait-out
+    /// (§10.3) — now checks the cupboards inside its disc, and nothing beyond it, so
+    /// the modifier strictly *adds* pressure without widening the swept area. A Calm
+    /// guard that has released to a watch keeps its `focus` but is no longer
+    /// searching, so the modifier never makes it flush.
+    #[test]
+    fn the_always_search_hideouts_modifier_flushes_a_lost_chase() {
+        let lead = Cell::new(20, 20);
+        let mut chaser = Guard::patrolling(lead);
+        chaser.begin_search();
+        assert_eq!(chaser.state(), GuardState::Alerted, "a lost chase searches");
+
+        // Baseline (modifier off): the lost chase checks nothing — the wait-out holds.
+        assert!(
+            !chaser.checks_hideout_at(lead, false),
+            "baseline: a lost-chase search leaves the cupboard safe",
+        );
+        // Modifier on: the same search now flushes a cupboard within its disc …
+        assert!(
+            chaser.checks_hideout_at(lead, true),
+            "modifier: a lost-chase search flushes a cupboard at its focus",
+        );
+        assert!(
+            chaser.checks_hideout_at(Cell::new(20, 24), true),
+            "modifier: … and one exactly SEARCH_RADIUS away, inside the disc",
+        );
+        // … but never one beyond the disc: the modifier widens *what* is searched,
+        // not *where* — the swept area is unchanged.
+        assert!(
+            !chaser.checks_hideout_at(Cell::new(20, 25), true),
+            "modifier: a cupboard one step past the disc is still left safe",
+        );
+
+        // A guard released from its search to a Calm watch keeps `focus` but is no
+        // longer Alerted, so the modifier does not turn its stale focus into a flush.
+        chaser.release_from_search();
+        assert_eq!(chaser.state(), GuardState::Calm, "released to a watch");
+        assert!(
+            !chaser.checks_hideout_at(lead, true),
+            "modifier: a Calm watcher with a stale focus never flushes",
         );
     }
 }

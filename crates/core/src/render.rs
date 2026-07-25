@@ -377,9 +377,16 @@ pub fn render(state: &State) -> Grid {
     // them red — everything past the window stays memory (§11.5). On open floor a
     // seen guard's whole cone paints, as §11.5 intends (knowledge you have); the clip
     // is the in-duct case alone, and the player FOV *is* the peek there.
+    // The `always_show_vision_cones` level modifier (§12.6) paints the overlay in
+    // full — every guard's cone, not only the ones the player can currently see.
+    // It may only ever *widen* the overlay (§11.5 [SETTLED]): dropping the "seen"
+    // gate below reveals the cones of sensed and out-of-range guards too, strictly
+    // more red, never less. The concealment and in-duct spares stay — they subtract
+    // red for cells that genuinely are not detected, which a widening must respect.
+    let show_all_cones = state.modifiers().always_show_vision_cones;
     let in_duct = state.in_duct();
     for guard in state.guards() {
-        if !fov.contains(guard.pos()) {
+        if !show_all_cones && !fov.contains(guard.pos()) {
             continue; // an unseen guard's cone is unknown, not safe — just unknown
         }
         let spare_player = state.concealed_from(guard.pos());
@@ -471,6 +478,7 @@ mod tests {
     use crate::guard::Guard;
     use crate::state::{Event, Input, State};
     use crate::test_support::open_room;
+    use crate::LevelModifiers;
 
     /// A hand-built state on a `w × h` walled box: the player, some guards, and a far
     /// exit, no objectives. Enough to render. Faces **south**, toward where these
@@ -1267,6 +1275,74 @@ mod tests {
         }
         // The only background painted is the sensed guard's own orange marker.
         assert_eq!(g.get(guard.x, guard.y).bg, Some(Category::Sensed));
+    }
+
+    /// The `always_show_vision_cones` level modifier (§12.6), directional: it may
+    /// only ever *widen* the overlay (§11.5 [SETTLED]). On the same scene as
+    /// [`an_unseen_guards_cone_paints_no_danger`], turning it on paints the unseen
+    /// guard's cone that baseline hides — so the painted danger set is a strict
+    /// superset of baseline, never smaller, proving the modifier reveals more.
+    #[test]
+    fn the_show_vision_cones_modifier_paints_an_unseen_guards_cone() {
+        // A guard behind the north-facing player, out of the FOV — sensed, not seen.
+        let guard = Cell::new(10, 14);
+        let scene = || {
+            State::new(
+                open_room(20, 20),
+                Cell::new(10, 10),
+                Direction::North,
+                vec![Guard::stationary(guard)],
+                Vec::new(),
+                Cell::new(18, 18),
+            )
+        };
+        let danger_cells = |g: &Grid| -> Vec<(u32, u32)> {
+            let mut cells = Vec::new();
+            for y in 0..g.height() {
+                for x in 0..g.width() {
+                    if g.get(x, y).bg == Some(Category::Danger) {
+                        cells.push((x, y));
+                    }
+                }
+            }
+            cells
+        };
+
+        let baseline = scene();
+        assert!(
+            !baseline.player_fov().contains(guard),
+            "the guard is unseen"
+        );
+        let baseline_danger = danger_cells(&render(&baseline));
+        assert!(
+            baseline_danger.is_empty(),
+            "baseline: an unseen guard's cone paints no danger",
+        );
+
+        let modified = scene().with_modifiers(LevelModifiers {
+            always_show_vision_cones: true,
+            ..LevelModifiers::default()
+        });
+        let modified_danger = danger_cells(&render(&modified));
+
+        // Widen-only (§11.5): every baseline-red cell is still red …
+        for cell in &baseline_danger {
+            assert!(
+                modified_danger.contains(cell),
+                "modifier must never hide a red cell: {cell:?}",
+            );
+        }
+        // … and the unseen guard's cone is now painted, strictly more than baseline.
+        // (Its own watched cell reads red too — a cone covers its origin, and the
+        // danger overlay outranks the sensed marker there, §11.5.)
+        assert!(
+            modified_danger.len() > baseline_danger.len(),
+            "modifier: the unseen guard's cone now paints danger",
+        );
+        assert!(
+            modified_danger.contains(&(guard.x, guard.y)),
+            "the sensed guard's own cell is inside its now-revealed cone",
+        );
     }
 
     /// §9.2/§11.3: a guard **sensed** through a wall paints an orange

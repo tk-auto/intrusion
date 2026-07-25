@@ -1763,6 +1763,61 @@ Serialise the run state (seed, level, progress) to browser local storage.
 much smaller one. Snapshotting is simpler and survives design changes; a replay
 save doesn't. Probably: snapshot for saves, replay for tests and bug reports.
 
+### 12.6 Level modifiers
+
+A **level modifier** is a named toggle or bounded knob that shifts a facility's
+*baseline* — its difficulty or its rules — *before the level begins*. Each one
+flips a rule an existing system already owns rather than adding a parallel one:
+*"guards always search hideouts"* forces the §7.6 search to check occupied
+cupboards unconditionally (harder); *"always show vision cones"* paints the §11.5
+danger overlay in full (easier). This is the **mechanism** difficulty and mode
+rules flow through — the shared seam #210 (alert scaling), #244 (quick play), and
+the v3 catalogue (#231–#236) all plug into instead of each inventing its own
+knobs.
+
+**One resolved value, read by many (§12.3).** All active modifiers are fields on a
+single `LevelModifiers` value — plain, heterogeneous data (a toggle is a `bool`, a
+knob a small enum or clamped integer). It is resolved **once at facility start**
+and every system branches on *that* value — never a global bool queried in ten
+places. Adding a modifier is adding a field, and the compiler then enumerates
+every read site that must handle it. Each field carries a documented **direction**
+(harder / easier); §2.3's anti-facade rule means every shipped modifier needs a
+**directional assertion** — from the same seed and inputs, the harder one yields
+at least as much pressure as baseline, the easier one reveals at least as much —
+so a flag that changes nothing observable cannot pass for shipped.
+
+**The source → modifier → config flow.** The mechanism is shared; the *sources*
+that switch modifiers on are separate and stack on top of it. Three, kept
+deliberately distinct:
+
+- **Choice** (exogenous) — the player's chosen or seeded baseline. A **mode** is a
+  named preset = a bundle of modifiers over the base rules (#244).
+- **Alert** (endogenous) — the campaign alert (#210): a loud raid raises the
+  alert, and higher alert switches on harder modifiers for later facilities. This
+  is where *"levels adapt to the strategy you lean on"* (§2) lives.
+- **Flavour** (per-node) — a facility's own character (#207).
+
+They compose into the *same* resolved `LevelModifiers` (`ModifierSources::resolve`):
+a toggle is active if **any** source requests it; a knob composes *harder-ward*.
+Adding a source is a new field and a line in `resolve`, never a new difficulty
+path — #210 owns the alert→modifier *mapping* and its own fairness (decay, floor,
+§2.2); this seam owns only the merge and the application.
+
+**Determinism (§12.4 [SETTLED]).** The resolved set is part of the reproducible
+config: same seed + **same modifiers** + same inputs → identical run. It is plain
+`Copy` data threaded through the boot alongside the seed, so a run's identity is
+now `(seed, modifiers, inputs)`. Carrying the modifiers in the shareable
+seed/replay *token* (so a handed-around link reproduces them) extends the #110/#197
+carrier — that is #245's job; the config being deterministic is this seam's.
+
+**Constraints.** The *"always show vision cones"* modifier may only ever **widen**
+the §11.5 overlay — it reveals unseen guards' cones on top of the seen ones, and
+must never narrow or hide the red detection set (§11.5 is **[SETTLED]**). Modifiers
+resolved before generation (guard count #232, safe zones #235, locked doors #236)
+read the same value at the generation seam; runtime modifiers (the two shipped,
+the intel gate #244, radio coordination #231) read it off the running state. Same
+value, two horizons.
+
 ---
 
 ## 13. The experiment loop
@@ -1879,7 +1934,8 @@ carried to the next one.
   no ability could ever be unlocked. The progression axis existed only on paper.
 - Intel as a real currency, with actual sinks: reveal facility intel, unlock an
   alternative route, lower the alert, upgrade an ability.
-- Difficulty that scales with the alert level. **The whole point of the alert
+- Difficulty that scales with the alert level, driven through the level-modifier
+  seam (§12.6) rather than a private knob set. **The whole point of the alert
   system is that being loud in facility 2 makes facility 3 harder.** Until that
   loop closes, alert is decoration.
 - An ending. The old campaign had no reachable conclusion.

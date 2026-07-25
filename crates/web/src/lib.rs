@@ -51,8 +51,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    generate_level, render_screen, Category, Direction, Grid, LevelConfig, Rng, ScreenUi, State,
-    Visibility, HEADER_ROWS, STATUS_ROWS,
+    generate_level, render_screen, Category, Direction, Grid, LevelConfig, LevelModifiers,
+    ModifierSources, Rng, ScreenUi, State, Visibility, HEADER_ROWS, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -186,6 +186,13 @@ fn swatch(category: Category) -> Swatch {
 /// `pub(crate)` so the replay viewer ([`replay`]) can re-run a seed through
 /// `inputs[0..K]` to derive the state at its cursor (replay-minus-N, §12.4).
 pub(crate) fn new_run(seed: u64) -> Result<State, JsValue> {
+    // The level modifiers for this facility (§12.6), resolved once at the start of
+    // the boot from their sources. Quick play is the plain baseline — the choice
+    // source with an empty set, no campaign alert (#210), no flavour (#207); the
+    // seam still runs (§2.3) so a preset (#244) or a shared token (#245) only has
+    // to hand a non-default `chosen` set here.
+    let modifiers = ModifierSources::chosen(LevelModifiers::default()).resolve();
+
     let mut rng = Rng::new(seed);
     // The full v1 level (§10.2): a carve passing every §10.6 guarantee, with the
     // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards patrol
@@ -204,7 +211,8 @@ pub(crate) fn new_run(seed: u64) -> Result<State, JsValue> {
         placement.intel().iter().copied(),
         placement.exit(),
     )
-    .with_rng(rng))
+    .with_rng(rng)
+    .with_modifiers(modifiers))
 }
 
 /// Boot the game: pick the run's seed, generate its facility, draw it, and start

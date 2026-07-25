@@ -8,7 +8,8 @@
 //! grid.
 
 use intrusion_core::{
-    generate_level, Direction, Event, GenError, Input, LevelConfig, Outcome, Rng, State,
+    generate_level, Direction, Event, GenError, Input, LevelConfig, LevelModifiers,
+    ModifierSources, Outcome, Rng, State,
 };
 
 use crate::policy::{PlayerPolicy, Recording};
@@ -91,6 +92,11 @@ pub fn run_one(
     // One seed per run (§12.4): the carve stream continues into the turn loop, where
     // the guard close-behind roll draws from it (§10.4/#146), so a sim run is as
     // deterministic and as faithful to the web build as the rest of the pipeline.
+    // The facility's level modifiers (§12.6), resolved once at boot exactly as the
+    // web shell does. The bot plays the baseline here — the same default set quick
+    // play boots (a modifier sweep is a follow-up, #244's `intel_to_exit`).
+    let modifiers = ModifierSources::chosen(LevelModifiers::default()).resolve();
+
     let mut rng = Rng::new(seed);
     let (layout, placement) = generate_level(&LevelConfig::V1, &mut rng)?;
     let guards = placement.guards(&layout);
@@ -102,7 +108,8 @@ pub fn run_one(
         placement.intel().iter().copied(),
         placement.exit(),
     )
-    .with_rng(rng);
+    .with_rng(rng)
+    .with_modifiers(modifiers);
 
     let mut record = RunRecord {
         seed,
