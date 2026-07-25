@@ -677,8 +677,12 @@ impl Guard {
     /// except that, on reaching a target, it sometimes **dwells** in place for a few
     /// turns first (§153, the seeded [`roll_dwell`]), a stationary window a Takedown
     /// (§7.2) can be lined up against. A held-in-place guard, or a Calm one with
-    /// nowhere to go, holds. `rng` and `dwell_chance` drive the dwell roll and are
-    /// the loop's only stochastic input here (§12.4); a `0` chance draws nothing.
+    /// nowhere to go, holds. A Calm guard that must **change heading** by 90° first
+    /// spends a turn rotating in place before it steps the new way, and no guard —
+    /// Calm or reactive — flips 180° in one move: both are [`commit_step`]'s job,
+    /// applied to whichever step the branches above chose. `rng` and `dwell_chance`
+    /// drive the dwell roll and are the loop's only stochastic input here (§12.4); a
+    /// `0` chance draws nothing.
     /// `blocked` are the cells other guards currently stand on: guards are solid to
     /// each other and must **path around** a colleague, not through one (§7.8). A
     /// route the pass finds steps only into cells no other guard holds, so a guard
@@ -712,7 +716,7 @@ impl Guard {
         if matches!(self.state, GuardState::Chasing | GuardState::Investigating) {
             if self.alert > 0 {
                 if let Some(step) = self.step_toward_destination(facility, blocked) {
-                    return Some(step);
+                    return self.commit_step(Some(step), facility);
                 }
                 if self.destination == Some(self.pos) {
                     // Arrived at the last-known cell with nothing seen: **Lost → Hunted**.
@@ -740,7 +744,7 @@ impl Guard {
         if self.state == GuardState::Responding {
             if self.alert > 0 {
                 if let Some(step) = self.step_toward_destination(facility, blocked) {
-                    return Some(step);
+                    return self.commit_step(Some(step), facility);
                 }
                 if self.destination == Some(self.pos) {
                     self.stand_down();
@@ -756,7 +760,7 @@ impl Guard {
         if self.state == GuardState::Alerted {
             if self.search > 0 {
                 if let Some(step) = self.step_search(facility, blocked) {
-                    return Some(step);
+                    return self.commit_step(Some(step), facility);
                 }
                 // Nothing left to poke at in the area — end the search early.
             }
@@ -785,7 +789,59 @@ impl Guard {
         }
 
         self.repick_patrol_target(facility);
-        self.step_toward_destination(facility, blocked)
+        let step = self.step_toward_destination(facility, blocked);
+        self.commit_step(step, facility)
+    }
+
+    /// Reconcile a desired step against the guard's facing before it commits (§7.5
+    /// slow turn, §7.2 no half-turn). `step` is the direction the patrol or reactive
+    /// logic wants to walk; the return is what the guard actually does this turn —
+    /// `Some(dir)` to step (the turn loop moves it and re-aims, §5), or `None` when
+    /// the whole turn is spent rotating in place. Facing is quantised to the four
+    /// cardinals (§4.3 **[SETTLED]**), so the desired step is one of three cases
+    /// relative to the current facing:
+    ///
+    /// - **straight ahead** (same direction): every state steps, no re-aim (§7.1 — a
+    ///   guard continuing forward pays nothing).
+    /// - **a 180° reversal** (opposite): forbidden in one move for *every* state
+    ///   (§7.2) — a guard cannot spin to face, and detect, a player lined up directly
+    ///   behind it. It rotates one quarter **clockwise** in place — the fixed,
+    ///   deterministic intermediate (§12.4) — and steps once aligned on a later turn,
+    ///   so facing about takes ≥2 turns and always passes through a quarter.
+    /// - **a 90° turn** (perpendicular): a **Calm** guard turns in place first (§7.5 —
+    ///   the stationary quarter-turn that telegraphs a patrol's next heading, a second
+    ///   window alongside the dwell); a **reactive** guard turns fast, re-aiming as it
+    ///   steps exactly as before (§7.1 — a hunt is never slowed).
+    ///
+    /// A turn in place re-aims the cone at the new facing at once ([`turn_in_place`]),
+    /// so the danger overlay a frame paints is honest about where a mid-turn guard is
+    /// now looking (§11.5). There is no "mid-rotation" flag: the choice is recomputed
+    /// from [`state`](Self::state) every turn, so the instant a Calm guard turns
+    /// reactive its slow-turn tax is simply gone (§7.5, like the dwell) — a detection
+    /// never waits on a pending rotation.
+    fn commit_step(&mut self, step: Option<Direction>, facility: &Facility) -> Option<Direction> {
+        let dir = step?;
+        if dir == self.facing {
+            return Some(dir);
+        }
+        if dir == self.facing.opposite() {
+            self.turn_in_place(self.facing.clockwise(), facility);
+            return None;
+        }
+        if self.state == GuardState::Calm {
+            self.turn_in_place(dir, facility);
+            None
+        } else {
+            Some(dir)
+        }
+    }
+
+    /// Rotate in place to `facing` without stepping (§7.5/§7.2): position unchanged,
+    /// the cone re-aimed at once so the overlay stays honest (§11.5). The guard has
+    /// spent its whole turn on the rotation.
+    fn turn_in_place(&mut self, facing: Direction, facility: &Facility) {
+        self.facing = facing;
+        self.look(facility);
     }
 
     /// Begin the §7.6 search: enter [`Alerted`](GuardState::Alerted) for
@@ -1221,7 +1277,18 @@ mod tests {
         loop {
             let step = guard.decide(&facility, &[], &mut rng, 100);
             if !guard.is_dwelling() {
-                assert!(step.is_some(), "the sweep resumes the turn the dwell ends");
+                // The dwell has ended and the sweep resumes: the guard is active
+                // again. It may first spend a turn or two rotating toward its new
+                // heading (§229) before it steps, but a step lands within a couple of
+                // turns — never a permanent hold.
+                let mut resumed = step.is_some();
+                for _ in 0..3 {
+                    if resumed {
+                        break;
+                    }
+                    resumed = guard.decide(&facility, &[], &mut rng, 100).is_some();
+                }
+                assert!(resumed, "the sweep resumes once the dwell ends");
                 break;
             }
             assert_eq!(step, None, "a dwelling guard holds");
@@ -1265,6 +1332,197 @@ mod tests {
         let step = guard.decide(&facility, &[], &mut rng, 100);
         assert!(!guard.is_dwelling(), "going reactive cancels the dwell");
         assert!(step.is_some(), "a chasing guard moves, it does not dwell");
+    }
+
+    /// §7.5 slow turn (#229): a **Calm** guard that must change heading by 90° spends
+    /// a turn rotating in place — position unchanged, the cone re-aimed the new way —
+    /// before it steps, and continuing straight pays nothing. The first decide turns
+    /// (returns no step, facing swung east, still on its cell, its cone now honestly
+    /// facing east); the second, now aligned, steps.
+    #[test]
+    fn a_calm_guard_spends_a_turn_rotating_before_a_quarter_turn() {
+        let facility = Facility::walled_box(12, 12);
+        // Faces south (§7.1); its patrol target is due east, a 90° turn away.
+        let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(8, 5));
+        guard.look(&facility);
+        assert!(
+            guard.fov().contains(Cell::new(5, 7)) && !guard.fov().contains(Cell::new(7, 5)),
+            "precondition: the cone starts facing south",
+        );
+
+        // Turn one: rotate in place. No step, unmoved, but the cone now faces east —
+        // the overlay a frame paints is honest about the mid-turn facing (§11.5).
+        let first = guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        assert_eq!(first, None, "the quarter-turn spends the whole turn");
+        assert_eq!(
+            guard.pos(),
+            Cell::new(5, 5),
+            "a turn in place does not move"
+        );
+        assert_eq!(guard.facing(), Direction::East, "it swung a quarter east");
+        assert!(
+            guard.fov().contains(Cell::new(7, 5)) && !guard.fov().contains(Cell::new(5, 7)),
+            "the cone re-aimed east at once",
+        );
+
+        // Turn two: now aligned, it steps — straight ahead costs nothing.
+        let second = guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        assert_eq!(
+            second,
+            Some(Direction::East),
+            "aligned, it walks the new way"
+        );
+    }
+
+    /// §7.1/§7.5 (#229): a **Calm** guard continuing straight ahead pays no turn tax —
+    /// its first decision on a target dead ahead is the step itself, no rotation.
+    #[test]
+    fn a_calm_guard_walking_straight_pays_no_turn_tax() {
+        let facility = Facility::walled_box(12, 12);
+        // Faces south (§7.1); the target is due south — straight ahead.
+        let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 9));
+        guard.look(&facility);
+        assert_eq!(
+            guard.decide(&facility, &[], &mut Rng::new(0), 0),
+            Some(Direction::South),
+            "a guard already facing its heading steps at once",
+        );
+    }
+
+    /// §7.1/§7.6 (#229): a **reactive** guard turns fast — no turn tax. A Responding
+    /// guard (any reactive state) heading 90° off its facing steps immediately,
+    /// re-aiming as it goes, where a Calm guard on the same line would first rotate in
+    /// place. A hunt is never slowed.
+    #[test]
+    fn a_reactive_guard_turns_without_a_tax() {
+        let facility = Facility::walled_box(12, 12);
+        let post = Cell::new(8, 5); // due east, a 90° turn from the south spawn facing
+
+        // Calm on this line first rotates in place (no step).
+        let mut calm = Guard::patrolling_to(Cell::new(5, 5), post);
+        calm.look(&facility);
+        assert_eq!(
+            calm.decide(&facility, &[], &mut Rng::new(0), 0),
+            None,
+            "the Calm guard spends the turn rotating",
+        );
+
+        // Reactive on the same line steps at once — the fast turn re-aims with the step.
+        let mut reactive = Guard::patrolling(Cell::new(5, 5));
+        reactive.look(&facility);
+        reactive.respond_to(post); // Responding, walking to the post, lead warm
+        assert_eq!(
+            reactive.decide(&facility, &[], &mut Rng::new(0), 0),
+            Some(Direction::East),
+            "a reactive guard turns fast and steps the same turn",
+        );
+    }
+
+    /// §7.2 (#229): **no guard, in any state, flips 180° in one move** — a reversal
+    /// passes through an intermediate quarter, always the clockwise one (§12.4), and
+    /// takes ≥2 turns to face fully about. This is the load-bearing half: a guard
+    /// cannot spin to face — and detect — a player lined up directly behind it.
+    #[test]
+    fn no_guard_flips_180_in_one_move() {
+        let facility = Facility::walled_box(12, 12);
+
+        // Reactive reversal: south-facing Responder sent due north. It never returns
+        // North on the first move; it rotates a clockwise quarter (west), then — now
+        // 90° off — turns fast and steps north. Two turns, through the quarter.
+        let mut reactive = Guard::patrolling(Cell::new(5, 5));
+        reactive.look(&facility);
+        reactive.respond_to(Cell::new(5, 1)); // due north — a 180° reversal
+        assert_eq!(
+            reactive.decide(&facility, &[], &mut Rng::new(0), 0),
+            None,
+            "a reactive guard cannot half-turn in one move",
+        );
+        assert_eq!(
+            reactive.facing(),
+            Direction::West,
+            "it rotated through the fixed clockwise quarter, not straight about",
+        );
+        assert_eq!(
+            reactive.decide(&facility, &[], &mut Rng::new(0), 0),
+            Some(Direction::North),
+            "now a quarter off, the fast turn steps north",
+        );
+
+        // Calm reversal: same about-face costs more — a rotation to the clockwise
+        // quarter (west), another to north, then the step. It faces north only on the
+        // second rotation, never in one move.
+        let mut calm = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 1));
+        calm.look(&facility);
+        assert_eq!(calm.decide(&facility, &[], &mut Rng::new(0), 0), None);
+        assert_eq!(
+            calm.facing(),
+            Direction::West,
+            "first the clockwise quarter"
+        );
+        assert_eq!(calm.decide(&facility, &[], &mut Rng::new(0), 0), None);
+        assert_eq!(calm.facing(), Direction::North, "then the second quarter");
+        assert_eq!(
+            calm.decide(&facility, &[], &mut Rng::new(0), 0),
+            Some(Direction::North),
+            "aligned at last, it steps",
+        );
+    }
+
+    /// §7.5 (#229), the dwell mirror: the moment a Calm guard turns reactive its
+    /// slow-turn tax is simply gone — a detection never waits on a pending rotation.
+    /// A guard mid-corner (already rotated a quarter east, still Calm) is dispatched
+    /// on a fresh 90° heading; a Calm guard would rotate again, but the reactive one
+    /// steps at once.
+    #[test]
+    fn going_reactive_drops_a_pending_slow_turn() {
+        let facility = Facility::walled_box(12, 12);
+        // Rotate in place once: south spawn facing, target due east — the Calm quarter.
+        let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(8, 5));
+        guard.look(&facility);
+        assert_eq!(guard.decide(&facility, &[], &mut Rng::new(0), 0), None);
+        assert_eq!(guard.facing(), Direction::East, "mid-corner, facing east");
+
+        // Now dispatched due north — 90° off the current east facing. A Calm guard
+        // would spend another turn rotating; going reactive drops the tax and steps.
+        guard.respond_to(Cell::new(5, 1));
+        assert_eq!(
+            guard.decide(&facility, &[], &mut Rng::new(0), 0),
+            Some(Direction::North),
+            "the reactive dispatch steps at once — no pending rotation to wait out",
+        );
+    }
+
+    /// §7.5 (#229) liveness: the turn tax delays a corner by exactly one turn, it
+    /// never freezes the sweep. A Calm guard rounding a 90° corner reaches its target
+    /// after a single rotation plus the walk — one held turn, then steady progress.
+    #[test]
+    fn the_slow_turn_delays_a_corner_it_does_not_freeze_it() {
+        let facility = Facility::walled_box(12, 12);
+        let target = Cell::new(9, 2);
+        let mut guard = Guard::patrolling_to(Cell::new(2, 2), target); // due east, a turn
+        guard.look(&facility);
+
+        let mut rotations = 0;
+        let mut steps = 0;
+        for _ in 0..20 {
+            if guard.pos() == target {
+                break;
+            }
+            match guard.decide(&facility, &[], &mut Rng::new(0), 0) {
+                Some(dir) => {
+                    let dest = guard.pos().step(dir).expect("interior step");
+                    guard.advance_to(dest, dir, &facility);
+                    steps += 1;
+                }
+                None => rotations += 1,
+            }
+        }
+        assert_eq!(guard.pos(), target, "the guard reaches its target");
+        assert_eq!(
+            rotations, 1,
+            "exactly one turn is spent rotating at the corner"
+        );
+        assert_eq!(steps, 7, "then it walks the seven cells east");
     }
 
     /// §7.6 fix 2 (Lost → Hunted → Released): a reactive guard that reaches its

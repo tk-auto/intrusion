@@ -422,13 +422,18 @@ fn win_requires_all_intel_then_the_exit() {
 #[test]
 fn a_guard_stepping_into_the_player_captures() {
     // Guard at (6,4) heading west across the room; player at (4,4) in its path.
-    // After the startup turn the guard is at (5,4); the player waits, and the
-    // guard steps onto (4,4).
+    // A **reactive** guard (Responding) turns fast (§229), so its startup step
+    // west both moves and re-aims — reaching (5,4) with its back-then-cone never
+    // having caught the player, the stale-latch that makes the arriving step's
+    // detection and capture land the same turn. (A Calm guard would telegraph the
+    // corner a turn early and detect at range, splitting the two events.)
+    let mut guard = Guard::patrolling(Cell::new(6, 4));
+    guard.respond_to(Cell::new(1, 4));
     let mut s = State::new(
         open_room(10, 10),
         Cell::new(4, 4),
         Direction::North,
-        vec![Guard::patrolling_to(Cell::new(6, 4), Cell::new(1, 4))],
+        vec![guard],
         Vec::new(),
         Cell::new(8, 8),
     );
@@ -683,6 +688,12 @@ fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
 /// player sits at perpendicular range 2, outside the ~90° wedge, unseen), then turns
 /// north onto the cell directly below the player — now facing it point-blank, yet
 /// its pre-move look never saw it. The next turn the player's bump must be refused.
+///
+/// The mover is a **reactive** guard (Responding): under §229 only a reactive guard
+/// turns *and* steps in one action — a Calm guard would telegraph the corner by
+/// rotating in place a turn early and so detect the player before arriving. A fast
+/// arriving turn is exactly what leaves the detection latch a turn stale, which is
+/// the case under test.
 #[test]
 fn a_guard_that_stepped_adjacent_facing_the_player_cannot_be_taken_from_the_front() {
     // A one-cell-wide elbow forces the guard's path: with the corner cell walled,
@@ -690,16 +701,20 @@ fn a_guard_that_stepped_adjacent_facing_the_player_cannot_be_taken_from_the_fron
     // (5,4) by turning north — facing the player at (5,3) — on its final step.
     let mut layout = open_room(9, 9);
     layout.place(Cell::new(4, 4), Terrain::Wall); // the elbow: no north-then-east cut
+
+    // A Responding guard walking to (5,4): reactive, so it turns fast at the corner
+    // (§229) — the arriving north step both moves and re-aims, and reactive `decide`
+    // draws no RNG, so the walk is deterministic (§12.4).
+    let mut guard = Guard::patrolling(Cell::new(4, 5));
+    guard.respond_to(Cell::new(5, 4));
     let mut s = State::new(
         layout,
         Cell::new(5, 3), // on open floor, north of the guard's approach
         Direction::North,
-        vec![Guard::patrolling_to(Cell::new(4, 5), Cell::new(5, 4))],
+        vec![guard],
         Vec::new(),
         Cell::new(7, 7),
     );
-    // No dwelling, so the walk to (5,4) is deterministic (§12.4).
-    s.set_guard_dwell_chance(0);
 
     // The §4.2 startup turn already walked the guard its first step, east to (5,5)
     // with its back to the player. One more turn turns it north onto (5,4) — now
@@ -1982,7 +1997,13 @@ fn a_guard_walking_its_route_opens_the_door_and_passes_through() {
         Cell::new(13, 1),
     );
     s.set_guard_close_chance(0); // isolate opening/pass-through from the close (#146)
-                                 // The startup turn walked the guard up against the closed panel.
+
+    // The startup turn is a quarter-turn in place (§229): heading east off its south
+    // spawn facing, the Calm guard rotates east without moving; a Wait then walks it
+    // up against the closed panel.
+    assert_eq!(s.guards()[0].pos(), Cell::new(2, 2));
+    assert_eq!(s.guards()[0].facing(), Direction::East);
+    s.step(Input::Wait);
     assert_eq!(s.guards()[0].pos(), Cell::new(3, 2));
     assert!(!s.layout().regions().door(door).is_open());
 
@@ -2079,7 +2100,12 @@ fn a_calm_guard_closes_the_door_behind_itself() {
     );
     s.set_guard_close_chance(100); // make the "sometimes" certain for the test
 
-    // Startup parked the guard against the closed panel (§10.4).
+    // The startup turn is a quarter-turn in place (§229): heading east off its south
+    // spawn facing, the Calm guard rotates east without moving; a Wait then walks it
+    // up against the closed panel (§10.4).
+    assert_eq!(s.guards()[0].pos(), Cell::new(2, 2));
+    assert_eq!(s.guards()[0].facing(), Direction::East);
+    s.step(Input::Wait);
     assert_eq!(s.guards()[0].pos(), Cell::new(3, 2));
 
     s.step(Input::Wait); // the walk-in opens the door; the guard holds
@@ -2727,14 +2753,17 @@ fn moving_off_a_hideout_climbs_out() {
 fn a_guard_cannot_capture_a_hidden_player() {
     let mut layout = open_room(10, 10);
     layout.place(Cell::new(4, 4), Terrain::Hideout);
-    // Guard at (6,4) sent to the cupboard cell (4,4) where the player hides.
-    // After the startup turn the guard is at (5,4), one step from the player's
-    // cell — the destination it will be refused entry to.
+    // A guard dispatched (Responding) to the cupboard cell (4,4) where the player
+    // hides. Reactive, so it turns fast (§229): after the startup step it is at
+    // (5,4), one step from the player's cell — the destination it will be refused
+    // entry to. (Any state routes around an occupied hideout, §10.3.)
+    let mut guard = Guard::patrolling(Cell::new(6, 4));
+    guard.respond_to(Cell::new(4, 4));
     let mut s = State::new(
         layout,
         Cell::new(4, 4),
         Direction::North,
-        vec![Guard::patrolling_to(Cell::new(6, 4), Cell::new(4, 4))],
+        vec![guard],
         Vec::new(),
         Cell::new(8, 8),
     );
@@ -3368,11 +3397,16 @@ fn a_hidden_player_is_concealed_from_every_direction() {
 fn a_crouched_player_is_still_captured_by_contact() {
     let mut layout = open_room(10, 10);
     layout.place(Cell::new(4, 3), Terrain::PartialCover); // cover to the north
+
+    // A reactive guard (Responding) turns fast (§229): its startup step west reaches
+    // (5,4) adjacent to the player without a telegraphed corner-turn.
+    let mut guard = Guard::patrolling(Cell::new(6, 4));
+    guard.respond_to(Cell::new(1, 4));
     let mut s = State::new(
         layout,
         Cell::new(4, 4),
         Direction::North,
-        vec![Guard::patrolling_to(Cell::new(6, 4), Cell::new(1, 4))],
+        vec![guard],
         Vec::new(),
         Cell::new(8, 8),
     );
@@ -3511,12 +3545,19 @@ fn a_moved_guards_cone_is_current_when_the_turn_ends() {
         Vec::new(),
         Cell::new(10, 10),
     );
-    // The startup turn already walked the guard one west and turned it.
+    // The startup turn is a quarter-turn in place (§229): heading west off its south
+    // spawn facing, the guard rotates west without moving, its cone re-aimed at once.
+    let g = &s.guards()[0];
+    assert_eq!(g.pos(), Cell::new(8, 8), "the quarter-turn did not move it");
+    assert_eq!(g.facing(), Direction::West);
+    assert!(g.fov().contains(Cell::new(6, 8)), "the wedge points west");
+    assert!(!g.fov().contains(Cell::new(10, 8)), "not behind it");
+
+    // Now aligned, each turn steps west and the stored cone moves with the guard.
+    s.step(Input::Wait);
     let g = &s.guards()[0];
     assert_eq!(g.pos(), Cell::new(7, 8));
-    assert_eq!(g.facing(), Direction::West);
-    assert!(g.fov().contains(Cell::new(5, 8)), "the wedge points west");
-    assert!(!g.fov().contains(Cell::new(9, 8)), "not behind it");
+    assert!(g.fov().contains(Cell::new(5, 8)) && !g.fov().contains(Cell::new(9, 8)));
 
     s.step(Input::Wait);
     let g = &s.guards()[0];
