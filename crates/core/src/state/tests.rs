@@ -5,7 +5,7 @@ use crate::region::{DoorKind, RegionGraph, RegionKind};
 use crate::targeting::Target;
 use crate::test_support::{open_room, region_strip, solo};
 use crate::vision::field_of_view;
-use crate::{generate, generate_level, DoorId, Rng};
+use crate::{generate, generate_level, DoorId, LevelModifiers, Rng};
 
 /// §7.3: a downed guard misses its radio ping a period after the takedown, and
 /// control dispatches the nearest active guard to its last known post (→
@@ -2840,6 +2840,75 @@ fn a_hidden_player_waits_out_a_search_and_watches_the_guard_leave() {
     );
 }
 
+/// The `guards_always_search_hideouts` level modifier (§12.6), directional at the
+/// run level: on the *same* scene and input path that
+/// [`a_hidden_player_waits_out_a_search_and_watches_the_guard_leave`] leaves the
+/// player safe, turning the modifier on flushes them. Baseline, the unwitnessed
+/// dive rides out the lost-chase search (§10.3, the §7.6 wait-out); with the
+/// modifier the same search checks the cupboard inside its disc and captures — at
+/// least as much pressure as baseline, the anti-facade proof the modifier bites
+/// (§2.3). Only the modifier differs between the two runs.
+#[test]
+fn the_always_search_hideouts_modifier_flushes_a_wait_out() {
+    // The shared scene: a cupboard walled into the guard's sight-shadow so the dive
+    // west is never witnessed (§15 Q5) — the guard only *lost* the player, which
+    // baseline never flushes.
+    let scene = || {
+        let mut layout = open_room(16, 12);
+        layout.place(Cell::new(4, 5), Terrain::Hideout);
+        layout.place(Cell::new(4, 4), Terrain::Wall);
+        let guards = vec![Guard::patrolling(Cell::new(5, 1))];
+        State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            guards,
+            Vec::new(),
+            Cell::new(14, 10),
+        )
+    };
+
+    // Baseline (modifier off): the player dives west and rides out the search.
+    let mut baseline = scene();
+    baseline.step(Input::Step(Direction::West));
+    assert!(baseline.hidden(), "the player is concealed");
+    for _ in 0..60 {
+        baseline.step(Input::Wait);
+    }
+    assert_eq!(
+        baseline.outcome(),
+        Outcome::Playing,
+        "baseline: the unwitnessed dive is a safe wait-out",
+    );
+    assert!(baseline.hidden(), "baseline: the player is never flushed");
+
+    // Modifier on: the identical dive and input path is flushed by the lost-chase
+    // search that now checks the cupboard inside its disc.
+    let mut modified = scene().with_modifiers(LevelModifiers {
+        guards_always_search_hideouts: true,
+        ..LevelModifiers::default()
+    });
+    modified.step(Input::Step(Direction::West));
+    assert!(modified.hidden(), "the player is concealed");
+    let mut captured = false;
+    for _ in 0..60 {
+        let events = modified.step(Input::Wait);
+        if events.iter().any(|e| matches!(e, Event::Captured { .. })) {
+            captured = true;
+            break;
+        }
+    }
+    assert!(
+        captured,
+        "modifier: the lost-chase search flushed the hidden player",
+    );
+    assert_eq!(
+        modified.outcome(),
+        Outcome::Lost,
+        "modifier: the wait-out is no longer safe",
+    );
+}
+
 /// §15 Q5: **a guard that saw you climb in flushes you out.** A chasing guard whose
 /// cone covers the cupboard on the entry turn witnessed the dive — so it re-engages
 /// the alcove, walks to the mouth, and captures the hidden player, rather than being
@@ -3510,6 +3579,57 @@ fn same_state_and_inputs_replay_identically() {
     };
 
     assert_eq!(run(), run(), "same state + inputs must replay identically");
+}
+
+/// §12.4 + §12.6: the active level modifiers are part of the reproducible config.
+/// Same seed + **same modifiers** + same inputs → identical run (determinism holds
+/// with a non-default set threaded in), and the same seed + inputs under a
+/// *different* modifier set yields a *different* run — proving the modifiers
+/// genuinely feed the run rather than riding along inert (§2.3). The scene is the
+/// §12.6 hideout flush: baseline rides out the lost-chase search, the harder
+/// modifier is caught.
+#[test]
+fn a_run_is_reproducible_from_its_seed_modifiers_and_inputs() {
+    const SEED: u64 = 0x125;
+    let mut inputs = vec![Input::Step(Direction::West)];
+    inputs.extend(std::iter::repeat_n(Input::Wait, 60));
+
+    let run = |modifiers: LevelModifiers| {
+        let mut layout = open_room(16, 12);
+        layout.place(Cell::new(4, 5), Terrain::Hideout);
+        layout.place(Cell::new(4, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(5, 1))],
+            Vec::new(),
+            Cell::new(14, 10),
+        )
+        .with_rng(Rng::new(SEED))
+        .with_modifiers(modifiers);
+        let events: Vec<Event> = inputs.iter().flat_map(|&i| s.step(i)).collect();
+        (events, s.outcome(), s.player(), s.hidden(), s.turn())
+    };
+
+    let harder = LevelModifiers {
+        guards_always_search_hideouts: true,
+        ..LevelModifiers::default()
+    };
+
+    // Same seed + same modifiers + same inputs → byte-identical run, twice over.
+    assert_eq!(
+        run(harder),
+        run(harder),
+        "a run is deterministic given its seed, modifiers, and inputs",
+    );
+    // Same seed + inputs, different modifiers → a different run: the set is config,
+    // not decoration.
+    assert_ne!(
+        run(LevelModifiers::default()).1,
+        run(harder).1,
+        "the modifier set changes the run's outcome (it is part of the config)",
+    );
 }
 
 /// The usable line's contract (§11.4): [`State::affordances`] offers exactly

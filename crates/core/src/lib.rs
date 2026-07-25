@@ -40,6 +40,7 @@ mod facility;
 mod generate;
 mod guard;
 mod input;
+mod modifiers;
 mod path;
 mod place;
 mod radio;
@@ -68,6 +69,7 @@ pub use guard::{Guard, GuardState};
 pub use input::{
     ability_hotkey, ability_input_for_key, input_for_key, ui_command_for_key, UiCommand,
 };
+pub use modifiers::{LevelModifiers, ModifierSources};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, DoorKind, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{

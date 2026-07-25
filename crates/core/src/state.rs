@@ -46,6 +46,7 @@ use crate::duct::Duct;
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::{Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
+use crate::modifiers::LevelModifiers;
 use crate::radio;
 use crate::region::{DoorCell, DoorId};
 use crate::rng::Rng;
@@ -649,6 +650,13 @@ pub struct State {
     /// every dead bump the free §4.4 no-op again, so the feature can be disabled
     /// for a playtest — or wholesale — without touching the slide logic.
     auto_slide: bool,
+    /// The level modifiers active for this facility (§12.6) — the one resolved
+    /// value guards, vision, and render branch on, threaded in at boot by
+    /// [`with_modifiers`](Self::with_modifiers). Defaults to the baseline (every
+    /// modifier off), so a hand-built state and every current run play the
+    /// unmodified game; a mode preset (#244) or a campaign source (#210) resolves
+    /// a non-default set through [`ModifierSources`](crate::ModifierSources).
+    modifiers: LevelModifiers,
 }
 
 impl State {
@@ -710,6 +718,7 @@ impl State {
             close_chance: GUARD_CLOSE_CHANCE_PERCENT,
             dwell_chance: GUARD_DWELL_CHANCE_PERCENT,
             auto_slide: traversal::AUTO_SLIDE_DEFAULT,
+            modifiers: LevelModifiers::default(),
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -726,6 +735,26 @@ impl State {
     pub fn with_rng(mut self, rng: Rng) -> Self {
         self.rng = rng;
         self
+    }
+
+    /// Thread the facility's resolved [`LevelModifiers`] into the state (§12.6) —
+    /// the one value the guard search (§7.6) and the danger overlay (§11.5) read,
+    /// resolved once at facility start from its sources
+    /// ([`ModifierSources::resolve`](crate::ModifierSources::resolve)). A state
+    /// built without this keeps the baseline (every modifier off), which is all a
+    /// test of the unmodified game needs; the real game and the sim resolve and
+    /// thread the set at boot.
+    #[must_use]
+    pub fn with_modifiers(mut self, modifiers: LevelModifiers) -> Self {
+        self.modifiers = modifiers;
+        self
+    }
+
+    /// The level modifiers active for this facility (§12.6), for the systems that
+    /// branch on them and for a test to assert what was resolved.
+    #[must_use]
+    pub fn modifiers(&self) -> LevelModifiers {
+        self.modifiers
     }
 
     /// Set the chance a Calm guard closes a hinged door behind itself, as a
@@ -2037,9 +2066,15 @@ impl State {
         // the sweep is checked too — the readable mistake is hiding within the search a
         // body you left triggered (§2.2). A stowed body is never found (skipped above),
         // so it never starts a search and never reaches here.
+        // The `guards_always_search_hideouts` level modifier (§12.6) widens this to
+        // *any* active search: with it on, a lost-chase sweep over the cupboard you
+        // dived into flushes it too, not only a body search — a harder setting that
+        // turns off the §7.6 wait-out. Read once here, off the one resolved config
+        // value (§12.3), and passed to each guard's own check.
+        let always_search = self.modifiers.guards_always_search_hideouts;
         if let Some(cell) = hidden_cell {
             for guard in &mut self.guards {
-                if guard.checks_hideout_at(cell) {
+                if guard.checks_hideout_at(cell, always_search) {
                     guard.check_hideout(cell);
                 }
             }
