@@ -5276,3 +5276,400 @@ fn the_auto_slide_kill_switch_restores_the_free_bump() {
     assert_eq!(s.player(), Cell::new(2, 1), "nothing moved");
     assert_eq!(s.turn(), turn_before, "a free bump does not spend the turn");
 }
+
+// --- Autodoors (§8.3/§7.6/§10.4, #241) ----------------------------------------
+
+/// A hand-built strip: a left room (cols 1–5) and a right room (cols 7…) joined by
+/// one **manual** door at column 6 — hinges at `(6,1)`/`(6,3)`, a single panel at
+/// `(6,2)` — with the player starting `player`, **facing east**, ahead of the door
+/// and holding the full loadout (Autodoors included). No guards, so the flight
+/// mechanics read clean. Returns the state and the door's panel cell.
+fn autodoor_strip(width: u32, player: Cell) -> (State, Cell) {
+    let mut f = Facility::walled_box(width, 6);
+    let mut g = RegionGraph::new(width, 6);
+    let column =
+        |x0: u32, x1: u32| (1..5).flat_map(move |y| (x0..x1).map(move |x| Cell::new(x, y)));
+    let left = g.add_region(RegionKind::Room, column(1, 6));
+    let right = g.add_region(RegionKind::Room, column(7, width - 1));
+    for y in 1..5 {
+        f.set_terrain(6, y, Terrain::Wall);
+    }
+    f.set_terrain(6, 1, Terrain::DoorHinge);
+    f.set_terrain(6, 2, Terrain::DoorPanelClosed);
+    f.set_terrain(6, 3, Terrain::DoorHinge);
+    g.add_door(
+        left,
+        right,
+        [Cell::new(6, 1), Cell::new(6, 3)],
+        [Cell::new(6, 2)],
+        DoorKind::Manual,
+    );
+    let s = State::new(
+        Layout::from_parts(f, g),
+        player,
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(width - 2, 4),
+    );
+    (s, Cell::new(6, 2))
+}
+
+/// The core edge (§8.3/§7.6, AC #241): while Autodoors is active a closed door in
+/// the path **opens as the player steps into it** — no manual bump — and the same
+/// step carries them onto the panel in one turn, then the door **shuts behind** them
+/// the turn they clear the throat. Both changes are the player's own
+/// (`by_player: true`), so they self-narrate and light no sensed cue (§9.4/§11.7).
+#[test]
+fn autodoors_opens_ahead_and_shuts_behind() {
+    let (mut s, panel) = autodoor_strip(12, Cell::new(5, 2));
+    let door = s
+        .layout()
+        .regions()
+        .door_at(panel)
+        .expect("the strip's door");
+
+    // Turn 1: switch the ability on (a spent turn; the player does not move).
+    s.step(Input::Activate(AbilityId::Autodoors));
+    assert!(matches!(
+        s.ability_state(AbilityId::Autodoors),
+        AbilityState::Active { .. }
+    ));
+    assert!(!s.layout().regions().door(door).is_open(), "still closed");
+
+    // Turn 2: step east into the closed panel. It opens *and* the player walks
+    // through in the one turn — the open-turn the manual bump would cost is saved.
+    let e = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        e,
+        vec![
+            Event::DoorOpened {
+                at: panel,
+                by_player: true,
+            },
+            Event::Moved { to: panel },
+        ],
+        "one step both opens the door and moves onto the panel",
+    );
+    assert_eq!(s.player(), panel, "the player stands in the throat");
+    assert!(s.layout().regions().door(door).is_open(), "opened ahead");
+    assert!(
+        s.autodoors_pending.contains(&door),
+        "the door is armed to shut behind",
+    );
+
+    // Turn 3: step clear of the throat. Once vacated, the door swings shut behind —
+    // the crush-safe §10.4 close, reported as the player's own change.
+    let e = s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), Cell::new(7, 2), "through to the far side");
+    assert_eq!(
+        e,
+        vec![
+            Event::Moved {
+                to: Cell::new(7, 2)
+            },
+            Event::DoorClosed {
+                at: panel,
+                by_player: true,
+            },
+        ],
+        "clearing the throat shuts the door behind",
+    );
+    assert!(!s.layout().regions().door(door).is_open(), "shut behind");
+    assert_eq!(
+        s.layout().facility().terrain_at(panel.x, panel.y),
+        Some(Terrain::DoorPanelClosed),
+        "the panel restamps solid, exactly as any close leaves it",
+    );
+    assert!(
+        s.autodoors_pending.is_empty(),
+        "a shut door is no longer owed a close",
+    );
+}
+
+/// AC #241, the §7.6 payoff: a door shut behind the fleeing player **breaks a
+/// pursuer's line of sight** (§10.3). Verified from a west vantage looking east:
+/// through the open doorway the far cell is visible; once the door shuts behind the
+/// player, the closed panel occludes it.
+#[test]
+fn autodoors_breaks_a_pursuers_sightline() {
+    let (mut s, panel) = autodoor_strip(12, Cell::new(5, 2));
+    let vantage = Cell::new(2, 2); // a pursuer back in the left room
+    let far = Cell::new(7, 2); // where the player flees to, beyond the door
+
+    s.step(Input::Activate(AbilityId::Autodoors));
+    s.step(Input::Step(Direction::East)); // onto the panel; the door is open
+
+    let through_open = field_of_view(
+        s.layout().facility(),
+        vantage,
+        Direction::East,
+        crate::vision::WAIT_SIGHT_ARC,
+        20,
+    );
+    assert!(
+        through_open.contains(far),
+        "the open doorway lets the line reach the far cell",
+    );
+
+    s.step(Input::Step(Direction::East)); // clear the throat → the door shuts
+
+    let through_shut = field_of_view(
+        s.layout().facility(),
+        vantage,
+        Direction::East,
+        crate::vision::WAIT_SIGHT_ARC,
+        20,
+    );
+    assert!(
+        !through_shut.contains(far),
+        "the shut panel breaks the pursuer's line (§10.3)",
+    );
+    // The vantage still sees its own side of the now-closed door — the break is at
+    // the panel, not a blanked view.
+    assert!(through_shut.contains(panel.step(Direction::West).unwrap()));
+}
+
+/// AC #241 (never crushing, §10.4): an armed door **waits for a dragged body** to
+/// clear the throat before it shuts. A body on the panel is an occupant to the
+/// crush rule (§7.2), so the auto-close refuses until it is gone — the door does not
+/// clip the body the player is hauling through.
+#[test]
+fn an_armed_autodoor_never_shuts_on_a_body_in_the_throat() {
+    let (mut s, panel) = autodoor_strip(12, Cell::new(5, 2));
+    let door = s
+        .layout()
+        .regions()
+        .door_at(panel)
+        .expect("the strip's door");
+
+    s.step(Input::Activate(AbilityId::Autodoors));
+    s.step(Input::Step(Direction::East)); // onto the panel; the door is open + armed
+    assert!(s.layout().regions().door(door).is_open());
+
+    // The player is hauling a body: place it under them in the throat and take hold,
+    // so the next step hauls it into the panel behind them as they clear it. Set up
+    // directly to isolate the crush interaction from the full takedown-and-grab dance
+    // (`haul_body_to` threads the haul itself).
+    s.bodies.push(crate::body::Body::new(
+        panel,
+        panel,
+        crate::radio::RadioClock::from_period(4),
+        s.turn(),
+    ));
+    s.dragging = Some(0);
+    s.drag_debt = false;
+
+    let e = s.step(Input::Step(Direction::East)); // player clears; the body follows in
+    assert_eq!(s.player(), Cell::new(7, 2));
+    assert_eq!(
+        s.bodies[0].cell(),
+        panel,
+        "the hauled body is now in the throat"
+    );
+    assert!(
+        !e.iter().any(|ev| matches!(ev, Event::DoorClosed { .. })),
+        "the door does not shut on the body",
+    );
+    assert!(
+        s.layout().regions().door(door).is_open(),
+        "the body in the throat holds the door open (§10.4 never crushes)",
+    );
+    assert!(s.autodoors_pending.contains(&door), "still owed a close");
+
+    // The body hauled clear of the throat, the next world turn shuts the door.
+    s.bodies[0].move_to(Cell::new(3, 2));
+    let e = s.step(Input::Wait);
+    assert!(
+        e.contains(&Event::DoorClosed {
+            at: panel,
+            by_player: true,
+        }),
+        "the throat clear, the armed door finally shuts",
+    );
+    assert!(!s.layout().regions().door(door).is_open());
+}
+
+/// The gate (§8.3): with Autodoors **inactive**, a closed door is the ordinary
+/// bump-to-open (§10.4/#148) — a spent turn that opens the door but does *not* move
+/// the player through, and arms no close-behind. The edge is the ability's alone.
+#[test]
+fn without_the_ability_a_closed_door_is_a_plain_bump_open() {
+    let (mut s, panel) = autodoor_strip(12, Cell::new(5, 2));
+    let door = s
+        .layout()
+        .regions()
+        .door_at(panel)
+        .expect("the strip's door");
+
+    let e = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        e,
+        vec![Event::DoorOpened {
+            at: panel,
+            by_player: true,
+        }],
+        "a plain bump opens the door and nothing more",
+    );
+    assert_eq!(
+        s.player(),
+        Cell::new(5, 2),
+        "the bump does not move the player"
+    );
+    assert!(s.layout().regions().door(door).is_open());
+    assert!(
+        s.autodoors_pending.is_empty(),
+        "no close is armed without the ability",
+    );
+
+    // And with the door left open, it never auto-shuts — a Wait passes and it stays.
+    s.step(Input::Wait);
+    assert!(
+        s.layout().regions().door(door).is_open(),
+        "a manually opened door does not close itself",
+    );
+}
+
+/// Autodoors offers only a **panel** (§8.3): a closed **hinge** opens the door too
+/// (#148), but the hinge cell stays solid, so there is nothing to step onto — the
+/// bump is the ordinary door op (open in place), not a walk-through, and arms no
+/// close.
+#[test]
+fn autodoors_leaves_a_closed_hinge_a_plain_door_op() {
+    // Player west of the lower hinge (6,3), facing east into it (the fixture facing).
+    let (mut s, _) = autodoor_strip(12, Cell::new(5, 3));
+    let hinge = Cell::new(6, 3);
+    let door = s
+        .layout()
+        .regions()
+        .door_at(hinge)
+        .expect("the strip's door");
+
+    s.step(Input::Activate(AbilityId::Autodoors));
+    let e = s.step(Input::Step(Direction::East));
+    assert!(
+        e.iter().any(|ev| matches!(
+            ev,
+            Event::DoorOpened {
+                at,
+                by_player: true,
+            } if *at == hinge
+        )),
+        "the hinge opens the door",
+    );
+    assert_eq!(
+        s.player(),
+        Cell::new(5, 3),
+        "a hinge is solid — the player does not walk onto it",
+    );
+    assert!(s.layout().regions().door(door).is_open());
+    assert!(
+        s.autodoors_pending.is_empty(),
+        "the hinge path arms no auto-close — only the walk-through panel does",
+    );
+}
+
+/// Once armed, a door owes its close-behind regardless of the ability's live state:
+/// toggling Autodoors **off** is free (§4.4) and does not cancel the pending close —
+/// a door opened while active still shuts as the player steps clear.
+#[test]
+fn an_armed_autodoor_shuts_even_after_the_ability_is_toggled_off() {
+    let (mut s, panel) = autodoor_strip(12, Cell::new(5, 2));
+    let door = s
+        .layout()
+        .regions()
+        .door_at(panel)
+        .expect("the strip's door");
+
+    s.step(Input::Activate(AbilityId::Autodoors));
+    s.step(Input::Step(Direction::East)); // onto the panel; armed
+    let turn_before = s.turn();
+
+    // Toggle off — a free action (§4.4): the turn does not advance.
+    let e = s.step(Input::Deactivate(AbilityId::Autodoors));
+    assert_eq!(
+        e,
+        vec![Event::AbilityDeactivated {
+            ability: AbilityId::Autodoors,
+        }],
+    );
+    assert_eq!(s.turn(), turn_before, "toggling off is free");
+    assert!(
+        s.autodoors_pending.contains(&door),
+        "the close is still owed"
+    );
+
+    // Stepping clear still shuts the door the ability opened.
+    let e = s.step(Input::Step(Direction::East));
+    assert!(
+        e.contains(&Event::DoorClosed {
+            at: panel,
+            by_player: true,
+        }),
+        "the armed door shuts behind even with the ability off",
+    );
+    assert!(!s.layout().regions().door(door).is_open());
+}
+
+/// Determinism (§12.4, AC #241): the whole open-ahead/shut-behind flow draws no
+/// randomness, so the same fixture and inputs reproduce identical events and frame.
+#[test]
+fn the_autodoors_flow_is_deterministic() {
+    let script = [
+        Input::Activate(AbilityId::Autodoors),
+        Input::Step(Direction::East),
+        Input::Step(Direction::East),
+        Input::Step(Direction::East),
+    ];
+    let run = || {
+        let (mut s, _) = autodoor_strip(12, Cell::new(5, 2));
+        let events: Vec<Vec<Event>> = script.iter().map(|&i| s.step(i)).collect();
+        (events, crate::render(&s))
+    };
+    let (events_a, frame_a) = run();
+    let (events_b, frame_b) = run();
+    assert_eq!(events_a, events_b, "same inputs → same events");
+    assert_eq!(frame_a, frame_b, "same inputs → same frame");
+}
+
+/// The flight edge on **automatic** doors (§7.6, #241): a door opened via Autodoors
+/// is shut *promptly* behind the player — the turn they clear the throat — rather
+/// than lingering open for its full `delay` (§10.4/#147). Here the delay is a long
+/// 5, so without the ability the door would idle open for several turns; the ability
+/// makes the break immediate, exactly as it does for a manual door.
+#[test]
+fn autodoors_shuts_an_automatic_door_promptly_behind() {
+    let (mut s, door) = auto_door_state(5); // a deliberately slow self-close timer
+    let panel = Cell::new(3, 2);
+
+    s.step(Input::Activate(AbilityId::Autodoors));
+
+    // Step through: the automatic door opens ahead and the player walks onto it in
+    // the one turn, exactly as a manual door does.
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), panel, "walked into the doorway in one turn");
+    assert!(s.layout().regions().door(door).is_open());
+    assert!(
+        s.autodoors_pending.contains(&door),
+        "the automatic door is armed too"
+    );
+
+    // Clear the throat: the ability shuts it at once — its delay-5 timer has barely
+    // begun, so this is far sooner than #147 alone would.
+    let e = s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), Cell::new(4, 2), "through to the far room");
+    assert!(
+        e.iter().any(|ev| matches!(
+            ev,
+            Event::DoorClosed {
+                by_player: true,
+                ..
+            }
+        )),
+        "the automatic door shuts behind at once, not on its slow timer",
+    );
+    assert!(
+        !s.layout().regions().door(door).is_open(),
+        "shut promptly, not left to idle open",
+    );
+}

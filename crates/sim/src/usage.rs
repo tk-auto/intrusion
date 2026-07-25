@@ -51,6 +51,8 @@ pub enum Verb {
     Decoy,
     /// Activated Dephase (§8.3).
     Dephase,
+    /// Activated Autodoors (§8.3).
+    Autodoors,
     /// Landed a takedown (§7.2) — [`Event::TakenDown`](intrusion_core::Event::TakenDown).
     Takedown,
     /// Grabbed a body to drag (§8.3) — [`Event::BodyGrabbed`](intrusion_core::Event::BodyGrabbed).
@@ -63,12 +65,13 @@ impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 7] = [
+    pub const ALL: [Verb; 8] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
         Verb::Decoy,
         Verb::Dephase,
+        Verb::Autodoors,
         Verb::Takedown,
         Verb::Drag,
     ];
@@ -81,6 +84,7 @@ impl Verb {
             AbilityId::Camouflage => Verb::Camouflage,
             AbilityId::Decoy => Verb::Decoy,
             AbilityId::Dephase => Verb::Dephase,
+            AbilityId::Autodoors => Verb::Autodoors,
         }
     }
 
@@ -92,6 +96,7 @@ impl Verb {
             Verb::Camouflage => "camouflage",
             Verb::Decoy => "decoy",
             Verb::Dephase => "dephase",
+            Verb::Autodoors => "autodoors",
             Verb::Takedown => "takedown",
             Verb::Drag => "drag",
         }
@@ -208,6 +213,7 @@ mod tests {
                 "camouflage",
                 "decoy",
                 "dephase",
+                "autodoors",
                 "takedown",
                 "drag"
             ]
@@ -217,6 +223,7 @@ mod tests {
         assert_eq!(Verb::of_ability(AbilityId::Camouflage), Verb::Camouflage);
         assert_eq!(Verb::of_ability(AbilityId::Decoy), Verb::Decoy);
         assert_eq!(Verb::of_ability(AbilityId::Dephase), Verb::Dephase);
+        assert_eq!(Verb::of_ability(AbilityId::Autodoors), Verb::Autodoors);
     }
 
     /// Recording accumulates the exact per-verb counts, and `total` sums them —

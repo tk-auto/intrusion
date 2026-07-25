@@ -71,10 +71,10 @@ mod tests {
         };
         assert_eq!(
             replay.to_json_line(),
-            "{\"seed\":\"L1-42-4-rcdx\",\"inputs\":\"N+r.\"}"
+            "{\"seed\":\"L1-42-4-rcdxa\",\"inputs\":\"N+r.\"}"
         );
         // The baked token decodes straight back to the captured preset.
-        assert_eq!(LevelSeed::decode("L1-42-4-rcdx"), Some(LevelSeed::sim(42)));
+        assert_eq!(LevelSeed::decode("L1-42-4-rcdxa"), Some(LevelSeed::sim(42)));
     }
 
     /// The §12.4 property, asserted end to end (slice A acceptance): capture a bot

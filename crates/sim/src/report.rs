@@ -200,7 +200,7 @@ mod tests {
     fn the_run_row_schema_is_pinned() {
         assert_eq!(
             record(17, RunOutcome::Win, 214).to_json_line(),
-            "{\"seed\":17,\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"takedown\":0,\"drag\":0},\"alert_peak\":null}"
+            "{\"seed\":17,\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"takedown\":0,\"drag\":0},\"alert_peak\":null}"
         );
     }
 
@@ -218,7 +218,7 @@ mod tests {
         let summary = Summary::of(&records);
         assert_eq!(
             summary.to_json_line(),
-            "{\"summary\":{\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"takedown\":0,\"drag\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"takedown\":0.0000,\"drag\":0.0000},\"diversity\":0.0000,\"alert_peak\":null}}"
+            "{\"summary\":{\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"takedown\":0,\"drag\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"takedown\":0.0000,\"drag\":0.0000},\"diversity\":0.0000,\"alert_peak\":null}}"
         );
     }
 
