@@ -27,20 +27,37 @@ def replace_once(text: str, old: str, new: str, what: str) -> str:
     return text.replace(old, new)
 
 
+def valid_level_seed(token: str) -> bool:
+    """Whether `token` is a plausible level-seed string (crates/core/src/level_seed.rs).
+
+    Two shapes, matching `LevelSeed::encode`: a bare decimal u64 (quick play), or a
+    versioned `L1-…` token carrying a modifier set and loadout. This is a *shape*
+    guard so a typo fails the build loudly instead of silently baking a token the
+    shell can't decode (which would fall through to a random-seed page — the opposite
+    of seed-locked). The core is the real validator; the split here is deliberately
+    light so it cannot drift from `LevelSeed::decode`."""
+    if token.isdigit():
+        return 0 <= int(token) < 2**64
+    # A versioned token: `L<version>-…`. Leave the field-level validation to the core.
+    return bool(re.fullmatch(r"L\d+-[0-9A-Za-z-]+", token))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dist", required=True,
                     help="wasm-bindgen --target web output dir")
     ap.add_argument("--index", required=True, help="path to web/index.html")
     ap.add_argument("--out", required=True, help="output HTML path")
-    ap.add_argument("--seed", type=int, default=None,
-                    help="bake a fixed run seed into the page (a u64). The build "
-                         "boots this facility with no URL and no typing — how a "
+    ap.add_argument("--seed", default=None,
+                    help="bake a fixed level into the page for live play. The build "
+                         "boots this level with no URL and no typing — how a "
                          "seed-locked artifact pins the exact level the sim played "
-                         "(#110). A bare seed boots quick play (#244); a full "
-                         "level-seed string (with modifiers/loadout, #245) rides in "
-                         "via --replay-json's `seed` field. Omit for the normal "
-                         "random-seed build.")
+                         "(#110). The value is a level-seed string (#245): a bare "
+                         "u64 boots quick play (#244), or a full `L1-<seed>-<mods>-"
+                         "<abils>` token carries a chosen modifier set and ability "
+                         "loadout (e.g. `L1-8371-a-x` — cones shown, Dephase only). "
+                         "Omit for the normal random-seed build. For a *replay* "
+                         "build (boots the scrub viewer) use --replay-json instead.")
     ap.add_argument("--replay-json", default=None,
                     help="bake a captured replay into the page: a path (or '-' for "
                          "stdin) to the `{\"seed\":S,\"inputs\":\"...\"}` line that "
@@ -57,8 +74,9 @@ def main() -> None:
                          "by this tag). Use the skill's convention, e.g. "
                          "intrusion-110-8371-1.")
     args = ap.parse_args()
-    if args.seed is not None and not (0 <= args.seed < 2**64):
-        sys.exit(f"assemble: --seed must be a u64 (0 .. 2^64-1), got {args.seed}")
+    if args.seed is not None and not valid_level_seed(args.seed):
+        sys.exit(f"assemble: --seed must be a level-seed string — a u64, or an "
+                 f"`L1-…` token from LevelSeed::encode — got {args.seed!r}")
 
     # A replay carries its own level (§12.4/#245), so it and --seed are exclusive.
     # Parse the `{seed, inputs}` pair from --emit-replay's output; the `seed` is the
@@ -79,8 +97,9 @@ def main() -> None:
         except (ValueError, KeyError, TypeError) as e:
             sys.exit(f"assemble: --replay-json is not a {{seed,inputs}} line "
                      f"(from `sim --emit-replay`): {e}")
-        if not replay_token:
-            sys.exit("assemble: --replay-json has an empty seed token")
+        if not valid_level_seed(replay_token):
+            sys.exit(f"assemble: --replay-json seed is not a level-seed string "
+                     f"(a u64 or an `L1-…` token): {replay_token!r}")
 
     dist = pathlib.Path(args.dist)
     glue = (dist / "intrusion_web.js").read_text()
@@ -115,8 +134,7 @@ def main() -> None:
     # the inputs boot the viewer (#197/#245); a bare --seed bakes only the seed, which
     # the shell decodes as quick play (#110/#244). Either way __intrusionSeed is a
     # string the core's `LevelSeed::decode` reads.
-    bake_seed = replay_token if replay_inputs is not None else (
-        str(args.seed) if args.seed is not None else None)
+    bake_seed = replay_token if replay_inputs is not None else args.seed
     globals_js = ""
     if bake_seed is not None:
         globals_js += f"window.__intrusionSeed = {json.dumps(bake_seed)};\n"
