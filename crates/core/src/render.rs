@@ -435,6 +435,7 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
 
 mod help;
 mod hud;
+pub use help::{help_hit, HelpHit, HelpTab};
 pub use hud::{
     ability_at, is_ability_button, is_help_button, is_message_button, render_screen, ScreenUi,
     HEADER_ROWS, STATUS_ROWS,

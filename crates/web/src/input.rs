@@ -19,9 +19,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_at, ability_input_for_key, input_for_key, is_ability_button, is_help_button,
-    is_message_button, ui_command_for_key, AbilityId, Cell, Direction, Input, UiCommand,
-    HEADER_ROWS, STATUS_ROWS,
+    ability_at, ability_input_for_key, help_hit, help_nav_for_key, input_for_key,
+    is_ability_button, is_help_button, is_message_button, ui_command_for_key, AbilityId, Cell,
+    Direction, HelpHit, HelpNav, Input, UiCommand, HEADER_ROWS, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -38,8 +38,24 @@ impl Game {
     /// `core::input_for_key` where native tests pin every binding — this shell
     /// never interprets a key.
     fn handle_key(&mut self, key: &str, is_repeat: bool) -> bool {
-        // UI commands (§11.4) come first: they toggle view state and redraw without
-        // ever touching the turn loop. `Tab` deploys the ability panel.
+        // While the help panel is open it is **modal** (§14 v2/#248): it captures
+        // input, so keys route to help navigation first and the world never steps
+        // underneath. `?`/Esc close it, Tab/←→ switch tabs. A key the panel does not
+        // navigate by is *swallowed* if the game would otherwise own it (a move, an
+        // ability, a UI toggle) — keeping the world frozen — but a genuinely unowned
+        // key (F5, a browser shortcut) is still left to the page, as it is in play.
+        if self.ui.help_open {
+            if let Some(nav) = help_nav_for_key(key) {
+                self.apply_help_nav(nav);
+                self.draw();
+                return true;
+            }
+            return ui_command_for_key(key).is_some()
+                || input_for_key(key).is_some()
+                || ability_input_for_key(key).is_some();
+        }
+        // UI commands (§11.4) come next: they toggle view state and redraw without
+        // ever touching the turn loop. `Tab` deploys the ability panel; `?` opens help.
         if let Some(command) = ui_command_for_key(key) {
             self.apply_ui_command(command);
             self.draw();
@@ -97,6 +113,33 @@ impl Game {
             UiCommand::ToggleHelp => {
                 self.ui.help_open = !self.ui.help_open;
             }
+        }
+    }
+
+    /// Apply a [`HelpNav`] from the open modal panel (§14 v2/#248) — close it, or
+    /// cycle the shown tab. Still a pure view action: no [`State`], no turn (§4.4).
+    fn apply_help_nav(&mut self, nav: HelpNav) {
+        match nav {
+            HelpNav::Close => self.ui.help_open = false,
+            HelpNav::NextTab => self.ui.help_tab = self.ui.help_tab.next(),
+            HelpNav::PrevTab => self.ui.help_tab = self.ui.help_tab.prev(),
+        }
+    }
+
+    /// The [`HelpHit`] under a viewport point while the panel is open, or `None`
+    /// (§11.6/#248) — the core ([`help_hit`]) owns the tab bar's geometry, so a tap
+    /// resolves to exactly the control drawn (a tab, or the `[x]` close).
+    fn help_hit_at(&self, client_x: f64, client_y: f64) -> Option<HelpHit> {
+        let (col, row) = self.screen_cell(client_x, client_y)?;
+        help_hit(self.state.layout().facility().width(), col, row)
+    }
+
+    /// Apply a [`HelpHit`] from a tap on the open panel: switch to the tapped tab or
+    /// close. A view action like [`apply_help_nav`](Self::apply_help_nav).
+    fn apply_help_hit(&mut self, hit: HelpHit) {
+        match hit {
+            HelpHit::Close => self.ui.help_open = false,
+            HelpHit::Tab(tab) => self.ui.help_tab = tab,
         }
     }
 
@@ -355,6 +398,17 @@ impl GesturePump {
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
         {
             let mut game = self.game.borrow_mut();
+            // Modal help (§14 v2/#248): while it is up, every press is the panel's — a
+            // tap on a tab switches, on `[x]` closes, anywhere else is swallowed.
+            // Nothing starts a gesture or steps the game while the panel captures input.
+            if game.ui.help_open {
+                if let Some(hit) = game.help_hit_at(x, y) {
+                    game.apply_help_hit(hit);
+                    game.draw();
+                }
+                e.prevent_default();
+                return;
+            }
             // The deploy button is tested first, so a tap on it toggles the panel and
             // never falls through to an activation underneath (§11.4).
             if game.hit_deploy_button(x, y) {

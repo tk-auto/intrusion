@@ -1,31 +1,304 @@
-//! The help overlay: a glyph legend, the colour categories, and the controls
-//! (§14 v2, #139). The old game never had a legend — "nothing ever explained what
-//! `$`, `E`, `}` or `z` meant" — so this is the reference card, toggled on demand.
+//! The help panel: a full-screen, input-capturing reference card (§14 v2,
+//! #139/#248).
 //!
-//! **Every row derives from the real source**, never a hand-copied table that could
-//! drift from the game it documents (§11.2/§11.3/§11.6): terrain glyphs and their
-//! categories come from [`Terrain::glyph`]/[`Terrain::category`], the entity glyphs
-//! from the [`super`] render constants the world draws with, the colour meanings from
-//! an exhaustive match over [`Category`] (a new category will not compile until it is
-//! documented), and the ability keys from [`AbilityId`]'s settled §11.6 hotkeys. The
-//! tests assert each derivation, so an edit to a glyph or a key surfaces here.
+//! The old game never had a legend — "nothing ever explained what `$`, `E`, `}`
+//! or `z` meant" (§14 v2) — so this is the reference the player can call up on
+//! demand. It began as a single stacked page overlaid on the map; #248 splits it
+//! into **tabs** so a fourth kind of content (the run's active level modifiers)
+//! has somewhere to live without the page overflowing the board:
 //!
-//! Opening and closing the overlay is a pure **view** toggle owned by the shell
-//! ([`ScreenUi::help_open`](super::ScreenUi)) — it changes no world, costs no turn
-//! (§4.4), and so no guard moves while it is up. [`overlay_help`] draws it over the
-//! map layer only, leaving the header (with its toggle button) and the status lines
-//! in place, so the same button that opened it can close it by touch (§11.6).
+//! - **Level info** ([`HelpTab::LevelInfo`]) — what's bending the rules *this run*:
+//!   the active [`LevelModifiers`], by name and direction (§12.6).
+//! - **Legend** ([`HelpTab::Legend`]) — the glyph legend, the colour key, and the
+//!   controls, the original reference card (#139).
+//! - *Options* land as a third tab (§14 v2 "options"; #189 light mode, #237
+//!   difficulty).
+//!
+//! **Every row derives from the real source**, never a hand-copied table that
+//! could drift from the game it documents (§11.2/§11.3/§11.6): terrain glyphs and
+//! their categories come from [`Terrain::glyph`]/[`Terrain::category`], the entity
+//! glyphs from the [`super`] render constants the world draws with, the colour
+//! meanings from an exhaustive match over [`Category`], the ability keys from
+//! [`AbilityId`]'s settled §11.6 hotkeys, and the modifier rows from
+//! [`LevelModifiers::active`] — so a newly added modifier appears here on its own.
+//! The tests assert each derivation.
+//!
+//! Opening and closing the panel is a pure **view** action owned by the shell
+//! ([`ScreenUi::help_open`](super::ScreenUi)): it changes no world and costs no
+//! turn (§4.4), so no guard moves while it is up. Unlike the old map-only overlay,
+//! the panel is **modal and full-screen** (#248): while it is up it takes the whole
+//! screen and the shell routes input to it — keys through
+//! [`help_nav_for_key`](crate::help_nav_for_key), taps through [`help_hit`] — so
+//! the game never steps underneath. It stays escapable (§11.6's no-trap rule): `?`
+//! or `Escape` closes it, and the tab bar carries a touchable `[x]`.
 
 use super::{GlyphCell, Grid, Visibility, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH};
 use crate::ability::AbilityId;
 use crate::category::Category;
 use crate::facility::Terrain;
+use crate::modifiers::{LevelModifiers, ModifierDirection};
 
-/// The key that toggles the help overlay (§11.6). A free letter — not a movement
+/// The key that toggles the help panel (§11.6). A free letter — not a movement
 /// key, an ability hotkey, or another UI control — and the conventional roguelike
 /// help key. Shown in the controls list and matched in
-/// [`ui_command_for_key`](crate::input::ui_command_for_key).
+/// [`ui_command_for_key`](crate::input::ui_command_for_key) (to open) and
+/// [`help_nav_for_key`](crate::help_nav_for_key) (to close).
 pub(crate) const HELP_KEY: char = '?';
+
+/// The tabs the help panel pages between (§14 v2/#248). The panel opens on the
+/// leftmost ([`Default`]) and the tab bar switches between them; a shell keeps the
+/// current tab on [`ScreenUi`](super::ScreenUi) and hands it to [`render_help`].
+///
+/// Ordered as the player reads them left to right — *this run* first, the standing
+/// reference second — and cycled by [`next`](Self::next)/[`prev`](Self::prev) so
+/// the tab bar wraps at either end. A third *Options* tab slots in here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum HelpTab {
+    /// This run's active level modifiers (§12.6/#248) — what is bending the rules.
+    #[default]
+    LevelInfo,
+    /// The glyph legend, colour key, and controls (#139) — the reference card.
+    Legend,
+}
+
+impl HelpTab {
+    /// Every tab, in reading (left-to-right) order — the tab bar's layout and the
+    /// cycle order. A new tab is one entry here.
+    pub const ALL: [HelpTab; 2] = [HelpTab::LevelInfo, HelpTab::Legend];
+
+    /// The label shown on the tab bar and used to size its hit region.
+    fn label(self) -> &'static str {
+        match self {
+            HelpTab::LevelInfo => "Level info",
+            HelpTab::Legend => "Legend",
+        }
+    }
+
+    /// The next tab, wrapping past the last back to the first — the panel's
+    /// "advance" motion (Tab / rightward keys, §14 v2/#248).
+    #[must_use]
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|&t| t == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// The previous tab, wrapping past the first back to the last.
+    #[must_use]
+    pub fn prev(self) -> Self {
+        let i = Self::ALL.iter().position(|&t| t == self).unwrap_or(0);
+        Self::ALL[(i + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
+/// What a pointer press inside the open help panel lands on (§11.6/#248) — the
+/// touch counterpart of [`help_nav_for_key`](crate::help_nav_for_key). A shell
+/// maps a tap to a screen cell, asks [`help_hit`], and applies the result; a press
+/// anywhere else is swallowed by the modal panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HelpHit {
+    /// The `[x]` close control — dismiss the panel (the always-reachable escape).
+    Close,
+    /// A tab in the tab bar — switch the panel to it.
+    Tab(HelpTab),
+}
+
+/// The `[x]` close control on the tab bar — three cells wide, like the header's
+/// other `[?]`/`[▾]` buttons, so the escape reads as a button.
+const CLOSE_BUTTON: &str = "[x]";
+const CLOSE_BUTTON_LEN: u32 = 3;
+
+/// The column the close control starts at: right-aligned with a one-cell margin,
+/// like the ability line's deploy button. Shared by the drawing and [`help_hit`]
+/// so a tap lands on exactly the `[x]` drawn.
+fn close_button_start(width: u32) -> u32 {
+    width.saturating_sub(1 + CLOSE_BUTTON_LEN)
+}
+
+/// Lay the tab bar out: each tab as `(tab, start col, width)`, drawn `[Label]`
+/// from a one-cell margin with a one-cell gap between. The width is independent of
+/// which tab is active (the brackets are always there), so switching tabs never
+/// shifts a hit region. Shared by [`draw_tab_bar`] and [`help_hit`] so a tap lands
+/// on exactly the tab drawn.
+fn tab_layout() -> Vec<(HelpTab, u32, u32)> {
+    let mut out = Vec::new();
+    let mut x = 1u32; // the one-cell left margin
+    for tab in HelpTab::ALL {
+        let len = tab.label().chars().count() as u32 + 2; // the enclosing `[` `]`
+        out.push((tab, x, len));
+        x += len + 1; // one cell of gap between tabs
+    }
+    out
+}
+
+/// The pointer→control hit-test for the open panel (§11.6/#248): which [`HelpHit`]
+/// screen cell `(x, y)` lands on, or `None` for the body (a press the modal panel
+/// swallows without acting). Only the tab-bar row (row 0) carries controls; the
+/// close `[x]` is tested first so it wins even if a layout ever abutted it.
+#[must_use]
+pub fn help_hit(width: u32, x: u32, y: u32) -> Option<HelpHit> {
+    if y != 0 {
+        return None;
+    }
+    let close = close_button_start(width);
+    if x >= close && x < close + CLOSE_BUTTON_LEN {
+        return Some(HelpHit::Close);
+    }
+    for (tab, start, len) in tab_layout() {
+        if x >= start && x < start + len {
+            return Some(HelpHit::Tab(tab));
+        }
+    }
+    None
+}
+
+/// Render the full-screen help panel (§14 v2/#139/#248): the tab bar, the active
+/// tab's content, and a footer hint, filling a `width × height` grid on its own —
+/// **the whole screen**, not an overlay on the map. Called by
+/// [`render_screen`](super::render_screen) in place of the game frame while
+/// [`ScreenUi::help_open`](super::ScreenUi) is set, so the panel is modal: nothing
+/// of the game shows and the shell captures input against it.
+///
+/// It writes no state, so closing restores the exact frame beneath. Bounds are
+/// clamped, never asserted: on a board too small for a row (only hand-built test
+/// states get that small — the v1 board is 40×40, §10.2) that row shows what fits
+/// and stops.
+pub(super) fn render_help(
+    width: u32,
+    height: u32,
+    tab: HelpTab,
+    modifiers: LevelModifiers,
+) -> Grid {
+    let blank = GlyphCell {
+        glyph: ' ',
+        fg: Category::Neutral,
+        bg: None,
+        vis: Visibility::Live,
+    };
+    let mut grid = Grid {
+        width,
+        height,
+        cells: vec![blank; (width * height) as usize],
+    };
+
+    draw_tab_bar(&mut grid, tab);
+    // Content begins two rows down, leaving the tab bar and a blank rule above it.
+    match tab {
+        HelpTab::LevelInfo => draw_level_info(&mut grid, 2, modifiers),
+        HelpTab::Legend => draw_legend(&mut grid, 2),
+    }
+    draw_footer(&mut grid);
+    grid
+}
+
+/// Draw the tab bar on row 0: each tab as `[Label]` — the active one in Interest
+/// (the bright goal colour), the rest in Ground (dim) — and the right-aligned
+/// `[x]` close control in System (the HUD-control colour, like the deploy button).
+fn draw_tab_bar(grid: &mut Grid, active: HelpTab) {
+    for (tab, start, _len) in tab_layout() {
+        let category = if tab == active {
+            Category::Interest
+        } else {
+            Category::Ground
+        };
+        draw(grid, start, 0, &format!("[{}]", tab.label()), category);
+    }
+    draw(
+        grid,
+        close_button_start(grid.width),
+        0,
+        CLOSE_BUTTON,
+        Category::System,
+    );
+}
+
+/// The **Level info** tab (§12.6/#248): the run's active level modifiers, each by
+/// name and direction, or a clear "none active" when the run is baseline. The list
+/// is [`LevelModifiers::active`], so it is derived and cannot drift — a new
+/// modifier field surfaces here on its own.
+fn draw_level_info(grid: &mut Grid, mut y: u32, modifiers: LevelModifiers) {
+    draw(grid, 2, y, "THIS RUN", Category::Interest);
+    y += 2;
+    draw(grid, 2, y, "MODIFIERS", Category::System);
+    y += 1;
+
+    let active = modifiers.active();
+    if active.is_empty() {
+        // Baseline quick play: legible as "none active", not blank or absent (#248).
+        draw(grid, 3, y, "none active — baseline rules", Category::Ground);
+        return;
+    }
+    for m in active {
+        // The modifier's own name carries the direction as a **colour cue** (§11.2):
+        // the whole caption is drawn in Warning (orange) for a harder rule, Owned
+        // (blue) for an easier one — pulled from the standing categories, not ad-hoc
+        // styling. A bounded knob appends its value (`name: value`).
+        let text = match m.detail {
+            Some(detail) => format!("{}: {}", m.name, detail),
+            None => m.name.to_string(),
+        };
+        draw(grid, 3, y, &text, direction_category(m.direction));
+        y += 1;
+    }
+}
+
+/// The §11.2 category a direction reads in — the colour cue the caption is drawn
+/// in: Warning (a hunting threat's orange) for *harder*, Owned (yours, calm blue)
+/// for *easier*. Pulled from the standing categories, never new ad-hoc styling
+/// (§11.2/#248).
+fn direction_category(direction: ModifierDirection) -> Category {
+    match direction {
+        ModifierDirection::Harder => Category::Warning,
+        ModifierDirection::Easier => Category::Owned,
+    }
+}
+
+/// The **Legend** tab (#139): the glyph legend, the colour key, and the controls —
+/// the original reference card, now one tab of the panel.
+fn draw_legend(grid: &mut Grid, mut y: u32) {
+    draw(grid, 2, y, "GLYPHS", Category::System);
+    y += 1;
+    for (glyph, category, meaning) in glyph_rows() {
+        draw(grid, 3, y, &glyph.to_string(), category);
+        draw(grid, 6, y, meaning, Category::Neutral);
+        y += 1;
+    }
+    y += 1;
+
+    draw(grid, 2, y, "COLOURS", Category::System);
+    y += 1;
+    for category in CATEGORIES {
+        // The name is drawn *in its own colour*, so the player reads the colour and
+        // its meaning on one line.
+        draw(grid, 3, y, category_name(category), category);
+        draw(grid, 14, y, category_meaning(category), Category::Neutral);
+        y += 1;
+    }
+    y += 1;
+
+    draw(grid, 2, y, "CONTROLS", Category::System);
+    y += 1;
+    for (keys, action) in control_rows() {
+        draw(grid, 3, y, &keys, Category::System);
+        draw(grid, 26, y, action, Category::Neutral);
+        y += 1;
+    }
+}
+
+/// Draw the footer hint on the last row: how to switch tabs and close, so a player
+/// who opened the modal panel always sees the way out (§11.6's no-trap rule, made
+/// explicit now the header `[?]` is covered).
+fn draw_footer(grid: &mut Grid) {
+    if grid.height == 0 {
+        return;
+    }
+    draw(
+        grid,
+        2,
+        grid.height - 1,
+        "Tab switches   Esc or [?] closes",
+        Category::Ground,
+    );
+}
 
 /// The glyph legend (§11.3): each `(glyph, category, meaning)`, glyph and category
 /// pulled from the real source — [`Terrain`] for the terrain rows, the [`super`]
@@ -106,72 +379,6 @@ fn control_rows() -> Vec<(String, &'static str)> {
     rows
 }
 
-/// Overlay the help card onto the map `grid` (§14 v2/#139): the glyph legend, the
-/// colour key, and the controls, laid over a cleared board. Drawn on the map layer
-/// only — before the header and status rows are added — so the toggle button and the
-/// near/usable lines stay put and closing restores the exact board beneath (the
-/// overlay writes no state).
-///
-/// Bounds are clamped, never asserted: a board too small for every row (only
-/// hand-built test states get that small — the v1 board is 40×40, §10.2) shows what
-/// fits and stops.
-pub(super) fn overlay_help(grid: &mut Grid) {
-    // Clear the map to background so the card reads as a solid page over the board.
-    let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: None,
-        vis: Visibility::Live,
-    };
-    for cell in grid.cells.iter_mut() {
-        *cell = blank;
-    }
-
-    let mut y = 1u32;
-    draw(grid, 2, y, "HELP", Category::Interest);
-    y += 2;
-
-    draw(grid, 2, y, "GLYPHS", Category::System);
-    y += 1;
-    for (glyph, category, meaning) in glyph_rows() {
-        draw(grid, 3, y, &glyph.to_string(), category);
-        draw(grid, 6, y, meaning, Category::Neutral);
-        y += 1;
-    }
-    y += 1;
-
-    draw(grid, 2, y, "COLOURS", Category::System);
-    y += 1;
-    for category in CATEGORIES {
-        // The name is drawn *in its own colour*, so the player reads the colour and
-        // its meaning on one line.
-        draw(grid, 3, y, category_name(category), category);
-        draw(grid, 14, y, category_meaning(category), Category::Neutral);
-        y += 1;
-    }
-    y += 1;
-
-    draw(grid, 2, y, "CONTROLS", Category::System);
-    y += 1;
-    for (keys, action) in control_rows() {
-        draw(grid, 3, y, &keys, Category::System);
-        draw(grid, 26, y, action, Category::Neutral);
-        y += 1;
-    }
-
-    // A closing hint, so touch users who opened it by tapping the button know the
-    // way out is the same tap (§11.6's trap: never unreachable, never inescapable).
-    if y < grid.height {
-        draw(
-            grid,
-            2,
-            grid.height - 1,
-            "[?] again to close",
-            Category::Ground,
-        );
-    }
-}
-
 /// The category's display name for the colour key — its own identifier, so the key
 /// names exactly the [`Category`] the renderer tags cells with.
 fn category_name(category: Category) -> &'static str {
@@ -189,7 +396,7 @@ fn category_name(category: Category) -> &'static str {
 }
 
 /// Write `text` onto `grid` from `(x, y)` in `category`, clamping at the right edge
-/// and off the bottom — the one drawing primitive the overlay shares, so every row
+/// and off the bottom — the one drawing primitive the panel shares, so every row
 /// truncates the same way on a small board.
 fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Category) {
     if y >= grid.height {
@@ -212,6 +419,16 @@ fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Category) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modifiers::{ActiveModifier, IntelGate};
+
+    /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
+    /// that no row truncates, so a test can read the panel's content whole.
+    const W: u32 = 40;
+    const H: u32 = 43; // HEADER_ROWS + 40 + STATUS_ROWS
+
+    fn text_of(grid: &Grid) -> String {
+        grid.to_text().join("\n")
+    }
 
     /// The glyph legend is **derived**, not hand-copied (§11.3): every terrain row's
     /// glyph and category equal the source table's, so an edit to [`Terrain::glyph`]
@@ -275,5 +492,166 @@ mod tests {
         }
         // The help key documents itself.
         assert!(rows.iter().any(|(k, _)| *k == HELP_KEY.to_string()));
+    }
+
+    /// The **Legend** tab still carries the whole reference card — the three
+    /// sections and a glyph derived from the real terrain table (the duct `=`, §10.7).
+    #[test]
+    fn the_legend_tab_carries_the_glyphs_colours_and_controls() {
+        let g = render_help(W, H, HelpTab::Legend, LevelModifiers::default());
+        let text = text_of(&g);
+        assert!(text.contains("GLYPHS") && text.contains("COLOURS") && text.contains("CONTROLS"));
+        for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
+            assert!(text.contains(glyph), "the legend shows {glyph:?}");
+        }
+        for id in AbilityId::ALL {
+            assert!(
+                text.contains(id.hotkey()),
+                "the controls show {}",
+                id.name()
+            );
+        }
+        // The Legend tab is not the Level-info tab: its modifier section is elsewhere.
+        assert!(
+            !text.contains("MODIFIERS"),
+            "MODIFIERS lives on the other tab"
+        );
+    }
+
+    /// The **Level info** tab lists the run's active modifiers by name, and a
+    /// baseline run reads clearly as "none active" (#248). The rows are derived from
+    /// [`LevelModifiers::active`], so the tab cannot drift from the resolved set.
+    #[test]
+    fn the_level_info_tab_lists_active_modifiers_or_none() {
+        // Baseline: "none active", not blank.
+        let baseline = render_help(W, H, HelpTab::LevelInfo, LevelModifiers::default());
+        let text = text_of(&baseline);
+        assert!(text.contains("THIS RUN") && text.contains("MODIFIERS"));
+        assert!(
+            text.contains("none active"),
+            "baseline reads none active: still legible"
+        );
+
+        // A harder toggle and the harder knob both surface, by name — and, for the
+        // knob, its value.
+        let modified = LevelModifiers {
+            guards_always_search_hideouts: true,
+            intel_to_exit: IntelGate::All,
+            ..LevelModifiers::default()
+        };
+        let g = render_help(W, H, HelpTab::LevelInfo, modified);
+        let text = text_of(&g);
+        assert!(
+            !text.contains("none active"),
+            "an active run does not read none"
+        );
+        assert!(text.contains("Guards search hideouts"));
+        assert!(
+            text.contains("Intel to exit: all of it"),
+            "a bounded knob renders its value: {text:?}"
+        );
+    }
+
+    /// The modifier's **caption** is drawn in its direction's cue colour (§11.2/#248):
+    /// Warning for a harder rule, Owned for an easier one — so the direction reads at
+    /// a glance, and the colours come from the standing categories, not ad-hoc styling.
+    #[test]
+    fn the_caption_reads_in_its_direction_cue_colour() {
+        // A harder toggle: its caption `Guards search hideouts` is drawn in Warning.
+        let harder = LevelModifiers {
+            guards_always_search_hideouts: true,
+            ..LevelModifiers::default()
+        };
+        let g = render_help(W, H, HelpTab::LevelInfo, harder);
+        // The MODIFIERS heading is at row 4 (THIS RUN@2, blank, heading@4), the first
+        // modifier row at row 5; its caption starts at column 3.
+        assert_eq!(g.get(3, 5).glyph, 'G');
+        assert_eq!(
+            g.get(3, 5).fg,
+            Category::Warning,
+            "a harder caption cues in Warning orange"
+        );
+
+        // An easier toggle's caption `All vision cones shown` cues in Owned.
+        let easier = LevelModifiers {
+            always_show_vision_cones: true,
+            ..LevelModifiers::default()
+        };
+        let g = render_help(W, H, HelpTab::LevelInfo, easier);
+        assert_eq!(g.get(3, 5).glyph, 'A');
+        assert_eq!(
+            g.get(3, 5).fg,
+            Category::Owned,
+            "an easier caption cues in Owned blue"
+        );
+    }
+
+    /// The tab bar shows both tabs, and the active one reads in Interest while the
+    /// rest are dim Ground — the at-a-glance "you are here" (#248), asserted on the
+    /// cell colour since a text render loses it.
+    #[test]
+    fn the_tab_bar_highlights_the_active_tab() {
+        let layout = tab_layout();
+        for &active in &HelpTab::ALL {
+            let g = render_help(W, H, active, LevelModifiers::default());
+            for &(tab, start, _len) in &layout {
+                let expected = if tab == active {
+                    Category::Interest
+                } else {
+                    Category::Ground
+                };
+                // The `[` at the tab's start carries its colour.
+                assert_eq!(g.get(start, 0).glyph, '[', "{tab:?} draws its bracket");
+                assert_eq!(
+                    g.get(start, 0).fg,
+                    expected,
+                    "with {active:?} active, {tab:?} reads {expected:?}"
+                );
+            }
+        }
+    }
+
+    /// The panel is escapable and switchable **by touch** (§11.6/#248): the `[x]`
+    /// close control hit-tests to [`HelpHit::Close`], each tab's cells to
+    /// [`HelpHit::Tab`], and the body to nothing (a press the modal panel swallows).
+    #[test]
+    fn the_panel_is_escapable_and_switchable_by_touch() {
+        // The close control at the right edge → Close, and nothing just left of it.
+        let close = close_button_start(W);
+        assert_eq!(help_hit(W, close, 0), Some(HelpHit::Close));
+        assert_eq!(help_hit(W, close + 1, 0), Some(HelpHit::Close));
+        assert_ne!(help_hit(W, close - 1, 0), Some(HelpHit::Close));
+
+        // Each tab's whole `[Label]` region resolves to that tab, by identity.
+        for (tab, start, len) in tab_layout() {
+            for x in start..start + len {
+                assert_eq!(help_hit(W, x, 0), Some(HelpHit::Tab(tab)), "tab cell {x}");
+            }
+        }
+        // The body (below the tab bar) and the gap left of the first tab are inert.
+        assert_eq!(help_hit(W, 5, 3), None, "the body swallows presses");
+        assert_eq!(help_hit(W, 0, 0), None, "the left margin is not a tab");
+    }
+
+    /// The tabs cycle, wrapping at both ends (§14 v2/#248) — the Tab / arrow motion.
+    #[test]
+    fn the_tabs_cycle_both_ways() {
+        assert_eq!(HelpTab::LevelInfo.next(), HelpTab::Legend);
+        assert_eq!(HelpTab::Legend.next(), HelpTab::LevelInfo, "next wraps");
+        assert_eq!(HelpTab::LevelInfo.prev(), HelpTab::Legend, "prev wraps");
+        assert_eq!(HelpTab::Legend.prev(), HelpTab::LevelInfo);
+    }
+
+    /// `ActiveModifier` is re-exported for shells and tests to read the descriptor
+    /// directly, not only through the rendered card — a light guard that the type
+    /// stays public and constructible.
+    #[test]
+    fn the_active_modifier_descriptor_is_readable() {
+        let m = ActiveModifier {
+            name: "x",
+            direction: ModifierDirection::Harder,
+            detail: None,
+        };
+        assert_eq!(m.direction, ModifierDirection::Harder);
     }
 }

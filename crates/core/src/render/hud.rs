@@ -39,12 +39,19 @@ pub struct ScreenUi {
     /// list is always the current step's live set — deployed or not, it clears on
     /// the next action (§11.7), never a scrollback.
     pub message_log_open: bool,
-    /// Whether the help overlay is up (§14 v2/#139): the glyph legend, colour key,
-    /// and controls, drawn over the map. A pure view toggle — no world change, no
-    /// turn (§4.4) — driven by the `?` key
+    /// Whether the help panel is up (§14 v2/#139/#248): a modal, full-screen
+    /// reference — the tab bar, the active tab's content, the footer. A pure view
+    /// toggle — no world change, no turn (§4.4) — opened by the `?` key
     /// ([`ui_command_for_key`](crate::input::ui_command_for_key)) or the header's
-    /// help button ([`is_help_button`]), and dismissed the same two ways.
+    /// help button ([`is_help_button`]). While it is up it is modal: the shell
+    /// routes input to it ([`help_nav_for_key`](crate::help_nav_for_key) /
+    /// [`help_hit`](crate::help_hit)), so the game never steps underneath.
     pub help_open: bool,
+    /// Which help tab is showing while [`help_open`](Self::help_open) (§14 v2/#248).
+    /// Ignored when the panel is closed; the [`Default`] is the leftmost tab, so the
+    /// panel opens on Level info. The shell cycles it from
+    /// [`help_nav_for_key`](crate::help_nav_for_key) or a tab tap ([`help_hit`]).
+    pub help_tab: HelpTab,
 }
 
 /// The deploy button's label on the ability line (§11.4): a downward chevron when
@@ -162,33 +169,36 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 /// ability state ([`State::ability_statuses`]); a click on either resolves to the
 /// ability under it ([`ability_at`]) and activates it exactly as its hotkey would.
 pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
+    let facility = state.layout().facility();
+    let width = facility.width();
+    let height = HEADER_ROWS + facility.height() + STATUS_ROWS;
+
+    // Help is a modal, full-screen reference (§14 v2/#139/#248): while it is up it
+    // takes the *whole* screen — not an overlay on the map — and the shell captures
+    // input against it, so nothing of the game frame shows and the other overlays
+    // are moot. It writes no state, so closing restores the exact frame. The panel
+    // draws itself from the run's active modifiers (§12.6) and the chosen tab.
+    if ui.help_open {
+        return super::help::render_help(width, height, ui.help_tab, state.modifiers());
+    }
+
     let statuses = state.ability_statuses();
 
     // The map layer, with any deployed overlays: the ability panel opposite the
     // player, and the near line's message log rising from the bottom.
     let mut map = render(state);
-    // Help is a modal reference card (§14 v2/#139): when it is up it takes the whole
-    // map, so the other overlays are moot — draw it and skip them. It covers the map
-    // only; the header (with the `[?]` toggle) and status lines stay, so it is never
-    // inescapable (§11.6).
     let messages = live_messages(state);
-    if ui.help_open {
-        super::help::overlay_help(&mut map);
-    } else {
-        if ui.ability_panel_open {
-            let origin =
-                panel_origin_opposite_player(map.width(), map.height(), state.player(), &statuses);
-            overlay_ability_panel(&mut map, origin, &statuses);
-        }
-        // The step's live messages (§11.7), loudest first: the near line speaks the
-        // first, counts the rest, and deploys the whole list over the board here. The
-        // list only earns the board when more than one message is live.
-        if ui.message_log_open && messages.len() > 1 {
-            overlay_message_log(&mut map, &messages);
-        }
+    if ui.ability_panel_open {
+        let origin =
+            panel_origin_opposite_player(map.width(), map.height(), state.player(), &statuses);
+        overlay_ability_panel(&mut map, origin, &statuses);
     }
-    let width = map.width();
-    let height = HEADER_ROWS + map.height() + STATUS_ROWS;
+    // The step's live messages (§11.7), loudest first: the near line speaks the
+    // first, counts the rest, and deploys the whole list over the board here. The
+    // list only earns the board when more than one message is live.
+    if ui.message_log_open && messages.len() > 1 {
+        overlay_message_log(&mut map, &messages);
+    }
 
     // One grid, top to bottom: the ability line, the map, the two status lines.
     let mut cells = ability_line(width, &statuses, ui.ability_panel_open);
@@ -576,6 +586,7 @@ mod tests {
     use super::*;
     use crate::cell::{Cell, Direction};
     use crate::guard::Guard;
+    use crate::modifiers::LevelModifiers;
     use crate::state::{Input, State};
     use crate::test_support::open_room;
 
@@ -1136,9 +1147,9 @@ mod tests {
         );
     }
 
-    // --- Help overlay (§14 v2/#139) ------------------------------------------
+    // --- Help panel (§14 v2/#139/#248) ---------------------------------------
 
-    /// A plain full board to render the help card over.
+    /// A plain full board to render the help panel over.
     fn help_board() -> State {
         State::new(
             open_room(40, 40),
@@ -1150,11 +1161,12 @@ mod tests {
         )
     }
 
-    /// §4.4/#139: opening help is a pure view toggle. It changes the frame while up,
-    /// and **closing restores the exact frame** — the overlay writes no state, so the
-    /// board beneath is byte-identical before and after.
+    /// §4.4/#139/#248: opening help is a pure view toggle. It changes the frame
+    /// while up, and **closing restores the exact frame** — the panel writes no
+    /// state, so the frame beneath is byte-identical before and after. The open
+    /// frame is the full screen, the game frame's exact size.
     #[test]
-    fn help_overlays_the_map_and_closing_restores_it() {
+    fn help_is_a_modal_full_screen_frame_and_closing_restores_it() {
         let s = help_board();
         let closed = render_screen(&s, ScreenUi::default());
         let open = render_screen(
@@ -1164,17 +1176,25 @@ mod tests {
                 ..ScreenUi::default()
             },
         );
-        assert_ne!(open, closed, "the help card changes the frame while up");
+        assert_ne!(open, closed, "the help panel changes the frame while up");
+        // The panel is the full screen — the same width and height as the game frame.
+        assert_eq!(open.width(), closed.width());
+        assert_eq!(open.height(), closed.height());
         let reclosed = render_screen(&s, ScreenUi::default());
         assert_eq!(reclosed, closed, "closing restores the identical frame");
     }
 
-    /// The card carries the legend and the **live** hotkeys (#139): a glyph derived
-    /// from the terrain table (the duct `=`, new in §10.7), the exit `E`, a colour
-    /// name, and each ability's real §11.6 key.
+    /// The open frame **is** the modal panel (#248): the whole screen, not an
+    /// overlay on the map. Row 0 is the tab bar — the tab labels and the `[x]` close
+    /// — not the game's ability line, and the run's active modifiers show through
+    /// from `state.modifiers()`.
     #[test]
-    fn the_help_card_shows_the_legend_the_colours_and_the_hotkeys() {
-        let s = help_board();
+    fn the_open_frame_is_the_panel_showing_the_run_modifiers() {
+        // A run carrying one harder modifier, threaded as the real game would.
+        let s = help_board().with_modifiers(LevelModifiers {
+            guards_always_search_hideouts: true,
+            ..LevelModifiers::default()
+        });
         let g = render_screen(
             &s,
             ScreenUi {
@@ -1182,50 +1202,51 @@ mod tests {
                 ..ScreenUi::default()
             },
         );
+        let row0: String = (0..g.width()).map(|x| g.get(x, 0).glyph).collect();
+        // The tab bar, not the ability line: both tabs and the close control.
+        assert!(
+            row0.contains("[Level info]"),
+            "the tab bar heads the panel: {row0:?}"
+        );
+        assert!(row0.contains("[Legend]"));
+        assert!(row0.contains("[x]"), "a touchable close control");
+        assert!(
+            !row0.starts_with(" r c d x"),
+            "the ability line is gone while modal"
+        );
+        // The default tab is Level info, so the active modifier reads through.
         let text = g.to_text().join("\n");
-        assert!(text.contains("GLYPHS") && text.contains("COLOURS") && text.contains("CONTROLS"));
-        // Glyphs derived from the real tables, including the duct entry (§10.7).
-        for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
-            assert!(text.contains(glyph), "the legend shows {glyph:?}");
-        }
-        // The live ability hotkeys, straight from the deck.
-        for id in AbilityId::ALL {
-            assert!(
-                text.contains(id.hotkey()),
-                "the controls show {}'s key {}",
-                id.name(),
-                id.hotkey()
-            );
-        }
+        assert!(
+            text.contains("Guards search hideouts"),
+            "the run's modifier shows"
+        );
     }
 
-    /// §11.6's trap, designed out: the `[?]` button sits in the header and the header
-    /// is **not** covered by the overlay, so a touch user who opened help can always
-    /// close it. The hit-test agrees with the drawn button, open or closed.
+    /// §11.6's no-trap rule, kept for the full-screen panel (#248): with the header
+    /// `[?]` now covered, the panel carries its own escape — the `[x]` close control
+    /// hit-tests to [`HelpHit::Close`], and each tab tap switches — while the header
+    /// `[?]` still opens it when the panel is closed.
     #[test]
-    fn the_help_button_is_reachable_whether_open_or_closed() {
+    fn the_panel_is_reachable_to_open_and_escapable_once_open() {
         let s = help_board();
         let width = s.layout().facility().width();
+
+        // Closed: the header `[?]` opens the panel (its hit-test, and it is drawn).
         let start = help_button_start(width);
         assert!(is_help_button(width, start, 0), "the [?] cell hit-tests");
+        let closed = render_screen(&s, ScreenUi::default());
+        let header: String = (0..width).map(|x| closed.get(x, 0).glyph).collect();
         assert!(
-            !is_help_button(width, start, 1),
-            "only the header row is the button"
+            header.contains("[?]"),
+            "closed: the header offers [?]: {header:?}"
         );
-        for help_open in [false, true] {
-            let g = render_screen(
-                &s,
-                ScreenUi {
-                    help_open,
-                    ..ScreenUi::default()
-                },
-            );
-            let header: String = (0..width).map(|x| g.get(x, 0).glyph).collect();
-            assert!(
-                header.contains("[?]"),
-                "the toggle stays in the header (open={help_open}): {header:?}"
-            );
-        }
+
+        // Open: the panel is escapable by touch — the `[x]` closes, a tab switches.
+        assert!(matches!(
+            help_hit(width, width - 2, 0),
+            Some(HelpHit::Close)
+        ));
+        assert!(matches!(help_hit(width, 2, 0), Some(HelpHit::Tab(_))));
     }
 
     /// The help button and the ability deploy button do not overlap, and both are
