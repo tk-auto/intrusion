@@ -2001,6 +2001,24 @@ impl State {
                 events.push(Event::BodyFound { at });
             }
         }
+        // The found-a-body-nearby check (§15 Q5, second half): a found body is loud
+        // evidence the intruder is close (§7.2), so a guard searching the area around
+        // one checks the cupboards inside its sweep — an occupied hideout within
+        // `SEARCH_RADIUS` of the body it is searching is flushed, reusing the witness
+        // capture gate (#185: `witnessed_hideout` + the exception below). Only a **body**
+        // search checks: a guard that merely lost a chase still leaves the cupboard the
+        // safe wait-out it is (§10.3), the "hold still, watch the cone sweep past" payoff.
+        // Re-evaluated every turn, so a player who dives into the searched area *during*
+        // the sweep is checked too — the readable mistake is hiding within the search a
+        // body you left triggered (§2.2). A stowed body is never found (skipped above),
+        // so it never starts a search and never reaches here.
+        if let Some(cell) = hidden_cell {
+            for guard in &mut self.guards {
+                if guard.checks_hideout_at(cell) {
+                    guard.check_hideout(cell);
+                }
+            }
+        }
         // The decoy scan (§8.3, #105): a guard whose cone covers the decoy —
         // and whose look did *not* detect the player this turn — turns to
         // Investigate it. The precedence is the whole point: a guard that can

@@ -159,6 +159,17 @@ pub struct Guard {
     /// [`stand_down`](Self::stand_down) when the lead runs cold — so a witness is a
     /// short, live lead, never a permanent grudge.
     witnessed_hideout: Option<Cell>,
+    /// Whether the current §7.6 search was triggered by a **found body** (§15 Q5, the
+    /// found-a-body-nearby half). A body is loud evidence the intruder is close (§7.2),
+    /// so a search that began on one *checks the cupboards in the area it sweeps*: an
+    /// occupied hideout within [`SEARCH_RADIUS`] of the [`focus`](Self::focus) is
+    /// flushed like a witnessed dive ([`checks_hideout_at`](Self::checks_hideout_at)/
+    /// [`check_hideout`](Self::check_hideout)). Set only by [`find_body`](Self::find_body);
+    /// a **lost-chase** search ([`begin_search`](Self::begin_search)) leaves it `false`,
+    /// so a cupboard stays the safe wait-out it is against a guard that merely lost
+    /// sight of you (§10.3). Cleared whenever the search ends or a fresher lead
+    /// supersedes it.
+    body_search: bool,
 }
 
 /// Patrol radius (§7.5, **[START] = 15**): how far the *fallback* territory
@@ -281,6 +292,7 @@ impl Guard {
             dwell: 0,
             radio: RadioClock::DEFAULT,
             witnessed_hideout: None,
+            body_search: false,
         }
     }
 
@@ -541,6 +553,11 @@ impl Guard {
         self.search = SEARCH_DURATION;
         self.focus = Some(at);
         self.destination = None;
+        // This is a *body* search (§15 Q5): while it runs, an occupied cupboard within
+        // the swept area is checked — the found-a-body-nearby trigger the witness half
+        // (#185) left open. A lost-chase search never sets this, so hiding still works
+        // against a guard that only lost sight of you.
+        self.body_search = true;
     }
 
     /// Act on **witnessing the player climb into a hideout** (§15 Q5) — the one case
@@ -554,12 +571,55 @@ impl Guard {
     /// runs cold before the guard reaches the mouth, [`stand_down`](Self::stand_down)
     /// gives it up and the player has waited it out (§7.1/§7.6).
     pub(crate) fn flush_hideout(&mut self, cell: Cell) {
+        self.alert = ALERT_DURATION;
+        self.engage_hideout(cell);
+    }
+
+    /// Act on a **body-triggered search reaching an occupied hideout** (§15 Q5, the
+    /// found-a-body-nearby half). The loud found body (§7.2) says the intruder is
+    /// close, so the §7.6 search checks the cupboards inside the area it is already
+    /// sweeping ([`checks_hideout_at`](Self::checks_hideout_at)); on an occupied one it
+    /// flushes it — a **second** way to earn entry to a hideout, alongside the witness
+    /// (#185), not a new capture path. The hard found-body lead is kept
+    /// (`alert.max(ALERT_DURATION)` never lowers the [`BODY_ALERT_DURATION`]
+    /// [`find_body`](Self::find_body) granted); only the destination and the
+    /// [`witnessed_hideout`](Self::witnessed_hideout) capture-gate flag are pointed at
+    /// the cupboard, through the shared [`engage_hideout`](Self::engage_hideout) seam.
+    pub(crate) fn check_hideout(&mut self, cell: Cell) {
+        self.alert = self.alert.max(ALERT_DURATION);
+        self.engage_hideout(cell);
+    }
+
+    /// Re-engage an occupied cupboard as a live lead — the shared core of the two ways
+    /// a guard earns entry to a hideout (§15 Q5): it Chases the alcove itself, walks to
+    /// the mouth, and captures the hidden player on the step in ([`State::guard_phase`]).
+    /// The cell is recorded ([`witnessed_hideout`](Self::witnessed_hideout)) so **only
+    /// this guard** may enter it — every other still routes around the occupied cupboard
+    /// (§10.3). Any lingering search/watch is dropped; the caller sets the lead the
+    /// engagement carries (a witness gets a fresh [`ALERT_DURATION`], a body-searcher
+    /// keeps its harder one).
+    fn engage_hideout(&mut self, cell: Cell) {
         self.state = GuardState::Chasing;
         self.destination = Some(cell);
         self.last_seen = Some(cell);
-        self.alert = ALERT_DURATION;
         self.witnessed_hideout = Some(cell);
         self.end_search_and_watch();
+    }
+
+    /// Whether this guard's active **body search** (§15 Q5) covers an occupied hideout
+    /// at `cell`: true only while it is sweeping the disc around a found body
+    /// ([`body_search`](Self::body_search), set by [`find_body`](Self::find_body)) and
+    /// `cell` lies within [`SEARCH_RADIUS`] of that [`focus`](Self::focus) — the area
+    /// the guard is already pacing (§7.6, the §6.1 sight metric). A **lost-chase**
+    /// search never checks hideouts, so a cupboard stays the safe wait-out it is against
+    /// a guard that only lost sight of you (§10.3); only a body found nearby earns the
+    /// check. The turn loop reads this each turn and calls
+    /// [`check_hideout`](Self::check_hideout) when it holds.
+    pub(crate) fn checks_hideout_at(&self, cell: Cell) -> bool {
+        self.body_search
+            && self
+                .focus
+                .is_some_and(|focus| focus.sight_distance(cell) <= SEARCH_RADIUS)
     }
 
     /// Drop a witnessed-hideout lead because the player is **no longer in that cell**
@@ -590,6 +650,7 @@ impl Guard {
     fn end_search_and_watch(&mut self) {
         self.search = 0;
         self.watch = 0;
+        self.body_search = false;
     }
 
     /// The direction the guard will try this turn, or `None` to hold (§7.4 phase 3).
@@ -725,6 +786,10 @@ impl Guard {
         self.search = SEARCH_DURATION;
         self.focus = Some(self.last_seen.unwrap_or(self.pos));
         self.destination = None;
+        // A lost-chase search does not check hideouts (§15 Q5): only a found body earns
+        // that. Clearing here keeps a search that *re-began* after a witnessed/body
+        // flush fizzled (the player slipped out) from silently inheriting the check.
+        self.body_search = false;
     }
 
     /// One step of the search sweep: pace toward the farthest patrollable cell within
@@ -757,6 +822,7 @@ impl Guard {
         self.destination = None;
         self.last_seen = None;
         self.alert = 0;
+        self.body_search = false;
     }
 
     /// The first step of the shortest [`routable`] path to the current destination
@@ -790,6 +856,7 @@ impl Guard {
         // A cold lead includes a cupboard the guard saw the player dive into (§15 Q5):
         // giving up the chase means giving up the flush, so the player waited it out.
         self.witnessed_hideout = None;
+        self.body_search = false;
     }
 
     /// Keep the current patrol destination while it is still worth walking to;
@@ -1446,5 +1513,68 @@ mod tests {
         // With the lead cold, deciding stands the guard down to patrol.
         guard.decide(&facility, &[], &mut Rng::new(0), 0);
         assert_eq!(guard.state(), GuardState::Calm, "a cold lead is given up");
+    }
+
+    /// §15 Q5 (the found-a-body-nearby half) + §2.2 fairness: a **body** search checks
+    /// the cupboards inside the disc it sweeps and nothing beyond — a hidden player *in
+    /// range* of the found body is flushed, one *out of range* is left the safe cupboard
+    /// it is. A **lost-chase** search checks nothing at all, so hiding still works
+    /// against a guard that only lost sight of you (§10.3), and a spent search that
+    /// stands down stops checking. The distinction is only ever the result of hiding
+    /// within the search a body you left triggered.
+    #[test]
+    fn a_body_search_checks_only_hideouts_within_its_disc() {
+        let body = Cell::new(20, 20);
+        let mut finder = Guard::patrolling(body);
+        finder.find_body(body);
+        assert_eq!(
+            finder.state(),
+            GuardState::Alerted,
+            "a found body opens a search"
+        );
+
+        assert_eq!(
+            SEARCH_RADIUS, 4,
+            "the [START] search radius the check rides on"
+        );
+        // In range (the §6.1 sight metric): a cupboard inside the swept disc is checked.
+        assert!(
+            finder.checks_hideout_at(Cell::new(20, 24)),
+            "a cupboard exactly SEARCH_RADIUS south is in the disc",
+        );
+        assert!(
+            finder.checks_hideout_at(Cell::new(23, 23)),
+            "a diagonal cupboard within range is checked",
+        );
+        // Out of range: one step past the disc is never reached — the body was too far.
+        assert!(
+            !finder.checks_hideout_at(Cell::new(20, 25)),
+            "one step past the disc is left safe",
+        );
+        assert!(
+            !finder.checks_hideout_at(Cell::new(25, 25)),
+            "a far diagonal cupboard is never checked",
+        );
+
+        // A lost-chase search (not a body) checks nothing — the cupboard stays the safe
+        // wait-out it is against a guard that merely lost sight of you.
+        let mut chaser = Guard::patrolling(body);
+        chaser.begin_search();
+        assert_eq!(
+            chaser.state(),
+            GuardState::Alerted,
+            "a lost chase also opens a search"
+        );
+        assert!(
+            !chaser.checks_hideout_at(body),
+            "a lost-chase search never checks a hideout",
+        );
+
+        // A body search whose lead runs cold stands the guard down and stops checking.
+        finder.stand_down();
+        assert!(
+            !finder.checks_hideout_at(Cell::new(20, 20)),
+            "a spent search checks nothing",
+        );
     }
 }

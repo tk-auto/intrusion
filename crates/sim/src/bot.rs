@@ -98,6 +98,13 @@ const MAX_HIDE: u32 = 12;
 /// in an endless in-and-out (see [`StealthBot::cover_cooldown`]).
 const COVER_COOLDOWN: u32 = 8;
 
+/// How far a found body's §7.6 search reaches, as a keep-away radius the bot honours when
+/// choosing a bolthole (§15 Q5, the found-a-body-nearby check). It mirrors the core
+/// `SEARCH_RADIUS` disc a guard sweeps around a corpse it finds and checks the cupboards
+/// in — kept a local [START] because the bot reads the game as a player would, not from
+/// core's constants; conservative, so the bot errs toward not hiding beside a body it left.
+const BODY_HIDE_CLEARANCE: u32 = 4;
+
 /// The keep-away weight per unit of closeness-squared (see [`proximity_penalty`]).
 /// Sized to dominate raw path distance on the v1 footprint — so the bot will take a
 /// long way round to keep its distance — while staying well under [`WATCHED_PENALTY`],
@@ -207,13 +214,16 @@ impl StealthBot {
         }
 
         // Aim for the nearest known hideout to disappear into — the one place a
-        // guard's contact cannot reach (§4.5) — but never one a hunter is watching:
-        // diving in under an alerted cone is witnessed, and a witness flushes you
-        // right back out (§15 Q5). Break its sight first, then the cupboard is safe.
+        // guard's contact cannot reach (§4.5) — but never one a hunter is watching
+        // (diving in under an alerted cone is witnessed, and a witness flushes you right
+        // back out, §15 Q5), nor one within reach of a body: a guard that finds the body
+        // searches the cupboards beside it and flushes you the same way (§15 Q5). Break
+        // sight first, and hide away from your own handiwork, and the cupboard is safe.
         let witnessed = witnessed_cone_cells(state);
+        let bodies = findable_bodies(state);
         let boltholes: Vec<Cell> = known_hideouts(state)
             .into_iter()
-            .filter(|h| !witnessed.contains(h))
+            .filter(|h| !witnessed.contains(h) && !near_findable_body(&bodies, *h))
             .collect();
         if let Some(dir) = self.descend(state, &boltholes, danger, blocked, Descent::flee()) {
             return Input::Step(dir);
@@ -283,11 +293,17 @@ impl StealthBot {
         // Only worth a detour to a hideout that is genuinely close by; a far one is
         // not cover, it is a march across the guard's path. And never one an alerted
         // guard is watching — climbing in there is a witnessed dive the guard flushes
-        // (§15 Q5); a Calm patrol's cone is fine, which is the usual case here.
+        // (§15 Q5); a Calm patrol's cone is fine, which is the usual case here — nor one
+        // within reach of a body, which a finder would search and flush the same way.
         let witnessed = witnessed_cone_cells(state);
+        let bodies = findable_bodies(state);
         let hideouts: Vec<Cell> = known_hideouts(state)
             .into_iter()
-            .filter(|h| player.manhattan_distance(*h) <= COVER_REACH && !witnessed.contains(h))
+            .filter(|h| {
+                player.manhattan_distance(*h) <= COVER_REACH
+                    && !witnessed.contains(h)
+                    && !near_findable_body(&bodies, *h)
+            })
             .collect();
         if let Some(dir) = self.descend(state, &hideouts, danger, blocked, Descent::flee()) {
             return Some(Input::Step(dir));
@@ -514,6 +530,32 @@ fn witnessed_cone_cells(state: &State) -> HashSet<Cell> {
         }
     }
     cells
+}
+
+/// The bodies out on the floor a guard could still **find** (§7.2): every body except
+/// the stowed ones (inside a locked cupboard — *gone*, never found). A found body throws
+/// its finder into a §7.6 search that checks the cupboards within `SEARCH_RADIUS` of it
+/// (§15 Q5), so the flee routines keep clear of hiding within [`BODY_HIDE_CLEARANCE`] of
+/// one of these — a body known to the bot is one it dropped and can see on the map.
+fn findable_bodies(state: &State) -> Vec<Cell> {
+    let facility = state.layout().facility();
+    state
+        .bodies()
+        .iter()
+        .map(|body| body.cell())
+        .filter(|&at| facility.terrain(at) != Some(Terrain::Hideout))
+        .collect()
+}
+
+/// Whether diving into the cupboard at `hideout` risks a found-body flush (§15 Q5): true
+/// when a findable body lies within [`BODY_HIDE_CLEARANCE`] of it, so a guard that
+/// stumbles on that body would search — and open — the cupboard. This is the danger the
+/// player reads off the corpse they left, not off a cone (§2.2), so a player-honest bot
+/// reads it the same way and hides somewhere the body cannot reach.
+fn near_findable_body(bodies: &[Cell], hideout: Cell) -> bool {
+    bodies
+        .iter()
+        .any(|&body| body.sight_distance(hideout) <= BODY_HIDE_CLEARANCE)
 }
 
 /// Cells the bot must not step onto: bodies (solid, §7.2) and any guard that has

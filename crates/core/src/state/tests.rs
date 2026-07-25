@@ -741,61 +741,72 @@ fn a_guard_that_stepped_adjacent_facing_the_player_cannot_be_taken_from_the_fron
     assert_eq!(s.player(), Cell::new(5, 3), "a refused bump does not move");
 }
 
-/// §7.2: a body does not block sight, so the first cone to cover it fires
-/// the found-body event — exactly once, found is found — and the finder goes
-/// hunting (the §7.6 search). The body is non-solid to the player: stepping
-/// onto it is a plain move, and taking hold comes on the way back off.
+/// §7.2/§15 Q5: a body does not block sight, so the first cone to cover it fires the
+/// found-body event — exactly once, found is found. And, because a found body is loud
+/// evidence the intruder is close, the finder's §7.6 search **checks the cupboard beside
+/// it**: the player hid in the very cupboard next to the guard they dropped, so the
+/// finder flushes and catches them — hiding beside a body you left is the readable
+/// mistake (§2.2, #185's found-a-body-nearby second earn-entry path).
 #[test]
-fn a_body_is_found_once_by_a_covering_cone() {
-    let mut layout = open_room(10, 10);
-    layout.place(Cell::new(5, 5), Terrain::Hideout);
+fn a_found_body_is_registered_once_and_flushes_the_cupboard_beside_it() {
+    // A one-wide corridor along x=5, so the finder pacing down it cannot wander off the
+    // column its cone covers — it reliably finds the body and reaches the cupboard.
+    let mut layout = open_room(11, 11); // interior x 1..9, y 1..9
+    for y in 1..10 {
+        layout.place(Cell::new(4, y), Terrain::Wall); // west wall
+        layout.place(Cell::new(6, y), Terrain::Wall); // east wall
+    }
+    layout.place(Cell::new(5, 7), Terrain::Hideout); // the player's cupboard
     let mut s = State::new(
         layout,
-        Cell::new(5, 5), // hidden, striking north
+        Cell::new(5, 7), // hidden, striking north
         Direction::North,
         vec![
-            Guard::stationary(Cell::new(5, 4)), // the victim, adjacent
-            // A witness two cells up the column, cone south straight over
-            // the victim's cell: it sees the body the turn it appears.
-            Guard::stationary(Cell::new(5, 2)),
+            Guard::stationary(Cell::new(5, 6)), // the victim, one north
+            // A finder pacing south down the corridor, cone straight over the victim's
+            // cell: it sees the body the turn it appears. It patrols, so once it has
+            // checked the cupboard it walks to the mouth and captures.
+            Guard::patrolling_to(Cell::new(5, 1), Cell::new(5, 5)),
         ],
         Vec::new(),
-        Cell::new(8, 8),
+        Cell::new(5, 9),
     );
 
-    let body = Cell::new(5, 4);
+    let body = Cell::new(5, 6);
     let events = s.step(Input::Step(Direction::North));
     assert_eq!(
         events,
         vec![Event::TakenDown { at: body }, Event::BodyFound { at: body }],
-        "the witness's cone covers the fresh body: found the same turn",
+        "the finder's cone covers the fresh body: found the same turn",
     );
     assert_eq!(s.bodies()[0].cell(), body);
     assert!(s.bodies()[0].found());
+    // §15 Q5, the found-a-body-nearby half: a body one cell from the occupied cupboard
+    // is loud evidence the intruder hid close, so the finder's §7.6 search checks that
+    // cupboard — earning entry the way a witness does (#185), the capture gate opening
+    // for it alone (`witnessed_hideout`).
     assert_eq!(
-        s.guards()[0].state(),
-        GuardState::Alerted,
-        "the finder drops into the §7.6 search",
+        s.guards()[0].witnessed_hideout(),
+        Some(Cell::new(5, 7)),
+        "the finder checks the cupboard beside the body it found",
     );
 
-    // Found is found: the cone keeps covering the body every turn, and the
-    // loudest event in the game never repeats.
-    for _ in 0..3 {
+    // It walks to the mouth and captures — a cupboard is no refuge one cell from a body
+    // a guard has found — and the loudest event never repeats on the way (found is found).
+    let mut captured = false;
+    for _ in 0..6 {
         let events = s.step(Input::Wait);
         assert!(
             !events.iter().any(|e| matches!(e, Event::BodyFound { .. })),
             "the found-body event fires exactly once per body",
         );
+        if events.iter().any(|e| matches!(e, Event::Captured { .. })) {
+            captured = true;
+            break;
+        }
     }
-
-    // Non-solid to the player (§7.2): stepping onto the body climbs out of the
-    // cupboard and stands on it — a plain move, not a grab.
-    s.step(Input::Step(Direction::North)); // climb out onto the body
-    assert_eq!(s.player(), body, "the player stands on the non-solid body");
-    assert_eq!(s.dragging(), None, "standing on a body is not yet a grab");
-    // Taking hold comes on the way *out* of the body's cell (§8.3).
-    s.step(Input::Step(Direction::North));
-    assert_eq!(s.dragging(), Some(body), "stepping off takes hold");
+    assert!(captured, "hiding beside the found body is caught (§15 Q5)");
+    assert_eq!(s.outcome(), Outcome::Lost);
 }
 
 /// §7.2 (revised): a body is **non-solid** to guards too — a guard routes and
@@ -803,32 +814,50 @@ fn a_body_is_found_once_by_a_covering_cone() {
 /// stands on it, rather than being refused.
 #[test]
 fn a_guard_walks_over_a_bodys_cell() {
-    let mut layout = open_room(10, 10);
-    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's hideout
+    // A one-wide vertical corridor along x=4, so a guard crossing the body's cell has
+    // no way around it — the cleanest proof the body is non-solid to guards. The player
+    // takes the victim from behind on open floor (never a hidden cupboard occupant, so
+    // no §15 Q5 check applies) and ducks aside into a side duct.
+    let mut layout = open_room(9, 11); // interior x 1..7, y 1..9
+    for y in 1..10 {
+        if y != 4 {
+            layout.place(Cell::new(3, y), Terrain::Wall); // west wall, gap at y=4
+        }
+        layout.place(Cell::new(5, y), Terrain::Wall); // east wall
+    }
+    layout.place(Cell::new(3, 4), Terrain::DuctEntry); // the duck, through the west gap
+    layout.place(Cell::new(2, 4), Terrain::Wall);
+    let layout = layout.with_ducts(vec![crate::Duct::new(vec![
+        Cell::new(3, 4),
+        Cell::new(2, 4),
+    ])]);
     let mut s = State::new(
         layout,
-        Cell::new(5, 5),
-        Direction::North,
+        Cell::new(4, 4), // on open floor, directly behind the south-facing victim
+        Direction::South,
         vec![
-            Guard::stationary(Cell::new(5, 4)), // the victim
-            // A walker aimed straight at the victim's cell, from the north.
-            Guard::patrolling_to(Cell::new(5, 1), Cell::new(5, 6)),
+            Guard::stationary(Cell::new(4, 5)), // the victim, one south
+            // A walker at the south end, pacing north up the corridor: its only route
+            // over the body's cell.
+            Guard::patrolling_to(Cell::new(4, 8), Cell::new(4, 1)),
         ],
         Vec::new(),
-        Cell::new(8, 8),
+        Cell::new(4, 9),
     );
 
-    let body = Cell::new(5, 4);
-    s.step(Input::Step(Direction::North)); // the takedown; the body lies at (5,4)
+    let body = Cell::new(4, 5);
+    s.step(Input::Step(Direction::South)); // the takedown; the body lies at (4,5)
     assert_eq!(s.bodies()[0].cell(), body);
+    s.step(Input::Step(Direction::West)); // duck into the duct, out of the way
+    assert!(s.in_duct(), "safe in the duct, not a flushable cupboard");
 
-    // The walker heads down the column, over the body's cell — it stands on it
-    // at some point, and the player stays safe in the cupboard throughout.
+    // The walker paces up the one-wide corridor, so it must stand on the non-solid
+    // body to pass — and the player stays safe in the duct throughout.
     let mut stood_on_body = false;
-    for _ in 0..12 {
+    for _ in 0..16 {
         s.step(Input::Wait);
         stood_on_body |= s.guards()[0].pos() == body;
-        assert_eq!(s.outcome(), Outcome::Playing, "hidden all along");
+        assert_eq!(s.outcome(), Outcome::Playing, "safe in the duct all along");
     }
     assert!(
         stood_on_body,
@@ -849,7 +878,15 @@ fn a_body_in_a_chokepoint_does_not_freeze_a_guard() {
             layout.place(Cell::new(x, 5), Terrain::Wall);
         }
     }
-    layout.place(Cell::new(3, 4), Terrain::Hideout); // the player's duck, off the route
+    // The player's duck, off the route: a duct, not a cupboard — a hideout one cell
+    // from the body would now be *checked* by the investigator's found-body search
+    // (§15 Q5), but a duct is contact-safe and never flushed (§10.7).
+    layout.place(Cell::new(3, 4), Terrain::DuctEntry);
+    layout.place(Cell::new(2, 4), Terrain::Wall);
+    let layout = layout.with_ducts(vec![crate::Duct::new(vec![
+        Cell::new(3, 4),
+        Cell::new(2, 4),
+    ])]);
     let mut s = State::new(
         layout,
         Cell::new(4, 4), // just north of the gap
@@ -857,7 +894,9 @@ fn a_body_in_a_chokepoint_does_not_freeze_a_guard() {
         vec![
             Guard::stationary(Cell::new(4, 5)), // the victim, in the gap
             // An investigator on the south side, patrolling to the north — its only
-            // route is up through the gap the body will occupy.
+            // route is up through the gap the body will occupy. It faces south on turn
+            // one, so it does not find the body until it has turned north — by when the
+            // player has slipped into the duct.
             Guard::patrolling_to(Cell::new(4, 8), Cell::new(4, 2)),
         ],
         Vec::new(),
@@ -867,8 +906,8 @@ fn a_body_in_a_chokepoint_does_not_freeze_a_guard() {
     let gap = Cell::new(4, 5);
     s.step(Input::Step(Direction::South)); // take down the victim in the gap
     assert_eq!(s.bodies()[0].cell(), gap, "the body lies in the chokepoint");
-    s.step(Input::Step(Direction::West)); // duck into the cupboard, out of the way
-    assert!(s.hidden());
+    s.step(Input::Step(Direction::West)); // duck into the duct, out of the way
+    assert!(s.in_duct());
 
     // The investigator makes it to the north side: it routes over the non-solid
     // body instead of freezing on the far side of the gap. If the body were a
