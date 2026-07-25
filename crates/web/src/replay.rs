@@ -189,23 +189,29 @@ fn scrub_direction(dx: f64, dy: f64) -> Option<Scrub> {
 }
 
 /// How many cursor steps a top-rate held scrub advances per tick (§12.4/#227). The
-/// ramp climbs to this and no further, so even a very long hold keeps some readable
+/// ramp climbs to this and no further, so even a very long hold keeps readable
 /// motion instead of skipping the whole run in one blank frame. A [START] value: on
 /// the v1 footprint (a few hundred inputs) at [`REPEAT_INTERVAL_MS`], the ramp
-/// reaches this after ~1.5 s and thereafter clears ~130 inputs/s — quiet stretches
-/// vanish, a tap still steps one.
-const SCRUB_MAX_STEP: usize = 16;
+/// reaches this after ~1.7 s and thereafter clears ~65 inputs/s — a gentle
+/// fast-forward, while a tap still steps one.
+const SCRUB_MAX_STEP: usize = 8;
+
+/// How many held ticks add one step to the scrub rate (§12.4/#227) — the ramp's
+/// slope. Larger is **gentler**: the hold speeds up more slowly, so a short hold
+/// stays fine-grained and only a sustained one fast-forwards. A [START] value.
+const SCRUB_RAMP_TICKS_PER_STEP: u32 = 2;
 
 /// The scrub ramp (§12.4/#227): how many cursor steps a single held scrub tick
 /// advances, given how many ticks the scrub has been held **unbroken**. The first
-/// tick of a hold (`ticks_held == 0`) — and a lone tap — advances exactly one; each
-/// further tick adds one more, so a sustained hold fast-forwards, capped at
-/// [`SCRUB_MAX_STEP`]. Pure in the tick count so the ramp is testable natively, in
-/// the spirit of [`scrub_direction`] / [`gesture_input`](crate::input); counting
-/// **ticks**, not wall-clock, keeps keyboard auto-repeat and a held swipe feeling
-/// the same and keeps the rule clock-free.
+/// tick of a hold (`ticks_held == 0`) — and a lone tap — advances exactly one; every
+/// [`SCRUB_RAMP_TICKS_PER_STEP`] further ticks add one more, so a sustained hold
+/// speeds up gently, capped at [`SCRUB_MAX_STEP`]. Pure in the tick count so the ramp
+/// is testable natively, in the spirit of [`scrub_direction`] /
+/// [`gesture_input`](crate::input); counting **ticks**, not wall-clock, keeps
+/// keyboard auto-repeat and a held swipe feeling the same and keeps the rule
+/// clock-free.
 fn ramp_steps(ticks_held: u32) -> usize {
-    (ticks_held as usize + 1).min(SCRUB_MAX_STEP)
+    ((ticks_held / SCRUB_RAMP_TICKS_PER_STEP) as usize + 1).min(SCRUB_MAX_STEP)
 }
 
 /// The running ramp of a held scrub: the direction currently held and how many ticks
@@ -577,34 +583,57 @@ mod tests {
     }
 
     /// The scrub ramp (§12.4/#227), pure and pinned: the first held tick — and a lone
-    /// tap — advances exactly one, each further unbroken tick advances one more, and
-    /// the rate caps at [`SCRUB_MAX_STEP`] so a very long hold still leaves readable
-    /// motion instead of skipping the whole run in one frame.
+    /// tap — advances exactly one, the rate climbs one step every
+    /// [`SCRUB_RAMP_TICKS_PER_STEP`] ticks (a gentle slope), and it caps at
+    /// [`SCRUB_MAX_STEP`] so a very long hold still leaves readable motion instead of
+    /// skipping the whole run in one frame.
     #[test]
     fn the_ramp_starts_at_one_and_caps() {
         assert_eq!(ramp_steps(0), 1, "the first tick / a tap steps exactly one");
-        assert_eq!(ramp_steps(1), 2);
-        assert_eq!(ramp_steps(5), 6);
-        let cap = SCRUB_MAX_STEP as u32;
-        assert_eq!(ramp_steps(cap - 1), SCRUB_MAX_STEP, "climbs up to the cap");
-        assert_eq!(ramp_steps(cap), SCRUB_MAX_STEP, "and never past it");
+        assert_eq!(
+            ramp_steps(1),
+            1,
+            "still one part-way through the first stride"
+        );
+        assert_eq!(ramp_steps(2), 2, "one extra step per stride of ticks");
+        assert_eq!(ramp_steps(3), 2);
+        assert_eq!(ramp_steps(4), 3);
+        // Climbs up to the cap and never past it.
+        let cap_tick = (SCRUB_MAX_STEP as u32 - 1) * SCRUB_RAMP_TICKS_PER_STEP;
+        assert_eq!(ramp_steps(cap_tick), SCRUB_MAX_STEP, "climbs up to the cap");
+        assert_eq!(
+            ramp_steps(cap_tick + 1),
+            SCRUB_MAX_STEP,
+            "and never past it"
+        );
         assert_eq!(ramp_steps(10_000), SCRUB_MAX_STEP);
     }
 
-    /// The ramp's state machine: an unbroken hold climbs, while a **reversal** or an
-    /// explicit **reset** (a fresh key press, or a swipe that stops) starts slow
-    /// again — so a tap always steps one and only a sustained hold fast-forwards.
+    /// The ramp's state machine: an unbroken hold climbs (gently), while a
+    /// **reversal** or an explicit **reset** (a fresh key press, or a swipe that
+    /// stops) starts slow again — so a tap always steps one and only a sustained hold
+    /// fast-forwards.
     #[test]
     fn the_ramp_climbs_on_hold_and_restarts_on_reverse_or_reset() {
         let mut ramp = ScrubRamp::default();
-        // A held scrub in one direction climbs one step per tick.
-        assert_eq!(ramp.advance(Scrub::Forward), 1);
-        assert_eq!(ramp.advance(Scrub::Forward), 2);
-        assert_eq!(ramp.advance(Scrub::Forward), 3);
-        // Reversing restarts the ramp at one step, then climbs afresh.
+        // The first held tick (like a tap) is one step; an unbroken hold then speeds
+        // up, never slowing, until it reaches the cap.
+        let first = ramp.advance(Scrub::Forward);
+        assert_eq!(first, 1, "the first held tick steps one");
+        let mut prev = first;
+        let mut climbed = false;
+        for _ in 0..(SCRUB_MAX_STEP as u32 * SCRUB_RAMP_TICKS_PER_STEP) {
+            let next = ramp.advance(Scrub::Forward);
+            assert!(next >= prev, "an unbroken hold never slows down");
+            climbed |= next > first;
+            prev = next;
+        }
+        assert!(climbed, "a sustained hold speeds up");
+        assert_eq!(prev, SCRUB_MAX_STEP, "and tops out at the cap");
+        // Reversing restarts the ramp at one step.
         assert_eq!(ramp.advance(Scrub::Backward), 1);
-        assert_eq!(ramp.advance(Scrub::Backward), 2);
         // An explicit reset (a fresh press / a broken hold) restarts it too.
+        ramp.advance(Scrub::Backward);
         ramp.reset();
         assert_eq!(ramp.advance(Scrub::Backward), 1);
     }
