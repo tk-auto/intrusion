@@ -20,8 +20,8 @@ use std::rc::Rc;
 
 use intrusion_core::{
     ability_at, ability_input_for_key, input_for_key, is_ability_button, is_help_button,
-    is_message_button, ui_command_for_key, AbilityId, Direction, Input, UiCommand, HEADER_ROWS,
-    STATUS_ROWS,
+    is_message_button, ui_command_for_key, AbilityId, Cell, Direction, Input, UiCommand,
+    HEADER_ROWS, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -37,7 +37,7 @@ impl Game {
     /// stop the page from scrolling on the arrows). The mapping itself lives in
     /// `core::input_for_key` where native tests pin every binding — this shell
     /// never interprets a key.
-    fn handle_key(&mut self, key: &str) -> bool {
+    fn handle_key(&mut self, key: &str, is_repeat: bool) -> bool {
         // UI commands (§11.4) come first: they toggle view state and redraw without
         // ever touching the turn loop. `Tab` deploys the ability panel.
         if let Some(command) = ui_command_for_key(key) {
@@ -52,6 +52,14 @@ impl Game {
         let Some(input) = input_for_key(key).or_else(|| ability_input_for_key(key)) else {
             return false;
         };
+        // A keyboard **auto-repeat** (`KeyboardEvent.repeat`) that would walk the
+        // player into visible danger is swallowed here (§11.6/#223): the deliberate
+        // first press (`is_repeat` false) always lands, but its held repeat stops at
+        // the edge of a seen guard's cone — going deeper takes a fresh press. Still
+        // consumed (returns `true`) so the page never scrolls on the swallowed arrow.
+        if is_repeat && self.repeat_into_danger(input) {
+            return true;
+        }
         self.step_and_draw(input);
         true
     }
@@ -62,6 +70,18 @@ impl Game {
     fn step_and_draw(&mut self, input: Input) {
         self.state.step(input);
         self.draw();
+    }
+
+    /// Whether a held movement's *repeat* of `input` must be suppressed this tick
+    /// because continuing the hold would carry the player into — or deeper through —
+    /// visible danger (§11.5/§11.6, #223). Reads the core's own overlay set
+    /// ([`State::in_visible_danger`](intrusion_core::State::in_visible_danger)) so
+    /// the shell never recomputes detection; the pure rule is [`repeat_suppressed`],
+    /// unit-tested natively below. Called for repeats only — a fresh press never
+    /// routes here, so a single deliberate step into a cone is always allowed.
+    fn repeat_into_danger(&self, input: Input) -> bool {
+        let player = self.state.player();
+        repeat_suppressed(player, input, |cell| self.state.in_visible_danger(cell))
     }
 
     /// Apply a shell-level [`UiCommand`] (§11.4) — a view toggle, never a game
@@ -152,7 +172,11 @@ impl Game {
 pub(crate) fn install_input(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
     let game = game.clone();
     let cb = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
-        if game.borrow_mut().handle_key(&e.key()) {
+        // `e.repeat()` is the browser's own held-key auto-repeat flag (§11.6): the
+        // first keydown is fresh, every held-down repeat after it carries `repeat ==
+        // true`. The shell forwards it so the core rule (#223) can treat a held
+        // repeat differently from a deliberate press without the pump interpreting.
+        if game.borrow_mut().handle_key(&e.key(), e.repeat()) {
             e.prevent_default();
         }
     });
@@ -207,6 +231,28 @@ fn gesture_input(dx: f64, dy: f64) -> Option<Input> {
         Direction::South
     };
     Some(Input::Step(direction))
+}
+
+/// Whether a held movement's **repeat** should be suppressed this tick — the pure
+/// §11.6 rule behind #223, in the spirit of [`gesture_input`]. Given the player's
+/// cell, the repeat's [`Input`], and a membership test for the §11.5 danger set
+/// (`in_danger`, wired to
+/// [`State::in_visible_danger`](intrusion_core::State::in_visible_danger)), it says
+/// whether this repeat would walk the player into visible danger and so must not
+/// fire.
+///
+/// Only a `Step` is ever gated, and only when it touches the danger set: its
+/// destination cell is watched ("a step would move you in"), or the player already
+/// stands in one ("you have just entered one" — the deliberate first step landed on
+/// the cone edge). A held press-in-place is `Wait` and must keep waiting (§11.6), so
+/// it is never gated, and a repeat on safe ground fires normally. Fresh presses
+/// never reach here — the caller routes only repeats — so a single deliberate step
+/// into a cone is always allowed.
+fn repeat_suppressed(player: Cell, input: Input, in_danger: impl Fn(Cell) -> bool) -> bool {
+    let Input::Step(direction) = input else {
+        return false;
+    };
+    in_danger(player) || player.step(direction).is_some_and(in_danger)
 }
 
 /// The browser timer currently driving a gesture's repeats: the one-shot initial
@@ -404,7 +450,16 @@ impl GesturePump {
             gesture_input(g.delta.0, g.delta.1)
         };
         if let Some(input) = input {
-            self.game.borrow_mut().step_and_draw(input);
+            let mut game = self.game.borrow_mut();
+            // A held swipe never auto-walks into visible danger (§11.6/#223): the
+            // repeat is swallowed at the cone edge, the cadence left running so
+            // dragging to a safe heading fires again — but going deeper needs a
+            // fresh gesture. A held Wait (press-in-place) is never gated and keeps
+            // waiting.
+            if game.repeat_into_danger(input) {
+                return;
+            }
+            game.step_and_draw(input);
         }
     }
 
@@ -559,5 +614,79 @@ mod tests {
     fn a_non_finite_drag_is_ignored() {
         assert_eq!(gesture_input(f64::NAN, 0.0), None);
         assert_eq!(gesture_input(0.0, f64::NEG_INFINITY), None);
+    }
+
+    /// #223's core rule, pure and native. Standing on safe ground, a held `Step`
+    /// repeat is suppressed once its **destination** is a danger cell — the hold
+    /// halts at the cone edge — while a repeat away from the danger fires normally.
+    #[test]
+    fn a_step_repeat_into_a_cone_is_suppressed_at_the_edge() {
+        // A single danger cell to the north of the player: the overlay set as a set.
+        let danger = Cell::new(5, 4);
+        let player = Cell::new(5, 5);
+        let in_danger = |c: Cell| c == danger;
+        // North steps *into* the cone — suppressed; the other three are clear.
+        assert!(repeat_suppressed(
+            player,
+            Input::Step(Direction::North),
+            in_danger
+        ));
+        for dir in [Direction::South, Direction::East, Direction::West] {
+            assert!(
+                !repeat_suppressed(player, Input::Step(dir), in_danger),
+                "a {dir:?} repeat onto clear ground fires"
+            );
+        }
+    }
+
+    /// The "just entered" half: once the player *stands* in a danger cell (the
+    /// deliberate first step having landed on the cone), every held repeat is
+    /// suppressed — even one stepping back out — so escaping the cone is a fresh,
+    /// deliberate press each time, never a blind march.
+    #[test]
+    fn a_step_repeat_while_standing_in_a_cone_is_suppressed_in_any_direction() {
+        let player = Cell::new(5, 5);
+        let in_danger = |c: Cell| c == player; // the player's own cell is watched
+        for dir in Direction::ALL {
+            assert!(
+                repeat_suppressed(player, Input::Step(dir), in_danger),
+                "in danger, a {dir:?} repeat stops"
+            );
+        }
+    }
+
+    /// A held press-in-place is `Wait`, and an activation repeat is `Activate` —
+    /// neither is a step across the cone edge, so neither is ever gated. A held Wait
+    /// must keep waiting (§11.6's hold model), even while standing in danger.
+    #[test]
+    fn only_step_repeats_are_gated() {
+        let player = Cell::new(5, 5);
+        let all_danger = |_: Cell| true; // the worst case: everything is watched
+        assert!(!repeat_suppressed(player, Input::Wait, all_danger));
+        assert!(!repeat_suppressed(
+            player,
+            Input::Activate(AbilityId::Run),
+            all_danger
+        ));
+    }
+
+    /// A step that would leave the grid's north/west edge has no destination cell
+    /// ([`Cell::step`] is `None`): the repeat is judged on the player's own cell
+    /// alone — safe there, it fires (a harmless bump); in danger there, it stops.
+    #[test]
+    fn a_step_off_the_grid_edge_is_judged_on_the_player_cell_alone() {
+        let corner = Cell::new(0, 0);
+        // Off-grid destination, player on clear ground: not suppressed.
+        assert!(!repeat_suppressed(
+            corner,
+            Input::Step(Direction::North),
+            |_| { false }
+        ));
+        // Off-grid destination, but the player already stands in danger: suppressed.
+        assert!(repeat_suppressed(
+            corner,
+            Input::Step(Direction::West),
+            |c| c == corner
+        ));
     }
 }

@@ -378,42 +378,16 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
-    // The danger overlay (§11.5), last, across terrain and entities alike: the
-    // union of every visible guard's cone. Backgrounds compose with whatever
-    // glyph is on the cell — a watched guard, a watched player, watched floor.
-    // The one exception is the player's own cell while they are concealed from
-    // that guard — in a cupboard, or crouched behind a table the guard looks
-    // across (§10.3): the overlay's promise is "red under you = detected"
-    // (§11.5), and a concealed player is not. The table itself stays red — the
-    // guard watches the furniture, just not what is ducked behind it.
-    // Inside a duct the only live window is the mouth peek (§6.1/#134): a guard seen
-    // through it is real, but the parts of its cone that fall **beyond** the peek cast
-    // are cells the player perceives only as memory, so the overlay must not paint
-    // them red — everything past the window stays memory (§11.5). On open floor a
-    // seen guard's whole cone paints, as §11.5 intends (knowledge you have); the clip
-    // is the in-duct case alone, and the player FOV *is* the peek there.
-    // The `always_show_vision_cones` level modifier (§12.6) paints the overlay in
-    // full — every guard's cone, not only the ones the player can currently see.
-    // It may only ever *widen* the overlay (§11.5 [SETTLED]): dropping the "seen"
-    // gate below reveals the cones of sensed and out-of-range guards too, strictly
-    // more red, never less. The concealment and in-duct spares stay — they subtract
-    // red for cells that genuinely are not detected, which a widening must respect.
-    let show_all_cones = state.modifiers().always_show_vision_cones;
-    let in_duct = state.in_duct();
-    for guard in state.guards() {
-        if !show_all_cones && !fov.contains(guard.pos()) {
-            continue; // an unseen guard's cone is unknown, not safe — just unknown
-        }
-        let spare_player = state.concealed_from(guard.pos());
-        for cell in guard.fov().cells() {
-            if spare_player && cell == state.player() {
-                continue;
-            }
-            if in_duct && !fov.contains(cell) {
-                continue; // the peek window only — beyond the cast is memory
-            }
-            cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
-        }
+    // The danger overlay's cone pass (§11.5), last, across terrain and entities
+    // alike: the union of every visible guard's cone. Its definition — the "seen"
+    // gate, the concealment spare (a player concealed from that guard is not
+    // detected, §10.3), the in-duct mouth-peek clip (§10.7/#134), and the
+    // `always_show_vision_cones` widening (§12.6) — lives in
+    // [`State::visible_cone_cells`], so this paint and the held-movement guard
+    // (#223) read one set and cannot disagree. Backgrounds compose with whatever
+    // glyph is on the cell: a watched guard, a watched player, watched floor.
+    for cell in state.visible_cone_cells() {
+        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
     }
 
     Grid {

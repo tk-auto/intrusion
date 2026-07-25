@@ -1109,6 +1109,49 @@ impl State {
             .flat_map(move |guard| guard.pos().line_to(player))
     }
 
+    /// The cells the §11.5 danger overlay paints from guards the player can **see**
+    /// — the union of every such guard's cone, the "detection set you can see"
+    /// [SETTLED §11.5]. Defined once here so the renderer's cone pass and the
+    /// held-movement guard ([`in_visible_danger`](Self::in_visible_danger), #223)
+    /// read the *same* set: the picture and the rule can never disagree on what a
+    /// visible cone is.
+    ///
+    /// The overlay's spares are applied here, not by the caller. The player's own
+    /// cell drops out while they are [`concealed_from`](Self::concealed_from) that
+    /// guard (§10.3 — red under you means detected, and a concealed player is not),
+    /// and inside a duct only the mouth-peek window paints (§10.7/#134 — the rest of
+    /// a cone is memory). The `always_show_vision_cones` modifier (§12.6) widens the
+    /// set to every guard's cone, seen or not; it may only ever *widen* the overlay
+    /// (§11.5 [SETTLED]), never drop a spare.
+    pub fn visible_cone_cells(&self) -> impl Iterator<Item = Cell> + '_ {
+        let show_all = self.modifiers.always_show_vision_cones;
+        let in_duct = self.in_duct();
+        let player = self.player;
+        self.guards
+            .iter()
+            .filter(move |guard| show_all || self.player_fov.contains(guard.pos()))
+            .flat_map(move |guard| {
+                let spare_player = self.concealed_from(guard.pos());
+                guard.fov().cells().filter(move |&cell| {
+                    !(spare_player && cell == player)
+                        && !(in_duct && !self.player_fov.contains(cell))
+                })
+            })
+    }
+
+    /// Whether the player currently sees `cell` painted by the §11.5 danger overlay:
+    /// inside a seen guard's cone ([`visible_cone_cells`](Self::visible_cone_cells)),
+    /// or on the momentary spot-flash sightline of a guard that has *just* detected
+    /// them from out of view ([`spot_flash`](Self::spot_flash)/#250) — both are red
+    /// the player can act on ("don't get blindly walked into detection"). Exposed so
+    /// the shell's held-movement guard (#223) reuses the overlay's own set rather
+    /// than recomputing detection: a held key or swipe stops auto-repeating the
+    /// moment a step would carry the player into one of these cells, or they already
+    /// stand in one.
+    pub fn in_visible_danger(&self, cell: Cell) -> bool {
+        self.visible_cone_cells().any(|c| c == cell) || self.spot_flash().any(|c| c == cell)
+    }
+
     /// How the player perceives `guard` this frame (§9.2), or `None` if it is neither
     /// seen nor sensed (out of range — it draws nothing, live, and is not remembered,
     /// §11.5a). This is the pure §9 classification the renderer reads:
