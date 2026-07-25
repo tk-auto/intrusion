@@ -33,10 +33,11 @@
            inline-baseline whitespace that could nudge the page into scrolling. */
         display: block;
       }
-      /* Seed sharing (§13.1/#110): a small bar overlaying the top-left corner that
-         shows the run seed and loads another. Fixed, so it never affects the canvas
-         fit; the shell keeps its taps and keystrokes off the game (crates/web/src/
-         seed.rs). Values are its own palette echo of §11.2 (Owned blue, slate). */
+      /* Seed sharing (§13.1/#110/#245): a small bar overlaying the top-left corner
+         that shows the run's level-seed string — (seed, modifiers, abilities) — and
+         loads another. Fixed, so it never affects the canvas fit; the shell keeps its
+         taps and keystrokes off the game (crates/web/src/seed.rs). Values are its own
+         palette echo of §11.2 (Owned blue, slate). */
       #seedbar {
         position: fixed;
         top: 0;
@@ -83,10 +84,10 @@
         cursor: pointer;
       }
       /* HIDDEN FOR NOW: the bar sat over the board's top-left. Until it has a home
-         that doesn't cover play, seeds come from the build (a seed-locked artifact,
-         assemble.py --seed) or the URL (`?seed=N` / `#seed=N` on the Pages deploy),
-         not this box. The wiring above stays live, so re-enabling the bar is
-         deleting just this one rule. */
+         that doesn't cover play, levels come from the build (a seed-locked artifact,
+         assemble.py --seed) or the URL (`?seed=<token>` / `#seed=<token>` on the Pages
+         deploy — a bare seed still works), not this box. The wiring above stays live,
+         so re-enabling the bar is deleting just this one rule. */
       #seedbar {
         display: none;
       }
@@ -130,7 +131,8 @@
   </head>
   <body>
     <!--
-      Seed sharing (§13.1/#110): the run's seed, and a box to load another. Wired by
+      Seed sharing (§13.1/#110/#245): the run's level-seed string — seed, modifiers,
+      and ability loadout in one compact token — and a box to load another. Wired by
       crates/web/src/seed.rs — it fills #seed-value, and reads #seed-input on the
       button or Enter. Every element is optional to the shell, so the game still
       boots if this markup is absent.
@@ -140,11 +142,11 @@
       <span id="seed-value">…</span>
       <input
         id="seed-input"
-        inputmode="numeric"
+        inputmode="text"
         autocomplete="off"
         spellcheck="false"
         placeholder="load…"
-        aria-label="Load a seed"
+        aria-label="Load a level seed"
       />
       <button id="seed-go" type="button">play</button>
     </div>

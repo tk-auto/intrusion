@@ -99,7 +99,10 @@ hyphen-separated) so the list is greppable and a build is self-identifying:
 
 - `<ticket>` — the issue number, no `#` (e.g. `110`).
 - `<seed>` — the baked seed for a seed-locked build (e.g. `8371`), or `rand` for
-  the ordinary random-seed preview.
+  the ordinary random-seed preview. For a build locked to a full level-seed *token*
+  (modifiers/loadout, #245), keep the seed here and add a short slug for the preset
+  (e.g. `intrusion-244-8371-cones-x` for `L1-8371-a-x`), so the name stays a valid
+  filename and reads at a glance.
 - `<iteration>` — a 1-based build counter for that ticket+seed; bump it each time
   you publish a *new* build of the same pair. Find the current highest with the
   Artifact tool's `action: "list"` (the names share the `intrusion-<ticket>-`
@@ -132,41 +135,56 @@ short `label` (below) for the version picker as well.
 
 Hand the URL back with one line on what changed and which branch/PR it snapshots.
 
-## 6. Hand off a specific seed (§13.1/#110)
+## 6. Hand off a specific level (§13.1/#110/#245)
 
-The shell and the headless sim (§13.2) boot the **identical** path, so a given seed
-reproduces the **same facility the bot played** — how a playtest seed (`sim --bot`
-numbers a batch `S, S+1, …`; `/playtest` flags suspicious ones) becomes a level the
-user can play by hand. There are two seeding channels, split by where the build runs.
+The shell and the headless sim (§13.2) boot the **identical** path (`start_level`),
+so a given level reproduces the **same run the bot played** — how a playtest seed
+(`sim --bot` numbers a batch `S, S+1, …`; `/playtest` flags suspicious ones) becomes
+a level the user can play by hand. A "level" is the whole reproducible config, not
+just a seed: `(seed, modifiers, abilities)` compose to one **level-seed string**
+(`LevelSeed::encode`, #245) — a bare `u64` for the default quick-play preset, or a
+versioned `L1-<seed>-<mods>-<abils>` token when it carries a chosen modifier set or
+ability loadout. There are two channels, split by where the build runs.
 
-**A Claude Artifact → bake the seed into the build.** The Artifact host strips a
-`…#seed=N` hash before the framed page ever sees it, so a shared *link* cannot seed
-an artifact. Instead pass the seed to `assemble.py`, which stamps a
-`window.__intrusionSeed` global the shell reads ahead of the URL and clock — the
-page then boots that exact facility with no URL and no typing:
+**A Claude Artifact → bake the level into the build.** The Artifact host strips a
+`…#seed=<token>` hash before the framed page ever sees it, so a shared *link* cannot
+seed an artifact. Instead pass the level-seed string to `assemble.py`, which stamps a
+`window.__intrusionSeed` global the shell reads ahead of the URL and clock — the page
+then boots that exact level with no URL and no typing:
 
 ```
+# A bare seed → quick play (the default preset):
 python3 .claude/skills/artifact-build/assemble.py \
   --dist "$SCRATCH/dist" --index web/index.html \
   --out "$SCRATCH/intrusion-8371.html" --seed 8371
+
+# A full token → a chosen preset. `L1-8371-a-x` = seed 8371, "show vision
+# cones" on, ability loadout Dephase-only (from `LevelSeed::encode`):
+python3 .claude/skills/artifact-build/assemble.py \
+  --dist "$SCRATCH/dist" --index web/index.html \
+  --out "$SCRATCH/intrusion-8371-cones-x.html" --seed L1-8371-a-x
 ```
 
-Smoke-verify and publish as usual (§§4–5). This is what you hand back when the ask
-is "let me play the seed the bot flagged" — **one artifact per seed**: publish the
-seed-locked build to *its own* URL, named `intrusion-<ticket>-<seed>-<iteration>`
-(the `--seed` above and a matching `--title`, e.g. `--title intrusion-110-8371-1`),
-rather than overwriting the ticket's `rand` preview, so both stay reachable. Say
-plainly in the handoff which seed it is locked to.
+To get the token for a config you want, encode a `LevelSeed` in a throwaway test or
+read it off the seed bar / `#seed=` URL of a running build — `assemble.py` bakes it
+verbatim and the core validates it. Smoke-verify and publish as usual (§§4–5). This
+is what you hand back when the ask is "let me play the seed the bot flagged" (or "…
+with cones shown"): **one artifact per level** — publish the locked build to *its own*
+URL, named `intrusion-<ticket>-<seed>-<iteration>` (a matching `--title`, e.g.
+`--title intrusion-110-8371-1`), rather than overwriting the ticket's `rand` preview,
+so both stay reachable. Say plainly in the handoff which level it is locked to,
+token and all.
 
-**The Pages deploy → a `?seed=N` / `#seed=N` URL.** The canonical
-`ci`/`pages` build has no baked seed, and there the URL is the real document URL, so
-`https://tk-auto.github.io/intrusion/?seed=8371` (or `#seed=8371`) boots that level.
-Hand this form over only for the live Pages URL, never for an artifact.
+**The Pages deploy → a `?seed=<token>` / `#seed=<token>` URL.** The canonical
+`ci`/`pages` build has no baked level, and there the URL is the real document URL, so
+`https://tk-auto.github.io/intrusion/?seed=8371` (or `#seed=L1-8371-a-x`) boots that
+level. A bare seed still works (backward compatible, #110). Hand this form over only
+for the live Pages URL, never for an artifact.
 
 > **The on-page seed box is hidden for now** (it sat over the board's top-left). The
-> wiring is intact behind one CSS rule in `web/index.html`, so seeds currently come
-> from the build (`--seed`) or the URL, not a box. If you re-enable it, the box
-> loads any seed live and this section's "type it in" path returns.
+> wiring is intact behind one CSS rule in `web/index.html`, so levels currently come
+> from the build (`--seed`) or the URL, not a box. If you re-enable it, the box loads
+> any level-seed string live and this section's "type it in" path returns.
 
 ## 7. Hand off a **bot replay** (§13.3/#197)
 

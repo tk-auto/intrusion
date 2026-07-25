@@ -165,6 +165,22 @@ impl AbilityId {
         AbilityId::Dephase,
     ];
 
+    /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
+    /// opposed to innate [`Run`](AbilityId::Run). This is the default eligible pool
+    /// a `starting_abilities` grant (#244) draws from: the shipped, non-experimental
+    /// tech (the gated experiments #239/#243 are not economy abilities yet, so the
+    /// pool is exactly these three). Quick play grants three of them — with three in
+    /// the pool that is all of them today; the draw only bites as the pool grows.
+    pub const TECH: [AbilityId; 3] = [AbilityId::Camouflage, AbilityId::Decoy, AbilityId::Dephase];
+
+    /// Whether this ability is **innate** (§8.3) — always in the loadout, never
+    /// drawn or found. Run is the only innate *economy* ability (Move/Wait/Takedown/
+    /// Drag are the turn loop's own verbs, not deck abilities). The innate set is
+    /// what a quick-play loadout starts with before its tech grant (#244).
+    pub fn is_innate(self) -> bool {
+        matches!(self, AbilityId::Run)
+    }
+
     /// The ability's display name (§8.3) — the identity the settled §11.6 hotkey
     /// map ([`ability_hotkey`]) is keyed by, so a name and its key stay one fact.
     pub fn name(self) -> &'static str {
@@ -202,6 +218,76 @@ impl AbilityId {
             AbilityId::Decoy => 2,
             AbilityId::Dephase => 3,
         }
+    }
+}
+
+/// The set of economy abilities a run **starts with** (§8.3/#244) — its ability
+/// loadout, one of the three pieces of a run's reproducible config alongside the
+/// seed and the [`LevelModifiers`](crate::LevelModifiers) (#245).
+///
+/// Which abilities a player holds is no longer fixed: quick play grants the innate
+/// set plus a seeded draw of tech (#244), a campaign accumulates its set across
+/// facilities (§2.2). Both resolve to *this* — a concrete, explicit set carried in
+/// the shareable level-seed string ([`LevelSeed`](crate::LevelSeed)), so a handed-
+/// around run reproduces the exact loadout, not just the geometry. Held as a
+/// membership mask over [`AbilityId::ALL`] so it stays `Copy` and small.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Loadout {
+    present: [bool; AbilityId::ALL.len()],
+}
+
+impl Loadout {
+    /// The **full** loadout: every economy ability present. This is what the deck
+    /// held before loadouts existed, so it is both the default a bare run boots and
+    /// what quick play resolves to while the tech pool is exactly three (#244).
+    pub fn full() -> Self {
+        Self {
+            present: [true; AbilityId::ALL.len()],
+        }
+    }
+
+    /// The **empty** loadout: no abilities at all. Not a state any *run* boots — a
+    /// run always holds at least its innate set — but the neutral start the level-
+    /// seed decoder (#245) and tests build a set up from, one [`with`](Self::with)
+    /// at a time.
+    pub fn empty() -> Self {
+        Self {
+            present: [false; AbilityId::ALL.len()],
+        }
+    }
+
+    /// The **innate-only** loadout: just the always-available set (§8.3, Run) and no
+    /// tech — the base a quick-play grant ([`with`](Self::with)) or a campaign
+    /// pickup adds to.
+    pub fn innate() -> Self {
+        let mut loadout = Self::empty();
+        for id in AbilityId::ALL {
+            if id.is_innate() {
+                loadout = loadout.with(id);
+            }
+        }
+        loadout
+    }
+
+    /// The same loadout with `id` added — the granted-tech / found-tech step, one
+    /// ability at a time.
+    #[must_use]
+    pub fn with(mut self, id: AbilityId) -> Self {
+        self.present[id.index()] = true;
+        self
+    }
+
+    /// Whether `id` is in the loadout — the run holds this ability.
+    pub fn contains(self, id: AbilityId) -> bool {
+        self.present[id.index()]
+    }
+
+    /// The abilities in the loadout, in the fixed [`AbilityId::ALL`] order — the
+    /// canonical order the level-seed string serialises and the deck iterates.
+    pub fn iter(self) -> impl Iterator<Item = AbilityId> {
+        AbilityId::ALL
+            .into_iter()
+            .filter(move |id| self.present[id.index()])
     }
 }
 
@@ -467,27 +553,49 @@ impl Slot {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Deck {
     slots: [Slot; AbilityId::ALL.len()],
+    /// Which abilities the run actually holds (§8.3/#244) — the resolved
+    /// [`Loadout`]. An ability absent here has no slot the player can drive: it is
+    /// never listed on the ability line, never activates (a key press is the free
+    /// §4.4 no-op), and reads as [`Unusable`](AbilityState::Unusable). For the full
+    /// loadout — every bare run today — the deck behaves exactly as before.
+    loadout: Loadout,
 }
 
 impl Deck {
-    /// A fresh deck: every ability [`Ready`](Slot::Ready) (§8.3 — the v1 set is
-    /// available from the start, #104).
-    pub(crate) fn new() -> Self {
+    /// A fresh deck holding `loadout`, every held ability [`Ready`](Slot::Ready)
+    /// (§8.3 — the starting set is available from the start, #104). Abilities not in
+    /// the loadout are inert (see [`Deck::loadout`]).
+    pub(crate) fn new(loadout: Loadout) -> Self {
         Deck {
             slots: [Slot::Ready; AbilityId::ALL.len()],
+            loadout,
         }
     }
 
-    /// The economy state of `id`, as the panel reads it (§11.4).
+    /// The economy state of `id`, as the panel reads it (§11.4). An ability the run
+    /// does not hold (not in the loadout, #244) reads as
+    /// [`Unusable`](AbilityState::Unusable) — it is real but not yours.
     pub(crate) fn state(&self, id: AbilityId) -> AbilityState {
+        if !self.loadout.contains(id) {
+            return AbilityState::Unusable;
+        }
         self.slots[id.index()].display()
     }
 
-    /// Activate `id` if it is [`Ready`](Slot::Ready). Returns whether it activated —
-    /// `true` means the turn is spent (§4.4). Activating an ability that is active or
-    /// cooling is a mis-input: a **free** no-op (`false`), like bumping a wall
-    /// (§4.4), never a partial or queued activation.
+    /// The run's loadout — the abilities it holds (#244), for the UI line to list
+    /// and a test to assert what was resolved.
+    pub(crate) fn loadout(&self) -> Loadout {
+        self.loadout
+    }
+
+    /// Activate `id` if the run holds it and it is [`Ready`](Slot::Ready). Returns
+    /// whether it activated — `true` means the turn is spent (§4.4). Activating an
+    /// ability that is not in the loadout (#244), or one already active or cooling,
+    /// is a mis-input: a **free** no-op (`false`), like bumping a wall (§4.4).
     pub(crate) fn activate(&mut self, id: AbilityId) -> bool {
+        if !self.loadout.contains(id) {
+            return false;
+        }
         let slot = &mut self.slots[id.index()];
         if *slot != Slot::Ready {
             return false;
@@ -684,7 +792,7 @@ mod economy_tests {
     /// A fresh deck is all Ready (§8.3: the v1 set is available from the start).
     #[test]
     fn a_fresh_deck_is_all_ready() {
-        let deck = Deck::new();
+        let deck = Deck::new(Loadout::full());
         for id in AbilityId::ALL {
             assert_eq!(deck.state(id), AbilityState::Ready, "{}", id.name());
         }
@@ -694,7 +802,7 @@ mod economy_tests {
     /// number the panel shows before the first end-of-turn tick (§8.2 timing).
     #[test]
     fn activation_sets_the_full_duration() {
-        let mut deck = Deck::new();
+        let mut deck = Deck::new(Loadout::full());
         assert!(deck.activate(AbilityId::Dephase));
         assert_eq!(
             deck.state(AbilityId::Dephase),
@@ -715,7 +823,7 @@ mod economy_tests {
     /// covered. (Dephase, N = 3.)
     #[test]
     fn an_n_turn_ability_is_active_for_n_ticks_including_activation() {
-        let mut deck = Deck::new();
+        let mut deck = Deck::new(Loadout::full());
         deck.activate(AbilityId::Dephase); // the activation turn is protected turn 1
         let mut active_ticks = 1;
         loop {
@@ -738,7 +846,7 @@ mod economy_tests {
     /// while Active).
     #[test]
     fn the_lockout_is_duration_plus_cooldown() {
-        let mut deck = Deck::new();
+        let mut deck = Deck::new(Loadout::full());
         deck.activate(AbilityId::Run);
 
         let mut seen_active = 0;
@@ -772,7 +880,7 @@ mod economy_tests {
     /// into its **full** cooldown (§8.2 — cancelling saves you nothing).
     #[test]
     fn toggling_off_early_pays_the_full_cooldown() {
-        let mut deck = Deck::new();
+        let mut deck = Deck::new(Loadout::full());
         deck.activate(AbilityId::Camouflage); // dur 10 / cd 20
         let mut expired = Vec::new();
         deck.tick(&mut expired); // one turn of duration used (Active 10 → 9)
@@ -826,6 +934,42 @@ mod economy_tests {
             d = dn;
         }
         assert_eq!(c, Slot::Ready);
+    }
+
+    /// The loadout seam (#244): a deck built from a partial [`Loadout`] holds only
+    /// the granted abilities. An ability the run does not have reads as
+    /// [`Unusable`](AbilityState::Unusable) and refuses activation as a **free**
+    /// no-op (§4.4), while a held one activates normally — so a key press for an
+    /// ability you were not granted does nothing, exactly like bumping a wall.
+    #[test]
+    fn a_partial_loadout_holds_only_its_granted_abilities() {
+        // Innate-only: Run is held, the tech is not.
+        let mut deck = Deck::new(Loadout::innate());
+        assert_eq!(
+            deck.state(AbilityId::Run),
+            AbilityState::Ready,
+            "Run is held"
+        );
+        for tech in AbilityId::TECH {
+            assert_eq!(
+                deck.state(tech),
+                AbilityState::Unusable,
+                "{} is not in the loadout",
+                tech.name(),
+            );
+            assert!(
+                !deck.activate(tech),
+                "{} cannot activate — a free no-op",
+                tech.name(),
+            );
+            assert_eq!(deck.state(tech), AbilityState::Unusable, "still not yours");
+        }
+        // The held ability activates as usual.
+        assert!(deck.activate(AbilityId::Run), "the held ability activates");
+        assert!(matches!(
+            deck.state(AbilityId::Run),
+            AbilityState::Active { .. }
+        ));
     }
 
     /// An **instant** ability (duration 0) has no active window: it activates

@@ -35,7 +35,7 @@
 //! guard's destination the same way and reuse the same walk-toward-it movement.
 
 use crate::ability::{
-    AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, TargetingMode,
+    AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout, TargetingMode,
 };
 use crate::body::Body;
 
@@ -702,7 +702,10 @@ impl State {
             dragging: None,
             decoy: None,
             drag_debt: false,
-            abilities: Deck::new(),
+            // A hand-built state holds the full loadout — the deck as it was before
+            // loadouts (#244); [`with_loadout`](Self::with_loadout) narrows it to a
+            // resolved preset at boot.
+            abilities: Deck::new(Loadout::full()),
             objectives,
             exit,
             turn: 0,
@@ -755,6 +758,28 @@ impl State {
     #[must_use]
     pub fn modifiers(&self) -> LevelModifiers {
         self.modifiers
+    }
+
+    /// Thread the run's resolved ability **loadout** into the state (§8.3/#244) —
+    /// the set of economy abilities the player actually holds. Quick play grants
+    /// the innate set plus a seeded draw of tech, a campaign accumulates its set
+    /// (§2.2); both resolve to a [`Loadout`] carried in the shareable level-seed
+    /// string (#245). A state built without this keeps the full loadout (every
+    /// ability), which is all a test of the whole set needs; the real game and the
+    /// sim resolve and thread a preset's loadout at boot. Set before the first
+    /// [`step`](Self::step): a fresh deck is all-ready, so this only chooses which
+    /// abilities exist, never their live state.
+    #[must_use]
+    pub fn with_loadout(mut self, loadout: Loadout) -> Self {
+        self.abilities = Deck::new(loadout);
+        self
+    }
+
+    /// The run's ability loadout (§8.3/#244) — the abilities it holds, for a test
+    /// to assert what a preset resolved and for the level-seed string to carry.
+    #[must_use]
+    pub fn loadout(&self) -> Loadout {
+        self.abilities.loadout()
     }
 
     /// Set the chance a Calm guard closes a hinged door behind itself, as a
@@ -1083,16 +1108,30 @@ impl State {
         self.objectives.iter().filter(|o| !o.taken).count()
     }
 
-    /// Whether the exit will accept the player — the run's intel gate (§10.2/§4.5).
-    /// **[START] — experiment (§15 Q4/§13):** the exit opens once **at least one**
-    /// intel is in hand rather than the full set. Grabbing one objective and leaving
-    /// is a complete run; grabbing more is for the aggressive play (and a future
-    /// score, §15 Q4) to reward, not a requirement. This shortens the baseline §13.2
-    /// bot's exposure — the all-intel march pinned it in the facility long enough to
-    /// be caught nearly every seed — so the outcome profile stays mixed (§13.3). A
-    /// level with no objectives (never generated in v1) is winnable at once.
+    /// Whether the exit will accept the player — the run's **intel gate**
+    /// (§10.2/§4.5), now a level modifier ([`IntelGate`](crate::IntelGate)/#244)
+    /// rather than one fixed rule, so the three modes gate the same facility
+    /// differently:
+    ///
+    /// - [`All`](crate::IntelGate::All) — quick play (#244): every objective must be
+    ///   taken. Gather the intel, then get out (§10.2).
+    /// - [`AtLeastOne`](crate::IntelGate::AtLeastOne) — the §4.5 [START] baseline and
+    ///   the sim (§13.3): one intel in hand is a complete run, which keeps the bot's
+    ///   outcome profile mixed (the all-intel march got it caught nearly every seed).
+    /// - [`None`](crate::IntelGate::None) — campaign (§14 v3): intel is currency
+    ///   (§2.2), not an exit key, so the exit never refuses.
+    ///
+    /// A level with no objectives is winnable at once under every gate (an empty
+    /// `all` is vacuously satisfied).
     pub fn exit_ready(&self) -> bool {
-        self.objectives.is_empty() || self.objectives.iter().any(|o| o.taken)
+        use crate::modifiers::IntelGate;
+        match self.modifiers.intel_to_exit {
+            IntelGate::None => true,
+            IntelGate::AtLeastOne => {
+                self.objectives.is_empty() || self.objectives.iter().any(|o| o.taken)
+            }
+            IntelGate::All => self.objectives.iter().all(|o| o.taken),
+        }
     }
 
     /// The cells of consoles whose intel has been **taken** — spent objectives
@@ -1154,8 +1193,13 @@ impl State {
     /// [`render_screen`]: crate::render_screen
     /// [`ability_at`]: crate::ability_at
     pub fn ability_statuses(&self) -> Vec<AbilityStatus> {
-        AbilityId::ALL
-            .into_iter()
+        // Only the abilities the run actually holds (#244): the loadout, in the
+        // fixed deck order. An ability the player was not granted is not a greyed
+        // row — it is simply absent from the line, so the strip never advertises a
+        // key that does nothing.
+        self.abilities
+            .loadout()
+            .iter()
             .map(|id| AbilityStatus {
                 id,
                 state: self.ability_state(id),

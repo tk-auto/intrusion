@@ -1,22 +1,27 @@
-//! Replay capture (§12.4): a run is `(seed, [inputs])`, and this is the sim's
+//! Replay capture (§12.4): a run is `(level, [inputs])`, and this is the sim's
 //! shareable form of one.
 //!
 //! The *notation* — the string that spells an [`Input`] stream — lives in the
 //! core ([`intrusion_core::to_script`]/[`parse_script`](intrusion_core::parse_script)),
 //! shared by every consumer. What lives here is the sim-specific half: the
-//! [`Replay`] value the `--emit-replay` mode hands out (the seed paired with the
+//! [`Replay`] value the `--emit-replay` mode hands out (the level paired with the
 //! captured inputs), and the end-to-end round-trip test that a captured bot run
 //! replays byte-for-byte through [`Scripted`](crate::Scripted).
 
-use intrusion_core::{to_script, Input};
+use intrusion_core::{to_script, Input, LevelSeed};
 
-/// A captured run: the seed and the exact [`Input`] stream a policy issued
+/// A captured run: the [`LevelSeed`] and the exact [`Input`] stream a policy issued
 /// (§12.4). The pair is the whole replay — feed `inputs` back through
-/// [`Scripted`](crate::Scripted) on `seed` and the run reproduces.
+/// [`Scripted`](crate::Scripted) on the level's seed and the run reproduces.
+///
+/// The level, not a bare seed, is what the replay carries (#245): it is the run's
+/// whole config `(seed, modifiers, abilities)`, so a baked replay boots the same
+/// preset the sim captured it under — the `AtLeastOne` intel gate (§13.3), not quick
+/// play's stricter one — and the playback matches the captured run exactly.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Replay {
-    /// The seed the run booted from.
-    pub seed: u64,
+    /// The level the run booted from — its whole reproducible config.
+    pub level: LevelSeed,
     /// The inputs issued, in order.
     pub inputs: Vec<Input>,
 }
@@ -28,12 +33,16 @@ impl Replay {
     }
 
     /// The replay as a single JSON line — the §12.4 pair and nothing else, the
-    /// shareable form `--emit-replay` prints and slice C bakes into an Artifact.
-    /// `inputs` is the script string; feed it back on `seed` to reproduce the run.
+    /// shareable form `--emit-replay` prints and slice C bakes into an Artifact. The
+    /// `seed` field is the **level-seed string** ([`LevelSeed::encode`]) — a bare
+    /// number for quick play, a `L1-…` token when the preset carries non-default
+    /// modifiers or a loadout — so the baked run reproduces its config, not just its
+    /// geometry (#245). `inputs` is the script string; feed it back on the level to
+    /// reproduce the run.
     pub fn to_json_line(&self) -> String {
         format!(
-            "{{\"seed\":{},\"inputs\":\"{}\"}}",
-            self.seed,
+            "{{\"seed\":\"{}\",\"inputs\":\"{}\"}}",
+            self.level.encode(),
             self.script()
         )
     }
@@ -46,18 +55,26 @@ mod tests {
     use intrusion_core::{parse_script, AbilityId, Direction};
 
     /// The emit schema is pinned byte-for-byte (slice C reads it): the `(seed,
-    /// inputs)` pair, the inputs in the script notation, nothing else.
+    /// inputs)` pair, the `seed` field now the **level-seed string** carrying the
+    /// captured preset (#245), the inputs in the script notation, nothing else. The
+    /// sim preset for seed 42 is a non-default config (the `AtLeastOne` gate, the full
+    /// loadout), so its token is the structured `L1-…` form.
     #[test]
     fn the_emit_schema_is_pinned() {
         let replay = Replay {
-            seed: 42,
+            level: LevelSeed::sim(42),
             inputs: vec![
                 Input::Step(Direction::North),
                 Input::Activate(AbilityId::Run),
                 Input::Wait,
             ],
         };
-        assert_eq!(replay.to_json_line(), "{\"seed\":42,\"inputs\":\"N+r.\"}");
+        assert_eq!(
+            replay.to_json_line(),
+            "{\"seed\":\"L1-42-4-rcdx\",\"inputs\":\"N+r.\"}"
+        );
+        // The baked token decodes straight back to the captured preset.
+        assert_eq!(LevelSeed::decode("L1-42-4-rcdx"), Some(LevelSeed::sim(42)));
     }
 
     /// The §12.4 property, asserted end to end (slice A acceptance): capture a bot

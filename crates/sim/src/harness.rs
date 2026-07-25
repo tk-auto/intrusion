@@ -7,10 +7,7 @@
 //! [`Event`] stream as the run steps, never scraped from state or the rendered
 //! grid.
 
-use intrusion_core::{
-    generate_level, Direction, Event, GenError, Input, LevelConfig, LevelModifiers,
-    ModifierSources, Outcome, Rng, State,
-};
+use intrusion_core::{start_level, Event, GenError, Input, LevelSeed, Outcome};
 
 use crate::policy::{PlayerPolicy, Recording};
 use crate::replay::Replay;
@@ -92,24 +89,12 @@ pub fn run_one(
     // One seed per run (§12.4): the carve stream continues into the turn loop, where
     // the guard close-behind roll draws from it (§10.4/#146), so a sim run is as
     // deterministic and as faithful to the web build as the rest of the pipeline.
-    // The facility's level modifiers (§12.6), resolved once at boot exactly as the
-    // web shell does. The bot plays the baseline here — the same default set quick
-    // play boots (a modifier sweep is a follow-up, #244's `intel_to_exit`).
-    let modifiers = ModifierSources::chosen(LevelModifiers::default()).resolve();
-
-    let mut rng = Rng::new(seed);
-    let (layout, placement) = generate_level(&LevelConfig::V1, &mut rng)?;
-    let guards = placement.guards(&layout);
-    let mut state = State::new(
-        layout,
-        placement.player(),
-        Direction::North,
-        guards,
-        placement.intel().iter().copied(),
-        placement.exit(),
-    )
-    .with_rng(rng)
-    .with_modifiers(modifiers);
+    // The sim boots through the *same* [`start_level`] path the web shell and the
+    // replay viewer use (§13.2) — only the preset differs: the sim's [`IntelGate`]
+    // is `AtLeastOne`, which keeps the bot's outcome profile mixed (§13.3), where
+    // web quick play requires the full set (#244). The full loadout lets the bot
+    // reach for any ability.
+    let mut state = start_level(&LevelSeed::sim(seed))?;
 
     let mut record = RunRecord {
         seed,
@@ -161,13 +146,16 @@ pub fn run_one(
 /// Run one seeded game under `policy` and capture the replay alongside the
 /// metrics (§12.4): the same [`run_one`] loop, but with the policy wrapped so
 /// every issued input is recorded. Returns the run's [`RunRecord`] and the
-/// [`Replay`] — `(seed, [inputs])` — that reproduces it through
+/// [`Replay`] — `(level, [inputs])` — that reproduces it through
 /// [`Scripted`](crate::Scripted).
 ///
-/// Recording is a transparent decorator, so the captured run is byte-identical
-/// to an unwrapped one; feeding the returned inputs back on the same seed lands
-/// on the same record. This is the sim half of the replay loop the web viewer
-/// (#197) plays back.
+/// The replay carries the **sim [`LevelSeed`]** it was captured under, not a bare
+/// seed (#245): the sim's intel gate is `AtLeastOne` (§13.3), so a baked replay must
+/// boot *that* preset in the web viewer, or the run would replay against quick play's
+/// stricter gate and diverge. Recording is a transparent decorator, so the captured
+/// run is byte-identical to an unwrapped one; feeding the returned inputs back on the
+/// same seed lands on the same record. This is the sim half of the replay loop the
+/// web viewer (#197) plays back.
 pub fn capture_one<P: PlayerPolicy>(
     seed: u64,
     policy: P,
@@ -176,7 +164,7 @@ pub fn capture_one<P: PlayerPolicy>(
     let mut recording = Recording::new(policy);
     let record = run_one(seed, &mut recording, input_cap)?;
     let replay = Replay {
-        seed,
+        level: LevelSeed::sim(seed),
         inputs: recording.into_inputs(),
     };
     Ok((record, replay))
@@ -201,7 +189,7 @@ pub fn run_batch<P: PlayerPolicy>(
 mod tests {
     use super::*;
     use crate::policy::Scripted;
-    use intrusion_core::{AbilityId, Input};
+    use intrusion_core::{AbilityId, Direction, Input};
 
     /// The acceptance criterion verbatim (§12.4): the same `(seed, policy)`
     /// twice produces byte-identical metric rows.
