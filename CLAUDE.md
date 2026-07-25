@@ -39,6 +39,9 @@ skill rather than improvising its workflow. The intended loop:
   iterating.
 - **`/playtest`** — balance metrics via the headless sim (§13.2). **Incomplete**
   until `crates/sim` exists.
+- **`/list-issues`** — list the repo's issues (open, closed, or both) as a
+  compact index, filtering by state/label and paging in small batches so the
+  large issue bodies don't swamp the reply.
 
 Conventions live inside each skill (ticket taxonomy in `create-tickets`; the
 branch/test/lint/commit/PR rules in `work-ticket`), so follow the skill rather

@@ -10,6 +10,7 @@ slash command (e.g. `/create-tickets`) or by describing the task.
 | [`survey`](survey/SKILL.md) | Quick code-health survey — files/functions too large or complex, muddy naming, modules that lost their focus, duplication, stale comments, convention drift. Ranks the top few and feeds them to `create-tickets`. | Ready |
 | [`artifact-build`](artifact-build/SKILL.md) | Build the wasm bundle locally, pack it into one self-contained HTML page, smoke-verify it headlessly, and publish it as a Claude Artifact — a playable preview at a stable URL, no Pages deploy needed. | Ready |
 | [`playtest`](playtest/SKILL.md) | Run the headless sim (§13.2) over a batch of seeds, report the balance metrics against a stored baseline, and flag suspicious seeds to play. | Ready |
+| [`list-issues`](list-issues/SKILL.md) | List the repo's issues — open, closed, or both — as a compact index (number/title/state/labels), filtering by state/label and paging in small batches so the large issue bodies don't swamp the reply. Deep-reads one issue on demand. | Ready |
 
 ## The intended loop
 
