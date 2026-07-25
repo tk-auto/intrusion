@@ -4563,16 +4563,19 @@ fn a_blocked_step_with_one_open_side_slides_past() {
     );
 }
 
-/// §57/§4.4: a blocked step with **both** laterals open is ambiguous — a genuine
-/// mis-aim — so it stays the free wall-bump it has always been (§4.4). Nothing
-/// moves, no turn is spent.
+/// §57/§4.4: a blocked step with **both** laterals open *and* both forward-diagonals
+/// open — a lone pillar, clear either way — is genuinely ambiguous, so it stays the
+/// free wall-bump it has always been (§4.4). The forward-diagonal tiebreak refuses
+/// (both open), nothing moves, no turn is spent.
 #[test]
 fn a_blocked_step_with_both_sides_open_does_not_slide() {
     let mut layout = open_room(6, 6);
-    layout.place(Cell::new(3, 2), Terrain::Wall); // pillar dead ahead (east)
+    layout.place(Cell::new(3, 2), Terrain::Wall); // lone pillar dead ahead (east)
     let mut s = State::new(
         layout,
-        Cell::new(2, 2), // both north (2,1) and south (2,3) are open floor
+        // Both laterals — north (2,1), south (2,3) — and both forward-diagonals —
+        // north-east (3,1), south-east (3,3) — are open floor: nothing to round.
+        Cell::new(2, 2),
         Direction::East,
         Vec::new(),
         Vec::new(),
@@ -4586,7 +4589,7 @@ fn a_blocked_step_with_both_sides_open_does_not_slide() {
         vec![Event::Bumped {
             into: Cell::new(3, 2)
         }],
-        "two open sides is ambiguous — a free bump, no slide",
+        "a lone pillar, open both ways round, is ambiguous — a free bump, no slide",
     );
     assert_eq!(s.player(), Cell::new(2, 2), "nothing moved");
     assert_eq!(s.turn(), turn_before, "an ambiguous bump stays free");
@@ -4660,16 +4663,16 @@ fn the_slide_never_auto_enters_an_interactable_lateral() {
     );
 }
 
-/// §57/§2.2/§4.5 — the fairness guard: a slide is refused if the destination lies
-/// in a guard's cone, so an auto-move never drops the player silently into
-/// detection. The guard's straight-south cone covers the one open lateral; the
-/// bump falls back to the free no-op.
+/// §57/§4.5 — detection is deliberately *not* guarded: a slide may land in a
+/// guard's cone, because being seen is not losing (§4.5) and the player chose to
+/// press into the obstacle. The guard's straight-south cone covers the one open
+/// lateral, yet the slide proceeds — dodging cones is a separate follow-up ticket.
 #[test]
-fn the_slide_is_refused_into_a_guards_cone() {
+fn the_slide_proceeds_into_a_guards_cone_being_seen_is_not_losing() {
     let mut layout = open_room(10, 10);
     layout.place(Cell::new(4, 3), Terrain::Wall); // pillar dead ahead (north)
     layout.place(Cell::new(3, 4), Terrain::Wall); // west lateral blocked
-                                                  // east lateral (5,4) is plain floor — but a guard two cells north watches it.
+                                                  // east lateral (5,4) is plain floor — a guard two cells north watches it.
     let dest = Cell::new(5, 4);
     let mut s = State::new(
         layout,
@@ -4683,22 +4686,19 @@ fn the_slide_is_refused_into_a_guards_cone() {
         s.guards()[0].fov().contains(dest),
         "precondition: the guard's cone covers the destination",
     );
+    assert!(
+        s.guards()[0].pos().manhattan_distance(dest) > 1,
+        "precondition: the guard is not adjacent — only the cone is at stake",
+    );
     let turn_before = s.turn();
 
-    let events = s.step(Input::Step(Direction::North));
-    assert_eq!(
-        events,
-        vec![Event::Bumped {
-            into: Cell::new(4, 3)
-        }],
-        "the only open lateral is seen — the slide is refused, a free bump",
-    );
+    s.step(Input::Step(Direction::North));
     assert_eq!(
         s.player(),
-        Cell::new(4, 4),
-        "the player did not slide into the cone"
+        dest,
+        "the slide proceeds into the cone — detection is not the slide's concern",
     );
-    assert_eq!(s.turn(), turn_before, "a refused slide stays free");
+    assert_eq!(s.turn(), turn_before + 1, "the slide spends the turn");
 }
 
 /// §57/§2.2/§4.5 — the fairness guard, capture clause: a slide is refused when a
@@ -4744,5 +4744,138 @@ fn the_slide_is_refused_next_to_a_guard_that_could_capture() {
         Cell::new(4, 4),
         "the player did not slide next to the guard"
     );
+    assert_eq!(s.turn(), turn_before, "a refused slide stays free");
+}
+
+/// §57: with **both** laterals open, the forward-diagonal breaks the tie — the
+/// slide rounds the obstacle toward the side where the path continues. A pillar
+/// dead ahead that also blocks the north-east forward-diagonal, with the
+/// south-east one open, slides *south* (not north): the obstacle extends left, so
+/// you round it right. Still one orthogonal step — the diagonal is only read.
+#[test]
+fn both_sides_open_slides_round_the_obstacle_by_the_open_diagonal() {
+    let mut layout = open_room(8, 8);
+    layout.place(Cell::new(4, 3), Terrain::Wall); // pillar dead ahead (east)
+    layout.place(Cell::new(4, 2), Terrain::Wall); // north-east forward-diagonal blocked
+                                                  // south-east forward-diagonal (4,4) stays open floor; both laterals (3,2)/(3,4) open
+    let mut s = State::new(
+        layout,
+        Cell::new(3, 3),
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(6, 6),
+    );
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::Moved {
+            to: Cell::new(3, 4)
+        }],
+        "the obstacle blocks the NE diagonal — round it south toward the open SE",
+    );
+    assert_eq!(s.player(), Cell::new(3, 4), "slid one cell south");
+    assert_eq!(
+        s.facing(),
+        Direction::South,
+        "facing follows the slide (§5)"
+    );
+    assert_eq!(s.turn(), turn_before + 1, "the slide spends the turn");
+}
+
+/// §57: the reported playtest case (#57) — crouched against the long edge of a
+/// two-cell table, pressing *into* it (a held-crouch dead bump) with both laterals
+/// open. The table's second cell blocks the near forward-diagonal while the far one
+/// is open, so the slide rounds the table toward the open corridor rather than
+/// dead-stopping on "blocked".
+///
+/// ```text
+///   . . π      the table's far cell blocks the NE forward-diagonal
+///   . @ π   →  press east into the held table
+///   . . .      the SE forward-diagonal is open — round south
+/// ```
+#[test]
+fn crouched_against_a_two_cell_table_slides_round_it() {
+    let mut layout = open_room(8, 8);
+    layout.place(Cell::new(4, 2), Terrain::PartialCover); // the two-cell table…
+    layout.place(Cell::new(4, 3), Terrain::PartialCover); // …the player crouches behind
+    let mut s = State::new(
+        layout,
+        Cell::new(3, 3),
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(6, 6),
+    );
+
+    // First east bump crouches behind the table run {(4,2),(4,3)} (§10.3).
+    let crouch = s.step(Input::Step(Direction::East));
+    assert!(
+        crouch.contains(&Event::Crouched {
+            behind: Cell::new(4, 3)
+        }),
+        "the first bump crouches behind the table",
+    );
+    assert_eq!(
+        s.player(),
+        Cell::new(3, 3),
+        "crouching does not move the player"
+    );
+    let turn_after_crouch = s.turn();
+
+    // Second east bump is a held-crouch dead bump: both laterals (3,2)/(3,4) are
+    // open, the table's second cell (4,2) blocks the NE forward-diagonal, and the
+    // SE (4,4) is open — so it rounds the table south.
+    let slide = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        slide,
+        vec![Event::Moved {
+            to: Cell::new(3, 4)
+        }],
+        "the held-crouch bump rounds the two-cell table south",
+    );
+    assert_eq!(
+        s.player(),
+        Cell::new(3, 4),
+        "slid one cell south, round the table"
+    );
+    assert_eq!(
+        s.facing(),
+        Direction::South,
+        "facing follows the slide (§5)"
+    );
+    assert_eq!(s.turn(), turn_after_crouch + 1, "the slide spends the turn");
+}
+
+/// §57/§4.4: with both laterals open but **both** forward-diagonals blocked (the
+/// obstacle walls off the path both ways round), the tiebreak has no answer — it
+/// stays a free bump, nothing moves.
+#[test]
+fn both_sides_open_but_both_diagonals_blocked_does_not_slide() {
+    let mut layout = open_room(8, 8);
+    layout.place(Cell::new(4, 3), Terrain::Wall); // dead ahead (east)
+    layout.place(Cell::new(4, 2), Terrain::Wall); // NE forward-diagonal blocked
+    layout.place(Cell::new(4, 4), Terrain::Wall); // SE forward-diagonal blocked
+    let mut s = State::new(
+        layout,
+        Cell::new(3, 3), // laterals (3,2)/(3,4) open, but neither leads onward
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(6, 6),
+    );
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(4, 3)
+        }],
+        "blocked both ways round — no unambiguous side, a free bump",
+    );
+    assert_eq!(s.player(), Cell::new(3, 3), "nothing moved");
     assert_eq!(s.turn(), turn_before, "a refused slide stays free");
 }

@@ -2,12 +2,30 @@
 //!
 //! When a player's step is blocked by a **dead-bump obstacle** — a wall, a
 //! pillar, an occupied cupboard, a table already crouched behind: the bumps that
-//! today just no-op (§4.4) — and **exactly one** of the two perpendicular cells
-//! is plain, safe, enterable floor, the player slides one cell that way instead
-//! of catching on the corner. It smooths the "brush past a pillar while fleeing
-//! and have to re-input the turn" friction (§10.1a/§7.6) without adding a diagonal
-//! move (§4.1 [SETTLED]): the slide is one orthogonal step, chosen only when it is
-//! *unambiguous*.
+//! today just no-op (§4.4) — and a perpendicular cell is plain, safe, enterable
+//! floor, the player slides one cell that way instead of catching on the corner.
+//! It smooths the "brush past a pillar while fleeing and re-input the turn"
+//! friction (§10.1a/§7.6) without adding a diagonal move (§4.1 [SETTLED]): the
+//! slide is one orthogonal step, taken only when the *way round the obstacle is
+//! unambiguous*.
+//!
+//! **Choosing the side.** The two perpendicular cells decide it:
+//! - Exactly **one** is a valid slide target → slide there (the tight-corridor
+//!   case: a pillar ahead with a wall on one side).
+//! - **Both** are valid → not a dead end, but not yet unambiguous. Break the tie
+//!   by the *shape of the obstacle*: round it toward the side whose
+//!   **forward-diagonal** (one step ahead, one step that way) is open floor — the
+//!   side where the path keeps going — when exactly one forward-diagonal is open.
+//!   Brushing the long edge of a two-cell table, the table blocks one
+//!   forward-diagonal and the corridor continues past the other, so the slide
+//!   follows the corridor (#57 playtest). If **both** forward-diagonals are open
+//!   (a lone pillar, clear either way) or **neither** is (boxed in past the
+//!   corners), it stays genuinely ambiguous and refuses.
+//! - **Neither** perpendicular is valid → refuse.
+//!
+//! The forward-diagonal is only ever *read*, never moved into — the slide is
+//! always the orthogonal step to the chosen perpendicular cell, so §4.1's no-
+//! diagonal-movement rule holds.
 //!
 //! This is an **experiment** (see the ticket): shipped behind the smallest seam —
 //! `resolve_step`'s final dead-bump arm calls [`State::try_lateral_shift`] before
@@ -19,9 +37,7 @@
 //!    §4.4's "every action that changes the world costs the turn" governs — a *free*
 //!    slide would be free movement, a far worse hole in the economy than the typo
 //!    §4.4 protects. The typo cost is contained instead by the *unambiguous* gate:
-//!    a genuine mis-aim in a corridor (wall ahead, both sides open) is **ambiguous**
-//!    and still free-bumps; only a bump with exactly one open side — where the open
-//!    side is almost always the way you meant to go — spends the turn and moves.
+//!    a mis-aim with no single answer stays free.
 //! 2. **Does the shift change facing? Yes — to the shift direction.** §5 is
 //!    [SETTLED]: "facing is the direction of the last successful step." The slide is
 //!    a successful step sideways, so facing follows it, and the sight phase recasts
@@ -43,19 +59,20 @@
 //!
 //! **Fairness is the hard constraint (§2.2/§4.5).** Capture is contact, and
 //! permadeath demands every capture trace to a decision the player made — so an
-//! auto-move must never drop the player where a guard captures them, nor silently
-//! into a guard's cone. [`State::shift_is_safe`] refuses the slide unless the
-//! destination is clear of *both*: no guard's cone covers it (you never land seen),
-//! and no guard stands orthogonally adjacent to it (nothing can step in and capture
-//! next guard phase, §7.1's one-cell orthogonal move). When in doubt the slide is
-//! refused and the bump falls back to the free §4.4 no-op it has always been —
-//! losing nothing, only declining to help. (One noted wrinkle for the playtest: a
-//! slide refused by an *unseen* guard's cone is faintly informative, since it would
-//! otherwise have fired; the safety of never auto-walking into detection is judged
-//! to outweigh it.)
+//! auto-move must never drop the player where a guard captures them.
+//! [`State::shift_is_safe`] refuses the slide when a guard stands orthogonally
+//! adjacent to the destination (it could step in and capture next guard phase,
+//! §7.1's one-cell orthogonal move). When in doubt the slide falls back to the free
+//! §4.4 no-op — losing nothing, only declining to help.
+//!
+//! **Detection is deliberately *not* guarded here.** A slide may land in a guard's
+//! cone: being seen is not losing (§4.5), only the beginning of a problem, and the
+//! player chose to press into the obstacle. Teaching the slide to dodge cones —
+//! and settling the §5 tension it raises (dodging an *unseen* cone would leak that
+//! a hidden guard is watching) — is its own follow-up ticket, out of scope here.
 
-use super::{BumpKind, Event, State};
-use crate::cell::Direction;
+use super::{BumpKind, Event, State, ACTOR_FILL};
+use crate::cell::{Cell, Direction};
 
 impl State {
     /// Try to slide one cell past a dead-bump obstacle (#57), the player having
@@ -73,19 +90,17 @@ impl State {
             return false;
         }
 
-        // Exactly one lateral must qualify — the *unambiguous* gate. Two open sides
-        // (a real mis-aim) or none both leave the bump free, unchanged (§4.4).
-        let mut only = None;
-        for lateral in dir.perpendicular() {
-            if self.lateral_shift_target(lateral) {
-                if only.is_some() {
-                    return false; // both sides qualify — ambiguous, no slide
-                }
-                only = Some(lateral);
-            }
-        }
-        let Some(lateral) = only else {
-            return false; // neither side qualifies
+        let [a, b] = dir.perpendicular();
+        let chosen = match (self.lateral_shift_target(a), self.lateral_shift_target(b)) {
+            (true, false) => Some(a),
+            (false, true) => Some(b),
+            // Both sides qualify: the obstacle's shape breaks the tie — round it
+            // toward the side whose forward-diagonal is open (the path continues).
+            (true, true) => self.round_toward_open_diagonal(dir, a, b),
+            (false, false) => None,
+        };
+        let Some(lateral) = chosen else {
+            return false;
         };
         let target = self
             .player
@@ -104,6 +119,33 @@ impl State {
         true
     }
 
+    /// The forward-diagonal tiebreak (#57): with *both* laterals open, round the
+    /// obstacle toward the side whose forward-diagonal — one step `dir`, one step
+    /// that lateral — is open floor, i.e. where the path keeps going past the
+    /// obstacle. Returns that lateral when **exactly one** forward-diagonal is open;
+    /// `None` when both are (a lone obstacle, equally clear either way) or neither is
+    /// (boxed in past the corners) — both genuinely ambiguous, so refuse. Reads
+    /// terrain only — the static obstacle shape — and moves nothing diagonally: the
+    /// slide is still the orthogonal step to the chosen lateral (§4.1 [SETTLED]).
+    fn round_toward_open_diagonal(
+        &self,
+        dir: Direction,
+        a: Direction,
+        b: Direction,
+    ) -> Option<Direction> {
+        let forward_diagonal_open = |lateral: Direction| {
+            self.player
+                .step(dir)
+                .and_then(|forward| forward.step(lateral))
+                .is_some_and(|diagonal| self.layout.facility().can_enter(diagonal, ACTOR_FILL))
+        };
+        match (forward_diagonal_open(a), forward_diagonal_open(b)) {
+            (true, false) => Some(a),
+            (false, true) => Some(b),
+            _ => None,
+        }
+    }
+
     /// Whether the cell one step `lateral` from the player is a valid slide
     /// destination: plain enterable floor (a [`BumpKind::Move`]) that holds no loose
     /// body and no decoy — so the slide triggers no interaction the player did not
@@ -119,15 +161,16 @@ impl State {
     }
 
     /// The fairness gate (§2.2/§4.5): a cell is safe to be auto-slid into only if no
-    /// guard's cone covers it — the player never lands seen — and no guard stands
-    /// orthogonally adjacent to it — nothing can step in and capture next guard
-    /// phase (§7.1: guards move one orthogonal cell a turn). A downed guard is a
+    /// guard stands orthogonally adjacent to it — nothing can step in and capture
+    /// next guard phase (§7.1: guards move one orthogonal cell a turn). Detection is
+    /// *not* checked — a slide may land in a guard's cone (being seen is not losing,
+    /// §4.5); dodging cones is a separate follow-up ticket. A downed guard is a
     /// [`Body`](crate::body::Body), not in `guards`, and never moves or captures, so
     /// scanning the live guards alone is the whole threat set.
-    fn shift_is_safe(&self, cell: crate::cell::Cell) -> bool {
+    fn shift_is_safe(&self, cell: Cell) -> bool {
         !self
             .guards
             .iter()
-            .any(|g| g.fov().contains(cell) || g.pos().manhattan_distance(cell) == 1)
+            .any(|g| g.pos().manhattan_distance(cell) == 1)
     }
 }
