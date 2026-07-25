@@ -74,6 +74,12 @@
 use super::{BumpKind, Event, State, ACTOR_FILL};
 use crate::cell::{Cell, Direction};
 
+/// Whether the auto lateral-shift is on by default (#57). **On** — the experiment
+/// ships enabled so it is judged in play; it is gated behind a runtime switch
+/// ([`State::set_auto_slide`]) only so a playtest can turn it off without a code
+/// change, and so it can be disabled wholesale if it proves to fight §4.4/§5.
+pub(super) const AUTO_SLIDE_DEFAULT: bool = true;
+
 impl State {
     /// Try to slide one cell past a dead-bump obstacle (#57), the player having
     /// aimed `dir` into it. Returns whether a slide happened — `true` spends the
@@ -81,6 +87,11 @@ impl State {
     /// no-op free. Called from `resolve_step`'s dead-bump arm only, so `dir` is
     /// always a bump that would otherwise change nothing.
     pub(super) fn try_lateral_shift(&mut self, dir: Direction, events: &mut Vec<Event>) -> bool {
+        // The kill-switch (#57): off, every dead bump stays the free §4.4 no-op it
+        // always was — the whole experiment reduces to nothing.
+        if !self.auto_slide {
+            return false;
+        }
         // Never while dragging — hands are full and movement is capped at the drag's
         // half speed (§8.3); an auto-slide must not haul a body sideways. Never
         // inside a duct — the crawlspace confinement owns movement there (§10.7), and

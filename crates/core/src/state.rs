@@ -643,6 +643,12 @@ pub struct State {
     /// tickets. Defaults to [`GUARD_DWELL_CHANCE_PERCENT`]; `0` disables dwelling
     /// entirely (and draws no RNG, so it perturbs nothing), `100` always dwells.
     dwell_chance: u32,
+    /// Whether the auto lateral-shift past an obstacle is on (§57/#57) — the
+    /// runtime kill-switch for the traversal experiment. Defaults to
+    /// [`AUTO_SLIDE_DEFAULT`](traversal::AUTO_SLIDE_DEFAULT) (on); `false` makes
+    /// every dead bump the free §4.4 no-op again, so the feature can be disabled
+    /// for a playtest — or wholesale — without touching the slide logic.
+    auto_slide: bool,
 }
 
 impl State {
@@ -703,6 +709,7 @@ impl State {
             rng: Rng::new(0),
             close_chance: GUARD_CLOSE_CHANCE_PERCENT,
             dwell_chance: GUARD_DWELL_CHANCE_PERCENT,
+            auto_slide: traversal::AUTO_SLIDE_DEFAULT,
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -739,6 +746,16 @@ impl State {
     /// saturate. Deterministic given the seed threaded by [`with_rng`](Self::with_rng).
     pub fn set_guard_dwell_chance(&mut self, percent: u32) {
         self.dwell_chance = percent.min(100);
+    }
+
+    /// Turn the auto lateral-shift past an obstacle on or off (§57/#57) — the
+    /// runtime kill-switch for the traversal experiment, on by default
+    /// ([`AUTO_SLIDE_DEFAULT`](traversal::AUTO_SLIDE_DEFAULT)). `false` restores the
+    /// plain §4.4 free bump on every dead-end step, so a playtest — or a later
+    /// decision to drop the experiment — can disable it without a code change to the
+    /// slide logic.
+    pub fn set_auto_slide(&mut self, enabled: bool) {
+        self.auto_slide = enabled;
     }
 
     /// The level geometry (§10.5) — read-only outside the core.

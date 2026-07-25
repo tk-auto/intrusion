@@ -4879,3 +4879,33 @@ fn both_sides_open_but_both_diagonals_blocked_does_not_slide() {
     assert_eq!(s.player(), Cell::new(3, 3), "nothing moved");
     assert_eq!(s.turn(), turn_before, "a refused slide stays free");
 }
+
+/// §57: the kill-switch. With the auto-slide turned off, the one-open-side case
+/// that would slide (`a_blocked_step_with_one_open_side_slides_past`) reverts to
+/// the plain §4.4 free bump — nothing moves, no turn is spent.
+#[test]
+fn the_auto_slide_kill_switch_restores_the_free_bump() {
+    let mut layout = open_room(6, 6);
+    layout.place(Cell::new(3, 1), Terrain::Wall); // the pillar dead ahead (east)
+    let mut s = State::new(
+        layout,
+        Cell::new(2, 1), // north border wall blocked, south floor open — would slide
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(4, 4),
+    );
+    s.set_auto_slide(false);
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(3, 1)
+        }],
+        "with the slide off, the dead bump is the free §4.4 no-op",
+    );
+    assert_eq!(s.player(), Cell::new(2, 1), "nothing moved");
+    assert_eq!(s.turn(), turn_before, "a free bump does not spend the turn");
+}
