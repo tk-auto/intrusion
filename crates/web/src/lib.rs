@@ -236,6 +236,7 @@ pub fn start() -> Result<(), JsValue> {
         level,
         replay,
         replay_hud: None,
+        key_ramp: replay::ScrubRamp::default(),
     }));
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
     if game.borrow().replay.is_some() {
@@ -294,6 +295,10 @@ struct Game {
     /// The replay HUD's position element (`K / total`), wired in replay mode only —
     /// `None` in live play. Held so every redraw can refresh it ([`replay`]).
     replay_hud: Option<Element>,
+    /// The keyboard scrub's acceleration ramp (§12.4/#227), used in replay mode
+    /// only: a held Space/→/← climbs it and a fresh press resets it. Its touch
+    /// counterpart lives on each scrub gesture; live play never touches either.
+    key_ramp: replay::ScrubRamp,
 }
 
 impl Game {

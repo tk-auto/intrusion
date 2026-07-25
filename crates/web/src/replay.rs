@@ -54,25 +54,23 @@ impl ReplayView {
         self.cursor
     }
 
-    /// Advance the cursor one input, clamped at the end. Returns whether it moved,
-    /// so a scrub at `K == total` is a silent no-op, never a wrap.
-    fn forward(&mut self) -> bool {
-        if self.cursor < self.inputs.len() {
-            self.cursor += 1;
-            true
-        } else {
-            false
-        }
+    /// Advance the cursor by `count` inputs, clamped at the end. Returns whether it
+    /// moved, so a scrub at `K == total` is a silent no-op, never a wrap. A held
+    /// scrub advances several at once (the #227 ramp); the state is re-simulated
+    /// **once** at the new cursor, not per skipped input, so a big jump stays O(K).
+    fn forward_by(&mut self, count: usize) -> bool {
+        let target = self.cursor.saturating_add(count).min(self.inputs.len());
+        let moved = target != self.cursor;
+        self.cursor = target;
+        moved
     }
 
-    /// Rewind the cursor one input, clamped at `0`. Returns whether it moved.
-    fn backward(&mut self) -> bool {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-            true
-        } else {
-            false
-        }
+    /// Rewind the cursor by `count` inputs, clamped at `0`. Returns whether it moved.
+    fn backward_by(&mut self, count: usize) -> bool {
+        let target = self.cursor.saturating_sub(count);
+        let moved = target != self.cursor;
+        self.cursor = target;
+        moved
     }
 
     /// The state at the current cursor: the seed's facility re-run through the first
@@ -190,17 +188,81 @@ fn scrub_direction(dx: f64, dy: f64) -> Option<Scrub> {
     })
 }
 
+/// How many cursor steps a top-rate held scrub advances per tick (§12.4/#227). The
+/// ramp climbs to this and no further, so even a very long hold keeps readable
+/// motion instead of skipping the whole run in one blank frame. A [START] value: on
+/// the v1 footprint (a few hundred inputs) at [`REPEAT_INTERVAL_MS`], the ramp
+/// reaches this after ~1.7 s and thereafter clears ~65 inputs/s — a gentle
+/// fast-forward, while a tap still steps one.
+const SCRUB_MAX_STEP: usize = 8;
+
+/// How many held ticks add one step to the scrub rate (§12.4/#227) — the ramp's
+/// slope. Larger is **gentler**: the hold speeds up more slowly, so a short hold
+/// stays fine-grained and only a sustained one fast-forwards. A [START] value.
+const SCRUB_RAMP_TICKS_PER_STEP: u32 = 2;
+
+/// The scrub ramp (§12.4/#227): how many cursor steps a single held scrub tick
+/// advances, given how many ticks the scrub has been held **unbroken**. The first
+/// tick of a hold (`ticks_held == 0`) — and a lone tap — advances exactly one; every
+/// [`SCRUB_RAMP_TICKS_PER_STEP`] further ticks add one more, so a sustained hold
+/// speeds up gently, capped at [`SCRUB_MAX_STEP`]. Pure in the tick count so the ramp
+/// is testable natively, in the spirit of [`scrub_direction`] /
+/// [`gesture_input`](crate::input); counting **ticks**, not wall-clock, keeps
+/// keyboard auto-repeat and a held swipe feeling the same and keeps the rule
+/// clock-free.
+fn ramp_steps(ticks_held: u32) -> usize {
+    ((ticks_held / SCRUB_RAMP_TICKS_PER_STEP) as usize + 1).min(SCRUB_MAX_STEP)
+}
+
+/// The running ramp of a held scrub: the direction currently held and how many ticks
+/// it has repeated unbroken. Shared by both scrub inputs — the keyboard's auto-repeat
+/// (one instance on [`Game`]) and a held swipe (one per [`ScrubGesture`]) — so
+/// acceleration feels the same however the run is scrubbed. It only tracks the tick;
+/// the step count itself is the pure [`ramp_steps`].
+#[derive(Default)]
+pub(crate) struct ScrubRamp {
+    dir: Option<Scrub>,
+    ticks: u32,
+}
+
+impl ScrubRamp {
+    /// Advance the ramp for one scrub tick in `dir` and return how many cursor steps
+    /// it should move. A tick continuing the same unbroken hold climbs the ramp; a
+    /// **reversal** (or the first tick after a [`reset`](Self::reset)) restarts it at
+    /// one step. Pure book-keeping around [`ramp_steps`] — no clock, no world.
+    fn advance(&mut self, dir: Scrub) -> usize {
+        if self.dir == Some(dir) {
+            self.ticks += 1;
+        } else {
+            self.dir = Some(dir);
+            self.ticks = 0;
+        }
+        ramp_steps(self.ticks)
+    }
+
+    /// Break the hold, so the next [`advance`](Self::advance) starts slow again.
+    /// Called when a scrub stops without the ramp's owner being destroyed — a fresh
+    /// key press (as opposed to its auto-repeat), or a swipe tick that finds no scrub
+    /// this frame (the finger pulled back inside the threshold).
+    fn reset(&mut self) {
+        self.dir = None;
+        self.ticks = 0;
+    }
+}
+
 /// The replay-mode half of [`Game`]: drive the time cursor, never the world.
 impl Game {
-    /// Move the replay cursor one step in `dir`, rebuild the shown state, and
+    /// Move the replay cursor `count` steps in `dir`, rebuild the shown state, and
     /// repaint — or do nothing if the cursor is already clamped at that end. The
-    /// state is re-simulated from the seed (§12.4), so this changes no world; it is
-    /// the pure-view seam every replay input (a key, a scrub tick, a tap) drives.
-    fn scrub(&mut self, dir: Scrub) -> bool {
+    /// state is re-simulated from the seed **once** at the new cursor (§12.4), so a
+    /// held-scrub jump of many steps stays a single O(K) re-simulation and changes no
+    /// world; it is the pure-view seam every replay input (a key, a scrub tick, a
+    /// tap) drives.
+    fn scrub_by(&mut self, dir: Scrub, count: usize) -> bool {
         let moved = match self.replay.as_mut() {
             Some(view) => match dir {
-                Scrub::Forward => view.forward(),
-                Scrub::Backward => view.backward(),
+                Scrub::Forward => view.forward_by(count),
+                Scrub::Backward => view.backward_by(count),
             },
             None => return false,
         };
@@ -219,13 +281,23 @@ impl Game {
     /// step forward, `←` steps back — each repeating on hold through the browser's
     /// own key auto-repeat, the keyboard counterpart of holding a swipe. Returns
     /// whether the key was consumed, so the page keeps its other keys.
-    fn handle_replay_key(&mut self, key: &str) -> bool {
+    ///
+    /// A held key **accelerates** (§12.4/#227): `is_repeat` is the browser's own
+    /// auto-repeat flag, so a fresh press resets the ramp (one step) and each held
+    /// repeat climbs it, exactly as a held swipe does. Releasing the key stops the
+    /// OS repeat, so the scrub halts instantly with no timer to leak (§11.6); the
+    /// next fresh press starts slow again.
+    fn handle_replay_key(&mut self, key: &str, is_repeat: bool) -> bool {
         let dir = match key {
             " " | "ArrowRight" => Scrub::Forward,
             "ArrowLeft" => Scrub::Backward,
             _ => return false,
         };
-        self.scrub(dir);
+        if !is_repeat {
+            self.key_ramp.reset();
+        }
+        let steps = self.key_ramp.advance(dir);
+        self.scrub_by(dir, steps);
         true
     }
 
@@ -258,7 +330,10 @@ pub(crate) fn install(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(
     {
         let game = game.clone();
         let cb = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
-            if game.borrow_mut().handle_replay_key(&e.key()) {
+            // `e.repeat()` is the browser's held-key auto-repeat flag: false on the
+            // deliberate first press, true on every held repeat after it — the ramp's
+            // tick source (§12.4/#227), the keyboard counterpart of a held swipe.
+            if game.borrow_mut().handle_replay_key(&e.key(), e.repeat()) {
                 e.prevent_default();
             }
         });
@@ -281,6 +356,11 @@ struct ScrubGesture {
     /// **tap** — one step forward — resolved at the lift; a hold in place (no
     /// horizontal swipe) never fires, so it too resolves as that single tap.
     fired: bool,
+    /// The acceleration ramp of this held swipe (§12.4/#227): each unbroken tick in
+    /// the same direction advances more of the cursor, up to the cap. Reversing the
+    /// swipe or pulling back inside the threshold restarts it; lifting destroys the
+    /// gesture and the ramp with it, so a fresh swipe always starts slow.
+    ramp: ScrubRamp,
     timer: RepeatTimer,
 }
 
@@ -333,6 +413,7 @@ impl ScrubPump {
                 origin: (e.client_x() as f64, e.client_y() as f64),
                 delta: (0.0, 0.0),
                 fired: false,
+                ramp: ScrubRamp::default(),
                 timer: RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false)),
             });
         }
@@ -357,13 +438,15 @@ impl ScrubPump {
                     g.fired = true;
                     clear_timer(g.timer);
                     g.timer = RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false));
-                    Some(dir)
+                    // The swipe's first scrub — one step (a fresh ramp), then each
+                    // held tick climbs it (§12.4/#227).
+                    Some((dir, g.ramp.advance(dir)))
                 }
                 _ => None,
             }
         };
-        if let Some(dir) = first {
-            self.game.borrow_mut().scrub(dir);
+        if let Some((dir, steps)) = first {
+            self.game.borrow_mut().scrub_by(dir, steps);
         }
     }
 
@@ -371,7 +454,7 @@ impl ScrubPump {
     /// scrub one step that way; a hold in place (no horizontal swipe) scrubs
     /// nothing. On the one-shot delay, settle into the steady cadence.
     fn on_tick(&self) {
-        let dir = {
+        let scrub = {
             let mut active = self.active.borrow_mut();
             let Some(g) = active.as_mut() else {
                 return; // released while the tick was in flight — nothing may fire
@@ -382,13 +465,20 @@ impl ScrubPump {
             match scrub_direction(g.delta.0, g.delta.1) {
                 Some(dir) => {
                     g.fired = true;
-                    Some(dir)
+                    // A held tick climbs the ramp; a reversal restarts it (handled
+                    // inside `advance`), so a long hold fast-forwards (§12.4/#227).
+                    Some((dir, g.ramp.advance(dir)))
                 }
-                None => None,
+                None => {
+                    // Pulled back inside the threshold: no scrub, and the hold is
+                    // broken — a fresh swipe out must start slow again.
+                    g.ramp.reset();
+                    None
+                }
             }
         };
-        if let Some(dir) = dir {
-            self.game.borrow_mut().scrub(dir);
+        if let Some((dir, steps)) = scrub {
+            self.game.borrow_mut().scrub_by(dir, steps);
         }
     }
 
@@ -407,7 +497,7 @@ impl ScrubPump {
         };
         e.prevent_default();
         if tap {
-            self.game.borrow_mut().scrub(Scrub::Forward);
+            self.game.borrow_mut().scrub_by(Scrub::Forward, 1);
         }
     }
 
@@ -490,6 +580,91 @@ mod tests {
     fn a_non_finite_drag_is_ignored() {
         assert_eq!(scrub_direction(f64::NAN, 0.0), None);
         assert_eq!(scrub_direction(0.0, f64::INFINITY), None);
+    }
+
+    /// The scrub ramp (§12.4/#227), pure and pinned: the first held tick — and a lone
+    /// tap — advances exactly one, the rate climbs one step every
+    /// [`SCRUB_RAMP_TICKS_PER_STEP`] ticks (a gentle slope), and it caps at
+    /// [`SCRUB_MAX_STEP`] so a very long hold still leaves readable motion instead of
+    /// skipping the whole run in one frame.
+    #[test]
+    fn the_ramp_starts_at_one_and_caps() {
+        assert_eq!(ramp_steps(0), 1, "the first tick / a tap steps exactly one");
+        assert_eq!(
+            ramp_steps(1),
+            1,
+            "still one part-way through the first stride"
+        );
+        assert_eq!(ramp_steps(2), 2, "one extra step per stride of ticks");
+        assert_eq!(ramp_steps(3), 2);
+        assert_eq!(ramp_steps(4), 3);
+        // Climbs up to the cap and never past it.
+        let cap_tick = (SCRUB_MAX_STEP as u32 - 1) * SCRUB_RAMP_TICKS_PER_STEP;
+        assert_eq!(ramp_steps(cap_tick), SCRUB_MAX_STEP, "climbs up to the cap");
+        assert_eq!(
+            ramp_steps(cap_tick + 1),
+            SCRUB_MAX_STEP,
+            "and never past it"
+        );
+        assert_eq!(ramp_steps(10_000), SCRUB_MAX_STEP);
+    }
+
+    /// The ramp's state machine: an unbroken hold climbs (gently), while a
+    /// **reversal** or an explicit **reset** (a fresh key press, or a swipe that
+    /// stops) starts slow again — so a tap always steps one and only a sustained hold
+    /// fast-forwards.
+    #[test]
+    fn the_ramp_climbs_on_hold_and_restarts_on_reverse_or_reset() {
+        let mut ramp = ScrubRamp::default();
+        // The first held tick (like a tap) is one step; an unbroken hold then speeds
+        // up, never slowing, until it reaches the cap.
+        let first = ramp.advance(Scrub::Forward);
+        assert_eq!(first, 1, "the first held tick steps one");
+        let mut prev = first;
+        let mut climbed = false;
+        for _ in 0..(SCRUB_MAX_STEP as u32 * SCRUB_RAMP_TICKS_PER_STEP) {
+            let next = ramp.advance(Scrub::Forward);
+            assert!(next >= prev, "an unbroken hold never slows down");
+            climbed |= next > first;
+            prev = next;
+        }
+        assert!(climbed, "a sustained hold speeds up");
+        assert_eq!(prev, SCRUB_MAX_STEP, "and tops out at the cap");
+        // Reversing restarts the ramp at one step.
+        assert_eq!(ramp.advance(Scrub::Backward), 1);
+        // An explicit reset (a fresh press / a broken hold) restarts it too.
+        ramp.advance(Scrub::Backward);
+        ramp.reset();
+        assert_eq!(ramp.advance(Scrub::Backward), 1);
+    }
+
+    /// The cursor's multi-step jumps (the ramp's payload): a held scrub advances the
+    /// cursor several inputs at once, clamped at either end and never wrapping — so a
+    /// big jump lands on an exact `K` the shown state is then re-simulated from once
+    /// (§12.4), and forward/backward to the same `K` land on the same cursor.
+    #[test]
+    fn the_cursor_jumps_by_count_and_clamps_at_both_ends() {
+        let mut view = ReplayView {
+            level: LevelSeed::quick_play(1),
+            inputs: vec![Input::Wait; 5],
+            cursor: 0,
+        };
+        // A multi-step forward jump advances exactly that many.
+        assert!(view.forward_by(3));
+        assert_eq!(view.cursor(), 3);
+        // Overshooting clamps to the end but still counts as movement.
+        assert!(view.forward_by(10));
+        assert_eq!(view.cursor(), 5);
+        // At the end, a further scrub is a silent no-op, never a wrap.
+        assert!(!view.forward_by(4));
+        assert_eq!(view.cursor(), 5);
+        // Rewind is symmetric and saturates at zero.
+        assert!(view.backward_by(2));
+        assert_eq!(view.cursor(), 3);
+        assert!(view.backward_by(99));
+        assert_eq!(view.cursor(), 0);
+        assert!(!view.backward_by(1));
+        assert_eq!(view.cursor(), 0);
     }
 
     /// The URL/hash reader accepts an `inputs=` field from either fragment, tolerates
