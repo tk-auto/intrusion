@@ -5631,3 +5631,45 @@ fn the_autodoors_flow_is_deterministic() {
     assert_eq!(events_a, events_b, "same inputs → same events");
     assert_eq!(frame_a, frame_b, "same inputs → same frame");
 }
+
+/// The flight edge on **automatic** doors (§7.6, #241): a door opened via Autodoors
+/// is shut *promptly* behind the player — the turn they clear the throat — rather
+/// than lingering open for its full `delay` (§10.4/#147). Here the delay is a long
+/// 5, so without the ability the door would idle open for several turns; the ability
+/// makes the break immediate, exactly as it does for a manual door.
+#[test]
+fn autodoors_shuts_an_automatic_door_promptly_behind() {
+    let (mut s, door) = auto_door_state(5); // a deliberately slow self-close timer
+    let panel = Cell::new(3, 2);
+
+    s.step(Input::Activate(AbilityId::Autodoors));
+
+    // Step through: the automatic door opens ahead and the player walks onto it in
+    // the one turn, exactly as a manual door does.
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), panel, "walked into the doorway in one turn");
+    assert!(s.layout().regions().door(door).is_open());
+    assert!(
+        s.autodoors_pending.contains(&door),
+        "the automatic door is armed too"
+    );
+
+    // Clear the throat: the ability shuts it at once — its delay-5 timer has barely
+    // begun, so this is far sooner than #147 alone would.
+    let e = s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), Cell::new(4, 2), "through to the far room");
+    assert!(
+        e.iter().any(|ev| matches!(
+            ev,
+            Event::DoorClosed {
+                by_player: true,
+                ..
+            }
+        )),
+        "the automatic door shuts behind at once, not on its slow timer",
+    );
+    assert!(
+        !s.layout().regions().door(door).is_open(),
+        "shut promptly, not left to idle open",
+    );
+}

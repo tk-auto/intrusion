@@ -460,15 +460,15 @@ const DEPHASE: Ability = Ability {
     cooldown: 30,
     behaviour: Behaviour::Effects(&[Effect::Phase]),
 };
-// Autodoors [START] (§8.3): "several turns" of duration on a "medium" cooldown —
-// long enough to walk a stretch of corridor door-to-door, then a real wait before
-// the next flight (§7.6). Self-target toggle; free to cancel (§4.4).
+// Autodoors [START] (§8.3): a long active window — enough to walk a whole stretch
+// of corridor door-to-door through a chase — paid for by a long lockout before the
+// next flight (§7.6). Self-target toggle; free to cancel (§4.4).
 const AUTODOORS: Ability = Ability {
     id: AbilityId::Autodoors,
     cost: 1,
     targeting: TargetingMode::Itself,
-    duration: 8,
-    cooldown: 20,
+    duration: 16,
+    cooldown: 40,
     behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
 };
 
@@ -785,8 +785,8 @@ mod economy_tests {
                 AbilityId::Autodoors,
                 1,
                 TargetingMode::Itself,
-                8,
-                20,
+                16,
+                40,
                 Effect::AutoDoors,
             ),
         ] {

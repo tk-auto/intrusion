@@ -641,10 +641,11 @@ pub struct State {
     /// player steps through it ([`BumpKind::AutoDoor`]) and swings shut — via the
     /// §10.4 crush-safe close ([`close_armed_autodoors`](Self::close_armed_autodoors))
     /// — on the first world turn its throat is clear of the player and any dragged
-    /// body, then drops from the set. Only **manual** doors are armed: an automatic
-    /// door shuts itself on its own timer (§10.4/#147), so it is left to that path.
-    /// A small set — a player passes through one door at a time — so a plain `Vec`
-    /// scan beats a map.
+    /// body, then drops from the set. **Both** door kinds are armed: a manual door has
+    /// no self-close, and an automatic one would otherwise dawdle open for its full
+    /// `delay` (§10.4/#147) — too slow for the flight edge, so the ability shuts it
+    /// promptly too. A small set — a player passes through one door at a time — so a
+    /// plain `Vec` scan beats a map.
     autodoors_pending: Vec<DoorId>,
     /// The guards that **freshly** detected the player on the last spent turn — the
     /// transition [`Event::Detected`] reports (§7.6) — as indices into
@@ -2452,17 +2453,20 @@ impl State {
     }
 
     /// Arm the door at `cell` for the Autodoors close-behind (§8.3/§7.6): remember it
-    /// so [`close_armed_autodoors`](Self::close_armed_autodoors) shuts it once the
-    /// player clears the throat. Only **manual** doors are armed — an automatic door
-    /// has no handle and shuts itself on a timer (§10.4/#147), so it is left to
-    /// [`tick_auto_doors`](Layout::tick_auto_doors). Idempotent: a door already armed
-    /// (the player lingering on its panel) is not queued twice.
+    /// so [`close_armed_autodoors`](Self::close_armed_autodoors) shuts it the moment
+    /// the player clears the throat. Both kinds are armed: a **manual** door has no
+    /// self-close, and an **automatic** door would otherwise linger open for its full
+    /// `delay` (§10.4/#147) — too slow for a flight tool, so the ability shuts it
+    /// early too (the edge is the *prompt* break of sight, §7.6). Its own
+    /// [`tick_auto_doors`](Layout::tick_auto_doors) still governs it when opened any
+    /// other way. Idempotent: a door already armed (the player lingering on its panel)
+    /// is not queued twice.
     fn arm_autodoor_close(&mut self, cell: Cell) {
         let regions = self.layout.regions();
         let Some(id) = regions.door_at(cell) else {
             return;
         };
-        if regions.door(id).is_automatic() || self.autodoors_pending.contains(&id) {
+        if self.autodoors_pending.contains(&id) {
             return;
         }
         self.autodoors_pending.push(id);
