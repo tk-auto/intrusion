@@ -41,6 +41,44 @@ pub enum UiCommand {
     ToggleHelp,
 }
 
+/// A navigation command inside the **open** help panel (§14 v2/#248) — distinct
+/// from the [`UiCommand`] that *opens* it, because while the panel is up it is
+/// **modal**: it captures input, so the shell routes keys here first and the game
+/// never steps underneath. Closing and tab-switching are the only actions; every
+/// other key is swallowed by the open panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HelpNav {
+    /// Dismiss the panel — `?` (the toggle, still closing what it opened) or the
+    /// conventional `Escape`. The panel is full-screen, so this is the escape path
+    /// the header `[?]` button used to be (§11.6: never inescapable).
+    Close,
+    /// Move to the next tab (Level info → Legend → …), cycling — `Tab`, or the
+    /// rightward movement keys (`→` / `l` / `6`), read here as "next".
+    NextTab,
+    /// Move to the previous tab, cycling — the leftward movement keys (`←` / `h` /
+    /// `4`).
+    PrevTab,
+}
+
+/// Map a key to the [`HelpNav`] it drives **while the help panel is open**, or
+/// `None` for a key the modal panel simply swallows. The shell consults this
+/// before every other table when [`ScreenUi::help_open`](crate::ScreenUi) is set:
+/// the panel is modal (§14 v2/#248), so no key falls through to a game action or
+/// another UI toggle while it is up.
+///
+/// The movement keys are re-read as tab motion — `→`/`l`/`6` next, `←`/`h`/`4`
+/// prev — so the same left/right the board uses walks the tab bar; `Tab` (which
+/// *deploys* the ability panel in game) advances the tabs here instead. `?` and
+/// `Escape` both close, the two conventional exits.
+pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
+    match key {
+        "?" | "Escape" => Some(HelpNav::Close),
+        "Tab" | "ArrowRight" | "l" | "6" => Some(HelpNav::NextTab),
+        "ArrowLeft" | "h" | "4" => Some(HelpNav::PrevTab),
+        _ => None,
+    }
+}
+
 /// Map a key to the [`UiCommand`] it drives, or `None` for a key that is not a UI
 /// control. The shell consults this *before* [`input_for_key`]: a key claimed here
 /// toggles view state and redraws without ever touching [`State`](crate::State).
@@ -191,6 +229,43 @@ mod tests {
                 ui_command_for_key(key),
                 None,
                 "key {key:?} owns no UI command"
+            );
+        }
+    }
+
+    /// #248: while the help panel is open it is **modal** — the shell routes keys
+    /// through [`help_nav_for_key`] first. `?`/`Escape` close it, `Tab` and the
+    /// rightward/leftward keys switch tabs, and every other key is swallowed (`None`)
+    /// so the game never steps underneath the open card.
+    #[test]
+    fn the_open_help_panel_captures_input_and_switches_tabs() {
+        for key in ["?", "Escape"] {
+            assert_eq!(
+                help_nav_for_key(key),
+                Some(HelpNav::Close),
+                "{key:?} closes"
+            );
+        }
+        for key in ["Tab", "ArrowRight", "l", "6"] {
+            assert_eq!(
+                help_nav_for_key(key),
+                Some(HelpNav::NextTab),
+                "{key:?} → next tab"
+            );
+        }
+        for key in ["ArrowLeft", "h", "4"] {
+            assert_eq!(
+                help_nav_for_key(key),
+                Some(HelpNav::PrevTab),
+                "{key:?} → prev tab"
+            );
+        }
+        // A movement/wait/ability/other-UI key is swallowed by the open modal panel.
+        for key in ["k", "j", "w", "5", "r", "t", "m", "Enter"] {
+            assert_eq!(
+                help_nav_for_key(key),
+                None,
+                "{key:?} is swallowed while help is open"
             );
         }
     }

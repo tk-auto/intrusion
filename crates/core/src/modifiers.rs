@@ -128,7 +128,91 @@ pub struct LevelModifiers {
     pub intel_to_exit: IntelGate,
 }
 
+/// Which way a level modifier bends a run's difficulty (§12.6) — the *harder* /
+/// *easier* marker each [`LevelModifiers`] field documents, promoted from doc-only
+/// prose to real data the help panel (#248) reads, colours, and asserts against.
+/// *Harder* raises the pressure on a run, *easier* lowers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModifierDirection {
+    /// Raises the pressure on the run — the help card cues it in the §11.2 Warning
+    /// colour (a threat is hunting), the same orange a harder rule reads as.
+    Harder,
+    /// Lowers it, a rule bent in the player's favour — cued in the §11.2 Owned
+    /// colour (yours), the calm blue that reads apart from every threat shade.
+    Easier,
+}
+
+/// One **active** level modifier, described for the help panel (#248): a
+/// human-readable name, the direction it bends difficulty, and — for a bounded
+/// knob — the value it currently sits at. Produced by [`LevelModifiers::active`]
+/// so the card is **derived**, never hand-copied (§11.3): a new modifier field
+/// surfaces here on its own and cannot be silently omitted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ActiveModifier {
+    /// The modifier's name, as the player reads it on the card.
+    pub name: &'static str,
+    /// Which way it bends the run — the card's colour cue.
+    pub direction: ModifierDirection,
+    /// A bounded knob's current value (e.g. `"all of it"`), or `None` for a plain
+    /// on/off toggle whose name says all there is. Shaped for the knobs that land
+    /// with #232/#244; only toggles and the intel gate produce one today.
+    pub detail: Option<&'static str>,
+}
+
 impl LevelModifiers {
+    /// The modifiers **active** for this run, each described for display (#248):
+    /// every field sitting off its baseline, in reading order. The baseline
+    /// ([`LevelModifiers::default`]) yields an empty list — the help panel reads
+    /// that as *none active* — and a knob resting at its baseline value
+    /// ([`IntelGate::AtLeastOne`]) is likewise not "active".
+    ///
+    /// The set is **derived**, never a hand-copied table (§11.3): the fields are
+    /// destructured, so adding a modifier is a compile error here until it is
+    /// described — this is the single place the active set is enumerated, mirroring
+    /// the derived glyph legend. Direction is real data ([`ModifierDirection`]), so
+    /// the card's colour cue can never disagree with a field's documented sense.
+    #[must_use]
+    pub fn active(&self) -> Vec<ActiveModifier> {
+        // Destructure, don't field-access: a new modifier field fails to compile
+        // here until it is given a row, the compile-time half of the §11.3 rule.
+        let LevelModifiers {
+            guards_always_search_hideouts,
+            always_show_vision_cones,
+            intel_to_exit,
+        } = *self;
+        let mut active = Vec::new();
+        if guards_always_search_hideouts {
+            active.push(ActiveModifier {
+                name: "Guards search hideouts",
+                direction: ModifierDirection::Harder,
+                detail: None,
+            });
+        }
+        if always_show_vision_cones {
+            active.push(ActiveModifier {
+                name: "All vision cones shown",
+                direction: ModifierDirection::Easier,
+                detail: None,
+            });
+        }
+        // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
+        // settings are "active", each with the direction its exposure rank implies.
+        match intel_to_exit {
+            IntelGate::AtLeastOne => {} // the §4.5 baseline — nothing to surface
+            IntelGate::All => active.push(ActiveModifier {
+                name: "Intel to exit",
+                direction: ModifierDirection::Harder,
+                detail: Some("all of it"),
+            }),
+            IntelGate::None => active.push(ActiveModifier {
+                name: "Intel to exit",
+                direction: ModifierDirection::Easier,
+                detail: Some("none required"),
+            }),
+        }
+        active
+    }
+
     /// Compose two contributions into one active set. A toggle is active if
     /// **any** source requests it (field-wise OR) — sources add pressure, they do
     /// not cancel each other. When bounded knobs arrive they compose
@@ -253,6 +337,74 @@ mod tests {
         .resolve();
         assert!(resolved.always_show_vision_cones);
         assert!(resolved.guards_always_search_hideouts);
+    }
+
+    /// #248: the active set is **derived** from the fields, each described with its
+    /// documented direction — so flipping any single modifier surfaces exactly it on
+    /// the help card, and the baseline surfaces nothing. This mirrors the derived
+    /// glyph legend: the display cannot drift from the resolved value, and adding a
+    /// field is a compile error in `active` until it is described.
+    #[test]
+    fn the_active_set_describes_each_modifier_by_direction() {
+        // Baseline: nothing is active — the card reads "none active".
+        assert!(LevelModifiers::default().active().is_empty());
+
+        // A harder toggle, alone, surfaces exactly itself in the Harder direction.
+        let harder = LevelModifiers {
+            guards_always_search_hideouts: true,
+            ..LevelModifiers::default()
+        };
+        assert_eq!(
+            harder.active(),
+            vec![ActiveModifier {
+                name: "Guards search hideouts",
+                direction: ModifierDirection::Harder,
+                detail: None,
+            }]
+        );
+
+        // An easier toggle carries the Easier direction, its colour cue on the card.
+        let easier = LevelModifiers {
+            always_show_vision_cones: true,
+            ..LevelModifiers::default()
+        };
+        assert_eq!(
+            easier.active(),
+            vec![ActiveModifier {
+                name: "All vision cones shown",
+                direction: ModifierDirection::Easier,
+                detail: None,
+            }]
+        );
+
+        // The intel gate is a bounded knob: its two non-baseline settings each carry
+        // a direction *and* a rendered value; resting at the baseline surfaces nothing.
+        let all = LevelModifiers {
+            intel_to_exit: IntelGate::All,
+            ..LevelModifiers::default()
+        };
+        assert_eq!(
+            all.active(),
+            vec![ActiveModifier {
+                name: "Intel to exit",
+                direction: ModifierDirection::Harder,
+                detail: Some("all of it"),
+            }]
+        );
+        let none = LevelModifiers {
+            intel_to_exit: IntelGate::None,
+            ..LevelModifiers::default()
+        };
+        assert_eq!(none.active()[0].direction, ModifierDirection::Easier);
+        assert_eq!(none.active()[0].detail, Some("none required"));
+
+        // Several sources at once: every active field is listed, in reading order.
+        let stacked = LevelModifiers {
+            guards_always_search_hideouts: true,
+            always_show_vision_cones: true,
+            intel_to_exit: IntelGate::All,
+        };
+        assert_eq!(stacked.active().len(), 3);
     }
 
     #[test]
