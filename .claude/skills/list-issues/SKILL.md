@@ -36,8 +36,13 @@ than asking.
 
 ## The large-content problem, and how to dodge it
 
-`list_issues` returns each issue's **full body**. Do not fetch a wide page of
-them and echo them back. Instead:
+`list_issues` returns each issue's **full body**, and `minimal_output: true`
+does **not** drop it (it trims some author/label metadata but keeps the whole
+body) — so it is *not* a size lever here; don't reach for it expecting relief.
+This repo's bodies are long enough that a wide page blows the tool-result token
+limit and the harness **spills the whole payload to a file** instead of
+returning it (a 40-issue page is ~150 KB). Don't fetch a wide page and echo it
+back. Instead:
 
 1. **Filter before you fetch.** Narrow the set with `state` and, when the user
    named an area/type/milestone, `labels` (e.g. `["milestone:v1"]`,
@@ -46,7 +51,20 @@ them and echo them back. Instead:
    are more, use `pageInfo.endCursor` from the response as the `after` parameter
    on the next call. Stop once you have what the user asked for — don't page to
    the end reflexively.
-3. **Present a compact index, not the bodies.** For each issue show only:
+3. **If a call spills to a file anyway, don't read it back into context —
+   extract the index with `jq`.** Even a small page can spill when the bodies are
+   large. The saved file is one JSON object keyed `issues`, each issue carrying
+   `number`, `title`, `state`, and `labels` (an array of **plain strings**, not
+   objects). Turn it straight into the compact index:
+
+   ```
+   jq -r '.issues[] | "#\(.number)\t[\(.labels | join(","))]\t\(.title)"' <saved-file>
+   ```
+
+   (`.totalCount` and `.pageInfo.endCursor` are in the same object if you need
+   the count or the next cursor.) This keeps the 150 KB of bodies out of the
+   context window entirely — only the one-line-per-issue index comes back.
+4. **Present a compact index, not the bodies.** For each issue show only:
 
    ```
    #<num>  <title>   [<state>]   <labels>
@@ -55,7 +73,7 @@ them and echo them back. Instead:
    Group by milestone label when there is more than a handful. Do **not** paste
    the summary/acceptance-criteria bodies into the reply — they are noise at the
    index level.
-4. **Deep-read one issue on demand.** When the user wants the detail of a
+5. **Deep-read one issue on demand.** When the user wants the detail of a
    specific ticket ("what's in #12?"), call `issue_read` with `method: get` for
    that one issue, and `method: get_comments` (paginated, `perPage: 10`) if they
    want the discussion. That is the only time a full body belongs in the reply.
@@ -70,9 +88,10 @@ report the matches as a compact index, deep-read only on request.
 
 ## Counting
 
-If the user only wants a **count** ("how many are open?"), page through with a
-small `perPage` and tally the numbers/titles — still don't echo bodies. Report
-the number, and offer the compact index as a follow-up rather than dumping it
+If the user only wants a **count** ("how many are open?"), read `totalCount`
+from the response — it is the full count for the filter, so a single call with a
+small `perPage` answers it; no need to page to the end and tally. Report the
+number, and offer the compact index as a follow-up rather than dumping it
 unprompted.
 
 ## Output shape
