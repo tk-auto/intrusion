@@ -43,6 +43,42 @@ impl Cell {
         self.x.abs_diff(other.x).max(self.y.abs_diff(other.y))
     }
 
+    /// The cells on the straight line from this cell to `other`, both endpoints
+    /// included — an integer Bresenham trace, one cell per major-axis step. Purely
+    /// geometric: it names the squares a taut string between the two cells would lie
+    /// over, with no regard for walls or occupancy (whoever holds the grid decides
+    /// what those cells mean). Deterministic and, being pure integer arithmetic,
+    /// safe for the seeded model (§12.4). Used to draw the spot-flash sightline from
+    /// a guard to the player (§11.5/#222); a single cell yields just itself.
+    pub fn line_to(self, other: Cell) -> Vec<Cell> {
+        let (mut x, mut y) = (i64::from(self.x), i64::from(self.y));
+        let (x1, y1) = (i64::from(other.x), i64::from(other.y));
+        let dx = (x1 - x).abs();
+        let dy = -(y1 - y).abs();
+        let sx = if x < x1 { 1 } else { -1 };
+        let sy = if y < y1 { 1 } else { -1 };
+        // The classic error-accumulator form: `err` tracks how far the ideal line
+        // has drifted from the cell centres, stepping whichever axis keeps it closest.
+        let mut err = dx + dy;
+        let mut cells = Vec::new();
+        loop {
+            cells.push(Cell::new(x as u32, y as u32));
+            if x == x1 && y == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+        cells
+    }
+
     /// The neighbouring cell one step in `dir`, or `None` when that step would
     /// leave the grid's north or west edge — coordinates are unsigned, so there
     /// is no cell there to name. Stepping east or south always yields a `Cell`;
@@ -168,6 +204,51 @@ mod tests {
             Cell::new(0, 0).step(Direction::South),
             Some(Cell::new(0, 1))
         );
+    }
+
+    /// `line_to` traces the squares between two cells, endpoints included: a
+    /// straight run along an axis is exactly that column/row, a 45° diagonal steps
+    /// one cell each way, and a single cell is just itself. Reversing the endpoints
+    /// yields the reversed set — the line is the same squares either way.
+    #[test]
+    fn line_to_traces_the_cells_between_two_points() {
+        // A single cell: itself, nothing more.
+        assert_eq!(
+            Cell::new(4, 7).line_to(Cell::new(4, 7)),
+            vec![Cell::new(4, 7)]
+        );
+
+        // A vertical run: the whole column, inclusive.
+        assert_eq!(
+            Cell::new(3, 2).line_to(Cell::new(3, 5)),
+            vec![
+                Cell::new(3, 2),
+                Cell::new(3, 3),
+                Cell::new(3, 4),
+                Cell::new(3, 5),
+            ],
+        );
+
+        // A 45° diagonal: one step on each axis per cell.
+        assert_eq!(
+            Cell::new(0, 0).line_to(Cell::new(3, 3)),
+            vec![
+                Cell::new(0, 0),
+                Cell::new(1, 1),
+                Cell::new(2, 2),
+                Cell::new(3, 3),
+            ],
+        );
+
+        // The endpoints are always both present, whichever way round.
+        let a = Cell::new(2, 9);
+        let b = Cell::new(8, 5);
+        let forward = a.line_to(b);
+        let mut backward = b.line_to(a);
+        backward.reverse();
+        assert_eq!(forward, backward, "the line is the same squares either way");
+        assert_eq!(*forward.first().unwrap(), a);
+        assert_eq!(*forward.last().unwrap(), b);
     }
 
     #[test]
