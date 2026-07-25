@@ -40,6 +40,7 @@ mod facility;
 mod generate;
 mod guard;
 mod input;
+mod level_seed;
 mod modifiers;
 mod path;
 mod place;
@@ -56,7 +57,7 @@ mod test_support;
 mod vision;
 
 pub use ability::{
-    Ability, AbilityId, AbilityState, AbilityStatus, Behaviour, Effect, TargetingMode,
+    Ability, AbilityId, AbilityState, AbilityStatus, Behaviour, Effect, Loadout, TargetingMode,
 };
 pub use body::Body;
 pub use category::Category;
@@ -69,7 +70,8 @@ pub use guard::{Guard, GuardState};
 pub use input::{
     ability_hotkey, ability_input_for_key, input_for_key, ui_command_for_key, UiCommand,
 };
-pub use modifiers::{LevelModifiers, ModifierSources};
+pub use level_seed::{start_level, LevelSeed};
+pub use modifiers::{IntelGate, LevelModifiers, ModifierSources};
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, DoorKind, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{

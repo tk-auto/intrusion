@@ -23,7 +23,7 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--bot |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
-| `--emit-replay` | capture one run (seed `S`) and print its `(seed, inputs)` replay instead of the metrics batch | off |
+| `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed string (#245) — instead of the metrics batch | off |
 
 ### The script notation
 
@@ -56,20 +56,26 @@ the bug-report format.
 
 ## Capturing a replay (`--emit-replay`, §12.4)
 
-A replay is `(seed, [inputs])` and **nothing else** (§12.4 [SETTLED]).
-`--emit-replay` plays one run — seed `S`, the chosen policy — records the exact
-input stream it issued, and prints that pair on stdout as one JSON line:
+A replay is `(level, [inputs])` (§12.4): the reproducible unit widened from a bare
+seed to the whole config `(seed, modifiers, abilities)` once modifiers (#225) and a
+seeded loadout (#244) shaped a run. `--emit-replay` plays one run — seed `S`, the
+chosen policy — records the exact input stream it issued, and prints that pair on
+stdout as one JSON line. The `seed` field is the run's **level-seed string** (#245),
+so a baked replay reproduces the captured preset — the sim's `AtLeastOne` intel gate,
+not quick play's stricter one — and not just the geometry:
 
 ```
 $ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
-{"seed":42,"inputs":"NNE+rN..SS-r…"}
+{"seed":"L1-42-4-rcdx","inputs":"NNE+rN..SS-r…"}
 seed 42: win in 214 turns, 187 inputs          # (human summary, on stderr)
 ```
 
 The `inputs` string is the script notation above, so it feeds straight back:
 `--script "$(…)" --seed 42 --runs 1` reproduces the run byte-for-byte, and the
 same pair is what the web replay-viewer plays and what an Artifact bakes in
-(#197). stdout carries only the machine-readable pair (the summary goes to
+(#197/#245). The `seed` field is a level-seed string the core decodes
+(`LevelSeed::decode`) — a bare seed still decodes (to quick play), so an older
+bare-number replay stays loadable. stdout carries only the machine-readable pair (the summary goes to
 stderr), so it pipes cleanly into a consumer. The round-trip is asserted
 natively in `src/replay.rs` — capturing a bot run and replaying the emitted
 stream lands on an identical record — which is the §12.4 determinism property

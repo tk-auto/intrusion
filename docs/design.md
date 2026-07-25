@@ -256,12 +256,21 @@ If you are adding an ability and about to make it free, re-read §2.3.
   no damage. **[SETTLED]**
 - **Being seen is not losing.** It is the beginning of a problem.
 - **Win: grab the intel, then return to your entry point.** You leave the
-  way you came in. Bumping the exit before you hold any intel refuses, with a
-  message. **[START]** — the gate is **at least one** intel in hand, not the full
-  set (§10.2): one objective is a complete run, and pressing on for more is what an
-  aggressive style trades extra exposure for, not a requirement. The all-intel march
-  kept a run long enough that the §13.2 bot was caught nearly every seed; one-intel
-  keeps the outcome profile mixed (§13.3).
+  way you came in. Bumping the exit before you hold enough intel refuses, with a
+  message. **How much is "enough" is a level modifier** (`intel_to_exit`, §12.6/#244),
+  not one fixed rule, so the modes gate the *same* facility differently:
+  - **Quick play — all the intel** (§10.2/#244). Gather the whole set, then get out:
+    a complete objective, and v1's default mode.
+  - **The sim — at least one** (§13.2/§13.3). One objective is a complete run for the
+    bot; the all-intel march kept it in the facility long enough to be caught nearly
+    every seed, so the shorter gate keeps the outcome profile mixed. **[START]** on
+    the value.
+  - **Campaign — none** (§14 v3). Intel is currency (§2.2), not an exit key, so the
+    exit never refuses.
+
+  Pressing on for more than the gate demands is what an aggressive style trades extra
+  exposure for. The gate is part of the run's reproducible config, carried in the
+  shareable level-seed string (§12.4/#245).
 
 > **Consequence to preserve:** because capture is *contact*, not *detection*,
 > being invisible does not make you safe. A guard patrolling into the cell you
@@ -708,6 +717,12 @@ Notes carried forward, because they are good and non-obvious:
 - **Decoy draws Investigating, never Chasing** — a guard that can see *you*
   ignores it. Decoys work on guards that have lost you, not on guards that have
   you.
+- **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
+  not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
+  tech from a pool that defaults to the shipped, non-experimental set (with three tech
+  shipped, "three random" is all three — the draw only bites as the pool grows); a
+  campaign accumulates its set instead (§2.2). The resolved loadout is one of the
+  three pieces of the shareable level-seed string (§12.4/#245).
 - **Drag has no grab button.** A body is non-solid (§7.2), so you cross it like
   floor; the drag begins the moment you step *off* a cell with a body on it and your
   hands are free, and the body follows into each cell you vacate. **Bump the trailing
@@ -1065,7 +1080,8 @@ is unclear and probably wants play evidence first.
 | Size | **40 × 40** **[START]** |
 | Guards | **5** **[START]** |
 | Intel | **3** **[START]** |
-| Exit rule | **At least one intel required** **[START]** |
+| Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, the sim = **at least one**, campaign = **none** |
+| Starting abilities | **A level modifier** (`starting_abilities`, §8.3/#244): quick play grants the innate set **plus three random tech**, seeded (§12.4); campaign accumulates instead (§2.2) |
 
 Size is **screen-bound**: the whole level renders on screen with no camera
 (§11.4 **[SETTLED]**), so it cannot outgrow what one screen shows legibly. The
@@ -1737,7 +1753,11 @@ and vision, the type system should say so out loud.
   change between library versions — the standard one in Rust's `rand` explicitly
   does not guarantee reproducibility across releases. Use a small, explicitly
   versioned algorithm.
-- **A replay is `(seed, [inputs])`.** Nothing else.
+- **A replay is `(seed, [inputs])`.** Nothing else — until level modifiers and a
+  seeded ability loadout made the *config* part of the reproducible unit too, so the
+  identity widened to `(seed, modifiers, abilities, [inputs])`, all but the inputs
+  carried in one compact **level-seed string** (§12.6/#245). The principle is
+  unchanged: a small, serialisable token reproduces the run exactly.
 
 What this single property buys:
 
@@ -1805,10 +1825,17 @@ path — #210 owns the alert→modifier *mapping* and its own fairness (decay, f
 
 **Determinism (§12.4 [SETTLED]).** The resolved set is part of the reproducible
 config: same seed + **same modifiers** + same inputs → identical run. It is plain
-`Copy` data threaded through the boot alongside the seed, so a run's identity is
-now `(seed, modifiers, inputs)`. Carrying the modifiers in the shareable
-seed/replay *token* (so a handed-around link reproduces them) extends the #110/#197
-carrier — that is #245's job; the config being deterministic is this seam's.
+`Copy` data threaded through the boot alongside the seed, so — with the ability
+**loadout** (§8.3/#244), the third piece — a run's identity is now
+`(seed, modifiers, abilities, inputs)`. These three pieces compose to one
+**level-seed string** (`LevelSeed`, #245): a compact, URL-safe, versioned token
+(`L1-<seed>-<mods>-<abilities>`, or just the bare seed when the config is the default
+quick-play preset) that extends the #110/#197 carrier rather than inventing a second
+scheme. A bare `?seed=N` still decodes — to quick play — and a malformed token falls
+back to a fresh run, never a bricked page. One boot path (`start_level`) turns a
+`LevelSeed` into a running state for the web shell, the replay viewer, and the
+headless sim alike, and the one token format is what saves (§12.5) and the replay
+Artifact build (#197 slice C) share so they cannot diverge.
 
 **Constraints.** The *"always show vision cones"* modifier may only ever **widen**
 the §11.5 overlay — it reveals unseen guards' cones on top of the seen ones, and

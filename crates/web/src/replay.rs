@@ -20,7 +20,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use intrusion_core::{parse_script, Input, State};
+use intrusion_core::{parse_script, Input, LevelSeed, State};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, KeyboardEvent, PointerEvent};
@@ -30,13 +30,15 @@ use crate::input::{
 };
 use crate::{new_run, Game};
 
-/// A captured run and the time cursor into it (§12.4): the seed, the input stream,
+/// A captured run and the time cursor into it (§12.4): the level, the input stream,
 /// and `K` — how many inputs have been replayed. `K` ranges over `0..=inputs.len()`
 /// (`0` is the fresh facility, `total` the run's end). The shown state is always
-/// `state_at(K)`, re-simulated from the seed, so it can never drift from what a
-/// live run of the same inputs would show.
+/// `state_at(K)`, re-simulated from the level, so it can never drift from what a
+/// live run of the same inputs would show. The level is the whole reproducible config
+/// `(seed, modifiers, abilities)` (#245), so a replay of a non-default preset boots
+/// the *right* modifiers and loadout, not just the geometry.
 pub(crate) struct ReplayView {
-    seed: u64,
+    level: LevelSeed,
     inputs: Vec<Input>,
     cursor: usize,
 }
@@ -79,7 +81,7 @@ impl ReplayView {
     /// byte-identical by construction. `pub(crate)` so the boot can paint the
     /// opening frame (`K = 0`) before the input pumps are wired.
     pub(crate) fn state_at(&self) -> Result<State, JsValue> {
-        let mut state = new_run(self.seed)?;
+        let mut state = new_run(&self.level)?;
         for &input in &self.inputs[..self.cursor] {
             state.step(input);
         }
@@ -90,18 +92,20 @@ impl ReplayView {
 /// The replay to boot into, or `None` for ordinary live play. The inputs come from
 /// an explicit carrier — a **baked** `window.__intrusionReplay` script string the
 /// build stamped in (how a replay Artifact pins its run, slice C), or an `inputs=`
-/// field in the page **URL** — paired with the seed the shell already resolved
-/// ([`crate::seed::initial_seed`]). This reuses #110's seed surface and only widens
-/// the payload to `(seed, inputs)`; it does not invent a second seed scheme.
+/// field in the page **URL** — paired with the level the shell already resolved
+/// ([`crate::seed::initial_level`]). This reuses #110's seed surface and only widens
+/// the payload to `(level, inputs)`; it does not invent a second scheme, and the
+/// level carries the modifiers and loadout too (#245), so a replay reproduces the
+/// exact run, not just its geometry.
 ///
 /// An absent carrier is live play (`None`). A present-but-malformed one is *also*
 /// live play, not an error: a bad replay must never brick the page, exactly as a
-/// bad seed falls through to a fresh run (#110). An empty stream is a valid replay
-/// of length zero — just the seed's opening facility.
-pub(crate) fn initial_replay(seed: u64) -> Option<ReplayView> {
+/// bad token falls through to a fresh run (#110). An empty stream is a valid replay
+/// of length zero — just the level's opening facility.
+pub(crate) fn initial_replay(level: LevelSeed) -> Option<ReplayView> {
     let inputs = parse_script(&replay_script()?).ok()?;
     Some(ReplayView {
-        seed,
+        level,
         inputs,
         cursor: 0,
     })

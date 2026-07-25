@@ -51,8 +51,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    generate_level, render_screen, Category, Direction, Grid, LevelConfig, LevelModifiers,
-    ModifierSources, Rng, ScreenUi, State, Visibility, HEADER_ROWS, STATUS_ROWS,
+    render_screen, start_level, Category, Grid, LevelSeed, ScreenUi, State, Visibility,
+    HEADER_ROWS, STATUS_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -175,68 +175,47 @@ fn swatch(category: Category) -> Swatch {
     }
 }
 
-/// Build a fresh run from `seed` — the **exact** boot the headless sim uses
-/// (`Rng::new(seed)` → [`generate_level`] with [`LevelConfig::V1`] → [`State::new`]
-/// facing north, §13.2), so a seed here is the very facility a `--bot`/`--script`
-/// run played, and a sim finding reproduces in the browser (§12.4).
+/// Build a fresh run from a [`LevelSeed`] — the **exact** boot the headless sim and
+/// the replay viewer use ([`start_level`]: `Rng::new(seed)` → generation →
+/// `State::new` facing north, then the seed's modifiers and loadout, §13.2), so a
+/// level here is the very run a `--bot`/`--script` run or a shared link played, and
+/// a sim finding reproduces in the browser (§12.4).
 ///
-/// One seed per run (§12.4): the same stream that carves the level continues into
-/// the turn loop, where the guard close-behind roll draws from it (§10.4/#146).
+/// A run is `(seed, modifiers, abilities)` (#245): the [`LevelSeed`] carries all
+/// three, and quick play (#244) is its default preset — the intel gate at *all*,
+/// the innate set plus a seeded tech grant. One seed per run (§12.4): the stream
+/// that carves the level continues into the turn loop (§10.4/#146).
 ///
-/// `pub(crate)` so the replay viewer ([`replay`]) can re-run a seed through
+/// `pub(crate)` so the replay viewer ([`replay`]) can re-run a level through
 /// `inputs[0..K]` to derive the state at its cursor (replay-minus-N, §12.4).
-pub(crate) fn new_run(seed: u64) -> Result<State, JsValue> {
-    // The level modifiers for this facility (§12.6), resolved once at the start of
-    // the boot from their sources. Quick play is the plain baseline — the choice
-    // source with an empty set, no campaign alert (#210), no flavour (#207); the
-    // seam still runs (§2.3) so a preset (#244) or a shared token (#245) only has
-    // to hand a non-default `chosen` set here.
-    let modifiers = ModifierSources::chosen(LevelModifiers::default()).resolve();
-
-    let mut rng = Rng::new(seed);
-    // The full v1 level (§10.2): a carve passing every §10.6 guarantee, with the
-    // player, exit, intel and guards placed by the §10.1.7–9 rules. Guards patrol
-    // their territories (§7.5); the reactive states ride on the same seam.
-    let (layout, placement) = generate_level(&LevelConfig::V1, &mut rng)
-        .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))?;
-
-    // Guards carry their region beats (§7.5/§10.5), grown from the layout's
-    // graph before the layout moves into the state.
-    let guards = placement.guards(&layout);
-    Ok(State::new(
-        layout,
-        placement.player(),
-        Direction::North,
-        guards,
-        placement.intel().iter().copied(),
-        placement.exit(),
-    )
-    .with_rng(rng)
-    .with_modifiers(modifiers))
+pub(crate) fn new_run(level: &LevelSeed) -> Result<State, JsValue> {
+    start_level(level).map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))
 }
 
 /// Boot the game: pick the run's seed, generate its facility, draw it, and start
 /// listening for input and resize (§4.2, §13.1's build→play half).
 ///
 /// This is the wasm entry point the page calls after the module initialises. The
-/// seed is the one impurity the shell owns (§12.1 keeps the *core* pure): it comes
-/// from the URL when a `…#seed=N` link was shared, otherwise off the clock so each
-/// load is a different facility ([`seed::initial_seed`]). The seed is surfaced and
-/// re-enterable through the on-page bar ([`seed::install`]) — the seed-sharing loop
-/// (§13.1/#110).
+/// level is the one impurity the shell owns (§12.1 keeps the *core* pure): it comes
+/// from the URL when a `…#seed=<token>` link was shared, otherwise off the clock so
+/// each load is a different facility ([`seed::initial_level`]). It is the whole
+/// reproducible config `(seed, modifiers, abilities)` (#245), surfaced and
+/// re-enterable through the on-page bar ([`seed::install`]) as a compact level-seed
+/// string — the seed-sharing loop (§13.1/#110/#244).
 #[wasm_bindgen]
 pub fn start() -> Result<(), JsValue> {
-    // The seed comes from #110's surface (baked global, URL, or clock); a replay
-    // widens that payload to `(seed, inputs)` (§12.4/#197). When one is present the
-    // shell boots into the **replay viewer** — a pure playback of the captured run
-    // — otherwise into ordinary live play. The mode is fixed here, at boot, behind
-    // this one flag: the two input maps are wired mutually exclusively below, so a
-    // time-scrub swipe and a movement swipe can never reach the same handler.
-    let seed = seed::initial_seed();
-    let replay = replay::initial_replay(seed);
+    // The level comes from #110's surface (baked global, URL, or clock), decoded from
+    // its level-seed string (#245); a replay widens the payload again to
+    // `(level, inputs)` (§12.4/#197). When one is present the shell boots into the
+    // **replay viewer** — a pure playback of the captured run — otherwise into
+    // ordinary live play. The mode is fixed here, at boot, behind this one flag: the
+    // two input maps are wired mutually exclusively below, so a time-scrub swipe and
+    // a movement swipe can never reach the same handler.
+    let level = seed::initial_level();
+    let replay = replay::initial_replay(level);
     let state = match &replay {
         Some(view) => view.state_at()?,
-        None => new_run(seed)?,
+        None => new_run(&level)?,
     };
 
     let document = web_sys::window()
@@ -254,7 +233,7 @@ pub fn start() -> Result<(), JsValue> {
         ctx,
         metrics: Metrics::base(),
         ui: ScreenUi::default(),
-        seed,
+        level,
         replay,
         replay_hud: None,
     }));
@@ -303,10 +282,11 @@ struct Game {
     /// View state the shell owns (§11.4): whether the ability panel is deployed.
     /// Not part of [`State`] — it changes no world and costs no turn (§12.1).
     ui: ScreenUi,
-    /// The seed the current run booted from (§12.4) — the shell's, not the core's:
-    /// the core derives everything from it but never needs the number back. Held so
-    /// the seed bar can show it and a `…#seed=N` link can carry it ([`seed`]).
-    seed: u64,
+    /// The level the current run booted from (§12.4/#245) — the shell's, not the
+    /// core's: the whole reproducible config `(seed, modifiers, abilities)`. Held so
+    /// the seed bar can show its [level-seed string](LevelSeed::encode) and a
+    /// `…#seed=<token>` link can carry it, modifiers and loadout and all ([`seed`]).
+    level: LevelSeed,
     /// The replay being played back, or `None` in ordinary live play (#197). When
     /// `Some`, the shell is in the pure-view replay mode: [`state`](Game::state) is
     /// `view.state_at(K)` and input drives the cursor, not the world ([`replay`]).
@@ -357,15 +337,16 @@ impl Game {
         self.draw();
     }
 
-    /// Rebuild the run from a new `seed` and repaint (§13.1 seed sharing / #110): a
-    /// fresh facility from the same deterministic boot as [`new_run`], the view state
-    /// reset to a clean default. A pure reset — no world carries over, and the board
-    /// footprint is unchanged (40×40, §10.2), so the existing fit still holds; we
-    /// refit-and-draw anyway to paint the first frame. Returns the generation error
-    /// only if the seed somehow fails to carve (the v1 footprint always does, §10.6).
-    fn reseed(&mut self, seed: u64) -> Result<(), JsValue> {
-        self.state = new_run(seed)?;
-        self.seed = seed;
+    /// Rebuild the run from a new [`LevelSeed`] and repaint (§13.1 seed sharing /
+    /// #110/#245): a fresh facility from the same deterministic boot as [`new_run`],
+    /// the view state reset to a clean default. A pure reset — no world carries over,
+    /// and the board footprint is unchanged (40×40, §10.2), so the existing fit still
+    /// holds; we refit-and-draw anyway to paint the first frame. Returns the
+    /// generation error only if the seed somehow fails to carve (the v1 footprint
+    /// always does, §10.6).
+    fn reseed(&mut self, level: LevelSeed) -> Result<(), JsValue> {
+        self.state = new_run(&level)?;
+        self.level = level;
         self.ui = ScreenUi::default();
         self.fit_and_draw();
         Ok(())

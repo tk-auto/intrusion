@@ -3035,6 +3035,52 @@ fn one_intel_opens_the_exit() {
     assert_eq!(s.outcome(), Outcome::Won);
 }
 
+/// #244: the intel gate is a level modifier. Under [`IntelGate::All`] — quick
+/// play's objective (§10.2) — the exit refuses until **every** console is taken,
+/// where the [`IntelGate::AtLeastOne`] baseline opened on the first. Same facility,
+/// a different objective: exactly the seam #244 asks for.
+#[test]
+fn the_all_intel_gate_requires_the_full_set() {
+    use crate::modifiers::IntelGate;
+    let mut s = State::new(
+        open_room(12, 12),
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(5, 4), Cell::new(6, 5)], // two objectives; both now required
+        Cell::new(5, 6),
+    )
+    .with_modifiers(LevelModifiers {
+        intel_to_exit: IntelGate::All,
+        ..LevelModifiers::default()
+    });
+
+    // Take the first console (bump north), leaving the second out.
+    s.step(Input::Step(Direction::North));
+    assert_eq!(s.objectives_remaining(), 1, "one intel still out");
+    assert!(
+        !s.exit_ready(),
+        "the all-intel gate holds the exit shut on a partial set",
+    );
+    let events = s.step(Input::Step(Direction::South));
+    assert!(
+        events.contains(&Event::ExitRefused),
+        "the exit refuses a partial set under the all-intel gate",
+    );
+    assert_eq!(s.outcome(), Outcome::Playing);
+
+    // Take the second console (bump east): now the whole set is in hand.
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.objectives_remaining(), 0, "the full set is in hand");
+    assert!(
+        s.exit_ready(),
+        "the all-intel gate opens once every intel is taken"
+    );
+    let events = s.step(Input::Step(Direction::South));
+    assert!(events.contains(&Event::Won), "all intel + exit is a win");
+    assert_eq!(s.outcome(), Outcome::Won);
+}
+
 /// §7.8: guards are solid to each other but **path around** a colleague instead of
 /// pathing through, failing the step, and stalling — the old deadlock. Two guards
 /// sweep a 2-wide corridor toward destinations past one another; they must pass
