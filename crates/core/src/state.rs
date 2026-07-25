@@ -625,6 +625,18 @@ pub struct State {
     /// handful of doors change in any few-turn window — so a plain `Vec` scan is
     /// cheaper than a map.
     door_cues: Vec<DoorCue>,
+    /// The guards that **freshly** detected the player on the last spent turn — the
+    /// transition [`Event::Detected`] reports (§7.6) — as indices into
+    /// [`guards`](Self::guards), for the momentary **spot flash** (§11.5/§9.2, #222).
+    /// Filled in [`guard_phase`](Self::guard_phase) and cleared at the head of every
+    /// [`step`](Self::step), so it holds exactly one turn's fresh spots and clears on
+    /// the next action — the same one-beat life as the near-line message (§11.7). The
+    /// renderer reads it through [`spot_flash`](Self::spot_flash) and lights the
+    /// sightline of each spotter the player still cannot *see* (a seen guard's cone
+    /// already paints, §9.2). Indices, not cells: they are set and consumed within a
+    /// single turn — no guard is added or removed between — so the order is stable for
+    /// that window, and the renderer reads each spotter's *current* position.
+    spotters: Vec<usize>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
     /// two stochastic guard decisions: a Calm guard's chance to close a door behind
     /// itself (§10.4/#146) and its chance to dwell on reaching a patrol destination
@@ -713,6 +725,7 @@ impl State {
             outcome: Outcome::Playing,
             last_events: Vec::new(),
             door_cues: Vec::new(),
+            spotters: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
             // have passed through a door before it has taken a step — so setting the
@@ -1073,6 +1086,29 @@ impl State {
             .flat_map(move |cue| regions.door(cue.door).cells())
     }
 
+    /// The cells of the momentary **spot flash** (§11.5/§9.2/§7.6, #222): when a
+    /// guard *freshly* detects the player from **outside the player's view**, the
+    /// straight sightline from that guard to the player lights red
+    /// ([`Category::Danger`]) for that one beat — the "a guard just saw you, and here
+    /// is where it is" cue the loop was missing, so a spot is a direction to run
+    /// *from* rather than a dice roll (§7.6). The line is honest danger: the spotting
+    /// guard's cone genuinely watches those cells (it detected the player along them),
+    /// so this is a strict, momentary *subset* of the danger overlay, never a new kind
+    /// of claim — and it clears on the next action ([`spotters`](Self::spotters)).
+    ///
+    /// A guard the player *can* see is excluded: its facing and full cone already
+    /// paint every turn (§9.2), so flashing a line to it would only double-draw. The
+    /// flash is the **exception §9.2 permits** — a deliberate, detection-fired reveal
+    /// of an unseen guard's line, never a standing cone for one that stays unseen.
+    pub fn spot_flash(&self) -> impl Iterator<Item = Cell> + '_ {
+        let player = self.player;
+        self.spotters
+            .iter()
+            .filter_map(move |&index| self.guards.get(index))
+            .filter(move |guard| self.perceive_guard(guard) != Some(GuardPerception::Seen))
+            .flat_map(move |guard| guard.pos().line_to(player))
+    }
+
     /// How the player perceives `guard` this frame (§9.2), or `None` if it is neither
     /// seen nor sensed (out of range — it draws nothing, live, and is not remembered,
     /// §11.5a). This is the pure §9 classification the renderer reads:
@@ -1253,6 +1289,10 @@ impl State {
         // A fresh turn: no hideout has been climbed into yet. The §15 Q5 witness check
         // in phase 3 reads whatever the Hide bump sets below, this turn only.
         self.entered_hideout = None;
+        // The spot flash lasts exactly one action (§11.7, #222): clear last turn's
+        // fresh spots here, so any this turn's guard phase records show for that beat
+        // and nothing lingers on the next input — free action or spent.
+        self.spotters.clear();
         // Phase 1. A free action (wall bump, refused exit) does not end the turn.
         let from = self.player;
         let spent = self.player_phase(input, &mut events);
@@ -2043,7 +2083,14 @@ impl State {
             .iter()
             .map(|guard| self.perceive_guard(guard) == Some(GuardPerception::Seen))
             .collect();
-        for ((guard, &concealed), &seen) in self.guards.iter_mut().zip(&concealed).zip(&seen) {
+        let mut spotters = Vec::new();
+        for (index, ((guard, &concealed), &seen)) in self
+            .guards
+            .iter_mut()
+            .zip(&concealed)
+            .zip(&seen)
+            .enumerate()
+        {
             // Awareness is per-turn, so the pre-sense reading is last turn's: a
             // guard aware now that was not aware then has *freshly* found the
             // player — the transition [`Event::Detected`] reports, and the §13.2
@@ -2052,6 +2099,10 @@ impl State {
             guard.sense(player, concealed);
             if guard.detected_player() && !was_aware {
                 events.push(Event::Detected { by: guard.pos() });
+                // Record the fresh spot for the one-beat spot flash (§11.5, #222).
+                // Every fresh detection is recorded; the renderer paints only the
+                // ones the player cannot *see* — a seen guard's cone already paints.
+                spotters.push(index);
             }
             // Witness the dive (§15 Q5): on the entry turn, a guard the player can see
             // that is *alerted* (any non-Calm mood) and whose cone covers the cupboard
@@ -2070,6 +2121,9 @@ impl State {
                 guard.forget_hideout();
             }
         }
+        // Hand this turn's fresh spots to the renderer (#222), replacing the set the
+        // step head cleared. Empty on a turn nobody freshly detected the player.
+        self.spotters = spotters;
         // The found-body scan (§7.2): a body is *found* the first time any cone
         // covers it — a body does not block sight, so the cones just recomputed
         // decide. Every guard seeing it reacts ([`Guard::find_body`]: the harder
