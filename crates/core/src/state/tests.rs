@@ -4014,6 +4014,127 @@ fn guards_classify_as_seen_sensed_or_neither() {
     );
 }
 
+/// §11.5/#223: [`visible_cone_cells`] is *exactly* a seen guard's cone (no
+/// concealment here), and [`in_visible_danger`] mirrors membership — a cell in the
+/// cone is danger, a cell outside it is not. This is the set the shell's
+/// held-movement guard reads, the same one the renderer paints.
+#[test]
+fn the_visible_cone_set_matches_a_seen_guards_cone() {
+    // Player at (10,10) facing north; guard adjacent at (9,9), in the FOV, looking
+    // south so its wedge covers the player — the same scene the overlay golden uses.
+    let s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(9, 9))],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    assert_eq!(
+        s.perceive_guard(&s.guards()[0]),
+        Some(GuardPerception::Seen),
+        "precondition: the guard is in view",
+    );
+    let cone: std::collections::HashSet<Cell> = s.guards()[0].fov().cells().collect();
+    let visible: std::collections::HashSet<Cell> = s.visible_cone_cells().collect();
+    assert_eq!(
+        visible, cone,
+        "the visible-danger set is exactly the seen cone"
+    );
+
+    let watched = Cell::new(9, 11); // straight down the wedge
+    assert!(cone.contains(&watched));
+    assert!(s.in_visible_danger(watched), "a watched cell is danger");
+    let clear = Cell::new(0, 0); // a corner the cone never reaches
+    assert!(!cone.contains(&clear));
+    assert!(
+        !s.in_visible_danger(clear),
+        "a cell outside the cone is not danger"
+    );
+}
+
+/// §11.5 [SETTLED] held through the new query: an **unseen** guard's cone is unknown
+/// information, so it is not visible danger — [`visible_cone_cells`] is empty and
+/// [`in_visible_danger`] is false over the guard's own (out-of-view) cone.
+#[test]
+fn an_unseen_guards_cone_is_not_visible_danger() {
+    // Guard behind the north-facing player at (10,14), looking south (spawn) — away
+    // from the player, so it never detects, and unseen, so its cone paints nothing.
+    let guard = Cell::new(10, 14);
+    let s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::North,
+        vec![Guard::stationary(guard)],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    assert!(
+        !s.player_fov().contains(guard),
+        "precondition: the guard is unseen"
+    );
+    assert_eq!(
+        s.visible_cone_cells().count(),
+        0,
+        "an unseen guard contributes no visible cone",
+    );
+    assert_eq!(s.spot_flash().count(), 0, "it faces away — no fresh spot");
+    // A cell the guard's cone genuinely covers (south of it, out of the FOV) is not
+    // danger: knowledge the player does not have.
+    let in_cone = Cell::new(10, 16);
+    assert!(
+        s.guards()[0].fov().contains(in_cone),
+        "the cell is in the cone"
+    );
+    assert!(
+        !s.player_fov().contains(in_cone),
+        "but out of the player's FOV"
+    );
+    assert!(
+        !s.in_visible_danger(in_cone),
+        "an unseen cone is not visible danger"
+    );
+}
+
+/// #223 with #250: a guard the player cannot see that **freshly** detects them
+/// contributes no cone (it is unseen), but its momentary spot-flash sightline *is*
+/// visible danger — the "you just got spotted, don't blindly march on" case. The
+/// shell's held-movement guard reads it through the same query.
+#[test]
+fn a_fresh_spot_from_an_unseen_guard_is_visible_danger() {
+    // Guard at (10,5) facing south; player five south at (10,10) facing south too —
+    // the guard is directly behind, unseen, but its cone runs down over the player,
+    // so at level start it freshly detects a player it is unseen by (§9.2).
+    let s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::South,
+        vec![Guard::stationary(Cell::new(10, 5))],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    assert!(
+        !s.player_fov().contains(Cell::new(10, 5)),
+        "precondition: the spotter is behind the player, unseen",
+    );
+    assert_eq!(
+        s.visible_cone_cells().count(),
+        0,
+        "the unseen cone paints no danger on its own",
+    );
+    // The fresh spot-flash sightline (10,6)..=(10,10) is danger the player can act on.
+    for y in 6..=10 {
+        assert!(
+            s.in_visible_danger(Cell::new(10, y)),
+            "the spot sightline at (10,{y}) is visible danger",
+        );
+    }
+    assert!(
+        !s.in_visible_danger(Cell::new(12, 8)),
+        "off the sightline stays clear — a line, not the whole cone",
+    );
+}
+
 /// §9.1's headline: the sense **passes through walls** — it is not line of sight.
 /// A guard sealed behind a wall, with no line to the player but inside the box, is
 /// **Sensed** (position only), not hidden. A walled-off fixture pins this.
