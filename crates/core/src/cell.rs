@@ -136,6 +136,19 @@ impl Direction {
         }
     }
 
+    /// The direction a 90° **clockwise** turn faces — N→E→S→W→N, the same clockwise
+    /// order as [`ALL`](Self::ALL). This is the fixed, deterministic quarter a guard
+    /// rotates through when it must reverse (§7.2 — no half-turn in one move; the
+    /// intermediate quarter is always the clockwise one, §12.4).
+    pub fn clockwise(self) -> Direction {
+        match self {
+            Direction::North => Direction::East,
+            Direction::East => Direction::South,
+            Direction::South => Direction::West,
+            Direction::West => Direction::North,
+        }
+    }
+
     /// The two directions at right angles to this one — the axis this direction
     /// does *not* lie on. Returned east-then-west for a vertical direction and
     /// north-then-south for a horizontal one, so the order is fixed and the answer
@@ -260,6 +273,20 @@ mod tests {
         // Turning around twice returns you to where you faced.
         for dir in Direction::ALL {
             assert_eq!(dir.opposite().opposite(), dir);
+        }
+    }
+
+    #[test]
+    fn clockwise_rotates_a_quarter_turn() {
+        // N→E→S→W→N — one quarter each, the ALL ordering.
+        assert_eq!(Direction::North.clockwise(), Direction::East);
+        assert_eq!(Direction::East.clockwise(), Direction::South);
+        assert_eq!(Direction::South.clockwise(), Direction::West);
+        assert_eq!(Direction::West.clockwise(), Direction::North);
+        // Two quarters clockwise is a reversal; four returns you to the start.
+        for dir in Direction::ALL {
+            assert_eq!(dir.clockwise().clockwise(), dir.opposite());
+            assert_eq!(dir.clockwise().clockwise().clockwise().clockwise(), dir);
         }
     }
 

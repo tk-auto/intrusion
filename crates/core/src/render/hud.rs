@@ -775,13 +775,15 @@ mod tests {
         // and the near line reads Danger — the colour flash before the words.
         s = State::new(
             open_room(24, 6),
-            Cell::new(2, 2),
+            Cell::new(2, 3),
             Direction::North,
-            vec![Guard::patrolling_to(Cell::new(2, 4), Cell::new(2, 1))],
+            // Walking south, its spawn facing, straight into the player — no corner,
+            // so no §229 turn tax delays the contact.
+            vec![Guard::patrolling_to(Cell::new(2, 1), Cell::new(2, 4))],
             Vec::new(),
             Cell::new(22, 4),
         );
-        s.step(Input::Wait); // the guard steps north into the player: caught
+        s.step(Input::Wait); // the guard steps south into the player: caught
         let g = render_screen(&s, ScreenUi::default());
         assert_eq!(g.get(0, near_y).bg, Some(Category::Danger));
         assert_eq!(g.get(1, near_y).glyph, 'c'); // "caught"
