@@ -24,7 +24,7 @@
 //!   bump-adjacent (§4.3) to it: start → every objective → exit, on the level as
 //!   it will actually be played.
 
-use crate::beat::{beat_cells, BEAT_REGIONS};
+use crate::beat::{coordinated_beat_cells, BEAT_REGIONS};
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
@@ -117,17 +117,22 @@ impl Placement {
     /// sweepers (§7.4's reactive states ride on the same seam), each carrying its
     /// region **beat** (§10.5, [`crate::beat`]): the station's region grown across
     /// `layout`'s door edges, so a territory is rooms plus the corridors joining
-    /// them and never straddles a wall. Placement records guard *cells* because
-    /// the §10.6 guarantees are about where a guard *stands*; turning a spawn into
-    /// a behaving guard is a single decision, and it lives here so every caller —
-    /// the web build, the sim — spawns the same patrolling guard.
+    /// them and never straddles a wall. The beats are grown **cooperatively**
+    /// ([`coordinated_beat_cells`]) so guards stationed near each other fan out to
+    /// cover distinct wings rather than grinding the same ground (§7.5). Placement
+    /// records guard *cells* because the §10.6 guarantees are about where a guard
+    /// *stands*; turning a spawn into a behaving guard is a single decision, and it
+    /// lives here so every caller — the web build, the sim — spawns the same
+    /// patrolling guard.
     pub fn guards(&self, layout: &Layout) -> Vec<Guard> {
+        let beats = coordinated_beat_cells(layout.regions(), self.guard_cells(), BEAT_REGIONS);
         self.guard_cells()
             .iter()
             .zip(&self.guard_clocks)
-            .map(|(&cell, &clock)| {
+            .zip(beats)
+            .map(|((&cell, &clock), beat)| {
                 Guard::patrolling(cell)
-                    .with_beat(beat_cells(layout.regions(), cell, BEAT_REGIONS))
+                    .with_beat(beat)
                     .with_radio_clock(clock)
             })
             .collect()
@@ -528,6 +533,55 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// §7.5 coverage on real generated levels: growing the guards' beats
+    /// **cooperatively** spreads them over at least as many distinct regions as
+    /// independent per-guard growth, and strictly more on some seeds — the "two
+    /// guards grinding one wing" weakness measurably reduced. Coordination never
+    /// changes a beat's size, so more union means less overlap, one for one.
+    #[test]
+    fn coordination_covers_at_least_as_much_ground_as_independent_growth() {
+        use crate::beat::{beat_regions, coordinated_beats, BEAT_REGIONS};
+
+        let union = |beats: &[Vec<RegionId>]| {
+            beats
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<HashSet<RegionId>>()
+                .len()
+        };
+
+        let mut improved_somewhere = false;
+        for seed in seed_sweep(SEEDS) {
+            let (layout, p) = v1(seed);
+            let regions = layout.regions();
+            let stations = p.guard_cells();
+
+            let independent: Vec<Vec<RegionId>> = stations
+                .iter()
+                .map(|&s| beat_regions(regions, s, BEAT_REGIONS))
+                .collect();
+            let coordinated = coordinated_beats(regions, stations, BEAT_REGIONS);
+
+            // Same size per guard (only the composition moves), and no starved beat.
+            for (indep, coord) in independent.iter().zip(&coordinated) {
+                assert_eq!(indep.len(), coord.len(), "seed {seed}: beat size changed");
+                assert!(!coord.is_empty(), "seed {seed}: a guard got no beat");
+            }
+
+            let (indep_union, coord_union) = (union(&independent), union(&coordinated));
+            assert!(
+                coord_union >= indep_union,
+                "seed {seed}: coordination covered less ground ({coord_union} < {indep_union})"
+            );
+            improved_somewhere |= coord_union > indep_union;
+        }
+        assert!(
+            improved_somewhere,
+            "coordination never widened coverage across the sweep — expected some overlap to fix"
+        );
     }
 
     /// §12.4: placement is deterministic — the same seed places the same board,
