@@ -151,6 +151,8 @@ pub enum AbilityId {
     Decoy,
     /// Salvaged tech (§8.3): walk through solids, no concealment.
     Dephase,
+    /// Salvaged tech (§8.3): doors open ahead and shut behind while active.
+    Autodoors,
 }
 
 impl AbilityId {
@@ -158,20 +160,26 @@ impl AbilityId {
     /// display/iteration order only — hotkeys come from the identity map (§11.6),
     /// never from a position — but it *is* the order [`index`](Self::index) pins,
     /// so the two must not drift.
-    pub const ALL: [AbilityId; 4] = [
+    pub const ALL: [AbilityId; 5] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
+        AbilityId::Autodoors,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
     /// opposed to innate [`Run`](AbilityId::Run). This is the default eligible pool
     /// a `starting_abilities` grant (#244) draws from: the shipped, non-experimental
     /// tech (the gated experiments #239/#243 are not economy abilities yet, so the
-    /// pool is exactly these three). Quick play grants three of them — with three in
-    /// the pool that is all of them today; the draw only bites as the pool grows.
-    pub const TECH: [AbilityId; 3] = [AbilityId::Camouflage, AbilityId::Decoy, AbilityId::Dephase];
+    /// pool is exactly these four). Quick play grants the whole pool while its size
+    /// meets the grant count; the draw only bites once the pool outgrows the grant.
+    pub const TECH: [AbilityId; 4] = [
+        AbilityId::Camouflage,
+        AbilityId::Decoy,
+        AbilityId::Dephase,
+        AbilityId::Autodoors,
+    ];
 
     /// Whether this ability is **innate** (§8.3) — always in the loadout, never
     /// drawn or found. Run is the only innate *economy* ability (Move/Wait/Takedown/
@@ -189,6 +197,7 @@ impl AbilityId {
             AbilityId::Camouflage => "Camouflage",
             AbilityId::Decoy => "Decoy",
             AbilityId::Dephase => "Dephase",
+            AbilityId::Autodoors => "Autodoors",
         }
     }
 
@@ -207,6 +216,7 @@ impl AbilityId {
             AbilityId::Camouflage => &CAMOUFLAGE,
             AbilityId::Decoy => &DECOY,
             AbilityId::Dephase => &DEPHASE,
+            AbilityId::Autodoors => &AUTODOORS,
         }
     }
 
@@ -217,6 +227,7 @@ impl AbilityId {
             AbilityId::Camouflage => 1,
             AbilityId::Decoy => 2,
             AbilityId::Dephase => 3,
+            AbilityId::Autodoors => 4,
         }
     }
 }
@@ -334,6 +345,10 @@ pub enum Effect {
     SpawnDecoy,
     /// Dephase (§8.3): fill → 0, pass through solids; **does not conceal**.
     Phase,
+    /// Autodoors (§8.3, §7.6): while active, a door in the player's path opens as
+    /// they step into it — no manual bump — and shuts behind them once they clear
+    /// the throat, breaking a pursuer's line of sight (§10.3/§10.4).
+    AutoDoors,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -444,6 +459,17 @@ const DEPHASE: Ability = Ability {
     duration: 3,
     cooldown: 30,
     behaviour: Behaviour::Effects(&[Effect::Phase]),
+};
+// Autodoors [START] (§8.3): "several turns" of duration on a "medium" cooldown —
+// long enough to walk a stretch of corridor door-to-door, then a real wait before
+// the next flight (§7.6). Self-target toggle; free to cancel (§4.4).
+const AUTODOORS: Ability = Ability {
+    id: AbilityId::Autodoors,
+    cost: 1,
+    targeting: TargetingMode::Itself,
+    duration: 8,
+    cooldown: 20,
+    behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
 };
 
 /// The live economy state of one deck ability (§8.2): the three states the *time*
@@ -755,6 +781,14 @@ mod economy_tests {
                 30,
                 Effect::Phase,
             ),
+            (
+                AbilityId::Autodoors,
+                1,
+                TargetingMode::Itself,
+                8,
+                20,
+                Effect::AutoDoors,
+            ),
         ] {
             let def = id.def();
             assert_eq!(def.id(), id);
@@ -787,6 +821,7 @@ mod economy_tests {
         assert_eq!(AbilityId::Camouflage.hotkey(), 'c');
         assert_eq!(AbilityId::Decoy.hotkey(), 'd');
         assert_eq!(AbilityId::Dephase.hotkey(), 'x');
+        assert_eq!(AbilityId::Autodoors.hotkey(), 'a');
     }
 
     /// A fresh deck is all Ready (§8.3: the v1 set is available from the start).

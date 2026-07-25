@@ -699,6 +699,7 @@ whole reason the architecture looks the way it does.
 | **Camouflage** | 1 turn | 10 | 20 | Undetectable **while you don't move**. Moving reveals you for that turn. |
 | **Decoy** | 1 turn | 20 | 30 | A fake intruder in the cell you face. Draws Investigating, not Chasing. Dies when anything steps on it. |
 | **Dephase** | 1 turn | 3 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** |
+| **Autodoors** | 1 turn | 8 | 20 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it. A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
 
 Notes carried forward, because they are good and non-obvious:
 
@@ -719,10 +720,11 @@ Notes carried forward, because they are good and non-obvious:
   you.
 - **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
   not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
-  tech from a pool that defaults to the shipped, non-experimental set (with three tech
-  shipped, "three random" is all three — the draw only bites as the pool grows); a
-  campaign accumulates its set instead (§2.2). The resolved loadout is one of the
-  three pieces of the shareable level-seed string (§12.4/#245).
+  tech from a pool that defaults to the shipped, non-experimental set (four tech now
+  ship, so "three random" is a genuine draw of three of the four — the pool has
+  outgrown the grant and it finally bites, #241); a campaign accumulates its set
+  instead (§2.2). The resolved loadout is one of the three pieces of the shareable
+  level-seed string (§12.4/#245).
 - **Drag has no grab button.** A body is non-solid (§7.2), so you cross it like
   floor; the drag begins the moment you step *off* a cell with a body on it and your
   hands are free, and the body follows into each cell you vacate. **Bump the trailing

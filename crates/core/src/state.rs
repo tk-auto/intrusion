@@ -410,6 +410,14 @@ enum BumpKind {
     /// hinge. Only an **open panel** is *not* a door action: it classifies as
     /// [`BumpKind::Move`], the walk-through, exactly as the bump resolves.
     Door { action: DoorAction },
+    /// A closed door **panel** the player walks straight through because the
+    /// **Autodoors** ability is active (§8.3/§7.6): the door opens as they step into
+    /// it — no manual bump — and is armed to shut behind them. Movement, not a
+    /// standalone door op, so it obeys the drag half-speed and reuses the plain
+    /// [`Move`](BumpKind::Move) step; classified apart only so the executor can open
+    /// the door and arm the close first. Offered only when the opened cell is
+    /// walkable — a hinge, which stays solid, is a plain [`Door`](BumpKind::Door).
+    AutoDoor,
     /// An empty concealment cupboard to climb into (§10.3).
     Hide,
     /// A cupboard that cannot be entered — already holding an actor, or **locked**
@@ -448,7 +456,10 @@ impl BumpKind {
             BumpKind::Intel => Some(Affordance::TakeIntel),
             BumpKind::Door {
                 action: DoorAction::Opened,
-            } => Some(Affordance::OpenDoor),
+            }
+            // Autodoors opens as you step through — the usable line still reads
+            // "open", truthfully, since that is what the step does to the door.
+            | BumpKind::AutoDoor => Some(Affordance::OpenDoor),
             BumpKind::Door {
                 action: DoorAction::Closed,
             } => Some(Affordance::CloseDoor),
@@ -625,6 +636,16 @@ pub struct State {
     /// handful of doors change in any few-turn window — so a plain `Vec` scan is
     /// cheaper than a map.
     door_cues: Vec<DoorCue>,
+    /// Doors the **Autodoors** ability (§8.3/§7.6) opened in the player's path and
+    /// still owes a close-behind, as [`DoorId`]s. A door is armed here the turn the
+    /// player steps through it ([`BumpKind::AutoDoor`]) and swings shut — via the
+    /// §10.4 crush-safe close ([`close_armed_autodoors`](Self::close_armed_autodoors))
+    /// — on the first world turn its throat is clear of the player and any dragged
+    /// body, then drops from the set. Only **manual** doors are armed: an automatic
+    /// door shuts itself on its own timer (§10.4/#147), so it is left to that path.
+    /// A small set — a player passes through one door at a time — so a plain `Vec`
+    /// scan beats a map.
+    autodoors_pending: Vec<DoorId>,
     /// The guards that **freshly** detected the player on the last spent turn — the
     /// transition [`Event::Detected`] reports (§7.6) — as indices into
     /// [`guards`](Self::guards), for the momentary **spot flash** (§11.5/§9.2, #222).
@@ -725,6 +746,7 @@ impl State {
             outcome: Outcome::Playing,
             last_events: Vec::new(),
             door_cues: Vec::new(),
+            autodoors_pending: Vec::new(),
             spotters: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
@@ -1518,7 +1540,7 @@ impl State {
         // not movement and stay full price; free bumps stay free.
         if self.dragging.is_some()
             && self.drag_debt
-            && matches!(kind, BumpKind::Move | BumpKind::Hide)
+            && matches!(kind, BumpKind::Move | BumpKind::Hide | BumpKind::AutoDoor)
         {
             self.drag_debt = false;
             return true;
@@ -1626,6 +1648,23 @@ impl State {
                 }
                 DoorAction::Obstructed => false,
             },
+            // Autodoors (§8.3/§7.6): the closed door in the player's path opens as
+            // they step into it — no manual bump — and the same step carries them
+            // through onto the panel, saving the open-turn. The door is armed to
+            // swing shut behind them once the throat clears (the world phase's
+            // [`close_armed_autodoors`]). The move itself is an ordinary
+            // [`walk_into`], so dragging, facing (§5) and a Run sprint compose exactly
+            // as they do through an already-open door.
+            BumpKind::AutoDoor => {
+                self.operate_door(target); // the door was closed, so this opens it
+                self.arm_autodoor_close(target);
+                events.push(Event::DoorOpened {
+                    at: target,
+                    by_player: true,
+                });
+                self.walk_into(dir, target, events);
+                true
+            }
             // A hideout: bump the empty cupboard to climb in (§4.3, §10.3). Unlike
             // floor, you do not drift onto it — entering is a *decision*. It moves you
             // into the cell, spends the turn, and conceals you ([`hidden`](Self::hidden));
@@ -1694,34 +1733,7 @@ impl State {
             // doorway, or a cell holding a *loose* body (non-solid, §7.2: you walk
             // over it).
             BumpKind::Move => {
-                // A plain move while inside a duct is the climb-out at a mouth (§10.7)
-                // — the only Move the confinement in `bump_kind` admits — so leaving
-                // the crawlspace clears the stored state. (A phase-out, the one other
-                // way a Move fires from a duct cell, ends the crawl just the same.)
-                self.in_duct = None;
-                let vacated = self.player;
-                self.haul_body_to(vacated);
-                self.player = target;
-                self.facing = dir; // facing follows the last successful step (§5)
-                events.push(Event::Moved { to: target });
-                // Take hold on the way out (§8.3): stepping *off* a body cell with
-                // free hands starts the drag — the body stays in the vacated cell and
-                // follows from here. The pickup rides this full step; the weight then
-                // catches up at half speed (`drag_debt`), so the next step is spent
-                // hauling. A dragging player never reaches here for a second body
-                // (hands are full), and a sprint's extra step below is suppressed the
-                // instant a grab lands, so Run never stacks with Drag (§8.3/#103).
-                if self.dragging.is_none() {
-                    if let Some(i) = self.body_at(vacated) {
-                        self.dragging = Some(i);
-                        self.drag_debt = true;
-                        events.push(Event::BodyGrabbed { at: vacated });
-                    }
-                }
-                // Stepping onto your own decoy kills it (§8.3) — anything's step
-                // does, the maker's included; a sprint checks its second cell too.
-                self.stomp_decoy(target, events);
-                self.run_extra_step(dir, events);
+                self.walk_into(dir, target, events);
                 true
             }
             // A cupboard already holding an actor or locked by a stowed body, the
@@ -1740,6 +1752,43 @@ impl State {
                 }
             }
         }
+    }
+
+    /// Move the player one cell into `target` — the plain-move executor (§4.3/§5)
+    /// shared by [`BumpKind::Move`] and, once the door is open, [`BumpKind::AutoDoor`].
+    /// It hauls a dragged body into the vacated cell, faces the step (§5), takes hold
+    /// of a body stepped off (§8.3), stomps a decoy underfoot, and lets a Run sprint
+    /// add its extra cell — every consequence of a step, in one place so a walk
+    /// through an auto-opened door behaves exactly as one through an already-open one.
+    fn walk_into(&mut self, dir: Direction, target: Cell, events: &mut Vec<Event>) {
+        // A plain move while inside a duct is the climb-out at a mouth (§10.7) — the
+        // only Move the confinement in `bump_kind` admits — so leaving the crawlspace
+        // clears the stored state. (A phase-out, the one other way a Move fires from a
+        // duct cell, ends the crawl just the same.)
+        self.in_duct = None;
+        let vacated = self.player;
+        self.haul_body_to(vacated);
+        self.player = target;
+        self.facing = dir; // facing follows the last successful step (§5)
+        events.push(Event::Moved { to: target });
+        // Take hold on the way out (§8.3): stepping *off* a body cell with free hands
+        // starts the drag — the body stays in the vacated cell and follows from here.
+        // The pickup rides this full step; the weight then catches up at half speed
+        // (`drag_debt`), so the next step is spent hauling. A dragging player never
+        // reaches here for a second body (hands are full), and a sprint's extra step
+        // below is suppressed the instant a grab lands, so Run never stacks with Drag
+        // (§8.3/#103).
+        if self.dragging.is_none() {
+            if let Some(i) = self.body_at(vacated) {
+                self.dragging = Some(i);
+                self.drag_debt = true;
+                events.push(Event::BodyGrabbed { at: vacated });
+            }
+        }
+        // Stepping onto your own decoy kills it (§8.3) — anything's step does, the
+        // maker's included; a sprint checks its second cell too.
+        self.stomp_decoy(target, events);
+        self.run_extra_step(dir, events);
     }
 
     /// The facing a **frame bump** (#148) turns the player to: from the bumped
@@ -1852,6 +1901,16 @@ impl State {
             return BumpKind::Intel;
         }
         if let Some(action) = self.layout.preview_door_bump(target, |c| self.occupied(c)) {
+            // Autodoors (§8.3/§7.6): a closed door in the path opens and is walked
+            // through in one step — but only when the opened cell is a walkable panel.
+            // A hinge (#148) also opens the door on a bump, yet the hinge itself stays
+            // solid, so there is nothing to step onto: that remains a plain door op.
+            if action == DoorAction::Opened
+                && self.abilities.effect_active(Effect::AutoDoors)
+                && self.door_panel_at(target)
+            {
+                return BumpKind::AutoDoor;
+            }
             return BumpKind::Door { action };
         }
         match self.layout.facility().terrain(target) {
@@ -1911,6 +1970,10 @@ impl State {
         self.radio_phase(&mut events);
         self.guard_phase(&mut events);
         self.door_phase(&mut events);
+        // Autodoors shuts the doors the player passed through this run once their
+        // throats clear (§8.3/§7.6) — after the guards move, so a pursuer stepping
+        // into the doorway holds it open exactly as any occupant does (§10.4).
+        self.close_armed_autodoors(&mut events);
         // Latch a fading cue on every door the player did not cause (§10.4) — the
         // player's own open is emitted in phase 1 and never reaches here.
         self.record_door_cues(&events);
@@ -2375,6 +2438,63 @@ impl State {
                 .close_behind(door, |c| actor_occupies(player, guards, bodies, c)),
             Some(DoorAction::Closed)
         )
+    }
+
+    /// Whether `cell` is a door **panel** — the walk-through part of a doorway, as
+    /// opposed to a hinge (the solid handle, #148). The Autodoors step (§8.3) offers
+    /// only a panel, since a hinge cannot be stood on even once the door is open.
+    fn door_panel_at(&self, cell: Cell) -> bool {
+        let regions = self.layout.regions();
+        regions
+            .door_at(cell)
+            .and_then(|id| regions.door(id).role(cell))
+            == Some(DoorCell::Panel)
+    }
+
+    /// Arm the door at `cell` for the Autodoors close-behind (§8.3/§7.6): remember it
+    /// so [`close_armed_autodoors`](Self::close_armed_autodoors) shuts it once the
+    /// player clears the throat. Only **manual** doors are armed — an automatic door
+    /// has no handle and shuts itself on a timer (§10.4/#147), so it is left to
+    /// [`tick_auto_doors`](Layout::tick_auto_doors). Idempotent: a door already armed
+    /// (the player lingering on its panel) is not queued twice.
+    fn arm_autodoor_close(&mut self, cell: Cell) {
+        let regions = self.layout.regions();
+        let Some(id) = regions.door_at(cell) else {
+            return;
+        };
+        if regions.door(id).is_automatic() || self.autodoors_pending.contains(&id) {
+            return;
+        }
+        self.autodoors_pending.push(id);
+    }
+
+    /// Shut every armed Autodoors door whose throat has cleared (§8.3/§7.6) — the
+    /// player-driven half of the §10.4 close, run once per world turn after everyone
+    /// has moved. Each armed door still open is closed the crush-safe way
+    /// ([`close_behind_door`], so it never shuts on the player or a dragged body,
+    /// §10.4); a door that closes drops from the set and reports a
+    /// [`DoorClosed`](Event::DoorClosed) — `by_player`, since the player's ability
+    /// caused it, so it self-narrates (§11.7) and lights no sensed cue. A door still
+    /// obstructed stays armed for a later turn, and one already shut (the player
+    /// walked back through, or it timed out) is simply forgotten.
+    fn close_armed_autodoors(&mut self, events: &mut Vec<Event>) {
+        // Take the queue so the crush-safe close can borrow `self` freely; still-
+        // obstructed doors are pushed back on.
+        let pending = std::mem::take(&mut self.autodoors_pending);
+        for id in pending {
+            if !self.layout.regions().door(id).is_open() {
+                continue; // already shut — nothing owed
+            }
+            let at = self.layout.regions().door(id).panels()[0];
+            if self.close_behind_door(id) {
+                events.push(Event::DoorClosed {
+                    at,
+                    by_player: true,
+                });
+            } else {
+                self.autodoors_pending.push(id); // throat still occupied; retry
+            }
+        }
     }
 
     /// The index of a guard standing on `cell`, if any.

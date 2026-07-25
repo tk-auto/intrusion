@@ -43,8 +43,10 @@ use crate::rng::Rng;
 use crate::state::State;
 
 /// The number of salvaged-tech abilities quick play grants at start (#244) — the
-/// `starting_abilities` count knob. With [`AbilityId::TECH`] holding exactly three
-/// today, three grants all of them; the draw only bites once the pool grows.
+/// `starting_abilities` count knob. With [`AbilityId::TECH`] now holding four, a
+/// grant of three is a **seeded draw of three of the four** (§8.3): the pool has
+/// outgrown the grant, so the draw finally bites — a run holds a subset of the tech,
+/// not all of it.
 const QUICK_PLAY_TECH_GRANT: usize = 3;
 
 /// A fixed transform applied to the run seed before drawing the quick-play ability
@@ -159,8 +161,8 @@ impl LevelSeed {
 /// [`QUICK_PLAY_TECH_GRANT`] tech chosen from [`AbilityId::TECH`]. Seeded off a
 /// sub-stream independent of generation ([`LOADOUT_STREAM_SALT`]), so the draw is
 /// deterministic yet never perturbs the facility. When the grant meets or exceeds
-/// the pool (the v1 case: three of three) every tech is granted and no randomness is
-/// drawn at all.
+/// the pool every tech is granted and no randomness is drawn at all; with four tech
+/// shipped and a grant of three, the partial draw below runs and picks a subset.
 fn quick_play_loadout(seed: u64) -> Loadout {
     let mut pool = AbilityId::TECH;
     let grant = QUICK_PLAY_TECH_GRANT.min(pool.len());
@@ -301,18 +303,29 @@ mod tests {
     use super::*;
     use crate::Outcome;
 
-    /// Quick play (#244): the intel gate at [`IntelGate::All`] and the innate set
-    /// plus the whole tech pool — with three tech shipped, "three random" is all
-    /// three, so the loadout is full and every ability is held.
+    /// Quick play (#244): the intel gate at [`IntelGate::All`], the innate set, and a
+    /// seeded draw of [`QUICK_PLAY_TECH_GRANT`] tech. With four tech shipped and a
+    /// grant of three the draw bites (§8.3): the run holds every innate ability plus
+    /// exactly three of the four tech — a strict subset of the full loadout.
     #[test]
     fn quick_play_is_all_intel_and_the_tech_grant() {
         let level = LevelSeed::quick_play(8371);
         assert_eq!(level.modifiers.intel_to_exit, IntelGate::All);
-        for id in AbilityId::ALL {
-            assert!(level.abilities.contains(id), "{} is granted", id.name());
+        // Every innate ability is always granted.
+        for id in AbilityId::ALL.into_iter().filter(|id| id.is_innate()) {
+            assert!(level.abilities.contains(id), "{} is innate", id.name());
         }
-        // The grant is exactly innate + the tech pool.
-        assert_eq!(level.abilities, Loadout::full());
+        // Exactly QUICK_PLAY_TECH_GRANT of the tech pool are granted.
+        let tech_held = AbilityId::TECH
+            .into_iter()
+            .filter(|&id| level.abilities.contains(id))
+            .count();
+        assert_eq!(
+            tech_held, QUICK_PLAY_TECH_GRANT,
+            "a three-of-four tech draw"
+        );
+        // The pool now outgrows the grant, so the loadout is a strict subset.
+        assert_ne!(level.abilities, Loadout::full(), "not every tech is held");
     }
 
     /// The sim preset (§13.3): the baseline gate ([`IntelGate::AtLeastOne`]) and the
@@ -471,9 +484,10 @@ mod tests {
             crate::render(&b),
             "the token boots the same frame as the config",
         );
-        // The resolved config is threaded into the running state.
+        // The resolved config is threaded into the running state — the loadout the
+        // token carries (a three-of-four tech draw now, no longer the full set).
         assert_eq!(a.modifiers().intel_to_exit, IntelGate::All);
-        assert_eq!(a.loadout(), Loadout::full());
+        assert_eq!(a.loadout(), level.abilities);
         assert_eq!(a.outcome(), Outcome::Playing);
     }
 

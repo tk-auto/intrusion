@@ -906,8 +906,8 @@ mod tests {
     #[test]
     fn deploying_shows_the_panel_opposite_the_player() {
         // Player top-left → panel bottom-right. On a fresh run the widest label is
-        // `c Camouflage` (12) → a 13-wide band, four rows: map origin (16,9), so the
-        // first row sits at screen (16,10) (map row + the header).
+        // `c Camouflage` (12) → a 13-wide band, five rows: map origin (16,8), so the
+        // first row sits at screen (16,9) (map row + the header).
         let s = State::new(
             open_room(30, 14),
             Cell::new(5, 5),
@@ -927,17 +927,17 @@ mod tests {
         // Closed: that corner is plain map (interior floor). Open: the panel's first
         // row `r Run` starts there, in Owned.
         assert_eq!(
-            closed.get(16, 10).glyph,
+            closed.get(16, 9).glyph,
             '·',
             "not deployed: the board is whole"
         );
         assert_eq!(
-            open.get(16, 10).glyph,
+            open.get(16, 9).glyph,
             'r',
             "deployed: panel opposite the player"
         );
-        assert_eq!(open.get(18, 10).glyph, 'R', "…the label reads `r Run`");
-        assert_eq!(open.get(16, 10).fg, Category::Owned);
+        assert_eq!(open.get(18, 9).glyph, 'R', "…the label reads `r Run`");
+        assert_eq!(open.get(16, 9).fg, Category::Owned);
         // The far side (near the player, top-left) stays board even when deployed.
         assert_eq!(
             open.get(2, 2).glyph,
@@ -978,7 +978,7 @@ mod tests {
             Vec::new(),
             Cell::new(22, 2),
         );
-        // A 4-tall map cannot fit all four panel rows within its inset; the render
+        // A 4-tall map cannot fit all five panel rows within its inset; the render
         // shows what fits and stops — no panic, and the screen height is intact.
         let g = render_screen(
             &s,
@@ -1009,12 +1009,13 @@ mod tests {
         );
         let ui = ScreenUi::default();
 
-        // r@1 c@3 d@5 x@7 (all ready → one cell each), by identity not position.
+        // r@1 c@3 d@5 x@7 a@9 (all ready → one cell each), by identity not position.
         for (col, id) in [
             (1, AbilityId::Run),
             (3, AbilityId::Camouflage),
             (5, AbilityId::Decoy),
             (7, AbilityId::Dephase),
+            (9, AbilityId::Autodoors),
         ] {
             assert_eq!(ability_at(&s, ui, col, 0), Some(id), "col {col}");
         }
@@ -1043,7 +1044,7 @@ mod tests {
     #[test]
     fn ability_at_resolves_the_deployed_panel() {
         // Same geometry as `deploying_shows_the_panel_opposite_the_player`: a fresh
-        // run, player top-left, panel at map origin (16,9) → screen rows from 10.
+        // run, player top-left, panel at map origin (16,8) → screen rows from 9.
         let s = State::new(
             open_room(30, 14),
             Cell::new(5, 5),
@@ -1059,10 +1060,11 @@ mod tests {
 
         // One panel row per economy ability, top to bottom in deck order.
         for (screen_y, id) in [
-            (10, AbilityId::Run),
-            (11, AbilityId::Camouflage),
-            (12, AbilityId::Decoy),
-            (13, AbilityId::Dephase),
+            (9, AbilityId::Run),
+            (10, AbilityId::Camouflage),
+            (11, AbilityId::Decoy),
+            (12, AbilityId::Dephase),
+            (13, AbilityId::Autodoors),
         ] {
             assert_eq!(
                 ability_at(&s, open, 16, screen_y),
@@ -1071,9 +1073,9 @@ mod tests {
             );
         }
         // A cell left of the band is not the panel; nor is it while the panel closes.
-        assert_eq!(ability_at(&s, open, 2, 10), None, "off the band");
+        assert_eq!(ability_at(&s, open, 2, 9), None, "off the band");
         assert_eq!(
-            ability_at(&s, ScreenUi::default(), 16, 10),
+            ability_at(&s, ScreenUi::default(), 16, 9),
             None,
             "closed: the panel is not hit-testable"
         );
