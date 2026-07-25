@@ -56,6 +56,7 @@ use crate::vision::{
 use crate::DoorAction;
 
 mod abilities;
+mod traversal;
 
 /// The player and every guard are solid and exclusive — fill 1.0 (§4.3). A cell
 /// already holding one admits no other actor.
@@ -1553,10 +1554,17 @@ impl State {
             // A cupboard already holding an actor or locked by a stowed body, the
             // table already crouched behind, or anything else solid (a wall, a
             // pillar): a free bump (§4.4). A closed hinge is no longer here — it
-            // opens the door now (#148, `BumpKind::Door`).
+            // opens the door now (#148, `BumpKind::Door`). Before it no-ops, the
+            // traversal experiment (#57) gets a chance to read the dead bump as an
+            // unambiguous sidestep and slide one cell past it; only if it declines
+            // does the bump fall through to the free wall-bump it has always been.
             BumpKind::HideoutBlocked | BumpKind::CrouchHeld | BumpKind::Solid => {
-                events.push(Event::Bumped { into: target });
-                false
+                if self.try_lateral_shift(dir, events) {
+                    true
+                } else {
+                    events.push(Event::Bumped { into: target });
+                    false
+                }
             }
         }
     }

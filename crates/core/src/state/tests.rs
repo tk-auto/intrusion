@@ -193,18 +193,21 @@ fn a_move_into_open_floor_spends_the_turn_and_turns_the_player() {
 }
 
 /// §4.4's load-bearing exception: bumping a wall is free — the turn does not
-/// advance, the player does not move, and facing is unchanged (§5).
+/// advance, the player does not move, and facing is unchanged (§5). Bumped here
+/// from mid-wall, where **both** laterals are open floor: the #57 auto-slide only
+/// fires on an *unambiguous* single open side, so this ambiguous bump stays the
+/// free mis-input §4.4 protects (the slide cases are pinned by the `#57` tests).
 #[test]
 fn bumping_a_wall_is_free_and_does_not_advance_the_turn() {
-    let mut s = solo(Cell::new(1, 1));
-    let events = s.step(Input::Step(Direction::West)); // into the west wall
+    let mut s = solo(Cell::new(2, 1)); // both (1,1) and (3,1) are open floor
+    let events = s.step(Input::Step(Direction::North)); // into the north wall
     assert_eq!(
         events,
         vec![Event::Bumped {
-            into: Cell::new(0, 1)
+            into: Cell::new(2, 0)
         }]
     );
-    assert_eq!(s.player(), Cell::new(1, 1), "no move");
+    assert_eq!(s.player(), Cell::new(2, 1), "no move");
     assert_eq!(s.facing(), Direction::North, "a blocked move keeps facing");
     assert_eq!(s.turn(), 0, "a free action does not spend the turn");
 }
@@ -4514,4 +4517,232 @@ fn the_usable_line_offers_duct_enter_at_a_mouth() {
             .any(|(_, a)| *a == Affordance::EnterDuct),
         "inside, there is nothing to enter",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Auto lateral-shift past an obstacle (#57) — the traversal experiment.
+// ---------------------------------------------------------------------------
+
+/// §57/§4.4: a step blocked by a pillar with **exactly one** open lateral slides
+/// one cell that way instead of dead-stopping. The slide is a successful move —
+/// it spends the turn (§4.4) and sets facing to the shift direction (§5).
+#[test]
+fn a_blocked_step_with_one_open_side_slides_past() {
+    let mut layout = open_room(6, 6);
+    layout.place(Cell::new(3, 1), Terrain::Wall); // the pillar dead ahead (east)
+                                                  // Player hard against the north wall so its two laterals are: north border wall
+                                                  // (blocked) and south floor (open) — exactly one, unambiguous.
+    let mut s = State::new(
+        layout,
+        Cell::new(2, 1),
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(4, 4),
+    );
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::Moved {
+            to: Cell::new(2, 2)
+        }],
+        "the bump into the pillar slid south into the one open lateral",
+    );
+    assert_eq!(s.player(), Cell::new(2, 2), "shifted one cell south");
+    assert_eq!(
+        s.facing(),
+        Direction::South,
+        "facing follows the successful step (§5), not the aimed east",
+    );
+    assert_eq!(
+        s.turn(),
+        turn_before + 1,
+        "the slide is a move — it spends the turn"
+    );
+}
+
+/// §57/§4.4: a blocked step with **both** laterals open is ambiguous — a genuine
+/// mis-aim — so it stays the free wall-bump it has always been (§4.4). Nothing
+/// moves, no turn is spent.
+#[test]
+fn a_blocked_step_with_both_sides_open_does_not_slide() {
+    let mut layout = open_room(6, 6);
+    layout.place(Cell::new(3, 2), Terrain::Wall); // pillar dead ahead (east)
+    let mut s = State::new(
+        layout,
+        Cell::new(2, 2), // both north (2,1) and south (2,3) are open floor
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(4, 4),
+    );
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(3, 2)
+        }],
+        "two open sides is ambiguous — a free bump, no slide",
+    );
+    assert_eq!(s.player(), Cell::new(2, 2), "nothing moved");
+    assert_eq!(s.turn(), turn_before, "an ambiguous bump stays free");
+}
+
+/// §57/§4.4: a blocked step with **neither** lateral open (a dead end) stays a
+/// free bump — there is nowhere to slide.
+#[test]
+fn a_blocked_step_with_no_open_side_does_not_slide() {
+    let mut layout = open_room(6, 6);
+    layout.place(Cell::new(2, 1), Terrain::Wall); // dead ahead (north)
+    layout.place(Cell::new(3, 2), Terrain::Wall); // east lateral blocked
+    layout.place(Cell::new(1, 2), Terrain::Wall); // west lateral blocked
+    let mut s = State::new(
+        layout,
+        Cell::new(2, 2),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(4, 4),
+    );
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::North));
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(2, 1)
+        }],
+        "boxed in on both sides — a free bump, no slide",
+    );
+    assert_eq!(s.player(), Cell::new(2, 2), "nothing moved");
+    assert_eq!(s.turn(), turn_before, "a dead-end bump stays free");
+}
+
+/// §57: the slide targets **plain floor only** — a lateral that is an interactable
+/// (here a hideout) does not qualify, so it is never auto-entered. With a cupboard
+/// on one side and floor on the other, the one *plain* lateral wins and the player
+/// slides onto the floor, away from the cupboard — proof the cupboard was excluded
+/// (had it counted, the two open sides would have been ambiguous and nothing would
+/// have moved).
+#[test]
+fn the_slide_never_auto_enters_an_interactable_lateral() {
+    let mut layout = open_room(6, 6);
+    layout.place(Cell::new(3, 2), Terrain::Wall); // pillar dead ahead (east)
+    layout.place(Cell::new(2, 1), Terrain::Hideout); // north lateral: a cupboard
+                                                     // south lateral (2,3) stays plain floor
+    let mut s = State::new(
+        layout,
+        Cell::new(2, 2),
+        Direction::East,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(4, 4),
+    );
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::Moved {
+            to: Cell::new(2, 3)
+        }],
+        "slid onto the plain floor, not into the cupboard",
+    );
+    assert_eq!(s.player(), Cell::new(2, 3), "on the floor south");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::EnteredHideout { .. })),
+        "the cupboard was never climbed into",
+    );
+}
+
+/// §57/§2.2/§4.5 — the fairness guard: a slide is refused if the destination lies
+/// in a guard's cone, so an auto-move never drops the player silently into
+/// detection. The guard's straight-south cone covers the one open lateral; the
+/// bump falls back to the free no-op.
+#[test]
+fn the_slide_is_refused_into_a_guards_cone() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(4, 3), Terrain::Wall); // pillar dead ahead (north)
+    layout.place(Cell::new(3, 4), Terrain::Wall); // west lateral blocked
+                                                  // east lateral (5,4) is plain floor — but a guard two cells north watches it.
+    let dest = Cell::new(5, 4);
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 2))], // faces south, cone down the column
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    assert!(
+        s.guards()[0].fov().contains(dest),
+        "precondition: the guard's cone covers the destination",
+    );
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::North));
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(4, 3)
+        }],
+        "the only open lateral is seen — the slide is refused, a free bump",
+    );
+    assert_eq!(
+        s.player(),
+        Cell::new(4, 4),
+        "the player did not slide into the cone"
+    );
+    assert_eq!(s.turn(), turn_before, "a refused slide stays free");
+}
+
+/// §57/§2.2/§4.5 — the fairness guard, capture clause: a slide is refused when a
+/// guard stands orthogonally adjacent to the destination, even when its cone does
+/// *not* cover it (here the destination is in the guard's rear blind spot, §155) —
+/// nothing may auto-step the player into a cell a guard can capture next phase.
+#[test]
+fn the_slide_is_refused_next_to_a_guard_that_could_capture() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(4, 3), Terrain::Wall); // pillar dead ahead (north)
+    layout.place(Cell::new(3, 4), Terrain::Wall); // west lateral blocked
+                                                  // east lateral (5,4) is plain floor — a guard sits directly south of it.
+    let dest = Cell::new(5, 4);
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 5))], // faces south; dest is behind it
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    assert!(
+        !s.guards()[0].fov().contains(dest),
+        "precondition: the destination is in the guard's rear blind spot, not its cone",
+    );
+    assert_eq!(
+        s.guards()[0].pos().manhattan_distance(dest),
+        1,
+        "precondition: the guard is orthogonally adjacent to the destination",
+    );
+    let turn_before = s.turn();
+
+    let events = s.step(Input::Step(Direction::North));
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(4, 3)
+        }],
+        "a guard could step into the destination — the slide is refused",
+    );
+    assert_eq!(
+        s.player(),
+        Cell::new(4, 4),
+        "the player did not slide next to the guard"
+    );
+    assert_eq!(s.turn(), turn_before, "a refused slide stays free");
 }
