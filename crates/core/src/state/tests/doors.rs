@@ -489,6 +489,341 @@ fn a_frame_bump_opens_the_door_and_auto_faces_the_peek() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// The withheld frame (#320): the hinge of the door you just opened slides you
+// past it instead of shutting it again.
+// ---------------------------------------------------------------------------
+
+/// The #320 worked example as geometry: an east–west wall across the middle of a
+/// box, holding one **manual** door — hinge `(3,3)`, panels `(4,3)`/`(5,3)`, hinge
+/// `(6,3)` — with a room either side. The player starts in the south room at
+/// `player`, facing north into the wall line.
+///
+/// ```text
+///   col 0123456789
+///        ..........   row 1   north room
+///        ..........   row 2
+///       #############
+///        ##+++##      row 3   wall line: hinges at x=3,6, panels at x=4,5
+///        ..........   row 4   south room — the player starts here
+///        ..........   row 5
+/// ```
+///
+/// Returns the state and the door's id.
+fn frame_bump_rooms(player: Cell) -> (State, DoorId) {
+    let mut f = Facility::walled_box(11, 7);
+    let mut g = RegionGraph::new(11, 7);
+    let row = |y0: u32, y1: u32| (y0..y1).flat_map(|y| (1..10).map(move |x| Cell::new(x, y)));
+    let north = g.add_region(RegionKind::Room, row(1, 3));
+    let south = g.add_region(RegionKind::Room, row(4, 6));
+    for x in 1..10 {
+        f.set_terrain(x, 3, Terrain::Wall);
+    }
+    for x in [3, 6] {
+        f.set_terrain(x, 3, Terrain::DoorHinge);
+    }
+    for x in [4, 5] {
+        f.set_terrain(x, 3, Terrain::DoorPanelClosed);
+    }
+    let door = g.add_door(
+        north,
+        south,
+        [Cell::new(3, 3), Cell::new(6, 3)],
+        [Cell::new(4, 3), Cell::new(5, 3)],
+        DoorKind::Manual,
+    );
+    let s = State::new(
+        Layout::from_parts(f, g),
+        player,
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(9, 5), // exit parked in the south room's far corner, never touched
+    );
+    (s, door)
+}
+
+/// #320, the worked example: a player one cell off the panel line presses the **same
+/// direction three times** and gets through — open, slide, walk — instead of opening
+/// and immediately shutting the door they just opened. The middle press is the fix:
+/// a frame bump on a door the previous action opened is a *dead bump* (§4.4), so the
+/// #57 slide rounds the frame onto the open panel rather than the hinge closing it
+/// (§10.4's "bump a hinge to close", with this one documented exception).
+#[test]
+fn a_frame_bump_on_the_door_you_just_opened_slides_past_it() {
+    let hinge = Cell::new(3, 3);
+    let panel = Cell::new(4, 3);
+    let (mut s, door) = frame_bump_rooms(Cell::new(3, 4)); // south of the west hinge
+
+    // Press 1 — the #148 frame bump: the door opens and the player turns to face
+    // along the door line, toward the panels, without stepping into the sightline.
+    let opened = s.step(Input::Step(Direction::North));
+    assert_eq!(
+        opened,
+        vec![Event::DoorOpened {
+            at: hinge,
+            by_player: true,
+        }],
+    );
+    assert!(s.layout().regions().door(door).is_open());
+    assert_eq!(
+        s.player(),
+        Cell::new(3, 4),
+        "the open did not move the player"
+    );
+    assert_eq!(
+        s.facing(),
+        Direction::East,
+        "#148's peek along the door line"
+    );
+
+    // The §11.4 usable line goes quiet on the frame while the close is withheld: it
+    // must never promise a *close door* the very next bump will not deliver.
+    assert!(
+        !s.affordances()
+            .iter()
+            .any(|&(_, a)| a == Affordance::CloseDoor),
+        "the withheld frame offers no close",
+    );
+
+    // Press 2 — the same direction again. Today this shut the door; now it is a dead
+    // bump offered to the #57 slide. Both laterals are open floor, so the
+    // forward-diagonal breaks the tie: `(4,3)` is the open panel, `(2,3)` is wall, so
+    // the player rounds the frame east onto the panel's column.
+    let slid = s.step(Input::Step(Direction::North));
+    assert_eq!(
+        slid,
+        vec![Event::Moved {
+            to: Cell::new(4, 4)
+        }],
+        "the frame bump slid east round the frame instead of closing the door",
+    );
+    assert!(
+        s.layout().regions().door(door).is_open(),
+        "the door the player just opened is still open",
+    );
+    assert_eq!(
+        s.turn(),
+        2,
+        "the slide is a move — it spends the turn (§4.4)"
+    );
+
+    // Press 3 — the same direction once more: straight through the open panel.
+    let through = s.step(Input::Step(Direction::North));
+    assert_eq!(through, vec![Event::Moved { to: panel }]);
+    assert_eq!(
+        s.player(),
+        panel,
+        "into the doorway, three presses, one door"
+    );
+}
+
+/// #320/§10.4: the suppression is exactly **one action** wide. Whatever the player
+/// does next — here a Wait — spends the mark, and the frame is the plain handle
+/// again: the usable line offers the close and the bump delivers it.
+#[test]
+fn the_frame_close_returns_the_action_after_the_open() {
+    let (mut s, door) = frame_bump_rooms(Cell::new(3, 4));
+
+    s.step(Input::Step(Direction::North)); // the frame bump: opens, marks the door
+    assert_eq!(s.door_just_opened, Some(door), "the open marked its door");
+
+    s.step(Input::Wait); // any action at all spends the mark
+    assert_eq!(s.door_just_opened, None, "one action wide, no more");
+    assert!(
+        s.affordances()
+            .contains(&(Direction::North, Affordance::CloseDoor)),
+        "the frame offers the close again",
+    );
+
+    let turn_before = s.turn();
+    s.step(Input::Step(Direction::North));
+    assert!(
+        !s.layout().regions().door(door).is_open(),
+        "shutting a door behind you is still a real move (§10.4)",
+    );
+    assert_eq!(
+        s.turn(),
+        turn_before + 1,
+        "the close spends the turn (§4.3)"
+    );
+    assert_eq!(
+        s.player(),
+        Cell::new(3, 4),
+        "the close did not move the player"
+    );
+}
+
+/// #320/§10.4: a door that was **already open** when the player walked up to it —
+/// nothing to do with their last action — closes on the first frame bump, exactly as
+/// it always has. Only the door you opened *this instant* withholds its close.
+#[test]
+fn a_door_already_open_closes_on_the_first_frame_bump() {
+    let (mut s, door) = frame_bump_rooms(Cell::new(3, 4));
+    // Open it out of band — the world's doing, not the player's action.
+    s.layout.bump_door(Cell::new(4, 3), |_| false);
+    assert!(s.layout().regions().door(door).is_open());
+    assert_eq!(s.door_just_opened, None, "no player open, no mark");
+
+    let turn_before = s.turn();
+    s.step(Input::Step(Direction::North));
+    assert!(
+        !s.layout().regions().door(door).is_open(),
+        "an open door the player did not just open shuts on the frame bump",
+    );
+    assert_eq!(s.turn(), turn_before + 1, "the close spends the turn");
+}
+
+/// #320: a **refused** slide must not shut the door in the same breath — that is the
+/// bug, not a fallback. With both laterals walled off, the #57 slide declines, so the
+/// frame bump falls through to the free §4.4 no-op: nothing moves, no turn is spent,
+/// and the door stays open. The mark is spent all the same, so the player who
+/// genuinely wants it shut simply presses again.
+#[test]
+fn a_refused_slide_leaves_the_just_opened_door_open() {
+    let hinge = Cell::new(3, 3);
+    let (mut s, door) = frame_bump_rooms(Cell::new(3, 4));
+    s.layout.place(Cell::new(2, 4), Terrain::Wall); // west lateral blocked
+    s.layout.place(Cell::new(4, 4), Terrain::Wall); // east lateral blocked
+
+    s.step(Input::Step(Direction::North)); // opens the door, marks it
+    let turn_before = s.turn();
+
+    let refused = s.step(Input::Step(Direction::North));
+    assert_eq!(
+        refused,
+        vec![Event::Bumped { into: hinge }],
+        "boxed in either side: the slide declines and the bump is free",
+    );
+    assert_eq!(s.player(), Cell::new(3, 4), "nothing moved");
+    assert_eq!(s.turn(), turn_before, "a refused slide stays free (§4.4)");
+    assert!(
+        s.layout().regions().door(door).is_open(),
+        "the refusal did not undo the open",
+    );
+
+    // The mark went with the action, so the close is right there on the next press.
+    s.step(Input::Step(Direction::North));
+    assert!(
+        !s.layout().regions().door(door).is_open(),
+        "a player who genuinely wants it shut simply presses again",
+    );
+}
+
+/// #320/§2.2/§4.5: the fairness gate matters most here, because the slide is now
+/// reachable from a doorway — a place guards walk through. A guard orthogonally
+/// adjacent to the slide's destination refuses it (it could step in and capture next
+/// phase), and the refusal is the free no-op, never a close.
+#[test]
+fn the_doorway_slide_is_refused_next_to_a_guard_that_could_capture() {
+    let hinge = Cell::new(3, 3);
+    let dest = Cell::new(4, 4);
+    let (mut s, door) = frame_bump_rooms(Cell::new(3, 4));
+    s.layout.place(Cell::new(2, 4), Terrain::Wall); // west lateral blocked: east or nothing
+    s.guards.push(Guard::stationary(Cell::new(4, 5))); // faces south; dest is behind it
+
+    assert_eq!(
+        s.guards()[0].pos().manhattan_distance(dest),
+        1,
+        "precondition: a guard could step into the destination next phase",
+    );
+    s.step(Input::Step(Direction::North)); // opens the door, marks it
+    let turn_before = s.turn();
+
+    let refused = s.step(Input::Step(Direction::North));
+    assert_eq!(refused, vec![Event::Bumped { into: hinge }]);
+    assert_eq!(s.player(), Cell::new(3, 4), "never slid into reach");
+    assert_eq!(s.turn(), turn_before, "a refused slide stays free");
+    assert!(s.layout().regions().door(door).is_open());
+    assert_eq!(s.outcome(), Outcome::Playing);
+}
+
+/// #320: the mark is the **player's** alone. A door a guard walks open (§10.4) is the
+/// world's doing, so it sets nothing — the player's next frame bump on it closes it
+/// like any other open door.
+#[test]
+fn a_door_a_guard_opened_never_marks_the_players_frame() {
+    let layout = region_strip();
+    let panel = Cell::new(4, 2);
+    let door = layout.regions().door_at(panel).unwrap();
+    let mut s = State::new(
+        layout,
+        Cell::new(13, 4), // parked in corridor D, two closed doors away
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(2, 2), Cell::new(6, 2))],
+        Vec::new(),
+        Cell::new(13, 1),
+    );
+    s.set_guard_close_chance(0); // isolate the guard's open from the close-behind
+
+    // Drive the loop until the patrolling guard walks the closed panel open (#146).
+    for _ in 0..8 {
+        let e = s.step(Input::Wait);
+        assert_eq!(
+            s.door_just_opened, None,
+            "no player action opened a frame this turn",
+        );
+        if e.iter().any(|ev| {
+            matches!(
+                ev,
+                Event::DoorOpened {
+                    by_player: false,
+                    ..
+                }
+            )
+        }) {
+            assert!(s.layout().regions().door(door).is_open());
+            return;
+        }
+    }
+    panic!("the patrolling guard never opened the door");
+}
+
+/// #320/§10.4/#147: a **frameless automatic** door has no hinges, so there is no
+/// frame bump on it to withhold — the fix cannot reach it. Opening one marks
+/// nothing, and none of its cells is a hinge.
+#[test]
+fn an_automatic_door_has_no_frame_to_withhold() {
+    let (mut s, door) = auto_door_state(3);
+
+    s.step(Input::Step(Direction::East)); // the panel bump opens it
+    assert!(s.layout().regions().door(door).is_open());
+    assert_eq!(
+        s.door_just_opened, None,
+        "a panel open marks nothing — there is no frame to catch on",
+    );
+    let cells: Vec<Cell> = s.layout().regions().door(door).cells().collect();
+    for cell in cells {
+        assert_eq!(
+            s.hinge_door_at(cell),
+            None,
+            "an automatic door is all panels (#147)",
+        );
+        assert!(!s.frame_bump_withheld(cell));
+    }
+}
+
+/// Determinism (§12.4): the mark is derived purely from the input stream, so the same
+/// fixture and inputs reproduce identical events and frame — open, slide, walk through.
+#[test]
+fn the_withheld_frame_flow_is_deterministic() {
+    let script = [
+        Input::Step(Direction::North),
+        Input::Step(Direction::North),
+        Input::Step(Direction::North),
+        Input::Wait,
+    ];
+    let run = || {
+        let (mut s, _) = frame_bump_rooms(Cell::new(3, 4));
+        let events: Vec<Vec<Event>> = script.iter().map(|&i| s.step(i)).collect();
+        (events, crate::render(&s))
+    };
+    let (events_a, frame_a) = run();
+    let (events_b, frame_b) = run();
+    assert_eq!(events_a, events_b, "same inputs → same events");
+    assert_eq!(frame_a, frame_b, "same inputs → same frame");
+}
+
 /// Door affordances speak the §10.4 door graph: a closed panel offers the
 /// open; an open hinge offers the close — except while an actor stands on a
 /// panel, when the close would be refused (doors never crush) and so is

@@ -1396,7 +1396,17 @@ opaque — they're the frame) and **1–4 panels** between them that open and cl
 one unit.
 
 - **Bump a panel to open. Bump a hinge to close.** The hinge is the handle, and
-  it's why hinges stay solid forever.
+  it's why hinges stay solid forever. Since #148 a hinge on a *closed* door opens it
+  too — cracking the door from beside the frame, with a peek along the door line.
+  - **One exception, and only one (#320): the frame of the door you just opened does
+    not shut it.** For exactly the **next action**, a bump on that same hinge is a
+    *dead bump* — offered to the #57 lateral shift, so a player walking into a doorway
+    slightly off-line rounds the frame onto the open panel instead of spending a
+    second turn undoing their own open. If the slide declines it is the free §4.4
+    no-op, never a close. The mark is spent by whatever the player does next, free or
+    spent, so "bump a hinge to close" is never more than one action away — and a door
+    a *guard* opened, or one that was already open, closes on the first bump as
+    always. The window's length is the tuning lever, not the rule.
 - **Anyone can operate any door.** No keys, no locks. **[START]** — keys are an
   obvious future axis, and one the fiction supports.
 - **A door cannot close if anything occupies a panel cell.** Doors never crush
