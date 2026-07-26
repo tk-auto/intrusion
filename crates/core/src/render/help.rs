@@ -32,7 +32,7 @@
 //! the game never steps underneath. It stays escapable (§11.6's no-trap rule): `?`
 //! or `Escape` closes it, and the tab bar carries a touchable `[x]`.
 
-use super::{GlyphCell, Grid, Visibility, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH};
+use super::{blank_grid, draw, Grid, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH};
 use crate::ability::AbilityId;
 use crate::category::Category;
 use crate::facility::Terrain;
@@ -170,17 +170,7 @@ pub(super) fn render_help(
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
 ) -> Grid {
-    let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: None,
-        vis: Visibility::Live,
-    };
-    let mut grid = Grid {
-        width,
-        height,
-        cells: vec![blank; (width * height) as usize],
-    };
+    let mut grid = blank_grid(width, height);
 
     draw_tab_bar(&mut grid, tab);
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
@@ -420,27 +410,6 @@ fn category_name(category: Category) -> &'static str {
         Category::Interest => "Interest",
         Category::System => "System",
         Category::Sensed => "Sensed",
-    }
-}
-
-/// Write `text` onto `grid` from `(x, y)` in `category`, clamping at the right edge
-/// and off the bottom — the one drawing primitive the panel shares, so every row
-/// truncates the same way on a small board.
-fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Category) {
-    if y >= grid.height {
-        return;
-    }
-    for (i, glyph) in text.chars().enumerate() {
-        let cx = x + i as u32;
-        if cx >= grid.width {
-            break;
-        }
-        grid.cells[(y * grid.width + cx) as usize] = GlyphCell {
-            glyph,
-            fg: category,
-            bg: None,
-            vis: Visibility::Live,
-        };
     }
 }
 

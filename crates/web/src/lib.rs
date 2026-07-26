@@ -44,6 +44,7 @@
 //! a placed guard is; it just hands what placement built to the core.
 
 mod input;
+mod menu;
 mod replay;
 mod seed;
 
@@ -197,21 +198,29 @@ pub(crate) fn new_run(level: &LevelSeed) -> Result<State, JsValue> {
 ///
 /// This is the wasm entry point the page calls after the module initialises. The
 /// level is the one impurity the shell owns (§12.1 keeps the *core* pure): it comes
-/// from the URL when a `…#seed=<token>` link was shared, otherwise off the clock so
-/// each load is a different facility ([`seed::initial_level`]). It is the whole
-/// reproducible config `(seed, modifiers, abilities)` (#245), surfaced and
-/// re-enterable through the on-page bar ([`seed::install`]) as a compact level-seed
-/// string — the seed-sharing loop (§13.1/#110/#244).
+/// from the URL when a `…#seed=<token>` link was shared, from a baked global in a
+/// seed-locked artifact, and otherwise off the clock ([`seed`]). It is the whole
+/// reproducible config `(seed, modifiers, abilities)` (#245), re-enterable through
+/// the menu's seed prompt ([`menu`]) as a compact level-seed string — the
+/// seed-sharing loop (§13.1/#110/#244).
+///
+/// **Where a load lands** (#268): a load that was *told* which level to play — a
+/// shared link, a baked artifact, a replay — boots straight into it, because the
+/// sharer already chose the run. A bare load was told nothing, so it opens on the
+/// **title screen** and the player chooses. Either way the shell builds a run here:
+/// it sizes the canvas, and it is the run the menu's Quick play replaces a moment
+/// later with a fresh roll off the clock.
 #[wasm_bindgen]
 pub fn start() -> Result<(), JsValue> {
-    // The level comes from #110's surface (baked global, URL, or clock), decoded from
-    // its level-seed string (#245); a replay widens the payload again to
-    // `(level, inputs)` (§12.4/#197). When one is present the shell boots into the
-    // **replay viewer** — a pure playback of the captured run — otherwise into
-    // ordinary live play. The mode is fixed here, at boot, behind this one flag: the
-    // two input maps are wired mutually exclusively below, so a time-scrub swipe and
-    // a movement swipe can never reach the same handler.
-    let level = seed::initial_level();
+    // The level comes from #110's surface (baked global or URL), decoded from its
+    // level-seed string (#245); a replay widens the payload again to `(level,
+    // inputs)` (§12.4/#197). When one is present the shell boots into the **replay
+    // viewer** — a pure playback of the captured run — otherwise into ordinary live
+    // play. The mode is fixed here, at boot, behind this one flag: the two input maps
+    // are wired mutually exclusively below, so a time-scrub swipe and a movement
+    // swipe can never reach the same handler.
+    let chosen = seed::explicit_level();
+    let level = chosen.unwrap_or_else(seed::random_level);
     let replay = replay::initial_replay(level);
     let state = match &replay {
         Some(view) => view.state_at()?,
@@ -227,12 +236,20 @@ pub fn start() -> Result<(), JsValue> {
         .ok_or_else(|| JsValue::from_str("no 2d context"))?
         .dyn_into::<CanvasRenderingContext2d>()?;
 
+    // A load nobody aimed at a particular run opens on the title screen; one that was
+    // aimed — a shared link, a baked seed, a replay — goes straight in (#268).
+    let ui = if chosen.is_none() && replay.is_none() {
+        menu::opening_ui()
+    } else {
+        ScreenUi::default()
+    };
+
     let game = Rc::new(RefCell::new(Game {
         state,
         canvas,
         ctx,
         metrics: Metrics::base(),
-        ui: ScreenUi::default(),
+        ui,
         level,
         replay,
         replay_hud: None,
@@ -246,7 +263,13 @@ pub fn start() -> Result<(), JsValue> {
     } else {
         input::install_input(&document, &game)?;
         input::install_gestures(&document, &game)?;
-        seed::install(&document, &game)?;
+        menu::install(&document, &game)?;
+        // A run the load already named is live from the first frame, so its token
+        // belongs in the address bar straight away (§13.1/#110). A run chosen from
+        // the menu reflects itself when it starts, not before.
+        if game.borrow().ui.menu.is_none() {
+            seed::reflect_level(&level);
+        }
     }
     install_resize(&game)?;
     Ok(())
@@ -339,6 +362,10 @@ impl Game {
             cell_h: CELL_H * scale * dpr,
             font: (CELL_H - 2.0) * scale * dpr,
         };
+        // Tell the page how big a glyph is now (in CSS pixels, so the same number the
+        // stylesheet works in): the seed box types itself at the board's own size
+        // rather than a fixed one that would tower over a small fit ([`menu`]).
+        menu::set_glyph_size((CELL_H - 2.0) * scale);
         self.draw();
     }
 

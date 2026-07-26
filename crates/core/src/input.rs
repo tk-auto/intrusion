@@ -79,6 +79,41 @@ pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
     }
 }
 
+/// A navigation command on the **title screen / main menu** (§14/#268) — the menu's
+/// counterpart of [`HelpNav`], for the same reason: while it is up it is modal, so
+/// the shell routes keys here first and nothing falls through to a game action. The
+/// screen it drives lives in [`menu`](crate::render::menu).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenuNav {
+    /// Move the selection to the previous enabled entry, wrapping.
+    Prev,
+    /// Move the selection to the next enabled entry, wrapping.
+    Next,
+    /// Choose the selected entry — start the run, or open the seed prompt. A
+    /// disabled entry (§14 v2/v3) does nothing.
+    Activate,
+    /// Step back out of the seed prompt to the entry list. On the list itself there
+    /// is nowhere further back — the menu *is* the root — so it does nothing there.
+    Back,
+}
+
+/// Map a key to the [`MenuNav`] it drives **while the menu is up**, or `None` for a
+/// key the modal menu swallows (§14/#268).
+///
+/// The vertical movement keys walk the list — `↑`/`k`/`8` up, `↓`/`j`/`2` down, the
+/// same three-way spelling the board takes (§11.6) — and `Enter`/`Space` and
+/// `Escape` finally do the *confirm* and *cancel* jobs §11.6 reserved for them
+/// ("arrive with the first menu"). This is that menu.
+pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
+    match key {
+        "ArrowUp" | "k" | "8" => Some(MenuNav::Prev),
+        "ArrowDown" | "j" | "2" => Some(MenuNav::Next),
+        "Enter" | " " => Some(MenuNav::Activate),
+        "Escape" => Some(MenuNav::Back),
+        _ => None,
+    }
+}
+
 /// Map a key to the [`UiCommand`] it drives, or `None` for a key that is not a UI
 /// control. The shell consults this *before* [`input_for_key`]: a key claimed here
 /// toggles view state and redraws without ever touching [`State`](crate::State).
@@ -277,6 +312,37 @@ mod tests {
                 help_nav_for_key(key),
                 None,
                 "{key:?} is swallowed while help is open"
+            );
+        }
+    }
+
+    /// #268: the menu is modal too — while it is up the shell routes keys through
+    /// [`menu_nav_for_key`] first. The vertical movement keys walk the list, and
+    /// `Enter`/`Space` and `Escape` do the confirm/cancel jobs §11.6 always reserved
+    /// for "the first menu". Every other key is swallowed, so nothing of the game
+    /// runs underneath the title screen.
+    #[test]
+    fn the_open_menu_captures_input_and_walks_the_list() {
+        for key in ["ArrowUp", "k", "8"] {
+            assert_eq!(menu_nav_for_key(key), Some(MenuNav::Prev), "{key:?} → up");
+        }
+        for key in ["ArrowDown", "j", "2"] {
+            assert_eq!(menu_nav_for_key(key), Some(MenuNav::Next), "{key:?} → down");
+        }
+        for key in ["Enter", " "] {
+            assert_eq!(
+                menu_nav_for_key(key),
+                Some(MenuNav::Activate),
+                "{key:?} confirms"
+            );
+        }
+        assert_eq!(menu_nav_for_key("Escape"), Some(MenuNav::Back));
+        // A key the game would otherwise own is swallowed by the open menu.
+        for key in ["ArrowLeft", "h", "w", "5", "r", "t", "m", "?", "Tab"] {
+            assert_eq!(
+                menu_nav_for_key(key),
+                None,
+                "{key:?} is swallowed while the menu is up"
             );
         }
     }
