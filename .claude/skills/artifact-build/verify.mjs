@@ -57,6 +57,23 @@ if (!canvas) {
   await browser.close();
   process.exit(1);
 }
+// An unbaked live build opens on the title screen (#268), where the arrows would
+// only move a selection. Screenshot the menu, then press Enter on Quick play so the
+// checks below exercise the real game. A build with a baked seed (or a replay) is
+// already in its run and reports no menu, so this is skipped.
+const screen = () => page.evaluate(() => document.body.dataset.screen ?? "");
+if ((await screen()) === "menu") {
+  await page.screenshot({ path: resolve(shotsDir, "menu.png") });
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(500);
+  const now = await screen();
+  if (now !== "play") {
+    console.error(`verify: FAIL — Quick play did not start a run (screen "${now}")`);
+    await browser.close();
+    process.exit(1);
+  }
+}
+
 const boot = await page.screenshot({ path: resolve(shotsDir, "boot.png") });
 
 // A blank canvas screenshots as a near-empty PNG; the glyph grid does not.

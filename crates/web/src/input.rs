@@ -20,8 +20,8 @@ use std::rc::Rc;
 
 use intrusion_core::{
     ability_at, ability_input_for_key, help_hit, help_nav_for_key, input_for_key,
-    is_ability_button, is_help_button, is_message_button, ui_command_for_key, AbilityId, Cell,
-    Direction, HelpHit, HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    is_ability_button, is_help_button, is_message_button, menu_nav_for_key, ui_command_for_key,
+    AbilityId, Cell, Direction, HelpHit, HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -38,6 +38,19 @@ impl Game {
     /// `core::input_for_key` where native tests pin every binding — this shell
     /// never interprets a key.
     fn handle_key(&mut self, key: &str, is_repeat: bool) -> bool {
+        // Before a run starts, the menu owns the keyboard (§14/#268): it is modal in
+        // the strongest sense — there is no world to step underneath it. Everything
+        // the game would claim is swallowed; a genuinely unowned key (F5, a browser
+        // shortcut) is still left to the page.
+        if self.ui.menu.is_some() {
+            if let Some(nav) = menu_nav_for_key(key) {
+                self.apply_menu_nav(nav);
+                return true;
+            }
+            return ui_command_for_key(key).is_some()
+                || input_for_key(key).is_some()
+                || ability_input_for_key(key).is_some();
+        }
         // While the help panel is open it is **modal** (§14 v2/#248): it captures
         // input, so keys route to help navigation first and the world never steps
         // underneath. `?`/Esc close it, Tab/←→ switch tabs. A key the panel does not
@@ -149,7 +162,7 @@ impl Game {
     /// linear scale from the canvas rect gives the `(col, row)` the core drew — the
     /// one place the shell turns pixels into a grid coordinate, shared by every
     /// pointer hit-test so they can never disagree.
-    fn screen_cell(&self, client_x: f64, client_y: f64) -> Option<(u32, u32)> {
+    pub(crate) fn screen_cell(&self, client_x: f64, client_y: f64) -> Option<(u32, u32)> {
         let rect = self.canvas.get_bounding_client_rect();
         let (rw, rh) = (rect.width(), rect.height());
         if !(rw > 0.0 && rh > 0.0) {
@@ -159,12 +172,18 @@ impl Game {
         if lx < 0.0 || ly < 0.0 || lx >= rw || ly >= rh {
             return None; // outside the canvas (a letterbox tap)
         }
-        let facility = self.state.layout().facility();
-        let cols = facility.width();
-        let rows = facility.height() + TOP_ROWS + BOTTOM_ROWS;
+        let cols = self.state.layout().facility().width();
+        let rows = self.screen_height();
         let col = (lx / rw * cols as f64).floor() as u32;
         let row = (ly / rh * rows as f64).floor() as u32;
         Some((col, row))
+    }
+
+    /// The screen's height in rows: the map plus the §11.4 status lines above it and
+    /// the ability bar beneath. The one arithmetic every hit-test and the menu share,
+    /// so none of them can disagree with the frame the core drew.
+    pub(crate) fn screen_height(&self) -> u32 {
+        self.state.layout().facility().height() + TOP_ROWS + BOTTOM_ROWS
     }
 
     /// Whether the viewport point lands on the deploy button (§11.4) — the core
@@ -174,9 +193,8 @@ impl Game {
         let Some((col, row)) = self.screen_cell(client_x, client_y) else {
             return false;
         };
-        let facility = self.state.layout().facility();
-        let height = facility.height() + TOP_ROWS + BOTTOM_ROWS;
-        is_ability_button(facility.width(), height, col, row)
+        let width = self.state.layout().facility().width();
+        is_ability_button(width, self.screen_height(), col, row)
     }
 
     /// Whether the viewport point lands on the near line's help toggle (§14
@@ -399,6 +417,18 @@ impl GesturePump {
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
         {
             let mut game = self.game.borrow_mut();
+            // The menu (§14/#268): before a run starts, every press on the board is
+            // the menu's. A tap on an entry row chooses it — the same path its key
+            // takes — and a press anywhere else is swallowed. Nothing starts a
+            // gesture: there is no player to walk yet. (The seed box's own presses
+            // never reach here; its panel stops them at itself.)
+            if game.ui.menu.is_some() {
+                if let Some(entry) = game.menu_entry_at(x, y) {
+                    game.choose(entry);
+                }
+                e.prevent_default();
+                return;
+            }
             // Modal help (§14 v2/#248): while it is up, every press is the panel's — a
             // tap on a tab switches, on `[x]` closes, anywhere else is swallowed.
             // Nothing starts a gesture or steps the game while the panel captures input.
