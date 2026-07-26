@@ -459,7 +459,7 @@ answer.** A guard that is down does not answer.
 | Property | Value |
 |---|---|
 | Ping interval | **every ~20 turns per guard, jittered** **[START]** |
-| Missed ping → | Control dispatches the nearest active guard to the silent guard's last known post |
+| Missed ping → | Control dispatches the nearest active guard to the **takedown location** — the cell the guard fell in — where it **searches** (§7.6) rather than merely standing |
 | Second missed ping → | Facility-wide alert step |
 
 Why this is the right mechanic:
@@ -471,13 +471,15 @@ Why this is the right mechanic:
 - **It is diegetic and legible.** The player can *read* the pings — a near-line
   message when control pings, and, because guard positions are sensed through
   walls (§9), the dispatched responder is a **dot that visibly peels off toward
-  the silent post.** So the player knows the clock exists and roughly when it
+  the place you struck.** So the player knows the clock exists and roughly when it
   fires. That makes it plannable, which is the pillar about giving enough
   information to strategise. *(This tell was going to be a **sound** — a ping the
   player heard, §9. Sound is gone; make the tell visual from the start.)*
-- **It gives hiding a body a real payoff** — a hidden body still misses its ping,
-  so hiding buys you the *investigation* being confused rather than the
-  investigation not happening.
+- **It gives moving a body a real payoff.** Control's last fix on a guard is where
+  it went down, so that is where the responder searches — and a body you dragged
+  or stowed elsewhere is no longer there when it arrives (§8.3). A hidden body
+  still misses its ping: hiding it buys you the *investigation being confused*,
+  not the investigation not happening.
 - **It creates the escalation the alert system was always supposed to provide**,
   from a concrete, explainable source rather than a global number.
 
@@ -492,7 +494,7 @@ See §15.
 | **Alerted** | orange | Alert timer > 0, nothing seen this turn | Walks to its destination, then **searches** it (§7.6) |
 | **Chasing** | red | Player detected this turn | Destination ← player's live cell; alert timer ← 30; step along shortest path |
 | **Investigating** | red | A decoy seen, or a glimpse in the outer zone (§7.6) | As Chasing, but toward where it thinks you are, and reported at lower severity |
-| **Responding** | orange | Dispatched by a missed radio ping (§7.3) | Walks to the silent guard's post |
+| **Responding** | orange | Dispatched by a missed radio ping (§7.3), or called in by another guard (§7.7) | Walks to the cell it was sent to, then **searches** it (§7.6) |
 
 ### 7.5 Patrol
 
@@ -564,9 +566,9 @@ glued, or gone. Never hunted.**
 
 | Phase | What happens | How it feels |
 |---|---|---|
-| **Spotted** | Guard chases. **It calls it in** (§7.7). | Oh no |
+| **Spotted** | Guard chases. | Oh no |
 | **Flight** | You need ~3–4 turns of broken sight to disappear. Run, doors, corners. | Urgent, but *achievable* |
-| **Lost** | Guard reaches last known position. Others converge. **The search begins.** | The good part |
+| **Lost** | Guard reaches last known position. **It calls it in** (§7.7) and others converge. **The search begins.** | The good part |
 | **Hunted** | You are in a hideout / behind a pillar, holding still. Cones sweep. | **The best part** |
 | **Released** | They give up. Alert decays. Patrol resumes — but *this region gets watched harder*. | Earned |
 
@@ -608,10 +610,11 @@ and it is invisible if you only look at the AI.
 
 This is the design pivot. **The tail is not the threat. The net is.** A single
 guard moving at your exact speed can never catch you in the open, and that's
-fine — it *shouldn't*. The frightening thing is that it **called it in**, and now
-two more are converging on your reported position **from ahead**. That converts a
-chase from tail-gating (boring, unwinnable, what you played) into a spatial
-problem (readable, solvable, tense).
+fine — it *shouldn't*. The frightening thing is what happens when you break
+contact: it **calls it in** (§7.7), and someone who was never chasing you starts
+combing the ground you vanished into — arriving from wherever they happened to be,
+quite possibly **from ahead**. That converts a chase from tail-gating (boring,
+unwinnable, what you played) into a spatial problem (readable, solvable, tense).
 
 Danger should come from **being cornered and cut off**, never from being
 out-jogged.
@@ -620,22 +623,64 @@ out-jogged.
 
 The old version had none: no communication, no shared knowledge, no reaction to a
 downed colleague. Each guard was an island. Given §7.6, this is not a nice-to-have
-— **it is where the difficulty is supposed to come from.** **[START]**
+— **it is where the difficulty is supposed to come from.**
 
-- **A chasing guard calls it in.** Other guards within radio range switch to
-  Responding and converge on the reported position. This is the single biggest
-  lever on difficulty, the thing that makes a single sighting matter, and where
-  the "levels adapt to your strategy" pillar lives.
-- **A guard that finds a body calls it in**, harder.
-- **Guards do not merge into a hive mind.** They know what has been *said*, not
-  what each other can see. The player should be able to exploit a guard being out
-  of radio contact, or reach one before it finishes reporting — **which makes
-  "silence the radio" a real tactic and gives takedowns a purpose beyond removal.**
+Cooperation has exactly one verb: **a call sends a fixed number of guards to
+search a cell.** That is the whole vocabulary, and it is deliberately this small.
+Three parts use it.
+
+**1. The radio net (§7.3) — baseline.** Control pings; a downed guard cannot
+answer; control dispatches a guard to the **takedown location** and it searches
+there. This runs in every facility. It is the cost that keeps a permanent takedown
+from being free, so it is never gated behind a modifier.
+
+**2. A confirmed sighting lost calls one guard** — a level modifier (§12.6,
+harder). A guard that had you inside the **certain** zone (§7.6, `CERTAIN_RANGE`
+**[START] = 5**) and then loses sight calls **one** **[START]** guard, which walks
+to the cell where it last had you and searches it. A **glimpse**-zone contact
+(6–10, imprecise by design) calls nobody.
+
+**3. A body discovery calls two guards** — a level modifier (§12.6, harder). A
+guard that finds a body (§7.2) calls **two** **[START]**, which converge on the
+body's cell and search it. Finding a body is the loudest event in the game, and
+here "louder" means simply **how many come** — not a longer reach, a priority
+system, or a second alert channel.
+
+**The guard that makes the discovery searches on its own, modifiers or not.** A
+guard that loses a chase, or finds a body, hunts that area regardless (§7.6,
+§7.2). The modifiers add only the *calling of others* — so turning them off makes
+a facility lonelier, never blind.
+
+**What cooperation deliberately is not.** No radio **range** — a call reaches
+whoever control sends. No reporting **delay**, and no window to interrupt a call
+mid-sentence. No re-broadcast, and no rules about a report going stale. No shared
+field of view, and no hive mind. And nothing searches "along a patrol route":
+§7.5 patrols are emergent, so there is no path to walk. A call names a **cell**.
+
+Two things fall out of that simplicity for free — worth knowing before anyone adds
+the machinery back:
+
+- **"Silence it before it reports" costs nothing to build.** The sighting call
+  fires when a guard **loses** you, so taking the chaser down before it breaks
+  contact means no call is ever made. The tactic this section always wanted exists
+  without a report timer to interrupt.
+- **The searched cell is stale by construction.** It is where you were when
+  contact broke, never where you are. Responders converge on a place you have
+  already left — which is exactly the readable spatial problem §7.6 fix 4 asks
+  for: **the tail is not the threat, the net is.**
+
+**Legibility (§9.3).** Sound is gone, so a call needs a **visual** tell: a near
+line when it is made (§11.7), and the called guard's own **sensed dot** (§9)
+peeling off toward the cell it was sent to. Never a ping the player has to hear.
 
 > **Tuning warning.** §7.6 and §7.7 pull in opposite directions and must be tuned
 > as a pair. Loosen the individual guard (escapable), tighten the collective (the
 > net closes). Get this backwards — sticky guards *and* cooperation — and you
 > rebuild the exact thing that wasn't fun, only worse.
+
+The guard counts — **one** on a sighting, **two** on a body — are the difficulty
+dial, and both are **[START]**. They are the first thing to sweep once the
+headless sim (§13.2) can measure what they do to a run.
 
 ### 7.8 Guards and each other
 
@@ -891,9 +936,9 @@ cannot see its cone, so you hold still and hope. Exactly as intended, and now th
 > sound for legibility — the player was meant to *hear* a ping. With sound gone,
 > "call it in" and the radio clock need a **visual / near-line** cue instead. The
 > sense helps for free: a responder peeling off its patrol toward your last
-> position is now **directly readable** as a moving dot on the map. Radio is still
-> unbuilt (§7.3, **[START]**); design its tells visual from the start — a near-line
-> message and the responder's own motion, not a sound.
+> position is now **directly readable** as a moving dot on the map. The radio
+> clock is built and tells its story that way (§7.3); every §7.7 call must do the
+> same — a near-line message and the responder's own motion, never a sound.
 
 ### 9.4 Sensing doors
 
@@ -1871,10 +1916,11 @@ A **level modifier** is a named toggle or bounded knob that shifts a facility's
 flips a rule an existing system already owns rather than adding a parallel one:
 *"guards always search hideouts"* forces the §7.6 search to check occupied
 cupboards unconditionally (harder); *"always show vision cones"* paints the §11.5
-danger overlay in full (easier). This is the **mechanism** difficulty and mode
-rules flow through — the shared seam #210 (alert scaling), #244 (quick play), and
-the v3 catalogue (#231–#236) all plug into instead of each inventing its own
-knobs.
+danger overlay in full (easier); the two **cooperation call-ins** (§7.7) decide
+whether a lost sighting and a found body summon anyone (harder). This is the
+**mechanism** difficulty and mode rules flow through — the shared seam #210 (alert
+scaling), #244 (quick play), and the v3 catalogue (#232–#236) all plug into
+instead of each inventing its own knobs.
 
 **One resolved value, read by many (§12.3).** All active modifiers are fields on a
 single `LevelModifiers` value — plain, heterogeneous data (a toggle is a `bool`, a
@@ -1923,8 +1969,8 @@ the §11.5 overlay — it reveals unseen guards' cones on top of the seen ones, 
 must never narrow or hide the red detection set (§11.5 is **[SETTLED]**). Modifiers
 resolved before generation (guard count #232, safe zones #235, locked doors #236)
 read the same value at the generation seam; runtime modifiers (the two shipped,
-the intel gate #244, radio coordination #231) read it off the running state. Same
-value, two horizons.
+the intel gate #244, the two §7.7 cooperation call-ins) read it off the running
+state. Same value, two horizons.
 
 ---
 
@@ -1991,7 +2037,8 @@ Included:
 - 40×40 generation with the full corridor-partition algorithm, features, hideouts
 - **Corridor cover + the sightline assertion (§10.1a)** and reachability (§10.6)
 - Guards: cones, patrols, chasing, **a chase that can end (§7.6)**, searching,
-  radio (§7.3), cooperation
+  radio (§7.3) as baseline, and **cooperation (§7.7)** — the radio net plus the
+  two call-in modifiers (a lost sighting summons one guard, a found body two)
 - **The guard sense** (§9) — vision-only guards, the player senses guard positions through walls
 - Innate abilities + the starting tech set
 - Takedowns, bodies, dragging, hiding
