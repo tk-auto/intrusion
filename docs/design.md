@@ -1080,7 +1080,7 @@ is unclear and probably wants play evidence first.
 | Parameter | Value |
 |---|---|
 | Size | **40 × 40** **[START]** |
-| Guards | **5** **[START]** |
+| Guards | **4** **[START]** |
 | Intel | **3** **[START]** |
 | Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, the sim = **at least one**, campaign = **none** |
 | Starting abilities | **A level modifier** (`starting_abilities`, §8.3/#244): quick play grants the innate set **plus three random tech**, seeded (§12.4); the sim grants the **innate set only**; campaign accumulates instead (§2.2) |
@@ -1091,6 +1091,24 @@ be winnable with no tech**. Tech is what makes a run *better*, never what makes 
 *possible*; measuring the bot with a full loadout hides a facility that is only
 survivable because something was handed out. The guard count is tuned against the
 bare number, so every tech draw on top is upside.
+
+**Where 4 came from.** The `--guards` sweep (`sim --bot`, 300 seeds each, bare
+loadout) traced the whole curve:
+
+| Guards | 1 | 2 | 3 | **4** | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| Bare win rate | 80% | 61% | 48% | **37%** | 29% | 21% | 16% |
+| Captures | 58 | 116 | 155 | **189** | 213 | 234 | 251 |
+| Timeouts | 2 | 2 | 2 | **0** | 1 | 3 | 2 |
+
+Roughly linear, about 8–10 points of win rate per guard — no cliff, so the number
+is a taste call rather than a threshold. **4** is the forgiving-but-real end: a
+bare run wins better than one in three, and it is the only row where *every* seed
+resolved to a win or a capture rather than stalling. Read it against §13.4 — the
+bot has perfect information and no fear, but plays greedily and badly, so a human
+sits well above its number, and this is a floor, not a forecast. Nudge it back up
+once guard cooperation (§7.7) and the radio net (§7.3) add pressure the bot
+currently never feels.
 
 Size is **screen-bound**: the whole level renders on screen with no camera
 (§11.4 **[SETTLED]**), so it cannot outgrow what one screen shows legibly. The
