@@ -42,6 +42,7 @@
 //! actors (§7.5) straight from `Placement::guards`, so the shell never decides what
 //! a placed guard is; it just hands what placement built to the core.
 
+mod debug;
 mod input;
 mod menu;
 mod replay;
@@ -189,7 +190,16 @@ fn swatch(category: Category) -> Swatch {
 /// `pub(crate)` so the replay viewer ([`replay`]) can re-run a level through
 /// `inputs[0..K]` to derive the state at its cursor (replay-minus-N, §12.4).
 pub(crate) fn new_run(level: &LevelSeed) -> Result<State, JsValue> {
-    start_level(level).map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))
+    start_level(level)
+        // The build's debug switches (§12.6), applied on top of — never inside — the
+        // level: they are not part of what the run *is*, so they ride the boot rather
+        // than the token, and a run under them plays the identical game (they widen
+        // what the player perceives, never the facility or the guards). This is the
+        // shell's one funnel for a fresh run — the
+        // first frame, the menu's Quick play, and each replay re-run — so a baked
+        // switch holds for every run of the page.
+        .map(|state| state.with_debug(debug::baked_debug()))
+        .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))
 }
 
 /// Boot the game: pick the run's seed, generate its facility, draw it, and start

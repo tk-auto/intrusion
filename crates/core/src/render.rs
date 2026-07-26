@@ -1854,4 +1854,69 @@ mod tests {
         assert_eq!(g.get(2, 1).glyph, '=', "the near entry stays geometry");
         assert_eq!(g.get(5, 1).glyph, '=', "the far entry stays geometry");
     }
+
+    // --- The debug reveal (§12.6) --------------------------------------------
+
+    /// The playtest reveal is a **sight** substitution, not a drawing rule (it lands
+    /// in the sight phase, `State::recompute_sight`), so the frame needs no special
+    /// case here and gets the plain live picture everywhere: a never-scouted console
+    /// and cupboard draw their real glyphs, a far guard draws its `g`, and every cell
+    /// is [`Visibility::Live`] — one colour scheme to read, no dimmed or remembered
+    /// second layer over the board.
+    #[test]
+    fn the_debug_reveal_draws_the_whole_level_live() {
+        use crate::DebugModifiers;
+        // Player facing north; a console behind them, a cupboard across the room, a
+        // guard 14 cells south — past the sense box, so none of the three shows.
+        let guard = Cell::new(10, 24);
+        let mut layout = open_room(40, 40);
+        layout.place(Cell::new(20, 30), Terrain::Hideout);
+        let fogged = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            vec![Guard::stationary(guard)],
+            [Cell::new(10, 14)],
+            Cell::new(38, 38),
+        );
+        let g = render(&fogged);
+        assert_eq!(g.get(10, 14).glyph, '\u{b7}', "the console masks as floor");
+        assert_eq!(g.get(20, 30).glyph, '#', "the cupboard masks as wall");
+        assert_eq!(g.get(guard.x, guard.y).glyph, '\u{b7}', "no guard drawn");
+
+        let revealed = fogged.with_debug(DebugModifiers {
+            reveal_whole_level: true,
+        });
+        let g = render(&revealed);
+        assert_eq!(g.get(10, 14).glyph, '$', "the console shows");
+        assert_eq!(g.get(20, 30).glyph, '}', "the cupboard shows");
+        assert_eq!(g.get(guard.x, guard.y).glyph, 'g', "and so does the guard");
+        // Everything is the live layer — nothing on the board is dimmed or
+        // remembered, so the whole picture reads in one scheme.
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                assert_eq!(
+                    g.get(x, y).vis,
+                    Visibility::Live,
+                    "({x},{y}) is not drawn live",
+                );
+            }
+        }
+        // The guard is seen, so the overlay paints its cone (§11.5) — the reveal
+        // gives the cones for free rather than needing a second switch.
+        assert_eq!(
+            g.get(guard.x, guard.y).bg,
+            Some(Category::Danger),
+            "the seen guard's own cell is watched",
+        );
+        let watched = (0..g.height())
+            .flat_map(|y| (0..g.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| g.get(x, y).bg == Some(Category::Danger))
+            .count();
+        assert_eq!(
+            watched,
+            revealed.guards()[0].fov().cells().count(),
+            "the whole cone paints — the reveal gives the cones for free",
+        );
+    }
 }

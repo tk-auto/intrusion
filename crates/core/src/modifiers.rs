@@ -28,6 +28,13 @@
 //! `resolve`, never a new difficulty path. Determinism (§12.4) is preserved
 //! because the resolved set is plain [`Copy`] data threaded through the same seed
 //! and inputs: same seed + same modifiers + same inputs → identical run.
+//!
+//! # Debug modifiers are a different thing
+//!
+//! [`DebugModifiers`] lives here as the *contrast*, not as a fourth source: a
+//! playtest-only view switch that no rule and no generation seam may read, and that
+//! never travels in a level-seed string. See its own documentation for why the two
+//! are deliberately kept apart.
 
 /// The exit's **intel gate** (§4.5/§10.2/#244): how much intel a run must hold
 /// before the exit will let the player leave.
@@ -367,6 +374,48 @@ impl ModifierSources {
     }
 }
 
+/// **Debug modifiers** — playtest-only switches over what is *drawn*, deliberately
+/// kept apart from [`LevelModifiers`].
+///
+/// A level modifier bends the **rules** and is part of a level's identity: it is
+/// resolved from sources at facility start, some are read at the generation seam
+/// (§12.6), and every one of them travels in the shareable level-seed string
+/// ([`LevelSeed`](crate::LevelSeed), #245). A debug modifier is none of that. It bends
+/// only what the **player perceives** — never the facility, the guards, or the seed's
+/// stream — so a run under one plays exactly the run it plays without one, and the
+/// only thing that differs is how much of it you get to watch. It is never encoded
+/// into a [`LevelSeed`](crate::LevelSeed), so no shared level, typed token or `?seed=`
+/// link can turn it on: the only way to get one is to bake it into a build (the
+/// artifact-build skill's `assemble.py --debug reveal`), which is what makes it safe
+/// to be as blunt as it is.
+///
+/// The separation is the whole point. As a `LevelModifiers` field the reveal would
+/// need a bit in the token, so "try this level" could quietly hand someone a game
+/// with the fog lifted; it would join the set the generation seam reads; and the
+/// compile-time enumeration of modifier read sites (§12.2) would start listing a
+/// switch that no rule may ever consult. Two types, two rules: **a level modifier
+/// changes the game, a debug modifier changes only what you get to see of it.**
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DebugModifiers {
+    /// See the **whole level**: the player's field of view (§6) becomes every cell of
+    /// the facility, so a playtest build can be watched instead of played blind.
+    ///
+    /// It is stated as *sight*, not as a drawing rule — the sight phase substitutes a
+    /// full [`VisibleSet`](crate::vision::VisibleSet) and everything downstream
+    /// follows on its own, with no special case anywhere else. So the fog lifts
+    /// (§11.5a: contents draw, live and in their ordinary colours — there is no dim
+    /// second layer to read), every guard reads as **Seen** (§9.2) and therefore draws
+    /// its full state-coloured `g`, and the §11.5 danger overlay paints every one of
+    /// their cones. The picture is exactly the picture a player standing there with
+    /// impossible eyes would get.
+    ///
+    /// What it does **not** touch is the facility: guards look with their own cones,
+    /// detect what they would have detected and walk the same beats, so the run plays
+    /// identically — which is the whole reason watching one is worth anything. Seeing
+    /// everything is not being everywhere.
+    pub reveal_whole_level: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,6 +425,9 @@ mod tests {
         let baseline = LevelModifiers::default();
         assert!(!baseline.guards_always_search_hideouts);
         assert!(!baseline.always_show_vision_cones);
+        // A debug modifier is off by default too — the fog is on unless a build
+        // deliberately baked the reveal in.
+        assert!(!DebugModifiers::default().reveal_whole_level);
         // The intel gate's baseline is the §4.5 [START] "at least one" — the game
         // exactly as it plays without the modifier system.
         assert_eq!(baseline.intel_to_exit, IntelGate::AtLeastOne);

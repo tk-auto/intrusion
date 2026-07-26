@@ -645,3 +645,110 @@ fn vision_widens_the_player_not_the_guards() {
         "the guard's own cone is untouched — it does not see back",
     );
 }
+
+// --- The debug reveal (§12.6) ------------------------------------------------
+
+/// The playtest reveal is expressed as *sight*, not as a drawing rule: the player's
+/// field of view becomes the whole grid, so everything a view derives from it follows
+/// on its own — the fog lifts, and every guard reads as **Seen** (§9.2) and therefore
+/// paints its cone into the §11.5 danger overlay, wherever it stands. This is the
+/// difference between "the picture has an overlay bolted on" and "you can see the
+/// level".
+#[test]
+fn the_debug_reveal_makes_the_players_sight_the_whole_level() {
+    use crate::DebugModifiers;
+    // A guard far behind a north-facing player: out of the half-disc, out of the
+    // guard-sense box, its own cone facing away.
+    let guard = Cell::new(20, 34);
+    let build = || {
+        State::new(
+            open_room(40, 40),
+            Cell::new(20, 20),
+            Direction::North,
+            vec![Guard::stationary(guard)],
+            Vec::new(),
+            Cell::new(38, 38),
+        )
+    };
+    let fogged = build();
+    assert_eq!(fogged.perceive_guard(&fogged.guards()[0]), None);
+    assert_eq!(
+        fogged.visible_cone_cells().count(),
+        0,
+        "precondition: an unseen guard paints nothing",
+    );
+
+    let revealed = build().with_debug(DebugModifiers {
+        reveal_whole_level: true,
+    });
+    let facility = revealed.layout().facility();
+    for y in 0..facility.height() {
+        for x in 0..facility.width() {
+            assert!(
+                revealed.player_fov().contains(Cell::new(x, y)),
+                "({x},{y}) is outside the revealed sight",
+            );
+        }
+    }
+    assert_eq!(
+        revealed.perceive_guard(&revealed.guards()[0]),
+        Some(GuardPerception::Seen),
+        "a guard anywhere is seen, so it draws its full self and its cone",
+    );
+    assert_eq!(
+        revealed.visible_cone_cells().count(),
+        revealed.guards()[0].fov().cells().count(),
+        "the overlay paints exactly that guard's own cone — no more, no less",
+    );
+}
+
+/// The reveal changes only what the **player perceives**. Guards look with their own
+/// cones, so the facility plays the identical run: same poses, same guard states, same
+/// detection, same outcome from the same inputs. Seeing everything is not being
+/// everywhere — and, crucially, not being *seen* any differently.
+#[test]
+fn the_debug_reveal_leaves_the_guards_and_the_world_alone() {
+    use crate::DebugModifiers;
+    let build = || {
+        State::new(
+            open_room(20, 20),
+            Cell::new(5, 5),
+            Direction::South,
+            vec![Guard::patrolling_to(Cell::new(12, 12), Cell::new(12, 16))],
+            [Cell::new(9, 9)],
+            Cell::new(18, 18),
+        )
+    };
+    let mut fogged = build();
+    let mut revealed = build().with_debug(DebugModifiers {
+        reveal_whole_level: true,
+    });
+    for input in [
+        Input::Step(Direction::South),
+        Input::Step(Direction::East),
+        Input::Wait,
+        Input::Step(Direction::South),
+        Input::Step(Direction::East),
+    ] {
+        fogged.step(input);
+        revealed.step(input);
+    }
+    assert_eq!(fogged.player(), revealed.player());
+    assert_eq!(fogged.turn(), revealed.turn());
+    assert_eq!(fogged.outcome(), revealed.outcome());
+    assert_eq!(fogged.alert(), revealed.alert());
+    for (a, b) in fogged.guards().iter().zip(revealed.guards()) {
+        assert_eq!(a.pos(), b.pos(), "a guard walks the same beat");
+        assert_eq!(a.state(), b.state(), "…in the same state of mind");
+        assert_eq!(
+            a.fov().cells().count(),
+            b.fov().cells().count(),
+            "…looking with its own cone, not the player's",
+        );
+        assert_eq!(
+            a.detected_player(),
+            b.detected_player(),
+            "…and detecting exactly what it would have",
+        );
+    }
+}
