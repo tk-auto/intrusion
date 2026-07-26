@@ -179,6 +179,12 @@ enum BumpKind {
     Exit { ready: bool },
     /// An objective console still holding its intel.
     Intel,
+    /// The comms console while the radio net is still live (§7.3/§7.7): bumping it
+    /// silences the net for the rest of the level — a spent turn. Once silenced the
+    /// same cell classifies as [`Solid`](BumpKind::Solid): there is nothing left to
+    /// switch off, so a second bump is a free no-op (§4.4) and the usable line offers
+    /// nothing.
+    SilenceRadio,
     /// A door cell whose bump is a real door action (open, close, or a crush-refused
     /// close). Both handles of a closed door open it — a panel and, since #148, a
     /// hinge. Only an **open panel** is *not* a door action: it classifies as
@@ -228,6 +234,7 @@ impl BumpKind {
             BumpKind::Exit { ready: true } => Some(Affordance::Leave),
             BumpKind::Exit { ready: false } => Some(Affordance::ExitRefused),
             BumpKind::Intel => Some(Affordance::TakeIntel),
+            BumpKind::SilenceRadio => Some(Affordance::SilenceRadio),
             BumpKind::Door {
                 action: DoorAction::Opened,
             }
@@ -385,6 +392,17 @@ pub struct State {
     /// from the start (§8.3/#104), so this begins all-ready.
     abilities: Deck,
     objectives: Vec<Objective>,
+    /// The facility's comms console (§7.3/§7.7), or `None` for a facility that has
+    /// none — a hand-built test state, which plays the unmodified radio game exactly
+    /// as before. Derived once in [`new`](Self::new) from the stamped grid rather than
+    /// taken as a parameter, so no boot path has to remember to pass it and the cell
+    /// can never disagree with the terrain.
+    comms_console: Option<Cell>,
+    /// Whether the radio net has been **killed** for the rest of the level (§7.3/§7.7)
+    /// — set by bumping the comms console and never cleared. One-way and permanent by
+    /// construction: nothing in the loop writes `false`, so there is no window in which
+    /// the net could come back and no timer to read.
+    radio_silenced: bool,
     exit: Cell,
     turn: u32,
     /// The facility-wide alert level (§7.3): a count of escalations, each from a
@@ -501,6 +519,16 @@ impl State {
             })
             .collect();
         layout.place(exit, Terrain::Exit);
+        // The comms console (§7.3/§7.7), stamped here with the other solid usables
+        // rather than by the generator, so the carve stays bare for the §10.5/§10.6
+        // work that runs on it. Placement recorded the cell on the layout, so no boot
+        // path has to pass it in.
+        if let Some(cell) = layout.comms_console() {
+            layout.place(cell, Terrain::CommsConsole);
+        }
+        // One source of truth for the cell: the grid. Reading it back also picks up a
+        // hand-built fixture that stamped its own console without a placement.
+        let comms_console = layout.facility().find(Terrain::CommsConsole);
 
         let mut state = Self {
             layout,
@@ -526,6 +554,8 @@ impl State {
             // whole run (§8.3/#265) — never something to acquire by default.
             abilities: Deck::new(Loadout::innate()),
             objectives,
+            comms_console,
+            radio_silenced: false,
             exit,
             turn: 0,
             alert: 0,
@@ -548,6 +578,15 @@ impl State {
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
         state
+    }
+
+    /// Kill the radio net directly (§7.3/§7.7) — the seam a test uses to reach the
+    /// flag without staging a comms-console bump, so a scene built for the §7.7
+    /// call-ins can be replayed with the net dead and nothing else changed. The real
+    /// game only ever sets it through the bump ([`BumpKind::SilenceRadio`]).
+    #[cfg(test)]
+    pub(crate) fn silence_radio_for_test(&mut self) {
+        self.radio_silenced = true;
     }
 
     /// Thread the run's seeded random source into the state (§12.4) — the
@@ -933,6 +972,15 @@ impl State {
                 events.push(Event::IntelTaken { remaining });
                 true
             }
+            // The comms console (§7.3/§7.7): one bump kills the radio net for the rest
+            // of the level. A spent turn — the counterplay costs the detour that got
+            // you here plus this turn, and nothing else, because the flag is one-way
+            // and there is no upkeep to pay.
+            BumpKind::SilenceRadio => {
+                self.radio_silenced = true;
+                events.push(Event::CommsSilenced { at: target });
+                true
+            }
             // A door (§4.3, §10.4): opening or closing spends the turn. An obstructed
             // close changed nothing — free; doors never crush.
             BumpKind::Door { action } => match action {
@@ -1213,6 +1261,12 @@ impl State {
         if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
             return BumpKind::Intel;
         }
+        // The comms console (§7.3/§7.7), while the net is still live. A silenced one
+        // falls through to the plain solid bump below — spent scenery, offering
+        // nothing, which is precisely how the design wants it to read.
+        if self.comms_console == Some(target) && !self.radio_silenced {
+            return BumpKind::SilenceRadio;
+        }
         if let Some(action) = self.layout.preview_door_bump(target, |c| self.occupied(c)) {
             // Autodoors (§8.3/§7.6): a closed door in the path opens and is walked
             // through in one step — but only when the opened cell is a walkable panel.
@@ -1313,7 +1367,17 @@ impl State {
     /// investigation — the responder searches the cell the body was dragged away
     /// from — it does not cancel it. Both events are surfaced (§11.7): the silence
     /// as a near-line message, the responder as its own sensed dot (§9).
+    ///
+    /// A net the player has **killed** at the comms console (§7.7) runs none of this:
+    /// control cannot ping what it has no radio for, so no ping is ever missed, no
+    /// responder is dispatched, and the alert never steps from this source again. The
+    /// bodies keep their clocks untouched — there is nothing to resume, since silencing
+    /// is one-way — and a guard already walking to a takedown site keeps going (see
+    /// [`call_guards_to`](Self::call_guards_to)).
     fn radio_phase(&mut self, events: &mut Vec<Event>) {
+        if self.radio_silenced {
+            return;
+        }
         // Index-walk: `bodies` is only ever appended to (§7.2), so indices are
         // stable across the loop, and the dispatch borrows `guards` separately.
         for i in 0..self.bodies.len() {

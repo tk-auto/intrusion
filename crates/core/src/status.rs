@@ -75,6 +75,12 @@ pub fn message_for(event: Event) -> Option<Message> {
             20,
         ),
         Event::ExitRefused => ("the exit needs intel in hand first".to_string(), 20),
+        // The §7.7 counterplay landing (§7.3): the whole net is down for the rest of
+        // the level. Ranked with the objective feedback rather than on the threat
+        // ladder — it is the payoff for a detour the player chose, and it must not be
+        // buried by a guard event on the same turn, because "did that work?" is the one
+        // question the bump raises. Nothing ever unsays it: the flag is one-way.
+        Event::CommsSilenced { .. } => ("the radio net goes dead".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
         // The other death (§8.3): rematerializing inside something solid. The
@@ -390,6 +396,29 @@ mod tests {
         assert_eq!(alert.text, "the facility is on alert — level 2");
         assert_eq!(alert.category, Category::Warning);
         assert_eq!(alert.priority, 5);
+    }
+
+    /// §7.7/§11.7: killing the radio net at the comms console is **objective
+    /// feedback**, not a threat message — the Interest band, on the same rung as
+    /// taking intel (20), well above every guard event. That rung is the point: the
+    /// bump raises exactly one question — *did that work?* — and a detection or a
+    /// found body landing the same turn must not bury the answer.
+    #[test]
+    fn killing_the_radio_net_reads_as_objective_feedback() {
+        let msg = message_for(Event::CommsSilenced {
+            at: Cell::new(3, 3),
+        })
+        .expect("silencing the net is never silent");
+        assert_eq!(msg.text, "the radio net goes dead");
+        assert_eq!(msg.category, Category::Interest);
+        assert_eq!(msg.priority, 20);
+
+        // Louder than the loudest thing the net itself could have said.
+        let alert = message_for(Event::AlertRaised { level: 9 }).expect("an alert step speaks");
+        assert!(
+            msg.priority > alert.priority,
+            "the answer to \"did that work?\" outranks a guard event on the same turn",
+        );
     }
 
     /// §7.7/§11.7: the two call-ins sit on the same Warning band, at the rungs

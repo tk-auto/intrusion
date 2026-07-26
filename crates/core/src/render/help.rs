@@ -384,6 +384,7 @@ fn glyph_rows() -> Vec<(char, Category, &'static str)> {
         terrain(Terrain::PartialCover, "table — bump to crouch"),
         terrain(Terrain::DuctEntry, "duct — bump to crawl in"),
         terrain(Terrain::Console, "intel — bump to take"),
+        terrain(Terrain::CommsConsole, "comms — bump to kill the radio"),
         terrain(Terrain::Exit, "the exit"),
         (FLOOR_DOT, Category::Ground, "floor"),
     ]
@@ -518,6 +519,7 @@ mod tests {
             Terrain::PartialCover,
             Terrain::DuctEntry,
             Terrain::Console,
+            Terrain::CommsConsole,
             Terrain::Exit,
         ] {
             assert!(

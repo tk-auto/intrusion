@@ -423,12 +423,17 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
         Terrain::DoorPanelClosed | Terrain::DoorPanelOpen => {
             (Terrain::DoorPanelClosed, Visibility::Dimmed)
         }
-        // Contents: hidden until seen, then remembered (§11.5a).
-        Terrain::Console | Terrain::Hideout if remembered => (terrain, Visibility::Remembered),
+        // Contents: hidden until seen, then remembered (§11.5a). The comms console
+        // (§7.3/§7.7) is contents like the intel console: the counterplay it offers
+        // has to be *found*, so the map never advertises it before the player has
+        // scouted the room.
+        Terrain::Console | Terrain::CommsConsole | Terrain::Hideout if remembered => {
+            (terrain, Visibility::Remembered)
+        }
         // Never seen: masked by the geometry naturally in its place — plain floor
         // where a console stands, plain wall over a hideout alcove, so the map
         // gives neither away before the player has scouted it.
-        Terrain::Console => (Terrain::Floor, Visibility::Dimmed),
+        Terrain::Console | Terrain::CommsConsole => (Terrain::Floor, Visibility::Dimmed),
         Terrain::Hideout => (Terrain::Wall, Visibility::Dimmed),
     }
 }
@@ -1114,6 +1119,44 @@ mod tests {
             (remembered.glyph, remembered.fg, remembered.vis),
             ('$', Category::Neutral, Visibility::Remembered),
             "a spent console stays Neutral in memory",
+        );
+    }
+
+    /// §11.2/§7.7: the **comms console** takes the same spent recolour. Live it is an
+    /// Interest `Ψ` — its own glyph, so it is never confused with the intel `$`
+    /// (§11.3); once the radio net is dead it keeps the glyph and drops to Neutral,
+    /// reading as the spent scenery it now is (there is nothing left to switch off).
+    #[test]
+    fn a_silenced_comms_console_recolours_to_neutral() {
+        let mut layout = open_room(40, 40);
+        layout.place(Cell::new(11, 10), Terrain::CommsConsole);
+        let mut s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::East,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 38),
+        );
+
+        let live = render(&s).get(11, 10);
+        assert_eq!(
+            (live.glyph, live.fg, live.vis),
+            ('Ψ', Category::Interest, Visibility::Live),
+            "a live comms console is Interest, with its own glyph",
+        );
+
+        assert_eq!(
+            s.step(Input::Step(Direction::East)),
+            vec![Event::CommsSilenced {
+                at: Cell::new(11, 10)
+            }],
+        );
+        let spent = render(&s).get(11, 10);
+        assert_eq!(
+            (spent.glyph, spent.fg, spent.vis),
+            ('Ψ', Category::Neutral, Visibility::Live),
+            "a silenced comms console is Neutral scenery, glyph kept",
         );
     }
 

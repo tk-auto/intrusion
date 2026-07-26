@@ -1870,7 +1870,10 @@ fn a_guard_is_judged_where_the_phase_found_it_not_where_its_step_lands() {
 /// its sight-shadow, plus a second guard far enough away to have seen nothing. The
 /// chase therefore ends in a search — the moment a lost sighting is called in — and
 /// there is somebody free to answer.
-fn call_in_scene() -> State {
+///
+/// Shared with the comms-console tests ([`super::comms`]), which need the same
+/// "somebody would be called here" scene to show that a killed net calls nobody.
+pub(super) fn call_in_scene() -> State {
     let mut layout = open_room(30, 12);
     layout.place(Cell::new(4, 5), Terrain::Hideout); // the dive
     layout.place(Cell::new(4, 4), Terrain::Wall); // …unwitnessed (§15 Q5)
@@ -2094,7 +2097,10 @@ fn taking_the_chaser_down_before_it_searches_suppresses_the_call() {
 /// The scene the §7.7 body-call tests share: the player takes down a guard from a
 /// cupboard, leaving a body in the open, with a patrolling guard that will walk
 /// into sight of it and two more far away and free to be called.
-fn body_call_scene() -> State {
+///
+/// Shared with the comms-console tests ([`super::comms`]), for the same reason
+/// [`call_in_scene`] is.
+pub(super) fn body_call_scene() -> State {
     let mut layout = open_room(30, 12);
     layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's cupboard
     State::new(

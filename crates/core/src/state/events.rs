@@ -126,6 +126,14 @@ pub enum Event {
     /// way. Fires only with the `body_found_calls_two_guards` modifier on (§12.6),
     /// once per body, and only when someone was free to send.
     BodyCalledIn { at: Cell },
+    /// The player bumped the **comms console** and killed the radio net for the rest
+    /// of the level (§7.3/§7.7): control stops pinging, so no further body is ever
+    /// missed and no further alert steps from that source, and both cooperation
+    /// call-ins stop firing. One-way and permanent — there is no matching "the radio is
+    /// back" event because there is no way back. Distinct from
+    /// [`RadioSilence`](Event::RadioSilence), which is a single *guard* gone quiet and
+    /// is bad news; this is the net itself, and it is the player's doing.
+    CommsSilenced { at: Cell },
     /// A second missed radio ping stepped the facility-wide alert to `level`
     /// (§7.3): the concrete, explainable escalation the alert system was always
     /// meant to provide (§2.3). Written here, read on the near line (§11.4).
@@ -210,8 +218,14 @@ impl Event {
             // open or shut is scenery, whoever moved it.
             Event::DoorOpened { .. } | Event::DoorClosed { .. } => Category::System,
             // Goals and rewards — including the exit talking about the goal it
-            // still refuses (§4.5) and the win itself.
-            Event::IntelTaken { .. } | Event::ExitRefused | Event::Won => Category::Interest,
+            // still refuses (§4.5) and the win itself. Killing the radio net (§7.7) is
+            // the reward for routing to the comms console, and it reads in that band
+            // rather than the Owned one your abilities use: it is a fact about the
+            // *facility* now, not a tool you are holding.
+            Event::IntelTaken { .. }
+            | Event::ExitRefused
+            | Event::Won
+            | Event::CommsSilenced { .. } => Category::Interest,
             // A threat that has you, literally (§4.5) — or the wall does (§8.3).
             Event::Captured { .. } | Event::Entombed { .. } => Category::Danger,
         }
@@ -242,6 +256,10 @@ pub enum Affordance {
     CloseDoor,
     /// An untaken intel console: bump to take the intel (§4.3).
     TakeIntel,
+    /// The comms console with the radio net still live: bump to kill it for the rest of
+    /// the level (§7.3/§7.7). Never offered on a console already used — a silenced net
+    /// has nothing left to switch off.
+    SilenceRadio,
     /// An empty cupboard: bump to climb in and be concealed (§10.3).
     Hide,
     /// A duct entry: bump to climb into the crawlspace shortcut (§10.7).
@@ -264,6 +282,7 @@ impl Affordance {
             Affordance::OpenDoor => "door: open",
             Affordance::CloseDoor => "door: close",
             Affordance::TakeIntel => "console: take intel",
+            Affordance::SilenceRadio => "comms: silence radio",
             Affordance::Hide => "cupboard: hide",
             Affordance::EnterDuct => "duct: enter",
             Affordance::Crouch => "table: crouch",
@@ -273,8 +292,10 @@ impl Affordance {
     }
 
     /// What acting on this affordance is *about* (§11.2): doors, cupboards and
-    /// tables are System furniture; the console and the exit are the goal,
-    /// Interest; a takedown is about the unaware threat it targets — Caution,
+    /// tables are System furniture; both consoles and the exit are the goal,
+    /// Interest — the comms console is a place worth routing to (§7.7), which is what
+    /// puts it there rather than with the furniture; a takedown is about the unaware
+    /// threat it targets — Caution,
     /// matching the yellow `g` it points at; the body in your hands is Owned,
     /// like its recoloured glyph (§11.3). Stowing a body is a cupboard
     /// interaction — System furniture, like hiding in one.
@@ -288,9 +309,10 @@ impl Affordance {
             | Affordance::StoreBody
             | Affordance::EnterDuct
             | Affordance::Crouch => Category::System,
-            Affordance::TakeIntel | Affordance::Leave | Affordance::ExitRefused => {
-                Category::Interest
-            }
+            Affordance::TakeIntel
+            | Affordance::SilenceRadio
+            | Affordance::Leave
+            | Affordance::ExitRefused => Category::Interest,
         }
     }
 }

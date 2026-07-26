@@ -327,7 +327,25 @@ impl State {
     /// Returns whether anybody was actually sent, so the caller only reports a call
     /// that someone answered: with nobody free the call is simply unanswered, never
     /// queued or retried (§7.7).
+    ///
+    /// **A killed net sends nobody** (§7.7): with the radio silenced at the comms
+    /// console there is no channel for a call to travel down, so both cooperation
+    /// call-ins stop firing here — one gate on the one shared seam, so no future call
+    /// can forget it. What does *not* stop is a guard already on its way: an errand
+    /// given before the net died is **finished**, not recalled. That is the deliberate
+    /// choice of the two the design leaves open, and it follows §7.7's own rule that a
+    /// call, once made, is never queued or retried — there is no channel to un-send it
+    /// down either. It also keeps the console honest as counterplay rather than a panic
+    /// button: silencing the net stops the *next* wave, it does not erase the search
+    /// already bearing down on you (§2.3 — cost is load-bearing).
+    ///
+    /// The guard that made the discovery still searches on its own either way — that is
+    /// §7.6/§7.2 behaviour, not a call — so a silenced facility is lonelier, never
+    /// blind.
     fn call_guards_to(&mut self, at: Cell, exclude: &[usize], count: usize) -> bool {
+        if self.radio_silenced {
+            return false;
+        }
         let sent: Vec<usize> = radio::nearest_respondable(&self.guards, at, self.guards.len())
             .into_iter()
             .filter(|g| !exclude.contains(g))

@@ -483,6 +483,42 @@ Why this is the right mechanic:
 - **It creates the escalation the alert system was always supposed to provide**,
   from a concrete, explainable source rather than a global number.
 
+#### The comms console — the counterplay to the net
+
+The net above is pressure the player is meant to be able to *answer*, not merely
+endure. The answer is a **comms console**: the facility's radio terminal, one per
+level, **bumped** like everything else (§4.3's one interaction verb). Bumping it
+**kills all radio for the rest of the level.**
+
+| Property | Value |
+|---|---|
+| Glyph | `Ψ` — its own, never the intel console's `$` (§11.3) |
+| Interaction | **Bump** (§4.3); the usable line reads `comms: silence radio` (§11.4) |
+| Cost | **1 turn**, plus the detour that got you there |
+| Effect | Control stops pinging (no dispatch, no alert step from a missed ping), and **both** §7.7 cooperation call-ins stop firing |
+| Guards already sent | **Finish the errand** — silencing stops the next wave, it never recalls a search already under way |
+| Permanence | **One-way**, for the whole level; the console then reads as spent (Neutral, §11.2) |
+| Placement | A non-start room, at least **16** cells (Manhattan) from the spawn **[START]**, reachable by a bump (§10.6), hidden until seen (§11.5a) |
+
+Why it is shaped this way:
+
+- **The cost is the route, not the switch.** One bump is cheap; getting to it is
+  not. Placement distance is therefore the balance knob (**[START]** — the sim,
+  §13.2, sweeps it), and the reason the console is not simply free: a console
+  found in the first few turns would make every later takedown free, which is
+  exactly the collapse §7.3 exists to prevent.
+- **It is findable, not given.** Contents are fogged (§11.5a), so the console has
+  to be *scouted*; the map never advertises it. And it is asserted reachable like
+  an objective (§10.6) — **counterplay the player cannot reach is not
+  counterplay**, so a seed that seals it away is a generation reject.
+- **Errands are not recalled**, which keeps it counterplay rather than a panic
+  button. It also follows §7.7's own rule that a call, once made, is never queued
+  or retried — there is no channel to un-send one down either.
+- **A silenced facility is lonelier, never blind.** Nothing here touches what a
+  guard does with its *own* eyes: the one that loses you still searches, the one
+  that finds a body still hunts it (§7.6/§7.2). Only the *calling of others*
+  stops.
+
 **[OPEN]** — whether a run **score** exists, and whether takedowns cost score.
 See §15.
 
@@ -677,7 +713,12 @@ the machinery back:
 - **"Silence it before it reports" costs nothing to build.** The sighting call
   fires when a guard **loses** you, so taking the chaser down before it breaks
   contact means no call is ever made. The tactic this section always wanted exists
-  without a report timer to interrupt.
+  without a report timer to interrupt. Its facility-scale twin is the **comms
+  console** (§7.3): one bump and *no* call fires again for the rest of the level —
+  both call-ins here, and the radio net's own dispatch, go with it. That console is
+  the deliberate answer to the pressure this section applies, and it is why the
+  guard counts below can be tuned upward without the net becoming something the
+  player can only suffer.
 - **The searched cell is stale by construction.** It is where you were when
   contact broke, never where you are. Responders converge on a place you have
   already left — which is exactly the readable spatial problem §7.6 fix 4 asks
@@ -1239,6 +1280,7 @@ fail**. Guard the minimum.
 | **Duct entry** | `=` | Yes (**player: Bump**) | Yes | Yes |
 | **Partial cover (table)** | `π` | Yes | **No** | Yes |
 | **Console** | `$` | Yes | No | No |
+| **Comms console** | `Ψ` | Yes | No | No |
 | **Exit** | `E` | Yes | No | No |
 | **Player** | `@` | Yes | No | No |
 | **Guard** | `g` | Yes | No | No |
@@ -1423,7 +1465,8 @@ This is the highest-leverage structural decision in the document. Nearly every
 | Corridor network connected | Each corridor punches into its parent → the network is a tree |
 | Every room reaches a corridor | Every room is bounded by corridor walls, which qualify as door candidates |
 | Every room ≥ 6×6, ≤ ~12 rooms | Partition constants |
-| **A path exists: start → every objective → exit** | **Assert it. See below.** |
+| **A path exists: start → every objective → the comms console → exit** | **Assert it. See below.** |
+| **The comms console is a real detour** | ≥ 16 cells from the spawn, non-start room **[START]** (§7.3) |
 | **One usable beside any floor cell (preferred)** | Conflict-aware stamping, best-effort; the arrow disambiguates the rest. See below. |
 
 **The old generator never verified solvability.** It relied on the structural
@@ -1438,13 +1481,13 @@ generator must never merely *believe*.
 
 **One usable per cell — a preference, not a guarantee.** The usable line
 (§11.4) points each bump with its own arrow, so a floor cell beside **two
-distinct usables** (a door, a table, a cupboard, a console, the exit; a
+distinct usables** (a door, a table, a cupboard, either console, the exit; a
 multi-cell door counts once) is still *legible* — `→ door: open` and `↑ table:
 crouch` are two aimed actions, not one ambiguous prompt — but it reads cleanest
 at one. So every stamping stage **avoids crowding where it cheaply can**:
 cupboard sites that would double up are skipped (sites are plentiful), and
-console and exit candidates prefer a clean cell, falling back rather than
-failing the draw.
+console (intel and comms) and exit candidates prefer a clean cell, falling back
+rather than failing the draw.
 
 **Two of the §10.6 guarantees outrank it, so it is not asserted.** Connectivity
 and the sightline rule (§10.1a) come first, and §10.1a's repairs must land where

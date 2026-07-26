@@ -69,6 +69,16 @@ pub enum Terrain {
     /// share its cell) but transparent to sight and pathing. Renders `$`
     /// (§10.3, §11.3).
     Console,
+    /// A **comms console** — the facility's radio terminal (§7.3/§7.7). Bumping it
+    /// silences the whole net for the rest of the level: control stops pinging, and
+    /// the two §7.7 cooperation call-ins stop firing. Physically an intel console's
+    /// twin — solid, transparent to sight and pathing, bumped from an adjacent cell
+    /// — and deliberately a *different glyph* (`Ψ`, an aerial) so a player reading
+    /// the grid can tell the two apart at a glance (§11.3). Static furniture the
+    /// generator installs, unlike the intel console, which is an objective the run
+    /// carries state for; its spent/live distinction is state on
+    /// [`State`](crate::State), not terrain.
+    CommsConsole,
     /// The exit: where a laden player leaves to win (§4.5). Solid but otherwise
     /// transparent, like a console. Renders `E` (§10.3, §11.3).
     Exit,
@@ -78,7 +88,7 @@ impl Terrain {
     /// Every terrain kind, for exhaustive sweeps — the counterpart to
     /// [`Direction::ALL`](crate::Direction::ALL). Its length is pinned by a test, so
     /// a new variant cannot slip in without being listed here too.
-    pub const ALL: [Terrain; 10] = [
+    pub const ALL: [Terrain; 11] = [
         Terrain::Floor,
         Terrain::Wall,
         Terrain::DoorHinge,
@@ -88,6 +98,7 @@ impl Terrain {
         Terrain::PartialCover,
         Terrain::DuctEntry,
         Terrain::Console,
+        Terrain::CommsConsole,
         Terrain::Exit,
     ];
 
@@ -103,6 +114,7 @@ impl Terrain {
             Terrain::PartialCover => 'π',
             Terrain::DuctEntry => '=',
             Terrain::Console => '$',
+            Terrain::CommsConsole => 'Ψ',
             Terrain::Exit => 'E',
         }
     }
@@ -111,8 +123,15 @@ impl Terrain {
     /// each cell with this; the platform shell owns the category → colour table, so
     /// no concrete colour is named here. Walls are inert **Neutral**; floor (and the
     /// walkable gap of an open panel) is **Ground**, drawn to recede so everything
-    /// else pops; doors and hideouts are **System** furniture; a console (intel) and
-    /// the exit are **Interest** — a goal or reward.
+    /// else pops; doors and hideouts are **System** furniture; a console (intel), the
+    /// comms console and the exit are **Interest** — a goal or reward.
+    ///
+    /// The comms console sits with the goals rather than with the furniture because
+    /// it is a place worth *routing to* (§7.7): its counterplay costs the turns and
+    /// exposure the detour takes, which is exactly the "goal" reading. Its glyph, not
+    /// its colour, is what tells it apart from the intel console (§11.3) — and, like a
+    /// spent objective, once used it recolours to Neutral (§11.2, the renderer's
+    /// spent-console pass).
     pub fn category(self) -> Category {
         match self {
             Terrain::Wall => Category::Neutral,
@@ -122,7 +141,7 @@ impl Terrain {
             | Terrain::Hideout
             | Terrain::PartialCover
             | Terrain::DuctEntry => Category::System,
-            Terrain::Console | Terrain::Exit => Category::Interest,
+            Terrain::Console | Terrain::CommsConsole | Terrain::Exit => Category::Interest,
         }
     }
 
@@ -138,6 +157,7 @@ impl Terrain {
             | Terrain::PartialCover
             | Terrain::DuctEntry
             | Terrain::Console
+            | Terrain::CommsConsole
             | Terrain::Exit => 1.0,
         }
     }
@@ -159,6 +179,7 @@ impl Terrain {
             | Terrain::Hideout
             | Terrain::PartialCover
             | Terrain::Console
+            | Terrain::CommsConsole
             | Terrain::Exit => false,
             // A duct entry is wall-like to every viewer: a guard never sees
             // *through* it or into the crawlspace behind it (§10.7).
@@ -198,6 +219,7 @@ impl Terrain {
             | Terrain::DoorPanelClosed
             | Terrain::DoorPanelOpen
             | Terrain::Console
+            | Terrain::CommsConsole
             | Terrain::Exit => false,
         }
     }
@@ -234,10 +256,10 @@ impl Terrain {
             Terrain::Hideout => true,
             // Solid to the player: no route crosses these (§10.3).
             Terrain::Wall | Terrain::DoorHinge | Terrain::PartialCover => false,
-            // Goals, not through-cells: both are reached by a *bump* from an adjacent
-            // cell (take the intel, leave by the exit, §4.3/§4.5), never crossed — so
-            // a route ends beside one rather than running over it.
-            Terrain::Console | Terrain::Exit => false,
+            // Goals, not through-cells: each is reached by a *bump* from an adjacent
+            // cell (take the intel, silence the radio, leave by the exit, §4.3/§4.5),
+            // never crossed — so a route ends beside one rather than running over it.
+            Terrain::Console | Terrain::CommsConsole | Terrain::Exit => false,
             // A duct entry **is** enterable by the player and by them alone (§10.7),
             // so this `false` is a decision, not an oversight: bumping a mouth is a
             // *mode change* into the crawlspace, where movement is confined to the
@@ -317,6 +339,18 @@ impl Facility {
         }
     }
 
+    /// The first cell holding `terrain` in row-major scan order, or `None` if the
+    /// grid has none. For the one-of-a-kind fixtures a facility carries — today the
+    /// comms console (§7.3/§7.7) — so a caller can recover the cell from the grid
+    /// instead of being handed it separately and risking the two disagreeing. Scan
+    /// order makes the answer deterministic (§12.4) even if a grid ever held two.
+    pub fn find(&self, terrain: Terrain) -> Option<Cell> {
+        self.cells
+            .iter()
+            .position(|&t| t == terrain)
+            .map(|i| Cell::new(i as u32 % self.width, i as u32 / self.width))
+    }
+
     /// Whether `cell` names a square on this grid.
     pub fn in_bounds(&self, cell: Cell) -> bool {
         cell.x < self.width && cell.y < self.height
@@ -380,7 +414,7 @@ mod tests {
     /// count is the deliberate step a new terrain has to pass through.
     #[test]
     fn all_lists_every_terrain_kind() {
-        assert_eq!(Terrain::ALL.len(), 10, "a new Terrain must be added to ALL");
+        assert_eq!(Terrain::ALL.len(), 11, "a new Terrain must be added to ALL");
         for (i, &a) in Terrain::ALL.iter().enumerate() {
             for &b in &Terrain::ALL[i + 1..] {
                 assert_ne!(a, b, "ALL holds each kind once");
@@ -535,7 +569,7 @@ mod tests {
         assert!(Terrain::Wall.blocks_pathing());
     }
 
-    /// The rest of the static §10.3 table: hideout, console, exit.
+    /// The rest of the static §10.3 table: hideout, the two consoles, exit.
     #[test]
     fn hideout_console_and_exit_match_10_3() {
         // Hideout, empty: walk-through (fill 0.0), sight transparent, yet it
@@ -547,15 +581,31 @@ mod tests {
         assert!(h.blocks_pathing(), "hideout must block pathing");
         assert_eq!(h.glyph(), '}');
 
-        // Console and exit: solid (fill 1.0, blocks movement) but transparent to
-        // sight and pathing — you see past them and route across them.
-        for (t, glyph) in [(Terrain::Console, '$'), (Terrain::Exit, 'E')] {
+        // Both consoles and the exit: solid (fill 1.0, blocks movement) but
+        // transparent to sight and pathing — you see past them and route across them.
+        // The comms console (§7.3/§7.7) is the intel console's physical twin; only
+        // its glyph and what a bump does differ.
+        for (t, glyph) in [
+            (Terrain::Console, '$'),
+            (Terrain::CommsConsole, 'Ψ'),
+            (Terrain::Exit, 'E'),
+        ] {
             assert_eq!(t.fill(), 1.0);
             assert!(t.blocks_movement());
             assert!(!t.blocks_sight());
             assert!(!t.blocks_pathing());
+            assert!(!t.routes_player(), "a goal is bumped, never crossed");
             assert_eq!(t.glyph(), glyph);
+            assert_eq!(t.category(), Category::Interest);
         }
+
+        // The two consoles are told apart by **glyph**, not colour (§11.3) — the
+        // player must never have to read a colour to know which terminal is which.
+        assert_ne!(
+            Terrain::Console.glyph(),
+            Terrain::CommsConsole.glyph(),
+            "the comms console needs its own glyph (§11.3)",
+        );
     }
 
     /// The §10.3 partial-cover row: a table is solid to movement and pathing like
@@ -583,6 +633,7 @@ mod tests {
             Terrain::Hideout,
             Terrain::DuctEntry,
             Terrain::Console,
+            Terrain::CommsConsole,
             Terrain::Exit,
         ] {
             assert!(!other.provides_cover(), "{other:?} must not provide cover");
