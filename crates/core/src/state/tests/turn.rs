@@ -137,7 +137,11 @@ fn ability_statuses_are_the_economy_deck_in_order() {
         .find(|st| st.id == AbilityId::Vision)
         .expect("the passive has a row");
     assert_eq!(vision.state, AbilityState::Passive);
-    assert_eq!(vision.compact(), "v", "the bare key, undecorated for now");
+    assert_eq!(
+        vision.bar_entry(),
+        "Sight(on)",
+        "named, and marked always-on"
+    );
 
     // Each row mirrors the live economy state.
     s.step(Input::Activate(AbilityId::Run));

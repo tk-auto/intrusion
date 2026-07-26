@@ -33,7 +33,7 @@
 //! or `Escape` closes it, and the tab bar carries a touchable `[x]`.
 
 use super::{blank_grid, draw, Grid, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH};
-use crate::ability::AbilityId;
+use crate::ability::{AbilityId, PASSIVE_MARKER};
 use crate::category::Category;
 use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
@@ -297,7 +297,7 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
     y += 1;
     for (keys, action) in control_rows() {
         draw(grid, 3, y, &keys, Category::System);
-        draw(grid, 26, y, action, Category::Neutral);
+        draw(grid, 26, y, &action, Category::Neutral);
         y += 1;
     }
 }
@@ -383,23 +383,40 @@ fn category_meaning(category: Category) -> &'static str {
 /// rows; the **ability** rows derive their keys from [`AbilityId`]'s settled hotkeys,
 /// so an ability's key on this card is exactly the key that activates it; the UI keys
 /// close the card and drive the panels.
-fn control_rows() -> Vec<(String, &'static str)> {
-    let mut rows: Vec<(String, &'static str)> = vec![
-        ("arrows / hjkl / 8246".to_string(), "move"),
-        ("w / 5 / .".to_string(), "wait & sense"),
+/// **This card is now the only place hotkeys are written down** (#287): the ability
+/// bar spends its width on names instead of letters, so a player who wants to know
+/// which key fires what comes here. Which makes it also where the bar's short names
+/// are explained — an ability's left column is `<key> / <bar name>`, exactly the two
+/// things a player is holding in their head ("the `Camo` down there, what fires it?"),
+/// and the right column is the full §8.3 name the near line's messages speak.
+///
+/// A **passive** (#264) shows its bar entry and no key: it has nothing to press, and
+/// advertising its identity letter would promise an action that does nothing — but
+/// it *is* an entry on the bar, so a card that omitted it would leave the one entry
+/// a player cannot act on as the one entry nothing explains.
+fn control_rows() -> Vec<(String, String)> {
+    let mut rows: Vec<(String, String)> = vec![
+        ("arrows / hjkl / 8246".to_string(), "move".to_string()),
+        ("w / 5 / .".to_string(), "wait & sense".to_string()),
     ];
-    // Passives are deliberately absent (#264): this card is the list of keys and
-    // what pressing them does, and a passive has no key to press — it is in effect
-    // because it is held, not because anything was activated. It still carries a
-    // hotkey letter as its identity (the ability line's glyph, the level-seed code),
-    // but advertising that letter here would promise an action that does nothing.
-    for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
-        rows.push((id.hotkey().to_string(), id.name()));
+    for id in AbilityId::ALL {
+        rows.push((ability_row_keys(id), id.name().to_string()));
     }
-    rows.push(("Tab".to_string(), "ability panel"));
-    rows.push(("m".to_string(), "messages"));
-    rows.push((HELP_KEY.to_string(), "this help"));
+    rows.push(("m".to_string(), "messages".to_string()));
+    rows.push((HELP_KEY.to_string(), "this help".to_string()));
     rows
+}
+
+/// An ability's left column on the controls card (#287): the key that fires it and
+/// the [bar name](AbilityId::bar_name) it appears under, so the two are read as one
+/// fact. A **passive** has no key, so it shows its bar entry as the bar draws it —
+/// `Sight (on)` — which is the thing on screen the row is there to explain.
+fn ability_row_keys(id: AbilityId) -> String {
+    if id.is_passive() {
+        format!("{} {PASSIVE_MARKER}", id.bar_name())
+    } else {
+        format!("{} / {}", id.hotkey(), id.bar_name())
+    }
 }
 
 /// The category's display name for the colour key — its own identifier, so the key
@@ -480,25 +497,50 @@ mod tests {
     }
 
     /// The ability control rows carry each **activated** ability's settled §11.6
-    /// hotkey and name, straight from [`AbilityId`] — so the card's keys are the
-    /// keys that actually activate them, and cannot drift. A **passive** is
-    /// deliberately absent (#264): it has no key to press, and listing its identity
-    /// letter here would advertise an action that does nothing.
+    /// hotkey, straight from [`AbilityId`] — so the card's keys are the keys that
+    /// actually activate them, and cannot drift. Since the bar stopped showing
+    /// letters (#287) this card is the whole key reference, so *every* ability is
+    /// listed: an activated one under its key, a **passive** under its always-on
+    /// marker, because it has no key to press but is still an entry on the bar.
     #[test]
     fn the_control_rows_carry_the_real_ability_hotkeys() {
         let rows = control_rows();
         for id in AbilityId::ALL {
-            let key = id.hotkey().to_string();
-            let listed = rows.iter().any(|(k, a)| *k == key && *a == id.name());
-            assert_eq!(
-                listed,
-                !id.is_passive(),
-                "the controls list exactly the pressable abilities: {}",
+            let keys = ability_row_keys(id);
+            assert!(
+                rows.iter().any(|(k, a)| *k == keys && a == id.name()),
+                "the controls must list {} under {keys:?}",
                 id.name(),
             );
         }
         // The help key documents itself.
         assert!(rows.iter().any(|(k, _)| *k == HELP_KEY.to_string()));
+    }
+
+    /// The card joins the bar's short name to the key that fires it and to the full
+    /// name the messages speak (#287) — the whole reason it is safe for the bar to
+    /// show neither the letter nor the long name. A passive shows its bar entry and
+    /// no key, because there is none.
+    #[test]
+    fn the_control_rows_explain_the_bar_names() {
+        assert_eq!(ability_row_keys(AbilityId::Camouflage), "c / Camo");
+        assert_eq!(ability_row_keys(AbilityId::Run), "r / Run");
+        assert_eq!(ability_row_keys(AbilityId::Vision), "Sight (on)");
+        let text = text_of(&render_help(
+            W,
+            H,
+            HelpTab::Legend,
+            None,
+            LevelModifiers::default(),
+        ));
+        for (keys, name) in [
+            ("c / Camo", "Camouflage"),
+            ("Sight (on)", "Vision"),
+            ("a / Doors", "Autodoors"),
+        ] {
+            assert!(text.contains(keys), "the card shows {keys:?}");
+            assert!(text.contains(name), "…against {name:?}");
+        }
     }
 
     /// The **Legend** tab still carries the whole reference card — the three
@@ -511,9 +553,9 @@ mod tests {
         for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
             assert!(text.contains(glyph), "the legend shows {glyph:?}");
         }
-        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
+        for id in AbilityId::ALL {
             assert!(
-                text.contains(id.hotkey()),
+                text.contains(&ability_row_keys(id)),
                 "the controls show {}",
                 id.name()
             );

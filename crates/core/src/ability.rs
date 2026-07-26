@@ -1,16 +1,25 @@
-//! The ability line/panel's display vocabulary (§11.4) — **what the always-on
-//! ability line and the deployable panel say**, assembled from the run's real
-//! ability economy.
+//! The ability bar's display vocabulary (§11.4) — **what the always-on ability
+//! bar says**, assembled from the run's real ability economy.
 //!
-//! §11.4 leaves *where* ability state lives on screen **[OPEN]** (§15 Q9). The
-//! current experiment is the always-on **compact line** plus an on-demand
-//! **deployable panel** (`Tab`, or the deploy button) — both now driven by real
-//! per-ability runtime, and both *actionable*: a click resolves to the ability
-//! under it and activates it exactly as its hotkey would (§11.4, §11.6). This
-//! module owns the *display* half: the four states an ability reads as
-//! ([`AbilityState`]) and how each formats, plus one panel row ([`AbilityStatus`]).
-//! The render composes and hit-tests them
+//! §11.4's settled answer to §15 Q9 is one always-on **named bar**: every ability
+//! the run holds, drawn by its short bar name with its state notation tucked
+//! against it, driven by real per-ability runtime and *actionable* — a click
+//! resolves to the ability under it and activates it exactly as its hotkey would
+//! (§11.4, §11.6). This module owns the *display* half: the states an ability reads
+//! as ([`AbilityState`]) and how each formats, the bounded bar names, and one bar
+//! entry ([`AbilityStatus`]). The render composes and hit-tests them
 //! ([`render_screen`](crate::render_screen), [`ability_at`](crate::ability_at)).
+//!
+//! # The bar has to fit, and the compiler is what says so
+//!
+//! A run holds at most [`AbilityId::MAX_HELD`] abilities (§8.3 — innate Run plus the
+//! three-tech grant) and the bar names all of them on one row of a 40-wide board
+//! (§10.2). That is a real budget, so it is spent deliberately: the bar names
+//! ([`AbilityId::bar_name`]) are short by design, the widest state notation is
+//! **derived from the catalog's own numbers** ([`MAX_STATE_NOTATION`]) rather than
+//! written down, and the render turns the two into a compile-time assertion that the
+//! worst-case bar fits the board. Renaming an ability, raising a cooldown past 99,
+//! or raising the grant then fails the *build* — never the frame.
 //!
 //! # Two halves: the economy model and its display
 //!
@@ -22,24 +31,26 @@
 //! the rules rather than stored. The deck reads each ability's state as one of the
 //! display [`AbilityState`]s ([`Deck::state`]) — the number the player actually
 //! gets (§8.2 timing) — which is how the two halves meet.
-//! [`State::ability_statuses`](crate::State::ability_statuses) builds the line and
-//! panel straight from that live state, one row per economy ability.
+//! [`State::ability_statuses`](crate::State::ability_statuses) builds the bar
+//! straight from that live state, one entry per held ability.
 //!
 //! Two things are real and load-bearing across the display:
 //!
 //! - **Hotkeys come from [`ability_hotkey`](crate::input::ability_hotkey)**, the
-//!   settled §11.6 identity→letter map — never from the panel's row order. A key
+//!   settled §11.6 identity→letter map — never from the bar's entry order. A key
 //!   is a fixed fact about an ability, so reordering or trimming the list can
 //!   never move one (the §11.6 regression this repo already designed out); and a
-//!   click resolves by that same identity, never by the row it lands on.
-//! - **The number shown is the number the player gets** (§8.2 timing): the panel
+//!   click resolves by that same identity, never by the entry it lands on. The bar
+//!   itself no longer *shows* the letter — it has names to draw instead — so the
+//!   help panel's Legend card is where a player reads the keys off (§15 Q9).
+//! - **The number shown is the number the player gets** (§8.2 timing): the bar
 //!   formats exactly the value it is handed and advertises nothing else, so it
 //!   cannot re-introduce the old advertised-vs-real discrepancy.
 
 use crate::input::ability_hotkey;
 
 /// The runtime state of one ability, as the player reads it (§11.4): the cases the
-/// panel must keep discoverable — ready, active, cooling, passive, unusable.
+/// bar must keep discoverable — ready, active, cooling, passive, unusable.
 ///
 /// The numbers are turn counts under the §8.2 economy — a duration ticking down
 /// while active, a cooldown draining once inactive — and [`AbilityState::suffix`]
@@ -58,17 +69,15 @@ pub enum AbilityState {
     /// Its own state deliberately, rather than a permanent
     /// [`Active`](AbilityState::Active): the clock states all carry "and then it
     /// ends", and a passive never does. Stretching `Active` to mean always-on would
-    /// make the number the panel shows a fiction, which is the one thing §8.2's
-    /// timing note forbids — and it would put a countdown on the line for something
+    /// make the number the bar shows a fiction, which is the one thing §8.2's
+    /// timing note forbids — and it would put a countdown on the bar for something
     /// that never counts down.
     ///
-    /// It currently carries **no notation of its own** — the line shows the bare
-    /// key, as it does for [`Ready`](AbilityState::Ready). An earlier pass drew it
-    /// `(on)`; that is held back until the ability line/panel rework lands, so the
-    /// new surface can decide how an always-on ability should read rather than
-    /// inheriting a notation invented here. The *state* stays distinct regardless
-    /// — that is what keeps a passive from ever reading as pressable — so giving it
-    /// a notation later is a change to [`suffix`](Self::suffix) alone.
+    /// It reads [`PASSIVE_MARKER`] — a bare `(on)` where the clock states carry a
+    /// number (#264 deferred the marker to this rework, #287). No number, because
+    /// there is none; not *nothing*, because a passive sitting undecorated beside
+    /// the ready abilities would read as one more thing you could press, and it is
+    /// the one entry on the bar you never can.
     Passive,
     /// Not usable right now for a reason other than cooldown — no adjacent target
     /// for a takedown, no body to drag (§8.3). Discoverable, but greyed.
@@ -77,32 +86,41 @@ pub enum AbilityState {
 
 impl AbilityState {
     /// The state's notation appended after the ability name (§11.4): `[N]` while
-    /// active, `/N/` while cooling, a lone `—` while unusable, and nothing at all
-    /// when ready — a ready ability needs no decoration, only its name and key.
+    /// active, `/N/` while cooling, [`PASSIVE_MARKER`] while passive, a lone `—`
+    /// while unusable, and nothing at all when ready — a ready ability needs no
+    /// decoration, only its name.
     ///
-    /// The number is rendered verbatim from the state, so what the panel shows is
+    /// The number is rendered verbatim from the state, so what the bar shows is
     /// exactly what the player gets (§8.2) — the advertised-vs-real gap the old UI
-    /// had cannot open here. A **passive** carries no notation at all (#264): it has
-    /// no number to carry, and the always-on marker it might otherwise show is left
-    /// to the ability line/panel rework rather than invented here.
+    /// had cannot open here. The widest this can ever come out is
+    /// [`MAX_STATE_NOTATION`], derived from the catalog itself.
     pub fn suffix(self) -> String {
         match self {
-            AbilityState::Ready | AbilityState::Passive => String::new(),
+            AbilityState::Ready => String::new(),
             AbilityState::Active { remaining } => format!("[{remaining}]"),
             AbilityState::Cooling { remaining } => format!("/{remaining}/"),
+            AbilityState::Passive => PASSIVE_MARKER.to_string(),
             AbilityState::Unusable => "—".to_string(),
         }
     }
 }
 
-/// One row of the ability line and deployed panel (§11.4): an economy ability's
-/// identity and the state it is in. Assembled from live runtime by
+/// What a **passive** ability shows where an activated one shows its clock (§11.4,
+/// #264/#287): `(on)` — it is in effect, and it will not stop being.
+///
+/// Deliberately as wide as the widest number notation (`/45/`) rather than wider:
+/// the bar's whole budget is per-entry width, so an always-on marker that cost more
+/// than a countdown would have made passives the reason names had to shrink.
+pub(crate) const PASSIVE_MARKER: &str = "(on)";
+
+/// One entry on the always-on ability bar (§11.4): a held ability's identity and
+/// the state it is in. Assembled from live runtime by
 /// [`State::ability_statuses`](crate::State::ability_statuses); its hotkey and
-/// name come from the [`AbilityId`], never a row position, so reordering the
-/// panel can never move a key (§11.6) and a click resolves by identity.
+/// name come from the [`AbilityId`], never an entry position, so reordering the
+/// bar can never move a key (§11.6) and a click resolves by identity.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AbilityStatus {
-    /// The economy ability this row is for — the identity a click resolves to and
+    /// The ability this entry is for — the identity a click resolves to and
     /// activates (§11.4), and the source of its hotkey and name.
     pub id: AbilityId,
     /// What state the ability is in right now (§11.4).
@@ -116,40 +134,124 @@ impl AbilityStatus {
         self.id.hotkey()
     }
 
-    /// The ability's display name (§8.3), by identity ([`AbilityId::name`]).
+    /// The ability's full display name (§8.3), by identity ([`AbilityId::name`]).
     pub fn name(&self) -> &'static str {
         self.id.name()
     }
 
-    /// The one line the deployed panel draws for this ability: `<key> <Name>` with
-    /// the state notation tacked on when there is one — `r Run`, `c Camouflage [7]`,
-    /// `d Decoy /12/`.
-    pub fn label(&self) -> String {
-        let suffix = self.state.suffix();
-        if suffix.is_empty() {
-            format!("{} {}", self.hotkey(), self.name())
-        } else {
-            format!("{} {} {}", self.hotkey(), self.name(), suffix)
-        }
-    }
-
-    /// The compact readout for the **always-on ability line** (§11.4): just the
-    /// hotkey, with the active/cooling number tucked inline (`c[7]`, `d/12/`).
-    /// Ready, passive and unusable abilities show the bare key — their state is
-    /// carried by colour alone, keeping the strip to one glyph each so the whole
-    /// set fits a single row. The full name lives only in the deployed panel
-    /// ([`Self::label`]).
-    pub fn compact(&self) -> String {
-        match self.state {
-            AbilityState::Active { .. } | AbilityState::Cooling { .. } => {
-                format!("{}{}", self.hotkey(), self.state.suffix())
-            }
-            AbilityState::Ready | AbilityState::Passive | AbilityState::Unusable => {
-                self.hotkey().to_string()
-            }
-        }
+    /// The entry the **always-on ability bar** draws for this ability (§11.4): its
+    /// bar name ([`AbilityId::bar_name`]) with its state notation tucked against it
+    /// — `Camo[7]`, `Doors/12/`, `Sight(on)` — and the bare name when ready, whose
+    /// state colour says all there is to say. Never wider than [`MAX_BAR_ENTRY`],
+    /// which is what lets the whole held set be named on one row.
+    pub fn bar_entry(&self) -> String {
+        format!("{}{}", self.id.bar_name(), self.state.suffix())
     }
 }
+
+/// The widest state notation ([`AbilityState::suffix`]) the catalog can produce, in
+/// cells: the longest duration or cooldown in it plus the two delimiters of `[N]` /
+/// `/N/`, or the [`PASSIVE_MARKER`], whichever is wider. **Derived, not written
+/// down** — retuning a §8.3 number past 99 widens this on its own, and trips the
+/// ability bar's compile-time width bound (§11.4) instead of quietly truncating a
+/// row.
+pub(crate) const MAX_STATE_NOTATION: usize = max_state_notation();
+
+/// The widest single **bar entry** (§11.4): the longest bar name plus the widest
+/// state notation, tucked together as [`AbilityStatus::bar_entry`] draws them
+/// (`Decoy/30/`, `Sight(on)`). The render sizes its compile-time bound off this.
+pub(crate) const MAX_BAR_ENTRY: usize = max_bar_name() + MAX_STATE_NOTATION;
+
+/// How many abilities are **innate** (§8.3) — the part of a loadout that is never
+/// drawn. `const` so [`AbilityId::MAX_HELD`] is arithmetic over the catalog rather
+/// than a second number to keep in step.
+const fn innate_count() -> usize {
+    let mut count = 0;
+    let mut i = 0;
+    while i < AbilityId::ALL.len() {
+        if AbilityId::ALL[i].is_innate() {
+            count += 1;
+        }
+        i += 1;
+    }
+    count
+}
+
+/// Cells taken by `n` in decimal — the width of a duration or cooldown as the
+/// notation prints it.
+const fn decimal_width(n: u32) -> usize {
+    let mut width = 1;
+    let mut rest = n / 10;
+    while rest > 0 {
+        rest /= 10;
+        width += 1;
+    }
+    width
+}
+
+/// Walk the catalog for the widest notation any ability can show: the biggest
+/// number an [`Economy`] carries plus its two delimiters, against the passive
+/// marker's own width. `const` so [`MAX_STATE_NOTATION`] is a compile-time fact.
+const fn max_state_notation() -> usize {
+    let mut widest = PASSIVE_MARKER.len();
+    let mut i = 0;
+    while i < AbilityId::ALL.len() {
+        match AbilityId::ALL[i].def().mode {
+            // A passive has no clock at all — its marker is the starting value above.
+            AbilityMode::Passive => {}
+            AbilityMode::Activated(economy) => {
+                let duration = decimal_width(economy.duration) + 2;
+                let cooldown = decimal_width(economy.cooldown) + 2;
+                if duration > widest {
+                    widest = duration;
+                }
+                if cooldown > widest {
+                    widest = cooldown;
+                }
+            }
+        }
+        i += 1;
+    }
+    widest
+}
+
+/// The longest [`AbilityId::bar_name`], in cells. Byte length **is** cell width
+/// because the names are ASCII, which [`bar_names_are_ascii`] pins right below.
+const fn max_bar_name() -> usize {
+    let mut widest = 0;
+    let mut i = 0;
+    while i < AbilityId::ALL.len() {
+        let len = AbilityId::ALL[i].bar_name().len();
+        if len > widest {
+            widest = len;
+        }
+        i += 1;
+    }
+    widest
+}
+
+/// Whether every bar name is ASCII — the assumption [`max_bar_name`] rests on, since
+/// the grid is one cell per *character* and `len()` counts *bytes*.
+const fn bar_names_are_ascii() -> bool {
+    let mut i = 0;
+    while i < AbilityId::ALL.len() {
+        let bytes = AbilityId::ALL[i].bar_name().as_bytes();
+        let mut b = 0;
+        while b < bytes.len() {
+            if !bytes[b].is_ascii() {
+                return false;
+            }
+            b += 1;
+        }
+        i += 1;
+    }
+    true
+}
+
+const _: () = assert!(
+    bar_names_are_ascii(),
+    "an ability bar name must be ASCII: one byte is one grid cell (§11.1)",
+);
 
 // ---------------------------------------------------------------------------
 // The economy model (§8.1, §8.2)
@@ -215,16 +317,32 @@ impl AbilityId {
         AbilityId::Vision,
     ];
 
+    /// The most **salvaged tech** a run holds at once (§8.3/§10.2/#266) — the
+    /// `starting_abilities` grant count (#244), and the cap a campaign accumulation
+    /// (§2.2) would have to respect too. Settled at three, and load-bearing beyond
+    /// the economy: it is what makes the held set small enough for the ability bar
+    /// to name every entry on one row (§11.4), and it is the whole price a passive
+    /// pays (§8.2/#264 — a slot, permanently).
+    pub const MAX_TECH_HELD: usize = 3;
+
+    /// The most abilities a run holds at once: the innate set (§8.3 — Run alone)
+    /// plus [`MAX_TECH_HELD`]. The bar draws one named entry per held ability, so
+    /// this is the count its compile-time width bound is sized against (§11.4).
+    pub const MAX_HELD: usize = innate_count() + Self::MAX_TECH_HELD;
+
     /// Whether this ability is **innate** (§8.3) — always in the loadout, never
     /// drawn or found. Run is the only innate *economy* ability (Move/Wait/Takedown/
     /// Drag are the turn loop's own verbs, not deck abilities). The innate set is
     /// what a quick-play loadout starts with before its tech grant (#244).
-    pub fn is_innate(self) -> bool {
+    pub const fn is_innate(self) -> bool {
         matches!(self, AbilityId::Run)
     }
 
     /// The ability's display name (§8.3) — the identity the settled §11.6 hotkey
     /// map ([`ability_hotkey`]) is keyed by, so a name and its key stay one fact.
+    /// This is the **full** name: the help panel, the messages and the level-seed
+    /// string all speak it. The ability bar has a row to fit and speaks the short
+    /// [`bar_name`](Self::bar_name) instead.
     pub fn name(self) -> &'static str {
         match self {
             AbilityId::Run => "Run",
@@ -234,6 +352,29 @@ impl AbilityId {
             AbilityId::Autodoors => "Autodoors",
             AbilityId::Confusion => "Confusion",
             AbilityId::Vision => "Vision",
+        }
+    }
+
+    /// The ability's **bar display name** (§11.4) — the short label the always-on
+    /// ability bar draws, one per held ability, alongside its state notation.
+    ///
+    /// Short because the row is: [`MAX_HELD`](Self::MAX_HELD) entries across a
+    /// 40-wide board (§10.2), each carrying up to a `/45/` or an `(on)`, leaves about
+    /// nine cells an entry. Every name here is a plain word a player can say out loud
+    /// — `Camo`, `Phase`, `Doors`, `Daze`, `Sight` — not an abbreviation to decode,
+    /// and each pairs with the full §8.3 [`name`](Self::name) on the help panel's
+    /// Legend card, which is also where the hotkey is read off. A name that would
+    /// overflow the row fails the **build**, not the frame (see [`MAX_BAR_ENTRY`] and
+    /// the render's bound).
+    pub const fn bar_name(self) -> &'static str {
+        match self {
+            AbilityId::Run => "Run",
+            AbilityId::Camouflage => "Camo",
+            AbilityId::Decoy => "Decoy",
+            AbilityId::Dephase => "Phase",
+            AbilityId::Autodoors => "Doors",
+            AbilityId::Confusion => "Daze",
+            AbilityId::Vision => "Sight",
         }
     }
 
@@ -249,10 +390,11 @@ impl AbilityId {
         ability_hotkey(self.name()).expect("every economy ability has a settled §11.6 hotkey")
     }
 
-    /// This ability's static definition (§8.1): its economy numbers, targeting, and
+    /// This ability's static definition (§8.1): how it is paid for, and its
     /// behaviour. The catalog is `const` data — declaring a new ability is adding a
-    /// row here (§8.1), not writing a system.
-    pub fn def(self) -> &'static Ability {
+    /// row here (§8.1), not writing a system. `const` so the display can measure the
+    /// catalog's own numbers at compile time ([`MAX_STATE_NOTATION`]).
+    pub const fn def(self) -> &'static Ability {
         match self {
             AbilityId::Run => &RUN,
             AbilityId::Camouflage => &CAMOUFLAGE,
@@ -295,6 +437,11 @@ pub struct Loadout {
 
 impl Loadout {
     /// The **full** loadout: every ability present, passives included.
+    ///
+    /// It is **not a loadout a run can hold** — seven abilities is well over the
+    /// [`AbilityId::MAX_HELD`] cap (§8.3), so no preset resolves to it and the
+    /// ability bar's compile-time width bound (§11.4) does not cover it. A bar this
+    /// long simply truncates, as it does on any oversized hand-built state.
     pub fn full() -> Self {
         Self {
             present: [true; AbilityId::ALL.len()],
@@ -707,7 +854,7 @@ impl Slot {
         }
     }
 
-    /// Project the economy slot onto the display [`AbilityState`] the panel reads
+    /// Project the economy slot onto the display [`AbilityState`] the bar reads
     /// (§11.4): the number shown is the number the slot holds (§8.2 timing), and
     /// `Unusable` — being contextual — is never produced here.
     fn display(self) -> AbilityState {
@@ -738,7 +885,7 @@ pub(crate) struct Deck {
     slots: [Slot; AbilityId::ALL.len()],
     /// Which abilities the run actually holds (§8.3/#244) — the resolved
     /// [`Loadout`]. An ability absent here has no slot the player can drive: it is
-    /// never listed on the ability line, never activates (a key press is the free
+    /// never listed on the ability bar, never activates (a key press is the free
     /// §4.4 no-op), and reads as [`Unusable`](AbilityState::Unusable). For the full
     /// loadout — every bare run today — the deck behaves exactly as before.
     loadout: Loadout,
@@ -755,7 +902,7 @@ impl Deck {
         }
     }
 
-    /// The economy state of `id`, as the panel reads it (§11.4). An ability the run
+    /// The economy state of `id`, as the bar reads it (§11.4). An ability the run
     /// does not hold (not in the loadout, #244) reads as
     /// [`Unusable`](AbilityState::Unusable) — it is real but not yours. A held
     /// **passive** reads as [`Passive`](AbilityState::Passive) (#264): holding it is
@@ -870,63 +1017,49 @@ mod tests {
         assert_eq!(AbilityState::Ready.suffix(), "");
         assert_eq!(AbilityState::Active { remaining: 3 }.suffix(), "[3]");
         assert_eq!(AbilityState::Cooling { remaining: 2 }.suffix(), "/2/");
+        assert_eq!(AbilityState::Passive.suffix(), "(on)");
         assert_eq!(AbilityState::Unusable.suffix(), "—");
     }
 
-    /// A status line reads `<key> <Name>` with the notation appended only when
-    /// there is one — a ready ability carries no trailing space or bracket. Key
-    /// and name come from the identity, so the row is built from an [`AbilityId`].
+    /// A bar entry is the ability's **bar name** with the notation tucked straight
+    /// against it (§11.4) — a ready ability is the bare name, with no trailing
+    /// bracket or space to pay for. The name comes from the identity, so the entry
+    /// is built from an [`AbilityId`].
     #[test]
-    fn a_status_line_joins_key_name_and_notation() {
-        let ready = AbilityStatus {
-            id: AbilityId::Run,
-            state: AbilityState::Ready,
-        };
-        assert_eq!(ready.label(), "r Run");
-
-        let cooling = AbilityStatus {
-            id: AbilityId::Decoy,
-            state: AbilityState::Cooling { remaining: 12 },
-        };
-        assert_eq!(cooling.label(), "d Decoy /12/");
+    fn a_bar_entry_is_the_bar_name_and_any_notation() {
+        let entry = |id, state| AbilityStatus { id, state }.bar_entry();
+        assert_eq!(entry(AbilityId::Run, AbilityState::Ready), "Run");
+        assert_eq!(
+            entry(AbilityId::Camouflage, AbilityState::Active { remaining: 7 }),
+            "Camo[7]"
+        );
+        assert_eq!(
+            entry(AbilityId::Decoy, AbilityState::Cooling { remaining: 12 }),
+            "Decoy/12/"
+        );
+        assert_eq!(
+            entry(AbilityId::Autodoors, AbilityState::Unusable),
+            "Doors—"
+        );
     }
 
-    /// The always-on line's compact form (§11.4): active and cooling tuck the
-    /// number against the key, ready and unusable are the bare key (colour carries
-    /// their state) — one glyph-group each so the whole set fits a single row.
-    #[test]
-    fn the_compact_readout_is_the_key_and_any_number() {
-        let compact = |state| {
-            AbilityStatus {
-                id: AbilityId::Camouflage,
-                state,
-            }
-            .compact()
-        };
-        assert_eq!(compact(AbilityState::Ready), "c");
-        assert_eq!(compact(AbilityState::Unusable), "c");
-        assert_eq!(compact(AbilityState::Active { remaining: 7 }), "c[7]");
-        assert_eq!(compact(AbilityState::Cooling { remaining: 12 }), "c/12/");
-    }
-
-    /// A passive draws **no notation** for now (#264): the bare key and name, like a
-    /// ready ability. The always-on marker an earlier pass drew (`(on)`) is held
-    /// back for the ability line/panel rework, so the new surface picks it.
+    /// A passive reads `(on)` where an activated ability reads its clock (#264/#287)
+    /// — the marker #264 deferred to this rework. Undecorated it would have sat on
+    /// the bar looking exactly like the ready abilities beside it, which is the one
+    /// thing it is not: there is nothing to press.
     ///
-    /// What must survive that decision is the *state*: `Passive` is still its own
+    /// What had to survive that decision is the *state*: `Passive` is still its own
     /// case, never `Active { .. }` — so nothing can start showing a countdown for
-    /// an ability that never counts down, and giving it a marker later touches
-    /// [`AbilityState::suffix`] alone.
+    /// an ability that never counts down.
     #[test]
-    fn a_passive_draws_no_notation_but_is_still_its_own_state() {
-        assert_eq!(AbilityState::Passive.suffix(), "");
+    fn a_passive_reads_as_always_on_and_is_still_its_own_state() {
+        assert_eq!(AbilityState::Passive.suffix(), PASSIVE_MARKER);
         let status = AbilityStatus {
             id: AbilityId::Vision,
             state: AbilityState::Passive,
         };
-        assert_eq!(status.label(), "v Vision");
-        assert_eq!(status.compact(), "v");
-        // Undecorated like Ready, but never the same *state* as Ready or a clock.
+        assert_eq!(status.bar_entry(), "Sight(on)");
+        // Marked, never the same *state* as Ready or a clock.
         assert_ne!(AbilityState::Passive, AbilityState::Ready);
         for n in 0..4 {
             assert_ne!(AbilityState::Passive, AbilityState::Active { remaining: n });
@@ -937,11 +1070,68 @@ mod tests {
         }
     }
 
-    /// A row's hotkey and name are the **explicit** §11.6 identity, taken from the
-    /// [`AbilityId`] — not the row's position. Were they derived from list order,
-    /// reordering the panel would shuffle the keys (the regression §11.6 rules out).
+    /// **The bar's width budget, as arithmetic** (§11.4/#287). The widest notation is
+    /// read off the catalog's own numbers — the longest `[N]`/`/N/` any §8.3 ability
+    /// can show, against the passive marker — and the widest entry is that plus the
+    /// longest bar name, so a retune or a rename moves these rather than silently
+    /// overflowing the row. The render turns them into a `const` assertion against
+    /// the board width; this pins the values that assertion is made of.
     #[test]
-    fn a_row_takes_its_hotkey_and_name_from_its_identity() {
+    fn the_bar_budget_is_measured_from_the_catalog() {
+        // The longest number in the catalog is Confusion's 45 → `/45/`, exactly as
+        // wide as the passive `(on)`.
+        assert_eq!(MAX_STATE_NOTATION, 4);
+        assert_eq!(PASSIVE_MARKER.len(), MAX_STATE_NOTATION);
+        // The longest bar name is five (`Decoy`/`Phase`/`Doors`/`Sight`).
+        assert_eq!(max_bar_name(), 5);
+        assert_eq!(MAX_BAR_ENTRY, 9);
+        // No ability, in any state its own mode can reach, draws wider than that.
+        for id in AbilityId::ALL {
+            let mut states = vec![AbilityState::Unusable];
+            match id.def().mode() {
+                AbilityMode::Passive => states.push(AbilityState::Passive),
+                AbilityMode::Activated(economy) => states.extend([
+                    AbilityState::Ready,
+                    AbilityState::Active {
+                        remaining: economy.duration(),
+                    },
+                    AbilityState::Cooling {
+                        remaining: economy.cooldown(),
+                    },
+                ]),
+            }
+            for state in states {
+                let entry = AbilityStatus { id, state }.bar_entry();
+                assert!(
+                    entry.chars().count() <= MAX_BAR_ENTRY,
+                    "{entry:?} overflows the per-entry budget",
+                );
+            }
+        }
+    }
+
+    /// The held-set cap (§8.3/#244/#266), the other half of the budget: innate Run
+    /// plus [`AbilityId::MAX_TECH_HELD`] tech. Counted off the catalog, so promoting
+    /// an ability to innate moves it rather than leaving a stale number behind.
+    #[test]
+    fn the_held_cap_is_the_innate_set_plus_the_tech_grant() {
+        assert_eq!(AbilityId::MAX_TECH_HELD, 3);
+        assert_eq!(AbilityId::MAX_HELD, 4);
+        assert_eq!(
+            innate_count(),
+            AbilityId::ALL.iter().filter(|id| id.is_innate()).count(),
+        );
+        assert!(
+            AbilityId::MAX_TECH_HELD <= AbilityId::TECH.len(),
+            "the grant cannot exceed the pool it draws from",
+        );
+    }
+
+    /// An entry's hotkey and name are the **explicit** §11.6 identity, taken from
+    /// the [`AbilityId`] — not its position. Were they derived from list order,
+    /// reordering the bar would shuffle the keys (the regression §11.6 rules out).
+    #[test]
+    fn an_entry_takes_its_hotkey_and_name_from_its_identity() {
         for id in AbilityId::ALL {
             let status = AbilityStatus {
                 id,
@@ -1139,7 +1329,7 @@ mod economy_tests {
     }
 
     /// Activation moves a Ready ability to Active for its **whole** duration — the
-    /// number the panel shows before the first end-of-turn tick (§8.2 timing).
+    /// number the bar shows before the first end-of-turn tick (§8.2 timing).
     #[test]
     fn activation_sets_the_full_duration() {
         let mut deck = Deck::new(Loadout::full());
@@ -1147,7 +1337,7 @@ mod economy_tests {
         assert_eq!(
             deck.state(AbilityId::Dephase),
             AbilityState::Active { remaining: 3 },
-            "the panel shows the full duration, not duration − 1",
+            "the bar shows the full duration, not duration − 1",
         );
         // Re-activating an active ability is a free no-op — nothing changes.
         assert!(!deck.activate(AbilityId::Dephase));

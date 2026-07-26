@@ -698,10 +698,11 @@ Three consequences worth stating, because they are what keep the model honest:
   on; dropping it is the only off.
 - **It reads as its own state** — not `Ready`, not `Active [N]`. The four clock
   states all mean "and then it ends", and a passive never does; reusing `Active`
-  would make the number the panel shows a fiction, which is the one thing the
-  timing trap above forbids. What that state *draws* is **[OPEN]**: it carries no
-  notation today (the bare key, like a ready ability), deliberately left for the
-  ability line/panel rework to decide rather than fixed here.
+  would make the number the bar shows a fiction, which is the one thing the
+  timing trap above forbids. What that state draws was left to the ability-bar
+  rework and is now settled there (§11.4/#287): **`(on)`**, where an activated
+  ability carries its clock. Undecorated it read as one more thing you could
+  press, and it is the one entry on the bar you never can.
 - **It is still an `Effect` list** (§8.1). A passive is not a parallel system —
   the same effect vocabulary, applied continuously instead of for a window.
 
@@ -759,8 +760,16 @@ Notes carried forward, because they are good and non-obvious:
   ship, so "three random" is a genuine draw of three of the six — the pool has
   outgrown the grant and it finally bites, #241); a campaign accumulates its set
   instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
-  tech — it competes for the same slot, which is exactly what it pays with. The resolved loadout is one of the three pieces of the shareable
-  level-seed string (§12.4/#245).
+  tech — it competes for the same slot, which is exactly what it pays with. The
+  resolved loadout is one of the three pieces of the shareable level-seed string
+  (§12.4/#245).
+- **Three tech is a cap, not just this preset's number** **[SETTLED]**. Whatever
+  hands a run its abilities — the quick-play draw, a campaign's accumulation — it
+  holds at most three tech, so at most **four** abilities counting Run. It is what
+  a passive's slot price is a fraction *of* (§8.2), and it is what lets the ability
+  bar name every held ability on a single row (§11.4): the bar's width bound is
+  checked against it at compile time, so raising the cap is a change the *build*
+  has an opinion about (#287).
 - **Drag has no grab button.** A body is non-solid (§7.2), so you cross it like
   floor; the drag begins the moment you step *off* a cell with a body on it and your
   hands are free, and the body follows into each cell you vacate. **Bump the trailing
@@ -1604,15 +1613,15 @@ backlog until a single screen-bound story proves fun.
 │    ##############        #########                         │
 │                       E                                    │
 ├────────────────────────────────────────────────────────────┤
-│                         r/11/ c[9] d x a z [▴]             │ ← ability bar
+│                    Run/11/   Camo[9]   Decoy     Sight(on) │ ← ability bar
 └────────────────────────────────────────────────────────────┘
 ```
 
 **Which way up: action low, status high.** The chrome is ordered for **thumb
-reach** on a held device. The one row you *tap* — the ability bar and its deploy
-button — sits **bottom-right**, where a hand already rests; the rows you only
-*read* — near line, usable line, and the `[?]` help toggle — sit at the **top**,
-clear of both the thumb and the board. On a very wide desktop viewport the
+reach** on a held device. The one row you *tap* — the ability bar — sits
+**bottom-right**, where a hand already rests; the rows you only *read* — near
+line, usable line, and the `[?]` help toggle — sit at the **top**, clear of both
+the thumb and the board. On a very wide desktop viewport the
 bottom-right corner is a long way from anything, which is fine: the mobile grip
 is the case this serves.
 
@@ -1639,18 +1648,60 @@ is the case this serves.
 
 **No ability column.** The old fixed 14-column list spent a seventh of the
 screen on information consulted once a minute. Ability state (ready / active
-`[3]` / cooling `/2/` / unusable) must stay *discoverable*, but where it lives
-is **[OPEN]** (§15 Q9). Two experiments are spent: showing the list *while
-waiting* buried the 360° guard-sense the wait exists to reveal (§9.1), and a
-left-aligned header strip put the tap target furthest from the thumb.
+`[3]` / cooling `/2/` / passive / unusable) must stay *discoverable*, and §15 Q9
+asked where it should live. Three experiments answered it. Showing the list
+*while waiting* buried the 360° guard-sense the wait exists to reveal (§9.1). A
+left-aligned header strip put the tap target furthest from the thumb. A compact
+bottom-right strip of bare hotkeys, with a deploy button unfolding the named
+panel over the board, put it in the right corner but made every name a second
+tap away.
 
-**[START]** — current experiment: a **one-row ability bar, flush to the
-bottom-right**, always on, every ability's hotkey coloured by state with its
-`[3]` / `/2/` number inline; the deploy button `[▴]` in the corner unfolds the
-full named panel **upward off the bar**, over the board's bottom-right, and the
-same tap folds it away. A tap on any entry activates exactly what its hotkey
-would. The bar is a **projection** of the §11.6 keys, never their source:
-hotkeys stay explicit and stable wherever the bar is drawn.
+**[SETTLED]** — a **one-row ability bar, flush to the bottom-right**, always on,
+carrying **every held ability by name** with its `[3]` / `/2/` / `(on)` notation
+tucked against it and its state in colour. No hotkey letters on the bar, no
+deploy button, no panel: the whole set is simply always readable, and the board
+is never covered. A tap on any entry activates exactly what its hotkey would. The
+bar is a **projection** of the §11.6 keys, never their source — the keys are
+unchanged and unconditional, and the help panel's Legend card is where a player
+reads them off, each one paired with the bar name it fires (`c / Camo` →
+*Camouflage*).
+
+**Fixed slots: the names never move.** Each ability owns a **10-cell slot** — 9
+of entry, 1 of air — and its entry is drawn **left-aligned inside it**, whatever
+state it is in. A cooldown appearing, or ticking from `/10/` to `/9/`, changes
+nothing but its own cells. This matters more than it sounds: a bar whose words
+slide about as numbers come and go is a bar you have to *read* every time you
+look, and the whole case for it being always-on is that you learn its shape and
+then only **glance**. An ability's column is a fact about the run, like its
+hotkey (§11.6) — position is muscle memory too. The slots are laid end to end and
+the block is flush **right**, so a shorter loadout still keeps the bar under the
+thumb (#267).
+
+**Why names fit now, and the budget that makes them fit.** A run holds **at most
+four** abilities — innate Run plus the three-tech grant (§8.3/§10.2) — so the
+compression the old strip paid for bought nothing worth its cost. Four named
+slots across a 40-wide board is still tight, and the arithmetic is exact:
+
+| | cells |
+|---|---|
+| Longest state notation (`/45/` — the catalog's biggest cooldown, plus delimiters; a passive's `(on)` is deliberately no wider) | 4 |
+| Longest **bar name** (`Decoy` / `Phase` / `Doors` / `Sight`) | 5 |
+| Widest entry, so the slot's content width | **9** |
+| Plus one cell of air → **one slot** | **10** |
+| Four slots | **40** |
+
+That is the whole board width, with nothing spare — which is why each ability
+carries a short **bar name** (`Run`, `Camo`, `Decoy`, `Phase`, `Doors`, `Daze`,
+`Sight`) distinct from the full §8.3 name the help panel, the messages and the
+level-seed string use, and why the notation is tucked hard against it. **The
+budget is checked at compile time.** Every input is derived — the held cap from
+the innate set plus the tech grant, the notation width from the catalog's own
+durations and cooldowns — so renaming an ability, pushing a cooldown past 99, or
+granting a fourth tech fails the *build*, not the frame (#287).
+
+The slot is also the **tap target**, all nine cells of it: a short name is no
+harder to hit than a long one, and the target does not move when the ability's
+state does (§11.6's touch rule).
 
 ### 11.5 Field of view and the danger overlay
 
@@ -2131,10 +2182,15 @@ default.
    danger overlay.
 8. **Touch.** A real target, or drop the manifest? Half-built touch is worse than
    none — the old version could trap a touch user in a dialog they couldn't close.
-9. **Where does ability state live on screen?** (§11.4) The fixed column is gone.
-   Show-on-wait (peeking costs a turn) was the first experiment and lost — it
-   buried the wait's own 360° sense (§9.1). The current one is an always-on
-   **bottom-right bar** with a deploy button unfolding the named panel above it,
-   chosen for thumb reach; an only-while-active strip is still an alternative.
-   Constraints: ready / active / cooling / unusable must stay discoverable, and
-   hotkeys (§11.6) must never depend on a visible list.
+9. **Where does ability state live on screen?** *(Resolved — see §11.4.)* The
+   fixed column is gone, and so are the three experiments that followed it:
+   show-on-wait buried the wait's own 360° sense (§9.1), a left-aligned header
+   put the tap target furthest from the thumb, and a compact bottom-right strip
+   of bare hotkeys needed a deploy button and a panel to say what anything was.
+   The settled answer: an always-on **bottom-right bar naming every held
+   ability** in a fixed 10-cell slot, with its `[3]` / `/2/` / `(on)` notation and
+   its state colour, and nothing to deploy. What unlocked it was capping the held set at four (§8.3) —
+   the names fit, so the compression was pure cost. Both constraints hold: every
+   state stays discoverable on the bar, and hotkeys (§11.6) are untouched by it —
+   the bar no longer even shows them, and the help panel's Legend card pairs each
+   key with the bar name it fires (#287).
