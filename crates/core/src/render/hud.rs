@@ -1410,8 +1410,8 @@ mod tests {
         let text = open.to_text().join("\n");
         assert!(text.contains("LEVEL SEED"), "the section is there");
         assert!(
-            text.contains(&level.encode()),
-            "…showing this run's own token"
+            text.contains(&level.encode_full()),
+            "…showing this run's own token, in full"
         );
         assert_eq!(s.turn(), before, "looking costs no turn");
         assert_eq!(

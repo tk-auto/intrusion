@@ -213,8 +213,9 @@ fn draw_tab_bar(grid: &mut Grid, active: HelpTab) {
     );
 }
 
-/// The **Level info** tab (§12.6/#248/#272): the run's **level-seed string** — the
-/// one token that reproduces this exact run (§13.1/#245) — then its active level
+/// The **Level info** tab (§12.6/#248/#272): the run's **level-seed string** in
+/// full — the one token that reproduces this exact run (§13.1/#245), spelling out
+/// its modifiers and loadout rather than implying them — then its active level
 /// modifiers, each by name and direction, or a clear "none active" when the run is
 /// baseline. The modifier list is [`LevelModifiers::active`], so it is derived and
 /// cannot drift — a new modifier field surfaces here on its own — and the token is
@@ -237,9 +238,11 @@ fn draw_level_info(
         draw(grid, 2, y, "LEVEL SEED", Category::System);
         y += 1;
         // Interest, the goal/reward colour: this is the thing worth taking away
-        // from the panel. Quick play's default preset encodes as the bare seed, so
-        // the common case reads as a short number, not a long token.
-        draw(grid, 3, y, &level.encode(), Category::Interest);
+        // from the panel. The **full** form ([`LevelSeed::encode_full`]), even for
+        // the default preset whose link form is the bare seed: this surface exists
+        // to show what the run *is*, and `8371` alone says nothing about the
+        // modifiers and loadout it implies. It decodes to the same run either way.
+        draw(grid, 3, y, &level.encode_full(), Category::Interest);
         y += 2;
     }
 
@@ -581,8 +584,9 @@ mod tests {
     /// The **level-seed string** on the Level info tab (§13.1/#245/#272): the run's
     /// own token, drawn under its heading — and it **decodes back to the very run
     /// showing it**, config and all, so the panel can never hand out a string that
-    /// boots a different game. Quick play, the default preset, renders as the bare
-    /// seed rather than a needlessly long token.
+    /// boots a different game. The panel always shows the **full** form, including
+    /// for the default preset whose link form is a bare seed: this surface is where
+    /// you read what the run *is*, so it spells the initial situation out.
     #[test]
     fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
         for level in [
@@ -600,9 +604,13 @@ mod tests {
         ] {
             let g = render_help(W, H, HelpTab::LevelInfo, Some(level), level.modifiers);
             let text = text_of(&g);
-            let token = level.encode();
+            let token = level.encode_full();
             assert!(text.contains("LEVEL SEED"), "the section is labelled");
-            assert!(text.contains(&token), "the token is shown: {text:?}");
+            assert!(text.contains(&token), "the full token is shown: {text:?}");
+            assert!(
+                token.starts_with("L1-"),
+                "…in the versioned form, whatever the preset"
+            );
             // The round trip: what a player reads off the panel boots this run.
             assert_eq!(
                 LevelSeed::decode(&token),
@@ -611,17 +619,16 @@ mod tests {
             );
         }
 
-        // Quick play stays short — the bare seed, not an `L1-…` token.
-        let quick = render_help(
-            W,
-            H,
-            HelpTab::LevelInfo,
-            Some(LevelSeed::quick_play(8371)),
-            LevelSeed::quick_play(8371).modifiers,
+        // The default preset is *not* collapsed to its bare-seed link form here:
+        // the panel spells the initial situation out (the loadout letters and all).
+        let quick = LevelSeed::quick_play(8371);
+        let g = render_help(W, H, HelpTab::LevelInfo, Some(quick), quick.modifiers);
+        let text = text_of(&g);
+        assert!(
+            text.contains(&quick.encode_full()),
+            "quick play shows its full token: {text:?}"
         );
-        let text = text_of(&quick);
-        assert!(text.contains("8371"));
-        assert!(!text.contains("L1-"), "the default preset is the bare seed");
+        assert_eq!(quick.encode(), "8371", "…while its link form stays bare");
 
         // A hand-built state has no reproducible token, so the section is absent
         // rather than showing a string that boots something else.
