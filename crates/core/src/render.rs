@@ -433,13 +433,54 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
     }
 }
 
+/// A blank full-screen [`Grid`] — every cell an empty, live, uncoloured space. The
+/// starting canvas of a **panel** render (the help card, the menu): a surface that
+/// replaces the game frame entirely rather than overlaying it, so it begins from
+/// nothing and draws its own rows.
+pub(super) fn blank_grid(width: u32, height: u32) -> Grid {
+    let blank = GlyphCell {
+        glyph: ' ',
+        fg: Category::Neutral,
+        bg: None,
+        vis: Visibility::Live,
+    };
+    Grid {
+        width,
+        height,
+        cells: vec![blank; (width * height) as usize],
+    }
+}
+
+/// Write `text` onto `grid` from `(x, y)` in `category`, clamping at the right edge
+/// and off the bottom — the one drawing primitive the panels share, so every row of
+/// every panel truncates the same way on a small board.
+pub(super) fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Category) {
+    if y >= grid.height {
+        return;
+    }
+    for (i, glyph) in text.chars().enumerate() {
+        let cx = x + i as u32;
+        if cx >= grid.width {
+            break;
+        }
+        grid.cells[(y * grid.width + cx) as usize] = GlyphCell {
+            glyph,
+            fg: category,
+            bg: None,
+            vis: Visibility::Live,
+        };
+    }
+}
+
 mod help;
 mod hud;
+mod menu;
 pub use help::{help_hit, HelpHit, HelpTab};
 pub use hud::{
     ability_at, is_ability_button, is_help_button, is_message_button, render_screen, ScreenUi,
     BOTTOM_ROWS, TOP_ROWS,
 };
+pub use menu::{menu_hit, MenuEntry, MenuUi};
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row
 /// (§11.1) — no entities. This is the generator's debug view: generation works on a
