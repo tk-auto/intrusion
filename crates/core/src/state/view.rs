@@ -412,6 +412,14 @@ impl State {
         self.objectives.iter().filter(|o| !o.taken).count()
     }
 
+    /// How much intel is actually **in hand** — consoles taken. The other half of the
+    /// objective picture from [`intel_needed_to_exit`](Self::intel_needed_to_exit):
+    /// what the player holds and what the gate still wants are different questions, and
+    /// under [`None`](crate::IntelGate::None) the exit is open while this is zero.
+    pub fn intel_in_hand(&self) -> usize {
+        self.objectives.len() - self.objectives_remaining()
+    }
+
     /// Whether the exit will accept the player — the run's **intel gate**
     /// (§10.2/§4.5), now a level modifier ([`IntelGate`](crate::IntelGate)/#244)
     /// rather than one fixed rule, so the three modes gate the same facility
@@ -428,13 +436,29 @@ impl State {
     /// A level with no objectives is winnable at once under every gate (an empty
     /// `all` is vacuously satisfied).
     pub fn exit_ready(&self) -> bool {
+        self.intel_needed_to_exit() == 0
+    }
+
+    /// How many **more** consoles the run must take before the exit will open — the
+    /// gate's own answer, which is not the objective tally
+    /// ([`objectives_remaining`](Self::objectives_remaining)): under
+    /// [`AtLeastOne`](crate::IntelGate::AtLeastOne) with three consoles out, three
+    /// are *remaining* but only one is *needed*.
+    ///
+    /// The distinction is what the messaging layer needs and the tally could not give
+    /// it (#310): every objective line derives from this — or equivalently from
+    /// [`exit_ready`](Self::exit_ready), which is just this at zero — rather than from
+    /// any fixed intel count, so no message can promise an exit that will refuse.
+    pub fn intel_needed_to_exit(&self) -> usize {
         use crate::modifiers::IntelGate;
+        let out = self.objectives_remaining();
         match self.modifiers.intel_to_exit {
-            IntelGate::None => true,
-            IntelGate::AtLeastOne => {
-                self.objectives.is_empty() || self.objectives.iter().any(|o| o.taken)
-            }
-            IntelGate::All => self.objectives.iter().all(|o| o.taken),
+            IntelGate::None => 0,
+            IntelGate::AtLeastOne if self.intel_in_hand() > 0 => 0,
+            // One console is the whole requirement — and none at all on a facility with
+            // no consoles, which is vacuously satisfied under every gate.
+            IntelGate::AtLeastOne => out.min(1),
+            IntelGate::All => out,
         }
     }
 

@@ -133,10 +133,17 @@ fn events_declare_their_message_category() {
         Category::System
     );
     assert_eq!(
-        Event::IntelTaken { remaining: 1 }.category(),
+        Event::IntelTaken {
+            remaining: 1,
+            still_needed: 0
+        }
+        .category(),
         Category::Interest
     );
-    assert_eq!(Event::ExitRefused.category(), Category::Interest);
+    assert_eq!(
+        Event::ExitRefused { still_needed: 1 }.category(),
+        Category::Interest
+    );
     assert_eq!(Event::Won.category(), Category::Interest);
     assert_eq!(Event::Captured { by: at }.category(), Category::Danger);
     assert_eq!(Event::TakenDown { at }.category(), Category::Owned);
@@ -828,5 +835,75 @@ fn the_debug_reveal_leaves_the_guards_and_the_world_alone() {
             b.detected_player(),
             "…and detecting exactly what it would have",
         );
+    }
+}
+
+/// #310: what is still **out** is not what is still **needed**. The tally counts
+/// consoles; [`State::intel_needed_to_exit`] answers the run's gate (§4.5/#244), and
+/// [`State::exit_ready`] is exactly that count at zero — the one fact every objective
+/// message derives from, so none of them can promise an exit that would refuse.
+#[test]
+fn the_gate_says_how_much_intel_is_needed_not_how_much_is_out() {
+    use crate::modifiers::{IntelGate, LevelModifiers};
+
+    let facility = |gate: IntelGate| {
+        State::new(
+            open_room(12, 12),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(5, 4), Cell::new(6, 5), Cell::new(4, 5)],
+            Cell::new(5, 6),
+        )
+        .with_modifiers(LevelModifiers {
+            intel_to_exit: gate,
+            ..LevelModifiers::default()
+        })
+    };
+
+    // Three consoles out under every gate; how many of them are *required* differs.
+    for (gate, needed) in [
+        (IntelGate::None, 0),
+        (IntelGate::AtLeastOne, 1),
+        (IntelGate::All, 3),
+    ] {
+        let mut s = facility(gate);
+        assert_eq!(s.objectives_remaining(), 3, "{gate:?}: three consoles out");
+        assert_eq!(s.intel_needed_to_exit(), needed, "{gate:?}: what is needed");
+        assert_eq!(
+            s.exit_ready(),
+            needed == 0,
+            "{gate:?}: ready iff none needed"
+        );
+        assert_eq!(s.intel_in_hand(), 0);
+
+        // Take one (bump north): the requirement drops by what the gate counts.
+        s.step(Input::Step(Direction::North));
+        assert_eq!(s.intel_in_hand(), 1);
+        assert_eq!(s.objectives_remaining(), 2);
+        assert_eq!(
+            s.intel_needed_to_exit(),
+            needed.saturating_sub(1).min(2),
+            "{gate:?}: one take satisfies `AtLeastOne` and only chips at `All`",
+        );
+        assert_eq!(s.exit_ready(), s.intel_needed_to_exit() == 0);
+    }
+
+    // A facility with no consoles is vacuously satisfied under every gate.
+    for gate in [IntelGate::None, IntelGate::AtLeastOne, IntelGate::All] {
+        let s = State::new(
+            open_room(12, 12),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(5, 6),
+        )
+        .with_modifiers(LevelModifiers {
+            intel_to_exit: gate,
+            ..LevelModifiers::default()
+        });
+        assert_eq!(s.intel_needed_to_exit(), 0, "{gate:?}: nothing to gate on");
+        assert!(s.exit_ready());
     }
 }

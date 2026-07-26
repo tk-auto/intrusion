@@ -82,10 +82,28 @@ pub enum Event {
     /// close-by-bump — but a door cue is raised for every close the player did not
     /// cause).
     DoorClosed { at: Cell, by_player: bool },
-    /// The player took the intel at a console; `remaining` objectives are still out.
-    IntelTaken { remaining: usize },
-    /// The player bumped the exit with objectives still outstanding — refused (§4.5).
-    ExitRefused,
+    /// The player took the intel at a console; `remaining` objectives are still out
+    /// and `still_needed` of them must be taken before the exit will open.
+    ///
+    /// The two counts differ (#310): the run's [`IntelGate`](crate::IntelGate) decides
+    /// how much is *enough* (§4.5/#244), so under
+    /// [`AtLeastOne`](crate::IntelGate::AtLeastOne) this take satisfies the gate with
+    /// two still out, while under [`All`](crate::IntelGate::All) it is progress and
+    /// nothing more. `still_needed` is
+    /// [`intel_needed_to_exit`](State::intel_needed_to_exit) *after* the take — zero
+    /// exactly when the exit is now open — and it is carried here because
+    /// [`message_for`](crate::status::message_for) is pure over the event and cannot
+    /// ask the gate itself.
+    IntelTaken {
+        remaining: usize,
+        still_needed: usize,
+    },
+    /// The player bumped the exit before the intel gate was met — refused (§4.5).
+    /// `still_needed` is how many more consoles the gate wants
+    /// ([`intel_needed_to_exit`](State::intel_needed_to_exit)), so the refusal can
+    /// name the real requirement rather than assume one fixed rule (#310). Always at
+    /// least 1: a refusal *is* an unmet gate.
+    ExitRefused { still_needed: usize },
     /// The intel gate was satisfied (§10.2) and the player reached the exit: won.
     Won,
     /// A guard moved into the player's cell: captured (§4.5) — the only loss.
@@ -230,7 +248,7 @@ impl Event {
             // rather than the Owned one your abilities use: it is a fact about the
             // *facility* now, not a tool you are holding.
             Event::IntelTaken { .. }
-            | Event::ExitRefused
+            | Event::ExitRefused { .. }
             | Event::Won
             | Event::CommsSilenced { .. } => Category::Interest,
             // A threat that has you, literally (§4.5) — or the wall does (§8.3).

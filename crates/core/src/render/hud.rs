@@ -635,10 +635,12 @@ mod tests {
     /// Two of these clip even with no message counter beside them ("you stow the
     /// body…" at 42, "intel in hand… (n more out)" at 45); the rest fit alone and
     /// clip only when a second message stacks the counter into the row.
-    const PRE_EXISTING_OVERFLOW: [&str; 7] = [
+    ///
+    /// The exit's refusal left this list in #310: naming the gate's real requirement
+    /// ("the exit needs 2 more intel") is shorter than the fixed rule it replaced.
+    const PRE_EXISTING_OVERFLOW: [&str; 6] = [
         "all the intel — the exit is open",
         "the guard drops — a body is left",
-        "the exit needs intel in hand first",
         "you slip away — the run is won",
         "you stow the body — the cupboard is sealed",
         "the facility is on alert — level 99",
@@ -680,9 +682,19 @@ mod tests {
                 at,
                 by_player: false,
             },
-            Event::IntelTaken { remaining: 0 },
-            Event::IntelTaken { remaining: 9 },
-            Event::ExitRefused,
+            Event::IntelTaken {
+                remaining: 0,
+                still_needed: 0,
+            },
+            Event::IntelTaken {
+                remaining: 9,
+                still_needed: 0,
+            },
+            Event::IntelTaken {
+                remaining: 9,
+                still_needed: 9,
+            },
+            Event::ExitRefused { still_needed: 9 },
             Event::Won,
             Event::Captured { by: at },
             Event::TakenDown { at },
@@ -870,7 +882,7 @@ mod tests {
         assert_eq!(
             text,
             vec![
-                " intel remaining: 1                 [?] ".to_string(),
+                " 1 more intel to leave              [?] ".to_string(),
                 " → console: take intel                  ".to_string(),
                 "########################################".to_string(),
                 "#······································#".to_string(),

@@ -1932,6 +1932,13 @@ system — it is derived from adjacency every frame and carries no state.
   (§7.3) there is more to say, so this probably needs to grow.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
+- **Objective messaging derives from the gate, never from a fixed intel count**
+  (§4.5/#310). Whether the exit is open is `exit_ready()`, and how much it still
+  wants is `intel_needed_to_exit()` — which is *not* the tally of consoles still out
+  (under `AtLeastOne` three can be out while one is needed). A message layer that is
+  pure over its event must be *handed* that fact by the event; no take message may
+  announce an exit that would refuse, and no refusal may misstate the requirement.
+  **[SETTLED]**
 
 Priority ladder **[START]**: routine self-narration ≤ 0; guard threat escalates
 2 → 4 → 10; objective feedback dominates at 20; ambient status sits below
