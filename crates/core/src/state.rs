@@ -121,11 +121,15 @@ pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
 /// The **Confusion** blast radius (§8.3/§9/#240 **[START]**): while the Confusion
 /// ability is active ([`Effect::Confuse`](crate::Effect)), every guard within this
 /// Chebyshev box of the player is blinded and frozen — measured the same way as the
-/// guard sense (§6.1 box metric) and, like it, reaching **through walls** (§9). It is
-/// deliberately **smaller** than [`PLAYER_SENSE_RANGE`] — a conservative bubble
-/// around the player, not a wing-clear (the note in #240: radius and cooldown are the
-/// levers, started low). Pinned by a test so a later change is a visible edit.
-pub const CONFUSION_RADIUS: u32 = 4;
+/// guard sense (§6.1 box metric) and, like it, reaching **through walls** (§9).
+///
+/// It stays **smaller** than [`PLAYER_SENSE_RANGE`] (asserted below) so the bubble can
+/// never reach a guard the player cannot already sense — but it now covers a guard's
+/// whole *certain* zone (`CERTAIN_RANGE` = 5, §7.6), so the guards actually bearing
+/// down on you are the ones it catches. Raised from the first pass's 4, where the
+/// bubble was tight enough that a chaser could sit just outside it. Pinned by a test
+/// so a later change is a visible edit.
+pub const CONFUSION_RADIUS: u32 = 6;
 
 /// Confusion's bubble stays **within the guard sense** (§9/#240): a guard is never
 /// frozen before the player can even sense its dot, so the effect is always legible

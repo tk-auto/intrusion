@@ -484,17 +484,19 @@ const AUTODOORS: Ability = Ability {
     cooldown: 40,
     behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
 };
-// Confusion [START] (§8.3, §9, #240): a short blind-and-freeze bubble around the
-// player, through walls — powerful, so the cost is a *large* lockout that keeps it
-// rare (§2.3/§13.2). A self/area toggle: it centres on the player and reaches
-// [`CONFUSION_RADIUS`] (a conservative bubble, not a wing-clear — the radius and this
-// cooldown are the levers, started low). Three protected turns (§8.2 timing, the
-// activation turn covered), then a long recharge before the next panic-buy.
+// Confusion [START] (§8.3, §9, #240): a blind-and-freeze bubble around the player,
+// through walls — powerful, so the cost is a *large* lockout that keeps it rare
+// (§2.3/§13.2). A self/area toggle: it centres on the player and reaches
+// [`CONFUSION_RADIUS`]. **Six** protected turns (§8.2 timing, the activation turn
+// covered) — enough of a window to actually walk out of the bubble you bought, which
+// three was not — then a long recharge before the next panic-buy. Duration and radius
+// were raised together from the first pass (3/4): the window and the bubble are the
+// levers, and the cooldown is what still makes spending it a real decision.
 const CONFUSION: Ability = Ability {
     id: AbilityId::Confusion,
     cost: 1,
     targeting: TargetingMode::Itself,
-    duration: 3,
+    duration: 6,
     cooldown: 45,
     behaviour: Behaviour::Effects(&[Effect::Confuse]),
 };
@@ -820,7 +822,7 @@ mod economy_tests {
                 AbilityId::Confusion,
                 1,
                 TargetingMode::Itself,
-                3,
+                6,
                 45,
                 Effect::Confuse,
             ),

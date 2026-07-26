@@ -5700,7 +5700,7 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
     assert_eq!(s.guards()[0].state(), GuardState::Chasing);
 
     // Activation turn: frozen this very turn (§8.2 covers the activation turn). Then
-    // two more Waits, all inside the 3-turn window — the guard never advances.
+    // five more Waits, all inside the 6-turn window — the guard never advances.
     let events = s.step(Input::Activate(AbilityId::Confusion));
     assert!(
         events.contains(&Event::AbilityActivated {
@@ -5708,14 +5708,14 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
         }),
         "the ability switched on: {events:?}",
     );
-    for turn in 1..=3 {
+    for turn in 1..=6 {
         assert_eq!(s.outcome(), Outcome::Playing, "turn {turn}: still playing");
         assert_eq!(
             s.guards()[0].pos(),
             Cell::new(10, 8),
             "turn {turn}: a frozen chaser does not advance",
         );
-        if turn < 3 {
+        if turn < 6 {
             s.step(Input::Wait);
         }
     }
@@ -5758,7 +5758,7 @@ fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
     );
 
     s.step(Input::Activate(AbilityId::Confusion));
-    for turn in 1..=3 {
+    for turn in 1..=6 {
         assert_eq!(
             s.outcome(),
             Outcome::Playing,
@@ -5769,7 +5769,7 @@ fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
             Cell::new(10, 9),
             "turn {turn}: it holds its cell, one step from the player",
         );
-        if turn < 3 {
+        if turn < 6 {
             s.step(Input::Wait);
         }
     }
@@ -5793,22 +5793,22 @@ fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
 #[test]
 fn confusion_reaches_through_walls_and_stops_at_its_radius() {
     // Pin the [START] radius so a later change is a visible edit.
-    assert_eq!(CONFUSION_RADIUS, 4);
+    assert_eq!(CONFUSION_RADIUS, 6);
 
-    let mut layout = open_room(24, 12);
-    // A wall between the player (6,6) and the near guard (10,6), to prove the bubble
+    let mut layout = open_room(24, 20);
+    // A wall between the player (6,6) and the near guard (12,6), to prove the bubble
     // ignores line of sight.
-    layout.place(Cell::new(8, 6), Terrain::Wall);
+    layout.place(Cell::new(9, 6), Terrain::Wall);
     let mut s = State::new(
         layout,
         Cell::new(6, 6),
         Direction::North,
         vec![
-            Guard::stationary(Cell::new(10, 6)), // distance 4 == radius, behind a wall
-            Guard::stationary(Cell::new(6, 11)), // distance 5 > radius
+            Guard::stationary(Cell::new(12, 6)), // distance 6 == radius, behind a wall
+            Guard::stationary(Cell::new(6, 13)), // distance 7 > radius
         ],
         Vec::new(),
-        Cell::new(22, 10),
+        Cell::new(22, 18),
     );
 
     // Before activation nothing is confused.
@@ -5822,7 +5822,7 @@ fn confusion_reaches_through_walls_and_stops_at_its_radius() {
     );
     assert!(
         !s.guard_confused(&s.guards()[1]),
-        "a guard one cell past the edge is untouched — the bubble is conservative",
+        "a guard one cell past the edge is untouched — the bubble still has an edge",
     );
 }
 
