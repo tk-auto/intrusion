@@ -56,6 +56,15 @@ pub(crate) const MAX_MISSED_PINGS: u8 = 2;
 /// this steps is a real value, written here and read by the near line (§11.4).
 pub(crate) const ALERT_STEP: u32 = 1;
 
+/// How many guards a **lost confirmed sighting** calls in (§7.7, **[START] = 1**),
+/// when the `sighting_lost_calls_a_guard` modifier is on (§12.6). This count *is*
+/// the difficulty dial for the §7.7 net — the design deliberately expresses "how
+/// loud was that" as "how many come", not as a reach or a priority — so it is the
+/// first knob a tuning pass should sweep once the sim (§13.2) can measure it. One
+/// is on purpose: the point is that *someone who was never chasing you* arrives,
+/// not that the facility empties onto your last position.
+pub(crate) const SIGHTING_CALL_GUARDS: usize = 1;
+
 /// A guard's radio ping cadence (§7.3): the period of its personal clock, drawn
 /// once from the run seed so the whole schedule is deterministic (§12.4). Carried
 /// by the guard and handed to the [`Body`](crate::body::Body) it becomes at a

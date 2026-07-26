@@ -115,6 +115,16 @@ pub struct LevelModifiers {
     /// (the "hold still, watch the cone sweep past" payoff, §7.6); with this on,
     /// any active search that sweeps over the cupboard you dived into flushes it.
     pub guards_always_search_hideouts: bool,
+    /// **Harder.** A guard that had the player in the **certain** zone (§7.6,
+    /// `CERTAIN_RANGE`) and then loses sight **calls it in** (§7.7): one other
+    /// guard converges on the last-known cell and searches it. Baseline, breaking
+    /// contact leaves you with only the guard you broke it from — with this on,
+    /// someone who was never chasing you starts combing the ground you vanished
+    /// into. This is the §7.7 net, and the reason a lone tail is allowed to be
+    /// escapable (§7.6 fix 4). A **glimpse**-zone contact never calls anyone, and
+    /// the losing guard searches on its own either way — the modifier adds the
+    /// calling of others, nothing else.
+    pub sighting_lost_calls_a_guard: bool,
     /// **Easier.** Paint the §11.5 danger overlay in full — the cone of *every*
     /// guard, not only the ones you can currently see. This only ever **widens**
     /// what is revealed; it never hides the red detection set, so the §11.5
@@ -177,6 +187,7 @@ impl LevelModifiers {
         // here until it is given a row, the compile-time half of the §11.3 rule.
         let LevelModifiers {
             guards_always_search_hideouts,
+            sighting_lost_calls_a_guard,
             always_show_vision_cones,
             intel_to_exit,
         } = *self;
@@ -186,6 +197,13 @@ impl LevelModifiers {
                 name: "Guards search hideouts",
                 direction: ModifierDirection::Harder,
                 detail: None,
+            });
+        }
+        if sighting_lost_calls_a_guard {
+            active.push(ActiveModifier {
+                name: "Sightings called in",
+                direction: ModifierDirection::Harder,
+                detail: Some("one guard converges"),
             });
         }
         if always_show_vision_cones {
@@ -223,6 +241,8 @@ impl LevelModifiers {
         Self {
             guards_always_search_hideouts: self.guards_always_search_hideouts
                 || other.guards_always_search_hideouts,
+            sighting_lost_calls_a_guard: self.sighting_lost_calls_a_guard
+                || other.sighting_lost_calls_a_guard,
             always_show_vision_cones: self.always_show_vision_cones
                 || other.always_show_vision_cones,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
@@ -401,21 +421,24 @@ mod tests {
         // Several sources at once: every active field is listed, in reading order.
         let stacked = LevelModifiers {
             guards_always_search_hideouts: true,
+            sighting_lost_calls_a_guard: true,
             always_show_vision_cones: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 3);
+        assert_eq!(stacked.active().len(), 4);
     }
 
     #[test]
     fn union_is_a_field_wise_or() {
         let a = LevelModifiers {
             guards_always_search_hideouts: true,
+            sighting_lost_calls_a_guard: true,
             always_show_vision_cones: false,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
             guards_always_search_hideouts: false,
+            sighting_lost_calls_a_guard: false,
             always_show_vision_cones: true,
             intel_to_exit: IntelGate::None,
         };

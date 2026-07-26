@@ -252,12 +252,14 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
 fn modifier_bits(m: LevelModifiers) -> u32 {
     let LevelModifiers {
         guards_always_search_hideouts,
+        sighting_lost_calls_a_guard,
         always_show_vision_cones,
         intel_to_exit,
     } = m;
     u32::from(guards_always_search_hideouts)
         | u32::from(always_show_vision_cones) << 1
         | gate_bits(intel_to_exit) << 2
+        | u32::from(sighting_lost_calls_a_guard) << 4
 }
 
 /// Unpack a bitfield back into a [`LevelModifiers`], or `None` if a field holds a
@@ -267,6 +269,7 @@ fn modifiers_from_bits(bits: u32) -> Option<LevelModifiers> {
         guards_always_search_hideouts: bits & 0b1 != 0,
         always_show_vision_cones: bits & 0b10 != 0,
         intel_to_exit: gate_from_bits((bits >> 2) & 0b11)?,
+        sighting_lost_calls_a_guard: bits & 0b1_0000 != 0,
     })
 }
 
@@ -468,6 +471,7 @@ mod tests {
             seed: 999,
             modifiers: LevelModifiers {
                 guards_always_search_hideouts: true,
+                sighting_lost_calls_a_guard: true,
                 always_show_vision_cones: true,
                 intel_to_exit: IntelGate::None,
             },
@@ -495,22 +499,25 @@ mod tests {
         ];
         for search in [false, true] {
             for cones in [false, true] {
-                for gate in gates {
-                    for abilities in loadouts {
-                        let level = LevelSeed {
-                            seed: 12345,
-                            modifiers: LevelModifiers {
-                                guards_always_search_hideouts: search,
-                                always_show_vision_cones: cones,
-                                intel_to_exit: gate,
-                            },
-                            abilities,
-                        };
-                        assert_eq!(
-                            LevelSeed::decode(&level.encode()),
-                            Some(level),
-                            "round-trip failed for {level:?}",
-                        );
+                for called in [false, true] {
+                    for gate in gates {
+                        for abilities in loadouts {
+                            let level = LevelSeed {
+                                seed: 12345,
+                                modifiers: LevelModifiers {
+                                    guards_always_search_hideouts: search,
+                                    sighting_lost_calls_a_guard: called,
+                                    always_show_vision_cones: cones,
+                                    intel_to_exit: gate,
+                                },
+                                abilities,
+                            };
+                            assert_eq!(
+                                LevelSeed::decode(&level.encode()),
+                                Some(level),
+                                "round-trip failed for {level:?}",
+                            );
+                        }
                     }
                 }
             }
@@ -551,6 +558,7 @@ mod tests {
             seed: u64::MAX,
             modifiers: LevelModifiers {
                 guards_always_search_hideouts: true,
+                sighting_lost_calls_a_guard: true,
                 always_show_vision_cones: true,
                 intel_to_exit: IntelGate::All,
             },

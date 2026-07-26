@@ -440,6 +440,14 @@ impl Guard {
         self.destination
     }
 
+    /// The cell an active search or watch is centred on (§7.6) — where this guard
+    /// believes the trail ran out. Read by the §7.7 call-in: the cell a lost
+    /// sighting reports is the one the loser is itself about to sweep, so the two
+    /// can never disagree.
+    pub(crate) fn focus(&self) -> Option<Cell> {
+        self.focus
+    }
+
     /// The guard's station (§7.5) — the anchor its Calm beat is grown from. The
     /// radio net no longer reads it: a dispatch heads for where the guard *fell*
     /// (§7.3), not the post it was assigned to, so this is the beat's seam for the

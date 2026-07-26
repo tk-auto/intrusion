@@ -94,6 +94,10 @@ pub fn message_for(event: Event) -> Option<Message> {
         // responder. A hunting-threat message — above a fresh glimpse, below a
         // found body: a silence is suspicion, a body is proof.
         Event::RadioSilence { .. } => ("a guard has gone silent".to_string(), 3),
+        // The §7.7 net closing: you broke contact, and it reported where you were.
+        // Ranked with the radio silence — both say "they are converging on a place
+        // you were", above a bare glimpse and below the proof a body gives.
+        Event::CalledIn { .. } => ("your position has been called in".to_string(), 3),
         // The facility alert stepped (§7.3): the loudest radio event, a
         // facility-wide escalation — above a found body, below being caught.
         Event::AlertRaised { level } => (format!("the facility is on alert — level {level}"), 5),

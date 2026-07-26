@@ -1864,3 +1864,229 @@ fn a_guard_is_judged_where_the_phase_found_it_not_where_its_step_lands() {
         "frozen from the next phase on",
     );
 }
+
+/// The scene the §7.7 call-in tests share: a guard that gets a **certain**-zone
+/// sighting of the player (§7.6, ≤ 5) and then loses it to a cupboard walled into
+/// its sight-shadow, plus a second guard far enough away to have seen nothing. The
+/// chase therefore ends in a search — the moment a lost sighting is called in — and
+/// there is somebody free to answer.
+fn call_in_scene() -> State {
+    let mut layout = open_room(30, 12);
+    layout.place(Cell::new(4, 5), Terrain::Hideout); // the dive
+    layout.place(Cell::new(4, 4), Terrain::Wall); // …unwitnessed (§15 Q5)
+    State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![
+            Guard::patrolling(Cell::new(5, 1)),  // 4 away — the certain zone
+            Guard::patrolling(Cell::new(25, 9)), // far out of sight, free to be sent
+        ],
+        Vec::new(),
+        Cell::new(28, 10),
+    )
+}
+
+/// §7.7: with the modifier on, a guard that had the player in the certain zone and
+/// then lost sight **calls it in** — one other guard converges on the cell where
+/// contact broke and searches it. The reported cell is stale by construction: it is
+/// where the player *was* when the chase ended, which is exactly where they are not.
+#[test]
+fn a_lost_confirmed_sighting_calls_one_guard_to_the_reported_cell() {
+    let mut s = call_in_scene().with_modifiers(LevelModifiers {
+        sighting_lost_calls_a_guard: true,
+        ..LevelModifiers::default()
+    });
+    s.step(Input::Step(Direction::West)); // dive into the cupboard, breaking sight
+    assert!(s.hidden(), "the player is concealed");
+
+    let mut reported = None;
+    for _ in 0..40 {
+        for e in s.step(Input::Wait) {
+            if let Event::CalledIn { at } = e {
+                reported = Some(at);
+            }
+        }
+        if reported.is_some() {
+            break;
+        }
+    }
+    let at = reported.expect("the lost chase was called in (§7.7)");
+    assert_ne!(
+        at,
+        s.player(),
+        "the reported cell is where contact broke, not where the player is",
+    );
+    assert_eq!(
+        s.guards()[1].state(),
+        GuardState::Responding,
+        "the far guard was called in",
+    );
+    assert_eq!(
+        s.guards()[1].destination(),
+        Some(at),
+        "it converges on the reported cell",
+    );
+}
+
+/// The `sighting_lost_calls_a_guard` modifier (§12.6), directional at the run level
+/// (§2.3's anti-facade rule): on the *same* scene and inputs, baseline calls nobody
+/// — and, crucially, the guard that lost the player **still searches on its own**.
+/// The modifier adds the calling of others, nothing else.
+#[test]
+fn baseline_calls_nobody_but_the_loser_still_searches() {
+    let mut s = call_in_scene();
+    s.step(Input::Step(Direction::West));
+
+    let mut searched = false;
+    for _ in 0..40 {
+        for e in s.step(Input::Wait) {
+            assert!(
+                !matches!(e, Event::CalledIn { .. }),
+                "baseline never calls anyone in",
+            );
+        }
+        if s.guards()[0].state() == GuardState::Alerted {
+            searched = true;
+        }
+        assert_ne!(
+            s.guards()[1].state(),
+            GuardState::Responding,
+            "the far guard is never sent",
+        );
+    }
+    assert!(
+        searched,
+        "the guard that lost the player searches regardless of the modifier",
+    );
+}
+
+/// §7.7/§7.6: only a **confirmed** sighting is worth reporting. A guard that had no
+/// more than a glimpse (the outer zone, 6–10 — Investigating, imprecise by design)
+/// searches when its lead runs out like any other, but calls nobody: there is no
+/// position it is sure enough of to report.
+#[test]
+fn a_glimpse_that_is_lost_calls_nobody() {
+    let mut layout = open_room(30, 12);
+    layout.place(Cell::new(4, 9), Terrain::Hideout);
+    layout.place(Cell::new(4, 8), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 9), // 8 from the guard — the glimpse zone, never the certain one
+        Direction::North,
+        vec![
+            Guard::patrolling(Cell::new(5, 1)),
+            Guard::patrolling(Cell::new(25, 2)),
+        ],
+        Vec::new(),
+        Cell::new(28, 10),
+    )
+    .with_modifiers(LevelModifiers {
+        sighting_lost_calls_a_guard: true,
+        ..LevelModifiers::default()
+    });
+
+    // Whatever the guard makes of the glimpse, it never reaches the certain zone:
+    // the player dives on the first turn and stays hidden.
+    s.step(Input::Step(Direction::West));
+    assert!(s.hidden());
+    let mut glimpsed = false;
+    let mut searched = false;
+    for _ in 0..40 {
+        for e in s.step(Input::Wait) {
+            assert!(
+                !matches!(e, Event::CalledIn { .. }),
+                "a glimpse is never called in (§7.7)",
+            );
+        }
+        match s.guards()[0].state() {
+            GuardState::Investigating => glimpsed = true,
+            GuardState::Alerted => searched = true,
+            GuardState::Chasing => panic!("the fixture leaked a certain-zone sighting"),
+            _ => {}
+        }
+    }
+    // Without these the test would pass vacuously on a guard that saw nothing at
+    // all: the point is that a guard which *did* react, and *did* end in a search,
+    // still called nobody.
+    assert!(glimpsed, "the guard did glimpse the player");
+    assert!(
+        searched,
+        "and its lead ended in a search, which called nobody"
+    );
+}
+
+/// §12.4: the call-in is deterministic — the same scene, modifiers and inputs pick
+/// the same guard and report the same cell, every time.
+#[test]
+fn the_call_in_is_deterministic() {
+    let run = || {
+        let mut s = call_in_scene().with_modifiers(LevelModifiers {
+            sighting_lost_calls_a_guard: true,
+            ..LevelModifiers::default()
+        });
+        let mut seen = Vec::new();
+        seen.push(s.step(Input::Step(Direction::West)));
+        for _ in 0..40 {
+            seen.push(s.step(Input::Wait));
+        }
+        (seen, s.guards()[1].destination())
+    };
+    assert_eq!(run(), run(), "same seed + same modifiers + same inputs");
+}
+
+/// §7.7: **"silence it before it reports"**, which the design gets for free. The
+/// call fires when a chase *ends*, so a chaser taken down before that never reports
+/// — there is no report timer to interrupt, just a guard that no longer exists to
+/// decide anything. The window is real in play: the guard arrives on the cell it
+/// last saw you at and only opens its search on the *following* turn, and while it
+/// cannot see into the cupboard it is not aware, so the bump is a takedown (§7.2).
+#[test]
+fn taking_the_chaser_down_before_it_searches_suppresses_the_call() {
+    let mut s = call_in_scene().with_modifiers(LevelModifiers {
+        sighting_lost_calls_a_guard: true,
+        ..LevelModifiers::default()
+    });
+    let broke_at = Cell::new(5, 5);
+    s.step(Input::Step(Direction::West)); // dive west into the cupboard
+    assert!(s.hidden());
+
+    // Wait for the chaser to arrive on the cell it last had us — the turn before
+    // it would open its search and call it in.
+    let mut adjacent = false;
+    for _ in 0..20 {
+        for e in s.step(Input::Wait) {
+            assert!(
+                !matches!(e, Event::CalledIn { .. }),
+                "nothing is reported while it is still walking",
+            );
+        }
+        if s.guards()[0].pos() == broke_at {
+            adjacent = true;
+            break;
+        }
+    }
+    assert!(adjacent, "the chaser reached the cell contact broke at");
+
+    // Strike from the cupboard before it can turn round and report.
+    let e = s.step(Input::Step(Direction::East));
+    assert!(
+        e.contains(&Event::TakenDown { at: broke_at }),
+        "a guard that cannot see you is not aware, so the bump lands (§7.2)",
+    );
+    assert_eq!(s.guards().len(), 1, "only the far guard is left");
+
+    for _ in 0..40 {
+        for e in s.step(Input::Wait) {
+            assert!(
+                !matches!(e, Event::CalledIn { .. }),
+                "a guard taken down before its search never reports (§7.7)",
+            );
+        }
+    }
+    assert_ne!(
+        s.guards()[0].state(),
+        GuardState::Responding,
+        "nobody was ever called in",
+    );
+}

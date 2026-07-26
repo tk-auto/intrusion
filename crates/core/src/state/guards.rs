@@ -255,6 +255,54 @@ impl State {
         }
     }
 
+    /// **The call-in** (§7.7): guard `i` was Chasing before it decided this turn —
+    /// if it has just dropped into a search, the chase ended and it reports where
+    /// contact broke. One other guard ([`SIGHTING_CALL_GUARDS`]) converges on that
+    /// cell and searches it, exactly as a radio dispatch does (§7.3).
+    ///
+    /// Three properties the design leans on, all of which fall out of *when* this
+    /// fires rather than from any machinery:
+    ///
+    /// - **Taking the chaser down before it loses you suppresses the call.** A
+    ///   guard that is gone never decides, so it never reports — §7.7's "silence it
+    ///   before it reports", for free (there is no report timer to interrupt).
+    /// - **The reported cell is stale by construction.** It is where the guard last
+    ///   had you, which is precisely where you are *not* — you just broke contact.
+    /// - **A guard on the player is never sent** (the [`nearest_respondable`] filter),
+    ///   and neither is the caller itself: it has its own search to run.
+    ///
+    /// Off by default — this is the `sighting_lost_calls_a_guard` modifier (§12.6),
+    /// and with it off the loser still searches alone, exactly as before.
+    fn call_in_lost_sighting(&mut self, caller: usize, events: &mut Vec<Event>) {
+        if !self.modifiers.sighting_lost_calls_a_guard {
+            return;
+        }
+        // A chase that ended is a guard now sweeping the cell it lost you at. Any
+        // other outcome (still chasing, or a cold lead given up with no search —
+        // §7.1's backstop) reports nothing: there is no position worth calling.
+        if self.guards[caller].state() != GuardState::Alerted {
+            return;
+        }
+        let Some(at) = self.guards[caller].focus() else {
+            return;
+        };
+        // The caller is Alerted and so respondable itself; exclude it explicitly
+        // rather than relying on the count, or a lone guard would "call in" its own
+        // search and restart it.
+        let free: Vec<usize> = radio::nearest_respondable(&self.guards, at, self.guards.len())
+            .into_iter()
+            .filter(|&g| g != caller)
+            .take(radio::SIGHTING_CALL_GUARDS)
+            .collect();
+        if free.is_empty() {
+            return; // nobody to send: the call goes unanswered, and is not reported
+        }
+        for g in free {
+            self.guards[g].respond_to(at);
+        }
+        events.push(Event::CalledIn { at });
+    }
+
     /// Pass 5 — each guard `decide`s a step (§7.5) and takes it. A guard moving into
     /// the player's cell is a capture and ends the run (§4.5). Otherwise it moves onto
     /// any cell that admits it and holds no other actor; a guard with nowhere to go, or
@@ -282,9 +330,16 @@ impl State {
                 .filter(|(j, _)| *j != i)
                 .map(|(_, g)| g.pos())
                 .collect();
-            let Some(dir) =
-                self.guards[i].decide(facility, &blocked, &mut self.rng, self.dwell_chance)
-            else {
+            // §7.7: a chase that ends *this turn* is what calls it in, so the state
+            // is read either side of the decision. Chasing is exactly the certain
+            // zone (§7.6) — an Investigating guard only ever had a glimpse and
+            // reports nothing — and `decide` is the one place a chase can run out.
+            let was_chasing = self.guards[i].state() == GuardState::Chasing;
+            let step = self.guards[i].decide(facility, &blocked, &mut self.rng, self.dwell_chance);
+            if was_chasing {
+                self.call_in_lost_sighting(i, events);
+            }
+            let Some(dir) = step else {
                 continue;
             };
             let Some(target) = self.guards[i].pos().step(dir) else {
