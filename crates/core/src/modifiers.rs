@@ -169,6 +169,73 @@ pub struct ActiveModifier {
     pub detail: Option<&'static str>,
 }
 
+/// What the help card puts between a modifier's name and its value — the `": "` in
+/// `Intel to exit: all of it`. Shared by the renderer and by
+/// [`ActiveModifier::caption_len`] so the measured width and the drawn one cannot
+/// drift apart.
+pub(crate) const CAPTION_SEPARATOR: &str = ": ";
+
+impl ActiveModifier {
+    /// The width, in cells, of this modifier's caption as the help card draws it
+    /// (#248) — `name` alone, or `name: detail` for a knob. `const` on purpose:
+    /// it is what the card's compile-time width bound measures against, so a
+    /// caption that would clip on the v1 board fails the build rather than being
+    /// discovered as a truncated line in a screenshot.
+    pub(crate) const fn caption_len(&self) -> usize {
+        match self.detail {
+            Some(detail) => self.name.len() + CAPTION_SEPARATOR.len() + detail.len(),
+            None => self.name.len(),
+        }
+    }
+}
+
+/// **Every caption the help card can draw** (#248) — the one place a modifier's
+/// display text is written, so the width bound in
+/// [`render::help`](crate::render) can measure the complete set at compile time.
+/// [`LevelModifiers::active`] returns entries from here rather than building
+/// literals inline: a caption that is not in this table is a caption nothing
+/// checks, which is exactly the drift the bound exists to stop.
+///
+/// A bounded knob contributes **one entry per non-baseline value**, since each is a
+/// different caption with a different width.
+pub(crate) const CAPTIONS: [ActiveModifier; 5] = [
+    SEARCHES_HIDEOUTS,
+    CALLS_IN_SIGHTINGS,
+    SHOWS_ALL_CONES,
+    INTEL_GATE_ALL,
+    INTEL_GATE_NONE,
+];
+
+const SEARCHES_HIDEOUTS: ActiveModifier = ActiveModifier {
+    name: "Guards search hideouts",
+    direction: ModifierDirection::Harder,
+    detail: None,
+};
+
+const CALLS_IN_SIGHTINGS: ActiveModifier = ActiveModifier {
+    name: "Sightings called in",
+    direction: ModifierDirection::Harder,
+    detail: Some("one guard"),
+};
+
+const SHOWS_ALL_CONES: ActiveModifier = ActiveModifier {
+    name: "All vision cones shown",
+    direction: ModifierDirection::Easier,
+    detail: None,
+};
+
+const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
+    name: "Intel to exit",
+    direction: ModifierDirection::Harder,
+    detail: Some("all of it"),
+};
+
+const INTEL_GATE_NONE: ActiveModifier = ActiveModifier {
+    name: "Intel to exit",
+    direction: ModifierDirection::Easier,
+    detail: Some("none required"),
+};
+
 impl LevelModifiers {
     /// The modifiers **active** for this run, each described for display (#248):
     /// every field sitting off its baseline, in reading order. The baseline
@@ -192,41 +259,23 @@ impl LevelModifiers {
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
+        // Every caption comes from [`CAPTIONS`] rather than a literal built here, so
+        // the help card's compile-time width bound measures exactly what is drawn.
         if guards_always_search_hideouts {
-            active.push(ActiveModifier {
-                name: "Guards search hideouts",
-                direction: ModifierDirection::Harder,
-                detail: None,
-            });
+            active.push(SEARCHES_HIDEOUTS);
         }
         if sighting_lost_calls_a_guard {
-            active.push(ActiveModifier {
-                name: "Sightings called in",
-                direction: ModifierDirection::Harder,
-                detail: Some("one guard converges"),
-            });
+            active.push(CALLS_IN_SIGHTINGS);
         }
         if always_show_vision_cones {
-            active.push(ActiveModifier {
-                name: "All vision cones shown",
-                direction: ModifierDirection::Easier,
-                detail: None,
-            });
+            active.push(SHOWS_ALL_CONES);
         }
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
         // settings are "active", each with the direction its exposure rank implies.
         match intel_to_exit {
             IntelGate::AtLeastOne => {} // the §4.5 baseline — nothing to surface
-            IntelGate::All => active.push(ActiveModifier {
-                name: "Intel to exit",
-                direction: ModifierDirection::Harder,
-                detail: Some("all of it"),
-            }),
-            IntelGate::None => active.push(ActiveModifier {
-                name: "Intel to exit",
-                direction: ModifierDirection::Easier,
-                detail: Some("none required"),
-            }),
+            IntelGate::All => active.push(INTEL_GATE_ALL),
+            IntelGate::None => active.push(INTEL_GATE_NONE),
         }
         active
     }
