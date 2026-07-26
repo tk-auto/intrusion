@@ -22,13 +22,13 @@
 //! the document-level pumps (§11.6) can read a keystroke as a move or a press as a
 //! swipe — the same guard the old seed bar needed, for the same reason.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use intrusion_core::{menu_hit, LevelSeed, MenuEntry, MenuNav, MenuUi, ScreenUi};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Document, HtmlInputElement, KeyboardEvent, MouseEvent, PointerEvent};
+use web_sys::{Document, Element, HtmlInputElement, KeyboardEvent, MouseEvent, Node, PointerEvent};
 
 use crate::{seed, Game};
 
@@ -171,11 +171,84 @@ fn focus_seed_input() {
     }
 }
 
-/// Wire the menu's DOM: the seed box, its *play* and *back* buttons, and the two
-/// event guards that keep the panel's own input away from the game's document-level
-/// pumps (§11.6). Every element is optional — a page hosted without the markup still
-/// boots and still plays, it just has no seed prompt — so each lookup falls out
-/// quietly rather than failing the boot.
+/// Ignore any click on the panel whose **press began somewhere else** — the
+/// "ghost click" a touch leaves behind (§11.6).
+///
+/// One tap is one `pointerdown` on the board followed, on release, by a `click`
+/// aimed at whatever is under the finger *by then*. The press that chooses Seed
+/// play therefore opens the prompt and *then* clicks whatever part of the
+/// just-revealed panel happens to sit under that finger. On a narrow frame that is
+/// the `back` button — the panel wraps it to a second row, centred, exactly where
+/// the menu row that opened the prompt was tapped — so a single tap opened the
+/// prompt and closed it again, the form and the keyboard flashing on the way past.
+///
+/// The rule that fixes it is the one a control already implies: **an interaction
+/// that started on the board is not an interaction with this panel.** A pointerdown
+/// or a keystroke *inside* the panel arms it; a pointerdown anywhere else disarms it
+/// (both read in the capture phase, so they are seen before the panel stops the
+/// event reaching the game's pumps); and an unarmed click is swallowed before any
+/// button's own handler runs. Arming on the keystroke is what keeps Enter or Space
+/// on a focused button working — the click those synthesise is indistinguishable
+/// from a touch's by its own fields (both report a click count of zero), so *what
+/// came before it* is the only honest test.
+fn guard_ghost_clicks(document: &Document, panel: &Element) -> Result<(), JsValue> {
+    let armed = Rc::new(Cell::new(false));
+
+    {
+        let armed = armed.clone();
+        let panel = panel.clone();
+        let cb = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
+            let inside = e
+                .target()
+                .and_then(|t| t.dyn_into::<Node>().ok())
+                .is_some_and(|n| panel.contains(Some(&n)));
+            armed.set(inside);
+        });
+        document.add_event_listener_with_callback_and_bool(
+            "pointerdown",
+            cb.as_ref().unchecked_ref(),
+            true, // capture: before the panel stops the event going any further
+        )?;
+        cb.forget();
+    }
+
+    {
+        let armed = armed.clone();
+        let cb = Closure::<dyn FnMut(KeyboardEvent)>::new(move |_e: KeyboardEvent| armed.set(true));
+        panel.add_event_listener_with_callback_and_bool(
+            "keydown",
+            cb.as_ref().unchecked_ref(),
+            true,
+        )?;
+        cb.forget();
+    }
+
+    {
+        let armed = armed.clone();
+        let cb = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
+            if armed.replace(false) {
+                return;
+            }
+            e.stop_propagation();
+            e.prevent_default();
+        });
+        panel.add_event_listener_with_callback_and_bool(
+            "click",
+            cb.as_ref().unchecked_ref(),
+            true, // capture: swallowed before any button's own handler runs
+        )?;
+        cb.forget();
+    }
+
+    Ok(())
+}
+
+/// Wire the menu's DOM: the seed box, its *play* and *back* buttons, and the event
+/// guards that keep the panel's own input away from the game's document-level pumps
+/// — and the board's presses away from the panel ([`guard_ghost_clicks`], §11.6).
+/// Every element is optional — a page hosted without the markup still boots and
+/// still plays, it just has no seed prompt — so each lookup falls out quietly rather
+/// than failing the boot.
 ///
 /// Called in live play only, never in the replay viewer (a replay has no menu: it
 /// was told exactly which run to show).
@@ -194,6 +267,8 @@ pub(crate) fn install(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(
     ) else {
         return Ok(()); // no seed-prompt markup on this page — nothing to wire
     };
+
+    guard_ghost_clicks(document, &panel)?;
 
     // Loading a token: decode the box and play it. An empty or unreadable box rolls
     // a fresh quick-play run rather than refusing (#110) — the prompt must never be
@@ -230,13 +305,21 @@ pub(crate) fn install(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(
     // "activate". Enter submits the token; Escape leaves the prompt, the keyboard
     // twin of the back button. Nothing is `preventDefault`ed, so the box still types
     // normally.
+    //
+    // Enter on a **focused button** is that button's own activation, not the box's
+    // submit: the browser turns it into a click, so intercepting it here as well
+    // would fire *play* while the click fires *back*.
     {
         let load = load.clone();
         let game = game.clone();
         let cb = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
             e.stop_propagation();
+            let on_button = e
+                .target()
+                .and_then(|t| t.dyn_into::<Element>().ok())
+                .is_some_and(|el| el.tag_name() == "BUTTON");
             match e.key().as_str() {
-                "Enter" => load(),
+                "Enter" if !on_button => load(),
                 "Escape" => game.borrow_mut().show_entries(),
                 _ => {}
             }
