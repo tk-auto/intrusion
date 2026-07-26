@@ -168,6 +168,16 @@ fn rows(height: u32) -> (u32, u32, u32) {
     (title, title + 2, title + 6)
 }
 
+/// Where the seed prompt's title, tagline and heading sit — the title **near the
+/// top**, not centred as on the list. The prompt's text has to clear the middle of
+/// the screen for the DOM box that floats there, and the centred block does not: on
+/// the v1 board its title row and the heading would land on each other. Moving the
+/// title up is what buys the clear band, so the two are one decision, here.
+fn seed_rows(height: u32) -> (u32, u32, u32) {
+    let title = (height / 12).max(1);
+    (title, title + 2, title + 5)
+}
+
 /// The screen row entry `index` is drawn on — the counterpart of [`rows`] for the
 /// list itself.
 fn entry_row(height: u32, index: usize) -> u32 {
@@ -236,25 +246,30 @@ pub fn menu_hit(height: u32, ui: MenuUi, y: u32) -> Option<MenuEntry> {
 ///
 /// Two screens, one for each state of [`MenuUi::seed_entry`]:
 ///
-/// - the **entry list** — title, tagline, the four entries with the selection
-///   marker, and the footer that names both ways to choose;
-/// - the **seed prompt** — the same title over the instructions for a level-seed
-///   string, with **the middle band of the screen left deliberately blank**. That
-///   band is where the shell's DOM text box floats (a canvas cannot raise a phone's
-///   keyboard, so the box has to be real markup); leaving the space empty rather
-///   than aligning glyphs to it means the two never fight over a row, at any fit.
+/// - the **entry list** — the title block centred, the four entries with the
+///   selection marker, and the footer that names both ways to choose;
+/// - the **seed prompt** — the same title, moved up the screen, over the
+///   instructions for a level-seed string, with **the middle band left deliberately
+///   blank**. That band is where the shell's DOM text box floats (a canvas cannot
+///   raise a phone's keyboard, so the box has to be real markup); leaving the space
+///   empty rather than aligning glyphs to it means the two never fight over a row,
+///   at any fit.
 ///
 /// Bounds are clamped, never asserted (like the help card): on a board too small
 /// for a row, that row shows what fits and stops.
 pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     let mut grid = blank_grid(width, height);
-    let (title_row, tagline_row, _) = rows(height);
+    let (title_row, tagline_row, heading_row) = if ui.seed_entry {
+        seed_rows(height)
+    } else {
+        rows(height)
+    };
 
     draw_centred(&mut grid, title_row, TITLE, Category::Interest);
     draw_centred(&mut grid, tagline_row, TAGLINE, Category::Ground);
 
     if ui.seed_entry {
-        draw_seed_prompt(&mut grid);
+        draw_seed_prompt(&mut grid, heading_row);
     } else {
         let column = entry_column(width);
         for (i, &entry) in MenuEntry::ALL.iter().enumerate() {
@@ -291,19 +306,16 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     grid
 }
 
-/// Draw the seed prompt's heading and instructions **above** the screen's middle,
-/// leaving the band around the centre clear for the DOM text box that floats there
-/// (see [`render_menu`]). The box is centred in the viewport and the canvas is
-/// centred in the viewport too, so the middle of the grid is where it lands at every
-/// fit — the one row-level coupling between the two, kept as slack rather than
-/// arithmetic.
-fn draw_seed_prompt(grid: &mut Grid) {
-    let middle = grid.height() / 2;
-    let heading = middle.saturating_sub(SEED_LINES.len() as u32 + 4);
+/// Draw the seed prompt's heading and instructions from `heading` down, high enough
+/// on the screen that the band around the **middle** stays clear for the DOM text box
+/// that floats there (see [`render_menu`]). The box is centred in the viewport and the
+/// canvas is centred in the viewport too, so the middle of the grid is where it lands
+/// at every fit — the one row-level coupling between the two, kept as slack rather
+/// than arithmetic, and asserted below.
+fn draw_seed_prompt(grid: &mut Grid, heading: u32) {
     draw_centred(grid, heading, SEED_HEADING, Category::System);
     for (i, line) in SEED_LINES.iter().enumerate() {
-        let y = heading + 2 + i as u32;
-        draw_centred(grid, y, line, Category::Neutral);
+        draw_centred(grid, heading + 2 + i as u32, line, Category::Neutral);
     }
 }
 
@@ -453,33 +465,59 @@ mod tests {
     /// still works, and — critically — leaves the **middle band blank** for the DOM
     /// text box that floats there. A glyph drawn into that band would sit under the
     /// box.
+    ///
+    /// Each row is matched **whole**, not by `contains`: the first cut of this screen
+    /// centred its title exactly where the heading went, and the two drew over each
+    /// other into `I N SEED PLAY O N` — which a substring check reads as both lines
+    /// present and correct.
     #[test]
     fn the_seed_prompt_instructs_and_keeps_the_middle_clear() {
         let ui = MenuUi {
             seed_entry: true,
             ..MenuUi::default()
         };
-        let grid = render_menu(W, H, ui);
-        let rows = grid.to_text();
-        let text = rows.join("\n");
-        assert!(text.contains(SEED_HEADING), "{text}");
-        for line in SEED_LINES {
-            assert!(text.contains(line), "{text}");
+        let rows = render_menu(W, H, ui).to_text();
+        let (title, tagline, heading) = seed_rows(H);
+        let row = |y: u32| rows[y as usize].trim().to_string();
+
+        assert_eq!(row(title), TITLE);
+        assert_eq!(row(tagline), TAGLINE);
+        assert_eq!(row(heading), SEED_HEADING);
+        for (i, line) in SEED_LINES.iter().enumerate() {
+            assert_eq!(row(heading + 2 + i as u32), *line);
         }
         // Nothing of the entry list survives into the prompt.
+        let text = rows.join("\n");
         for entry in MenuEntry::ALL {
             assert!(
                 !text.contains(entry.label()),
                 "{entry:?} still shows on the seed prompt:\n{text}",
             );
         }
-        let middle = (H / 2) as usize;
-        for row in &rows[middle - 2..=middle + 2] {
+        let middle = H / 2;
+        for y in middle - 3..=middle + 3 {
             assert!(
-                row.trim().is_empty(),
-                "the DOM seed box's band must stay blank, found: {row:?}",
+                row(y).is_empty(),
+                "row {y} must stay blank for the DOM seed box, found: {:?}",
+                row(y),
             );
         }
+    }
+
+    /// The list screen's own rows, matched whole for the same reason — the title and
+    /// tagline must not collide with each other or with the first entry at the fit
+    /// the game actually ships (§10.2's 40×40 board).
+    #[test]
+    fn the_list_screen_draws_each_row_whole() {
+        let (title, tagline, first) = rows(H);
+        let drawn = render_menu(W, H, MenuUi::default()).to_text();
+        assert_eq!(drawn[title as usize].trim(), TITLE);
+        assert_eq!(drawn[tagline as usize].trim(), TAGLINE);
+        assert_eq!(
+            drawn[first as usize].trim(),
+            entry_text(MenuEntry::QuickPlay, true).trim(),
+        );
+        assert!(first > tagline, "the entries sit below the title block");
     }
 
     /// §11.6's no-trap rule, on the screen itself: both footers name the way on —
