@@ -135,6 +135,7 @@ pub fn ability_hotkey(ability: &str) -> Option<char> {
         "Decoy" => 'd',
         "Dephase" => 'x',
         "Autodoors" => 'a',
+        "Confusion" => 'z',
         _ => return None,
     })
 }
@@ -167,7 +168,7 @@ mod tests {
 
     /// The §8.3 starting set, in design-doc order — the order the old scheme
     /// derived keys from, kept here only to prove it no longer matters.
-    const ABILITIES: [&str; 7] = [
+    const ABILITIES: [&str; 8] = [
         "Run",
         "Takedown",
         "Drag",
@@ -175,6 +176,7 @@ mod tests {
         "Decoy",
         "Dephase",
         "Autodoors",
+        "Confusion",
     ];
 
     /// Every single-character key the movement table owns; ability hotkeys must
@@ -292,6 +294,7 @@ mod tests {
             ("Decoy", 'd'),
             ("Dephase", 'x'),
             ("Autodoors", 'a'),
+            ("Confusion", 'z'),
         ] {
             assert_eq!(ability_hotkey(ability), Some(key), "{ability}");
         }

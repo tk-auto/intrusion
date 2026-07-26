@@ -906,8 +906,8 @@ mod tests {
     #[test]
     fn deploying_shows_the_panel_opposite_the_player() {
         // Player top-left → panel bottom-right. On a fresh run the widest label is
-        // `c Camouflage` (12) → a 13-wide band, five rows: map origin (16,8), so the
-        // first row sits at screen (16,9) (map row + the header).
+        // `c Camouflage` (12) → a 13-wide band, six rows: map origin (16,7), so the
+        // first row sits at screen (16,8) (map row + the header).
         let s = State::new(
             open_room(30, 14),
             Cell::new(5, 5),
@@ -927,17 +927,17 @@ mod tests {
         // Closed: that corner is plain map (interior floor). Open: the panel's first
         // row `r Run` starts there, in Owned.
         assert_eq!(
-            closed.get(16, 9).glyph,
+            closed.get(16, 8).glyph,
             '·',
             "not deployed: the board is whole"
         );
         assert_eq!(
-            open.get(16, 9).glyph,
+            open.get(16, 8).glyph,
             'r',
             "deployed: panel opposite the player"
         );
-        assert_eq!(open.get(18, 9).glyph, 'R', "…the label reads `r Run`");
-        assert_eq!(open.get(16, 9).fg, Category::Owned);
+        assert_eq!(open.get(18, 8).glyph, 'R', "…the label reads `r Run`");
+        assert_eq!(open.get(16, 8).fg, Category::Owned);
         // The far side (near the player, top-left) stays board even when deployed.
         assert_eq!(
             open.get(2, 2).glyph,
@@ -978,7 +978,7 @@ mod tests {
             Vec::new(),
             Cell::new(22, 2),
         );
-        // A 4-tall map cannot fit all five panel rows within its inset; the render
+        // A 4-tall map cannot fit all six panel rows within its inset; the render
         // shows what fits and stops — no panic, and the screen height is intact.
         let g = render_screen(
             &s,
@@ -1009,13 +1009,14 @@ mod tests {
         );
         let ui = ScreenUi::default();
 
-        // r@1 c@3 d@5 x@7 a@9 (all ready → one cell each), by identity not position.
+        // r@1 c@3 d@5 x@7 a@9 z@11 (all ready → one cell each), by identity not position.
         for (col, id) in [
             (1, AbilityId::Run),
             (3, AbilityId::Camouflage),
             (5, AbilityId::Decoy),
             (7, AbilityId::Dephase),
             (9, AbilityId::Autodoors),
+            (11, AbilityId::Confusion),
         ] {
             assert_eq!(ability_at(&s, ui, col, 0), Some(id), "col {col}");
         }
@@ -1058,13 +1059,16 @@ mod tests {
             ..ScreenUi::default()
         };
 
-        // One panel row per economy ability, top to bottom in deck order.
+        // One panel row per economy ability, top to bottom in deck order. Six
+        // abilities anchor one row higher than five did — the panel grows upward from
+        // the board's bottom edge (§11.4's opposite-the-player placement).
         for (screen_y, id) in [
-            (9, AbilityId::Run),
-            (10, AbilityId::Camouflage),
-            (11, AbilityId::Decoy),
-            (12, AbilityId::Dephase),
-            (13, AbilityId::Autodoors),
+            (8, AbilityId::Run),
+            (9, AbilityId::Camouflage),
+            (10, AbilityId::Decoy),
+            (11, AbilityId::Dephase),
+            (12, AbilityId::Autodoors),
+            (13, AbilityId::Confusion),
         ] {
             assert_eq!(
                 ability_at(&s, open, 16, screen_y),
