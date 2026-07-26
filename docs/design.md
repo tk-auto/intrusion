@@ -1551,7 +1551,10 @@ facilities (stairs, elevators, one story per screen) are parked in the §14
 backlog until a single screen-bound story proves fun.
 
 ```
-┌─ map: the whole story, fixed ──────────────────────────────┐
+┌────────────────────────────────────────────────────────────┐
+│ Radio: a guard has gone silent                        [?]  │ ← near line
+│ → door: open                                               │ ← usable line
+├─ map: the whole story, fixed ──────────────────────────────┤
 │    ################                                        │
 │    #              #        ####                            │
 │    #    $         +        #  #                            │
@@ -1566,20 +1569,29 @@ backlog until a single screen-bound story proves fun.
 │    ##############        #########                         │
 │                       E                                    │
 ├────────────────────────────────────────────────────────────┤
-│ Radio: a guard has gone silent                             │ ← near line
-│ → door: open                                               │ ← usable line
+│                         r/11/ c[9] d x a z [▴]             │ ← ability bar
 └────────────────────────────────────────────────────────────┘
 ```
+
+**Which way up: action low, status high.** The chrome is ordered for **thumb
+reach** on a held device. The one row you *tap* — the ability bar and its deploy
+button — sits **bottom-right**, where a hand already rests; the rows you only
+*read* — near line, usable line, and the `[?]` help toggle — sit at the **top**,
+clear of both the thumb and the board. On a very wide desktop viewport the
+bottom-right corner is a long way from anything, which is fine: the mobile grip
+is the case this serves.
 
 - **Map**: the full story, statically fitted to the screen (scaled, aspect
   preserved). No camera.
 - **Near line** — *what is around you*: the highest-priority live message
   (§11.7) — guard caution, a radio event (§7.3), an alert change, intel
-  collected — drawn as a **solid band in the message's category colour**. Threat reads as a
-  colour flash across the bottom of the screen, legible without reading the
-  words; that's a nice piece of design — keep it. When no message is live, the
-  line falls back to quiet **ambient status** (alert level, an active ability's
-  remaining turns) instead of sitting empty.
+  collected — drawn as a **solid band in the message's category colour**. Threat
+  reads as a colour flash across the top of the screen, legible without reading
+  the words; that's a nice piece of design — keep it. When no message is live,
+  the line falls back to quiet **ambient status** (alert level, an active
+  ability's remaining turns) instead of sitting empty. Its right-hand corner
+  carries the two view toggles: the live-message counter and the `[?]` help
+  button.
 - **Usable line** — *what you can act on*: the bump affordances adjacent to the
   player right now, each **with an arrow giving the bump's direction** (`→ door:
   open`, `↑ console: take intel`, `← table: crouch`, `↓ cupboard: hide`). Not a
@@ -1593,11 +1605,17 @@ backlog until a single screen-bound story proves fun.
 **No ability column.** The old fixed 14-column list spent a seventh of the
 screen on information consulted once a minute. Ability state (ready / active
 `[3]` / cooling `/2/` / unusable) must stay *discoverable*, but where it lives
-is **[OPEN]** — first experiment: **show the ability list while waiting**
-(peeking costs a turn, which is exactly the §2.3 "cost is load-bearing"
-principle applied to UI); alternatives: a toggle key, or a strip that appears
-only while something is active or cooling. Whatever wins, hotkeys stay explicit
-and stable (§11.6) — never dependent on a visible list.
+is **[OPEN]** (§15 Q9). Two experiments are spent: showing the list *while
+waiting* buried the 360° guard-sense the wait exists to reveal (§9.1), and a
+left-aligned header strip put the tap target furthest from the thumb.
+
+**[START]** — current experiment: a **one-row ability bar, flush to the
+bottom-right**, always on, every ability's hotkey coloured by state with its
+`[3]` / `/2/` number inline; the deploy button `[▴]` in the corner unfolds the
+full named panel **upward off the bar**, over the board's bottom-right, and the
+same tap folds it away. A tap on any entry activates exactly what its hotkey
+would. The bar is a **projection** of the §11.6 keys, never their source:
+hotkeys stay explicit and stable wherever the bar is drawn.
 
 ### 11.5 Field of view and the danger overlay
 
@@ -2079,7 +2097,9 @@ default.
 8. **Touch.** A real target, or drop the manifest? Half-built touch is worse than
    none — the old version could trap a touch user in a dialog they couldn't close.
 9. **Where does ability state live on screen?** (§11.4) The fixed column is gone.
-   Show-on-wait (peeking costs a turn) is the first experiment; a toggle key and
-   an only-while-active strip are the alternatives. Constraints: ready / active /
-   cooling must stay discoverable, and hotkeys (§11.6) must never depend on a
-   visible list.
+   Show-on-wait (peeking costs a turn) was the first experiment and lost — it
+   buried the wait's own 360° sense (§9.1). The current one is an always-on
+   **bottom-right bar** with a deploy button unfolding the named panel above it,
+   chosen for thumb reach; an only-while-active strip is still an alternative.
+   Constraints: ready / active / cooling / unusable must stay discoverable, and
+   hotkeys (§11.6) must never depend on a visible list.

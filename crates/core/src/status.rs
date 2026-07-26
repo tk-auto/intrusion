@@ -1,4 +1,4 @@
-//! The near line's message system (§11.7) — what the bottom-but-one row says.
+//! The near line's message system (§11.7) — what the screen's top row says.
 //!
 //! The loop reports facts as [`Event`]s; this module turns them into the
 //! messages the **near line** (§11.4) shows: each event becomes at most one

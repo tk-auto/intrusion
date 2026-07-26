@@ -424,7 +424,7 @@ mod tests {
     /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
     /// that no row truncates, so a test can read the panel's content whole.
     const W: u32 = 40;
-    const H: u32 = 43; // HEADER_ROWS + 40 + STATUS_ROWS
+    const H: u32 = 43; // TOP_ROWS + 40 + BOTTOM_ROWS
 
     fn text_of(grid: &Grid) -> String {
         grid.to_text().join("\n")
