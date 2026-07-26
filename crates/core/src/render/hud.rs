@@ -697,6 +697,7 @@ mod tests {
             Event::BodyStored { at },
             Event::DecoyDied { at },
             Event::Entombed { at },
+            Event::RematerializeRefused,
         ];
         let max = near_line_text_max();
         for event in events {
@@ -1086,7 +1087,7 @@ mod tests {
     /// discoverable without the letter.
     #[test]
     fn the_bar_still_projects_the_settled_hotkeys_and_states() {
-        use crate::input::ability_input_for_key;
+        use crate::input::ability_for_key;
 
         let mut s = State::new(
             open_room(40, 10),
@@ -1109,9 +1110,9 @@ mod tests {
                 "{id:?} under its own entry"
             );
             assert_eq!(
-                ability_input_for_key(&key.to_string()),
-                Some(Input::Activate(id)),
-                "{key} still fires {id:?}"
+                ability_for_key(&key.to_string()),
+                Some(id),
+                "{key} still names {id:?}"
             );
         }
 
@@ -1292,12 +1293,13 @@ mod tests {
     }
 
     /// The click **is** the hotkey (§11.4/§11.6): the id a bar cell resolves to is
-    /// the very id its §11.6 shortcut fires, and firing it drives the one
-    /// `Input::Activate` path — so a click activates a ready ability and, on a
-    /// cooling one, refuses for free with no turn spent (§4.4), exactly as the key.
+    /// the very id its §11.6 shortcut names, and both hand that id to the one
+    /// `State::ability_input` toggle (#304) — so a click activates a ready ability
+    /// and, on a cooling one, refuses for free with no turn spent (§4.4), exactly as
+    /// the key.
     #[test]
     fn a_click_activates_by_the_same_path_as_the_hotkey() {
-        use crate::input::ability_input_for_key;
+        use crate::input::ability_for_key;
 
         let mut s = State::new(
             open_room(40, 10),
@@ -1313,19 +1315,35 @@ mod tests {
         // The bar's Run slot resolves to the same id `r` fires — one path, by identity.
         let clicked = ability_at(&s, 0, bar).expect("Run under the pointer");
         assert_eq!(
-            ability_input_for_key("r"),
-            Some(Input::Activate(clicked)),
-            "the click and the shortcut resolve to the same activation",
+            ability_for_key("r"),
+            Some(clicked),
+            "the click and the shortcut resolve to the same ability",
+        );
+        assert_eq!(
+            s.ability_input(clicked),
+            Input::Activate(clicked),
+            "a ready ability switches on from either",
         );
 
         // A click on a ready ability activates it (a spent turn).
-        let events = s.step(Input::Activate(clicked));
+        let events = s.step(s.ability_input(clicked));
         assert_eq!(s.turn(), 1, "activating spends the turn");
         assert!(!events.is_empty(), "the ability activated");
 
+        // The entry is `Run[4]` now, and the bar is a projection of the keys
+        // (§11.4/#304): tapping it switches the sprint off, exactly as pressing `r`
+        // again does. The tap resolving to `Activate` here was the whole of #304 —
+        // there was no reachable way to stop a sprint.
+        let active = ability_at(&s, 0, bar).expect("Run still under the pointer");
+        assert_eq!(
+            s.ability_input(active),
+            Input::Deactivate(AbilityId::Run),
+            "an active entry is the toggle-off, from tap and key alike",
+        );
+
         // Drive Run to cooling, then a click on its (now cooling) entry refuses
         // cleanly: the same `Input::Activate` is a free no-op — no turn, no change.
-        s.step(Input::Deactivate(AbilityId::Run));
+        s.step(s.ability_input(active));
         assert!(matches!(
             s.ability_state(AbilityId::Run),
             AbilityState::Cooling { .. }
@@ -1333,8 +1351,13 @@ mod tests {
         // The entry widened to `Run/12/` inside its slot — which did not move, so
         // the very same cell is still Run (#287).
         let cooling = ability_at(&s, 0, bar).expect("Run still under the pointer");
+        assert_eq!(
+            s.ability_input(cooling),
+            Input::Activate(cooling),
+            "a cooling entry is still an activation — the one that refuses",
+        );
         let turn_before = s.turn();
-        let refused = s.step(Input::Activate(cooling));
+        let refused = s.step(s.ability_input(cooling));
         assert!(refused.is_empty(), "a cooling entry refuses");
         assert_eq!(s.turn(), turn_before, "the mis-click spends no turn");
     }

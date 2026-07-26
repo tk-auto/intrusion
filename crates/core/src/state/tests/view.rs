@@ -141,6 +141,9 @@ fn events_declare_their_message_category() {
     assert_eq!(Event::Captured { by: at }.category(), Category::Danger);
     assert_eq!(Event::TakenDown { at }.category(), Category::Owned);
     assert_eq!(Event::BodyFound { at }.category(), Category::Warning);
+    // A refused toggle-off is one of your own tools answering back (§8/#304), so it
+    // reads in the Owned band beside the activation it declined to undo.
+    assert_eq!(Event::RematerializeRefused.category(), Category::Owned);
 }
 
 /// The usable line's contract (§11.4): [`State::affordances`] offers exactly
@@ -644,6 +647,81 @@ fn vision_widens_the_player_not_the_guards() {
         !s.guards()[0].fov().contains(s.player()),
         "the guard's own cone is untouched — it does not see back",
     );
+}
+
+/// §4.4/#304: an ability's shortcut is a **toggle**, and [`State::ability_input`] is
+/// the one place that is decided — an active ability switches off, everything else
+/// switches on. This is what makes the free toggle-off reachable at all: before it,
+/// every path resolved to `Activate` and a started sprint ran its full duration
+/// whether the player wanted it or not.
+#[test]
+fn an_active_ability_resolves_to_the_toggle_off() {
+    let mut s = solo(Cell::new(4, 4));
+    assert_eq!(
+        s.ability_input(AbilityId::Run),
+        Input::Activate(AbilityId::Run),
+        "ready: the key switches it on",
+    );
+
+    s.step(Input::Activate(AbilityId::Run));
+    assert!(matches!(
+        s.ability_state(AbilityId::Run),
+        AbilityState::Active { .. }
+    ));
+    assert_eq!(
+        s.ability_input(AbilityId::Run),
+        Input::Deactivate(AbilityId::Run),
+        "active: the same key switches it off",
+    );
+
+    s.step(Input::Deactivate(AbilityId::Run));
+    assert!(matches!(
+        s.ability_state(AbilityId::Run),
+        AbilityState::Cooling { .. }
+    ));
+    assert_eq!(
+        s.ability_input(AbilityId::Run),
+        Input::Activate(AbilityId::Run),
+        "cooling: back to the activation that refuses for free",
+    );
+
+    // An ability the run does not hold (#244) reads Unusable and resolves to the
+    // activation its deck refuses — there is nothing on to switch off.
+    assert_eq!(s.ability_state(AbilityId::Decoy), AbilityState::Unusable);
+    assert_eq!(
+        s.ability_input(AbilityId::Decoy),
+        Input::Activate(AbilityId::Decoy),
+    );
+}
+
+/// #264/#304: a **passive** is never a toggle. Holding it is the whole of its state,
+/// so its hotkey resolves to the activation that has always been a free no-op — the
+/// `(on)` marker cannot be pressed off, and only dropping the ability ends it.
+#[test]
+fn a_passive_cannot_be_switched_off() {
+    let mut s = solo(Cell::new(4, 4)).with_loadout(Loadout::innate().with(AbilityId::Vision));
+    assert_eq!(s.ability_state(AbilityId::Vision), AbilityState::Passive);
+    assert_eq!(
+        s.ability_input(AbilityId::Vision),
+        Input::Activate(AbilityId::Vision),
+        "the passive's key never becomes a toggle-off",
+    );
+
+    let turn = s.turn();
+    assert!(
+        s.step(s.ability_input(AbilityId::Vision)).is_empty(),
+        "pressing it says nothing",
+    );
+    assert_eq!(turn, s.turn(), "and is free, as it always was");
+    assert_eq!(
+        s.ability_state(AbilityId::Vision),
+        AbilityState::Passive,
+        "still on",
+    );
+
+    // The explicit toggle-off is refused too, whoever sends it (the sim, a replay).
+    assert!(s.step(Input::Deactivate(AbilityId::Vision)).is_empty());
+    assert_eq!(s.ability_state(AbilityId::Vision), AbilityState::Passive);
 }
 
 // --- The debug reveal (§12.6) ------------------------------------------------

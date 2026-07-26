@@ -503,6 +503,34 @@ impl State {
         self.abilities.state(id)
     }
 
+    /// What pressing ability `id`'s shortcut does **right now** (§11.6/#304): the
+    /// one place the `Activate`/`Deactivate` choice is made.
+    ///
+    /// §4.4 grants two free actions, and one of them is toggling an ability *off*,
+    /// so a held ability's key is a toggle: an [`Active`](AbilityState::Active)
+    /// ability switches off ([`Input::Deactivate`]), anything else switches on
+    /// ([`Input::Activate`]). A `Cooling` or `Unusable` press resolves to the
+    /// activation that refuses for free, exactly as it did before, and a **passive**
+    /// (§8.2/#264) resolves to `Activate` too — it can never be switched off, and
+    /// its activation is the free no-op it has always been, so the `(on)` marker
+    /// never becomes a toggle.
+    ///
+    /// Both input paths call this — the hotkey after
+    /// [`ability_for_key`](crate::ability_for_key), a tap after
+    /// [`ability_at`](crate::ability_at) — so the bar stays a *projection* of the
+    /// keys (§11.4) and neither shell duplicates the rule. The key's live meaning is
+    /// already on screen before it is pressed: the bar draws `Run[3]` while active
+    /// and `Run` while ready ([`AbilityStatus::bar_entry`]).
+    pub fn ability_input(&self, id: AbilityId) -> Input {
+        match self.ability_state(id) {
+            AbilityState::Active { .. } => Input::Deactivate(id),
+            AbilityState::Ready
+            | AbilityState::Cooling { .. }
+            | AbilityState::Passive
+            | AbilityState::Unusable => Input::Activate(id),
+        }
+    }
+
     /// The run's ability line/panel (§11.4): one [`AbilityStatus`] per economy
     /// ability, in the fixed deck order ([`AbilityId::ALL`]), each carrying its
     /// real slot state ([`ability_state`](Self::ability_state)). This is what the

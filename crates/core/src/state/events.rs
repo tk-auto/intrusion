@@ -157,6 +157,12 @@ pub enum Event {
     /// rematerializing there is lethal (§8.3): the run ends. A distinct loss
     /// from [`Event::Captured`], so the game-over reason stays truthful.
     Entombed { at: Cell },
+    /// A toggle-off of Dephase was **refused** because the player stands where no
+    /// solid body can (§8.3/#304): there is nowhere to rematerialize, so the phase
+    /// holds. Free and nothing changed, like a [`Bumped`](Event::Bumped) wall — the
+    /// lethal squeeze belongs to the duration alone ([`Entombed`](Event::Entombed)),
+    /// never to a mis-pressed key (§4.4: cancelling is never a trap).
+    RematerializeRefused,
     /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
     AbilityActivated { ability: AbilityId },
     /// The player toggled an ability off early (§4.4) — free; its cooldown still
@@ -190,6 +196,7 @@ impl Event {
             Event::AbilityActivated { .. }
             | Event::AbilityDeactivated { .. }
             | Event::AbilityExpired { .. }
+            | Event::RematerializeRefused
             | Event::DecoyDied { .. } => Category::Owned,
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it

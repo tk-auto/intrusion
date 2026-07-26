@@ -168,7 +168,14 @@ fn toggling_dephase_off_inside_a_wall_is_refused() {
     s.step(Input::Step(Direction::East)); // inside the wall
     let turn = s.turn();
     let events = s.step(Input::Deactivate(AbilityId::Dephase));
-    assert!(events.is_empty(), "nowhere to solidify: refused");
+    // It says why (§11.7/#304): now that the toggle is reachable from a key, a
+    // press that changes nothing cannot pass in silence — the player asked to
+    // solidify and is still phased.
+    assert_eq!(
+        events,
+        vec![Event::RematerializeRefused],
+        "nowhere to solidify: refused, and said so",
+    );
     assert_eq!(s.turn(), turn, "and free, like every mis-input");
     assert!(
         matches!(
@@ -932,5 +939,78 @@ fn stowing_a_body_locks_the_cupboard() {
     assert!(
         !s.affordances().iter().any(|(_, a)| *a == Affordance::Hide),
         "the usable line no longer offers the hide",
+    );
+}
+
+/// #304, the case that surfaced the bug: you sprint to break a sightline, then want
+/// the last cells walked quietly and precisely. Switching Run off mid-sprint takes
+/// effect immediately — the very next step is one cell, on the same turn boundary as
+/// any other move, with no half-step and no lost turn.
+#[test]
+fn switching_run_off_mid_sprint_returns_the_step_to_one_cell() {
+    let mut s = State::new(
+        open_room(20, 10),
+        Cell::new(2, 5),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(18, 8),
+    );
+    s.step(Input::Activate(AbilityId::Run)); // protected turn 1
+    s.step(Input::Step(Direction::East)); // two cells: 2 → 4
+    assert_eq!(s.player(), Cell::new(4, 5), "precondition: sprinting");
+
+    let turn = s.turn();
+    assert_eq!(
+        s.step(s.ability_input(AbilityId::Run)),
+        vec![Event::AbilityDeactivated {
+            ability: AbilityId::Run
+        }],
+        "the same key that started the sprint stops it",
+    );
+    assert_eq!(s.turn(), turn, "stopping costs no turn (§4.4)");
+    assert_eq!(s.player(), Cell::new(4, 5), "and moves nobody");
+
+    // The next step is an ordinary one: one cell, one Moved, one spent turn.
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), Cell::new(5, 5), "one cell, precisely");
+    assert_eq!(
+        events,
+        vec![Event::Moved {
+            to: Cell::new(5, 5)
+        }],
+    );
+    assert_eq!(s.turn(), turn + 1, "a plain step, on the usual boundary");
+}
+
+/// §8.3/#304: a cancelled cloak stops cloaking **that turn** — no lingering
+/// protection, no special case. Camouflage's effect is read from the deck each
+/// sight phase, so switching it off is enough to expose the player on the very next
+/// sweep, exactly as its expiry does.
+#[test]
+fn switching_camouflage_off_exposes_the_player_at_once() {
+    let mut s = State::new(
+        open_room(12, 12),
+        Cell::new(5, 6),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 2))],
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Camouflage));
+    s.step(Input::Activate(AbilityId::Camouflage));
+    assert!(!s.guards()[0].detected_player(), "precondition: cloaked");
+
+    // Free, so the sight phase does not run on this input — the cloak is off, and
+    // the next turn the standing player is in the cone.
+    s.step(s.ability_input(AbilityId::Camouflage));
+    assert!(matches!(
+        s.ability_state(AbilityId::Camouflage),
+        AbilityState::Cooling { .. }
+    ));
+    s.step(Input::Wait);
+    assert!(
+        s.guards()[0].detected_player(),
+        "the cloak ended when it was switched off, not when it would have faded",
     );
 }
