@@ -75,6 +75,22 @@ pub enum Terrain {
 }
 
 impl Terrain {
+    /// Every terrain kind, for exhaustive sweeps — the counterpart to
+    /// [`Direction::ALL`](crate::Direction::ALL). Its length is pinned by a test, so
+    /// a new variant cannot slip in without being listed here too.
+    pub const ALL: [Terrain; 10] = [
+        Terrain::Floor,
+        Terrain::Wall,
+        Terrain::DoorHinge,
+        Terrain::DoorPanelClosed,
+        Terrain::DoorPanelOpen,
+        Terrain::Hideout,
+        Terrain::PartialCover,
+        Terrain::DuctEntry,
+        Terrain::Console,
+        Terrain::Exit,
+    ];
+
     /// The character this terrain renders as (§10.3). Floor and an open panel are
     /// blank; the renderer paints them as background.
     pub fn glyph(self) -> char {
@@ -183,6 +199,52 @@ impl Terrain {
             | Terrain::DoorPanelOpen
             | Terrain::Console
             | Terrain::Exit => false,
+        }
+    }
+
+    /// Whether a **player** route may run *through* this cell (§10.3) — the
+    /// player's counterpart to [`blocks_pathing`](Self::blocks_pathing), which
+    /// answers the same question for a guard.
+    ///
+    /// The two are deliberately **not** the same rule, and must not be merged: a
+    /// guard routes through a closed door but never through a cupboard (it flows
+    /// *around* one, §10.1 — the asymmetry that makes hiding work), while a player
+    /// routes through both. Keeping them as two exhaustive matches side by side is
+    /// what makes that asymmetry visible instead of implied.
+    ///
+    /// This is the single source of truth for player routing, and the §13.2 sim bot
+    /// plans on it (§13.4: bot output is only a smoke detector for *this* game). It
+    /// used to hold a private allow-list of its own — a `matches!` that silently
+    /// swallowed any new [`Terrain`], and had already fallen a variant behind. The
+    /// exhaustive match below is the point: adding a terrain will not compile until
+    /// someone decides whether the player can route through it (§12.2 **[SETTLED]**
+    /// — "the compiler enumerates the work").
+    pub fn routes_player(self) -> bool {
+        match self {
+            // Plain walk-through (§10.3).
+            Terrain::Floor | Terrain::DoorPanelOpen => true,
+            // A closed panel is not walked *over* but bumped open (§10.4), and the
+            // step through follows — so a route may plan straight through one, the
+            // same deliberate surprise `blocks_pathing` grants a guard.
+            Terrain::DoorPanelClosed => true,
+            // A cupboard is walk-*in*: fill 0.0 to the player, who ducks inside
+            // (§10.1/§10.3). Empty it is a legal cell to stand in and pass through;
+            // occupancy — an actor or a stowed body — is not terrain's business and
+            // is settled by the caller's own blocked set.
+            Terrain::Hideout => true,
+            // Solid to the player: no route crosses these (§10.3).
+            Terrain::Wall | Terrain::DoorHinge | Terrain::PartialCover => false,
+            // Goals, not through-cells: both are reached by a *bump* from an adjacent
+            // cell (take the intel, leave by the exit, §4.3/§4.5), never crossed — so
+            // a route ends beside one rather than running over it.
+            Terrain::Console | Terrain::Exit => false,
+            // A duct entry **is** enterable by the player and by them alone (§10.7),
+            // so this `false` is a decision, not an oversight: bumping a mouth is a
+            // *mode change* into the crawlspace, where movement is confined to the
+            // duct's recorded path and perception is degraded — not a step a plain
+            // floor route can take. A router that wants ducts must model the crawl,
+            // which is its own piece of work; until then no route runs through one.
+            Terrain::DuctEntry => false,
         }
     }
 }
@@ -312,6 +374,65 @@ impl Facility {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [`Terrain::ALL`] must list every kind: the sweeps that pin the §10.3 table
+    /// (and the sim's agreement check) are only exhaustive if it is. Bumping this
+    /// count is the deliberate step a new terrain has to pass through.
+    #[test]
+    fn all_lists_every_terrain_kind() {
+        assert_eq!(Terrain::ALL.len(), 10, "a new Terrain must be added to ALL");
+        for (i, &a) in Terrain::ALL.iter().enumerate() {
+            for &b in &Terrain::ALL[i + 1..] {
+                assert_ne!(a, b, "ALL holds each kind once");
+            }
+        }
+    }
+
+    /// §10.3: **player routing and guard routing are different rules**, and there is
+    /// exactly *one* terrain where they part — the **hideout**. The player ducks in
+    /// (fill 0.0); a guard's route flows around it. That single divergence is the
+    /// hiding mechanic (§10.1), so pinning it as the only one is worth a test: a
+    /// change that adds a second becomes a visible edit rather than a silent drift.
+    ///
+    /// A guard's rule is terrain that neither blocks pathing nor blocks movement,
+    /// plus the closed panel it opens by walking in (§10.4) — the terrain half of
+    /// `guard::routable`. Note it is *not* `!blocks_pathing()` on its own: a console
+    /// and the exit are transparent to pathing yet solid, so no router crosses
+    /// either, and they are goals both actors reach by a bump.
+    #[test]
+    fn the_hideout_is_the_only_place_player_and_guard_routing_part() {
+        for t in Terrain::ALL {
+            let player = t.routes_player();
+            let guard =
+                (!t.blocks_pathing() && !t.blocks_movement()) || t == Terrain::DoorPanelClosed;
+            if t == Terrain::Hideout {
+                assert!(
+                    player && !guard,
+                    "the player ducks in, a guard routes around (§10.1)",
+                );
+            } else {
+                assert_eq!(player, guard, "{t:?}: player and guard routing agree");
+            }
+        }
+    }
+
+    /// The §10.3 player-routing column, pinned kind by kind so a change to any cell
+    /// of it is a deliberate edit. The two that catch people out are the **closed
+    /// panel** (routable — the bump opens it, §10.4) and the **goals**, which are
+    /// bumped from an adjacent cell and never crossed (§4.3/§4.5).
+    #[test]
+    fn the_player_routing_column_is_pinned() {
+        for t in Terrain::ALL {
+            let expected = matches!(
+                t,
+                Terrain::Floor
+                    | Terrain::DoorPanelOpen
+                    | Terrain::DoorPanelClosed
+                    | Terrain::Hideout
+            );
+            assert_eq!(t.routes_player(), expected, "{t:?}");
+        }
+    }
 
     #[test]
     fn walled_box_has_the_requested_dimensions() {
