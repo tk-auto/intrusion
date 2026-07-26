@@ -582,7 +582,7 @@ mod tests {
     use crate::cell::{Cell, Direction};
     use crate::guard::Guard;
     use crate::modifiers::LevelModifiers;
-    use crate::state::{Input, State};
+    use crate::state::{Event, Input, State};
     use crate::test_support::open_room;
 
     /// A **legal** run loadout (§8.3/#244): innate Run plus a three-tech grant — the
@@ -604,6 +604,134 @@ mod tests {
             .with(AbilityId::Camouflage)
             .with(AbilityId::Decoy)
             .with(AbilityId::Vision)
+    }
+
+    /// **The near-line message width bound** (§11.7): how many cells a message has
+    /// on the v1 board ([`LevelConfig::V1`], 40 wide — §10.2) before
+    /// [`status_row`] clips it. Computed from the very functions that lay the row
+    /// out — the words stop one cell short of the corner cluster, and the widest
+    /// that cluster gets in practice is the message counter beside the help button
+    /// — so the bound cannot drift from the layout it is meant to describe.
+    ///
+    /// It lives here rather than as a `const` because most messages are built with
+    /// `format!` at runtime (an ability's name, an alert level): there is no const
+    /// string to measure, so the check is a test that walks the real
+    /// [`message_for`](crate::status::message_for) instead. ("the body has been
+    /// reported — guards are converging" was 49 cells and reached a screenshot cut
+    /// at "…reported —".)
+    fn near_line_text_max() -> usize {
+        let width = LevelConfig::V1.width;
+        let label = message_button_label(1, false).chars().count() as u32;
+        message_button_start(width, label).saturating_sub(1) as usize
+    }
+
+    /// Near-line messages that were **already** over the bound before
+    /// the bound existed (§11.7). They are player-facing wording, not a bug in any
+    /// one feature, so rewording them is its own change rather than a silent edit
+    /// smuggled in beside an unrelated one — see the follow-up ticket. Listed
+    /// explicitly so the bound still bites for every *new* message: adding one here
+    /// is a deliberate act, and the list only ever shrinks.
+    ///
+    /// Two of these clip even with no message counter beside them ("you stow the
+    /// body…" at 42, "intel in hand… (n more out)" at 45); the rest fit alone and
+    /// clip only when a second message stacks the counter into the row.
+    const PRE_EXISTING_OVERFLOW: [&str; 7] = [
+        "all the intel — the exit is open",
+        "the guard drops — a body is left",
+        "the exit needs intel in hand first",
+        "you slip away — the run is won",
+        "you stow the body — the cupboard is sealed",
+        "the facility is on alert — level 99",
+        "intel in hand — the exit is open (9 more out)",
+    ];
+
+    /// §11.7: **every** message the near line can show fits the row it is shown on.
+    /// `status_row` clips rather than asserting — right for a hand-built test state,
+    /// but it means an over-long message fails silently in the one place it matters
+    /// ("the body has been reported — guards are converging" was drawn cut at
+    /// "…reported —"). Walking `message_for` covers the `format!`-built messages a
+    /// const bound could not reach.
+    #[test]
+    fn every_near_line_message_fits() {
+        let at = Cell::new(3, 3);
+        // One representative of every variant. The compiler does not enumerate a
+        // match's arms for us here, so this list is the thing to extend when an
+        // event is added — the assertion below is what makes forgetting expensive.
+        let events = [
+            Event::Moved { to: at },
+            Event::Bumped { into: at },
+            Event::EnteredHideout { at },
+            Event::EnteredDuct { at },
+            Event::DuctCrawled { to: at },
+            Event::Crouched { behind: at },
+            Event::DoorOpened {
+                at,
+                by_player: true,
+            },
+            Event::DoorOpened {
+                at,
+                by_player: false,
+            },
+            Event::DoorClosed {
+                at,
+                by_player: true,
+            },
+            Event::DoorClosed {
+                at,
+                by_player: false,
+            },
+            Event::IntelTaken { remaining: 0 },
+            Event::IntelTaken { remaining: 9 },
+            Event::ExitRefused,
+            Event::Won,
+            Event::Captured { by: at },
+            Event::TakenDown { at },
+            Event::Detected { by: at },
+            Event::BodyFound { at },
+            Event::RadioSilence { at },
+            Event::CalledIn { at },
+            Event::BodyCalledIn { at },
+            Event::AlertRaised { level: 99 },
+            Event::BodyGrabbed { at },
+            Event::BodyReleased { at },
+            Event::BodyStored { at },
+            Event::DecoyDied { at },
+            Event::Entombed { at },
+        ];
+        let max = near_line_text_max();
+        for event in events {
+            let Some(m) = crate::status::message_for(event) else {
+                continue; // a silent event says nothing to measure
+            };
+            let len = m.text.chars().count();
+            if PRE_EXISTING_OVERFLOW.contains(&m.text.as_str()) {
+                continue;
+            }
+            assert!(
+                len <= max,
+                "{:?} is {len} cells, over the {max} the near line leaves beside \
+                 its controls: {:?}",
+                event,
+                m.text,
+            );
+        }
+
+        // Every ability's activation line too — those are `format!`-built from a
+        // name, so the longest name is what decides whether they fit.
+        for ability in AbilityId::ALL {
+            for event in [
+                Event::AbilityActivated { ability },
+                Event::AbilityDeactivated { ability },
+                Event::AbilityExpired { ability },
+            ] {
+                let m = crate::status::message_for(event).expect("an ability speaks");
+                assert!(
+                    m.text.chars().count() <= max,
+                    "{:?} does not fit the near line",
+                    m.text,
+                );
+            }
+        }
     }
 
     /// §11.7: when one step raises more than one message the near line speaks the

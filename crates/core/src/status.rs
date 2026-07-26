@@ -97,7 +97,15 @@ pub fn message_for(event: Event) -> Option<Message> {
         // The §7.7 net closing: you broke contact, and it reported where you were.
         // Ranked with the radio silence — both say "they are converging on a place
         // you were", above a bare glimpse and below the proof a body gives.
-        Event::CalledIn { .. } => ("your position has been called in".to_string(), 3),
+        Event::CalledIn { .. } => ("your position was called in".to_string(), 3),
+        // A body call reports *a body*, not you — and it lands above the bare find
+        // (4): reported is worse than merely found, because guards are now on their
+        // way to it. Below the facility-wide alert step (5), which on the rare
+        // shared turn is pushed first and so keeps the line (§11.7). Kept short:
+        // the near line is one row minus its corner controls (see
+        // `NEAR_LINE_TEXT_MAX`), and *that guards are coming* is what "reported"
+        // already means — spelling it out only cost the words that fit.
+        Event::BodyCalledIn { .. } => ("a body has been reported".to_string(), 5),
         // The facility alert stepped (§7.3): the loudest radio event, a
         // facility-wide escalation — above a found body, below being caught.
         Event::AlertRaised { level } => (format!("the facility is on alert — level {level}"), 5),
@@ -382,6 +390,40 @@ mod tests {
         assert_eq!(alert.text, "the facility is on alert — level 2");
         assert_eq!(alert.category, Category::Warning);
         assert_eq!(alert.priority, 5);
+    }
+
+    /// §7.7/§11.7: the two call-ins sit on the same Warning band, at the rungs
+    /// their content earns. A **sighting** call reports *your* position and reads
+    /// with the radio silence (3). A **body** call reports the *body's* — never the
+    /// player's, who may be nowhere near — and outranks the bare find (4), because
+    /// it says everything the find says and adds that guards are on their way. Both
+    /// stay under the facility-wide alert step (5→) and being caught.
+    #[test]
+    fn the_call_ins_read_on_the_threat_ladder() {
+        let at = Cell::new(3, 3);
+
+        let sighting = message_for(Event::CalledIn { at }).expect("a call-in speaks");
+        assert_eq!(sighting.text, "your position was called in");
+        assert_eq!(sighting.category, Category::Warning);
+        assert_eq!(sighting.priority, 3);
+
+        let found = message_for(Event::BodyFound { at }).expect("a find speaks");
+        let body = message_for(Event::BodyCalledIn { at }).expect("a body call speaks");
+        assert_eq!(body.text, "a body has been reported");
+        assert_eq!(body.category, Category::Warning);
+        assert!(
+            body.priority > found.priority,
+            "a reported body outranks a merely found one ({} vs {})",
+            body.priority,
+            found.priority,
+        );
+        assert!(
+            body.priority
+                <= message_for(Event::AlertRaised { level: 1 })
+                    .expect("an alert speaks")
+                    .priority,
+            "…but never over the facility-wide alert",
+        );
     }
 
     /// §7.3/§11.4: once the radio has stepped the facility alert, the value is
