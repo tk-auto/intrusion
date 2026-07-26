@@ -65,6 +65,17 @@ pub(crate) const ALERT_STEP: u32 = 1;
 /// not that the facility empties onto your last position.
 pub(crate) const SIGHTING_CALL_GUARDS: usize = 1;
 
+/// How many guards a **found body** calls in (§7.7, **[START] = 2**), when the
+/// `body_found_calls_two_guards` modifier is on (§12.6). Finding a body is the
+/// loudest event in the game (§7.2), and this count is the *only* sense in which
+/// its call is louder than a sighting's — not a longer reach, not a priority that
+/// outranks another lead. Keeping "how loud" and "how many come" the same quantity
+/// is what stops cooperation growing a second dial.
+pub(crate) const BODY_CALL_GUARDS: usize = 2;
+// The §7.7 relation, held at compile time like the §7.2 body-vs-sighting alert:
+// a body must always out-call a sighting, whatever either count is retuned to.
+const _: () = assert!(BODY_CALL_GUARDS > SIGHTING_CALL_GUARDS);
+
 /// A guard's radio ping cadence (§7.3): the period of its personal clock, drawn
 /// once from the run seed so the whole schedule is deterministic (§12.4). Carried
 /// by the guard and handed to the [`Body`](crate::body::Body) it becomes at a

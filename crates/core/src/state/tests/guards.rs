@@ -2090,3 +2090,174 @@ fn taking_the_chaser_down_before_it_searches_suppresses_the_call() {
         "nobody was ever called in",
     );
 }
+
+/// The scene the §7.7 body-call tests share: the player takes down a guard from a
+/// cupboard, leaving a body in the open, with a patrolling guard that will walk
+/// into sight of it and two more far away and free to be called.
+fn body_call_scene() -> State {
+    let mut layout = open_room(30, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's cupboard
+    State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![
+            Guard::stationary(Cell::new(5, 4)), // the victim
+            Guard::patrolling_to(Cell::new(5, 10), Cell::new(5, 6)), // walks up and finds it
+            Guard::patrolling(Cell::new(25, 2)), // free
+            Guard::patrolling(Cell::new(25, 9)), // free
+        ],
+        Vec::new(),
+        Cell::new(28, 10),
+    )
+}
+
+/// §7.7/§7.2: with the modifier on, discovering a body calls **two** guards to
+/// converge on it and search — twice a sighting's one, which is the only sense in
+/// which a body is "louder". The finder is not one of them: it is already there.
+#[test]
+fn a_found_body_calls_two_guards_that_are_not_the_finder() {
+    let mut s = body_call_scene().with_modifiers(LevelModifiers {
+        body_found_calls_two_guards: true,
+        ..LevelModifiers::default()
+    });
+    s.step(Input::Step(Direction::North)); // takedown — a body at (5,4)
+    let body = s.bodies()[0].cell();
+
+    let mut called = None;
+    for _ in 0..40 {
+        for e in s.step(Input::Wait) {
+            if let Event::CalledIn { at } = e {
+                called = Some(at);
+            }
+        }
+        if called.is_some() {
+            break;
+        }
+    }
+    assert_eq!(called, Some(body), "the call names the body's cell");
+
+    let responding: Vec<usize> = s
+        .guards()
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| g.state() == GuardState::Responding)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        responding.len(),
+        radio::BODY_CALL_GUARDS,
+        "a body calls exactly two (§7.7)",
+    );
+    for i in responding {
+        assert_eq!(
+            s.guards()[i].destination(),
+            Some(body),
+            "each converges on the body",
+        );
+    }
+}
+
+/// The `body_found_calls_two_guards` modifier (§12.6), directional at the run level
+/// (§2.3): the same scene and inputs, baseline calls nobody — while the guard that
+/// *found* the body still reacts exactly as it always did (§7.2's harder alert and
+/// its own search). The modifier adds the calling of others, nothing else.
+#[test]
+fn baseline_calls_nobody_to_a_body_but_the_finder_still_reacts() {
+    let mut s = body_call_scene();
+    s.step(Input::Step(Direction::North));
+
+    let mut found = false;
+    for _ in 0..40 {
+        for e in s.step(Input::Wait) {
+            if matches!(e, Event::BodyFound { .. }) {
+                found = true;
+            }
+            assert!(
+                !matches!(e, Event::CalledIn { .. }),
+                "baseline never calls anyone to a body",
+            );
+        }
+        // The two far guards are never sent — only the finder ever reacts. The
+        // victim left the vec at the takedown (§7.2), so they sit at 1 and 2.
+        for far in [1, 2] {
+            assert_ne!(
+                s.guards()[far].state(),
+                GuardState::Responding,
+                "guard {far} was never called",
+            );
+        }
+    }
+    assert!(found, "the body was found regardless of the modifier");
+    assert!(
+        s.bodies()[0].found(),
+        "and the finder's own §7.2 reaction is untouched",
+    );
+}
+
+/// §7.2/§7.7: a body stowed in a cupboard is *gone* — no cone finds it, so it calls
+/// nobody however long the run goes on. Hiding a body still buys you that (the
+/// radio's missed ping is the separate §7.3 clock).
+#[test]
+fn a_stowed_body_calls_nobody() {
+    let mut layout = open_room(30, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's cupboard
+    layout.place(Cell::new(5, 2), Terrain::Hideout); // where the body is stowed
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![
+            Guard::stationary(Cell::new(5, 4)),
+            Guard::patrolling(Cell::new(25, 2)),
+            Guard::patrolling(Cell::new(25, 9)),
+        ],
+        Vec::new(),
+        Cell::new(28, 10),
+    )
+    .with_modifiers(LevelModifiers {
+        body_found_calls_two_guards: true,
+        ..LevelModifiers::default()
+    });
+
+    s.step(Input::Step(Direction::North)); // takedown at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
+    s.step(Input::Step(Direction::North)); // the hold costs its turn (§8.3)
+    s.step(Input::Step(Direction::North)); // stow it in the cupboard at (5,2)
+    assert_eq!(
+        s.layout().facility().terrain(s.bodies()[0].cell()),
+        Some(Terrain::Hideout),
+        "the body is stowed",
+    );
+
+    for _ in 0..40 {
+        for e in s.step(Input::Wait) {
+            assert!(
+                !matches!(e, Event::CalledIn { .. } | Event::BodyFound { .. }),
+                "a stowed body is never found and so never called in (§7.2)",
+            );
+        }
+    }
+}
+
+/// §7.7: the call fires **once per body**, at discovery — a body that stays in a
+/// guard's cone does not re-call every turn it remains visible.
+#[test]
+fn a_body_is_called_in_once_not_every_turn() {
+    let mut s = body_call_scene().with_modifiers(LevelModifiers {
+        body_found_calls_two_guards: true,
+        ..LevelModifiers::default()
+    });
+    s.step(Input::Step(Direction::North));
+
+    let mut calls = 0;
+    for _ in 0..60 {
+        for e in s.step(Input::Wait) {
+            if matches!(e, Event::CalledIn { .. }) {
+                calls += 1;
+            }
+        }
+    }
+    assert_eq!(calls, 1, "exactly one call for the one body");
+}

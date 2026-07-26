@@ -659,6 +659,7 @@ mod tests {
             let all_on = LevelModifiers {
                 guards_always_search_hideouts: true,
                 sighting_lost_calls_a_guard: true,
+                body_found_calls_two_guards: true,
                 always_show_vision_cones: true,
                 intel_to_exit: gate,
             };

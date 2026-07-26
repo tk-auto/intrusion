@@ -125,6 +125,16 @@ pub struct LevelModifiers {
     /// the losing guard searches on its own either way — the modifier adds the
     /// calling of others, nothing else.
     pub sighting_lost_calls_a_guard: bool,
+    /// **Harder.** A guard that finds a body (§7.2) **calls it in** (§7.7): two
+    /// other guards converge on the body's cell and search it. Finding a body is
+    /// the loudest event in the game, and "louder than a sighting" is expressed as
+    /// *how many come* — not a longer reach or a priority system — so this is the
+    /// same call as [`sighting_lost_calls_a_guard`] with a bigger count. The finder
+    /// reacts on its own either way (the harder alert and its own search, §7.2);
+    /// the modifier adds only the calling of others.
+    ///
+    /// [`sighting_lost_calls_a_guard`]: LevelModifiers::sighting_lost_calls_a_guard
+    pub body_found_calls_two_guards: bool,
     /// **Easier.** Paint the §11.5 danger overlay in full — the cone of *every*
     /// guard, not only the ones you can currently see. This only ever **widens**
     /// what is revealed; it never hides the red detection set, so the §11.5
@@ -198,9 +208,10 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 5] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 6] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
+    CALLS_IN_BODIES,
     SHOWS_ALL_CONES,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
@@ -216,6 +227,12 @@ const CALLS_IN_SIGHTINGS: ActiveModifier = ActiveModifier {
     name: "Sightings called in",
     direction: ModifierDirection::Harder,
     detail: Some("one guard"),
+};
+
+const CALLS_IN_BODIES: ActiveModifier = ActiveModifier {
+    name: "Bodies called in",
+    direction: ModifierDirection::Harder,
+    detail: Some("two guards"),
 };
 
 const SHOWS_ALL_CONES: ActiveModifier = ActiveModifier {
@@ -255,6 +272,7 @@ impl LevelModifiers {
         let LevelModifiers {
             guards_always_search_hideouts,
             sighting_lost_calls_a_guard,
+            body_found_calls_two_guards,
             always_show_vision_cones,
             intel_to_exit,
         } = *self;
@@ -266,6 +284,9 @@ impl LevelModifiers {
         }
         if sighting_lost_calls_a_guard {
             active.push(CALLS_IN_SIGHTINGS);
+        }
+        if body_found_calls_two_guards {
+            active.push(CALLS_IN_BODIES);
         }
         if always_show_vision_cones {
             active.push(SHOWS_ALL_CONES);
@@ -292,6 +313,8 @@ impl LevelModifiers {
                 || other.guards_always_search_hideouts,
             sighting_lost_calls_a_guard: self.sighting_lost_calls_a_guard
                 || other.sighting_lost_calls_a_guard,
+            body_found_calls_two_guards: self.body_found_calls_two_guards
+                || other.body_found_calls_two_guards,
             always_show_vision_cones: self.always_show_vision_cones
                 || other.always_show_vision_cones,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
@@ -471,10 +494,11 @@ mod tests {
         let stacked = LevelModifiers {
             guards_always_search_hideouts: true,
             sighting_lost_calls_a_guard: true,
+            body_found_calls_two_guards: true,
             always_show_vision_cones: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 4);
+        assert_eq!(stacked.active().len(), 5);
     }
 
     #[test]
@@ -482,12 +506,14 @@ mod tests {
         let a = LevelModifiers {
             guards_always_search_hideouts: true,
             sighting_lost_calls_a_guard: true,
+            body_found_calls_two_guards: true,
             always_show_vision_cones: false,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
             guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
+            body_found_calls_two_guards: false,
             always_show_vision_cones: true,
             intel_to_exit: IntelGate::None,
         };

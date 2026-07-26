@@ -188,19 +188,24 @@ impl State {
             if self.layout.facility().terrain(at) == Some(Terrain::Hideout) {
                 continue;
             }
-            let mut seen = false;
+            // The finders are tracked, not just counted: they are already standing
+            // over the body with their own search running (§7.2), so the §7.7 call
+            // must send *other* guards — a finder called to the body it just found
+            // would restart its own sweep.
+            let mut finders = Vec::new();
             for (index, guard) in self.guards.iter_mut().enumerate() {
                 if !senses.acts(index) {
                     continue;
                 }
                 if guard.fov().contains(at) {
                     guard.find_body(at);
-                    seen = true;
+                    finders.push(index);
                 }
             }
-            if seen {
+            if !finders.is_empty() {
                 self.bodies[body_index].mark_found();
                 events.push(Event::BodyFound { at });
+                self.call_in_body(at, &finders, events);
             }
         }
     }
@@ -286,21 +291,52 @@ impl State {
         let Some(at) = self.guards[caller].focus() else {
             return;
         };
-        // The caller is Alerted and so respondable itself; exclude it explicitly
-        // rather than relying on the count, or a lone guard would "call in" its own
-        // search and restart it.
-        let free: Vec<usize> = radio::nearest_respondable(&self.guards, at, self.guards.len())
+        // The caller is Alerted and so respondable itself; exclude it explicitly,
+        // or a lone guard would "call in" its own search and restart it.
+        if self.call_guards_to(at, &[caller], radio::SIGHTING_CALL_GUARDS) {
+            events.push(Event::CalledIn { at });
+        }
+    }
+
+    /// **The body call-in** (§7.7/§7.2): a body has just been discovered by
+    /// `finders`, so two guards ([`BODY_CALL_GUARDS`]) converge on it and search.
+    ///
+    /// Finding a body is the loudest event in the game, and the *only* way this
+    /// call is louder than a sighting's is **how many come** — same seam, same
+    /// arrival behaviour, a bigger count. The finders themselves are excluded: they
+    /// are already on it with their own §7.2 search running, which happens with the
+    /// modifier off exactly as it does with it on.
+    ///
+    /// Fires once per body, from the discovery scan, so a body that stays in view
+    /// does not re-call every turn — and a body concealed in a hideout is never
+    /// discovered (§7.2), so it never calls anyone.
+    fn call_in_body(&mut self, at: Cell, finders: &[usize], events: &mut Vec<Event>) {
+        if !self.modifiers.body_found_calls_two_guards {
+            return;
+        }
+        if self.call_guards_to(at, finders, radio::BODY_CALL_GUARDS) {
+            events.push(Event::CalledIn { at });
+        }
+    }
+
+    /// Send up to `count` guards to search `at` — the one call seam every §7.7
+    /// call-in and the §7.3 radio dispatch share. Picks the nearest respondable
+    /// guards ([`nearest_respondable`], which never takes one that has the live
+    /// player), skipping `exclude` — whoever is already dealing with this lead.
+    ///
+    /// Returns whether anybody was actually sent, so the caller only reports a call
+    /// that someone answered: with nobody free the call is simply unanswered, never
+    /// queued or retried (§7.7).
+    fn call_guards_to(&mut self, at: Cell, exclude: &[usize], count: usize) -> bool {
+        let sent: Vec<usize> = radio::nearest_respondable(&self.guards, at, self.guards.len())
             .into_iter()
-            .filter(|&g| g != caller)
-            .take(radio::SIGHTING_CALL_GUARDS)
+            .filter(|g| !exclude.contains(g))
+            .take(count)
             .collect();
-        if free.is_empty() {
-            return; // nobody to send: the call goes unanswered, and is not reported
+        for g in &sent {
+            self.guards[*g].respond_to(at);
         }
-        for g in free {
-            self.guards[g].respond_to(at);
-        }
-        events.push(Event::CalledIn { at });
+        !sent.is_empty()
     }
 
     /// Pass 5 — each guard `decide`s a step (§7.5) and takes it. A guard moving into

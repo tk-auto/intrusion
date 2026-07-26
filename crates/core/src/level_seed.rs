@@ -253,6 +253,7 @@ fn modifier_bits(m: LevelModifiers) -> u32 {
     let LevelModifiers {
         guards_always_search_hideouts,
         sighting_lost_calls_a_guard,
+        body_found_calls_two_guards,
         always_show_vision_cones,
         intel_to_exit,
     } = m;
@@ -260,6 +261,7 @@ fn modifier_bits(m: LevelModifiers) -> u32 {
         | u32::from(always_show_vision_cones) << 1
         | gate_bits(intel_to_exit) << 2
         | u32::from(sighting_lost_calls_a_guard) << 4
+        | u32::from(body_found_calls_two_guards) << 5
 }
 
 /// Unpack a bitfield back into a [`LevelModifiers`], or `None` if a field holds a
@@ -270,6 +272,7 @@ fn modifiers_from_bits(bits: u32) -> Option<LevelModifiers> {
         always_show_vision_cones: bits & 0b10 != 0,
         intel_to_exit: gate_from_bits((bits >> 2) & 0b11)?,
         sighting_lost_calls_a_guard: bits & 0b1_0000 != 0,
+        body_found_calls_two_guards: bits & 0b10_0000 != 0,
     })
 }
 
@@ -472,6 +475,7 @@ mod tests {
             modifiers: LevelModifiers {
                 guards_always_search_hideouts: true,
                 sighting_lost_calls_a_guard: true,
+                body_found_calls_two_guards: true,
                 always_show_vision_cones: true,
                 intel_to_exit: IntelGate::None,
             },
@@ -507,6 +511,7 @@ mod tests {
                                 modifiers: LevelModifiers {
                                     guards_always_search_hideouts: search,
                                     sighting_lost_calls_a_guard: called,
+                                    body_found_calls_two_guards: called,
                                     always_show_vision_cones: cones,
                                     intel_to_exit: gate,
                                 },
@@ -559,6 +564,7 @@ mod tests {
             modifiers: LevelModifiers {
                 guards_always_search_hideouts: true,
                 sighting_lost_calls_a_guard: true,
+                body_found_calls_two_guards: true,
                 always_show_vision_cones: true,
                 intel_to_exit: IntelGate::All,
             },
