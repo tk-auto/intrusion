@@ -1874,6 +1874,7 @@ Two problems from the old version to fix:
 | **Geometry** — walls, corridors, doors, room shapes | **Always visible, from turn one.** Never fogged. |
 | **Contents** — intel, hideouts, equipment, lore | **Hidden until seen.** Once seen, remembered. |
 | **Live state** — guards, bodies, door open/closed, danger cones | **Only what you can see right now.** Never remembered. **One exception: a guard's *position* is also known through walls within the guard-sense range (§9)** — but only its position, never its cone, and never remembered once out of range. |
+| **What you placed** — your live decoy (§8.3) | **Always drawn, wherever it is.** In the FOV or out of it, for as long as it exists. |
 
 This resolves the tension between two pillars that pull against each other:
 
@@ -1905,6 +1906,33 @@ finally having a mechanism.
 > distinct from both *live* and *never-seen*. Three states, not two. The old
 > version had no memory system at all, so this is new — don't assume the dimming
 > scheme above covers it.
+
+> **A decoy you placed is yours to see (§8.3).** The fourth row is not a hole in
+> the live-state rule, it is a different layer: a decoy is neither the facility's
+> live state nor a content to be discovered, but **the player's own placed
+> object** — the same category of knowledge as their own cell or the body in
+> their hands. The whole point of a fake is to *walk away from it* and let a
+> guard investigate the wrong cell, so a marker you can only see by standing next
+> to it is a marker the ability cannot use, and route-planning around your own
+> bait — the "you plan confidently" half of this section — is exactly what its
+> disappearance takes away.
+>
+> **It leaks nothing new.** A decoy dies the moment anything steps on it, so an
+> always-drawn one might seem to announce "a guard just walked here" through a
+> wall. The game already announces it, twice, on the turn it happens: the death
+> ends the ability into its full cooldown, so the §11.4 bar flips from *active*
+> to *cooling* wherever you are, and it prints the §11.7 message *"the decoy is
+> trampled"* with no visibility filter. Drawing the `@` only puts that same fact
+> where the player is already looking, instead of making them infer a location
+> from a cooldown pip.
+>
+> Out of the FOV it draws **remembered**, not live: the marker persists at full
+> Owned colour while the three-state discipline above keeps telling the truth
+> about what is actually being seen. It stays the lowest entity layer (§11.3), so
+> it never paints over a live entity and never hides the §11.5 danger overlay on
+> its cell. This is the decoy alone — **a body you dropped is not covered**: it is
+> the facility's live state and the §7.3 clock's evidence, and being unsure
+> whether it has been found yet is load-bearing.
 
 > **A duct's interior path is its own layer (§10.7).** The crawl path between a
 > duct's two entries is *neither* geometry (it carries no tell on the base map — it
