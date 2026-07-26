@@ -51,9 +51,9 @@ fn a_downed_guard_pings_a_dispatch_then_an_alert_step() {
     let dispatch = s.step(Input::Wait);
     assert!(
         dispatch.contains(&Event::RadioSilence {
-            post: Cell::new(1, 2)
+            at: Cell::new(1, 2)
         }),
-        "the first missed ping is a silence at the post",
+        "the first missed ping is a silence where the guard fell",
     );
     assert_eq!(
         s.guards()[0].state(),
@@ -151,6 +151,107 @@ fn a_hidden_body_still_misses_its_ping() {
     }
     assert!(silenced, "the hidden body still missed its ping (§7.3)");
     assert!(!s.bodies()[0].found(), "confusion, not cancellation");
+}
+
+/// §7.3: control's last fix on a guard is **where it fell**, not the post it was
+/// assigned to. A guard taken down far from its station is reported — and searched
+/// for — at the takedown site; the station never enters into it.
+#[test]
+fn a_dispatch_heads_for_the_takedown_site_not_the_station() {
+    let fell = Cell::new(1, 2);
+    let station = Cell::new(1, 25); // its post, right across the level
+    let mut layout = open_room(3, 30);
+    layout.place(Cell::new(1, 1), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(1, 1),
+        Direction::South,
+        vec![
+            Guard::stationary(fell)
+                .with_station(station)
+                .with_radio_clock(radio::RadioClock::from_period(3)),
+            Guard::patrolling(Cell::new(1, 20)),
+        ],
+        Vec::new(),
+        Cell::new(1, 28),
+    );
+
+    s.step(Input::Step(Direction::South)); // take it down at `fell`
+    assert_eq!(
+        s.bodies()[0].fell_at(),
+        fell,
+        "the body records where it fell"
+    );
+
+    s.step(Input::Wait); // the window
+    let dispatch = s.step(Input::Wait); // the first missed ping
+    assert!(
+        dispatch.contains(&Event::RadioSilence { at: fell }),
+        "the silence names the takedown site, not the station {station:?}",
+    );
+    assert_eq!(s.guards()[0].state(), GuardState::Responding);
+    assert_eq!(
+        s.guards()[0].destination(),
+        Some(fell),
+        "the responder walks to where the guard fell",
+    );
+}
+
+/// §7.3/§8.3: hauling a body away is what makes the dispatch *confused*. The
+/// responder is sent to the cell the guard fell in — which the body has since left
+/// — so dragging buys the investigation looking in the wrong place, exactly the
+/// §7.3 payoff. (It is not cancellation: the ping is still missed, cf.
+/// `a_hidden_body_still_misses_its_ping`.)
+#[test]
+fn dragging_a_body_sends_the_responder_to_the_empty_takedown_site() {
+    let fell = Cell::new(5, 4);
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's start cupboard
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![
+            Guard::stationary(fell).with_radio_clock(radio::RadioClock::from_period(8)),
+            Guard::patrolling(Cell::new(9, 9)),
+        ],
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+
+    s.step(Input::Step(Direction::North)); // takedown at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
+    s.step(Input::Step(Direction::North)); // the hold costs its turn (§8.3)
+    s.step(Input::Step(Direction::North)); // haul: player to (5,2), body to (5,3)
+
+    let body = s.bodies()[0].cell();
+    assert_ne!(
+        body, fell,
+        "the body has been dragged off the takedown site"
+    );
+    assert_eq!(
+        s.bodies()[0].fell_at(),
+        fell,
+        "control's fix stayed where the guard went down",
+    );
+
+    let mut dispatched = None;
+    for _ in 0..20 {
+        for e in s.step(Input::Wait) {
+            if let Event::RadioSilence { at } = e {
+                dispatched = Some(at);
+            }
+        }
+        if dispatched.is_some() {
+            break;
+        }
+    }
+    assert_eq!(
+        dispatched,
+        Some(fell),
+        "the responder is sent to the empty takedown site, not to the body",
+    );
 }
 
 /// §12.4: the radio net is deterministic — the same scenario under the same
