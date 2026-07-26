@@ -872,15 +872,12 @@ impl State {
                     .guard_at(target)
                     .expect("bump_kind classified a guard here");
                 let guard = self.guards.remove(i);
-                // The body inherits the downed guard's post *and* its radio
-                // cadence (§7.3): the clock that was silent while it lived starts
-                // ticking now, its first missed ping a full period out.
-                self.bodies.push(Body::new(
-                    target,
-                    guard.station(),
-                    guard.radio_clock(),
-                    self.turn,
-                ));
+                // The body inherits the downed guard's radio cadence (§7.3): the
+                // clock that was silent while it lived starts ticking now, its
+                // first missed ping a full period out. Where it falls is control's
+                // last fix on the guard, and so where a responder will be sent.
+                self.bodies
+                    .push(Body::new(target, guard.radio_clock(), self.turn));
                 events.push(Event::TakenDown { at: target });
                 true
             }
@@ -1302,18 +1299,20 @@ impl State {
     /// **missed**:
     ///
     /// - **First miss** — control dispatches the nearest still-active guard
-    ///   ([`radio::nearest_respondable`]) to the silent guard's last known post,
-    ///   switching it to [`Responding`](crate::GuardState::Responding). If every
-    ///   guard has the live player, nobody is free and the silence goes
-    ///   un-investigated — the second miss still lands.
+    ///   ([`radio::nearest_respondable`]) to **where the guard fell**
+    ///   ([`Body::fell_at`](crate::body::Body::fell_at)) — control's last fix on
+    ///   it — switching it to [`Responding`](crate::GuardState::Responding), and it
+    ///   **searches** there on arrival (§7.6). If every guard has the live player,
+    ///   nobody is free and the silence goes un-investigated — the second miss
+    ///   still lands.
     /// - **Second miss** — the facility-wide alert steps (§7.3); control has
     ///   escalated as far as the design specifies and stops pinging the corpse
     ///   ([`MAX_MISSED_PINGS`](crate::radio) caps it).
     ///
     /// A **hidden** body still misses its pings (§7.3): hiding a body confuses the
-    /// investigation — the responder walks to a post the body has been dragged
-    /// away from — it does not cancel it. Both events are surfaced (§11.7): the
-    /// silence as a near-line message, the responder as its own sensed dot (§9).
+    /// investigation — the responder searches the cell the body was dragged away
+    /// from — it does not cancel it. Both events are surfaced (§11.7): the silence
+    /// as a near-line message, the responder as its own sensed dot (§9).
     fn radio_phase(&mut self, events: &mut Vec<Event>) {
         // Index-walk: `bodies` is only ever appended to (§7.2), so indices are
         // stable across the loop, and the dispatch borrows `guards` separately.
@@ -1321,14 +1320,15 @@ impl State {
             if !self.bodies[i].ping_due(self.turn) {
                 continue;
             }
-            let post = self.bodies[i].post();
+            let at = self.bodies[i].fell_at();
             if self.bodies[i].miss_ping() == 1 {
                 // First miss: send the nearest guard who isn't already on the
-                // player. `respond_to` sets its destination and lead (§7.4).
-                if let Some(g) = radio::nearest_respondable(&self.guards, post) {
-                    self.guards[g].respond_to(post);
+                // player. `respond_to` sets its destination and lead (§7.4), and
+                // the walk ends in a search of the takedown site (§7.6).
+                for g in radio::nearest_respondable(&self.guards, at, 1) {
+                    self.guards[g].respond_to(at);
                 }
-                events.push(Event::RadioSilence { post });
+                events.push(Event::RadioSilence { at });
             } else {
                 // Second (final) miss: the escalation gets a concrete source.
                 self.alert += radio::ALERT_STEP;

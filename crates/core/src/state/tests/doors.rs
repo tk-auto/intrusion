@@ -1009,7 +1009,6 @@ fn an_armed_autodoor_never_shuts_on_a_body_in_the_throat() {
     // (`haul_body_to` threads the haul itself).
     s.bodies.push(crate::body::Body::new(
         panel,
-        panel,
         crate::radio::RadioClock::from_period(4),
         s.turn(),
     ));

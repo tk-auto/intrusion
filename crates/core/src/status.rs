@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn the_radio_events_read_on_the_threat_ladder() {
         let silence = message_for(Event::RadioSilence {
-            post: Cell::new(3, 3),
+            at: Cell::new(3, 3),
         })
         .expect("a radio silence is never silent");
         assert_eq!(silence.text, "a guard has gone silent");

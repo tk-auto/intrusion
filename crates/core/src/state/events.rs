@@ -106,11 +106,11 @@ pub enum Event {
     /// raises it; the radio escalation is §7.3/§7.7's tickets.
     BodyFound { at: Cell },
     /// A downed guard missed a radio ping (§7.3): control noticed the silence and
-    /// dispatched the nearest active guard to the silent guard's last known
-    /// `post`. The player reads it as a near-line message and as the responder's
-    /// own sensed dot peeling off toward the post (§9) — the visual tell that
-    /// replaces the old sound (§9.3).
-    RadioSilence { post: Cell },
+    /// dispatched the nearest active guard to `at` — where the guard fell, which
+    /// is control's last fix on it — to search there. The player reads it as a
+    /// near-line message and as the responder's own sensed dot peeling off toward
+    /// that cell (§9) — the visual tell that replaces the old sound (§9.3).
+    RadioSilence { at: Cell },
     /// A second missed radio ping stepped the facility-wide alert to `level`
     /// (§7.3): the concrete, explainable escalation the alert system was always
     /// meant to provide (§2.3). Written here, read on the near line (§11.4).

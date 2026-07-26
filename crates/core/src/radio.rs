@@ -3,11 +3,12 @@
 //! Takedowns are permanent and free of cooldown (§7.2); the body is the cost.
 //! The radio is what keeps that cost from being paid once: **control pings each
 //! guard periodically, and a guard that is down does not answer.** A missed ping
-//! dispatches the nearest still-active guard to the silent guard's last known
-//! post ([`Body::post`](crate::body::Body::post)); a second missed ping steps a
-//! facility-wide alert. So every takedown starts a clock — a future appointment —
-//! and three takedowns is three clocks running at once, which is why a full clear
-//! collapses under its own weight with no rule needed to ban it (§7.3).
+//! dispatches the nearest still-active guard to **where that guard fell**
+//! ([`Body::fell_at`](crate::body::Body::fell_at)) — control's last fix on it — to
+//! search there; a second missed ping steps a facility-wide alert. So every
+//! takedown starts a clock — a future appointment — and three takedowns is three
+//! clocks running at once, which is why a full clear collapses under its own weight
+//! with no rule needed to ban it (§7.3).
 //!
 //! This module owns the *timing and selection* — the per-guard cadence and the
 //! pure "who responds" query; the [`State`](crate::State) turn loop owns the
@@ -15,7 +16,7 @@
 //! the alert), because that reaches across guards, bodies and the alert together.
 //! The tell is deliberately **visual** (§7.3/§9.3, sound is gone): the silence is a
 //! near-line message and the responder is the player's own sensed dot peeling off
-//! toward the post — no ping the player has to hear.
+//! toward the takedown site — no ping the player has to hear.
 
 use crate::category::Category;
 use crate::cell::Cell;
@@ -105,26 +106,39 @@ impl Default for RadioClock {
     }
 }
 
-/// The index of the guard control would dispatch to a silent `post` (§7.3): the
-/// **nearest active** guard, by Manhattan distance to the post, ties broken by
+/// The indices of the `count` guards control would send to `at`, nearest first
+/// (§7.3/§7.7): the **nearest active** guards by Manhattan distance, ties broken by
 /// spawn order so the choice is deterministic (§12.4). "Active" here means a guard
 /// not already locked onto the live player — its state is not [`Category::Danger`]
 /// (Chasing/Investigating), because a guard that has *you* does not break off to
 /// walk toward a cold radio silence (§7.4). A guard already Calm, searching, or
-/// responding is fair game. `None` when every guard has the player — nobody is
-/// free to send, and the silence simply goes un-investigated this ping (the second
-/// miss still steps the alert).
+/// responding is fair game.
+///
+/// Returns **fewer than `count`** when fewer are free — including empty when every
+/// guard has the player, in which case the call simply goes unanswered (for a
+/// missed ping the silence goes un-investigated and the second miss still steps the
+/// alert). A call is never queued or retried: whoever is free at the moment it is
+/// made is who comes.
+///
+/// This is the one seam every call in the game shares: control's dispatch to a
+/// takedown site sends one, and the §7.7 cooperation call-ins send one on a lost
+/// sighting and two on a found body — the same selection, a different `count`.
 ///
 /// Distance is Manhattan **[START]**, not path length: cheap and deterministic,
 /// and the dispatched guard routes there properly regardless — refining the
 /// *choice* to true path distance is a later tune, pinned by no rule today.
-pub(crate) fn nearest_respondable(guards: &[Guard], post: Cell) -> Option<usize> {
-    guards
+pub(crate) fn nearest_respondable(guards: &[Guard], at: Cell, count: usize) -> Vec<usize> {
+    let mut free: Vec<usize> = guards
         .iter()
         .enumerate()
         .filter(|(_, g)| g.state().category() != Category::Danger)
-        .min_by_key(|(i, g)| (g.pos().manhattan_distance(post), *i))
         .map(|(i, _)| i)
+        .collect();
+    // Sort by distance, then by spawn order — the same total order the old
+    // single-pick `min_by_key` used, so taking the first is taking the nearest.
+    free.sort_by_key(|&i| (guards[i].pos().manhattan_distance(at), i));
+    free.truncate(count);
+    free
 }
 
 #[cfg(test)]
@@ -176,9 +190,44 @@ mod tests {
         let guards = vec![
             Guard::stationary(Cell::new(10, 2)), // 8 away
             Guard::stationary(Cell::new(10, 6)), // 4 away — nearest
+            Guard::stationary(Cell::new(2, 10)), // 8 away — ties with 0, later spawn
+        ];
+        assert_eq!(nearest_respondable(&guards, post, 1), vec![1]);
+    }
+
+    /// §7.7: the same selection serves a call for **more than one** guard — nearest
+    /// first, ties by spawn order, and never more than are free. Asking for more
+    /// than the facility holds yields everyone rather than failing, so a call on a
+    /// thinly-staffed level still sends whoever there is (§7.7 — a call is never
+    /// queued or retried).
+    #[test]
+    fn a_call_takes_the_n_nearest_in_order_and_no_more() {
+        let at = Cell::new(10, 10);
+        let guards = vec![
+            Guard::stationary(Cell::new(10, 2)), // 8 away — ties with 2, earlier spawn
+            Guard::stationary(Cell::new(10, 6)), // 4 away — nearest
             Guard::stationary(Cell::new(2, 10)), // 8 away
         ];
-        assert_eq!(nearest_respondable(&guards, post), Some(1));
+
+        assert_eq!(
+            nearest_respondable(&guards, at, 2),
+            vec![1, 0],
+            "nearest first"
+        );
+        assert_eq!(
+            nearest_respondable(&guards, at, 3),
+            vec![1, 0, 2],
+            "the tie at 8 goes to the earlier spawn (§12.4)",
+        );
+        assert_eq!(
+            nearest_respondable(&guards, at, 9),
+            vec![1, 0, 2],
+            "asking for more than are free sends everyone free",
+        );
+        assert!(
+            nearest_respondable(&guards, at, 0).is_empty(),
+            "a call for nobody sends nobody",
+        );
     }
 
     /// §7.4: a guard that has the live player (Chasing/Investigating — the Danger
@@ -194,8 +243,8 @@ mod tests {
             Guard::stationary(Cell::new(9, 9)).with_state(GuardState::Calm),
         ];
         assert_eq!(
-            nearest_respondable(&guards, post),
-            Some(1),
+            nearest_respondable(&guards, post, 1),
+            vec![1],
             "skip the chaser"
         );
 
@@ -203,9 +252,8 @@ mod tests {
             Guard::stationary(Cell::new(2, 1)).with_state(GuardState::Chasing),
             Guard::stationary(Cell::new(3, 1)).with_state(GuardState::Investigating),
         ];
-        assert_eq!(
-            nearest_respondable(&all_hunting, post),
-            None,
+        assert!(
+            nearest_respondable(&all_hunting, post, 2).is_empty(),
             "nobody free to send",
         );
     }

@@ -322,6 +322,16 @@ impl Guard {
         }
     }
 
+    /// The same guard stationed at `station` while standing where it was built —
+    /// the seam for pinning that a takedown is reported **where the guard fell**
+    /// and not at the post it was assigned to (§7.3). Only a walked patrol
+    /// separates the two in a real run, so tests set them apart directly.
+    #[cfg(test)]
+    pub(crate) fn with_station(mut self, station: Cell) -> Self {
+        self.station = station;
+        self
+    }
+
     /// The same guard in `state`. The §7.4 transitions are the reactive guard AI
     /// tickets' job; until they land, this is how a scenario — a test, the sim —
     /// puts a guard in a non-[`Calm`](GuardState::Calm) state.
@@ -422,8 +432,19 @@ impl Guard {
         self.state == GuardState::Calm
     }
 
-    /// The guard's station (§7.5) — recorded on its body at a takedown as the
-    /// "last known post" the radio net will dispatch a responder to (§7.3).
+    /// The cell this guard is currently walking to, if any (§7.4) — the seam the
+    /// loop-level tests read a dispatch's target through, since they sit outside
+    /// this module and the field is private.
+    #[cfg(test)]
+    pub(crate) fn destination(&self) -> Option<Cell> {
+        self.destination
+    }
+
+    /// The guard's station (§7.5) — the anchor its Calm beat is grown from. The
+    /// radio net no longer reads it: a dispatch heads for where the guard *fell*
+    /// (§7.3), not the post it was assigned to, so this is the beat's seam for the
+    /// §7.5/§10.5 territory tests alone.
+    #[cfg(test)]
     pub(crate) fn station(&self) -> Cell {
         self.station
     }
@@ -524,19 +545,27 @@ impl Guard {
         self.end_search_and_watch();
     }
 
-    /// React to a radio dispatch (§7.3): a colleague has stopped answering, so
-    /// control sends this guard to the silent guard's last known `post`. It
-    /// switches to [`Responding`](GuardState::Responding) (§7.4) and walks there
-    /// with a fresh lead — the same [`ALERT_DURATION`] backstop every reactive
-    /// state carries, so a responder that cannot reach the post gives up cleanly
-    /// rather than pacing forever. Any lingering search/watch is superseded: the
-    /// dispatch is the new priority. The caller only ever dispatches a guard that
-    /// does not have the live player ([`nearest_respondable`](crate::radio::nearest_respondable)),
-    /// so this never pulls a guard off a chase.
-    pub(crate) fn respond_to(&mut self, post: Cell) {
+    /// React to a call (§7.3/§7.7): control, or a colleague, wants this guard at
+    /// `at` — a takedown site whose guard stopped answering the radio, or the cell
+    /// a §7.7 call named. It switches to [`Responding`](GuardState::Responding)
+    /// (§7.4) and walks there with a fresh lead — the same [`ALERT_DURATION`]
+    /// backstop every reactive state carries, so a responder that cannot reach the
+    /// cell gives up cleanly rather than pacing forever. Any lingering search/watch
+    /// is superseded: the call is the new priority. The caller only ever sends a
+    /// guard that does not have the live player
+    /// ([`nearest_respondable`](crate::radio::nearest_respondable)), so this never
+    /// pulls a guard off a chase.
+    ///
+    /// The **stale sighting is dropped** ([`last_seen`](Self::last_seen)): a guard
+    /// answering a call goes to the cell it was *sent* to, and the search it opens
+    /// on arrival ([`decide`](Self::decide)) centres there rather than on wherever
+    /// this guard last happened to glimpse the player. A call carries its own cell;
+    /// it does not inherit anybody's memory (§7.7 — no shared field of view).
+    pub(crate) fn respond_to(&mut self, at: Cell) {
         self.state = GuardState::Responding;
-        self.destination = Some(post);
+        self.destination = Some(at);
         self.alert = ALERT_DURATION;
+        self.last_seen = None;
         self.end_search_and_watch();
     }
 
@@ -745,20 +774,23 @@ impl Guard {
             }
         }
 
-        // A **Responding** guard (§7.3/§7.4) walks to the silent guard's post. It
-        // carries a lead like any reactive state: while it is warm it heads for
-        // the post; on arrival with nothing there it stands down to patrol (the
-        // body may have been dragged off, or already found by its own cone en
-        // route — either way the post itself holds no live lead), and if the route
-        // is only blocked this turn it holds and retries. A cold lead — it never
-        // got there — gives up cleanly, the same anti-tracking backstop (§7.6).
+        // A **Responding** guard (§7.3/§7.4/§7.7) walks to the cell it was called
+        // to. It carries a lead like any reactive state: while it is warm it heads
+        // there; on arrival it **searches** the area — the same §7.6 sweep a lost
+        // chase ends in — because a call is a lead whose trail is already cold, and
+        // a responder that merely stood on the cell would make every call a walk
+        // rather than a hunt. If the route is only blocked this turn it holds and
+        // retries. A cold lead — it never got there — gives up cleanly, the same
+        // anti-tracking backstop (§7.6).
         if self.state == GuardState::Responding {
             if self.alert > 0 {
                 if let Some(step) = self.step_toward_destination(facility, blocked) {
                     return self.commit_step(Some(step), facility);
                 }
                 if self.destination == Some(self.pos) {
-                    self.stand_down();
+                    // `respond_to` cleared any stale sighting, so this centres on
+                    // the called cell the guard is now standing on.
+                    self.begin_search();
                 } else {
                     return None;
                 }
@@ -1426,6 +1458,83 @@ mod tests {
             reactive.decide(&facility, &[], &mut Rng::new(0), 0),
             Some(Direction::East),
             "a reactive guard turns fast and steps the same turn",
+        );
+    }
+
+    /// §7.3/§7.6/§7.7: a responder does not merely *stand* on the cell it was called
+    /// to — on arrival it opens the bounded §7.6 sweep, the same one a lost chase
+    /// ends in. A call is a lead whose trail is already cold, so without this every
+    /// call in the game would resolve as a walk rather than a hunt.
+    #[test]
+    fn a_responder_searches_the_cell_it_was_called_to() {
+        let facility = Facility::walled_box(12, 12);
+        let called_to = Cell::new(5, 9);
+        let mut guard = Guard::patrolling(Cell::new(5, 5));
+        guard.look(&facility);
+        guard.respond_to(called_to);
+
+        // Walk it in — `decide` returns the heading, the loop applies it (§4.2), so
+        // the test moves the guard itself. The lead ([`ALERT_DURATION`]) far
+        // outlasts the four steps.
+        for _ in 0..8 {
+            if guard.pos == called_to {
+                break;
+            }
+            let step = guard
+                .decide(&facility, &[], &mut Rng::new(0), 0)
+                .expect("the responder is still walking");
+            let next = guard.pos.step(step).expect("in bounds");
+            guard.advance_to(next, step, &facility);
+        }
+        assert_eq!(guard.pos, called_to, "it reached the cell it was called to");
+        assert_eq!(
+            guard.state,
+            GuardState::Responding,
+            "still on the errand until the arriving turn resolves",
+        );
+
+        // The turn it has nowhere further to walk, the errand becomes a search.
+        guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        assert_eq!(guard.state, GuardState::Alerted, "arrival opens a search");
+        assert_eq!(guard.search, SEARCH_DURATION);
+        assert_eq!(
+            guard.focus,
+            Some(called_to),
+            "the sweep centres on the called cell",
+        );
+    }
+
+    /// §7.7: a call carries its own cell and inherits nobody's memory. A guard that
+    /// glimpsed the player earlier must not drag that stale sighting into the search
+    /// it opens on arrival — it searches where it was *sent*, not where it once
+    /// thought you were.
+    #[test]
+    fn a_call_drops_the_responders_stale_sighting() {
+        let facility = Facility::walled_box(12, 12);
+        let stale = Cell::new(2, 2);
+        let called_to = Cell::new(5, 9);
+
+        let mut guard = Guard::patrolling(Cell::new(5, 5));
+        guard.look(&facility);
+        guard.last_seen = Some(stale); // it saw the player over there, a while ago
+        guard.respond_to(called_to);
+        assert_eq!(guard.last_seen, None, "the call clears the old sighting");
+
+        for _ in 0..8 {
+            if guard.pos == called_to {
+                break;
+            }
+            let step = guard
+                .decide(&facility, &[], &mut Rng::new(0), 0)
+                .expect("walking");
+            let next = guard.pos.step(step).expect("in bounds");
+            guard.advance_to(next, step, &facility);
+        }
+        guard.decide(&facility, &[], &mut Rng::new(0), 0); // arrive → search
+        assert_eq!(
+            guard.focus,
+            Some(called_to),
+            "the search centres on the call, not the stale sighting at {stale:?}",
         );
     }
 

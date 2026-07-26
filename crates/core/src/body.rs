@@ -9,9 +9,11 @@
 //! raises that guard's alert harder than seeing the player does.
 //!
 //! The body also carries what the later systems need: it **can be moved** — the
-//! drag (§8.3, #103) — and its [`post`](Body::post) remembers the downed guard's
-//! station, the "last known post" control dispatches a responder to when the
-//! guard stops answering the radio (§7.3, #107). The radio is what keeps the
+//! drag (§8.3, #103) — and its [`fell_at`](Body::fell_at) remembers **where the
+//! guard went down**, which is control's last fix on it and so the cell a
+//! responder is dispatched to search when it stops answering the radio (§7.3).
+//! That the two can differ is the point: drag the body elsewhere and the
+//! responder searches a spot it is no longer at. The radio is what keeps the
 //! takedown's permanence costly; this type is the seam it reads.
 
 use crate::cell::Cell;
@@ -23,10 +25,11 @@ use crate::radio::{RadioClock, MAX_MISSED_PINGS};
 pub struct Body {
     /// Where the body lies. Moves only by being dragged (§8.3, #103).
     cell: Cell,
-    /// The downed guard's station — the "last known post" a missed radio ping
-    /// dispatches a responder to (§7.3). Fixed at the takedown; dragging the
-    /// body does not change what control believes.
-    post: Cell,
+    /// Where the guard **went down** — control's last fix on it, and so the cell
+    /// a missed radio ping dispatches a responder to search (§7.3). Fixed at the
+    /// takedown: dragging the body moves [`cell`](Self::cell) and leaves this
+    /// where control still believes the guard to be.
+    fell_at: Cell,
     /// Whether a guard's cone has ever covered this body (§7.2). Set once —
     /// found is found — so the loudest event in the game fires exactly once
     /// per body.
@@ -47,15 +50,17 @@ pub struct Body {
 }
 
 impl Body {
-    /// A fresh body at `cell`, fallen at turn `turn` from a guard whose station
-    /// was `post` and whose radio cadence was `clock` (§7.2/§7.3). The first
-    /// ping is scheduled one full period out, so the takedown buys a guaranteed
-    /// window before control dispatches (§7.3 — the clock a takedown starts).
-    pub(crate) fn new(cell: Cell, post: Cell, clock: RadioClock, turn: u32) -> Self {
+    /// A fresh body at `cell`, fallen at turn `turn` from a guard whose radio
+    /// cadence was `clock` (§7.2/§7.3). Where it falls is also where control last
+    /// had the guard, so [`fell_at`](Self::fell_at) starts equal to `cell` and
+    /// then stays put while the body itself can be dragged away. The first ping is
+    /// scheduled one full period out, so the takedown buys a guaranteed window
+    /// before control dispatches (§7.3 — the clock a takedown starts).
+    pub(crate) fn new(cell: Cell, clock: RadioClock, turn: u32) -> Self {
         let period = clock.period();
         Self {
             cell,
-            post,
+            fell_at: cell,
             found: false,
             period,
             next_ping: turn.saturating_add(period),
@@ -68,9 +73,10 @@ impl Body {
         self.cell
     }
 
-    /// The downed guard's station — the post a radio dispatch heads for (§7.3).
-    pub fn post(&self) -> Cell {
-        self.post
+    /// Where the guard went down — the cell a radio dispatch heads for and
+    /// searches (§7.3).
+    pub fn fell_at(&self) -> Cell {
+        self.fell_at
     }
 
     /// Whether any guard has found this body (§7.2).
@@ -85,7 +91,7 @@ impl Body {
     }
 
     /// Move the body to `cell` — the drag (§8.3, #103): the loop hauls it into
-    /// the cell the dragging player just vacated. The [`post`](Self::post) stays
+    /// the cell the dragging player just vacated. [`fell_at`](Self::fell_at) stays
     /// where control believes it: dragging fools the radio, not the record.
     pub(crate) fn move_to(&mut self, cell: Cell) {
         self.cell = cell;
@@ -128,7 +134,6 @@ mod tests {
     fn the_ping_schedule_counts_two_misses_a_period_apart_then_stops() {
         let mut body = Body::new(
             Cell::new(3, 3),
-            Cell::new(3, 3),
             RadioClock::from_period(4),
             10, // downed on turn 10
         );
@@ -149,5 +154,21 @@ mod tests {
             "no more pings after the cap ({MAX_MISSED_PINGS})",
         );
         assert_eq!(body.missed_pings(), 2);
+    }
+
+    /// §7.3/§8.3: dragging moves the body, never control's fix on it. The radio
+    /// dispatch heads for where the guard *fell*, so hauling the body away is
+    /// what makes the responder search a cell it is no longer at — the §7.3
+    /// "hiding buys you a confused investigation" payoff, made literal.
+    #[test]
+    fn dragging_moves_the_body_but_not_where_it_fell() {
+        let fell = Cell::new(3, 3);
+        let mut body = Body::new(fell, RadioClock::from_period(4), 0);
+        assert_eq!(body.cell(), fell);
+        assert_eq!(body.fell_at(), fell, "a fresh body lies where it fell");
+
+        body.move_to(Cell::new(3, 8));
+        assert_eq!(body.cell(), Cell::new(3, 8), "the drag moved it");
+        assert_eq!(body.fell_at(), fell, "control's fix does not move with it");
     }
 }
