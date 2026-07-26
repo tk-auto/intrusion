@@ -59,11 +59,16 @@
         flex-wrap: wrap;
         justify-content: center;
         align-items: center;
-        gap: 6px;
-        padding: 8px;
-        /* Sized to sit *beside* the board, not to shout over it: the glyph grid is
-           small on a narrow screen, and a chunky form there reads as another app. */
-        font: 12px/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        /* Typeset at the board's own glyph size, which the shell publishes as
+           `--glyph` on every fit (crates/web/src/menu.rs). The canvas scales its text
+           to the viewport, so a form in fixed pixels towers over a small fit and
+           reads as another app dropped on top; in the board's own size it reads as
+           part of the same screen. Everything inside is in `em`, so the whole panel
+           scales with it. */
+        font: var(--glyph, 12px) / 1.35 ui-monospace, "SF Mono", Menlo, Consolas,
+          monospace;
+        gap: 0.6em;
+        padding: 0.8em;
         color: #a8a8a8;
         background: rgba(11, 11, 11, 0.92);
         border: 1px solid #293138;
@@ -87,7 +92,7 @@
         flex: 1 1 12ch;
         min-width: 6ch;
         box-sizing: border-box;
-        padding: 4px 6px;
+        padding: 0.35em 0.5em;
         font: inherit;
         color: #4ea6ff;
         background: #1e1e1e;
@@ -98,11 +103,11 @@
       }
       #menu-seed button {
         font: inherit;
-        /* A comfortable thumb target, not a desktop-sized hit box (§11.6), and never
-           shrunk by a cramped row — see the box above. */
+        /* Never shrunk by a cramped row — see the box above — and never smaller than
+           a thumb can reliably hit, however small the board's glyphs get (§11.6). */
         flex: 0 0 auto;
-        min-height: 30px;
-        padding: 4px 10px;
+        min-height: max(2.4em, 28px);
+        padding: 0.35em 0.9em;
         border: 0;
         border-radius: 3px;
         cursor: pointer;

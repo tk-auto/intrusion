@@ -28,7 +28,9 @@ use std::rc::Rc;
 use intrusion_core::{menu_hit, LevelSeed, MenuEntry, MenuNav, MenuUi, ScreenUi};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Document, Element, HtmlInputElement, KeyboardEvent, MouseEvent, Node, PointerEvent};
+use web_sys::{
+    Document, Element, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, Node, PointerEvent,
+};
 
 use crate::{seed, Game};
 
@@ -47,6 +49,28 @@ pub(crate) fn opening_ui() -> ScreenUi {
     ScreenUi {
         menu: Some(MenuUi::default()),
         ..ScreenUi::default()
+    }
+}
+
+/// Publish the board's current glyph size to the page as the `--glyph` custom
+/// property, in CSS pixels — the size the seed box types itself at.
+///
+/// The canvas scales its text to fit the viewport (§11.4: the whole level, always,
+/// at any size), so the *same words* are ten pixels tall in a narrow frame and twice
+/// that on a desktop. A form measured in fixed pixels does not follow, and in a
+/// narrow frame it ends up shouting over a board drawn half its size. Handing the
+/// fit's own number to the stylesheet keeps the one piece of DOM chrome the same
+/// size as the glyphs beside it, at every fit and through every rotation — the shell
+/// does not restyle anything, it just says how big a letter currently is.
+pub(crate) fn set_glyph_size(css_px: f64) {
+    if let Some(root) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element())
+        .and_then(|e| e.dyn_into::<HtmlElement>().ok())
+    {
+        let _ = root
+            .style()
+            .set_property("--glyph", &format!("{css_px:.2}px"));
     }
 }
 

@@ -362,6 +362,10 @@ impl Game {
             cell_h: CELL_H * scale * dpr,
             font: (CELL_H - 2.0) * scale * dpr,
         };
+        // Tell the page how big a glyph is now (in CSS pixels, so the same number the
+        // stylesheet works in): the seed box types itself at the board's own size
+        // rather than a fixed one that would tower over a small fit ([`menu`]).
+        menu::set_glyph_size((CELL_H - 2.0) * scale);
         self.draw();
     }
 

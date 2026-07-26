@@ -33,8 +33,15 @@ features = [
     "PointerEvent",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
-    # Seed sharing (§13.1/#110): the on-page seed box reads its value, and the
+    # Seed sharing (§13.1/#110): the menu's seed box reads its value, and the
     # active seed is read from / reflected into the page URL as `…#seed=N`.
     "HtmlInputElement",
     "Location",
+    # The title screen (#268): the seed box is the one piece of DOM chrome, so the
+    # shell tests where a press landed inside it (`Node`) and publishes the board's
+    # glyph size to the stylesheet as a custom property (`HtmlElement`'s inline
+    # style), which is what keeps the form typeset at the board's own size.
+    "Node",
+    "HtmlElement",
+    "CssStyleDeclaration",
 ]
