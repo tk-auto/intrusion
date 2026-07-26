@@ -438,13 +438,36 @@ impl State {
         }
     }
 
-    /// The cells of consoles whose intel has been **taken** — spent objectives
-    /// (§11.2). Terrain alone can't tell a spent console from a live one (both stay
-    /// `Terrain::Console`); the `taken` flag lives here, so the renderer reads it to
-    /// draw a collected console as inert Neutral scenery rather than a live Interest
-    /// `$` (§11.2 "spent objectives" = Neutral).
+    /// The cells of consoles that have been **used up** — spent objectives (§11.2),
+    /// plus a comms console whose radio net is already dead (§7.3/§7.7). Terrain alone
+    /// can't tell a spent console from a live one (both keep their terrain kind); the
+    /// `taken` flag and [`radio_silenced`](Self::radio_silenced) live here, so the
+    /// renderer reads them to draw a used console as inert Neutral scenery rather than a
+    /// live Interest `$`/`Ψ` (§11.2 "spent objectives" = Neutral).
+    ///
+    /// One list for both because the player reads them the same way — *there was
+    /// something here, it's done* — and because a silenced comms console offers nothing
+    /// on the usable line either, so its glyph should stop advertising itself too.
     pub fn spent_consoles(&self) -> impl Iterator<Item = Cell> + '_ {
-        self.objectives.iter().filter(|o| o.taken).map(|o| o.cell)
+        self.objectives
+            .iter()
+            .filter(|o| o.taken)
+            .map(|o| o.cell)
+            .chain(self.comms_console.filter(|_| self.radio_silenced))
+    }
+
+    /// The facility's comms console (§7.3/§7.7), or `None` for a facility without one.
+    /// Its cell is static geometry; whether it has been used is
+    /// [`radio_silenced`](Self::radio_silenced).
+    pub fn comms_console(&self) -> Option<Cell> {
+        self.comms_console
+    }
+
+    /// Whether the radio net has been killed for the rest of the level (§7.3/§7.7) —
+    /// the player bumped the comms console. Once true it never goes back: control stops
+    /// pinging downed guards, and both §7.7 cooperation call-ins stop firing.
+    pub fn radio_silenced(&self) -> bool {
+        self.radio_silenced
     }
 
     /// The count of completed turns (the startup turn is turn zero).

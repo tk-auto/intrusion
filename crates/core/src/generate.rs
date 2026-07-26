@@ -261,6 +261,15 @@ pub struct Layout {
     /// nothing on the grid tells. Empty on a level the generator placed none on (ducts
     /// are optional — reachability never depends on one, §10.6/§10.7).
     ducts: Vec<Duct>,
+    /// Where the facility's **comms console** goes (§7.3/§7.7), recorded rather than
+    /// stamped — like [`ducts`](Self::ducts), a fact about the level the grid does not
+    /// carry yet. The cell becomes [`Terrain::CommsConsole`] in
+    /// [`State::new`](crate::State::new), alongside the intel consoles and the exit,
+    /// which is what keeps the carve this type hands back **bare**: guard beats (§10.5)
+    /// and the §10.6 floods are computed on the grid before any solid usable lands on
+    /// it, and the comms console must not be the one exception to that. `None` on a
+    /// hand-built fixture.
+    comms_console: Option<Cell>,
 }
 
 impl Layout {
@@ -277,6 +286,12 @@ impl Layout {
     /// The duct crawlspaces on this level (§10.7), for the turn loop and renderer.
     pub fn ducts(&self) -> &[Duct] {
         &self.ducts
+    }
+
+    /// Where the comms console goes (§7.3/§7.7), or `None` on a facility without one.
+    /// Read once by [`State::new`](crate::State::new), which stamps it.
+    pub fn comms_console(&self) -> Option<Cell> {
+        self.comms_console
     }
 
     /// The index (into [`ducts`](Self::ducts)) of the duct whose path includes `cell`,
@@ -318,6 +333,7 @@ impl Layout {
             facility,
             regions: RegionGraph::new(w, h),
             ducts: Vec::new(),
+            comms_console: None,
         }
     }
 
@@ -329,6 +345,7 @@ impl Layout {
             facility,
             regions,
             ducts: Vec::new(),
+            comms_console: None,
         }
     }
 
@@ -357,7 +374,15 @@ pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenErr
 /// Generate a *placed* level: a carve passing every §10.6 guarantee **and** a
 /// [`Placement`] honouring §10.1 steps 7–9 with the spacing guarantees — exact
 /// piece counts, a safe starting area, spread intel, and post-placement
-/// solvability (start → every objective → exit).
+/// solvability (start → every objective → the comms console → exit).
+///
+/// The returned layout **records** where the **comms console** goes
+/// ([`Layout::comms_console`], §7.3/§7.7) without stamping it, exactly as it records a
+/// duct's path. [`State::new`](crate::State::new) does the stamping, with the intel
+/// consoles and the exit, for two reasons: the carve handed back stays **bare**, so
+/// guard beats (§10.5) and the §10.6 floods are still computed on a grid with no solid
+/// usable on it; and no boot path has to remember the console, since every one of them
+/// goes through [`State::new`](crate::State::new).
 ///
 /// This is the entry point real levels come from. Carve rejection (#13) and
 /// placement rejection (#12) share this one seed-retry loop, as §10.6 asks: a
@@ -381,6 +406,9 @@ pub fn generate_level(
         // doorways a guard's cone now reaches through.
         open_initial_doors(&mut layout, rng);
         if let Some(placement) = place(&layout, config, rng) {
+            // Record where the comms console goes; `State::new` stamps it, with the
+            // other solid usables — see the doc comment above.
+            layout.comms_console = Some(placement.comms());
             return Ok((layout, placement));
         }
     }
@@ -522,6 +550,9 @@ fn generate_once(
         facility,
         regions,
         ducts,
+        // Placement decides where the comms console goes, so it is recorded on the
+        // finished carve by `generate_level`, not here (§7.3/§7.7).
+        comms_console: None,
     })
 }
 

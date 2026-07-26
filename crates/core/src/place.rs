@@ -1,12 +1,13 @@
 //! Entity placement — §10.1 steps 7–9, with the §10.6 spacing guarantees.
 //!
 //! Generation so far carves the board (#7–#11); this module puts the pieces on it:
-//! the entry/exit tile, the player, the intel consoles, and the guards. The rules
-//! are §10.1's — entry/exit and player in the **largest room**, objectives and
-//! guards in any room *except* the start room — plus the three spacing guarantees
-//! the old generator entirely lacked (§10.6): the player never spawns next to the
-//! exit, the intel never clumps into one room, and no guard's turn-one cone covers
-//! the spawn. *"The starting area should be safe" — make it so.*
+//! the entry/exit tile, the player, the intel consoles, the comms console, and the
+//! guards. The rules are §10.1's — entry/exit and player in the **largest room**,
+//! objectives and guards in any room *except* the start room — plus the spacing
+//! guarantees the old generator entirely lacked (§10.6): the player never spawns next
+//! to the exit, the intel never clumps into one room, the comms console is a real
+//! detour away (§7.7), and no guard's turn-one cone covers the spawn. *"The starting
+//! area should be safe" — make it so.*
 //!
 //! Two lessons from the old generator shape the module:
 //!
@@ -21,8 +22,8 @@
 //!   the exit stamp in as solid (§10.3), and a console dropped into a 1-cell
 //!   squeeze could pinch the player's only route. So placement re-floods the
 //!   player's actual movement graph and requires every console and the exit to be
-//!   bump-adjacent (§4.3) to it: start → every objective → exit, on the level as
-//!   it will actually be played.
+//!   bump-adjacent (§4.3) to it: start → every objective → the comms console → exit,
+//!   on the level as it will actually be played.
 
 use crate::beat::{coordinated_beat_cells, BEAT_REGIONS};
 use crate::cell::Cell;
@@ -41,6 +42,24 @@ use std::collections::HashSet;
 /// largest room on the v1 footprint comfortably spans this; a cramped draw that
 /// cannot honour it is rejected and redrawn rather than quietly shrunk.
 const PLAYER_EXIT_MIN_DISTANCE: u32 = 8;
+
+/// The **comms console** spawns at least this far (Manhattan) from the player's
+/// spawn cell **[START]**.
+///
+/// The console silences the radio net for the whole level (§7.3/§7.7), which is the
+/// only cost a permanent takedown carries — so a console found in the first few turns
+/// would make every later takedown free. Distance is the balance knob the counterplay
+/// hangs on: far enough that reaching it is a deliberate detour costing turns and
+/// exposure (§2.3 — cost is load-bearing), not a switch on the way out of the start
+/// room. Chosen larger than [`PLAYER_EXIT_MIN_DISTANCE`] for exactly that reason, and
+/// asserted so; on the 40×40 v1 footprint it still leaves most non-start rooms
+/// eligible, and a draw with no far-enough cell is rejected and redrawn like any other
+/// §10.6 shortfall.
+const PLAYER_COMMS_MIN_DISTANCE: u32 = 16;
+
+// Reaching the radio must cost more than reaching the way out, whatever these
+// [START]s are retuned to — held at compile time, like the §7.3 radio relations.
+const _: () = assert!(PLAYER_COMMS_MIN_DISTANCE > PLAYER_EXIT_MIN_DISTANCE);
 
 /// A level recipe: the footprint and the piece counts (§10.2). v1 ships exactly
 /// one tuned configuration — [`LevelConfig::V1`] — but the knobs are data so the
@@ -87,6 +106,10 @@ pub struct Placement {
     player: Cell,
     exit: Cell,
     intel: Vec<Cell>,
+    /// The facility's one comms console (§7.3/§7.7) — the radio terminal a bump
+    /// silences. Exactly one per facility: "one interaction shuts the whole net" is
+    /// the design, so a second would only be a second switch for a net already dead.
+    comms: Cell,
     guards: Vec<Cell>,
     /// Each guard's radio ping cadence (§7.3), parallel to `guards` and drawn from
     /// the run seed in [`place`] so the whole ping schedule is deterministic
@@ -110,6 +133,13 @@ impl Placement {
     /// The intel consoles — one per room, never the start room (§10.1.8, §10.6).
     pub fn intel(&self) -> &[Cell] {
         &self.intel
+    }
+
+    /// The comms console (§7.3/§7.7) — never the start room, at least
+    /// [`PLAYER_COMMS_MIN_DISTANCE`] from the spawn, and reachable by a bump like any
+    /// other usable (§10.6). Bumping it kills the radio net for the level.
+    pub fn comms(&self) -> Cell {
+        self.comms
     }
 
     /// The guard spawn cells — never the start room, never eyeing the player's
@@ -273,6 +303,37 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         return None;
     }
 
+    // The comms console (§7.3/§7.7): the facility's radio terminal, treated like an
+    // objective for the §10.6 guarantees — a non-start room, bump-reachable (asserted
+    // below with the rest), and at least `PLAYER_COMMS_MIN_DISTANCE` from the spawn so
+    // the counterplay costs a real detour rather than a switch on the way out of the
+    // start room. Unlike intel it does *not* claim a room of its own: it may share one
+    // with an objective (a different cell), which keeps a four-room carve placeable.
+    //
+    // Drawn **last of the geometry**, after the guards, for the same reason the radio
+    // clocks below are: every draw before this one is byte-identical to before the comms
+    // console existed, so a seed still spawns the same player, exit, intel and *guards*
+    // it always did. Ordering it earlier would have shifted the guard pool's shuffle and
+    // silently re-stationed every guard on every seed — a much bigger change than the
+    // one this ticket is making.
+    let mut comms_pool: Vec<Cell> = others
+        .iter()
+        .flat_map(|&i| rooms[i].1.iter().copied())
+        .filter(|&c| {
+            !taken.contains(&c)
+                && !guards.contains(&c)
+                && c.manhattan_distance(player) >= PLAYER_COMMS_MIN_DISTANCE
+        })
+        .collect();
+    shuffle(&mut comms_pool, rng);
+    // A usable like any other (§11.4): prefer a cell that leaves every floor
+    // neighbour with one adjacent usable, but fall back rather than fail the draw.
+    let comms = comms_pool
+        .iter()
+        .copied()
+        .find(|&c| !placement_conflict(layout, c, &usables))
+        .or_else(|| comms_pool.first().copied())?;
+
     // The post-placement solvability assertion: on the grid as it will actually
     // be played (consoles and exit solid), the player still reaches every
     // objective and the way out. §10.6's "assert it, don't argue it", applied
@@ -284,6 +345,7 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         player,
         exit,
         intel,
+        comms,
         guards,
         guard_clocks: Vec::new(),
     };
@@ -330,7 +392,7 @@ fn pick_free(floor: &[Cell], taken: &[Cell], rng: &mut Rng) -> Option<Cell> {
 }
 
 /// Whether the placed level is solvable by the player's actual movement rules:
-/// start → every objective → exit (§10.6).
+/// start → every objective → the comms console → exit (§10.6).
 ///
 /// Floods the cells a *player* can come to occupy — floor, open **and closed**
 /// panels (a bump opens them, §10.4), and hideouts (bump-to-enter, §10.3) —
@@ -339,12 +401,18 @@ fn pick_free(floor: &[Cell], taken: &[Cell], rng: &mut Rng) -> Option<Cell> {
 /// must be **adjacent** to the flooded set rather than inside it. The pre-placement
 /// §10.6 gate proved the empty carve connected; this catches the rarer sin of a
 /// console stamped into a squeeze cell pinching the route that proof relied on.
+///
+/// The comms console (§7.3/§7.7) is held to the same standard as an objective, and
+/// deliberately so: *a console the player cannot reach is not counterplay.* It is not
+/// required to win, so a stricter reading might let it be walled off — but the whole
+/// point of the §7.7 answer to the radio net is that it is there to be found, and a
+/// seed that seals it away silently deletes the mechanic from that run.
 fn solvable(facility: &Facility, placement: &Placement) -> bool {
     let solid: Vec<Cell> = placement
         .intel
         .iter()
         .copied()
-        .chain([placement.exit])
+        .chain([placement.comms, placement.exit])
         .collect();
     let enterable = |c: Cell| {
         !solid.contains(&c)
@@ -424,7 +492,7 @@ mod tests {
             assert_eq!(p.guard_cells().len(), LevelConfig::V1.guards, "seed {seed}");
 
             // Every piece on its own plain floor cell — no stacking, no walls.
-            let mut all = vec![p.player(), p.exit()];
+            let mut all = vec![p.player(), p.exit(), p.comms()];
             all.extend_from_slice(p.intel());
             all.extend_from_slice(p.guard_cells());
             for &c in &all {
@@ -434,6 +502,7 @@ mod tests {
                     "seed {seed}: {c:?} is not plain floor"
                 );
             }
+
             let mut dedup = all.clone();
             dedup.sort_unstable_by_key(|c| (c.x, c.y));
             dedup.dedup();
@@ -441,6 +510,65 @@ mod tests {
                 dedup.len(),
                 all.len(),
                 "seed {seed}: two pieces share a cell"
+            );
+        }
+    }
+
+    /// §7.7 + §10.6: the comms console is **exactly one** per facility, outside the
+    /// start room, and at least [`PLAYER_COMMS_MIN_DISTANCE`] from the spawn — the
+    /// distance being what keeps silencing the radio a deliberate detour rather than a
+    /// switch on the way out of the start room (§2.3).
+    ///
+    /// This pins the **[START]** distance so a later tune is a visible edit, and pins
+    /// "exactly one" so no seed ever ships a second switch for a net already dead.
+    #[test]
+    fn the_comms_console_is_one_real_detour_from_the_spawn() {
+        assert_eq!(
+            PLAYER_COMMS_MIN_DISTANCE, 16,
+            "the [START] comms detour distance"
+        );
+        for seed in seed_sweep(SEEDS) {
+            let (layout, p) = v1(seed);
+            let distance = p.comms().manhattan_distance(p.player());
+            assert!(
+                distance >= PLAYER_COMMS_MIN_DISTANCE,
+                "seed {seed}: the comms console spawned {distance} from the player"
+            );
+            assert_ne!(
+                room_of(&layout, p.comms()),
+                room_of(&layout, p.player()),
+                "seed {seed}: comms console in the start room"
+            );
+
+            // The carve handed back is **bare** — the console is recorded, not stamped
+            // (§10.5/§10.6 run their floods on this grid) — and the record agrees with
+            // the placement.
+            assert_eq!(
+                layout.comms_console(),
+                Some(p.comms()),
+                "seed {seed}: the layout's record disagrees with the placement"
+            );
+
+            // One switch, one net, in the grid a run actually plays. Counted over the
+            // whole board, so a stray stamp anywhere would show up.
+            let state = State::new(
+                layout,
+                p.player(),
+                Direction::North,
+                Vec::new(),
+                p.intel().iter().copied(),
+                p.exit(),
+            );
+            let facility = state.layout().facility();
+            let stamped = (0..facility.height())
+                .flat_map(|y| (0..facility.width()).map(move |x| Cell::new(x, y)))
+                .filter(|&c| facility.terrain(c) == Some(Terrain::CommsConsole))
+                .count();
+            assert_eq!(stamped, 1, "seed {seed}: {stamped} comms consoles");
+            assert_eq!(
+                state.comms_console(),
+                Some(p.comms()),
+                "seed {seed}: the state found the wrong console"
             );
         }
     }
@@ -619,27 +747,39 @@ mod tests {
 
     /// The post-placement solvability flood: a console sealed into a pocket the
     /// player cannot bump from outside fails the check; the same console with its
-    /// pocket open passes. (On generated levels the §10.6 gate makes this rare —
-    /// this pins the assertion itself.)
+    /// pocket open passes. Holds for the **comms** console (§7.7) exactly as for an
+    /// objective — unreachable counterplay is no counterplay. (On generated levels the
+    /// §10.6 gate makes this rare — this pins the assertion itself.)
     #[test]
     fn solvability_requires_every_target_bump_adjacent() {
-        let placement = |intel: Cell| Placement {
+        // A placement with `pocket` holding the named piece and everything else out
+        // in the open, so each target can be sealed in turn.
+        let with_intel = |pocket: Cell| Placement {
             player: Cell::new(5, 5),
             exit: Cell::new(8, 8),
-            intel: vec![intel],
+            intel: vec![pocket],
+            comms: Cell::new(8, 5),
             guards: Vec::new(),
             guard_clocks: Vec::new(),
         };
+        let with_comms = |pocket: Cell| Placement {
+            comms: pocket,
+            intel: vec![Cell::new(8, 5)],
+            ..with_intel(Cell::new(8, 5))
+        };
 
         let mut sealed = Facility::walled_box(10, 10);
-        // Wall the corner pocket at (1,1) shut: the console inside has no
-        // reachable neighbour to bump it from.
+        // Wall the corner pocket at (1,1) shut: a console inside has no reachable
+        // neighbour to bump it from.
         for (x, y) in [(2, 1), (1, 2), (2, 2)] {
             sealed.set_terrain(x, y, Terrain::Wall);
         }
-        assert!(!solvable(&sealed, &placement(Cell::new(1, 1))));
+        let pocket = Cell::new(1, 1);
+        assert!(!solvable(&sealed, &with_intel(pocket)), "sealed intel");
+        assert!(!solvable(&sealed, &with_comms(pocket)), "sealed comms");
 
         let open = Facility::walled_box(10, 10);
-        assert!(solvable(&open, &placement(Cell::new(1, 1))));
+        assert!(solvable(&open, &with_intel(pocket)));
+        assert!(solvable(&open, &with_comms(pocket)));
     }
 }

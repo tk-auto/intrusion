@@ -843,6 +843,10 @@ mod tests {
             Terrain::Hideout,
             Terrain::PartialCover,
             Terrain::Console,
+            // The comms console (§7.7) is a *distinct* kind from the intel console, so
+            // the bot's objective scan can never mistake one for the other — and its
+            // routing must agree with the core's on it like any other solid usable.
+            Terrain::CommsConsole,
             Terrain::Exit,
         ] {
             assert!(seen.contains(&t), "seed 4242 stamps no {t:?} to check");
