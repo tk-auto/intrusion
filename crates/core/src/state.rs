@@ -16,9 +16,9 @@
 //!   end the turn, so the world does not move and the guards do not get a go.
 //! - **Win and lose (§4.5), the only two.** *Lose:* a guard moving into your cell
 //!   captures you — contact, not detection, so being unseen is not being safe. *Win:*
-//!   take at least one intel ([`exit_ready`](State::exit_ready), §10.2 [START]), then
-//!   return to the exit you came in by; bumping it empty-handed refuses. There is no
-//!   health, no combat.
+//!   take enough intel for the run's gate ([`exit_ready`](State::exit_ready), §4.5/
+//!   §12.6 — quick play wants all of it, the sim one), then return to the exit you
+//!   came in by; bumping it short of the gate refuses. There is no health, no combat.
 //! - **The startup turn (§4.2).** One full turn runs at level start, before the first
 //!   input, so guards have position and sight established when the player first acts.
 //!
@@ -174,8 +174,8 @@ enum BumpKind {
     /// body inside and locks the cupboard — it is no longer a hideout. A spent
     /// turn; the player stays put and their hands come free.
     DepositBody,
-    /// The exit; `ready` is [`exit_ready`](State::exit_ready) — at least one intel in
-    /// hand (§10.2 [START]): win vs. refused.
+    /// The exit; `ready` is [`exit_ready`](State::exit_ready) — the run's intel gate
+    /// met (§4.5/§12.6): win vs. refused.
     Exit { ready: bool },
     /// An objective console still holding its intel.
     Intel,
@@ -303,9 +303,9 @@ pub enum Outcome {
     Lost,
 }
 
-/// One objective: an intel console and whether it has been taken. The v1 exit rule
-/// is *at least one intel required* ([`exit_ready`](State::exit_ready), §10.2 [START]),
-/// so the run is won once any objective is in hand.
+/// One objective: an intel console and whether it has been taken. How many of them
+/// the exit demands is the run's gate ([`exit_ready`](State::exit_ready), §4.5/§12.6),
+/// not a fixed rule — all of them in quick play, one in the sim, none in campaign.
 #[derive(Clone, Copy, Debug)]
 struct Objective {
     cell: Cell,
@@ -991,7 +991,9 @@ impl State {
                 true
             }
             BumpKind::Exit { ready: false } => {
-                events.push(Event::ExitRefused);
+                events.push(Event::ExitRefused {
+                    still_needed: self.intel_needed_to_exit(),
+                });
                 false
             }
             // An objective console: take the intel.
@@ -1002,8 +1004,13 @@ impl State {
                     .find(|o| o.cell == target && !o.taken)
                     .expect("bump_kind classified an untaken console here");
                 obj.taken = true;
-                let remaining = self.objectives.iter().filter(|o| !o.taken).count();
-                events.push(Event::IntelTaken { remaining });
+                // Both counts are read *after* the take, and they are not the same
+                // number: what is still out is the tally, what the gate still wants is
+                // the requirement (#310/§4.5).
+                events.push(Event::IntelTaken {
+                    remaining: self.objectives_remaining(),
+                    still_needed: self.intel_needed_to_exit(),
+                });
                 true
             }
             // The comms console (§7.3/§7.7): one bump kills the radio net for the rest

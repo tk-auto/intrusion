@@ -66,15 +66,35 @@ pub fn message_for(event: Event) -> Option<Message> {
         | Event::DoorClosed {
             by_player: false, ..
         } => return None,
-        // The exit opens on the *first* intel (§10.2 [START]); more is optional extra,
-        // not a requirement — so every take reports the exit is open, noting any that
-        // remain only as more to grab, never as a gate still to clear.
-        Event::IntelTaken { remaining: 0 } => ("all the intel — the exit is open".to_string(), 20),
-        Event::IntelTaken { remaining } => (
+        // How much intel is *enough* is the run's gate (§4.5/§12.6), never a fixed
+        // count — so what a take announces comes from `still_needed` (the gate's own
+        // answer, carried on the event) and not from the tally. At zero the exit is
+        // genuinely open and any consoles left are optional extra; above zero the take
+        // is progress, and the line says what is still owed instead of promising an
+        // exit that would refuse (#310).
+        Event::IntelTaken {
+            remaining: 0,
+            still_needed: 0,
+        } => ("all the intel — the exit is open".to_string(), 20),
+        Event::IntelTaken {
+            remaining,
+            still_needed: 0,
+        } => (
             format!("intel in hand — the exit is open ({remaining} more out)"),
             20,
         ),
-        Event::ExitRefused => ("the exit needs intel in hand first".to_string(), 20),
+        // Only `IntelGate::All` reaches here — the other gates are met by the first
+        // take, or never gate at all — so what is still needed is also all that is
+        // still out, and one number says both.
+        Event::IntelTaken { still_needed, .. } => {
+            (format!("intel in hand — {still_needed} more to go"), 20)
+        }
+        // The refusal names the requirement it enforces, so it can never contradict a
+        // take message from the same run: under `All` that is the rest of the set,
+        // under `AtLeastOne` the single console the player has yet to reach.
+        Event::ExitRefused { still_needed } => {
+            (format!("the exit needs {still_needed} more intel"), 20)
+        }
         // The §7.7 counterplay landing (§7.3): the whole net is down for the rest of
         // the level. Ranked with the objective feedback rather than on the threat
         // ladder — it is the payoff for a detour the player chose, and it must not be
@@ -176,8 +196,9 @@ pub fn near_line(state: &State) -> Message {
 /// Owned band matches the recoloured cupboard or table, §10.3). Otherwise, when
 /// the facility is on alert (§7.3), the standing alert level — a raised alert is
 /// the thing reshaping every choice out in the open, and this is where it stays
-/// *visible* rather than written-but-unseen (§2.3). Failing all that, the
-/// objective tally.
+/// *visible* rather than written-but-unseen (§2.3). Failing all that, the objective:
+/// what the run's intel gate still wants, or — once it is met — the exit (§4.5/#310).
+/// Never a bare tally of consoles: what is still *out* is not what is still *needed*.
 fn ambient(state: &State) -> Message {
     let (text, category) = if state.hidden() {
         (
@@ -202,25 +223,29 @@ fn ambient(state: &State) -> Message {
             Category::Warning,
         )
     } else if !state.exit_ready() {
-        // No intel yet: a plain count of what is still out. Grabbing any one opens the
-        // exit (§10.2 [START]); the take message is what announces that, so this stays
-        // a neutral tally, not a "collect them all" instruction.
+        // The gate is not met: state the **requirement**, not the tally. Under
+        // `AtLeastOne` with three consoles out, three are remaining but only one is
+        // needed, and a bare "intel remaining: 3" implies the wrong goal (#310).
         (
-            format!("intel remaining: {}", state.objectives_remaining()),
+            format!("{} more intel to leave", state.intel_needed_to_exit()),
+            Category::Interest,
+        )
+    } else if state.intel_in_hand() == 0 {
+        // The gate is met with nothing in hand — [`IntelGate::None`] (§14 v3's campaign,
+        // where intel is currency, §2.2) or a facility with no consoles at all. Say the
+        // exit is open and claim nothing about what is held (#310).
+        ("the exit is open".to_string(), Category::Interest)
+    } else if state.objectives_remaining() == 0 {
+        (
+            "all intel in hand — reach the exit".to_string(),
             Category::Interest,
         )
     } else {
-        // The exit opened on the first intel; anything still out is optional extra.
-        match state.objectives_remaining() {
-            0 => (
-                "all intel in hand — reach the exit".to_string(),
-                Category::Interest,
-            ),
-            _ => (
-                "intel in hand — reach the exit".to_string(),
-                Category::Interest,
-            ),
-        }
+        // The gate is met; anything still out is optional extra.
+        (
+            "intel in hand — reach the exit".to_string(),
+            Category::Interest,
+        )
     };
     Message {
         text,
@@ -235,6 +260,7 @@ mod tests {
     use crate::cell::{Cell, Direction};
     use crate::facility::Terrain;
     use crate::guard::Guard;
+    use crate::modifiers::{IntelGate, LevelModifiers};
     use crate::state::Input;
     use crate::test_support::open_room;
 
@@ -272,7 +298,7 @@ mod tests {
         let mut s = state(Cell::new(5, 6), Cell::new(3, 3));
         s.step(Input::Step(Direction::West)); // a plain move: narrates nothing
         assert_eq!(near_line(&s).priority, i32::MIN, "a move narrates nothing");
-        assert_eq!(near_line(&s).text, "intel remaining: 1");
+        assert_eq!(near_line(&s).text, "1 more intel to leave");
 
         let mut s = state(Cell::new(3, 4), Cell::new(3, 3));
         s.step(Input::Step(Direction::North)); // take the intel: a loud message
@@ -313,8 +339,11 @@ mod tests {
             Vec::new(),
             Cell::new(10, 10),
         );
-        s.step(Input::Wait); // no cover adjacent: waiting narrates nothing
-        assert_eq!(near_line(&s).text, "all intel in hand — reach the exit");
+        // No cover adjacent, so waiting narrates nothing and the floor shows. This
+        // facility has no consoles: the exit is open with nothing in hand, and the line
+        // says exactly that rather than claiming intel the player never took (#310).
+        s.step(Input::Wait);
+        assert_eq!(near_line(&s).text, "the exit is open");
     }
 
     /// A crouch engaging is a message (Owned, §10.3); holding the crouch on the
@@ -561,6 +590,195 @@ mod tests {
             Some(near_line(&s)),
             "the list leads with exactly the near line's band",
         );
+    }
+
+    /// A facility with three consoles ringing the player and the exit one step
+    /// south, gated by `gate` (§4.5/#244). Bumping north, east and west takes the
+    /// three intel in turn — a bump moves nobody — and bumping south answers the
+    /// exit.
+    fn gated(gate: IntelGate) -> State {
+        State::new(
+            open_room(12, 12),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(5, 4), Cell::new(6, 5), Cell::new(4, 5)],
+            Cell::new(5, 6),
+        )
+        .with_modifiers(LevelModifiers {
+            intel_to_exit: gate,
+            ..LevelModifiers::default()
+        })
+    }
+
+    /// The directions that take the three consoles of [`gated`], in order.
+    const TAKES: [Direction; 3] = [Direction::North, Direction::East, Direction::West];
+
+    /// Every phrase the near line uses about the intel gate, checked against the
+    /// state that produced it: a claim that the exit is open must have
+    /// [`State::exit_ready`] behind it, a claim that intel is still owed must not, and
+    /// nothing claims intel the player is not holding. This is the #310 invariant — the
+    /// objective band derives from the gate, never from a fixed intel count — so a
+    /// future gate or rewording that re-breaks it fails here rather than on screen.
+    fn assert_objective_messages_are_honest(s: &State) {
+        let mut lines: Vec<String> = live_messages(s).into_iter().map(|m| m.text).collect();
+        lines.push(near_line(s).text);
+        lines.push(ambient(s).text);
+        for text in lines {
+            if text.contains("the exit is open") || text.contains("reach the exit") {
+                assert!(
+                    s.exit_ready(),
+                    "{text:?} promises an exit that would refuse",
+                );
+            }
+            if text.contains("more intel") || text.contains("more to go") {
+                assert!(
+                    !s.exit_ready(),
+                    "{text:?} asks for intel the gate no longer wants",
+                );
+            }
+            if text.contains("intel in hand") {
+                assert!(
+                    s.intel_in_hand() > 0,
+                    "{text:?} claims intel that is not in hand",
+                );
+            }
+        }
+    }
+
+    /// #310, the invariant the bug violated: across **all three gates** and every
+    /// amount of intel in hand, no message ever claims the exit is open unless it is —
+    /// take messages, refusals and the ambient floor alike.
+    #[test]
+    fn no_message_promises_an_exit_that_would_refuse() {
+        for gate in [IntelGate::None, IntelGate::AtLeastOne, IntelGate::All] {
+            for takes in 0..=TAKES.len() {
+                let mut s = gated(gate);
+                assert_objective_messages_are_honest(&s); // before touching anything
+                for dir in TAKES.iter().take(takes) {
+                    s.step(Input::Step(*dir));
+                    assert_objective_messages_are_honest(&s);
+                }
+                // Answer the exit: a win if the gate is met, a refusal if it is not —
+                // and either way the line that says so has to be true.
+                let ready = s.exit_ready();
+                let events = s.step(Input::Step(Direction::South));
+                assert_eq!(
+                    events.iter().any(|e| matches!(e, Event::Won)),
+                    ready,
+                    "{gate:?} with {takes} taken: the exit answered against its gate",
+                );
+                assert_objective_messages_are_honest(&s);
+            }
+        }
+    }
+
+    /// #310's headline case: under [`IntelGate::All`] — quick play, every real player's
+    /// first run — taking the first of three intel is **progress**, not a green light.
+    /// The old message announced an open exit that then refused the walk across the
+    /// facility; now the take says what is still owed, and only the last one opens it.
+    #[test]
+    fn the_all_intel_gate_does_not_announce_the_exit_on_the_first_take() {
+        let mut s = gated(IntelGate::All);
+
+        s.step(Input::Step(Direction::North));
+        assert_eq!(near_line(&s).text, "intel in hand — 2 more to go");
+        s.step(Input::Step(Direction::East));
+        assert_eq!(near_line(&s).text, "intel in hand — 1 more to go");
+
+        s.step(Input::Step(Direction::West));
+        assert_eq!(
+            near_line(&s).text,
+            "all the intel — the exit is open",
+            "the last take is the one that opens the exit",
+        );
+        assert!(s.exit_ready());
+    }
+
+    /// Under [`IntelGate::AtLeastOne`] the take message is **unchanged** — one intel
+    /// does open the exit, and the two still out are optional extra — but the ambient
+    /// floor no longer reports the tally as the requirement: three consoles are out,
+    /// one is needed, and that is what the line says (#310).
+    #[test]
+    fn the_at_least_one_gate_states_the_requirement_not_the_tally() {
+        let mut s = gated(IntelGate::AtLeastOne);
+        s.step(Input::Wait); // a quiet turn: the near line rests on the floor
+        assert_eq!(near_line(&s).text, "1 more intel to leave");
+        assert_eq!(
+            s.objectives_remaining(),
+            3,
+            "…with three consoles still out"
+        );
+
+        s.step(Input::Step(Direction::North));
+        assert_eq!(
+            near_line(&s).text,
+            "intel in hand — the exit is open (2 more out)",
+        );
+    }
+
+    /// Under [`IntelGate::None`] (§14 v3's campaign, where intel is currency, §2.2) the
+    /// exit never refuses, so no message ever asks for intel — and with nothing in hand
+    /// the floor says the exit is open without claiming intel the player has not taken.
+    #[test]
+    fn the_none_gate_never_asks_for_intel() {
+        let mut s = gated(IntelGate::None);
+        s.step(Input::Wait);
+        assert_eq!(near_line(&s).text, "the exit is open");
+
+        let events = s.step(Input::Step(Direction::South));
+        assert!(
+            events.contains(&Event::Won),
+            "the exit accepts empty hands under `None`: {events:?}",
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::ExitRefused { .. })),
+            "`None` never refuses",
+        );
+    }
+
+    /// §4.5/#310: a refusal names the **real** requirement — how many more consoles the
+    /// gate wants — so it can never contradict a take message from the same run. The
+    /// bug's compounding half: told the exit was open, the player crossed the facility
+    /// and was told it "needs intel in hand first" while holding intel.
+    #[test]
+    fn a_refusal_names_what_the_gate_still_wants() {
+        let mut s = gated(IntelGate::All);
+        let refused = s.step(Input::Step(Direction::South));
+        assert_eq!(refused, vec![Event::ExitRefused { still_needed: 3 }]);
+        assert_eq!(near_line(&s).text, "the exit needs 3 more intel");
+
+        s.step(Input::Step(Direction::North)); // one in hand, two still owed
+        let take = near_line(&s).text;
+        let refused = s.step(Input::Step(Direction::South));
+        assert_eq!(refused, vec![Event::ExitRefused { still_needed: 2 }]);
+        assert_eq!(near_line(&s).text, "the exit needs 2 more intel");
+        assert!(
+            !take.contains("the exit is open"),
+            "the take and the refusal cannot disagree about the same gate: {take:?}",
+        );
+
+        // The baseline gate asks for the one console it needs, not the three that are
+        // out — the tally is not the requirement.
+        let mut s = gated(IntelGate::AtLeastOne);
+        assert_eq!(
+            s.step(Input::Step(Direction::South)),
+            vec![Event::ExitRefused { still_needed: 1 }],
+        );
+        assert_eq!(near_line(&s).text, "the exit needs 1 more intel");
+    }
+
+    /// §8.2/§4.4-adjacent bookkeeping this ticket must not disturb: a refusal is free
+    /// and changes nothing, so a player who bumps the exit early loses no turn to the
+    /// corrected message.
+    #[test]
+    fn a_refusal_still_costs_nothing() {
+        let mut s = gated(IntelGate::All);
+        s.step(Input::Step(Direction::South));
+        assert_eq!(s.turn(), 0, "a refused exit is free (§4.5)");
+        assert_eq!(s.player(), Cell::new(5, 5), "and moves nobody");
     }
 
     /// A quiet action raises no message: [`live_messages`] is empty and the near

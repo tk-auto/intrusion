@@ -1095,7 +1095,10 @@ mod tests {
         // Bump the console east to take the intel; the player does not move.
         assert_eq!(
             s.step(Input::Step(Direction::East)),
-            vec![Event::IntelTaken { remaining: 0 }],
+            vec![Event::IntelTaken {
+                remaining: 0,
+                still_needed: 0
+            }],
         );
         assert_eq!(
             s.player(),

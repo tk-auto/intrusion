@@ -255,13 +255,19 @@ fn win_requires_all_intel_then_the_exit() {
 
     // Bumping the exit early: refused, free, still playing.
     let events = s.step(Input::Step(Direction::South));
-    assert_eq!(events, vec![Event::ExitRefused]);
+    assert_eq!(events, vec![Event::ExitRefused { still_needed: 1 }]);
     assert_eq!(s.outcome(), Outcome::Playing);
     assert_eq!(s.turn(), 0);
 
     // Take the intel by bumping the console to the east.
     let events = s.step(Input::Step(Direction::East));
-    assert_eq!(events, vec![Event::IntelTaken { remaining: 0 }]);
+    assert_eq!(
+        events,
+        vec![Event::IntelTaken {
+            remaining: 0,
+            still_needed: 0
+        }],
+    );
     assert_eq!(s.objectives_remaining(), 0);
     assert_eq!(
         s.player(),
@@ -495,7 +501,10 @@ fn one_intel_opens_the_exit() {
     assert!(!s.exit_ready(), "empty-handed: the exit is not yet open");
     // Bumping the exit with no intel refuses (free, §4.5).
     let events = s.step(Input::Step(Direction::South));
-    assert!(events.contains(&Event::ExitRefused), "refused empty-handed");
+    assert!(
+        events.contains(&Event::ExitRefused { still_needed: 1 }),
+        "refused empty-handed, wanting the one intel the gate asks for",
+    );
     assert_eq!(s.outcome(), Outcome::Playing);
 
     // Take one console (bump north), leaving the other out.
@@ -538,8 +547,8 @@ fn the_all_intel_gate_requires_the_full_set() {
     );
     let events = s.step(Input::Step(Direction::South));
     assert!(
-        events.contains(&Event::ExitRefused),
-        "the exit refuses a partial set under the all-intel gate",
+        events.contains(&Event::ExitRefused { still_needed: 1 }),
+        "the exit refuses a partial set under the all-intel gate, wanting the rest",
     );
     assert_eq!(s.outcome(), Outcome::Playing);
 
