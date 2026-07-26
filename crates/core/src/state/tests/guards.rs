@@ -1615,3 +1615,145 @@ fn a_confused_guards_cone_leaves_the_danger_overlay() {
         "a confused guard's cone is off — no danger overlay from a blinded guard",
     );
 }
+
+/// **One reading governs every pass** (§4.2/§8.3, #275). Phase 3 resolves whether
+/// each guard is confused *once*, before any guard is touched, and all five passes
+/// read that same snapshot. Here a single suppressed guard is denied three of them in
+/// the same turn — it does not find the body dropped in its cone (§7.2), does not
+/// check the cupboard beside it (§15 Q5), and does not move (§7.5) — and then wins
+/// all three back together the turn the window lapses.
+///
+/// This is the invariant that used to be argued for in a comment: the movement pass
+/// re-asked [`State::guard_confused`] live rather than reading the snapshot the other
+/// four shared. Two readings of one fact that merely happen to agree are the shape of
+/// #199/#200, so the agreement is pinned here instead of asserted in prose.
+#[test]
+fn one_confusion_reading_governs_every_pass_of_the_phase() {
+    // The §7.2 found-body scenario, run inside a Confusion bubble. A one-wide corridor
+    // along x=5 keeps the finder's cone straight down the column.
+    let mut layout = open_room(11, 11);
+    for y in 1..10 {
+        layout.place(Cell::new(4, y), Terrain::Wall);
+        layout.place(Cell::new(6, y), Terrain::Wall);
+    }
+    layout.place(Cell::new(5, 7), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 7), // hidden in the cupboard, striking north
+        Direction::North,
+        vec![
+            Guard::stationary(Cell::new(5, 6)), // the victim
+            Guard::patrolling_to(Cell::new(5, 1), Cell::new(5, 5)), // the finder
+        ],
+        Vec::new(),
+        Cell::new(5, 9),
+    );
+    // The startup turn (§4.2) walks the finder one step down the corridor, to well
+    // inside the bubble — this whole test hangs on it being suppressed.
+    let finder_start = s.guards()[1].pos();
+    assert!(
+        Cell::new(5, 7).sight_distance(finder_start) <= CONFUSION_RADIUS,
+        "the finder starts inside the bubble at {finder_start:?}",
+    );
+
+    s.step(Input::Activate(AbilityId::Confusion));
+    let frozen_at = s.guards()[1].pos();
+    let body = Cell::new(5, 6);
+    let events = s.step(Input::Step(Direction::North));
+    assert_eq!(
+        events,
+        vec![Event::TakenDown { at: body }],
+        "pass 2: a blind guard does not find the body dropped in its cone",
+    );
+
+    // The victim is gone, so the finder is now the only guard left.
+    assert_eq!(s.guards().len(), 1);
+
+    // Three passes denied, all from the one reading, for the whole window.
+    for turn in 0..3 {
+        assert!(!s.bodies()[0].found(), "turn {turn}: pass 2 still skipped");
+        assert_eq!(
+            s.guards()[0].witnessed_hideout(),
+            None,
+            "turn {turn}: pass 3 skipped — no cupboard check from a frozen guard",
+        );
+        assert_eq!(
+            s.guards()[0].pos(),
+            frozen_at,
+            "turn {turn}: pass 5 skipped — the same reading freezes the step",
+        );
+        s.step(Input::Wait);
+    }
+
+    // The window lapses (duration 6) and every pass resumes together — which is what
+    // makes the skips above a suppression rather than a cancellation (§8.2).
+    let mut found = false;
+    for _ in 0..3 {
+        if s.step(Input::Wait)
+            .iter()
+            .any(|e| matches!(e, Event::BodyFound { at } if *at == body))
+        {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "pass 2 resumes: the body is found once the guard can see"
+    );
+    assert_eq!(
+        s.guards()[0].witnessed_hideout(),
+        Some(Cell::new(5, 7)),
+        "pass 3 resumes: the cupboard beside the found body is checked (§15 Q5)",
+    );
+}
+
+/// The snapshot is taken **before any guard moves**, and a guard is judged by where
+/// it stood as the phase opened — not by where its own step leaves it (§8.3/#240).
+///
+/// A hunter one cell outside the bubble therefore still takes its step this turn,
+/// even though that step carries it *inside*; it is frozen from the next turn on.
+/// Re-deriving suppression after the step would freeze it a turn early, which is the
+/// concrete way a second reading of the same fact would show up.
+#[test]
+fn a_guard_is_judged_where_the_phase_found_it_not_where_its_step_lands() {
+    // The startup world phase (§4.2) walks this patroller one step toward the player,
+    // to (10, 3) — a sight_distance of 7, one clear of the bubble. At that range it is
+    // a §7.6 *glimpse*, so the guard Investigates rather than Chases; either way it
+    // closes, which is all this test needs.
+    let mut s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::North,
+        vec![Guard::patrolling(Cell::new(10, 2))],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    assert_eq!(s.guards()[0].pos(), Cell::new(10, 3));
+    assert_ne!(s.guards()[0].state(), GuardState::Calm, "a live lead");
+    assert!(
+        !s.guard_confused(&s.guards()[0]),
+        "one cell outside the bubble as the turn opens",
+    );
+
+    // Activation turn: the phase found it outside, so it acts — and its step lands it
+    // inside. Both halves matter: it moved, and it is now suppressed.
+    s.step(Input::Activate(AbilityId::Confusion));
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(10, 4),
+        "judged where the phase found it, so its step still happens",
+    );
+    assert!(
+        s.guard_confused(&s.guards()[0]),
+        "and that step carried it into the bubble",
+    );
+
+    // From here the snapshot reads it as suppressed, so it is frozen.
+    s.step(Input::Wait);
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(10, 4),
+        "frozen from the next phase on",
+    );
+}
