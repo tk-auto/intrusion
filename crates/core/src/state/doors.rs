@@ -150,6 +150,39 @@ impl State {
         )
     }
 
+    /// The door whose **hinge** `cell` is (§10.4) — the solid frame end you bump to
+    /// open (#148) or close — or `None` for a panel, or a cell on no door at all. The
+    /// one place hinge-ness is decided, so the #148 peek and the #320 frame mark ask
+    /// the same question. A frameless **automatic** door (#147) has no hinges, so
+    /// every one of its cells answers `None` and neither behaviour can reach it.
+    pub(super) fn hinge_door_at(&self, cell: Cell) -> Option<DoorId> {
+        let regions = self.layout.regions();
+        let id = regions.door_at(cell)?;
+        (regions.door(id).role(cell)? == DoorCell::Hinge).then_some(id)
+    }
+
+    /// Whether bumping `cell` is the **withheld frame** (#320): the hinge of the door
+    /// the player's immediately preceding action opened, whose close is suppressed for
+    /// exactly that one action so the bump can be read as a dead bump and slid past
+    /// (#57) instead of undoing the open. False for every other hinge — a door already
+    /// open, one a guard opened, one whose mark has expired — which close as always
+    /// (§10.4: the hinge is the handle).
+    pub(super) fn frame_bump_withheld(&self, cell: Cell) -> bool {
+        self.door_just_opened.is_some() && self.hinge_door_at(cell) == self.door_just_opened
+    }
+
+    /// Expire the #320 frame mark at the end of an action, `carried` being the mark
+    /// the action *started* with. The window is exactly one action — free or spent,
+    /// a bump, a wait, an ability, anything — so unless phase 1 has just replaced the
+    /// mark with a fresh hinge open, whatever was carried in is spent and cleared.
+    /// Clearing it is pure bookkeeping, never a world change, so it does not make a
+    /// free action cost the turn (§4.4).
+    pub(super) fn expire_frame_bump_mark(&mut self, carried: Option<DoorId>) {
+        if self.door_just_opened == carried {
+            self.door_just_opened = None;
+        }
+    }
+
     /// Whether `cell` is a door **panel** — the walk-through part of a doorway, as
     /// opposed to a hinge (the solid handle, #148). The Autodoors step (§8.3) offers
     /// only a panel, since a hinge cannot be stood on even once the door is open.

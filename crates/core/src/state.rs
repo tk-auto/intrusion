@@ -210,6 +210,16 @@ enum BumpKind {
     /// hinge. Only an **open panel** is *not* a door action: it classifies as
     /// [`BumpKind::Move`], the walk-through, exactly as the bump resolves.
     Door { action: DoorAction },
+    /// The **hinge of a door the player's immediately preceding action opened**
+    /// (#320): the close is withheld for exactly that one action, so the frame is a
+    /// **dead bump** — offered to the #57 lateral shift, which rounds the player onto
+    /// the open panel — instead of shutting what they just opened. Named apart from
+    /// [`Solid`](BumpKind::Solid) because the cell is anything but: the door is open,
+    /// the close is merely one action away, and the §11.4 usable line must go quiet on
+    /// it rather than promise a *close door* the bump will not deliver. Any other
+    /// hinge bump on an open door — one already open, one a guard opened, one whose
+    /// mark has expired — is the ordinary [`Door`](BumpKind::Door) close (§10.4).
+    HingeHeld,
     /// A closed door **panel** the player walks straight through because the
     /// **Autodoors** ability is active (§8.3/§7.6): the door opens as they step into
     /// it — no manual bump — and is armed to shut behind them. Movement, not a
@@ -273,6 +283,9 @@ impl BumpKind {
             | BumpKind::Door {
                 action: DoorAction::Obstructed,
             }
+            // The withheld frame (#320) offers nothing: while the suppression stands
+            // the bump will not close the door, so the line must not say it will.
+            | BumpKind::HingeHeld
             | BumpKind::HideoutBlocked
             | BumpKind::DuctCrawl
             | BumpKind::CrouchHeld
@@ -383,6 +396,19 @@ pub struct State {
     /// on the turn it actually happens (a guard that later aims its cone at an occupied
     /// cupboard did not see the player go in, and never gains the flush, §10.3).
     entered_hideout: Option<Cell>,
+    /// The door **the player's immediately preceding action opened from its hinge**
+    /// (#320/#148), or `None`. It suppresses the very next frame bump on that door:
+    /// bumping the hinge again would otherwise shut what you just opened, so while
+    /// the mark stands the frame reads as a dead bump ([`BumpKind::HingeHeld`]) and
+    /// is offered to the #57 lateral shift instead — you round the frame onto the
+    /// open panel rather than undoing the open. Written only by phase 1's own door
+    /// arm, so the world's doors (a guard's open, the #147 auto-close, the Autodoors
+    /// step) never set it, and expired by
+    /// [`expire_frame_bump_mark`](Self::expire_frame_bump_mark) at the end of every
+    /// action, free or spent — the smallest window that fixes the catch and keeps
+    /// "bump a hinge to close" one action away at all times. Derived purely from the
+    /// input stream, so a replay reproduces it (§12.4).
+    door_just_opened: Option<DoorId>,
     guards: Vec<Guard>,
     /// The bodies takedowns have left (§7.2) — solid entities the level owns
     /// (§12.3), each remembering its guard's post for the radio net (§7.3).
@@ -581,6 +607,7 @@ impl State {
             moved_this_turn: false,
             crouched_behind: None,
             entered_hideout: None,
+            door_just_opened: None,
             guards,
             bodies: Vec::new(),
             dragging: None,
@@ -781,7 +808,13 @@ impl State {
         self.spotters.clear();
         // Phase 1. A free action (wall bump, refused exit) does not end the turn.
         let from = self.player;
+        // The frame-bump mark (#320) has to survive *into* this action to be readable
+        // at all — `bump_kind` consults it, and so does the §11.4 usable line between
+        // turns — so it is expired at the far end of phase 1 rather than at the head
+        // of the turn like `entered_hideout`. Held across the resolve, spent by it.
+        let carried = self.door_just_opened;
         let spent = self.player_phase(input, &mut events);
+        self.expire_frame_bump_mark(carried);
 
         if self.outcome == Outcome::Playing && spent {
             self.turn += 1;
@@ -1077,6 +1110,12 @@ impl State {
             BumpKind::Door { action } => match action {
                 DoorAction::Opened => {
                     self.operate_door(target);
+                    // Remember a *hinge* open (#320) so the very next bump on this
+                    // frame slides past the door instead of shutting it again. Only
+                    // the hinge open is marked: opening from a panel leaves the player
+                    // facing an open panel they walk through, never a frame they could
+                    // bump next, so there is nothing there to catch on.
+                    self.door_just_opened = self.hinge_door_at(target);
                     // Frame bump (#148): opening from a *hinge* turns the player to
                     // face along the door line toward the panels, so the recomputed
                     // FOV + #121 peek leans through the doorway from beside it — the
@@ -1189,13 +1228,18 @@ impl State {
                 true
             }
             // A cupboard already holding an actor or locked by a stowed body, the
-            // table already crouched behind, or anything else solid (a wall, a
-            // pillar): a free bump (§4.4). A closed hinge is no longer here — it
-            // opens the door now (#148, `BumpKind::Door`). Before it no-ops, the
-            // traversal experiment (#57) gets a chance to read the dead bump as an
-            // unambiguous sidestep and slide one cell past it; only if it declines
-            // does the bump fall through to the free wall-bump it has always been.
-            BumpKind::HideoutBlocked | BumpKind::CrouchHeld | BumpKind::Solid => {
+            // table already crouched behind, the frame of the door just opened
+            // (#320), or anything else solid (a wall, a pillar): a free bump (§4.4).
+            // A closed hinge is no longer here — it opens the door now (#148,
+            // `BumpKind::Door`). Before it no-ops, the traversal experiment (#57) gets
+            // a chance to read the dead bump as an unambiguous sidestep and slide one
+            // cell past it; only if it declines does the bump fall through to the free
+            // wall-bump it has always been — and a declined slide never closes the
+            // just-opened door in the same breath, which is the whole point of #320.
+            BumpKind::HingeHeld
+            | BumpKind::HideoutBlocked
+            | BumpKind::CrouchHeld
+            | BumpKind::Solid => {
                 if self.try_lateral_shift(dir, events) {
                     true
                 } else {
@@ -1251,11 +1295,7 @@ impl State {
     /// open (or any non-door cell) leaves facing to §5, so the caller applies this
     /// only for the hinge case.
     fn hinge_peek_facing(&self, target: Cell) -> Option<Direction> {
-        let regions = self.layout.regions();
-        let door = regions.door(regions.door_at(target)?);
-        if door.role(target)? != DoorCell::Hinge {
-            return None;
-        }
+        let door = self.layout.regions().door(self.hinge_door_at(target)?);
         // A door is a straight line of hinges around panels, so exactly one panel is
         // orthogonally adjacent to each end hinge: that neighbour is the way in.
         let panel = door
@@ -1359,6 +1399,15 @@ impl State {
             return BumpKind::SilenceRadio;
         }
         if let Some(action) = self.layout.preview_door_bump(target, |c| self.occupied(c)) {
+            // The withheld frame (#320): the hinge of the door the player's *previous*
+            // action opened does not shut it — for that one action it is a dead bump
+            // that the #57 slide can round instead, so a player walking into a doorway
+            // slightly off-line gets through rather than undoing their own open. Only
+            // the close is withheld; an obstructed one is already a free no-op (doors
+            // never crush) and is left exactly as it was.
+            if action == DoorAction::Closed && self.frame_bump_withheld(target) {
+                return BumpKind::HingeHeld;
+            }
             // Autodoors (§8.3/§7.6): a closed door in the path opens and is walked
             // through in one step — but only when the opened cell is a walkable panel.
             // A hinge (#148) also opens the door on a bump, yet the hinge itself stays
