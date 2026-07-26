@@ -122,8 +122,9 @@ fn ability_statuses_are_the_economy_deck_in_order() {
         .collect();
     assert_eq!(ids, innate, "one row per held ability, in order");
 
-    // A held passive earns a row of its own, reading `(on)` rather than any clock
-    // state (#264) — the line lists what you hold, whether or not you can press it.
+    // A held passive earns a row of its own (#264) — the line lists what you hold,
+    // whether or not you can press it. It draws no notation for now; the always-on
+    // marker is left to the ability line/panel rework.
     let with_passive = solo(Cell::new(4, 4)).with_loadout(Loadout::full());
     let rows = with_passive.ability_statuses();
     assert_eq!(
@@ -136,7 +137,7 @@ fn ability_statuses_are_the_economy_deck_in_order() {
         .find(|st| st.id == AbilityId::Vision)
         .expect("the passive has a row");
     assert_eq!(vision.state, AbilityState::Passive);
-    assert_eq!(vision.compact(), "v(on)");
+    assert_eq!(vision.compact(), "v", "the bare key, undecorated for now");
 
     // Each row mirrors the live economy state.
     s.step(Input::Activate(AbilityId::Run));

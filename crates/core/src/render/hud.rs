@@ -522,8 +522,10 @@ fn overlay_ability_panel(grid: &mut Grid, origin: (u32, u32), statuses: &[Abilit
 /// — ready, active, or a passive in effect — is **Owned** (blue, "yours, in hand");
 /// a cooling one is **System** (the muted furniture tan, "unavailable, will
 /// return"); an unusable one is **Ground** (dim gray, receding) — discoverable but
-/// plainly not an option now. The `[N]` / `/N/` / `(on)` notation carries the rest,
-/// so those three share a colour without ambiguity.
+/// plainly not an option now. The `[N]` / `/N/` notation carries the rest, so those
+/// three share a colour without ambiguity — a passive is undecorated for now (#264),
+/// reading exactly like the ready abilities it sits beside until the line rework
+/// gives it a marker of its own.
 fn panel_category(state: AbilityState) -> Category {
     match state {
         AbilityState::Ready | AbilityState::Active { .. } | AbilityState::Passive => {

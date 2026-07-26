@@ -696,10 +696,12 @@ Three consequences worth stating, because they are what keep the model honest:
 - **Held is on.** There is no activation moment — nothing for a replay, a save,
   or a mid-run pickup to get out of step with. Picking a passive up switches it
   on; dropping it is the only off.
-- **It reads as its own state**, `(on)` — not `Ready`, not `Active [N]`. The
-  four clock states all mean "and then it ends", and a passive never does;
-  reusing `Active` would make the number the panel shows a fiction, which is the
-  one thing the timing trap above forbids.
+- **It reads as its own state** — not `Ready`, not `Active [N]`. The four clock
+  states all mean "and then it ends", and a passive never does; reusing `Active`
+  would make the number the panel shows a fiction, which is the one thing the
+  timing trap above forbids. What that state *draws* is **[OPEN]**: it carries no
+  notation today (the bare key, like a ready ability), deliberately left for the
+  ability line/panel rework to decide rather than fixed here.
 - **It is still an `Effect` list** (§8.1). A passive is not a parallel system —
   the same effect vocabulary, applied continuously instead of for a window.
 

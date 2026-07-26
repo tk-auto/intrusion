@@ -53,13 +53,22 @@ pub enum AbilityState {
     /// Recharging, with `remaining` turns of cooldown left — shown `/N/` (§11.4).
     Cooling { remaining: u32 },
     /// A **passive** ability (§8.2/#264): in effect for as long as it is held, with
-    /// no activation, no duration and no cooldown — shown `(on)`.
+    /// no activation, no duration and no cooldown.
     ///
     /// Its own state deliberately, rather than a permanent
     /// [`Active`](AbilityState::Active): the clock states all carry "and then it
     /// ends", and a passive never does. Stretching `Active` to mean always-on would
     /// make the number the panel shows a fiction, which is the one thing §8.2's
-    /// timing note forbids.
+    /// timing note forbids — and it would put a countdown on the line for something
+    /// that never counts down.
+    ///
+    /// It currently carries **no notation of its own** — the line shows the bare
+    /// key, as it does for [`Ready`](AbilityState::Ready). An earlier pass drew it
+    /// `(on)`; that is held back until the ability line/panel rework lands, so the
+    /// new surface can decide how an always-on ability should read rather than
+    /// inheriting a notation invented here. The *state* stays distinct regardless
+    /// — that is what keeps a passive from ever reading as pressable — so giving it
+    /// a notation later is a change to [`suffix`](Self::suffix) alone.
     Passive,
     /// Not usable right now for a reason other than cooldown — no adjacent target
     /// for a takedown, no body to drag (§8.3). Discoverable, but greyed.
@@ -68,20 +77,19 @@ pub enum AbilityState {
 
 impl AbilityState {
     /// The state's notation appended after the ability name (§11.4): `[N]` while
-    /// active, `/N/` while cooling, `(on)` for a passive, a lone `—` while
-    /// unusable, and nothing at all when ready — a ready ability needs no
-    /// decoration, only its name and key.
+    /// active, `/N/` while cooling, a lone `—` while unusable, and nothing at all
+    /// when ready — a ready ability needs no decoration, only its name and key.
     ///
     /// The number is rendered verbatim from the state, so what the panel shows is
     /// exactly what the player gets (§8.2) — the advertised-vs-real gap the old UI
-    /// had cannot open here. A passive carries no number for the same reason: it
-    /// has none to carry (#264).
+    /// had cannot open here. A **passive** carries no notation at all (#264): it has
+    /// no number to carry, and the always-on marker it might otherwise show is left
+    /// to the ability line/panel rework rather than invented here.
     pub fn suffix(self) -> String {
         match self {
-            AbilityState::Ready => String::new(),
+            AbilityState::Ready | AbilityState::Passive => String::new(),
             AbilityState::Active { remaining } => format!("[{remaining}]"),
             AbilityState::Cooling { remaining } => format!("/{remaining}/"),
-            AbilityState::Passive => "(on)".to_string(),
             AbilityState::Unusable => "—".to_string(),
         }
     }
@@ -126,17 +134,19 @@ impl AbilityStatus {
     }
 
     /// The compact readout for the **always-on ability line** (§11.4): just the
-    /// hotkey, with the active/cooling number — or a passive's `(on)` — tucked
-    /// inline (`c[7]`, `d/12/`, `v(on)`). Ready and unusable abilities show the
-    /// bare key — their state is carried by colour alone, keeping the strip to one
-    /// glyph each so the whole set fits a single row. The full name lives only in
-    /// the deployed panel ([`Self::label`]).
+    /// hotkey, with the active/cooling number tucked inline (`c[7]`, `d/12/`).
+    /// Ready, passive and unusable abilities show the bare key — their state is
+    /// carried by colour alone, keeping the strip to one glyph each so the whole
+    /// set fits a single row. The full name lives only in the deployed panel
+    /// ([`Self::label`]).
     pub fn compact(&self) -> String {
         match self.state {
-            AbilityState::Active { .. } | AbilityState::Cooling { .. } | AbilityState::Passive => {
+            AbilityState::Active { .. } | AbilityState::Cooling { .. } => {
                 format!("{}{}", self.hotkey(), self.state.suffix())
             }
-            AbilityState::Ready | AbilityState::Unusable => self.hotkey().to_string(),
+            AbilityState::Ready | AbilityState::Passive | AbilityState::Unusable => {
+                self.hotkey().to_string()
+            }
         }
     }
 }
@@ -899,24 +909,30 @@ mod tests {
         assert_eq!(compact(AbilityState::Cooling { remaining: 12 }), "c/12/");
     }
 
-    /// A passive reads as **its own** state everywhere the panel speaks (#264):
-    /// `(on)` — never `Ready` (which would invite a press), never `Active [N]`
-    /// (which would promise a countdown that does not exist).
+    /// A passive draws **no notation** for now (#264): the bare key and name, like a
+    /// ready ability. The always-on marker an earlier pass drew (`(on)`) is held
+    /// back for the ability line/panel rework, so the new surface picks it.
+    ///
+    /// What must survive that decision is the *state*: `Passive` is still its own
+    /// case, never `Active { .. }` — so nothing can start showing a countdown for
+    /// an ability that never counts down, and giving it a marker later touches
+    /// [`AbilityState::suffix`] alone.
     #[test]
-    fn a_passive_reads_as_on_and_never_as_a_clock_state() {
-        assert_eq!(AbilityState::Passive.suffix(), "(on)");
+    fn a_passive_draws_no_notation_but_is_still_its_own_state() {
+        assert_eq!(AbilityState::Passive.suffix(), "");
         let status = AbilityStatus {
             id: AbilityId::Vision,
             state: AbilityState::Passive,
         };
-        assert_eq!(status.label(), "v Vision (on)");
-        assert_eq!(status.compact(), "v(on)");
-        // Distinct from every clock state, with no number to be a fiction.
-        assert_ne!(AbilityState::Passive.suffix(), AbilityState::Ready.suffix());
+        assert_eq!(status.label(), "v Vision");
+        assert_eq!(status.compact(), "v");
+        // Undecorated like Ready, but never the same *state* as Ready or a clock.
+        assert_ne!(AbilityState::Passive, AbilityState::Ready);
         for n in 0..4 {
+            assert_ne!(AbilityState::Passive, AbilityState::Active { remaining: n });
             assert_ne!(
-                AbilityState::Passive.suffix(),
-                AbilityState::Active { remaining: n }.suffix(),
+                AbilityState::Passive,
+                AbilityState::Cooling { remaining: n }
             );
         }
     }
