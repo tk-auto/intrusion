@@ -30,9 +30,20 @@
 //! Calm guard, sweeps its territory toward the farthest cell it has not yet looked at.
 //! Guards detect on **vision alone** (§9 **[SETTLED]** — there is no sound, no
 //! hearing): a player in a guard's cone flips it to Chasing or Investigating (§7.6),
-//! and it stands back down to patrol once the lead runs out. The rest of the §7.4
-//! state machine — searching, decoys — is the later guard tickets, which set a
-//! guard's destination the same way and reuse the same walk-toward-it movement.
+//! and a lost lead searches its area, watches, and only then stands back down. The
+//! whole §7.4 state machine is built — the reactive states, the bounded search, the
+//! radio dispatch (§7.3), the decoy — and every one of them sets a guard's destination
+//! the same way and reuses the same walk-toward-it movement.
+//!
+//! # Where the loop lives
+//!
+//! This file owns the [`State`] itself, [`step`](State::step), the player phase and
+//! the sight phase. The rest is next door, each in its own module: the public
+//! [`Input`]/[`Event`]/[`Affordance`] vocabulary ([`events`]), the read surface the
+//! renderer and the §13.2 bot ask ([`view`]), phase 3 ([`guards`]), doors and their
+//! §9.4 cues ([`doors`]), the ability effects ([`abilities`]) and the #57 auto-slide
+//! ([`traversal`]). They are all `impl State` blocks over the *same* struct — plain
+//! structs, not an ECS (§12.3), so the coupling stays visible in the types.
 
 use crate::ability::{
     AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout, TargetingMode,
