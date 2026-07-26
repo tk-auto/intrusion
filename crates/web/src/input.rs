@@ -19,7 +19,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_at, ability_input_for_key, help_hit, help_nav_for_key, input_for_key, is_help_button,
+    ability_at, ability_for_key, help_hit, help_nav_for_key, input_for_key, is_help_button,
     is_message_button, menu_nav_for_key, ui_command_for_key, AbilityId, Cell, Direction, HelpHit,
     HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
@@ -49,7 +49,7 @@ impl Game {
             }
             return ui_command_for_key(key).is_some()
                 || input_for_key(key).is_some()
-                || ability_input_for_key(key).is_some();
+                || ability_for_key(key).is_some();
         }
         // While the help panel is open it is **modal** (§14 v2/#248): it captures
         // input, so keys route to help navigation first and the world never steps
@@ -65,7 +65,7 @@ impl Game {
             }
             return ui_command_for_key(key).is_some()
                 || input_for_key(key).is_some()
-                || ability_input_for_key(key).is_some();
+                || ability_for_key(key).is_some();
         }
         // UI commands (§11.4) come next: they toggle view state and redraw without
         // ever touching the turn loop. `m` deploys the message list; `?` opens help.
@@ -75,10 +75,25 @@ impl Game {
             return true;
         }
         // A game action (movement/wait) or an ability shortcut (§11.6): both resolve
-        // in the core and drive the one turn seam. An ability hotkey fires the same
-        // `Input::Activate(id)` a click on the ability's row does — one activation
-        // path, resolved by identity.
-        let Some(input) = input_for_key(key).or_else(|| ability_input_for_key(key)) else {
+        // in the core and drive the one turn seam. An ability hotkey names an ability
+        // by identity (`ability_for_key`) and the core turns that identity into this
+        // turn's input (`State::ability_input`) — a **toggle**, so the key that
+        // switched the ability on switches it off again (§4.4/#304). A click on the
+        // ability's row goes through the same two calls, so key and tap can never
+        // disagree.
+        let input = if let Some(input) = input_for_key(key) {
+            input
+        } else if let Some(id) = ability_for_key(key) {
+            // A **held** ability key is swallowed (§11.6/#304): now that the key is a
+            // toggle, letting the browser's auto-repeat through would switch the
+            // ability straight back off a frame after switching it on. Toggling takes
+            // a deliberate press, in both directions — and the repeat was a free
+            // no-op before this, so nothing is lost. Consumed, so the page is still.
+            if is_repeat {
+                return true;
+            }
+            self.state.ability_input(id)
+        } else {
             return false;
         };
         // A keyboard **auto-repeat** (`KeyboardEvent.repeat`) that would walk the
@@ -443,11 +458,14 @@ impl GesturePump {
                 e.prevent_default();
                 return;
             }
-            // A tap on an ability-bar entry fires the same `Input::Activate(id)` its
-            // hotkey does (§11.4/§11.6); a cooling/active entry refuses for free in the
+            // A tap on an ability-bar entry drives the same input its hotkey does
+            // (§11.4/§11.6): the core resolves the toggle from the ability's live
+            // state, so tapping `Run[3]` switches the sprint off (#304) exactly as
+            // pressing `r` again would, and a cooling entry refuses for free in the
             // economy (§4.4). Consumed either way, so it never also walks the player.
             if let Some(id) = game.ability_at_point(x, y) {
-                game.step_and_draw(Input::Activate(id));
+                let input = game.state.ability_input(id);
+                game.step_and_draw(input);
                 e.prevent_default();
                 return;
             }

@@ -834,8 +834,15 @@ impl State {
             // body cannot stand is **refused** (a free no-op): there is nowhere to
             // rematerialize — the lethal squeeze is the duration's alone (§8.3),
             // never a mis-pressed key (§2.2: every death traceable to a decision).
+            // The refusal *speaks* (§11.7): now that a player can reach this key
+            // (#304), a press that changes nothing has to say why.
             Input::Deactivate(id) => {
                 if declares(id, Effect::Phase) && !self.can_rematerialize() {
+                    // Only a phase actually running has a toggle-off to refuse; a
+                    // press with nothing on stays the silent no-op it always was.
+                    if matches!(self.ability_state(id), AbilityState::Active { .. }) {
+                        events.push(Event::RematerializeRefused);
+                    }
                     return false;
                 }
                 if self.abilities.deactivate(id) {

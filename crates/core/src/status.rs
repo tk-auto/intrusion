@@ -128,6 +128,11 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::AbilityActivated { ability } => (format!("{} active", ability.name()), 0),
         Event::AbilityDeactivated { ability } => (format!("{} off", ability.name()), 0),
         Event::AbilityExpired { ability } => (format!("{} fades", ability.name()), 0),
+        // A refused toggle-off (§8.3/#304): the same quiet band as the tools it
+        // belongs to, because that is what it is — a free press that changed nothing,
+        // like a bump. It still has to be said: the player asked to solidify and is
+        // still phased, and silence would read as a dropped key.
+        Event::RematerializeRefused => ("no room to rematerialize".to_string(), 0),
     };
     Some(Message {
         text,

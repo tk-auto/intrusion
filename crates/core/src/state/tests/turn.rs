@@ -155,11 +155,21 @@ fn ability_statuses_are_the_economy_deck_in_order() {
 }
 
 /// §4.4: toggling an ability off is one of the two free actions — the turn does
-/// not advance — and it still pays the full cooldown (§8.2 refunds nothing).
+/// not advance and **no guard steps** — and it still pays the full cooldown (§8.2
+/// refunds nothing). Free means free: cancelling must never hand the facility a
+/// turn, or players would hold a doomed sprint rather than pay for stopping it.
 #[test]
 fn toggling_an_ability_off_is_free() {
-    let mut s = solo(Cell::new(4, 4));
+    let mut s = State::new(
+        open_room(20, 20),
+        Cell::new(4, 4),
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(14, 14), Cell::new(14, 4))],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
     s.step(Input::Activate(AbilityId::Run)); // turn 1, Run active
+    let guard_was = s.guards()[0].pos();
     let events = s.step(Input::Deactivate(AbilityId::Run));
     assert_eq!(
         events,
@@ -168,10 +178,52 @@ fn toggling_an_ability_off_is_free() {
         }]
     );
     assert_eq!(s.turn(), 1, "toggling off does not spend the turn");
+    assert_eq!(s.guards()[0].pos(), guard_was, "and no guard steps for it");
     assert_eq!(
         s.ability_state(AbilityId::Run),
         AbilityState::Cooling { remaining: 12 },
         "early cancel still pays the whole cooldown",
+    );
+}
+
+/// §8.2, the exploit to design out (#304): cancelling early must not get the
+/// ability back sooner. The cooldown is frozen for the whole duration and only
+/// drains once the ability is inactive, so an early toggle-off starts the *full*
+/// cooldown from that turn — the lockout after it is exactly the lockout after an
+/// expiry, just reached earlier. Cancelling costs you effect turns and saves you
+/// nothing.
+#[test]
+fn an_early_toggle_off_shortens_no_cooldown() {
+    // Run: 5 turns of duration, 12 of cooldown (§8.3).
+    let ready_again = |mut s: State, toggle_off_after: u32| {
+        s.step(Input::Activate(AbilityId::Run));
+        while s.turn() < toggle_off_after {
+            s.step(Input::Wait);
+        }
+        if toggle_off_after > 0 {
+            s.step(Input::Deactivate(AbilityId::Run)); // free — the turn does not move
+        }
+        // Wait until the slot is Ready again and report how many turns that took
+        // from the activation.
+        while s.ability_state(AbilityId::Run) != AbilityState::Ready {
+            s.step(Input::Wait);
+        }
+        s.turn()
+    };
+
+    // The natural expiry: Ready again on turn 5 + 12 = 17, activation on turn 1.
+    let expiry = ready_again(solo(Cell::new(4, 4)), 0);
+    assert_eq!(expiry, 17, "duration + cooldown, as §8.2 defines it");
+
+    // Cancelled on turn 2 of the sprint: the full 12-turn cooldown runs from that
+    // turn (2 + 12 = 14), so the ability comes back exactly 3 turns earlier — the
+    // 3 turns of sprint the player threw away, and not one turn of cooldown.
+    let cancelled = ready_again(solo(Cell::new(4, 4)), 2);
+    assert_eq!(cancelled, 14, "the whole 12-turn cooldown, from the cancel");
+    assert_eq!(
+        expiry - cancelled,
+        3,
+        "the only thing saved is the duration given up: {expiry} vs {cancelled}",
     );
 }
 
@@ -964,5 +1016,48 @@ fn a_run_is_reproducible_from_its_seed_modifiers_and_inputs() {
         run(LevelModifiers::default()).1,
         run(harder).1,
         "the modifier set changes the run's outcome (it is part of the config)",
+    );
+}
+
+/// §12.4/#304: the toggle-off is an ordinary input in the replay stream. A script
+/// that cancels an ability **mid-duration** — the case a player can now drive, and
+/// the one that leaves the deck in a state no other stream reaches — parses back and
+/// reproduces the same run twice over, guards included.
+#[test]
+fn a_replay_with_a_mid_duration_toggle_off_reproduces_exactly() {
+    // "+r" sprint, one doubled step, "-r" stop it early, then walk and wait.
+    let script = "+rE-rEE...";
+    let inputs = crate::parse_script(script).expect("the notation covers the toggle");
+    assert!(
+        inputs.contains(&Input::Deactivate(AbilityId::Run)),
+        "the stream really carries the cancel",
+    );
+
+    let run = || {
+        let mut s = State::new(
+            open_room(20, 12),
+            Cell::new(3, 6),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(10, 2))],
+            Vec::new(),
+            Cell::new(18, 10),
+        )
+        .with_rng(Rng::new(0x304));
+        let events: Vec<Event> = inputs.iter().flat_map(|&i| s.step(i)).collect();
+        let guards: Vec<Cell> = s.guards().iter().map(|g| g.pos()).collect();
+        (
+            events,
+            s.player(),
+            s.turn(),
+            guards,
+            s.ability_state(AbilityId::Run),
+        )
+    };
+
+    let first = run();
+    assert_eq!(first, run(), "same seed + same inputs → the same run");
+    assert!(
+        matches!(first.4, AbilityState::Cooling { .. }),
+        "and the cancel is in the state the replay reproduced",
     );
 }

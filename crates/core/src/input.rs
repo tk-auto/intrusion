@@ -171,26 +171,30 @@ pub fn ability_hotkey(ability: &str) -> Option<char> {
     })
 }
 
-/// Map a key to the ability **activation** it drives (§11.6 shortcut), or `None`.
+/// Map a key to the **ability** its §11.6 shortcut names, or `None`.
 ///
 /// A single-character key is matched by **identity** against the settled hotkey of
-/// each economy ability ([`AbilityId::ALL`]) — never a list position — and resolves
-/// to the one `Input::Activate(id)` the loop already runs (§8.2). This is the
-/// keyboard half of the one activation path a pointer click also drives
-/// ([`ability_at`](crate::ability_at)); the two share the identity resolution so a
-/// key and a click can never disagree on what an ability's shortcut does. The bump
-/// verbs Takedown and Drag are **not** activated (they are done by walking into
-/// their target, §7.2/§8.3), so their letters resolve to nothing here.
-pub fn ability_input_for_key(key: &str) -> Option<Input> {
+/// each economy ability ([`AbilityId::ALL`]) — never a list position. This is the
+/// keyboard half of the one resolution a pointer click also drives
+/// ([`ability_at`](crate::ability_at)): a key and a click name the same ability, so
+/// they can never disagree on what a shortcut does. The bump verbs Takedown and
+/// Drag are **not** driven from here (they are done by walking into their target,
+/// §7.2/§8.3), so their letters resolve to nothing.
+///
+/// It stops at the *identity* deliberately. Which [`Input`] the key then drives is
+/// a **toggle** (§4.4: switching an ability off is a free action of its own), and
+/// that depends on the ability's live state, which this pure key table has no
+/// business knowing — so the shell hands the id to
+/// [`State::ability_input`](crate::State::ability_input) for the
+/// `Activate`/`Deactivate` choice (#304). Both shells go through that one seam
+/// rather than each branching for itself, which is the drift §11.6 pins against.
+pub fn ability_for_key(key: &str) -> Option<AbilityId> {
     let mut chars = key.chars();
     let ch = match (chars.next(), chars.next()) {
         (Some(c), None) => c,
         _ => return None, // named keys ("Tab", "ArrowUp") are never a hotkey
     };
-    AbilityId::ALL
-        .into_iter()
-        .find(|id| id.hotkey() == ch)
-        .map(Input::Activate)
+    AbilityId::ALL.into_iter().find(|id| id.hotkey() == ch)
 }
 
 #[cfg(test)]
@@ -259,7 +263,7 @@ mod tests {
         for key in ["m", "?"] {
             assert_eq!(input_for_key(key), None, "{key:?} is not a game action");
             assert_eq!(
-                ability_input_for_key(key),
+                ability_for_key(key),
                 None,
                 "{key:?} is a UI key, not an ability"
             );
@@ -376,30 +380,28 @@ mod tests {
         assert_eq!(ability_hotkey("Dephase"), Some('x'));
     }
 
-    /// The keyboard activation shortcut (§11.6): each economy ability's settled
-    /// hotkey resolves to its `Input::Activate` by identity — the same input a
-    /// pointer click fires — while the bump verbs Takedown and Drag, which are not
-    /// activated, resolve to nothing even though they own hotkeys.
+    /// The keyboard ability shortcut (§11.6): each economy ability's settled hotkey
+    /// resolves to *that ability* by identity — the same resolution a pointer click
+    /// makes — while the bump verbs Takedown and Drag, which are not driven from the
+    /// bar, resolve to nothing even though they own hotkeys. Which [`Input`] the
+    /// identity then drives is the toggle
+    /// [`State::ability_input`](crate::State::ability_input) decides (#304), tested
+    /// with the live state it needs.
     #[test]
-    fn an_ability_hotkey_activates_by_identity() {
+    fn an_ability_hotkey_resolves_by_identity() {
         use crate::ability::AbilityId;
         for id in AbilityId::ALL {
             let key = id.hotkey().to_string();
-            assert_eq!(
-                ability_input_for_key(&key),
-                Some(Input::Activate(id)),
-                "{} shortcut",
-                id.name()
-            );
+            assert_eq!(ability_for_key(&key), Some(id), "{} shortcut", id.name());
         }
         // The bump verbs own hotkeys but are not activated (§7.2/§8.3): 't' and 'g'
-        // drive no activation.
+        // name no ability here.
         for key in ["t", "g"] {
-            assert_eq!(ability_input_for_key(key), None, "bump verb key {key:?}");
+            assert_eq!(ability_for_key(key), None, "bump verb key {key:?}");
         }
-        // A movement key and a named key own no ability activation.
+        // A movement key and a named key own no ability shortcut.
         for key in ["k", "5", "Tab", "ArrowUp"] {
-            assert_eq!(ability_input_for_key(key), None, "key {key:?}");
+            assert_eq!(ability_for_key(key), None, "key {key:?}");
         }
     }
 

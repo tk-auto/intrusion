@@ -1899,6 +1899,15 @@ finally having a mechanism.
 | `Escape` | Cancel / menu |
 | Letters | Ability hotkeys |
 
+**An ability hotkey is a toggle.** The key switches the ability on and, pressed
+again while it is **active**, switches it off — the free action §4.4 grants, which
+otherwise has no key at all. One key with two meanings is safe here because the
+meaning is on screen before it is pressed: the bar draws `Run[3]` while active and
+`Run` while ready (§11.4). A **passive** (§8.2) is not a toggle — holding it is the
+whole of its state, so its key stays the free no-op it always was. The choice is
+made from live state in **one place** for both input paths, so a tap on the bar and
+its hotkey can never diverge (§11.4: the bar is a projection of the keys).
+
 **Assign ability hotkeys explicitly.** The old version derived them from the
 label — each ability claimed the first letter not already claimed by one above it
 — which meant `Dephase` became `e` because `Decoy` took `d`, and **an ability's
