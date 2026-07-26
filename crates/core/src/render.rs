@@ -142,7 +142,9 @@ impl Grid {
 /// [`Category::Sensed`] channel, but at its own longer range (§9.4/§10.4): a door that
 /// opens or shuts away from the player leaves a fading orange background over its
 /// **whole footprint** — evidence someone passed, also position only and also painted
-/// through walls.
+/// through walls. The **decoy** is the other exception (§8.3/#321): it is the player's
+/// own placed object rather than the facility's live state, so it draws at its cell in
+/// or out of the FOV, `Remembered` while unseen — see the decoy layer below.
 ///
 /// # Glyph priority (§11.3)
 ///
@@ -259,6 +261,34 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
+    // Entity layers, lowest priority first so the top entity is the last writer.
+    // The decoy (§8.3) draws lowest: an Owned `@` — a thing you made wearing
+    // your own glyph, which is the whole trick (§10.3/§11.3). Alone among the
+    // entities it draws **wherever it is**, in the FOV or out of it (§11.5a's
+    // second exception, #321): the whole point of a fake is to walk away from it
+    // and let a guard investigate the wrong cell, so a marker you can only see by
+    // standing next to it is a marker the ability cannot use. Its cell is the
+    // player's own knowledge, on the same footing as their own position — not a
+    // content of the facility they have to keep looking at. It leaks nothing:
+    // a decoy dies the turn anything steps on it, and that death already flips
+    // the §11.4 bar into cooldown and prints the §11.7 message unconditionally,
+    // so the `@` vanishing only puts a fact the player is already told where they
+    // are already looking. Out of view it draws `Remembered`, not `Live`: the
+    // marker persists at full Owned colour while the three-state discipline
+    // (§11.5a) keeps telling the truth about what is actually being seen.
+    if let Some(decoy) = state.decoy() {
+        cells[(decoy.y * width + decoy.x) as usize] = GlyphCell {
+            glyph: PLAYER_GLYPH,
+            fg: Category::Owned,
+            bg: None,
+            vis: if fov.contains(decoy) {
+                Visibility::Live
+            } else {
+                Visibility::Remembered
+            },
+        };
+    }
+
     // Entities are live state: whatever is drawn here is being seen right now.
     let mut put = |cell: Cell, glyph: char, fg: Category| {
         cells[(cell.y * width + cell.x) as usize] = GlyphCell {
@@ -268,16 +298,6 @@ pub fn render(state: &State) -> Grid {
             vis: Visibility::Live,
         };
     };
-
-    // Entity layers, lowest priority first so the top entity is the last writer.
-    // The decoy (§8.3) draws lowest: an Owned `@` — a thing you made wearing
-    // your own glyph, which is the whole trick (§10.3/§11.3). Live state like
-    // every entity: in the FOV or not at all.
-    if let Some(decoy) = state.decoy() {
-        if fov.contains(decoy) {
-            put(decoy, PLAYER_GLYPH, Category::Owned);
-        }
-    }
     // A body (§7.2) is live state like any entity — drawn inside the FOV as the `z`
     // a downed guard reads as (§10.3), in Caution: an unaware threat's colour,
     // because what a loose body *means* is trouble waiting to be found (§11.3). Two
@@ -721,6 +741,126 @@ mod tests {
         assert_eq!(g.get(4, 6).glyph, '@');
         assert_eq!(g.get(4, 6).fg, Category::Owned);
         assert_eq!(g.get(4, 5).glyph, '@', "the real player still draws");
+        assert_eq!(g.get(4, 6).vis, Visibility::Live, "in view: drawn live");
+    }
+
+    /// §8.3/§11.5a (#321): a decoy is the player's *own* placed object, so it is
+    /// drawn wherever it is — the whole point of the fake is to walk away from it
+    /// and let a guard investigate the wrong cell. Out of the FOV it keeps the
+    /// Owned `@` and drops to `Remembered`, so the marker persists without the
+    /// frame claiming an unseen cell is being seen.
+    #[test]
+    fn a_decoy_out_of_view_stays_drawn_as_a_remembered_owned_at() {
+        use crate::AbilityId;
+        let mut s = state_holding(10, 10, Cell::new(4, 4), Vec::new(), AbilityId::Decoy);
+        s.step(Input::Step(Direction::South)); // (4,5), facing south
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,6)
+        let decoy = Cell::new(4, 6);
+        assert_eq!(s.decoy(), Some(decoy), "precondition: the fake is out");
+
+        // Turn around and walk away until the fake is behind the sight cone.
+        while s.player_fov().contains(decoy) {
+            s.step(Input::Step(Direction::North));
+        }
+        assert!(s.decoy().is_some(), "precondition: nothing stepped on it");
+
+        let cell = render(&s).get(4, 6);
+        assert_eq!(cell.glyph, '@', "the fake you placed is still on the board");
+        assert_eq!(cell.fg, Category::Owned);
+        assert_eq!(
+            cell.vis,
+            Visibility::Remembered,
+            "out of sight, so not drawn as live",
+        );
+    }
+
+    /// §8.3/§11.5a (#321): the persistent marker still tells the truth about the
+    /// decoy's death. A guard walks onto the fake while the player cannot see the
+    /// cell — the `@` is gone from the very next frame, alongside the message and
+    /// the cooldown that already fire.
+    #[test]
+    fn a_decoy_stomped_out_of_view_leaves_no_stale_marker() {
+        use crate::AbilityId;
+        // One tall column: the player at the top, a guard walking up it from below,
+        // and the fake planted between them.
+        let decoy = Cell::new(4, 14);
+        let mut s = state_holding(
+            12,
+            20,
+            Cell::new(4, 12),
+            vec![Guard::patrolling_to(Cell::new(4, 18), Cell::new(4, 2))],
+            AbilityId::Decoy,
+        );
+        s.step(Input::Step(Direction::South)); // (4,13), facing south
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,14)
+        assert_eq!(s.decoy(), Some(decoy), "precondition: the fake is out");
+
+        // Walk away up the column while the guard comes up it. The player never
+        // *waits*: a spent wait opens the full 360° arc (§6.2) and would put the
+        // fake back in view. Only a footstep raises `DecoyDied` — the 20-turn expiry
+        // raises `AbilityExpired` instead — so a fake that merely timed out fails
+        // this loop rather than passing it by the back door.
+        let mut trampled = false;
+        for _ in 0..10 {
+            if s.step(Input::Step(Direction::North))
+                .iter()
+                .any(|e| matches!(e, Event::DecoyDied { at } if *at == decoy))
+            {
+                trampled = true;
+                break;
+            }
+        }
+        assert!(trampled, "the guard walked onto the fake");
+        assert!(
+            !s.player_fov().contains(decoy),
+            "and it died where the player could not see it",
+        );
+        assert_eq!(s.decoy(), None);
+
+        let cell = render(&s).get(4, 14);
+        assert_ne!(cell.glyph, '@', "no marker survives the decoy");
+    }
+
+    /// §11.5 **[SETTLED]** (#321): the persistent decoy marker is the *lowest*
+    /// entity layer and paints no background, so it can never hide the danger
+    /// overlay. A watched cell under an out-of-view fake still reads red — "red
+    /// means a guard watches this" survives the marker sitting on it.
+    #[test]
+    fn a_decoy_out_of_view_never_hides_the_danger_overlay() {
+        use crate::AbilityId;
+        // A guard posted up the column, looking south down it (§7.1's spawn facing)
+        // over the cell the fake will stand in. Cones of guards the player cannot see
+        // paint only under the §12.6 modifier, which is what puts red on that cell
+        // while the fake is behind the player.
+        let decoy = Cell::new(4, 9);
+        let mut s = state_holding_facing_north(
+            12,
+            20,
+            Cell::new(4, 10),
+            vec![Guard::stationary(Cell::new(4, 5))],
+            AbilityId::Decoy,
+        )
+        .with_modifiers(LevelModifiers {
+            always_show_vision_cones: true,
+            ..LevelModifiers::default()
+        });
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,9)
+        assert_eq!(s.decoy(), Some(decoy), "precondition: the fake is out");
+
+        // Walk away down the column until the fake is behind the sight cone.
+        while s.player_fov().contains(decoy) {
+            s.step(Input::Step(Direction::South));
+        }
+        assert_eq!(s.decoy(), Some(decoy), "precondition: nothing trampled it");
+
+        let cell = render(&s).get(decoy.x, decoy.y);
+        assert_eq!(cell.glyph, '@', "the fake still draws");
+        assert_eq!(cell.vis, Visibility::Remembered);
+        assert_eq!(
+            cell.bg,
+            Some(Category::Danger),
+            "and the watched cell under it still reads red",
+        );
     }
 
     /// §8.3/§11.5: the danger overlay keeps its promise under Camouflage — "red
