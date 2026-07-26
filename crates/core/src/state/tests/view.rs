@@ -462,3 +462,186 @@ fn the_sense_range_is_ten_and_twenty_on_wait() {
 }
 
 // --- Sensing doors (§9.4/§10.4) -----------------------------------------------
+
+// --- The Vision passive (§5/§6.1, §8.3/#265) ----------------------------------
+
+/// The passive's two `[START]` numbers, pinned (#265): the arc it lifts sight to is
+/// the **full 360°** (§6.2 width 5) and the range box is **20**, up from §5's 15.
+/// A later retune has to edit this test, which is the point.
+#[test]
+fn the_vision_passive_pins_its_start_arc_and_range() {
+    assert_eq!(FULL_SIGHT_ARC, 5, "the [START] 360° arc width");
+    assert_eq!(ENHANCED_SIGHT_RANGE, 20, "the [START] enhanced range");
+    const {
+        assert!(
+            ENHANCED_SIGHT_RANGE > PLAYER_SIGHT_RANGE,
+            "the passive must actually extend reach",
+        )
+    };
+}
+
+/// Holding the passive **widens the standing arc to 360°** (#265): a guard directly
+/// *behind* the player — which §5's forward half-disc can never show, and which is
+/// the whole reason Wait exists (§9.1) — is seen without spending a turn.
+///
+/// The two loadouts differ in nothing but the passive, so the widening is the
+/// ability's and not the geometry's.
+#[test]
+fn holding_vision_sees_behind_without_waiting() {
+    let behind = Cell::new(20, 24); // 4 south of a north-facing player
+    let build = |loadout| {
+        let mut s = State::new(
+            open_room(40, 40),
+            Cell::new(20, 20),
+            Direction::North,
+            vec![Guard::stationary(behind)],
+            Vec::new(),
+            Cell::new(38, 38),
+        )
+        .with_loadout(loadout);
+        // One spent turn runs the sight phase (§4.2) from the real loadout.
+        s.step(Input::Step(Direction::North));
+        s
+    };
+
+    let bare = build(Loadout::innate());
+    assert!(
+        !bare.player_fov().contains(behind),
+        "precondition: §5's half-disc cannot see behind",
+    );
+
+    let enhanced = build(Loadout::innate().with(AbilityId::Vision));
+    assert!(
+        enhanced.player_fov().contains(behind),
+        "the passive makes 360° the standing arc (§8.3/#265)",
+    );
+    assert_eq!(
+        enhanced.ability_state(AbilityId::Vision),
+        AbilityState::Passive,
+        "and it says so without ever being activated",
+    );
+}
+
+/// Holding the passive **extends the range box** (#265): a cell 18 north — inside
+/// the enhanced 20-box, outside §5's 15 — is lit only for the holder. Nothing
+/// occludes, so the box is the only thing that can decide it.
+#[test]
+fn holding_vision_lights_cells_past_the_base_range() {
+    let far = Cell::new(20, 20 - 18);
+    let build = |loadout| {
+        let mut s = State::new(
+            open_room(40, 40),
+            Cell::new(20, 20),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 38),
+        )
+        .with_loadout(loadout);
+        s.step(Input::Wait);
+        s
+    };
+
+    assert!(
+        !build(Loadout::innate()).player_fov().contains(far),
+        "precondition: 18 cells is outside the §5 15-box",
+    );
+    assert!(
+        build(Loadout::innate().with(AbilityId::Vision))
+            .player_fov()
+            .contains(far),
+        "the passive's 20-box reaches it",
+    );
+}
+
+/// **No double-widening** (#265): the passive and Wait (§9.1) both reach for the
+/// same 360°, so combining them changes nothing about *sight* — the wait's own gift
+/// is the widened guard **sense**, a separate channel the passive deliberately does
+/// not touch (§9). Pinned as set equality on the FOV, both ways round, so a future
+/// stacking bug cannot hide in a cell or two.
+#[test]
+fn waiting_while_holding_vision_neither_widens_nor_narrows_sight() {
+    let build = |wait: bool| {
+        let mut s = State::new(
+            open_room(40, 40),
+            Cell::new(20, 20),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 38),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Vision));
+        if wait {
+            s.step(Input::Wait);
+        } else {
+            s.step(Input::Step(Direction::North));
+        }
+        s
+    };
+
+    let moved = build(false);
+    let waited = build(true);
+    // The player stands on a different cell after a step, so compare the shape of
+    // the sight rather than the raw sets: the *arc* is what must not stack.
+    let seen_around = |s: &State| {
+        let p = s.player();
+        [
+            Direction::North,
+            Direction::South,
+            Direction::East,
+            Direction::West,
+        ]
+        .into_iter()
+        .filter(|&d| {
+            p.step(d)
+                .and_then(|c| c.step(d))
+                .and_then(|c| c.step(d))
+                .is_some_and(|c| s.player_fov().contains(c))
+        })
+        .count()
+    };
+    assert_eq!(
+        seen_around(&moved),
+        4,
+        "the passive alone already sees every way",
+    );
+    assert_eq!(
+        seen_around(&waited),
+        4,
+        "waiting on top adds nothing to sight — there is nothing past 360°",
+    );
+
+    // The sense, by contrast, is untouched by the passive and still widened by the
+    // wait: the two channels stay separate (§9/§9.1, #265's "vision only").
+    assert_eq!(moved.sense_range(), PLAYER_SENSE_RANGE, "vision only");
+    assert_eq!(waited.sense_range(), PLAYER_SENSE_RANGE_WAITING);
+}
+
+/// The passive changes **only the player's own sight**, never a guard's (#265): the
+/// guard cone the danger overlay is painted from is the guard's own, so holding
+/// Vision can show you a guard that cannot see you — the §9-spirit information
+/// asymmetry — without ever making the overlay claim you are spotted.
+#[test]
+fn vision_widens_the_player_not_the_guards() {
+    let guard = Cell::new(20, 24); // behind a north-facing player, facing away
+    let mut s = State::new(
+        open_room(40, 40),
+        Cell::new(20, 20),
+        Direction::North,
+        vec![Guard::stationary(guard)],
+        Vec::new(),
+        Cell::new(38, 38),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Vision));
+    s.step(Input::Step(Direction::North));
+
+    assert_eq!(
+        s.perceive_guard(&s.guards()[0]),
+        Some(GuardPerception::Seen),
+        "the widened arc sees it",
+    );
+    assert!(
+        !s.guards()[0].fov().contains(s.player()),
+        "the guard's own cone is untouched — it does not see back",
+    );
+}

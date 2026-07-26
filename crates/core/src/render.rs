@@ -504,6 +504,7 @@ pub fn ascii_grid(facility: &Facility) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ability::Loadout;
     use crate::cell::{Cell, Direction};
     use crate::facility::{Facility, Terrain};
     use crate::guard::Guard;
@@ -524,6 +525,19 @@ mod tests {
             Vec::new(),
             Cell::new(w - 2, h - 2),
         )
+    }
+
+    /// The same bare board, holding one salvaged-tech ability (§8.3/#244): a
+    /// loadout is built up from the innate set, so a render test that drives a
+    /// tech says which tech it has rather than inheriting the lot.
+    fn state_holding(
+        w: u32,
+        h: u32,
+        player: Cell,
+        guards: Vec<Guard>,
+        tech: crate::AbilityId,
+    ) -> State {
+        state(w, h, player, guards).with_loadout(Loadout::innate().with(tech))
     }
 
     /// The payoff of "render is a pure function that prints as text" (§11.1): a fixed
@@ -622,7 +636,7 @@ mod tests {
     #[test]
     fn a_decoy_draws_as_an_owned_at_glyph() {
         use crate::AbilityId;
-        let mut s = state(10, 10, Cell::new(4, 4), Vec::new());
+        let mut s = state_holding(10, 10, Cell::new(4, 4), Vec::new(), AbilityId::Decoy);
         s.step(Input::Step(Direction::South)); // (4,5), facing south
         s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,6)
         let g = render(&s);
@@ -648,7 +662,8 @@ mod tests {
             vec![Guard::stationary(Cell::new(5, 2))],
             Vec::new(),
             Cell::new(10, 10),
-        );
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Camouflage));
         assert_eq!(
             render(&s).get(5, 6).bg,
             Some(Category::Danger),

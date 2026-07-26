@@ -1061,7 +1061,7 @@ fn pick_farthest(territory: &[Cell], inspected: &VisibleSet, origin: Cell) -> Op
 mod tests {
     use super::*;
     use crate::facility::Facility;
-    use crate::vision::{field_of_view, WAIT_SIGHT_ARC};
+    use crate::vision::{field_of_view, FULL_SIGHT_ARC};
 
     /// §7.5: a *fixture* guard — one built without a region beat — falls back to
     /// the patrollable cells within [`PATROL_RADIUS`] of the station. The radius is
@@ -1236,7 +1236,7 @@ mod tests {
             &facility,
             Cell::new(2, 2),
             Direction::South,
-            WAIT_SIGHT_ARC,
+            FULL_SIGHT_ARC,
             2,
         );
         guard.inspected.absorb(&whole_room);

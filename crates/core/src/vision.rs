@@ -43,9 +43,23 @@ use crate::facility::Facility;
 pub const PLAYER_SIGHT_RANGE: u32 = 15;
 /// The player's sight arc (§5/§6.2): width 3, the ~180° forward half-disc. **[START]**
 pub const PLAYER_SIGHT_ARC: u8 = 3;
-/// The arc for a turn spent waiting (§8.3): width 5, the full 360° — waiting is the
-/// only way to see behind you (§5).
-pub const WAIT_SIGHT_ARC: u8 = 5;
+/// The **full 360°** arc (§6.2: width 5 — every ring neighbour transparent, so no
+/// artificial wall carves a cone at all).
+///
+/// Two things reach it, and they are the same fact seen twice: a turn spent
+/// **waiting** (§8.3/§9.1 — the innate way to see behind you, bought one turn at a
+/// time) and the **Vision** passive (§8.3/#265 — the same arc bought once, with a
+/// loadout slot). One constant, so the two can never drift into two different
+/// "360°"s.
+pub const FULL_SIGHT_ARC: u8 = 5;
+/// The player's sight range while the **Vision** passive is held (§5/§8.3, #265) —
+/// a 41×41 box, up from §5's 31×31. **[START]**
+///
+/// On the current 40×40 facility (§10.2) the lift is mostly nominal — walls, not
+/// the box, are what bound sight indoors — so the passive's real gift is the arc.
+/// The range is raised anyway so the ability is honest about what it claims, and
+/// so it still reads as an upgrade on a larger board.
+pub const ENHANCED_SIGHT_RANGE: u32 = 20;
 /// A guard's sight range (§7.1) — a 21×21 box. **[START]**
 pub const GUARD_SIGHT_RANGE: u32 = 10;
 /// A guard's sight arc (§7.1/§6.2): width 2, the ~90° forward wedge. **[START]**
@@ -672,7 +686,7 @@ mod tests {
     fn full_arc_on_open_floor_sees_exactly_the_range_box() {
         let f = open(11, 11);
         let origin = Cell::new(5, 5);
-        let fov = field_of_view(&f, origin, Direction::North, WAIT_SIGHT_ARC, 3);
+        let fov = field_of_view(&f, origin, Direction::North, FULL_SIGHT_ARC, 3);
         for y in 0..f.height() {
             for x in 0..f.width() {
                 let cell = Cell::new(x, y);
@@ -713,7 +727,7 @@ mod tests {
             let fov = field_of_view(&f, origin, Direction::North, arc, 4);
             assert!(!fov.contains(behind), "arc {arc} must not see behind");
         }
-        let fov = field_of_view(&f, origin, Direction::North, WAIT_SIGHT_ARC, 4);
+        let fov = field_of_view(&f, origin, Direction::North, FULL_SIGHT_ARC, 4);
         assert!(fov.contains(behind), "the 360° wait arc sees behind");
     }
 
@@ -896,9 +910,9 @@ mod tests {
             .filter(|&c| f.terrain(c) == Some(Terrain::Floor))
             .collect();
         for &a in &floors {
-            let from_a = field_of_view(&f, a, Direction::North, WAIT_SIGHT_ARC, 8);
+            let from_a = field_of_view(&f, a, Direction::North, FULL_SIGHT_ARC, 8);
             for &b in &floors {
-                let from_b = field_of_view(&f, b, Direction::North, WAIT_SIGHT_ARC, 8);
+                let from_b = field_of_view(&f, b, Direction::North, FULL_SIGHT_ARC, 8);
                 assert_eq!(
                     from_a.contains(b),
                     from_b.contains(a),
@@ -913,7 +927,7 @@ mod tests {
     #[test]
     fn a_viewer_in_a_corner_is_bounded_by_the_grid() {
         let f = open(6, 6);
-        let fov = field_of_view(&f, Cell::new(1, 1), Direction::North, WAIT_SIGHT_ARC, 10);
+        let fov = field_of_view(&f, Cell::new(1, 1), Direction::North, FULL_SIGHT_ARC, 10);
         assert!(
             fov.contains(Cell::new(0, 0)),
             "the corner wall face is seen"
@@ -935,7 +949,7 @@ mod tests {
         f.set_terrain(3, 3, Terrain::Wall);
         f.set_terrain(4, 4, Terrain::Wall);
         let origin = Cell::new(1, 1);
-        let fov = field_of_view(&f, origin, Direction::North, WAIT_SIGHT_ARC, 10);
+        let fov = field_of_view(&f, origin, Direction::North, FULL_SIGHT_ARC, 10);
         assert_eq!(
             picture(&f, &fov, origin),
             vec![
@@ -1036,7 +1050,7 @@ mod tests {
                             if f.terrain(o) != Some(Terrain::Floor) {
                                 continue;
                             }
-                            let fov = field_of_view(&f, o, Direction::North, WAIT_SIGHT_ARC, 7);
+                            let fov = field_of_view(&f, o, Direction::North, FULL_SIGHT_ARC, 7);
                             for c in fov.cells() {
                                 if f.terrain(c) == Some(Terrain::Floor) {
                                     assert!(
@@ -1092,7 +1106,7 @@ mod tests {
     fn a_cupboard_alcove_does_not_leak_sight_into_the_room() {
         let f = alcove_cupboard();
         let origin = Cell::new(8, 3);
-        let fov = field_of_view(&f, origin, Direction::South, WAIT_SIGHT_ARC, 15);
+        let fov = field_of_view(&f, origin, Direction::South, FULL_SIGHT_ARC, 15);
         assert_eq!(
             picture(&f, &fov, origin),
             vec![
@@ -1212,7 +1226,7 @@ mod tests {
         f.set_terrain(5, 4, Terrain::Wall);
         f.set_terrain(4, 5, Terrain::Wall);
         let a = Cell::new(2, 2);
-        let from_a = field_of_view(&f, a, Direction::North, WAIT_SIGHT_ARC, 8);
+        let from_a = field_of_view(&f, a, Direction::North, FULL_SIGHT_ARC, 8);
         for c in [Cell::new(5, 5), Cell::new(6, 6), Cell::new(7, 7)] {
             assert!(!from_a.contains(c), "{c:?} threaded the double corner");
         }
@@ -1220,13 +1234,13 @@ mod tests {
         assert!(from_a.contains(Cell::new(5, 4)), "the wall faces are seen");
         assert!(from_a.contains(Cell::new(4, 5)), "the wall faces are seen");
         let b = Cell::new(6, 6);
-        let from_b = field_of_view(&f, b, Direction::North, WAIT_SIGHT_ARC, 8);
+        let from_b = field_of_view(&f, b, Direction::North, FULL_SIGHT_ARC, 8);
         assert!(!from_b.contains(a), "the closure holds both ways");
 
         // Remove one wall: the vertex has a single opaque flank and the
         // diagonal grazes it freely again.
         f.set_terrain(4, 5, Terrain::Floor);
-        let grazing = field_of_view(&f, a, Direction::North, WAIT_SIGHT_ARC, 8);
+        let grazing = field_of_view(&f, a, Direction::North, FULL_SIGHT_ARC, 8);
         assert!(
             grazing.contains(Cell::new(5, 5)),
             "a lone corner never hides"
@@ -1268,7 +1282,7 @@ mod tests {
     fn on_open_floor_the_peek_changes_nothing() {
         let f = open(11, 11);
         let origin = Cell::new(5, 5);
-        for arc in [PLAYER_SIGHT_ARC, WAIT_SIGHT_ARC] {
+        for arc in [PLAYER_SIGHT_ARC, FULL_SIGHT_ARC] {
             let plain = field_of_view(&f, origin, Direction::North, arc, 4);
             let peek = field_of_view_with_peek(&f, origin, Direction::North, arc, 4);
             assert_eq!(
@@ -1360,7 +1374,7 @@ mod tests {
             let mut f = open(11, 11);
             f.set_terrain(5, 4, terrain);
             let origin = Cell::new(5, 5);
-            for arc in [PLAYER_SIGHT_ARC, WAIT_SIGHT_ARC] {
+            for arc in [PLAYER_SIGHT_ARC, FULL_SIGHT_ARC] {
                 let plain = field_of_view(&f, origin, Direction::North, arc, 8);
                 let peek = field_of_view_with_peek(&f, origin, Direction::North, arc, 8);
                 assert_eq!(
@@ -1378,7 +1392,7 @@ mod tests {
     fn the_peek_stays_inside_the_origin_range_box() {
         let f = l_corridor();
         let origin = Cell::new(3, 4);
-        for arc in [PLAYER_SIGHT_ARC, WAIT_SIGHT_ARC] {
+        for arc in [PLAYER_SIGHT_ARC, FULL_SIGHT_ARC] {
             let fov = field_of_view_with_peek(&f, origin, Direction::North, arc, 3);
             for c in fov.cells() {
                 assert!(

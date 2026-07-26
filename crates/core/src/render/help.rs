@@ -388,7 +388,12 @@ fn control_rows() -> Vec<(String, &'static str)> {
         ("arrows / hjkl / 8246".to_string(), "move"),
         ("w / 5 / .".to_string(), "wait & sense"),
     ];
-    for id in AbilityId::ALL {
+    // Passives are deliberately absent (#264): this card is the list of keys and
+    // what pressing them does, and a passive has no key to press — it is in effect
+    // because it is held, not because anything was activated. It still carries a
+    // hotkey letter as its identity (the ability line's glyph, the level-seed code),
+    // but advertising that letter here would promise an action that does nothing.
+    for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
         rows.push((id.hotkey().to_string(), id.name()));
     }
     rows.push(("Tab".to_string(), "ability panel"));
@@ -474,17 +479,21 @@ mod tests {
         }
     }
 
-    /// The ability control rows carry each ability's **settled** §11.6 hotkey and
-    /// name, straight from [`AbilityId`] — so the card's keys are the keys that
-    /// actually activate them, and cannot drift.
+    /// The ability control rows carry each **activated** ability's settled §11.6
+    /// hotkey and name, straight from [`AbilityId`] — so the card's keys are the
+    /// keys that actually activate them, and cannot drift. A **passive** is
+    /// deliberately absent (#264): it has no key to press, and listing its identity
+    /// letter here would advertise an action that does nothing.
     #[test]
     fn the_control_rows_carry_the_real_ability_hotkeys() {
         let rows = control_rows();
         for id in AbilityId::ALL {
             let key = id.hotkey().to_string();
-            assert!(
-                rows.iter().any(|(k, a)| *k == key && *a == id.name()),
-                "the controls must list {} as key {key}",
+            let listed = rows.iter().any(|(k, a)| *k == key && *a == id.name());
+            assert_eq!(
+                listed,
+                !id.is_passive(),
+                "the controls list exactly the pressable abilities: {}",
                 id.name(),
             );
         }
@@ -502,7 +511,7 @@ mod tests {
         for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
             assert!(text.contains(glyph), "the legend shows {glyph:?}");
         }
-        for id in AbilityId::ALL {
+        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
             assert!(
                 text.contains(id.hotkey()),
                 "the controls show {}",

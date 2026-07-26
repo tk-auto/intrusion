@@ -171,6 +171,7 @@ pub fn ability_hotkey(ability: &str) -> Option<char> {
         "Dephase" => 'x',
         "Autodoors" => 'a',
         "Confusion" => 'z',
+        "Vision" => 'v',
         _ => return None,
     })
 }

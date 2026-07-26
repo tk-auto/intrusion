@@ -1443,7 +1443,8 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
         vec![Guard::patrolling(Cell::new(10, 7))],
         Vec::new(),
         Cell::new(18, 18),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     // The startup chase has closed the gap by one: the guard is two cells north and
     // already Chasing — a live threat, well inside the bubble.
     assert_eq!(s.guards()[0].pos(), Cell::new(10, 8));
@@ -1500,7 +1501,8 @@ fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
         vec![Guard::patrolling(Cell::new(10, 8))],
         Vec::new(),
         Cell::new(18, 18),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     assert_eq!(
         s.guards()[0].pos(),
         Cell::new(10, 9),
@@ -1559,7 +1561,8 @@ fn confusion_reaches_through_walls_and_stops_at_its_radius() {
         ],
         Vec::new(),
         Cell::new(22, 18),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
 
     // Before activation nothing is confused.
     assert!(!s.guard_confused(&s.guards()[0]));
@@ -1591,7 +1594,8 @@ fn a_confused_guards_cone_leaves_the_danger_overlay() {
         vec![Guard::stationary(Cell::new(10, 7))],
         Vec::new(),
         Cell::new(18, 18),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     // A spent turn establishes sight: the seen guard's cone now paints red.
     s.step(Input::Wait);
     assert_eq!(
@@ -1647,7 +1651,8 @@ fn one_confusion_reading_governs_every_pass_of_the_phase() {
         ],
         Vec::new(),
         Cell::new(5, 9),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     // The startup turn (§4.2) walks the finder one step down the corridor, to well
     // inside the bubble — this whole test hangs on it being suppressed.
     let finder_start = s.guards()[1].pos();
@@ -1728,7 +1733,8 @@ fn a_guard_is_judged_where_the_phase_found_it_not_where_its_step_lands() {
         vec![Guard::patrolling(Cell::new(10, 2))],
         Vec::new(),
         Cell::new(18, 18),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     assert_eq!(s.guards()[0].pos(), Cell::new(10, 3));
     assert_ne!(s.guards()[0].state(), GuardState::Calm, "a live lead");
     assert!(
