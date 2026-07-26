@@ -5,26 +5,43 @@
 //! whole contract is `state × input → state, events`, and it must be testable
 //! natively in milliseconds with no browser.
 //!
-//! So far it holds the seeded PRNG wrapper (§12.4) — the one primitive every
-//! other system builds on — the grid substrate (§4.1/§4.3/§10.3): the terrain
-//! table, the cell-capacity occupancy query, and 4-directional movement with
-//! Manhattan distance, all wrapped in the indestructible border the facility
-//! guarantees. On top of it: the pure state→glyph-grid render (§11.1, drawn
-//! through the §11.5a fog — geometry always, contents once seen then remembered,
-//! live state only in the current FOV), the spatial
-//! region graph (§10.5) that gives corridors and rooms a name, the corridor-first
-//! partition (§10.1) that carves them, and the hinged doors (§10.4) it cuts where
-//! rooms meet corridors. On top of all that sits the turn loop (§4.2): the running
-//! [`State`], `state × input → state, events`, resolving player, sight, and guards in
-//! order with the turn-cost rule and the two win/lose conditions — and the sight phase
-//! is real: the symmetric-shadowcast field of view (§6), the player's half-disc and
-//! the guards' wedges, recomputed every turn. Guards detect on **vision alone** (§9
-//! **[SETTLED]** — there is no sound, no hearing): a guard reacts only to what it
-//! sees. On top of the loop sits the **ability economy** (§8.1/§8.2): a data-driven
-//! ability catalog and the time economy — turn cost, duration, cooldown — stepped
-//! at the end-of-turn hook the loop reserves, with the `duration + cooldown` lockout
-//! emergent. The individual ability *effects*, guard AI, and the rest land in their
-//! own tickets, in the phase hooks the loop already calls.
+//! # The layers
+//!
+//! Read bottom-up; each rests on the one before it.
+//!
+//! **Substrate.** The seeded PRNG ([`Rng`], §12.4) — the one primitive every other
+//! system builds on — and the grid ([`Cell`], [`Direction`], §4.1/§4.3): 4-directional
+//! movement with Manhattan distance. On it, the facility ([`Facility`], [`Terrain`]):
+//! the §10.3 terrain table as exhaustive property matches, the cell-capacity occupancy
+//! query, and the indestructible border the level guarantees (§10.6).
+//!
+//! **Space.** The region graph ([`RegionGraph`], §10.5) that gives corridors and rooms
+//! a name, the corridor-first partition that carves them ([`generate`], §10.1), the
+//! hinged doors cut where rooms meet corridors (§10.4), the sightline rule that
+//! guarantees cover on every long straight (§10.1a), and the player-only duct
+//! crawlspaces threaded through the walls ([`Duct`], §10.7).
+//!
+//! **Sight.** Symmetric-shadowcast field of view ([`field_of_view`], §6): the player's
+//! half-disc — 360° on a turn spent waiting — and each guard's ~90° wedge, recomputed
+//! every turn from its *current* pose. Guards detect on **vision alone** (§9
+//! **[SETTLED]** — there is no sound, no hearing).
+//!
+//! **The loop.** [`State`] and `state × input → state, events` (§4.2): player, sight,
+//! guards, in that order, under the turn-cost rule (§4.4) and the two win/lose
+//! conditions (§4.5). Around it sit the guard mind ([`Guard`], §7 — patrol, the two
+//! detection zones, the bounded search, takedowns and the radio net) and the ability
+//! economy ([`Ability`], §8.1/§8.2): a data-driven catalog plus turn cost, duration
+//! and cooldown, with the `duration + cooldown` lockout emergent rather than stored.
+//!
+//! **Presentation.** [`render`] (§11.1): a pure function of state producing the glyph
+//! grid, drawn through the §11.5a fog — geometry always, contents once seen then
+//! remembered, live state only in the current FOV. Colour is named only as a
+//! [`Category`] (§11.2); the platform shell owns the concrete table.
+//!
+//! **Configuration.** [`LevelModifiers`] (§12.6) resolved once per run, and
+//! [`LevelSeed`] composing seed, modifiers and loadout into one shareable token — the
+//! same entry point the shell and the §13.2 sim both boot through, which is what makes
+//! a seed the bot flagged a level you can play by hand.
 
 #![forbid(unsafe_code)]
 

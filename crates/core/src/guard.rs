@@ -71,10 +71,16 @@ impl GuardState {
 /// It has a real field of view — the ~90° cone (§6.2/§7.1), recomputed every sight
 /// phase — a [`GuardState`], and a `destination` it walks to along the shortest
 /// routable path (routing *around* furniture, cover and cupboards, and straight
-/// **through closed doors**, which it opens by walking in, §10.4). The reactive
-/// §7.4 states (chasing, investigating, responding) are the later guard tickets:
-/// they set `destination` their own way and reuse this same walk-toward-it
-/// movement.
+/// **through closed doors**, which it opens by walking in, §10.4).
+///
+/// The reactive §7.4 states all sit on that same seam: [`Chasing`](GuardState::Chasing)
+/// and [`Investigating`](GuardState::Investigating) from the §7.6 two zones,
+/// [`Responding`](GuardState::Responding) from a missed radio ping (§7.3), and
+/// [`Alerted`](GuardState::Alerted) for a lead being walked down and searched. Each
+/// sets `destination` its own way and reuses this same walk-toward-it movement, which
+/// is why they add transitions rather than machinery. A reactive guard whose lead
+/// runs out (§7.1's alert duration) searches its area and then stands back down to
+/// patrol on its own.
 #[derive(Clone, Debug)]
 pub struct Guard {
     pos: Cell,
@@ -181,10 +187,11 @@ pub(crate) const PATROL_RADIUS: u32 = 15;
 
 /// How long a detection lead survives with nothing sensed (§7.1 alert duration,
 /// **[START] = 30**). A fresh sighting resets the alert timer to this; each quiet
-/// turn drops it by one, and a reactive guard gives up
-/// its lead and returns to patrol once it hits zero. The bounded search this timer
-/// will pace (§7.6 fix 2) is a later ticket; here it is the honest backstop that
-/// keeps a guard from pursuing a stale lead forever.
+/// turn drops it by one, and a reactive guard gives up its lead once it hits zero.
+/// It paces the bounded §7.6 fix-2 search: a guard that loses its lead sweeps the
+/// area ([`SEARCH_DURATION`]/[`SEARCH_RADIUS`]) and then watches
+/// ([`WATCH_DURATION`]) before standing down. This is the anti-tracking-turret
+/// backstop — no guard pursues a stale lead forever.
 pub(crate) const ALERT_DURATION: u32 = 30;
 
 /// The **certain** detection zone (§7.6, **[START] = 5**): a player seen within this
@@ -670,9 +677,13 @@ impl Guard {
     /// *looked at* everything it can see. Then a **reactive** guard (Chasing or
     /// Investigating, §7.6) walks the destination its transition set; the moment it
     /// can no longer make progress — it has arrived, or the lead led somewhere it
-    /// cannot route to — its lead is spent and it **stands back down to patrol**. With no
-    /// search or alert-timer machinery yet (§7.6 fix #2 is a later ticket) that is the
-    /// honest end of an investigation: reach the spot, find nothing, resume the sweep.
+    /// cannot route to — it enters the **§7.6 fix-2 arc** rather than snapping back to
+    /// patrol: *Lost → Hunted → Released*. Arriving at the last-known cell with nothing
+    /// seen begins a bounded [`begin_search`] of the surrounding disc
+    /// ([`SEARCH_DURATION`]/[`SEARCH_RADIUS`]); when that runs dry it stands and
+    /// **watches** ([`WATCH_DURATION`]/[`WATCH_RADIUS`]) before finally releasing to
+    /// its patrol. A lead that simply cools to zero ([`ALERT_DURATION`]) releases the
+    /// same way — the anti-tracking-turret backstop.
     /// A **Calm** guard picks its next patrol target and steps toward it (§7.5) —
     /// except that, on reaching a target, it sometimes **dwells** in place for a few
     /// turns first (§153, the seeded [`roll_dwell`]), a stationary window a Takedown
@@ -1761,9 +1772,9 @@ mod tests {
 
     /// §7.1/§7.6: a lead cools by one each turn nothing is sensed, and a reactive guard
     /// whose alert reaches zero gives it up and stands back down to patrol — the honest
-    /// end of a chase whose sight was broken, ahead of the bounded search (§7.6 fix 2)
-    /// a later ticket adds. This is the anti-tracking-turret backstop: the guard cannot
-    /// pursue a stale lead forever.
+    /// end of a chase whose sight was broken, and the outer bound on the §7.6 fix-2
+    /// search arc. This is the anti-tracking-turret backstop: the guard cannot pursue a
+    /// stale lead forever.
     #[test]
     fn a_cold_lead_stands_the_guard_down() {
         let facility = Facility::walled_box(11, 11);
