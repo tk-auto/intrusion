@@ -438,7 +438,7 @@ mod hud;
 pub use help::{help_hit, HelpHit, HelpTab};
 pub use hud::{
     ability_at, is_ability_button, is_help_button, is_message_button, render_screen, ScreenUi,
-    HEADER_ROWS, STATUS_ROWS,
+    BOTTOM_ROWS, TOP_ROWS,
 };
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row

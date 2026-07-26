@@ -21,7 +21,7 @@ use std::rc::Rc;
 use intrusion_core::{
     ability_at, ability_input_for_key, help_hit, help_nav_for_key, input_for_key,
     is_ability_button, is_help_button, is_message_button, ui_command_for_key, AbilityId, Cell,
-    Direction, HelpHit, HelpNav, Input, UiCommand, HEADER_ROWS, STATUS_ROWS,
+    Direction, HelpHit, HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -145,7 +145,7 @@ impl Game {
 
     /// Map a viewport point `(client_x, client_y)` to the **screen cell** under it at
     /// the current fit, or `None` for a point off the canvas (a letterbox tap). The
-    /// screen is `map + HEADER_ROWS + STATUS_ROWS` rows fitted to the canvas, so a
+    /// screen is `map + TOP_ROWS + BOTTOM_ROWS` rows fitted to the canvas, so a
     /// linear scale from the canvas rect gives the `(col, row)` the core drew — the
     /// one place the shell turns pixels into a grid coordinate, shared by every
     /// pointer hit-test so they can never disagree.
@@ -161,7 +161,7 @@ impl Game {
         }
         let facility = self.state.layout().facility();
         let cols = facility.width();
-        let rows = facility.height() + HEADER_ROWS + STATUS_ROWS;
+        let rows = facility.height() + TOP_ROWS + BOTTOM_ROWS;
         let col = (lx / rw * cols as f64).floor() as u32;
         let row = (ly / rh * rows as f64).floor() as u32;
         Some((col, row))
@@ -174,13 +174,14 @@ impl Game {
         let Some((col, row)) = self.screen_cell(client_x, client_y) else {
             return false;
         };
-        is_ability_button(self.state.layout().facility().width(), col, row)
+        let facility = self.state.layout().facility();
+        let height = facility.height() + TOP_ROWS + BOTTOM_ROWS;
+        is_ability_button(facility.width(), height, col, row)
     }
 
-    /// Whether the viewport point lands on the header's help toggle (§14 v2/#139) —
-    /// the core ([`is_help_button`]) owns the `[?]` button's geometry, so a tap can
-    /// never miss the button drawn. The button sits outside the map the overlay
-    /// covers, so the same tap opens and closes the card.
+    /// Whether the viewport point lands on the near line's help toggle (§14
+    /// v2/#139/#267) — the core ([`is_help_button`]) owns the `[?]` button's
+    /// geometry, so a tap can never miss the button drawn.
     fn hit_help_button(&self, client_x: f64, client_y: f64) -> bool {
         let Some((col, row)) = self.screen_cell(client_x, client_y) else {
             return false;
@@ -418,9 +419,8 @@ impl GesturePump {
                 return;
             }
             // The help toggle, a view toggle like the deploy button (§14 v2/#139): a
-            // tap opens or closes the reference card and never starts a gesture. It
-            // sits in the header, which the card does not cover, so it is always
-            // reachable to dismiss (§11.6's no-trap rule).
+            // tap opens or closes the reference panel and never starts a gesture. The
+            // modal panel carries its own `[x]`, so the pair never traps (§11.6).
             if game.hit_help_button(x, y) {
                 game.apply_ui_command(UiCommand::ToggleHelp);
                 game.draw();
