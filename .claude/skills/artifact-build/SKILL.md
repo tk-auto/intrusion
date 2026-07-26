@@ -186,6 +186,41 @@ for the live Pages URL, never for an artifact.
 > from the build (`--seed`) or the URL, not a box. If you re-enable it, the box loads
 > any level-seed string live and this section's "type it in" path returns.
 
+## 6b. Lift the fog for a playtest (`--debug reveal`, §12.6)
+
+A build can be baked with **debug switches** — playtest-only changes to what is
+*drawn*. There is one so far:
+
+```
+python3 .claude/skills/artifact-build/assemble.py \
+  --dist "$SCRATCH/dist" --index web/index.html \
+  --out "$SCRATCH/intrusion-8371-reveal.html" --seed 8371 \
+  --debug reveal --title intrusion-244-8371-reveal-1
+```
+
+`reveal` makes the player's field of view the **whole facility** — you see the level as
+if you were standing everywhere at once. It is stated as *sight*, in the sight phase
+(`State::recompute_sight`), not as a drawing rule, so everything follows from that one
+substitution: the §11.5a fog lifts into the ordinary **live** picture (one colour
+scheme to read, no dim remembered layer), every guard draws its full state-coloured
+`g` wherever it stands, and the §11.5 danger overlay paints **every cone** — so you can
+watch a patrol sweep the far side of the facility while you play.
+
+**It changes only what the player perceives.** Guards look with their own cones, detect
+what they would have detected, and walk the same beats, so the run plays identically —
+that is what makes watching it worth anything. Seeing everything is not being
+everywhere: you can still be spotted, and contact still catches you.
+
+**It is not part of the level.** A debug switch never travels in a level-seed string
+and has no `?debug=` URL form (`crates/web/src/debug.rs`) — a build is the only way to
+set one, so a level you hand to someone else can never arrive with the fog lifted.
+Flag names are validated at build time against the set the shell knows, so a typo
+fails here rather than publishing a build that quietly lacks its switch.
+
+Name the artifact with a `-reveal` slug (as above) and **say in the handoff that the
+fog is lifted** — a revealed frame looks nothing like the shipped game, and a stale
+tab shouldn't be mistaken for one.
+
 ## 7. Hand off a **bot replay** (§13.3/#197)
 
 A seed hands over the *level*; a replay hands over the **exact run** — you watch
