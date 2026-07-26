@@ -53,6 +53,8 @@ pub enum Verb {
     Dephase,
     /// Activated Autodoors (§8.3).
     Autodoors,
+    /// Activated Confusion (§8.3).
+    Confusion,
     /// Landed a takedown (§7.2) — [`Event::TakenDown`](intrusion_core::Event::TakenDown).
     Takedown,
     /// Grabbed a body to drag (§8.3) — [`Event::BodyGrabbed`](intrusion_core::Event::BodyGrabbed).
@@ -65,13 +67,14 @@ impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 8] = [
+    pub const ALL: [Verb; 9] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
         Verb::Decoy,
         Verb::Dephase,
         Verb::Autodoors,
+        Verb::Confusion,
         Verb::Takedown,
         Verb::Drag,
     ];
@@ -85,6 +88,7 @@ impl Verb {
             AbilityId::Decoy => Verb::Decoy,
             AbilityId::Dephase => Verb::Dephase,
             AbilityId::Autodoors => Verb::Autodoors,
+            AbilityId::Confusion => Verb::Confusion,
         }
     }
 
@@ -97,6 +101,7 @@ impl Verb {
             Verb::Decoy => "decoy",
             Verb::Dephase => "dephase",
             Verb::Autodoors => "autodoors",
+            Verb::Confusion => "confusion",
             Verb::Takedown => "takedown",
             Verb::Drag => "drag",
         }
@@ -214,6 +219,7 @@ mod tests {
                 "decoy",
                 "dephase",
                 "autodoors",
+                "confusion",
                 "takedown",
                 "drag"
             ]
@@ -224,6 +230,7 @@ mod tests {
         assert_eq!(Verb::of_ability(AbilityId::Decoy), Verb::Decoy);
         assert_eq!(Verb::of_ability(AbilityId::Dephase), Verb::Dephase);
         assert_eq!(Verb::of_ability(AbilityId::Autodoors), Verb::Autodoors);
+        assert_eq!(Verb::of_ability(AbilityId::Confusion), Verb::Confusion);
     }
 
     /// Recording accumulates the exact per-verb counts, and `total` sums them —

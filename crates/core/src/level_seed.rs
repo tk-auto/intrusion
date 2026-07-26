@@ -43,8 +43,8 @@ use crate::rng::Rng;
 use crate::state::State;
 
 /// The number of salvaged-tech abilities quick play grants at start (#244) — the
-/// `starting_abilities` count knob. With [`AbilityId::TECH`] now holding four, a
-/// grant of three is a **seeded draw of three of the four** (§8.3): the pool has
+/// `starting_abilities` count knob. With [`AbilityId::TECH`] now holding five, a
+/// grant of three is a **seeded draw of three of the five** (§8.3): the pool has
 /// outgrown the grant, so the draw finally bites — a run holds a subset of the tech,
 /// not all of it.
 const QUICK_PLAY_TECH_GRANT: usize = 3;
@@ -161,7 +161,7 @@ impl LevelSeed {
 /// [`QUICK_PLAY_TECH_GRANT`] tech chosen from [`AbilityId::TECH`]. Seeded off a
 /// sub-stream independent of generation ([`LOADOUT_STREAM_SALT`]), so the draw is
 /// deterministic yet never perturbs the facility. When the grant meets or exceeds
-/// the pool every tech is granted and no randomness is drawn at all; with four tech
+/// the pool every tech is granted and no randomness is drawn at all; with five tech
 /// shipped and a grant of three, the partial draw below runs and picks a subset.
 fn quick_play_loadout(seed: u64) -> Loadout {
     let mut pool = AbilityId::TECH;
@@ -304,9 +304,9 @@ mod tests {
     use crate::Outcome;
 
     /// Quick play (#244): the intel gate at [`IntelGate::All`], the innate set, and a
-    /// seeded draw of [`QUICK_PLAY_TECH_GRANT`] tech. With four tech shipped and a
+    /// seeded draw of [`QUICK_PLAY_TECH_GRANT`] tech. With five tech shipped and a
     /// grant of three the draw bites (§8.3): the run holds every innate ability plus
-    /// exactly three of the four tech — a strict subset of the full loadout.
+    /// exactly three of the five tech — a strict subset of the full loadout.
     #[test]
     fn quick_play_is_all_intel_and_the_tech_grant() {
         let level = LevelSeed::quick_play(8371);
@@ -322,7 +322,7 @@ mod tests {
             .count();
         assert_eq!(
             tech_held, QUICK_PLAY_TECH_GRANT,
-            "a three-of-four tech draw"
+            "a three-of-five tech draw"
         );
         // The pool now outgrows the grant, so the loadout is a strict subset.
         assert_ne!(level.abilities, Loadout::full(), "not every tech is held");
@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(LevelSeed::decode("L1-notaseed-3-r"), None, "bad seed");
         assert_eq!(LevelSeed::decode("L1-1--r"), None, "empty modifier field");
         assert_eq!(LevelSeed::decode("L1-1-3-rr"), None, "a repeated ability");
-        assert_eq!(LevelSeed::decode("L1-1-3-rz"), None, "z is no ability key");
+        assert_eq!(LevelSeed::decode("L1-1-3-rq"), None, "q is no ability key");
         assert_eq!(LevelSeed::decode("-1.5-"), None, "not a token at all");
     }
 
@@ -485,7 +485,7 @@ mod tests {
             "the token boots the same frame as the config",
         );
         // The resolved config is threaded into the running state — the loadout the
-        // token carries (a three-of-four tech draw now, no longer the full set).
+        // token carries (a three-of-five tech draw now, no longer the full set).
         assert_eq!(a.modifiers().intel_to_exit, IntelGate::All);
         assert_eq!(a.loadout(), level.abilities);
         assert_eq!(a.outcome(), Outcome::Playing);

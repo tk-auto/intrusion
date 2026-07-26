@@ -5673,3 +5673,195 @@ fn autodoors_shuts_an_automatic_door_promptly_behind() {
         "shut promptly, not left to idle open",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Confusion (§8.3/§9/#240): blind and freeze guards in a radius, through walls.
+// ---------------------------------------------------------------------------
+
+/// The core of #240: a guard inside the bubble is **frozen in its tracks** while
+/// Confusion is active — a chaser bearing down on the player stops advancing the
+/// moment it is suppressed, and takes no step for the whole window. When the window
+/// ends it **resumes cleanly**, stepping toward the player again on the very next
+/// turn. (The level-start world phase, §4.2, already sent this patroller one step
+/// into a chase, so it enters the window at (10, 8).)
+#[test]
+fn confusion_freezes_a_hunting_guard_then_it_resumes() {
+    let mut s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::North,
+        vec![Guard::patrolling(Cell::new(10, 7))],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    // The startup chase has closed the gap by one: the guard is two cells north and
+    // already Chasing — a live threat, well inside the bubble.
+    assert_eq!(s.guards()[0].pos(), Cell::new(10, 8));
+    assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+
+    // Activation turn: frozen this very turn (§8.2 covers the activation turn). Then
+    // five more Waits, all inside the 6-turn window — the guard never advances.
+    let events = s.step(Input::Activate(AbilityId::Confusion));
+    assert!(
+        events.contains(&Event::AbilityActivated {
+            ability: AbilityId::Confusion
+        }),
+        "the ability switched on: {events:?}",
+    );
+    for turn in 1..=6 {
+        assert_eq!(s.outcome(), Outcome::Playing, "turn {turn}: still playing");
+        assert_eq!(
+            s.guards()[0].pos(),
+            Cell::new(10, 8),
+            "turn {turn}: a frozen chaser does not advance",
+        );
+        if turn < 6 {
+            s.step(Input::Wait);
+        }
+    }
+
+    // The window has ticked out. The guard resumes at once — stepping toward the
+    // player it was held off, its chase intact (no lost state, §8.2).
+    s.step(Input::Wait);
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(10, 9),
+        "the guard resumes its advance the moment the window ends",
+    );
+    assert_eq!(
+        s.guards()[0].state(),
+        GuardState::Chasing,
+        "with its chase preserved, not reset",
+    );
+}
+
+/// The §4.5 capture edge (#240): a **frozen adjacent** guard cannot step into the
+/// player, so it cannot capture while suppressed — but Confusion is a stay of
+/// execution, not a reprieve. The moment it lapses, capture-is-contact resumes and
+/// the adjacent guard takes the player.
+#[test]
+fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
+    // The startup chase (§4.2) walks this patroller from (10, 8) to (10, 9): adjacent
+    // and Chasing. Without Confusion its next step is into the player — a capture.
+    let mut s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::North,
+        vec![Guard::patrolling(Cell::new(10, 8))],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(10, 9),
+        "adjacent after startup"
+    );
+
+    s.step(Input::Activate(AbilityId::Confusion));
+    for turn in 1..=6 {
+        assert_eq!(
+            s.outcome(),
+            Outcome::Playing,
+            "turn {turn}: the frozen adjacent guard cannot capture",
+        );
+        assert_eq!(
+            s.guards()[0].pos(),
+            Cell::new(10, 9),
+            "turn {turn}: it holds its cell, one step from the player",
+        );
+        if turn < 6 {
+            s.step(Input::Wait);
+        }
+    }
+
+    // Confusion lapses: the adjacent guard is contact, and contact is capture (§4.5).
+    let events = s.step(Input::Wait);
+    assert_eq!(s.outcome(), Outcome::Lost, "the reprieve is over");
+    assert!(
+        events.contains(&Event::Captured {
+            by: Cell::new(10, 10)
+        }),
+        "capture-is-contact resumes: {events:?}",
+    );
+}
+
+/// The bubble is a **box through walls** (§9), exactly like the guard sense, and it
+/// stops at [`CONFUSION_RADIUS`]: a guard one cell past the edge is untouched, and a
+/// wall between the player and a guard inside the edge does not spare it. Read off
+/// the one [`guard_confused`](State::guard_confused) query both the phase and the
+/// renderer use.
+#[test]
+fn confusion_reaches_through_walls_and_stops_at_its_radius() {
+    // Pin the [START] radius so a later change is a visible edit.
+    assert_eq!(CONFUSION_RADIUS, 6);
+
+    let mut layout = open_room(24, 20);
+    // A wall between the player (6,6) and the near guard (12,6), to prove the bubble
+    // ignores line of sight.
+    layout.place(Cell::new(9, 6), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(6, 6),
+        Direction::North,
+        vec![
+            Guard::stationary(Cell::new(12, 6)), // distance 6 == radius, behind a wall
+            Guard::stationary(Cell::new(6, 13)), // distance 7 > radius
+        ],
+        Vec::new(),
+        Cell::new(22, 18),
+    );
+
+    // Before activation nothing is confused.
+    assert!(!s.guard_confused(&s.guards()[0]));
+    assert!(!s.guard_confused(&s.guards()[1]));
+
+    s.step(Input::Activate(AbilityId::Confusion));
+    assert!(
+        s.guard_confused(&s.guards()[0]),
+        "a guard at the radius edge is frozen even through a wall (§9)",
+    );
+    assert!(
+        !s.guard_confused(&s.guards()[1]),
+        "a guard one cell past the edge is untouched — the bubble still has an edge",
+    );
+}
+
+/// The "cone off (§11.5)" half of the acceptance: a confused guard the player can
+/// see stops painting the danger overlay. Its cone is dropped from
+/// [`visible_cone_cells`](State::visible_cone_cells) the moment it is frozen, so the
+/// overlay reads honestly — a blinded guard detects nothing, and nothing red follows.
+#[test]
+fn a_confused_guards_cone_leaves_the_danger_overlay() {
+    // Guard three cells north, in the player's forward view, so it is *seen* and its
+    // cone paints the overlay.
+    let mut s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(10, 7))],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    // A spent turn establishes sight: the seen guard's cone now paints red.
+    s.step(Input::Wait);
+    assert_eq!(
+        s.perceive_guard(&s.guards()[0]),
+        Some(GuardPerception::Seen),
+        "precondition: the guard is seen, so its cone is overlay-eligible",
+    );
+    assert!(
+        s.visible_cone_cells().next().is_some(),
+        "precondition: a seen guard paints a danger cone",
+    );
+
+    s.step(Input::Activate(AbilityId::Confusion));
+    assert!(
+        s.guard_confused(&s.guards()[0]),
+        "the guard is inside the bubble",
+    );
+    assert_eq!(
+        s.visible_cone_cells().count(),
+        0,
+        "a confused guard's cone is off — no danger overlay from a blinded guard",
+    );
+}
