@@ -1613,7 +1613,7 @@ backlog until a single screen-bound story proves fun.
 │    ##############        #########                         │
 │                       E                                    │
 ├────────────────────────────────────────────────────────────┤
-│                            Run/11/ Camo[9] Decoy Sight(on) │ ← ability bar
+│                    Run/11/   Camo[9]   Decoy     Sight(on) │ ← ability bar
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -1666,17 +1666,29 @@ unchanged and unconditional, and the help panel's Legend card is where a player
 reads them off, each one paired with the bar name it fires (`c / Camo` →
 *Camouflage*).
 
+**Fixed slots: the names never move.** Each ability owns a **10-cell slot** — 9
+of entry, 1 of air — and its entry is drawn **left-aligned inside it**, whatever
+state it is in. A cooldown appearing, or ticking from `/10/` to `/9/`, changes
+nothing but its own cells. This matters more than it sounds: a bar whose words
+slide about as numbers come and go is a bar you have to *read* every time you
+look, and the whole case for it being always-on is that you learn its shape and
+then only **glance**. An ability's column is a fact about the run, like its
+hotkey (§11.6) — position is muscle memory too. The slots are laid end to end and
+the block is flush **right**, so a shorter loadout still keeps the bar under the
+thumb (#267).
+
 **Why names fit now, and the budget that makes them fit.** A run holds **at most
 four** abilities — innate Run plus the three-tech grant (§8.3/§10.2) — so the
-compression the old strip paid for bought nothing worth its cost. Four names
-across a 40-wide board is still tight, and the arithmetic is exact:
+compression the old strip paid for bought nothing worth its cost. Four named
+slots across a 40-wide board is still tight, and the arithmetic is exact:
 
 | | cells |
 |---|---|
 | Longest state notation (`/45/` — the catalog's biggest cooldown, plus delimiters; a passive's `(on)` is deliberately no wider) | 4 |
 | Longest **bar name** (`Decoy` / `Phase` / `Doors` / `Sight`) | 5 |
-| Widest single entry | **9** |
-| Four entries, three one-cell gaps, one-cell right margin | **40** |
+| Widest entry, so the slot's content width | **9** |
+| Plus one cell of air → **one slot** | **10** |
+| Four slots | **40** |
 
 That is the whole board width, with nothing spare — which is why each ability
 carries a short **bar name** (`Run`, `Camo`, `Decoy`, `Phase`, `Doors`, `Daze`,
@@ -1686,6 +1698,10 @@ budget is checked at compile time.** Every input is derived — the held cap fro
 the innate set plus the tech grant, the notation width from the catalog's own
 durations and cooldowns — so renaming an ability, pushing a cooldown past 99, or
 granting a fourth tech fails the *build*, not the frame (#287).
+
+The slot is also the **tap target**, all nine cells of it: a short name is no
+harder to hit than a long one, and the target does not move when the ability's
+state does (§11.6's touch rule).
 
 ### 11.5 Field of view and the danger overlay
 
@@ -2172,8 +2188,8 @@ default.
    put the tap target furthest from the thumb, and a compact bottom-right strip
    of bare hotkeys needed a deploy button and a panel to say what anything was.
    The settled answer: an always-on **bottom-right bar naming every held
-   ability**, with its `[3]` / `/2/` / `(on)` notation and its state colour, and
-   nothing to deploy. What unlocked it was capping the held set at four (§8.3) —
+   ability** in a fixed 10-cell slot, with its `[3]` / `/2/` / `(on)` notation and
+   its state colour, and nothing to deploy. What unlocked it was capping the held set at four (§8.3) —
    the names fit, so the compression was pure cost. Both constraints hold: every
    state stays discoverable on the bar, and hotkeys (§11.6) are untouched by it —
    the bar no longer even shows them, and the help panel's Legend card pairs each

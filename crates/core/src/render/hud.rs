@@ -58,22 +58,26 @@ fn ability_row(map_h: u32) -> u32 {
     TOP_ROWS + map_h
 }
 
-/// The gap between two ability-bar entries (§11.4): a single cell — the tightest
-/// separation that still reads as two labels, and the one the width budget is
-/// costed with.
+/// The trailing cell of every ability-bar slot (§11.4): one cell of air after the
+/// entry, separating it from the next — and, on the last slot, from the frame's
+/// edge, so the strip never runs into the corner.
 const BAR_GAP: u32 = 1;
 
-/// The ability bar's right margin (§11.4): one cell of air between the last entry
-/// and the frame's edge, so the strip never runs into the corner.
-const BAR_MARGIN: u32 = 1;
+/// One ability's **fixed slot** on the bar, in cells (§11.4/#287): the widest entry
+/// any ability can draw ([`MAX_BAR_ENTRY`]) plus its trailing [`BAR_GAP`].
+///
+/// Fixed, not fitted: an entry is drawn **left-aligned inside its slot** and the
+/// slot is the same width whatever state the ability is in, so a cooldown ticking
+/// from `/9/` to `/10/` — or appearing at all — never shifts the ability beside it.
+/// A bar whose names slide around as numbers come and go is a bar you have to
+/// *read* every time; one whose names hold still is one you learn the shape of and
+/// then only glance at, which is the whole point of it being always-on (§11.4).
+/// Position is muscle memory, exactly like the hotkeys it projects (§11.6).
+const BAR_SLOT: u32 = MAX_BAR_ENTRY as u32 + BAR_GAP;
 
-/// The widest the ability bar can ever be, in cells (§11.4/#287): every ability a
-/// run can hold ([`AbilityId::MAX_HELD`]), each at its widest entry
-/// ([`MAX_BAR_ENTRY`] — longest bar name, longest state notation), with a gap
-/// between each pair and the right margin.
-const MAX_BAR_WIDTH: u32 = (AbilityId::MAX_HELD * MAX_BAR_ENTRY
-    + (AbilityId::MAX_HELD - 1) * BAR_GAP as usize) as u32
-    + BAR_MARGIN;
+/// The widest the ability bar can ever be, in cells (§11.4/#287): one [`BAR_SLOT`]
+/// for every ability a run can hold ([`AbilityId::MAX_HELD`]).
+const MAX_BAR_WIDTH: u32 = AbilityId::MAX_HELD as u32 * BAR_SLOT;
 
 /// **The bar must fit the board it is drawn under.** The whole point of naming every
 /// entry (#287) is that the held set is small enough to; this is where that stops
@@ -315,51 +319,38 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     }
 }
 
-/// Lay the ability bar out (§11.4/#267/#287): the start column of each entry that
-/// fits, in draw order, as `(status index, start col)`. The strip is
-/// **right-aligned** — it ends [`BAR_MARGIN`] short of the frame's edge, so the
-/// action surface hugs the bottom-right corner — with entries in deck order and
-/// [`BAR_GAP`] between them.
+/// Lay the ability bar out (§11.4/#267/#287): the start column of each ability's
+/// **fixed slot**, in draw order, as `(status index, slot start col)`. Slots are
+/// [`BAR_SLOT`] wide regardless of what the ability is doing, laid end to end and
+/// **right-aligned** so the action surface hugs the bottom-right corner.
+///
+/// The geometry depends only on *how many* abilities the run holds — never on their
+/// state — and a loadout is fixed for the whole run (§8.3), so a column here is a
+/// column for the entire run. That is the property worth having: a number appearing
+/// or growing by a digit moves nothing.
 ///
 /// A legal run loadout always fits: [`MAX_BAR_WIDTH`] says so at compile time. The
 /// truncation below is for the oversized hand-built states that outrun that bound
 /// (a `Loadout::full` test board, a narrow board): the **deck's tail** is dropped,
-/// last slot first, and what remains stays flush right.
-/// Shared by [`ability_bar`] (drawing) and [`ability_at`] (hit-testing) so a click
-/// can never land on an entry the row did not draw.
+/// last slot first, and what remains stays flush right. Shared by [`ability_bar`]
+/// (drawing) and [`ability_at`] (hit-testing) so a click can never land on a slot
+/// the row did not draw.
 fn ability_line_layout(width: u32, statuses: &[AbilityStatus]) -> Vec<(usize, u32)> {
-    let lens: Vec<u32> = statuses
-        .iter()
-        .map(|s| s.bar_entry().chars().count() as u32)
-        .collect();
-    // Width of the first `n` entries laid end to end with one gap between each pair.
-    let strip = |n: usize| -> u32 {
-        match n {
-            0 => 0,
-            n => lens[..n].iter().sum::<u32>() + (n as u32 - 1) * BAR_GAP,
-        }
-    };
-    // The room left of the margin; drop entries from the tail until the strip fits.
-    let right = width.saturating_sub(BAR_MARGIN);
-    let mut shown = lens.len();
-    while shown > 0 && strip(shown) > right {
+    let mut shown = statuses.len();
+    while shown > 0 && shown as u32 * BAR_SLOT > width {
         shown -= 1;
     }
-
-    let mut x = right.saturating_sub(strip(shown));
-    let mut out = Vec::new();
-    for (i, len) in lens.iter().take(shown).enumerate() {
-        out.push((i, x));
-        x += len + BAR_GAP;
-    }
-    out
+    let x0 = width - shown as u32 * BAR_SLOT;
+    (0..shown).map(|i| (i, x0 + i as u32 * BAR_SLOT)).collect()
 }
 
 /// The always-on ability bar (§11.4/#267/#287): the frame's last row, carrying every
-/// held ability by name with its state number tucked against it
-/// ([`AbilityStatus::bar_entry`]), right-aligned into the bottom-right corner, each
-/// in its state colour ([`bar_category`]). One cell between entries keeps the whole
-/// set on one row. No band — the bar reads as a quiet HUD strip, not a message.
+/// held ability by name with its state notation tucked against it
+/// ([`AbilityStatus::bar_entry`]), each **left-aligned in a fixed slot**
+/// ([`ability_line_layout`]) and coloured by state ([`bar_category`]), the whole
+/// strip right-aligned into the bottom-right corner. Slots are a fixed width so a
+/// number appearing or ticking never shifts a neighbour. No band — the bar reads as
+/// a quiet HUD strip, not a message.
 fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
     let blank = GlyphCell {
         glyph: ' ',
@@ -423,19 +414,21 @@ fn draw_help_button(row: &mut [GlyphCell], width: u32, band: Category) {
 /// The geometry mirrors [`render_screen`] exactly, drawing from the same shared
 /// layout ([`ability_line_layout`]) the render draws with, so a click can never miss
 /// the entry that is shown — nor hit one the row truncated away.
+///
+/// The target is the **whole slot**, not just the glyphs in it: the slot is fixed
+/// width (see [`BAR_SLOT`]), so a tap lands on the same ability whether it is
+/// showing `Camo` or `Camo/20/`, and a short name is no harder to hit than a long
+/// one. Only the trailing [`BAR_GAP`] is dead, keeping neighbouring targets apart.
 pub fn ability_at(state: &State, x: u32, y: u32) -> Option<AbilityId> {
     let facility = state.layout().facility();
     if y != ability_row(facility.height()) {
         return None; // the bar is the frame's last row and nothing else is the bar
     }
     let statuses = state.ability_statuses();
-    for (i, start) in ability_line_layout(facility.width(), &statuses) {
-        let len = statuses[i].bar_entry().chars().count() as u32;
-        if x >= start && x < start + len {
-            return Some(statuses[i].id);
-        }
-    }
-    None
+    ability_line_layout(facility.width(), &statuses)
+        .into_iter()
+        .find(|(_, start)| x >= *start && x < start + MAX_BAR_ENTRY as u32)
+        .map(|(i, _)| statuses[i].id)
 }
 
 /// The §11.2 category an ability entry reads in, by its state: an available ability
@@ -736,27 +729,27 @@ mod tests {
     #[test]
     fn the_full_screen_renders_golden() {
         let s = State::new(
-            open_room(24, 6),
+            open_room(40, 6),
             Cell::new(2, 2),
             Direction::North,
             Vec::new(),
             [Cell::new(3, 2)], // a console east of the player
-            Cell::new(22, 4),
+            Cell::new(38, 4),
         )
         .with_loadout(granted());
         let text = render_screen(&s, ScreenUi::default()).to_text();
         assert_eq!(
             text,
             vec![
-                " intel remaining: 1 [?] ".to_string(),
-                " → console: take intel  ".to_string(),
-                "########################".to_string(),
-                "#······················#".to_string(),
-                "#·@$···················#".to_string(),
-                "#······················#".to_string(),
-                "#·····················E#".to_string(),
-                "########################".to_string(),
-                "   Run Camo Decoy Phase ".to_string(),
+                " intel remaining: 1                 [?] ".to_string(),
+                " → console: take intel                  ".to_string(),
+                "########################################".to_string(),
+                "#······································#".to_string(),
+                "#·@$···································#".to_string(),
+                "#······································#".to_string(),
+                "#·····································E#".to_string(),
+                "########################################".to_string(),
+                "Run       Camo      Decoy     Phase     ".to_string(),
             ]
         );
     }
@@ -829,31 +822,30 @@ mod tests {
     #[test]
     fn the_always_on_bar_names_every_held_ability() {
         let s = State::new(
-            open_room(30, 10),
+            open_room(40, 10),
             Cell::new(15, 5),
             Direction::North,
             Vec::new(),
             Vec::new(),
-            Cell::new(28, 8),
+            Cell::new(38, 8),
         )
         .with_loadout(granted());
         let g = render_screen(&s, ScreenUi::default());
         let bar = ability_row(10);
         assert_eq!(bar + BOTTOM_ROWS, g.height(), "the bar is the last row");
 
-        // Four ready abilities named end to end with a cell between: a 20-wide strip
-        // ending at the margin on col 29 — so it starts at col 9.
-        for (col, name) in [(9, "Run"), (13, "Camo"), (18, "Decoy"), (24, "Phase")] {
+        // Four ready abilities in four ten-cell slots, filling the 40-wide row.
+        for (col, name) in [(0, "Run"), (10, "Camo"), (20, "Decoy"), (30, "Phase")] {
             let drawn: String = (col..col + name.len() as u32)
                 .map(|x| g.get(x, bar).glyph)
                 .collect();
             assert_eq!(drawn, name, "{name} at col {col}");
             assert_eq!(g.get(col, bar).fg, Category::Owned, "{name} ready colour");
         }
-        // Flush right behind the margin, with nothing before the strip: the bar is
-        // not a left-aligned header any more.
+        // Each name left-aligned in its slot, the strip flush right, one cell of air
+        // after the last: the four slots exactly fill the v1 row.
         let row: String = (0..g.width()).map(|x| g.get(x, bar).glyph).collect();
-        assert_eq!(row, "         Run Camo Decoy Phase ", "{row:?}");
+        assert_eq!(row, "Run       Camo      Decoy     Phase     ", "{row:?}");
         // The bump verbs never appear on the ability bar.
         assert!(
             !row.contains("Takedown"),
@@ -871,12 +863,12 @@ mod tests {
     #[test]
     fn the_bar_shows_active_and_cooling_state() {
         let mut s = State::new(
-            open_room(30, 10),
+            open_room(40, 10),
             Cell::new(15, 5),
             Direction::North,
             Vec::new(),
             Vec::new(),
-            Cell::new(28, 8),
+            Cell::new(38, 8),
         )
         .with_loadout(granted());
         // Run: activate (Active 4 after the turn's tick) then toggle off — a free
@@ -898,20 +890,65 @@ mod tests {
         let g = render_screen(&s, ScreenUi::default());
         let bar = ability_row(10);
         let row: String = (0..g.width()).map(|x| g.get(x, bar).glyph).collect();
-        // `Run/11/` cooling (System), `Camo[9]` active (Owned), then the ready names —
-        // wider entries push the strip left, but its right edge stays put.
-        assert!(
-            row.contains("Run/11/ Camo[9] Decoy Phase"),
-            "the live ability bar: {row:?}"
+        // `Run/11/` cooling (System) and `Camo[9]` active (Owned) grew into their
+        // slots — and **every name is still in the column it started in**.
+        assert_eq!(row, "Run/11/   Camo[9]   Decoy     Phase     ", "{row:?}");
+        assert_eq!(g.get(0, bar).fg, Category::System, "cooling reads System");
+        assert_eq!(g.get(3, bar).glyph, '/', "cooling shows /N/");
+        assert_eq!(g.get(10, bar).glyph, 'C');
+        assert_eq!(g.get(10, bar).fg, Category::Owned, "active reads Owned");
+        assert_eq!(g.get(14, bar).glyph, '[', "active shows [N]");
+    }
+
+    /// **Nothing moves** (§11.4/#287): the fixed slots mean an ability's column is a
+    /// fact about the run, not about the frame. Drive the deck through activation,
+    /// an early toggle-off, a two-digit cooldown draining to one digit, and back to
+    /// ready — and every ability starts on the same cell it started the run on. A
+    /// bar whose names slide as numbers come and go is one you re-read every glance.
+    #[test]
+    fn a_ticking_number_never_shifts_a_neighbour() {
+        let mut s = State::new(
+            open_room(40, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 8),
+        )
+        .with_loadout(granted());
+        let bar = ability_row(10);
+        // Where each name sits on the very first frame, before anything is used.
+        let columns = |s: &State| -> Vec<u32> {
+            ability_line_layout(40, &s.ability_statuses())
+                .into_iter()
+                .map(|(_, start)| start)
+                .collect()
+        };
+        let first = columns(&s);
+        assert_eq!(first, vec![0, 10, 20, 30]);
+
+        // Run: on, off, and then the whole 12-turn cooldown drained — `/12/` down
+        // through `/9/` to nothing, the digit count changing on the way.
+        s.step(Input::Activate(AbilityId::Run));
+        s.step(Input::Deactivate(AbilityId::Run));
+        for _ in 0..14 {
+            assert_eq!(columns(&s), first, "the columns held at turn {}", s.turn());
+            let name: String = (0..3)
+                .map(|x| {
+                    render_screen(&s, ScreenUi::default())
+                        .get(30 + x, bar)
+                        .glyph
+                })
+                .collect();
+            assert_eq!(name, "Pha", "…and the far slot is still Phase");
+            s.step(Input::Wait);
+        }
+        assert_eq!(
+            s.ability_state(AbilityId::Run),
+            AbilityState::Ready,
+            "the cooldown really did run out under the test",
         );
-        assert!(row.ends_with("Phase "), "the margin holds: {row:?}");
-        let run = row.find("Run/11/").expect("Run's entry") as u32;
-        assert_eq!(g.get(run, bar).fg, Category::System, "cooling reads System");
-        assert_eq!(g.get(run + 3, bar).glyph, '/', "cooling shows /N/");
-        let cam = run + 8;
-        assert_eq!(g.get(cam, bar).glyph, 'C');
-        assert_eq!(g.get(cam, bar).fg, Category::Owned, "active reads Owned");
-        assert_eq!(g.get(cam + 4, bar).glyph, '[', "active shows [N]");
+        assert_eq!(columns(&s), first, "and back to ready moved nothing");
     }
 
     /// The bar is a **projection**, not a rebinding (§11.6/#267/#287): dropping the
@@ -924,18 +961,18 @@ mod tests {
         use crate::input::ability_input_for_key;
 
         let mut s = State::new(
-            open_room(30, 10),
+            open_room(40, 10),
             Cell::new(15, 5),
             Direction::North,
             Vec::new(),
             Vec::new(),
-            Cell::new(28, 8),
+            Cell::new(38, 8),
         )
         .with_loadout(granted());
         let bar = ability_row(10);
 
         // Every entry the bar draws resolves to the very id its hotkey fires.
-        for (i, start) in ability_line_layout(30, &s.ability_statuses()) {
+        for (i, start) in ability_line_layout(40, &s.ability_statuses()) {
             let id = s.ability_statuses()[i].id;
             let key = crate::input::ability_hotkey(id.name()).expect("a settled hotkey");
             assert_eq!(
@@ -959,7 +996,7 @@ mod tests {
         let entry = |id: AbilityId| {
             let statuses = s.ability_statuses();
             let i = statuses.iter().position(|st| st.id == id).expect("in deck");
-            ability_line_layout(30, &statuses)
+            ability_line_layout(40, &statuses)
                 .into_iter()
                 .find(|(j, _)| *j == i)
                 .expect("drawn")
@@ -978,18 +1015,18 @@ mod tests {
     #[test]
     fn a_held_passive_reads_as_always_on() {
         let s = State::new(
-            open_room(30, 10),
+            open_room(40, 10),
             Cell::new(15, 5),
             Direction::North,
             Vec::new(),
             Vec::new(),
-            Cell::new(28, 8),
+            Cell::new(38, 8),
         )
         .with_loadout(granted_with_passive());
         let g = render_screen(&s, ScreenUi::default());
         let bar = ability_row(10);
         let row: String = (0..g.width()).map(|x| g.get(x, bar).glyph).collect();
-        assert_eq!(row, "     Run Camo Decoy Sight(on) ", "{row:?}");
+        assert_eq!(row, "Run       Camo      Decoy     Sight(on) ", "{row:?}");
 
         // In effect, so Owned — the same colour as the ready entries it sits beside,
         // with the marker rather than the colour carrying "you cannot press this".
@@ -1015,10 +1052,8 @@ mod tests {
     #[test]
     fn the_widest_possible_bar_fits_the_v1_board() {
         let width = LevelConfig::V1.width;
-        assert_eq!(
-            MAX_BAR_WIDTH, 40,
-            "four entries of nine, three gaps, a margin"
-        );
+        assert_eq!(BAR_SLOT, 10, "nine cells of entry, one of air");
+        assert_eq!(MAX_BAR_WIDTH, 40, "four slots of ten");
         assert!(
             MAX_BAR_WIDTH <= width,
             "and the board is at least that wide"
@@ -1043,10 +1078,14 @@ mod tests {
 
         let layout = ability_line_layout(width, &worst);
         assert_eq!(layout.len(), AbilityId::MAX_HELD, "no entry is dropped");
-        let (last, start) = *layout.last().expect("a laid-out bar");
-        let end = start + worst[last].bar_entry().chars().count() as u32;
-        assert_eq!(end, width - BAR_MARGIN, "the margin is exactly one cell");
-        assert!(layout[0].1 < width, "and the strip starts on the row");
+        // Even at their widest, no entry overruns its slot — and the last one still
+        // leaves the trailing cell of air at the frame's edge.
+        for (i, start) in &layout {
+            let len = worst[*i].bar_entry().chars().count() as u32;
+            assert!(len <= MAX_BAR_ENTRY as u32, "{:?} fits its slot", worst[*i]);
+            assert!(start + len <= width - BAR_GAP, "…inside the row");
+        }
+        assert_eq!(layout[0].1, 0, "and the four slots fill the row exactly");
     }
 
     /// A bar wider than its row **truncates** rather than panicking or wrapping. No
@@ -1079,9 +1118,9 @@ mod tests {
             .map(|x| g.get(x, ability_row(4)).glyph)
             .collect();
         assert_eq!(row.chars().count(), 24, "exactly one grid row wide");
-        // Seven entries need 41 cells and 23 are on offer, so the deck's last three
-        // go — and the four that remain sit flush right behind the margin.
-        assert_eq!(row, "   Run Camo Decoy Phase ", "{row:?}");
+        // Seven slots need 70 cells and 24 are on offer, so the deck's last five go
+        // — and the two that remain keep their full slots, flush right.
+        assert_eq!(row, "    Run       Camo      ", "{row:?}");
     }
 
     /// The pointer→identity hit-test (§11.4) on the always-on bar: each entry's cells
@@ -1090,36 +1129,38 @@ mod tests {
     #[test]
     fn ability_at_resolves_the_bar() {
         let s = State::new(
-            open_room(30, 10),
+            open_room(40, 10),
             Cell::new(15, 5),
             Direction::North,
             Vec::new(),
             Vec::new(),
-            Cell::new(28, 8),
+            Cell::new(38, 8),
         )
         .with_loadout(granted());
         let bar = ability_row(10);
 
-        // Run@9 Camo@13 Decoy@18 Phase@24 (all ready → the bare names, flush right),
-        // by identity not position — every cell of an entry, not just its first.
-        for (col, len, id) in [
-            (9, 3, AbilityId::Run),
-            (13, 4, AbilityId::Camouflage),
-            (18, 5, AbilityId::Decoy),
-            (24, 5, AbilityId::Dephase),
+        // Four fixed slots at 0/10/20/30, by identity not position — and the target
+        // is the **whole slot**, so the blank cells after a short name hit it too.
+        // That is what makes a slot a stable tap target rather than a moving word.
+        for (slot, id) in [
+            (0, AbilityId::Run),
+            (10, AbilityId::Camouflage),
+            (20, AbilityId::Decoy),
+            (30, AbilityId::Dephase),
         ] {
-            for x in col..col + len {
+            for x in slot..slot + MAX_BAR_ENTRY as u32 {
                 assert_eq!(ability_at(&s, x, bar), Some(id), "col {x}");
             }
+            // …but the trailing cell of air is dead, keeping the targets apart.
+            assert_eq!(
+                ability_at(&s, slot + MAX_BAR_ENTRY as u32, bar),
+                None,
+                "the gap after slot {slot} resolves to nothing",
+            );
         }
-        // The space between entries is no ability, and neither is the empty left
-        // half of the bar the strip does not reach, nor the margin at the far right.
-        assert_eq!(ability_at(&s, 12, bar), None, "the gap resolves to nothing");
-        assert_eq!(ability_at(&s, 1, bar), None, "nor the bar's empty left");
-        assert_eq!(ability_at(&s, 29, bar), None, "nor the right margin");
         // The map above the bar is not the bar.
-        assert_eq!(ability_at(&s, 9, bar - 1), None, "the row above is map");
-        assert_eq!(ability_at(&s, 9, NEAR_ROW), None, "nor is the near line");
+        assert_eq!(ability_at(&s, 0, bar - 1), None, "the row above is map");
+        assert_eq!(ability_at(&s, 0, NEAR_ROW), None, "nor is the near line");
     }
 
     /// The click **is** the hotkey (§11.4/§11.6): the id a bar cell resolves to is
@@ -1131,18 +1172,18 @@ mod tests {
         use crate::input::ability_input_for_key;
 
         let mut s = State::new(
-            open_room(30, 10),
+            open_room(40, 10),
             Cell::new(15, 5),
             Direction::North,
             Vec::new(),
             Vec::new(),
-            Cell::new(28, 8),
+            Cell::new(38, 8),
         )
         .with_loadout(granted());
         let bar = ability_row(10);
 
-        // The bar's Run entry resolves to the same id `r` fires — one path, by identity.
-        let clicked = ability_at(&s, 9, bar).expect("Run under the pointer");
+        // The bar's Run slot resolves to the same id `r` fires — one path, by identity.
+        let clicked = ability_at(&s, 0, bar).expect("Run under the pointer");
         assert_eq!(
             ability_input_for_key("r"),
             Some(Input::Activate(clicked)),
@@ -1161,10 +1202,9 @@ mod tests {
             s.ability_state(AbilityId::Run),
             AbilityState::Cooling { .. }
         ));
-        // The entry widened to `Run/12/`, so it moved: ask the layout where it is now
-        // rather than assuming the column held still.
-        let moved = ability_line_layout(30, &s.ability_statuses())[0].1;
-        let cooling = ability_at(&s, moved, bar).expect("Run still on the bar");
+        // The entry widened to `Run/12/` inside its slot — which did not move, so
+        // the very same cell is still Run (#287).
+        let cooling = ability_at(&s, 0, bar).expect("Run still under the pointer");
         let turn_before = s.turn();
         let refused = s.step(Input::Activate(cooling));
         assert!(refused.is_empty(), "a cooling entry refuses");
