@@ -115,6 +115,16 @@ pub struct LevelModifiers {
     /// (the "hold still, watch the cone sweep past" payoff, §7.6); with this on,
     /// any active search that sweeps over the cupboard you dived into flushes it.
     pub guards_always_search_hideouts: bool,
+    /// **Harder.** A guard that had the player in the **certain** zone (§7.6,
+    /// `CERTAIN_RANGE`) and then loses sight **calls it in** (§7.7): one other
+    /// guard converges on the last-known cell and searches it. Baseline, breaking
+    /// contact leaves you with only the guard you broke it from — with this on,
+    /// someone who was never chasing you starts combing the ground you vanished
+    /// into. This is the §7.7 net, and the reason a lone tail is allowed to be
+    /// escapable (§7.6 fix 4). A **glimpse**-zone contact never calls anyone, and
+    /// the losing guard searches on its own either way — the modifier adds the
+    /// calling of others, nothing else.
+    pub sighting_lost_calls_a_guard: bool,
     /// **Easier.** Paint the §11.5 danger overlay in full — the cone of *every*
     /// guard, not only the ones you can currently see. This only ever **widens**
     /// what is revealed; it never hides the red detection set, so the §11.5
@@ -159,6 +169,73 @@ pub struct ActiveModifier {
     pub detail: Option<&'static str>,
 }
 
+/// What the help card puts between a modifier's name and its value — the `": "` in
+/// `Intel to exit: all of it`. Shared by the renderer and by
+/// [`ActiveModifier::caption_len`] so the measured width and the drawn one cannot
+/// drift apart.
+pub(crate) const CAPTION_SEPARATOR: &str = ": ";
+
+impl ActiveModifier {
+    /// The width, in cells, of this modifier's caption as the help card draws it
+    /// (#248) — `name` alone, or `name: detail` for a knob. `const` on purpose:
+    /// it is what the card's compile-time width bound measures against, so a
+    /// caption that would clip on the v1 board fails the build rather than being
+    /// discovered as a truncated line in a screenshot.
+    pub(crate) const fn caption_len(&self) -> usize {
+        match self.detail {
+            Some(detail) => self.name.len() + CAPTION_SEPARATOR.len() + detail.len(),
+            None => self.name.len(),
+        }
+    }
+}
+
+/// **Every caption the help card can draw** (#248) — the one place a modifier's
+/// display text is written, so the width bound in
+/// [`render::help`](crate::render) can measure the complete set at compile time.
+/// [`LevelModifiers::active`] returns entries from here rather than building
+/// literals inline: a caption that is not in this table is a caption nothing
+/// checks, which is exactly the drift the bound exists to stop.
+///
+/// A bounded knob contributes **one entry per non-baseline value**, since each is a
+/// different caption with a different width.
+pub(crate) const CAPTIONS: [ActiveModifier; 5] = [
+    SEARCHES_HIDEOUTS,
+    CALLS_IN_SIGHTINGS,
+    SHOWS_ALL_CONES,
+    INTEL_GATE_ALL,
+    INTEL_GATE_NONE,
+];
+
+const SEARCHES_HIDEOUTS: ActiveModifier = ActiveModifier {
+    name: "Guards search hideouts",
+    direction: ModifierDirection::Harder,
+    detail: None,
+};
+
+const CALLS_IN_SIGHTINGS: ActiveModifier = ActiveModifier {
+    name: "Sightings called in",
+    direction: ModifierDirection::Harder,
+    detail: Some("one guard"),
+};
+
+const SHOWS_ALL_CONES: ActiveModifier = ActiveModifier {
+    name: "All vision cones shown",
+    direction: ModifierDirection::Easier,
+    detail: None,
+};
+
+const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
+    name: "Intel to exit",
+    direction: ModifierDirection::Harder,
+    detail: Some("all of it"),
+};
+
+const INTEL_GATE_NONE: ActiveModifier = ActiveModifier {
+    name: "Intel to exit",
+    direction: ModifierDirection::Easier,
+    detail: Some("none required"),
+};
+
 impl LevelModifiers {
     /// The modifiers **active** for this run, each described for display (#248):
     /// every field sitting off its baseline, in reading order. The baseline
@@ -177,38 +254,28 @@ impl LevelModifiers {
         // here until it is given a row, the compile-time half of the §11.3 rule.
         let LevelModifiers {
             guards_always_search_hideouts,
+            sighting_lost_calls_a_guard,
             always_show_vision_cones,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
+        // Every caption comes from [`CAPTIONS`] rather than a literal built here, so
+        // the help card's compile-time width bound measures exactly what is drawn.
         if guards_always_search_hideouts {
-            active.push(ActiveModifier {
-                name: "Guards search hideouts",
-                direction: ModifierDirection::Harder,
-                detail: None,
-            });
+            active.push(SEARCHES_HIDEOUTS);
+        }
+        if sighting_lost_calls_a_guard {
+            active.push(CALLS_IN_SIGHTINGS);
         }
         if always_show_vision_cones {
-            active.push(ActiveModifier {
-                name: "All vision cones shown",
-                direction: ModifierDirection::Easier,
-                detail: None,
-            });
+            active.push(SHOWS_ALL_CONES);
         }
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
         // settings are "active", each with the direction its exposure rank implies.
         match intel_to_exit {
             IntelGate::AtLeastOne => {} // the §4.5 baseline — nothing to surface
-            IntelGate::All => active.push(ActiveModifier {
-                name: "Intel to exit",
-                direction: ModifierDirection::Harder,
-                detail: Some("all of it"),
-            }),
-            IntelGate::None => active.push(ActiveModifier {
-                name: "Intel to exit",
-                direction: ModifierDirection::Easier,
-                detail: Some("none required"),
-            }),
+            IntelGate::All => active.push(INTEL_GATE_ALL),
+            IntelGate::None => active.push(INTEL_GATE_NONE),
         }
         active
     }
@@ -223,6 +290,8 @@ impl LevelModifiers {
         Self {
             guards_always_search_hideouts: self.guards_always_search_hideouts
                 || other.guards_always_search_hideouts,
+            sighting_lost_calls_a_guard: self.sighting_lost_calls_a_guard
+                || other.sighting_lost_calls_a_guard,
             always_show_vision_cones: self.always_show_vision_cones
                 || other.always_show_vision_cones,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
@@ -401,21 +470,24 @@ mod tests {
         // Several sources at once: every active field is listed, in reading order.
         let stacked = LevelModifiers {
             guards_always_search_hideouts: true,
+            sighting_lost_calls_a_guard: true,
             always_show_vision_cones: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 3);
+        assert_eq!(stacked.active().len(), 4);
     }
 
     #[test]
     fn union_is_a_field_wise_or() {
         let a = LevelModifiers {
             guards_always_search_hideouts: true,
+            sighting_lost_calls_a_guard: true,
             always_show_vision_cones: false,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
             guards_always_search_hideouts: false,
+            sighting_lost_calls_a_guard: false,
             always_show_vision_cones: true,
             intel_to_exit: IntelGate::None,
         };

@@ -37,7 +37,8 @@ use crate::ability::{AbilityId, PASSIVE_MARKER};
 use crate::category::Category;
 use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
-use crate::modifiers::{LevelModifiers, ModifierDirection};
+use crate::modifiers::{LevelModifiers, ModifierDirection, CAPTIONS, CAPTION_SEPARATOR};
+use crate::place::LevelConfig;
 
 /// The key that toggles the help panel (§11.6). A free letter — not a movement
 /// key, an ability hotkey, or another UI control — and the conventional roguelike
@@ -107,6 +108,38 @@ pub enum HelpHit {
 /// other `[?]`/`[▾]` buttons, so the escape reads as a button.
 const CLOSE_BUTTON: &str = "[x]";
 const CLOSE_BUTTON_LEN: u32 = 3;
+
+/// The column every Level info row is drawn from — one in from the section
+/// headings, the panel's standing content indent.
+const CONTENT_INDENT: u32 = 3;
+
+/// **The modifier caption width bound** (#248). The panel fills the board, so the
+/// narrowest screen a real run ever renders on is the v1 board
+/// ([`LevelConfig::V1`], 40 wide — §10.2); a caption starts at
+/// [`CONTENT_INDENT`] and leaves one column of right margin, the same margin the
+/// `[x]` control keeps. Anything longer is silently clipped by [`draw`], which is
+/// how "Sightings called in: one guard converges" reached a screenshot as
+/// `…one guard conver`.
+///
+/// So it is checked **at compile time** against [`CAPTIONS`] — the whole set of
+/// captions the card can draw — and a caption that would not fit fails the build
+/// instead of the eye. Derived from the board width rather than written as a
+/// number, so retuning §10.2 moves the bound with it.
+const CAPTION_MAX: usize = (LevelConfig::V1.width - CONTENT_INDENT - 1) as usize;
+
+// The bound bites here, over the complete caption set (§2.3 — a check that cannot
+// be bypassed by adding a modifier, because `active` may only draw from `CAPTIONS`).
+const _: () = {
+    let mut i = 0;
+    while i < CAPTIONS.len() {
+        assert!(
+            CAPTIONS[i].caption_len() <= CAPTION_MAX,
+            "a level-modifier caption is too long for the Level info panel — \
+             shorten its name or detail (see CAPTION_MAX in render::help)",
+        );
+        i += 1;
+    }
+};
 
 /// The column the close control starts at: right-aligned with a one-cell margin,
 /// like the ability line's deploy button. Shared by the drawing and [`help_hit`]
@@ -251,10 +284,20 @@ fn draw_level_info(
         // (blue) for an easier one — pulled from the standing categories, not ad-hoc
         // styling. A bounded knob appends its value (`name: value`).
         let text = match m.detail {
-            Some(detail) => format!("{}: {}", m.name, detail),
+            Some(detail) => format!("{}{CAPTION_SEPARATOR}{detail}", m.name),
             None => m.name.to_string(),
         };
-        draw(grid, 3, y, &text, direction_category(m.direction));
+        debug_assert!(
+            text.chars().count() == m.caption_len(),
+            "the drawn caption and the measured one must agree",
+        );
+        draw(
+            grid,
+            CONTENT_INDENT,
+            y,
+            &text,
+            direction_category(m.direction),
+        );
         y += 1;
     }
 }
@@ -599,6 +642,48 @@ mod tests {
             text.contains("Intel to exit: all of it"),
             "a bounded knob renders its value: {text:?}"
         );
+    }
+
+    /// #248: **every** caption the card can draw fits the board it is drawn on,
+    /// with every modifier at once. The compile-time bound (`CAPTION_MAX`) already
+    /// makes an over-long caption a build failure; this is its runtime companion —
+    /// it renders the real panel and checks no row was clipped, so the bound is
+    /// tied to an actual frame rather than to arithmetic that could drift from the
+    /// layout. (Regression: "Sightings called in: one guard converges" was drawn
+    /// as `…one guard conver` on the v1 board.)
+    #[test]
+    fn no_modifier_caption_is_clipped_on_the_board() {
+        // Every toggle on, and the knob at each of its non-baseline values, so all
+        // five captions in `CAPTIONS` are exercised across the two renders.
+        for gate in [IntelGate::All, IntelGate::None] {
+            let all_on = LevelModifiers {
+                guards_always_search_hideouts: true,
+                sighting_lost_calls_a_guard: true,
+                always_show_vision_cones: true,
+                intel_to_exit: gate,
+            };
+            let g = render_help(W, H, HelpTab::LevelInfo, None, all_on);
+            let text = text_of(&g);
+            for m in all_on.active() {
+                let caption = match m.detail {
+                    Some(d) => format!("{}: {}", m.name, d),
+                    None => m.name.to_string(),
+                };
+                assert!(
+                    text.contains(&caption),
+                    "caption {caption:?} was clipped on a {W}-wide board",
+                );
+            }
+        }
+        // And the bound itself is not vacuously large: a caption may not run past
+        // the board's last column once indented.
+        for m in CAPTIONS {
+            assert!(
+                CONTENT_INDENT as usize + m.caption_len() < W as usize,
+                "{:?} does not fit the board with its indent",
+                m.name,
+            );
+        }
     }
 
     /// The **level-seed string** on the Level info tab (§13.1/#245/#272): the run's

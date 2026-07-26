@@ -111,6 +111,13 @@ pub enum Event {
     /// near-line message and as the responder's own sensed dot peeling off toward
     /// that cell (§9) — the visual tell that replaces the old sound (§9.3).
     RadioSilence { at: Cell },
+    /// A guard that had the player in the certain zone lost sight and **called it
+    /// in** (§7.7): another guard is converging on `at` — the cell where contact
+    /// broke — to search it. Fires only with the `sighting_lost_calls_a_guard`
+    /// modifier on (§12.6), and only when someone was actually free to send. The
+    /// player reads it as this near line plus the caller's own sensed dot changing
+    /// course (§9) — the visual tell, sound being gone (§9.3).
+    CalledIn { at: Cell },
     /// A second missed radio ping stepped the facility-wide alert to `level`
     /// (§7.3): the concrete, explainable escalation the alert system was always
     /// meant to provide (§2.3). Written here, read on the near line (§11.4).
@@ -179,9 +186,13 @@ impl Event {
             // aroused but does not have you — the Warning band. A radio silence
             // and the alert step it can lead to are the same kind of aroused
             // threat — control knows something is wrong but nothing has you yet.
-            Event::BodyFound { .. } | Event::RadioSilence { .. } | Event::AlertRaised { .. } => {
-                Category::Warning
-            }
+            // A call-in (§7.7) is the same aroused-but-not-on-you band: the guard
+            // that had you has *lost* you, and the one converging has never seen
+            // you. The threat is spreading, not closing.
+            Event::BodyFound { .. }
+            | Event::RadioSilence { .. }
+            | Event::CalledIn { .. }
+            | Event::AlertRaised { .. } => Category::Warning,
             // A guard that sees you is hunting *you* — the same Danger band as
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
             // reinforce (§11.2).
