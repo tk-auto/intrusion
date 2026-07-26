@@ -74,6 +74,13 @@ pub struct ScreenUi {
     /// routes input to it ([`help_nav_for_key`](crate::help_nav_for_key) /
     /// [`help_hit`](crate::help_hit)), so the game never steps underneath.
     pub help_open: bool,
+    /// The title screen / main menu, while it is up (§14/#268) — `None` once a run
+    /// is playing. Like [`help_open`](Self::help_open) it is modal and full-screen:
+    /// [`render_screen`] draws it *instead of* the game frame and the shell routes
+    /// input to it ([`menu_nav_for_key`](crate::menu_nav_for_key) /
+    /// [`menu_hit`](crate::menu_hit)). Its own screen lives in
+    /// [`menu`](super::menu).
+    pub menu: Option<MenuUi>,
     /// Which help tab is showing while [`help_open`](Self::help_open) (§14 v2/#248).
     /// Ignored when the panel is closed; the [`Default`] is the leftmost tab, so the
     /// panel opens on Level info. The shell cycles it from
@@ -206,6 +213,13 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     let facility = state.layout().facility();
     let width = facility.width();
     let height = TOP_ROWS + facility.height() + BOTTOM_ROWS;
+
+    // The title screen (§14/#268) comes first of all: before a run starts there is
+    // nothing of the game to show, so the menu takes the whole screen — sized to the
+    // board behind it, so starting a run changes what is drawn and never the fit.
+    if let Some(menu) = ui.menu {
+        return super::menu::render_menu(width, height, menu);
+    }
 
     // Help is a modal, full-screen reference (§14 v2/#139/#248): while it is up it
     // takes the *whole* screen — not an overlay on the map — and the shell captures
@@ -1476,5 +1490,42 @@ mod tests {
             assert!(is_ability_button(width, height, x, bar));
             assert!(!is_help_button(width, x, bar), "deploy ≠ help at {x}");
         }
+    }
+
+    /// #268: the title screen takes the **whole** frame and takes it *first* — the
+    /// game's chrome does not show through, not even the help panel a stale
+    /// `help_open` would otherwise draw. It is the board's own size, so starting a
+    /// run swaps what is drawn without moving the fit, and it writes no state:
+    /// clearing it restores the identical frame.
+    #[test]
+    fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
+        let s = help_board();
+        let playing = render_screen(&s, ScreenUi::default());
+        let menu = render_screen(
+            &s,
+            ScreenUi {
+                menu: Some(MenuUi::default()),
+                // Set alongside every other overlay: the menu still wins outright.
+                help_open: true,
+                ability_panel_open: true,
+                ..ScreenUi::default()
+            },
+        );
+        assert_ne!(menu, playing);
+        assert_eq!(
+            (menu.width(), menu.height()),
+            (playing.width(), playing.height())
+        );
+        assert!(
+            menu.to_text()
+                .join("\n")
+                .contains(MenuEntry::QuickPlay.label()),
+            "the frame is the menu, not the help panel behind it",
+        );
+        assert_eq!(
+            render_screen(&s, ScreenUi::default()),
+            playing,
+            "leaving the menu restores the identical frame",
+        );
     }
 }
