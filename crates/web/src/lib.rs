@@ -48,6 +48,7 @@ mod input;
 mod menu;
 mod replay;
 mod seed;
+mod tap;
 
 use std::cell::RefCell;
 use std::rc::Rc;

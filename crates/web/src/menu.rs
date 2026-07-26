@@ -25,7 +25,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use intrusion_core::{menu_hit, LevelSeed, MenuEntry, MenuNav, MenuUi, ScreenUi};
+use intrusion_core::{LevelSeed, MenuEntry, MenuNav, MenuUi, ScreenUi};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -111,15 +111,6 @@ impl Game {
             MenuNav::Back if menu.seed_entry => self.show_entries(),
             _ => {}
         }
-    }
-
-    /// The entry a press lands on while the menu is up, or `None` (§11.6). The core
-    /// ([`menu_hit`]) owns the row geometry, so a tap resolves to exactly the entry
-    /// drawn — and to the *whole* row, the generous target a phone needs.
-    pub(crate) fn menu_entry_at(&self, client_x: f64, client_y: f64) -> Option<MenuEntry> {
-        let menu = self.menu()?;
-        let (_, row) = self.screen_cell(client_x, client_y)?;
-        menu_hit(self.screen_height(), menu, row)
     }
 
     /// Choose an entry — by key or by tap, one path for both (§11.6). A disabled
