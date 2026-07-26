@@ -19,9 +19,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_at, ability_input_for_key, help_hit, help_nav_for_key, input_for_key,
-    is_ability_button, is_help_button, is_message_button, menu_nav_for_key, ui_command_for_key,
-    AbilityId, Cell, Direction, HelpHit, HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    ability_at, ability_input_for_key, help_hit, help_nav_for_key, input_for_key, is_help_button,
+    is_message_button, menu_nav_for_key, ui_command_for_key, AbilityId, Cell, Direction, HelpHit,
+    HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -68,7 +68,7 @@ impl Game {
                 || ability_input_for_key(key).is_some();
         }
         // UI commands (§11.4) come next: they toggle view state and redraw without
-        // ever touching the turn loop. `Tab` deploys the ability panel; `?` opens help.
+        // ever touching the turn loop. `m` deploys the message list; `?` opens help.
         if let Some(command) = ui_command_for_key(key) {
             self.apply_ui_command(command);
             self.draw();
@@ -117,9 +117,6 @@ impl Game {
     /// action, so it changes no [`State`](intrusion_core::State).
     fn apply_ui_command(&mut self, command: UiCommand) {
         match command {
-            UiCommand::ToggleAbilityPanel => {
-                self.ui.ability_panel_open = !self.ui.ability_panel_open;
-            }
             UiCommand::ToggleMessageLog => {
                 self.ui.message_log_open = !self.ui.message_log_open;
             }
@@ -186,17 +183,6 @@ impl Game {
         self.state.layout().facility().height() + TOP_ROWS + BOTTOM_ROWS
     }
 
-    /// Whether the viewport point lands on the deploy button (§11.4) — the core
-    /// ([`is_ability_button`]) owns the button's geometry, so a click can never miss
-    /// the button that is drawn.
-    fn hit_deploy_button(&self, client_x: f64, client_y: f64) -> bool {
-        let Some((col, row)) = self.screen_cell(client_x, client_y) else {
-            return false;
-        };
-        let width = self.state.layout().facility().width();
-        is_ability_button(width, self.screen_height(), col, row)
-    }
-
     /// Whether the viewport point lands on the near line's help toggle (§14
     /// v2/#139/#267) — the core ([`is_help_button`]) owns the `[?]` button's
     /// geometry, so a tap can never miss the button drawn.
@@ -219,12 +205,12 @@ impl Game {
     }
 
     /// The ability under the viewport point, or `None` (§11.4). Maps the point to a
-    /// screen cell and asks the core hit-test ([`ability_at`]), which owns both the
-    /// line's and the panel's geometry — so a click resolves to exactly the entry
-    /// drawn, by identity, and fires the one `Input::Activate` path a hotkey does.
+    /// screen cell and asks the core hit-test ([`ability_at`]), which owns the bar's
+    /// geometry — so a click resolves to exactly the entry drawn, by identity, and
+    /// fires the one `Input::Activate` path a hotkey does.
     fn ability_at_point(&self, client_x: f64, client_y: f64) -> Option<AbilityId> {
         let (col, row) = self.screen_cell(client_x, client_y)?;
-        ability_at(&self.state, self.ui, col, row)
+        ability_at(&self.state, col, row)
     }
 }
 
@@ -440,17 +426,9 @@ impl GesturePump {
                 e.prevent_default();
                 return;
             }
-            // The deploy button is tested first, so a tap on it toggles the panel and
-            // never falls through to an activation underneath (§11.4).
-            if game.hit_deploy_button(x, y) {
-                game.apply_ui_command(UiCommand::ToggleAbilityPanel);
-                game.draw();
-                e.prevent_default();
-                return;
-            }
-            // The help toggle, a view toggle like the deploy button (§14 v2/#139): a
-            // tap opens or closes the reference panel and never starts a gesture. The
-            // modal panel carries its own `[x]`, so the pair never traps (§11.6).
+            // The help toggle, a pure view toggle (§14 v2/#139): a tap opens or closes
+            // the reference panel and never starts a gesture. The modal panel carries
+            // its own `[x]`, so the pair never traps (§11.6).
             if game.hit_help_button(x, y) {
                 game.apply_ui_command(UiCommand::ToggleHelp);
                 game.draw();
@@ -465,7 +443,7 @@ impl GesturePump {
                 e.prevent_default();
                 return;
             }
-            // A tap on a line or panel entry fires the same `Input::Activate(id)` its
+            // A tap on an ability-bar entry fires the same `Input::Activate(id)` its
             // hotkey does (§11.4/§11.6); a cooling/active entry refuses for free in the
             // economy (§4.4). Consumed either way, so it never also walks the player.
             if let Some(id) = game.ability_at_point(x, y) {

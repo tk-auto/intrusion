@@ -477,8 +477,7 @@ mod hud;
 mod menu;
 pub use help::{help_hit, HelpHit, HelpTab};
 pub use hud::{
-    ability_at, is_ability_button, is_help_button, is_message_button, render_screen, ScreenUi,
-    BOTTOM_ROWS, TOP_ROWS,
+    ability_at, is_help_button, is_message_button, render_screen, ScreenUi, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use menu::{menu_hit, MenuEntry, MenuUi};
 

@@ -47,7 +47,11 @@ use crate::state::State;
 /// grant of three is a **seeded draw of three of the five** (§8.3): the pool has
 /// outgrown the grant, so the draw finally bites — a run holds a subset of the tech,
 /// not all of it.
-const QUICK_PLAY_TECH_GRANT: usize = 3;
+///
+/// It *is* [`AbilityId::MAX_TECH_HELD`] rather than a second three: the cap is what
+/// the ability bar is sized against (§11.4), so a grant that outgrew it would have
+/// to answer to the bar's compile-time width bound.
+const QUICK_PLAY_TECH_GRANT: usize = AbilityId::MAX_TECH_HELD;
 
 /// A fixed transform applied to the run seed before drawing the quick-play ability
 /// loadout, so the draw takes from a sub-stream **independent** of the generation
