@@ -224,8 +224,7 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
         placement.exit(),
     )
     .with_rng(rng)
-    .with_modifiers(level.modifiers)
-    .with_loadout(level.abilities))
+    .with_level(*level))
 }
 
 /// Pack a [`LevelModifiers`] into a small bitfield for the token. A struct
@@ -320,6 +319,37 @@ fn from_base36(s: &str) -> Option<u32> {
 mod tests {
     use super::*;
     use crate::Outcome;
+
+    /// The booted run **carries the config that booted it** (#245/#272): `start_level`
+    /// records the whole [`LevelSeed`] on the state, so the help panel's token
+    /// ([`LevelSeed::encode`]) reproduces this very run — and the two halves it
+    /// applies, the modifiers and the loadout, agree with the recorded config by
+    /// construction. A hand-built state carries none.
+    #[test]
+    fn a_booted_run_carries_the_level_that_booted_it() {
+        for level in [
+            LevelSeed::quick_play(8371),
+            LevelSeed::sim(8371),
+            LevelSeed {
+                seed: 4242,
+                modifiers: LevelModifiers {
+                    always_show_vision_cones: true,
+                    ..LevelModifiers::default()
+                },
+                abilities: Loadout::innate(),
+            },
+        ] {
+            let state = start_level(&level).expect("the v1 recipe places");
+            assert_eq!(state.level(), Some(level), "the config is recorded");
+            assert_eq!(state.modifiers(), level.modifiers, "…and applied");
+            assert_eq!(state.loadout(), level.abilities, "…both halves of it");
+            // What the panel would show boots this run again.
+            assert_eq!(
+                LevelSeed::decode(&state.level().expect("a booted run").encode()),
+                Some(level),
+            );
+        }
+    }
 
     /// Quick play (#244): the intel gate at [`IntelGate::All`], the innate set, and a
     /// seeded draw of [`QUICK_PLAY_TECH_GRANT`] tech. With five tech shipped and a

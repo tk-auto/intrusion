@@ -213,7 +213,13 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // are moot. It writes no state, so closing restores the exact frame. The panel
     // draws itself from the run's active modifiers (§12.6) and the chosen tab.
     if ui.help_open {
-        return super::help::render_help(width, height, ui.help_tab, state.modifiers());
+        return super::help::render_help(
+            width,
+            height,
+            ui.help_tab,
+            state.level(),
+            state.modifiers(),
+        );
     }
 
     let statuses = state.ability_statuses();
@@ -1382,10 +1388,43 @@ mod tests {
         );
     }
 
+    /// #272, end to end: a **booted** run's help panel shows that run's own
+    /// level-seed string — the whole chain, `start_level` → `State::level` →
+    /// `render_screen` → the Level info tab — and looking at it is still free: no
+    /// turn, no state written, the frame beneath byte-identical afterwards (§4.4).
+    #[test]
+    fn the_help_panel_of_a_booted_run_shows_its_seed_for_free() {
+        use crate::level_seed::{start_level, LevelSeed};
+
+        let level = LevelSeed::quick_play(8371);
+        let s = start_level(&level).expect("the v1 recipe places");
+        let before = s.turn();
+        let closed = render_screen(&s, ScreenUi::default());
+        let open = render_screen(
+            &s,
+            ScreenUi {
+                help_open: true,
+                ..ScreenUi::default()
+            },
+        );
+        let text = open.to_text().join("\n");
+        assert!(text.contains("LEVEL SEED"), "the section is there");
+        assert!(
+            text.contains(&level.encode()),
+            "…showing this run's own token"
+        );
+        assert_eq!(s.turn(), before, "looking costs no turn");
+        assert_eq!(
+            render_screen(&s, ScreenUi::default()),
+            closed,
+            "and writes no state"
+        );
+    }
+
     /// §11.6's no-trap rule, kept for the full-screen panel (#248): with the near
     /// line's `[?]` now covered, the panel carries its own escape — the `[x]` close control
-    /// hit-tests to [`HelpHit::Close`], and each tab tap switches — while the header
-    /// `[?]` still opens it when the panel is closed.
+    /// hit-tests to [`HelpHit::Close`], and each tab tap switches — while the near
+    /// line's `[?]` still opens it when the panel is closed.
     #[test]
     fn the_panel_is_reachable_to_open_and_escapable_once_open() {
         let s = help_board();
