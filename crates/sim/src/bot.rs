@@ -913,13 +913,19 @@ mod tests {
 
     /// The ticket's batch smoke test (§13.2–§13.4): over a batch of generated seeds
     /// the bot finishes runs with a **mixed** outcome profile — some wins, some
-    /// captures, few timeouts — and actually uses its escape tools (Run to flee,
-    /// Camouflage for portable cover), so the ability histogram has something real to
-    /// measure. These are shape assertions, deliberately loose: they check the bot
-    /// *plays*, not that it plays well (§13.4 — a smoke detector, not a judge), and
-    /// the exact numbers are free to move as the game is tuned.
+    /// captures, few timeouts — and actually uses its innate escape (Run to flee), so
+    /// the ability histogram has something real to measure. These are shape
+    /// assertions, deliberately loose: they check the bot *plays*, not that it plays
+    /// well (§13.4 — a smoke detector, not a judge), and the exact numbers are free to
+    /// move as the game is tuned.
     ///
-    /// The **takedown** is deliberately not required here. It lands only from a
+    /// The sim baseline holds the **innate-only** loadout (§8.3) — it plays *bare*, no
+    /// salvaged tech — so only Run is asserted here. Camouflage and the other tech are
+    /// not in the loadout to fire (a level must be winnable with no tech is the
+    /// baseline this measures); a run that wants to weigh a specific tech grants it
+    /// back and asserts on that.
+    ///
+    /// The **takedown** is deliberately not required either. It lands only from a
     /// guard's rear blind spot or under concealment (§7.2/§155, gated live since
     /// #183), and this avoidance-first bot steers wide of guards rather than hunting
     /// them, so it reaches that safe angle only rarely — mandating the verb every
@@ -944,17 +950,15 @@ mod tests {
             "too many timeouts: {timeouts}/{runs} — the bot is stalling, not playing"
         );
 
-        // The escape abilities fire, so the §13.2 histogram is not measuring a bot
-        // that never acts: Run (fleeing) and Camouflage (portable cover) both show.
-        // The takedown is not asserted — see the doc comment above.
+        // The innate escape fires, so the §13.2 histogram is not measuring a bot that
+        // never acts: Run (fleeing) shows. Tech is out of the bare loadout, so it is
+        // not asserted — nor the takedown (see the doc comment above).
         let usage = records
             .iter()
             .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage));
-        for verb in [Verb::Run, Verb::Camouflage] {
-            assert!(
-                usage.count(verb) > 0,
-                "expected the bot to use {verb:?} at least once across the batch"
-            );
-        }
+        assert!(
+            usage.count(Verb::Run) > 0,
+            "expected the bot to use Run at least once across the batch"
+        );
     }
 }

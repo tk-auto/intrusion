@@ -99,14 +99,18 @@ impl LevelSeed {
 
     /// The **headless-sim** preset for `seed` (§13.2/§13.3): the baseline rules
     /// (the intel gate at [`IntelGate::AtLeastOne`], which keeps the bot's outcome
-    /// profile mixed) and the full loadout, so the bot can reach for any ability.
-    /// The web shell boots quick play; the sim boots this — same facility from the
-    /// same seed, a different objective and no ability draw.
+    /// profile mixed) and the **innate-only** loadout — Run and nothing salvaged.
+    /// The sim baseline is deliberately *bare*: a level must be winnable with no
+    /// tech (§8.3), so the bot's win rate measures the game's core stealth loop, not
+    /// what a lucky tech draw papers over. Runs that want to weigh a specific tech
+    /// add it back explicitly. The web shell boots quick play (§10.2's seeded tech
+    /// grant); the sim boots this — same facility from the same seed, a different
+    /// objective and no tech.
     pub fn sim(seed: u64) -> Self {
         Self {
             seed,
             modifiers: LevelModifiers::default(),
-            abilities: Loadout::full(),
+            abilities: Loadout::innate(),
         }
     }
 
@@ -194,8 +198,22 @@ fn quick_play_loadout(seed: u64) -> Loadout {
 /// whatever the loadout. The web shell, the replay viewer, and the sim all call
 /// this, so a level-seed string reproduces the *same* run everywhere.
 pub fn start_level(level: &LevelSeed) -> Result<State, GenError> {
+    start_level_with(&LevelConfig::V1, level)
+}
+
+/// Boot a running [`State`] from a [`LevelSeed`] under an explicit [`LevelConfig`]
+/// — the same boot as [`start_level`], with the facility recipe (its size and piece
+/// counts) opened up as a knob.
+///
+/// [`start_level`] is this called with [`LevelConfig::V1`], the one tuned v1 recipe
+/// the web shell plays. The headless sim (§13.2) drives *this* to **sweep** the
+/// recipe — most usefully the guard count — measuring how a knob moves the balance
+/// numbers, exactly the "the knobs are data so the sim can sweep them" the config is
+/// declared for (§10.2). The [`LevelSeed`] still fixes the seed, modifiers and
+/// loadout; only the recipe the facility carves from differs.
+pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State, GenError> {
     let mut rng = Rng::new(level.seed);
-    let (layout, placement) = generate_level(&LevelConfig::V1, &mut rng)?;
+    let (layout, placement) = generate_level(config, &mut rng)?;
     let guards = placement.guards(&layout);
     Ok(State::new(
         layout,
@@ -329,12 +347,17 @@ mod tests {
     }
 
     /// The sim preset (§13.3): the baseline gate ([`IntelGate::AtLeastOne`]) and the
-    /// full loadout, so the bot can reach for any ability.
+    /// **innate-only** loadout — the bare, no-tech baseline (§8.3), so the bot's win
+    /// rate measures the core stealth loop rather than a lucky tech draw.
     #[test]
-    fn the_sim_preset_is_the_baseline_gate_and_the_full_loadout() {
+    fn the_sim_preset_is_the_baseline_gate_and_the_innate_loadout() {
         let level = LevelSeed::sim(42);
         assert_eq!(level.modifiers.intel_to_exit, IntelGate::AtLeastOne);
-        assert_eq!(level.abilities, Loadout::full());
+        assert_eq!(level.abilities, Loadout::innate());
+        // Bare means bare: not one salvaged-tech ability is held.
+        for tech in AbilityId::TECH {
+            assert!(!level.abilities.contains(tech), "{} is tech", tech.name());
+        }
         assert_eq!(level.modifiers, LevelModifiers::default());
     }
 

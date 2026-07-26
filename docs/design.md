@@ -1083,7 +1083,14 @@ is unclear and probably wants play evidence first.
 | Guards | **5** **[START]** |
 | Intel | **3** **[START]** |
 | Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, the sim = **at least one**, campaign = **none** |
-| Starting abilities | **A level modifier** (`starting_abilities`, §8.3/#244): quick play grants the innate set **plus three random tech**, seeded (§12.4); campaign accumulates instead (§2.2) |
+| Starting abilities | **A level modifier** (`starting_abilities`, §8.3/#244): quick play grants the innate set **plus three random tech**, seeded (§12.4); the sim grants the **innate set only**; campaign accumulates instead (§2.2) |
+
+**The sim plays bare, and that is the point.** The headless baseline (§13.2) holds
+no salvaged tech — Run and the innate verbs, nothing else — because **a level must
+be winnable with no tech**. Tech is what makes a run *better*, never what makes it
+*possible*; measuring the bot with a full loadout hides a facility that is only
+survivable because something was handed out. The guard count is tuned against the
+bare number, so every tech draw on top is upside.
 
 Size is **screen-bound**: the whole level renders on screen with no camera
 (§11.4 **[SETTLED]**), so it cannot outgrow what one screen shows legibly. The

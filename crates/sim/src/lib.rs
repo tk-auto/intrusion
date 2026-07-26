@@ -31,7 +31,10 @@ mod report;
 mod usage;
 
 pub use bot::StealthBot;
-pub use harness::{capture_one, run_batch, run_one, RunOutcome, RunRecord, DEFAULT_INPUT_CAP};
+pub use harness::{
+    capture_one, capture_one_with, run_batch, run_batch_with, run_one, run_one_with, RunOutcome,
+    RunRecord, DEFAULT_INPUT_CAP,
+};
 pub use policy::{PlayerPolicy, Recording, Scripted};
 pub use replay::Replay;
 pub use report::Summary;
