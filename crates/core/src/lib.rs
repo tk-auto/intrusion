@@ -71,7 +71,7 @@ pub use input::{
     ability_hotkey, ability_input_for_key, help_nav_for_key, input_for_key, ui_command_for_key,
     HelpNav, UiCommand,
 };
-pub use level_seed::{start_level, LevelSeed};
+pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
     ActiveModifier, IntelGate, LevelModifiers, ModifierDirection, ModifierSources,
 };

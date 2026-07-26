@@ -59,11 +59,18 @@ pub struct LevelConfig {
 }
 
 impl LevelConfig {
-    /// The v1 configuration (§10.2): 40×40, 5 guards, 3 intel **[START]**.
+    /// The v1 configuration (§10.2): 40×40, 4 guards, 3 intel **[START]**.
+    ///
+    /// The guard count is tuned against the **bare** headless baseline (§13.2): the
+    /// sim bot holds no salvaged tech, because a level must be winnable with none
+    /// (§8.3). Over 300 seeds the `--guards` sweep read 3 → 48%, 4 → 37%, 5 → 29%,
+    /// 6 → 21%; 4 is the forgiving-but-real end of that curve, and the only row where
+    /// every run resolved (no timeouts). Quick play's three-of-five tech grant (#244)
+    /// then lands as upside on top, never as the thing that makes a run possible.
     pub const V1: Self = Self {
         width: 40,
         height: 40,
-        guards: 5,
+        guards: 4,
         intel: 3,
     };
 }

@@ -57,8 +57,9 @@ mod tests {
     /// The emit schema is pinned byte-for-byte (slice C reads it): the `(seed,
     /// inputs)` pair, the `seed` field now the **level-seed string** carrying the
     /// captured preset (#245), the inputs in the script notation, nothing else. The
-    /// sim preset for seed 42 is a non-default config (the `AtLeastOne` gate, the full
-    /// loadout), so its token is the structured `L1-…` form.
+    /// sim preset for seed 42 is a non-default config (the `AtLeastOne` gate, the
+    /// innate-only loadout — the bare, no-tech baseline), so its token is the
+    /// structured `L1-…` form with just Run's `r` in the ability field.
     #[test]
     fn the_emit_schema_is_pinned() {
         let replay = Replay {
@@ -71,13 +72,10 @@ mod tests {
         };
         assert_eq!(
             replay.to_json_line(),
-            "{\"seed\":\"L1-42-4-rcdxaz\",\"inputs\":\"N+r.\"}"
+            "{\"seed\":\"L1-42-4-r\",\"inputs\":\"N+r.\"}"
         );
         // The baked token decodes straight back to the captured preset.
-        assert_eq!(
-            LevelSeed::decode("L1-42-4-rcdxaz"),
-            Some(LevelSeed::sim(42))
-        );
+        assert_eq!(LevelSeed::decode("L1-42-4-r"), Some(LevelSeed::sim(42)));
     }
 
     /// The §12.4 property, asserted end to end (slice A acceptance): capture a bot

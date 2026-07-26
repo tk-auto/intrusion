@@ -13,7 +13,7 @@ not a judge.
 ## Running
 
 ```
-cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--bot | --script MOVES] [--emit-replay]
+cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--guards N] [--bot | --script MOVES] [--emit-replay]
 ```
 
 | Flag | Meaning | Default |
@@ -21,6 +21,7 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--bot |
 | `--runs N` | how many runs; seeds are `S, S+1, … S+N-1` | 100 |
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
+| `--guards N` | guards to place per facility — the §10.2 recipe knob the balance sweep drives (all else stays v1) | 4 |
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
 | `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed string (#245) — instead of the metrics batch | off |
@@ -66,9 +67,13 @@ not quick play's stricter one — and not just the geometry:
 
 ```
 $ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
-{"seed":"L1-42-4-rcdxa","inputs":"NNE+rN..SS-r…"}
+{"seed":"L1-42-4-r","inputs":"NNE+rN..SS-r…"}
 seed 42: win in 214 turns, 187 inputs          # (human summary, on stderr)
 ```
+
+The ability field is just `r` (Run): the sim boots the **bare, innate-only**
+loadout (§8.3) — a level must be winnable with no salvaged tech is the baseline the
+bot's win rate is measured against.
 
 The `inputs` string is the script notation above, so it feeds straight back:
 `--script "$(…)" --seed 42 --runs 1` reproduces the run byte-for-byte, and the

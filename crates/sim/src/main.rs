@@ -8,11 +8,13 @@
 
 use std::process::ExitCode;
 
-use intrusion_core::{parse_script, Input};
-use intrusion_sim::{capture_one, run_batch, Scripted, StealthBot, Summary, DEFAULT_INPUT_CAP};
+use intrusion_core::{parse_script, Input, LevelConfig};
+use intrusion_sim::{
+    capture_one_with, run_batch_with, Scripted, StealthBot, Summary, DEFAULT_INPUT_CAP,
+};
 
 const USAGE: &str = "\
-Usage: sim [--runs N] [--seed S] [--cap N] [--bot | --script MOVES] [--emit-replay]
+Usage: sim [--runs N] [--seed S] [--cap N] [--guards N] [--bot | --script MOVES] [--emit-replay]
 
 Run N seeded games headlessly and print JSON lines: one row per run, then a
 summary row (schema: crates/sim/README.md).
@@ -21,6 +23,8 @@ summary row (schema: crates/sim/README.md).
   --seed S       the first seed                               (default 0)
   --cap N        inputs issued per run before it is ruled a
                  timeout                                      (default 1000)
+  --guards N     guards to place per facility — the §10.2
+                 recipe knob the balance sweep drives         (default 4)
   --bot          play each run with the baseline stealth bot
                  instead of a script (design §13.2)           (default: off)
   --script MOVES inputs replayed from the start of every run:
@@ -54,6 +58,9 @@ struct Args {
     runs: u64,
     seed: u64,
     cap: u32,
+    /// The facility recipe the batch carves from (§10.2) — v1 with the guard count
+    /// overridden by `--guards`, so the sweep varies guards and holds the rest.
+    config: LevelConfig,
     policy: Policy,
     /// Emit the single-seed captured replay (§12.4) instead of the metrics batch.
     emit_replay: bool,
@@ -63,6 +70,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut runs = 100;
     let mut seed = 0;
     let mut cap = DEFAULT_INPUT_CAP;
+    let mut guards = LevelConfig::V1.guards;
     let mut script: Option<Vec<Input>> = None;
     let mut bot = false;
     let mut emit_replay = false;
@@ -77,6 +85,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--runs" => runs = parse_number(&value()?, flag)?,
             "--seed" => seed = parse_number(&value()?, flag)?,
             "--cap" => cap = parse_number::<u32>(&value()?, flag)?,
+            "--guards" => guards = parse_number::<usize>(&value()?, flag)?,
             "--script" => script = Some(parse_script(&value()?)?),
             "--bot" => bot = true,
             "--emit-replay" => emit_replay = true,
@@ -93,6 +102,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         runs,
         seed,
         cap,
+        config: LevelConfig {
+            guards,
+            ..LevelConfig::V1
+        },
         policy,
         emit_replay,
     })
@@ -108,8 +121,13 @@ fn parse_number<T: std::str::FromStr>(text: &str, flag: &str) -> Result<T, Strin
 /// on stderr so the pipe stays clean for a consumer (slice C's assemble.py).
 fn emit_replay(args: &Args) -> ExitCode {
     let captured = match &args.policy {
-        Policy::Scripted(script) => capture_one(args.seed, Scripted::new(script.clone()), args.cap),
-        Policy::Bot => capture_one(args.seed, StealthBot::new(), args.cap),
+        Policy::Scripted(script) => capture_one_with(
+            &args.config,
+            args.seed,
+            Scripted::new(script.clone()),
+            args.cap,
+        ),
+        Policy::Bot => capture_one_with(&args.config, args.seed, StealthBot::new(), args.cap),
     };
     let (record, replay) = match captured {
         Ok(captured) => captured,
@@ -145,8 +163,10 @@ fn main() -> ExitCode {
 
     let seeds = args.seed..args.seed.saturating_add(args.runs);
     let batch = match &args.policy {
-        Policy::Scripted(script) => run_batch(seeds, args.cap, |_| Scripted::new(script.clone())),
-        Policy::Bot => run_batch(seeds, args.cap, |_| StealthBot::new()),
+        Policy::Scripted(script) => run_batch_with(&args.config, seeds, args.cap, |_| {
+            Scripted::new(script.clone())
+        }),
+        Policy::Bot => run_batch_with(&args.config, seeds, args.cap, |_| StealthBot::new()),
     };
     let records = match batch {
         Ok(records) => records,

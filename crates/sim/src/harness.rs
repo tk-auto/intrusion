@@ -7,7 +7,7 @@
 //! [`Event`] stream as the run steps, never scraped from state or the rendered
 //! grid.
 
-use intrusion_core::{start_level, Event, GenError, Input, LevelSeed, Outcome};
+use intrusion_core::{start_level_with, Event, GenError, Input, LevelConfig, LevelSeed, Outcome};
 
 use crate::policy::{PlayerPolicy, Recording};
 use crate::replay::Replay;
@@ -86,15 +86,30 @@ pub fn run_one(
     policy: &mut dyn PlayerPolicy,
     input_cap: u32,
 ) -> Result<RunRecord, GenError> {
+    run_one_with(&LevelConfig::V1, seed, policy, input_cap)
+}
+
+/// Run one seeded game under `policy` on a facility carved from `config` — the
+/// [`run_one`] loop with the recipe opened up as a knob (§13.2), so the sim can
+/// **sweep** the guard count (and the other §10.2 parameters) and watch the balance
+/// numbers move. [`run_one`] is this called with [`LevelConfig::V1`], the shipped
+/// v1 recipe.
+pub fn run_one_with(
+    config: &LevelConfig,
+    seed: u64,
+    policy: &mut dyn PlayerPolicy,
+    input_cap: u32,
+) -> Result<RunRecord, GenError> {
     // One seed per run (§12.4): the carve stream continues into the turn loop, where
     // the guard close-behind roll draws from it (§10.4/#146), so a sim run is as
     // deterministic and as faithful to the web build as the rest of the pipeline.
-    // The sim boots through the *same* [`start_level`] path the web shell and the
-    // replay viewer use (§13.2) — only the preset differs: the sim's [`IntelGate`]
-    // is `AtLeastOne`, which keeps the bot's outcome profile mixed (§13.3), where
-    // web quick play requires the full set (#244). The full loadout lets the bot
-    // reach for any ability.
-    let mut state = start_level(&LevelSeed::sim(seed))?;
+    // The sim boots through the *same* [`start_level_with`] path the web shell and
+    // the replay viewer use (§13.2) — only the preset differs: the sim's
+    // [`IntelGate`] is `AtLeastOne`, which keeps the bot's outcome profile mixed
+    // (§13.3), where web quick play requires the full set (#244); and the sim holds
+    // the innate-only loadout (§8.3), so it plays *bare* — a level winnable with no
+    // tech is the baseline the win rate is measured against.
+    let mut state = start_level_with(config, &LevelSeed::sim(seed))?;
 
     let mut record = RunRecord {
         seed,
@@ -161,8 +176,22 @@ pub fn capture_one<P: PlayerPolicy>(
     policy: P,
     input_cap: u32,
 ) -> Result<(RunRecord, Replay), GenError> {
+    capture_one_with(&LevelConfig::V1, seed, policy, input_cap)
+}
+
+/// Capture a run under an explicit [`LevelConfig`] — [`capture_one`] with the recipe
+/// as a knob (§13.2). The baked replay still carries the sim [`LevelSeed`] (#245);
+/// note the guard-count sweep lives in the recipe, not the shareable token, so a
+/// replay captured off a swept config only reproduces under the same `--guards` (the
+/// web viewer plays the v1 recipe).
+pub fn capture_one_with<P: PlayerPolicy>(
+    config: &LevelConfig,
+    seed: u64,
+    policy: P,
+    input_cap: u32,
+) -> Result<(RunRecord, Replay), GenError> {
     let mut recording = Recording::new(policy);
-    let record = run_one(seed, &mut recording, input_cap)?;
+    let record = run_one_with(config, seed, &mut recording, input_cap)?;
     let replay = Replay {
         level: LevelSeed::sim(seed),
         inputs: recording.into_inputs(),
@@ -177,11 +206,25 @@ pub fn capture_one<P: PlayerPolicy>(
 pub fn run_batch<P: PlayerPolicy>(
     seeds: impl IntoIterator<Item = u64>,
     input_cap: u32,
+    policy_for: impl FnMut(u64) -> P,
+) -> Result<Vec<RunRecord>, (u64, GenError)> {
+    run_batch_with(&LevelConfig::V1, seeds, input_cap, policy_for)
+}
+
+/// Run a batch on a facility carved from `config` — [`run_batch`] with the recipe as
+/// a knob (§13.2), the entry point the guard-count sweep drives. [`run_batch`] is
+/// this called with [`LevelConfig::V1`].
+pub fn run_batch_with<P: PlayerPolicy>(
+    config: &LevelConfig,
+    seeds: impl IntoIterator<Item = u64>,
+    input_cap: u32,
     mut policy_for: impl FnMut(u64) -> P,
 ) -> Result<Vec<RunRecord>, (u64, GenError)> {
     seeds
         .into_iter()
-        .map(|seed| run_one(seed, &mut policy_for(seed), input_cap).map_err(|e| (seed, e)))
+        .map(|seed| {
+            run_one_with(config, seed, &mut policy_for(seed), input_cap).map_err(|e| (seed, e))
+        })
         .collect()
 }
 
@@ -255,28 +298,30 @@ mod tests {
     }
 
     /// #137: an ability activation is counted from its event, and exactly once. The
-    /// first input activates Dephase — which happens in the player phase, before any
-    /// guard can act — so `dephase == 1` on every seed, and a *refused* re-activation
-    /// (Dephase is now cooling) counts nothing (§4.4). Wait fills the rest.
+    /// first input activates Run — which happens in the player phase, before any guard
+    /// can act — so `run == 1` on every seed, and a *refused* re-activation (Run is now
+    /// active, then cooling) counts nothing (§4.4). Wait fills the rest. Run, not a
+    /// tech ability, because the sim boots the bare innate-only loadout: activating
+    /// tech it does not hold would be a free no-op that counts nothing.
     #[test]
     fn an_activation_is_counted_once_from_its_event() {
         for seed in [0, 7, 42] {
             let cap = 30;
             let mut script = vec![
-                Input::Activate(AbilityId::Dephase),
-                Input::Activate(AbilityId::Dephase), // refused: cooling — must not count
+                Input::Activate(AbilityId::Run),
+                Input::Activate(AbilityId::Run), // refused: already active — must not count
             ];
             script.resize(cap as usize, Input::Wait);
             let record = run_one(seed, &mut Scripted::new(script), cap).expect("generates");
             assert_eq!(
-                record.usage.count(Verb::Dephase),
+                record.usage.count(Verb::Run),
                 1,
                 "seed {seed}: one activation, one count — the refused retry is free",
             );
             assert_eq!(
-                record.usage.count(Verb::Run),
+                record.usage.count(Verb::Dephase),
                 0,
-                "seed {seed}: Run never fired"
+                "seed {seed}: Dephase never fired"
             );
         }
     }
