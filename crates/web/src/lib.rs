@@ -27,8 +27,8 @@
 //! tinted for the exit), muted slate remembered, and two red background shades for
 //! the danger overlay. Colours come from the §11.2 base palette below — a full-range,
 //! colour-blind-safe 16-colour set behind a single category→swatch table. The frame
-//! is the full §11.4 *screen* — the always-on ability line on top, the map, and the
-//! near and usable status lines beneath, all composed by `core::render_screen` from
+//! is the full §11.4 *screen* — the near and usable status lines on top, the map,
+//! and the always-on ability bar beneath, all composed by `core::render_screen` from
 //! the game state plus the shell's `ScreenUi` view state. Keys map through
 //! `core::input_for_key` (§11.6) for game actions, `core::ability_input_for_key` for
 //! the ability shortcuts, and `core::ui_command_for_key` for view toggles (`Tab`
@@ -52,7 +52,7 @@ use std::rc::Rc;
 
 use intrusion_core::{
     render_screen, start_level, Category, Grid, LevelSeed, ScreenUi, State, Visibility,
-    HEADER_ROWS, STATUS_ROWS,
+    BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -309,11 +309,11 @@ impl Game {
     /// resize / orientation change.
     fn fit_and_draw(&mut self) {
         let facility = self.state.layout().facility();
-        // The screen is the map plus the §11.4 ability line above it and the status
-        // lines beneath it.
+        // The screen is the map plus the §11.4 status lines above it and the
+        // ability bar beneath it.
         let (cols, rows) = (
             facility.width() as f64,
-            (facility.height() + HEADER_ROWS + STATUS_ROWS) as f64,
+            (facility.height() + TOP_ROWS + BOTTOM_ROWS) as f64,
         );
         let win = web_sys::window().expect("a window");
 
