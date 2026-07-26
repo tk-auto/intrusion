@@ -18,13 +18,15 @@
 //!   this one query, so the picture cannot disagree with the rule (§11.5: never a
 //!   guess).
 //! - **The flash.** The footprint is *shown* only for the first
-//!   [`EFFECT_FLASH_TURNS`] turns of the window, latched when the ability fires
-//!   ([`record_effect_flashes`](State::record_effect_flashes)) and fading turn by turn
-//!   ([`decay_effect_flashes`](State::decay_effect_flashes)) — long enough to teach the
-//!   extent, short enough that a 13×13 wash is not sitting over the board at the moment
-//!   the danger overlay matters most. What holds the state for the rest of the window is
-//!   the per-guard mark ([`guard_under_effect`](State::guard_under_effect)), which costs
-//!   no ink at all.
+//!   [`EFFECT_FLASH_TURNS`] turns of the window — one, the activation frame — latched
+//!   when the ability fires ([`record_effect_flashes`](State::record_effect_flashes))
+//!   and fading turn by turn ([`decay_effect_flashes`](State::decay_effect_flashes)):
+//!   enough to answer *how far* at the moment the player asks it, without leaving a
+//!   13×13 field of background over the board while the danger overlay is the thing
+//!   that matters. What holds the state for the rest of the window is the per-guard
+//!   mark ([`guard_under_effect`](State::guard_under_effect)), which costs no ink at
+//!   all. The decay machinery is kept general even at a life of one, so raising it is
+//!   a one-number change and Lockdown (#242) may want a longer one.
 
 use super::*;
 
@@ -118,7 +120,7 @@ impl State {
     /// The cells the §11.5 **effect layer** paints as a background: the in-bounds
     /// footprint of every area effect whose flash is still lit (#308).
     ///
-    /// Only the flash's few turns, not the whole window — see the module note. The set
+    /// Only the flash's turn, not the whole window — see the module note. The set
     /// is derived from [`effect_area`](Self::effect_area), so a footprint can never
     /// disagree with what the effect actually holds, and it follows the player while it
     /// lasts, which is how the travelling boundary gets taught at all.
@@ -347,12 +349,12 @@ mod tests {
         );
     }
 
-    /// The flash is a *few* turns, not the whole window (§11.5): it shows for
-    /// [`EFFECT_FLASH_TURNS`] renders and is gone on the next, while the ability is
-    /// still very much running — the marks carry the rest.
+    /// The flash is a *flash*, not the window (§11.5): it shows for
+    /// [`EFFECT_FLASH_TURNS`] renders — one, the activation frame — and is gone on the
+    /// next, while the ability is still very much running. The marks carry the rest.
     #[test]
     fn the_flash_fades_long_before_the_window_ends() {
-        assert_eq!(EFFECT_FLASH_TURNS, 3, "the [START] flash life is pinned");
+        assert_eq!(EFFECT_FLASH_TURNS, 1, "the [START] flash life is pinned");
         let mut s = level_with(Vec::new());
         activate(&mut s);
         // The activation frame counts: it is the first render the player reads, and

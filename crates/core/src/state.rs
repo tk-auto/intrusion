@@ -156,16 +156,19 @@ pub const CONFUSION_RADIUS: u32 = 6;
 
 /// How many turns a fired area effect's **footprint flash** stays painted (§8.3/§11.5
 /// **[START]**, #308): the cyan box that teaches how far Confusion — or any later
-/// radius tech — actually reaches. Deliberately far shorter than the window it opens
-/// (Confusion runs six turns): the flash exists to teach the *extent* once, and a
-/// 13×13 wash held over the whole window would sit on top of the danger overlay at
-/// exactly the moment that overlay matters most (§11.5 [SETTLED]). What carries the
-/// state for the remaining turns is the per-guard mark
-/// ([`guard_under_effect`](State::guard_under_effect)), which costs no ink. Lit at
-/// full life the turn the ability fires and decremented once per spent turn, so the
-/// footprint shows for this many renders and is gone on the next — the same
-/// persist-and-fade shape as [`DOOR_CUE_DECAY_TURNS`]. Pinned by a test.
-pub const EFFECT_FLASH_TURNS: u32 = 3;
+/// radius tech — actually reaches. **One turn** — a true flash, the activation frame
+/// and nothing after it. The wash exists to answer *how far* once, at the moment the
+/// player asks it, and a 13×13 field of background is a great deal of ink to leave on
+/// the board while the danger overlay is the thing that matters (§11.5 [SETTLED]).
+/// What carries the state for the rest of the window is the per-guard mark
+/// ([`guard_under_effect`](State::guard_under_effect)), which costs no ink at all.
+///
+/// Lit at full life the turn the ability fires and decremented once per spent turn,
+/// so the footprint shows for this many renders and is gone on the next — the same
+/// persist-and-fade shape as [`DOOR_CUE_DECAY_TURNS`], which is why raising it is a
+/// one-number change if playtest wants the boundary visible for longer. Pinned by a
+/// test.
+pub const EFFECT_FLASH_TURNS: u32 = 1;
 
 /// Confusion's bubble stays **within the guard sense** (§9/#240): a guard is never
 /// frozen before the player can even sense its dot, so the effect is always legible
@@ -446,7 +449,7 @@ pub struct State {
     /// cheaper than a map.
     door_cues: Vec<DoorCue>,
     /// The area effects whose **footprint** is still being painted (§8.3/§11.5, #308):
-    /// one entry per fired area effect, each fading over [`EFFECT_FLASH_TURNS`] spent
+    /// one entry per fired area effect, each lasting [`EFFECT_FLASH_TURNS`] spent
     /// turns. Lit in [`light_effect_flash`](Self::light_effect_flash) when the ability
     /// switches on, dropped in [`clear_effect_flash`](Self::clear_effect_flash) the
     /// moment its window ends either way (§8.2 expiry, §4.4 toggle-off), and decayed

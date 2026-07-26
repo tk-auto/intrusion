@@ -171,7 +171,7 @@ impl Grid {
 ///
 /// An **area effect** of the player's own making — Confusion's bubble today, Lockdown's
 /// radius next — draws in `Category::Effect`, in two places and one meaning. Its
-/// **footprint** washes the §6.1 box it reaches for the few turns of its flash, and
+/// **footprint** washes the §6.1 box it reaches for the one frame of its flash, and
 /// every guard it **holds** is marked for as long as it holds them: the seen guard's `g`
 /// recolours out of the threat ladder, and a guard felt only through a wall takes the
 /// mark on its sensed highlight, since it has no glyph to recolour. The precedence is
@@ -362,8 +362,8 @@ pub fn render(state: &State) -> Grid {
     }
 
     // The effect layer's footprint (§8.3/§11.5, #308): the §6.1 box a just-fired area
-    // effect reaches, washed over the board in `Category::Effect` for the few turns of
-    // its flash ([`EFFECT_FLASH_TURNS`](crate::EFFECT_FLASH_TURNS)) so the player learns
+    // effect reaches, washed over the board in `Category::Effect` for the flash's own
+    // turn ([`EFFECT_FLASH_TURNS`](crate::EFFECT_FLASH_TURNS)) so the player learns
     // where Confusion's bubble actually ends — the one thing the window's start/end
     // messaging cannot say. Painted **first of all the backgrounds**, so it is the
     // weakest cue on the board: every mark below overwrites it, and an advisory layer
@@ -2204,10 +2204,11 @@ mod tests {
         .with_loadout(Loadout::innate().with(AbilityId::Confusion));
 
         s.step(Input::Step(Direction::East)); // bump the panel open — the player's own, no cue
-        s.step(Input::Activate(AbilityId::Confusion));
-        // Wait the automatic door out: its self-close is nobody's doing, so it lights
-        // the §9.4 cue over the whole doorway while the flash is still lit.
-        let closed = s.step(Input::Wait);
+        s.step(Input::Wait);
+        // Fire Confusion on the very turn the automatic door times out: the flash lasts
+        // exactly this frame, and the door's self-close is nobody's doing, so it lights
+        // the §9.4 cue over the whole doorway in the same render the wash covers it.
+        let closed = s.step(Input::Activate(AbilityId::Confusion));
         assert!(
             closed.iter().any(|e| matches!(
                 e,

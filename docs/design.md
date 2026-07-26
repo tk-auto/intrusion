@@ -1656,8 +1656,8 @@ never a threat level.)*
 
 **An area effect speaks in both channels**, because it has two things to say and they
 land on different cells (#308). Its **footprint** is a background — the §6.1 box it
-reaches, painted through walls like the reach itself — shown for a few turns when the
-ability fires (see §11.5) rather than for the whole window. Every guard it **holds** is
+reaches, painted through walls like the reach itself — flashed on the turn the ability
+fires (see §11.5) rather than held for the whole window. Every guard it **holds** is
 marked for as long as it holds them: a *seen* guard's `g` leaves the yellow → orange →
 red ladder for cyan, because a mind switched off is not a rung on it, and a guard felt
 only through a wall takes the mark on its Sensed highlight instead, since it has no
@@ -1846,10 +1846,11 @@ pillar. **[SETTLED]** — keep it.
 
 **The effect layer is advisory and never outranks red** (§8.3/#308). An area effect
 of the player's own making — Confusion's bubble, Lockdown's radius — washes its
-footprint in cyan for **`EFFECT_FLASH_TURNS`** turns after it fires **[START]**: long
-enough to teach where the bubble ends, short enough that a 13×13 wash is not sitting
-over the danger overlay for the whole window. What carries the state for the remaining
-turns is the per-guard mark (§11.2), which costs no ink. The precedence is fixed —
+footprint in cyan for **`EFFECT_FLASH_TURNS`** turns after it fires — **one**, the
+activation frame **[START]**: enough to answer *how far* at the moment the player asks
+it, without leaving a 13×13 field of background over the board while the danger overlay
+is the thing that matters. What carries the state for every turn after that is the
+per-guard mark (§11.2), which costs no ink. The precedence is fixed —
 **Danger > Sensed > the effect footprint** — so an advisory layer can never masquerade
 as the detection set, nor hide it. The footprint is the live box, re-measured every
 turn from the same query the mechanic reads, so it travels with the player exactly as
