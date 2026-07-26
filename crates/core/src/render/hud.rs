@@ -524,6 +524,28 @@ fn draw_message_button(
     }
 }
 
+/// How many **map rows** the deployed message log covers right now (§11.7), or `0`
+/// when nothing of it is on the board — the geometry half of
+/// [`overlay_message_log`], read by a shell that must know which rows are the log's
+/// rather than the board's (#306: a tap on the list you opened to read must never
+/// burn a turn).
+///
+/// Mirrors the drawing exactly: the log earns the board only when it is deployed
+/// **and** more than one message is live, it hangs from the top of the map, and it is
+/// clamped to the map's height on a board too short to hold every row. `0` while a
+/// modal screen is up ([`ScreenUi::menu`] / [`ScreenUi::help_open`]) because then no
+/// board is drawn at all.
+pub fn message_log_rows(state: &State, ui: ScreenUi) -> u32 {
+    if ui.menu.is_some() || ui.help_open || !ui.message_log_open {
+        return 0;
+    }
+    let live = live_messages(state).len() as u32;
+    if live < 2 {
+        return 0;
+    }
+    live.min(state.layout().facility().height())
+}
+
 /// Overlay the deployed message log onto the map `grid` (§11.7/#267): the step's
 /// live messages ([`live_messages`]), one per row, **hanging from the near line** —
 /// at the map's top-left, the loudest on the first row directly below its own
@@ -822,6 +844,70 @@ mod tests {
             row_text(&g, TOP_ROWS + 1).contains("the guard drops — a body is left"),
             "the rest stack below it"
         );
+    }
+
+    /// [`message_log_rows`] tells a shell exactly which map rows the deployed list
+    /// covers (#306), and it must agree with the drawing: nothing while folded,
+    /// nothing while a modal screen is up, one row per live message once deployed —
+    /// the rows a tap must never read as the board underneath.
+    #[test]
+    fn the_message_log_reports_the_rows_it_covers() {
+        // The same two-message step as above: `TakenDown` plus `BodyFound`.
+        let mut layout = open_room(40, 14);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 4)),
+                Guard::stationary(Cell::new(5, 2)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.step(Input::Step(Direction::North));
+
+        let deployed = ScreenUi {
+            message_log_open: true,
+            ..ScreenUi::default()
+        };
+        assert_eq!(live_messages(&s).len(), 2, "two messages are live");
+        assert_eq!(
+            message_log_rows(&s, deployed),
+            2,
+            "deployed, the list covers one map row per live message"
+        );
+        assert_eq!(
+            message_log_rows(&s, ScreenUi::default()),
+            0,
+            "folded, the list covers nothing"
+        );
+        // A modal screen replaces the whole frame, so no board rows are the log's.
+        for ui in [
+            ScreenUi {
+                help_open: true,
+                ..deployed
+            },
+            ScreenUi {
+                menu: Some(MenuUi::default()),
+                ..deployed
+            },
+        ] {
+            assert_eq!(message_log_rows(&s, ui), 0, "no board, no log rows");
+        }
+
+        // One message earns no list at all — the near line simply speaks it (§11.7).
+        let quiet = State::new(
+            open_room(40, 14),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(live_messages(&quiet).len() < 2);
+        assert_eq!(message_log_rows(&quiet, deployed), 0);
     }
 
     /// §11.7: a single live message shows no counter — the near line is the plain

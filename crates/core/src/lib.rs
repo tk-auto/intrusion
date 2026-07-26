@@ -96,9 +96,9 @@ pub use modifiers::{
 pub use place::{LevelConfig, Placement};
 pub use region::{Door, DoorCell, DoorId, DoorKind, Region, RegionGraph, RegionId, RegionKind};
 pub use render::{
-    ability_at, ascii_grid, help_hit, is_help_button, is_message_button, menu_hit, render,
-    render_screen, GlyphCell, Grid, HelpHit, HelpTab, MenuEntry, MenuUi, ScreenUi, Visibility,
-    BOTTOM_ROWS, TOP_ROWS,
+    ability_at, ascii_grid, help_hit, is_help_button, is_message_button, menu_hit,
+    message_log_rows, render, render_screen, GlyphCell, Grid, HelpHit, HelpTab, MenuEntry, MenuUi,
+    ScreenUi, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{input_token, parse_script, to_script};
 pub use rng::Rng;
