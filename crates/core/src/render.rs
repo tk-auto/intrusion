@@ -144,18 +144,6 @@ impl Grid {
 /// **whole footprint** — evidence someone passed, also position only and also painted
 /// through walls.
 ///
-/// # The debug reveal (§12.6)
-///
-/// One switch lifts all of that: [`DebugModifiers::reveal_whole_level`], baked into a
-/// playtest build and reachable no other way (no level-seed token carries it). With
-/// it on, every cell counts as scouted, every duct's crawl path is drawn, and guards,
-/// bodies and decoys draw wherever they stand — but only what the player genuinely
-/// sees is [`Visibility::Live`], so the sight edge still reads. It changes what is
-/// drawn and nothing else: this function is the **only** reader, so detection, the
-/// danger overlay and the rest of the game are untouched by it.
-///
-/// [`DebugModifiers::reveal_whole_level`]: crate::DebugModifiers::reveal_whole_level
-///
 /// # Glyph priority (§11.3)
 ///
 /// The old renderer was last-writer-wins, so a guard standing in a doorway rendered
@@ -191,26 +179,6 @@ pub fn render(state: &State) -> Grid {
     let (width, height) = (facility.width(), facility.height());
     let fov = state.player_fov();
     let memory = state.memory();
-    // The debug reveal (§12.6, playtest builds only): the fog is lifted wholesale.
-    // Off in every real run — no token can carry it — so everything below reads as
-    // the plain §11.5a fog unless a build baked it in.
-    let reveal = state.debug().reveal_whole_level;
-    // What the player knows of a cell's *contents*: tile memory (§11.5a), or simply
-    // everything under the reveal.
-    let known = |cell: Cell| reveal || memory.contains(cell);
-    // Whether an entity standing on `cell` draws, and in which knowledge state. Live
-    // inside the FOV; merely `Remembered` where only the reveal shows it, so the real
-    // sight edge stays legible in a revealed picture instead of being washed away by
-    // it; nothing at all otherwise.
-    let entity_vis = |cell: Cell| {
-        if fov.contains(cell) {
-            Some(Visibility::Live)
-        } else if reveal {
-            Some(Visibility::Remembered)
-        } else {
-            None
-        }
-    };
 
     // Terrain layer, through the fog: what the player knows of each cell.
     let mut cells: Vec<GlyphCell> = (0..height)
@@ -223,7 +191,7 @@ pub fn render(state: &State) -> Grid {
             let (shown, vis) = if fov.contains(cell) {
                 (terrain, Visibility::Live)
             } else {
-                fogged_view(terrain, known(cell))
+                fogged_view(terrain, memory.contains(cell))
             };
             // Floor dots (§11.5): give open ground a foreground so the FOV edge
             // reads across it. Masked contents dot too — they *show* floor.
@@ -253,7 +221,7 @@ pub fn render(state: &State) -> Grid {
     // recolour only where it actually shows, both live and in memory, never a masked
     // floor dot standing in for a never-seen console.
     for cell in state.spent_consoles() {
-        if fov.contains(cell) || known(cell) {
+        if fov.contains(cell) || memory.contains(cell) {
             cells[(cell.y * width + cell.x) as usize].fg = Category::Neutral;
         }
     }
@@ -267,28 +235,6 @@ pub fn render(state: &State) -> Grid {
     // to nobody. The two **entries** are the exception — they are geometry, drawn `=`
     // from turn one by the fog above whether occupied or not — so nothing here needs
     // to draw an unoccupied duct at all.
-    //
-    // Under the debug reveal every duct's crawl path draws too, dim (`Remembered`):
-    // the route between two entries is the one piece of the level the fog hides
-    // outright rather than merely masking, so a reveal that stopped at contents would
-    // still not show the whole level. Written before the occupied run below, which
-    // keeps its brighter live pass over whichever duct the player is actually in.
-    if reveal {
-        for duct in state.layout().ducts() {
-            for &c in duct.cells() {
-                cells[(c.y * width + c.x) as usize] = GlyphCell {
-                    glyph: '=',
-                    fg: Category::System,
-                    bg: None,
-                    vis: if fov.contains(c) {
-                        Visibility::Live
-                    } else {
-                        Visibility::Remembered
-                    },
-                };
-            }
-        }
-    }
     if let Some(duct) = state.occupied_duct() {
         for &c in duct.cells() {
             cells[(c.y * width + c.x) as usize] = GlyphCell {
@@ -300,24 +246,23 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
-    // Entities are live state: whatever is drawn here is being seen right now — or,
-    // under the reveal, shown out of view in the dimmer `Remembered` state.
-    let mut put = |cell: Cell, glyph: char, fg: Category, vis: Visibility| {
+    // Entities are live state: whatever is drawn here is being seen right now.
+    let mut put = |cell: Cell, glyph: char, fg: Category| {
         cells[(cell.y * width + cell.x) as usize] = GlyphCell {
             glyph,
             fg,
             bg: None,
-            vis,
+            vis: Visibility::Live,
         };
     };
 
     // Entity layers, lowest priority first so the top entity is the last writer.
     // The decoy (§8.3) draws lowest: an Owned `@` — a thing you made wearing
     // your own glyph, which is the whole trick (§10.3/§11.3). Live state like
-    // every entity: in the FOV or not at all (or dimmed, under the reveal).
+    // every entity: in the FOV or not at all.
     if let Some(decoy) = state.decoy() {
-        if let Some(vis) = entity_vis(decoy) {
-            put(decoy, PLAYER_GLYPH, Category::Owned, vis);
+        if fov.contains(decoy) {
+            put(decoy, PLAYER_GLYPH, Category::Owned);
         }
     }
     // A body (§7.2) is live state like any entity — drawn inside the FOV as the `z`
@@ -329,16 +274,16 @@ pub fn render(state: &State) -> Grid {
     // (no longer a hideout). A **loose** body is never remembered; the locked-cupboard
     // status **is**, persisted out of view by the memory pass below.
     for body in state.bodies() {
-        let Some(vis) = entity_vis(body.cell()) else {
+        if !fov.contains(body.cell()) {
             continue;
-        };
+        }
         let stowed = facility.terrain(body.cell()) == Some(Terrain::Hideout);
         let fg = if stowed || state.dragging() == Some(body.cell()) {
             Category::Owned
         } else {
             Category::Caution
         };
-        put(body.cell(), BODY_GLYPH, fg, vis);
+        put(body.cell(), BODY_GLYPH, fg);
     }
     // A **seen** guard (in the FOV, §9.2) draws as the full state-coloured `g`; the
     // `g` glyph is re-categorised every turn from the guard's state (§11.2): yellow →
@@ -347,11 +292,8 @@ pub fn render(state: &State) -> Grid {
     // glyph of its own. A guard perceived neither way draws nothing and is never
     // remembered (§11.5a), so leaving both view and sense range erases it.
     for guard in state.guards() {
-        // A guard is **Seen** exactly when its cell is in the FOV (§9.2), so the one
-        // entity rule above already says it: the live `g` in view, the same glyph
-        // dimmed where only the debug reveal shows it, nothing where neither does.
-        if let Some(vis) = entity_vis(guard.pos()) {
-            put(guard.pos(), GUARD_GLYPH, guard.state().category(), vis);
+        if state.perceive_guard(guard) == Some(GuardPerception::Seen) {
+            put(guard.pos(), GUARD_GLYPH, guard.state().category());
         }
     }
     // The player, always Owned — trivially inside their own FOV. Inside a hideout
@@ -360,12 +302,7 @@ pub fn render(state: &State) -> Grid {
     // the `@`. Read through the same `hidden` query the loop and vision use, so
     // the picture cannot disagree.
     let player_glyph = if state.hidden() { '}' } else { PLAYER_GLYPH };
-    put(
-        state.player(),
-        player_glyph,
-        Category::Owned,
-        Visibility::Live,
-    );
+    put(state.player(), player_glyph, Category::Owned);
 
     // The crouch signal (§10.3/§11.3): while the player is crouched, the whole
     // run they ducked behind — that bench, not every table they stand beside —
@@ -390,7 +327,7 @@ pub fn render(state: &State) -> Grid {
         if fov.contains(cell) {
             continue;
         }
-        if facility.terrain(cell) == Some(Terrain::Hideout) && known(cell) {
+        if facility.terrain(cell) == Some(Terrain::Hideout) && memory.contains(cell) {
             cells[(cell.y * width + cell.x) as usize] = GlyphCell {
                 glyph: BODY_GLYPH,
                 fg: Category::Owned,
@@ -1877,18 +1814,17 @@ mod tests {
 
     // --- The debug reveal (§12.6) --------------------------------------------
 
-    /// The playtest reveal lifts the §11.5a fog wholesale: a never-seen console and
-    /// hideout draw their real contents, and a guard far outside both the FOV and the
-    /// guard-sense box draws its `g`. Everything the reveal adds is
-    /// [`Visibility::Remembered`], never `Live` — the sight edge still reads, so a
-    /// watcher can tell what the player actually knows from what the switch is
-    /// showing them.
+    /// The playtest reveal is a **sight** substitution, not a drawing rule (it lands
+    /// in the sight phase, `State::recompute_sight`), so the frame needs no special
+    /// case here and gets the plain live picture everywhere: a never-scouted console
+    /// and cupboard draw their real glyphs, a far guard draws its `g`, and every cell
+    /// is [`Visibility::Live`] — one colour scheme to read, no dimmed or remembered
+    /// second layer over the board.
     #[test]
-    fn the_debug_reveal_draws_the_contents_and_guards_the_fog_hides() {
+    fn the_debug_reveal_draws_the_whole_level_live() {
         use crate::DebugModifiers;
-        // Player at (10,10) facing north; a console four cells *behind* them, a
-        // hideout off to the side, and a guard 14 cells south — past the sense box,
-        // so it is neither seen nor sensed.
+        // Player facing north; a console behind them, a cupboard across the room, a
+        // guard 14 cells south — past the sense box, so none of the three shows.
         let guard = Cell::new(10, 24);
         let mut layout = open_room(40, 40);
         layout.place(Cell::new(20, 30), Terrain::Hideout);
@@ -1900,120 +1836,44 @@ mod tests {
             [Cell::new(10, 14)],
             Cell::new(38, 38),
         );
-
-        // Precondition: with the fog on, none of the three shows.
         let g = render(&fogged);
-        assert_eq!(g.get(10, 14).glyph, '·', "the console masks as floor");
-        assert_eq!(g.get(20, 30).glyph, '#', "the hideout masks as wall");
-        assert_eq!(g.get(guard.x, guard.y).glyph, '·', "no guard drawn");
+        assert_eq!(g.get(10, 14).glyph, '\u{b7}', "the console masks as floor");
+        assert_eq!(g.get(20, 30).glyph, '#', "the cupboard masks as wall");
+        assert_eq!(g.get(guard.x, guard.y).glyph, '\u{b7}', "no guard drawn");
 
-        let revealed = fogged.clone().with_debug(DebugModifiers {
+        let revealed = fogged.with_debug(DebugModifiers {
             reveal_whole_level: true,
         });
         let g = render(&revealed);
-        let console = g.get(10, 14);
-        assert_eq!(
-            console.glyph, '$',
-            "the console shows through the lifted fog"
-        );
-        assert_eq!(
-            console.vis,
-            Visibility::Remembered,
-            "…but not as live sight"
-        );
-        let hideout = g.get(20, 30);
-        assert_eq!(hideout.glyph, '}', "the cupboard shows too");
-        assert_eq!(hideout.vis, Visibility::Remembered);
-        let shown = g.get(guard.x, guard.y);
-        assert_eq!(
-            shown.glyph, 'g',
-            "the far guard is drawn wherever it stands"
-        );
-        assert_eq!(shown.fg, Category::Caution, "…in its own state's colour");
-        assert_eq!(shown.vis, Visibility::Remembered, "…dimmed, not live");
-        // What the player genuinely sees is still the live layer.
-        assert_eq!(g.get(10, 8).vis, Visibility::Live, "the FOV stays Live");
-    }
-
-    /// The reveal is a **picture** switch and nothing else (§12.6): no rule reads it,
-    /// so the same seed and the same inputs play the identical run under it — same
-    /// pose, same turn count, same guards, same FOV and memory. Only [`render`]
-    /// differs, which is exactly what makes watching a revealed run worth anything.
-    #[test]
-    fn the_debug_reveal_changes_the_picture_and_nothing_else() {
-        use crate::DebugModifiers;
-        // A cupboard far outside every FOV the walk below produces — including the
-        // 360° look a Wait buys (§8.3) — so the two frames genuinely differ.
-        let build = || {
-            let mut layout = open_room(40, 40);
-            layout.place(Cell::new(35, 35), Terrain::Hideout);
-            State::new(
-                layout,
-                Cell::new(5, 5),
-                Direction::South,
-                vec![Guard::patrolling_to(Cell::new(12, 12), Cell::new(12, 16))],
-                Vec::new(),
-                Cell::new(38, 38),
-            )
-        };
-        let mut fogged = build();
-        let mut revealed = build().with_debug(DebugModifiers {
-            reveal_whole_level: true,
-        });
-        for input in [
-            Input::Step(Direction::South),
-            Input::Step(Direction::East),
-            Input::Wait,
-            Input::Step(Direction::South),
-        ] {
-            fogged.step(input);
-            revealed.step(input);
+        assert_eq!(g.get(10, 14).glyph, '$', "the console shows");
+        assert_eq!(g.get(20, 30).glyph, '}', "the cupboard shows");
+        assert_eq!(g.get(guard.x, guard.y).glyph, 'g', "and so does the guard");
+        // Everything is the live layer — nothing on the board is dimmed or
+        // remembered, so the whole picture reads in one scheme.
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                assert_eq!(
+                    g.get(x, y).vis,
+                    Visibility::Live,
+                    "({x},{y}) is not drawn live",
+                );
+            }
         }
-        assert_eq!(fogged.player(), revealed.player());
-        assert_eq!(fogged.facing(), revealed.facing());
-        assert_eq!(fogged.turn(), revealed.turn());
-        assert_eq!(fogged.outcome(), revealed.outcome());
-        assert_eq!(fogged.player_fov(), revealed.player_fov());
-        assert_eq!(fogged.memory(), revealed.memory());
+        // The guard is seen, so the overlay paints its cone (§11.5) — the reveal
+        // gives the cones for free rather than needing a second switch.
         assert_eq!(
-            fogged.guards().iter().map(Guard::pos).collect::<Vec<_>>(),
-            revealed.guards().iter().map(Guard::pos).collect::<Vec<_>>(),
+            g.get(guard.x, guard.y).bg,
+            Some(Category::Danger),
+            "the seen guard's own cell is watched",
         );
-        // The overlay is a rule surface too (#223 reads it): the reveal must not
-        // widen it — that is `always_show_vision_cones`' job, and it is a *level*
-        // modifier because a painted cone is information the game may give.
+        let watched = (0..g.height())
+            .flat_map(|y| (0..g.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| g.get(x, y).bg == Some(Category::Danger))
+            .count();
         assert_eq!(
-            fogged.visible_cone_cells().collect::<Vec<_>>(),
-            revealed.visible_cone_cells().collect::<Vec<_>>(),
+            watched,
+            revealed.guards()[0].fov().cells().count(),
+            "the whole cone paints — the reveal gives the cones for free",
         );
-        // …and yet the two frames differ: a switch that changed nothing visible
-        // would be a facade (§2.3).
-        assert_ne!(render(&fogged), render(&revealed));
-    }
-
-    /// A duct's crawl path is the one part of the level the fog hides outright
-    /// (§10.7/#134 — an un-crawled interior reads as the wall band it threads), so
-    /// the reveal draws it: the whole run as a dim `=`, without the player ever
-    /// having entered. The entries stay the geometry they always were.
-    #[test]
-    fn the_debug_reveal_draws_an_uncrawled_ducts_path() {
-        use crate::DebugModifiers;
-        let s = duct_state(Vec::new()).with_debug(DebugModifiers {
-            reveal_whole_level: true,
-        });
-        assert!(!s.in_duct(), "nobody has crawled anything");
-        let g = render(&s);
-        for &(x, y) in &[(3, 1), (4, 1)] {
-            let c = g.get(x, y);
-            assert_eq!(c.glyph, '=', "the hidden crawl path is drawn");
-            assert_eq!(c.fg, Category::System);
-        }
-        // Both interior cells are in the FOV here — a viewer in the room sees the
-        // band's wall *faces* (§6.1), it is only the crawl path *behind* them the fog
-        // withholds — so the revealed run reads live. A path out of view draws
-        // dimmed, like everything else the switch adds.
-        assert!(s.player_fov().contains(Cell::new(4, 1)));
-        assert_eq!(g.get(4, 1).vis, Visibility::Live);
-        assert_eq!(g.get(2, 1).glyph, '=', "the entries are geometry as ever");
     }
 }

@@ -4,8 +4,8 @@
 //! A level is shared: it travels as a level-seed string in a link, a typed token or a
 //! `window.__intrusionSeed` global, and everything it carries is part of what the run
 //! *is* (#245). A [`DebugModifiers`] switch is the opposite of shared — it changes
-//! only what the renderer draws for whoever is watching, no rule reads it, and it must
-//! never ride along with a level someone hands to someone else. So it has its own
+//! only what the player perceives for whoever is watching, never the facility or the
+//! guards, and it must never ride along with a level someone hands on. So it has its own
 //! carrier, `window.__intrusionDebug`, which **only a build can stamp**: the
 //! artifact-build skill's `assemble.py --debug reveal`. There is deliberately no URL
 //! form and no in-game surface — a `?debug=` parameter would make the fog liftable by
@@ -19,9 +19,9 @@
 use intrusion_core::DebugModifiers;
 use wasm_bindgen::JsValue;
 
-/// The flag name for [`DebugModifiers::reveal_whole_level`] — lift the §11.5a fog and
-/// draw the whole facility. Kept beside the parser so the string the build stamps and
-/// the string the shell reads are one fact.
+/// The flag name for [`DebugModifiers::reveal_whole_level`] — the player's sight
+/// becomes the whole facility. Kept beside the parser so the string the build stamps
+/// and the string the shell reads are one fact.
 const REVEAL: &str = "reveal";
 
 /// The debug switches this build was baked with, all off when nothing stamped the

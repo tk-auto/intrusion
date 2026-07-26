@@ -78,11 +78,13 @@ def main() -> None:
     ap.add_argument("--debug", default=None, metavar="FLAGS",
                     help="bake playtest-only DEBUG switches into the page: a "
                          "comma-separated list from " + ", ".join(DEBUG_FLAGS) +
-                         " (§12.6). `reveal` lifts the fog and draws the whole "
-                         "level — contents, hidden duct paths, and every guard "
-                         "wherever it stands — so a playtest can watch patrols it "
-                         "has not met. These change only what is DRAWN: no rule "
-                         "reads them, so the run plays identically. They are "
+                         " (§12.6). `reveal` makes the player's field of view the "
+                         "whole facility: the fog lifts into the ordinary live "
+                         "picture, every guard draws, and the danger overlay paints "
+                         "every cone — so a playtest can watch patrols it has not "
+                         "met. These change only what the PLAYER PERCEIVES: guards "
+                         "look with their own cones, so the run plays identically. "
+                         "They are "
                          "deliberately not part of a level-seed string, and there "
                          "is no URL form — a build is the only way to set one, so a "
                          "shared level can never arrive with the fog lifted.")

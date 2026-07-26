@@ -198,18 +198,18 @@ python3 .claude/skills/artifact-build/assemble.py \
   --debug reveal --title intrusion-244-8371-reveal-1
 ```
 
-`reveal` lifts the §11.5a fog and draws the **whole level**: contents the player has
-never scouted (consoles, cupboards), the ducts' hidden crawl paths (#134), and every
-guard, body and decoy wherever it stands — so you can watch a patrol on the far side
-of the facility do its rounds while you play. Cells and entities the player genuinely
-sees still draw *live* and everything the switch adds draws dimmed, so the real sight
-edge stays readable in a screenshot.
+`reveal` makes the player's field of view the **whole facility** — you see the level as
+if you were standing everywhere at once. It is stated as *sight*, in the sight phase
+(`State::recompute_sight`), not as a drawing rule, so everything follows from that one
+substitution: the §11.5a fog lifts into the ordinary **live** picture (one colour
+scheme to read, no dim remembered layer), every guard draws its full state-coloured
+`g` wherever it stands, and the §11.5 danger overlay paints **every cone** — so you can
+watch a patrol sweep the far side of the facility while you play.
 
-**It changes only the picture.** No rule reads it (`crates/core/src/render.rs` is the
-sole reader), so the run plays identically — that is what makes watching it worth
-anything. To also paint every guard's cone, that is `always_show_vision_cones`, a
-*level* modifier: put it in the level-seed token instead (`--seed L1-8371-a-x`), and
-combine the two freely.
+**It changes only what the player perceives.** Guards look with their own cones, detect
+what they would have detected, and walk the same beats, so the run plays identically —
+that is what makes watching it worth anything. Seeing everything is not being
+everywhere: you can still be spotted, and contact still catches you.
 
 **It is not part of the level.** A debug switch never travels in a level-seed string
 and has no `?debug=` URL form (`crates/web/src/debug.rs`) — a build is the only way to

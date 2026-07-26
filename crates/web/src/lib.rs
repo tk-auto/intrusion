@@ -193,8 +193,9 @@ pub(crate) fn new_run(level: &LevelSeed) -> Result<State, JsValue> {
     start_level(level)
         // The build's debug switches (§12.6), applied on top of — never inside — the
         // level: they are not part of what the run *is*, so they ride the boot rather
-        // than the token, and a run under them plays the identical game (only the
-        // renderer reads them). This is the shell's one funnel for a fresh run — the
+        // than the token, and a run under them plays the identical game (they widen
+        // what the player perceives, never the facility or the guards). This is the
+        // shell's one funnel for a fresh run — the
         // first frame, the menu's Quick play, and each replay re-run — so a baked
         // switch holds for every run of the page.
         .map(|state| state.with_debug(debug::baked_debug()))

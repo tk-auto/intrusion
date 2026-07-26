@@ -380,12 +380,12 @@ impl ModifierSources {
 /// A level modifier bends the **rules** and is part of a level's identity: it is
 /// resolved from sources at facility start, some are read at the generation seam
 /// (§12.6), and every one of them travels in the shareable level-seed string
-/// ([`LevelSeed`](crate::LevelSeed), #245). A debug modifier is none of that. It is
-/// read by the renderer and by nothing else — not by generation, not by a guard, not
-/// by the exit gate — so a run under one plays *exactly* the run it plays without
-/// one, right down to the seed's stream position. It is never encoded into a
-/// [`LevelSeed`](crate::LevelSeed), so no shared level, typed token or `?seed=` link
-/// can turn it on: the only way to get one is to bake it into a build (the
+/// ([`LevelSeed`](crate::LevelSeed), #245). A debug modifier is none of that. It bends
+/// only what the **player perceives** — never the facility, the guards, or the seed's
+/// stream — so a run under one plays exactly the run it plays without one, and the
+/// only thing that differs is how much of it you get to watch. It is never encoded
+/// into a [`LevelSeed`](crate::LevelSeed), so no shared level, typed token or `?seed=`
+/// link can turn it on: the only way to get one is to bake it into a build (the
 /// artifact-build skill's `assemble.py --debug reveal`), which is what makes it safe
 /// to be as blunt as it is.
 ///
@@ -394,26 +394,25 @@ impl ModifierSources {
 /// with the fog lifted; it would join the set the generation seam reads; and the
 /// compile-time enumeration of modifier read sites (§12.2) would start listing a
 /// switch that no rule may ever consult. Two types, two rules: **a level modifier
-/// changes the game, a debug modifier changes only the picture.**
+/// changes the game, a debug modifier changes only what you get to see of it.**
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DebugModifiers {
-    /// Lift the §11.5a fog and draw the **whole facility**: every cell renders as
-    /// though its contents had been scouted — consoles, cupboards, the ducts' hidden
-    /// crawl paths (#134) — and every guard, body and decoy draws wherever it stands,
-    /// so a playtester can watch the patrol they have not met yet do its rounds.
+    /// See the **whole level**: the player's field of view (§6) becomes every cell of
+    /// the facility, so a playtest build can be watched instead of played blind.
     ///
-    /// What the player *actually* perceives stays readable: only cells and entities
-    /// inside the real FOV draw [`Live`](crate::Visibility::Live), and everything the
-    /// reveal adds draws [`Remembered`](crate::Visibility::Remembered), so the sight
-    /// edge is still visible in the picture rather than washed away by it.
+    /// It is stated as *sight*, not as a drawing rule — the sight phase substitutes a
+    /// full [`VisibleSet`](crate::vision::VisibleSet) and everything downstream
+    /// follows on its own, with no special case anywhere else. So the fog lifts
+    /// (§11.5a: contents draw, live and in their ordinary colours — there is no dim
+    /// second layer to read), every guard reads as **Seen** (§9.2) and therefore draws
+    /// its full state-coloured `g`, and the §11.5 danger overlay paints every one of
+    /// their cones. The picture is exactly the picture a player standing there with
+    /// impossible eyes would get.
     ///
-    /// It reveals and nothing more. Detection, the §11.5 danger overlay, the usable
-    /// line and the guard sense are all exactly what they would be with the fog on —
-    /// which is why watching a run under it is worth anything at all. To also paint
-    /// every guard's cone, pair it with
-    /// [`always_show_vision_cones`](LevelModifiers::always_show_vision_cones): that
-    /// one *is* a level modifier, because the overlay is information the game is
-    /// allowed to give a player.
+    /// What it does **not** touch is the facility: guards look with their own cones,
+    /// detect what they would have detected and walk the same beats, so the run plays
+    /// identically — which is the whole reason watching one is worth anything. Seeing
+    /// everything is not being everywhere.
     pub reveal_whole_level: bool,
 }
 

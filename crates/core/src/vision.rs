@@ -93,6 +93,22 @@ impl VisibleSet {
         }
     }
 
+    /// An all-**seen** set covering a `width × height` grid — every cell of the
+    /// facility at once.
+    ///
+    /// No cast produces this: it is the debug reveal (§12.6,
+    /// [`DebugModifiers::reveal_whole_level`](crate::DebugModifiers::reveal_whole_level))
+    /// standing in for the player's sight in a playtest build, so that *"I can see the
+    /// whole level"* is expressed as the one thing it means — a field of view that
+    /// covers everything — rather than as a special case in every view that reads one.
+    pub(crate) fn everything(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            seen: vec![true; (width * height) as usize],
+        }
+    }
+
     /// Mark `cell` seen. Off-grid coordinates are ignored — the caster probes the
     /// box edge freely and the grid boundary simply absorbs it.
     fn mark(&mut self, cell: Cell) {

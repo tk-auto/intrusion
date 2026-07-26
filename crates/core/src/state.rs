@@ -466,11 +466,13 @@ pub struct State {
     /// a non-default set through [`ModifierSources`](crate::ModifierSources).
     modifiers: LevelModifiers,
     /// The **debug** modifiers this build was baked with (§12.6) — playtest-only
-    /// switches over what the renderer draws, threaded in by
-    /// [`with_debug`](Self::with_debug). Deliberately *not* part of the
-    /// [`LevelSeed`] above: no rule and no generation seam reads them, and no shared
-    /// token can carry them, so a run under one plays exactly the run it plays
-    /// without one. Defaults to all off — the game as everybody else gets it.
+    /// switches over what the *player perceives*, threaded in by
+    /// [`with_debug`](Self::with_debug) and read in the sight phase
+    /// ([`recompute_sight`](Self::recompute_sight)). Deliberately *not* part of the
+    /// [`LevelSeed`] above: no generation seam reads them and no shared token can
+    /// carry them, and they never touch the facility or the guards, so a run under one
+    /// plays exactly the run it plays without one. Defaults to all off — the game as
+    /// everybody else gets it.
     debug: DebugModifiers,
     /// The run's reproducible starting config (§12.4/#245), threaded in at boot by
     /// [`with_level`](Self::with_level) — the one handle that reproduces *this* run
@@ -591,18 +593,24 @@ impl State {
     }
 
     /// Thread this build's [`DebugModifiers`] into the state (§12.6) — the
-    /// playtest-only view switches, set by a baked build and by nothing else (a
+    /// playtest-only perception switches, set by a baked build and by nothing else (a
     /// level-seed token cannot carry them). Separate from
     /// [`with_level`](Self::with_level) on purpose: the level is what the run *is*,
-    /// and these are only how it is drawn for whoever is watching it.
+    /// and these are only how much of it whoever is watching gets to see.
     #[must_use]
     pub fn with_debug(mut self, debug: DebugModifiers) -> Self {
         self.debug = debug;
+        // The startup turn (§4.2) has already run its sight phase by the time a
+        // builder is called, so re-run it here for the switches that shape sight —
+        // otherwise the reveal would only take hold from the player's first action,
+        // and the opening frame would still be fogged. Sight is a pure recompute (no
+        // RNG, §12.4), so running it twice costs a frame's work and changes nothing.
+        self.recompute_sight();
         self
     }
 
-    /// The debug modifiers this build was baked with (§12.6) — read by the renderer
-    /// ([`render`](crate::render)) and by nothing else.
+    /// The debug modifiers this build was baked with (§12.6) — read in the sight
+    /// phase, and nowhere in the rules.
     #[must_use]
     pub fn debug(&self) -> DebugModifiers {
         self.debug
@@ -1389,6 +1397,18 @@ impl State {
                 self.player_sight_range(),
             )
         };
+        // The debug reveal (§12.6): the player's sight is *replaced* by the whole
+        // grid — the playtest build where you can see the level. It is done here, at
+        // the one place sight is produced, rather than as a special case in each view
+        // that reads it: everything downstream then follows from the substitution on
+        // its own — the fog lifts, entities draw wherever they stand, and every guard
+        // reads as **Seen** (§9.2), so the §11.5 danger overlay paints every cone.
+        // Nothing switches this on in a real run; only a baked build can (#245 tokens
+        // cannot carry it), and it changes only what the *player* perceives — guards
+        // look with their own cones, so the facility plays exactly as it would.
+        if self.debug.reveal_whole_level {
+            self.player_fov = VisibleSet::everything(facility.width(), facility.height());
+        }
         // Tile memory (§11.5a) accumulates here, in the same phase that produced
         // the sight — every cell the player can see now is remembered forever. A
         // duct's interior path is deliberately *not* accumulated: it lives in its own
