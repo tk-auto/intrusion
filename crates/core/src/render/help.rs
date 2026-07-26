@@ -36,6 +36,7 @@ use super::{GlyphCell, Grid, Visibility, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLA
 use crate::ability::AbilityId;
 use crate::category::Category;
 use crate::facility::Terrain;
+use crate::level_seed::LevelSeed;
 use crate::modifiers::{LevelModifiers, ModifierDirection};
 
 /// The key that toggles the help panel (§11.6). A free letter — not a movement
@@ -166,6 +167,7 @@ pub(super) fn render_help(
     width: u32,
     height: u32,
     tab: HelpTab,
+    level: Option<LevelSeed>,
     modifiers: LevelModifiers,
 ) -> Grid {
     let blank = GlyphCell {
@@ -183,7 +185,7 @@ pub(super) fn render_help(
     draw_tab_bar(&mut grid, tab);
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
     match tab {
-        HelpTab::LevelInfo => draw_level_info(&mut grid, 2, modifiers),
+        HelpTab::LevelInfo => draw_level_info(&mut grid, 2, level, modifiers),
         HelpTab::Legend => draw_legend(&mut grid, 2),
     }
     draw_footer(&mut grid);
@@ -211,13 +213,39 @@ fn draw_tab_bar(grid: &mut Grid, active: HelpTab) {
     );
 }
 
-/// The **Level info** tab (§12.6/#248): the run's active level modifiers, each by
-/// name and direction, or a clear "none active" when the run is baseline. The list
-/// is [`LevelModifiers::active`], so it is derived and cannot drift — a new
-/// modifier field surfaces here on its own.
-fn draw_level_info(grid: &mut Grid, mut y: u32, modifiers: LevelModifiers) {
+/// The **Level info** tab (§12.6/#248/#272): the run's **level-seed string** in
+/// full — the one token that reproduces this exact run (§13.1/#245), spelling out
+/// its modifiers and loadout rather than implying them — then its active level
+/// modifiers, each by name and direction, or a clear "none active" when the run is
+/// baseline. The modifier list is [`LevelModifiers::active`], so it is derived and
+/// cannot drift — a new modifier field surfaces here on its own — and the token is
+/// [`LevelSeed::encode`] of the run's own config, so the panel can never show a
+/// string that boots a different game.
+fn draw_level_info(
+    grid: &mut Grid,
+    mut y: u32,
+    level: Option<LevelSeed>,
+    modifiers: LevelModifiers,
+) {
     draw(grid, 2, y, "THIS RUN", Category::Interest);
     y += 2;
+
+    // The level-seed string (§13.1/#245): the handle that hands this run around.
+    // A hand-built state has none — it was assembled cell by cell, and there is no
+    // token that reproduces it — so the section is simply absent rather than
+    // showing an honest-looking string that boots something else.
+    if let Some(level) = level {
+        draw(grid, 2, y, "LEVEL SEED", Category::System);
+        y += 1;
+        // Interest, the goal/reward colour: this is the thing worth taking away
+        // from the panel. The **full** form ([`LevelSeed::encode_full`]), even for
+        // the default preset whose link form is the bare seed: this surface exists
+        // to show what the run *is*, and `8371` alone says nothing about the
+        // modifiers and loadout it implies. It decodes to the same run either way.
+        draw(grid, 3, y, &level.encode_full(), Category::Interest);
+        y += 2;
+    }
+
     draw(grid, 2, y, "MODIFIERS", Category::System);
     y += 1;
 
@@ -419,6 +447,7 @@ fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Category) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ability::Loadout;
     use crate::modifiers::{ActiveModifier, IntelGate};
 
     /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
@@ -498,7 +527,7 @@ mod tests {
     /// sections and a glyph derived from the real terrain table (the duct `=`, §10.7).
     #[test]
     fn the_legend_tab_carries_the_glyphs_colours_and_controls() {
-        let g = render_help(W, H, HelpTab::Legend, LevelModifiers::default());
+        let g = render_help(W, H, HelpTab::Legend, None, LevelModifiers::default());
         let text = text_of(&g);
         assert!(text.contains("GLYPHS") && text.contains("COLOURS") && text.contains("CONTROLS"));
         for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
@@ -524,7 +553,7 @@ mod tests {
     #[test]
     fn the_level_info_tab_lists_active_modifiers_or_none() {
         // Baseline: "none active", not blank.
-        let baseline = render_help(W, H, HelpTab::LevelInfo, LevelModifiers::default());
+        let baseline = render_help(W, H, HelpTab::LevelInfo, None, LevelModifiers::default());
         let text = text_of(&baseline);
         assert!(text.contains("THIS RUN") && text.contains("MODIFIERS"));
         assert!(
@@ -539,7 +568,7 @@ mod tests {
             intel_to_exit: IntelGate::All,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, modified);
+        let g = render_help(W, H, HelpTab::LevelInfo, None, modified);
         let text = text_of(&g);
         assert!(
             !text.contains("none active"),
@@ -549,6 +578,90 @@ mod tests {
         assert!(
             text.contains("Intel to exit: all of it"),
             "a bounded knob renders its value: {text:?}"
+        );
+    }
+
+    /// The **level-seed string** on the Level info tab (§13.1/#245/#272): the run's
+    /// own token, drawn under its heading — and it **decodes back to the very run
+    /// showing it**, config and all, so the panel can never hand out a string that
+    /// boots a different game. The panel always shows the **full** form, including
+    /// for the default preset whose link form is a bare seed: this surface is where
+    /// you read what the run *is*, so it spells the initial situation out.
+    #[test]
+    fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
+        for level in [
+            // The default preset: a bare decimal seed.
+            LevelSeed::quick_play(8371),
+            // A run carrying a chosen modifier set and loadout: the versioned form.
+            LevelSeed {
+                seed: 8371,
+                modifiers: LevelModifiers {
+                    always_show_vision_cones: true,
+                    ..LevelModifiers::default()
+                },
+                abilities: Loadout::innate(),
+            },
+        ] {
+            let g = render_help(W, H, HelpTab::LevelInfo, Some(level), level.modifiers);
+            let text = text_of(&g);
+            let token = level.encode_full();
+            assert!(text.contains("LEVEL SEED"), "the section is labelled");
+            assert!(text.contains(&token), "the full token is shown: {text:?}");
+            assert!(
+                token.starts_with("L1-"),
+                "…in the versioned form, whatever the preset"
+            );
+            // The round trip: what a player reads off the panel boots this run.
+            assert_eq!(
+                LevelSeed::decode(&token),
+                Some(level),
+                "the displayed token reproduces the run exactly"
+            );
+        }
+
+        // The default preset is *not* collapsed to its bare-seed link form here:
+        // the panel spells the initial situation out (the loadout letters and all).
+        let quick = LevelSeed::quick_play(8371);
+        let g = render_help(W, H, HelpTab::LevelInfo, Some(quick), quick.modifiers);
+        let text = text_of(&g);
+        assert!(
+            text.contains(&quick.encode_full()),
+            "quick play shows its full token: {text:?}"
+        );
+        assert_eq!(quick.encode(), "8371", "…while its link form stays bare");
+
+        // A hand-built state has no reproducible token, so the section is absent
+        // rather than showing a string that boots something else.
+        let none = render_help(W, H, HelpTab::LevelInfo, None, LevelModifiers::default());
+        assert!(!text_of(&none).contains("LEVEL SEED"));
+    }
+
+    /// The seed section does not disturb the modifier list it heads (#272): with a
+    /// token shown, the run's modifiers still render by name in their cue colour,
+    /// just two rows lower.
+    #[test]
+    fn the_seed_section_shifts_the_modifier_list_without_changing_it() {
+        let level = LevelSeed {
+            seed: 8371,
+            modifiers: LevelModifiers {
+                guards_always_search_hideouts: true,
+                ..LevelModifiers::default()
+            },
+            abilities: Loadout::innate(),
+        };
+        let g = render_help(W, H, HelpTab::LevelInfo, Some(level), level.modifiers);
+        let text = text_of(&g);
+        assert!(text.contains("Guards search hideouts"));
+        assert!(!text.contains("none active"));
+        // THIS RUN@2, LEVEL SEED@4, the token@5, MODIFIERS@7, the first row@8.
+        // A chosen modifier set encodes as the versioned `L1-…` form.
+        assert_eq!(g.get(3, 5).glyph, 'L', "the token sits under its heading");
+        assert_eq!(g.get(3, 5).fg, Category::Interest);
+        assert_eq!(g.get(3, 8).glyph, 'G');
+        assert_eq!(
+            g.get(3, 8).fg,
+            Category::Warning,
+            "the caption keeps its direction cue"
         );
     }
 
@@ -562,7 +675,7 @@ mod tests {
             guards_always_search_hideouts: true,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, harder);
+        let g = render_help(W, H, HelpTab::LevelInfo, None, harder);
         // The MODIFIERS heading is at row 4 (THIS RUN@2, blank, heading@4), the first
         // modifier row at row 5; its caption starts at column 3.
         assert_eq!(g.get(3, 5).glyph, 'G');
@@ -577,7 +690,7 @@ mod tests {
             always_show_vision_cones: true,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, easier);
+        let g = render_help(W, H, HelpTab::LevelInfo, None, easier);
         assert_eq!(g.get(3, 5).glyph, 'A');
         assert_eq!(
             g.get(3, 5).fg,
@@ -593,7 +706,7 @@ mod tests {
     fn the_tab_bar_highlights_the_active_tab() {
         let layout = tab_layout();
         for &active in &HelpTab::ALL {
-            let g = render_help(W, H, active, LevelModifiers::default());
+            let g = render_help(W, H, active, None, LevelModifiers::default());
             for &(tab, start, _len) in &layout {
                 let expected = if tab == active {
                     Category::Interest

@@ -125,6 +125,21 @@ impl LevelSeed {
         if *self == Self::quick_play(self.seed) {
             return self.seed.to_string();
         }
+        self.encode_full()
+    }
+
+    /// Encode to the **versioned** `L1-<seed>-<mods>-<abils>` form, always — the
+    /// same token as [`encode`](Self::encode) except that a default-preset run
+    /// spells its config out instead of collapsing to the bare seed.
+    ///
+    /// This is for a surface that must *show what the run is*, not just carry it:
+    /// the help panel's Level info tab (#272) reads a token the player can compare
+    /// against the run in front of them, and a bare `8371` says nothing about the
+    /// modifiers or loadout it implies. Links keep using [`encode`](Self::encode)
+    /// — a bare seed is shorter and decodes to exactly the same run — so this
+    /// changes what is *displayed*, never what is carried. Both forms decode
+    /// (§12.4), and to the same [`LevelSeed`].
+    pub fn encode_full(&self) -> String {
         let mods = to_base36(modifier_bits(self.modifiers));
         let abils: String = self.abilities.iter().map(|id| id.hotkey()).collect();
         format!("{FORMAT_TAG}-{}-{mods}-{abils}", self.seed)
@@ -224,8 +239,7 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
         placement.exit(),
     )
     .with_rng(rng)
-    .with_modifiers(level.modifiers)
-    .with_loadout(level.abilities))
+    .with_level(*level))
 }
 
 /// Pack a [`LevelModifiers`] into a small bitfield for the token. A struct
@@ -320,6 +334,68 @@ fn from_base36(s: &str) -> Option<u32> {
 mod tests {
     use super::*;
     use crate::Outcome;
+
+    /// The two encodings are two views of one config (#272): [`encode`] is the
+    /// **link** form — bare for the default preset, so `?seed=8371` stays short —
+    /// and [`encode_full`] is the **display** form, always versioned, so a surface
+    /// that shows what the run *is* spells its modifiers and loadout out. Both
+    /// decode back to the same [`LevelSeed`], which is what makes the choice purely
+    /// cosmetic.
+    ///
+    /// [`encode`]: LevelSeed::encode
+    /// [`encode_full`]: LevelSeed::encode_full
+    #[test]
+    fn the_link_form_is_compact_and_the_display_form_is_always_full() {
+        let quick = LevelSeed::quick_play(8371);
+        assert_eq!(quick.encode(), "8371", "the link form collapses");
+        assert!(
+            quick.encode_full().starts_with("L1-8371-"),
+            "the display form spells the preset out: {}",
+            quick.encode_full()
+        );
+        assert_ne!(quick.encode(), quick.encode_full());
+        // Both decode to the same run — the display form loses nothing and adds no
+        // way to boot something else.
+        assert_eq!(LevelSeed::decode(&quick.encode()), Some(quick));
+        assert_eq!(LevelSeed::decode(&quick.encode_full()), Some(quick));
+
+        // A non-default config already emitted the full form, and still does — the
+        // two agree wherever the preset is not the default.
+        let custom = LevelSeed::sim(8371);
+        assert_eq!(custom.encode(), custom.encode_full());
+        assert_eq!(LevelSeed::decode(&custom.encode_full()), Some(custom));
+    }
+
+    /// The booted run **carries the config that booted it** (#245/#272): `start_level`
+    /// records the whole [`LevelSeed`] on the state, so the help panel's token
+    /// ([`LevelSeed::encode`]) reproduces this very run — and the two halves it
+    /// applies, the modifiers and the loadout, agree with the recorded config by
+    /// construction. A hand-built state carries none.
+    #[test]
+    fn a_booted_run_carries_the_level_that_booted_it() {
+        for level in [
+            LevelSeed::quick_play(8371),
+            LevelSeed::sim(8371),
+            LevelSeed {
+                seed: 4242,
+                modifiers: LevelModifiers {
+                    always_show_vision_cones: true,
+                    ..LevelModifiers::default()
+                },
+                abilities: Loadout::innate(),
+            },
+        ] {
+            let state = start_level(&level).expect("the v1 recipe places");
+            assert_eq!(state.level(), Some(level), "the config is recorded");
+            assert_eq!(state.modifiers(), level.modifiers, "…and applied");
+            assert_eq!(state.loadout(), level.abilities, "…both halves of it");
+            // What the panel would show boots this run again.
+            assert_eq!(
+                LevelSeed::decode(&state.level().expect("a booted run").encode()),
+                Some(level),
+            );
+        }
+    }
 
     /// Quick play (#244): the intel gate at [`IntelGate::All`], the innate set, and a
     /// seeded draw of [`QUICK_PLAY_TECH_GRANT`] tech. With five tech shipped and a

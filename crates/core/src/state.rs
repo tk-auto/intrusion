@@ -46,6 +46,7 @@ use crate::duct::Duct;
 use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::{Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
+use crate::level_seed::LevelSeed;
 use crate::modifiers::LevelModifiers;
 use crate::radio;
 use crate::region::{DoorCell, DoorId};
@@ -452,6 +453,14 @@ pub struct State {
     /// unmodified game; a mode preset (#244) or a campaign source (#210) resolves
     /// a non-default set through [`ModifierSources`](crate::ModifierSources).
     modifiers: LevelModifiers,
+    /// The run's reproducible starting config (§12.4/#245), threaded in at boot by
+    /// [`with_level`](Self::with_level) — the one handle that reproduces *this* run
+    /// exactly, which the help panel shows (#272). `None` for a hand-built state,
+    /// which was assembled cell by cell and has no seed to reproduce it from. It is
+    /// the **starting** config and never changes with play: a loadout the run later
+    /// grows by salvaging tech (§8.3) belongs to the run, not to the token that
+    /// boots it.
+    level: Option<LevelSeed>,
 }
 
 impl State {
@@ -519,6 +528,7 @@ impl State {
             dwell_chance: GUARD_DWELL_CHANCE_PERCENT,
             auto_slide: traversal::AUTO_SLIDE_DEFAULT,
             modifiers: LevelModifiers::default(),
+            level: None,
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
@@ -555,6 +565,28 @@ impl State {
     #[must_use]
     pub fn modifiers(&self) -> LevelModifiers {
         self.modifiers
+    }
+
+    /// Thread the run's whole [`LevelSeed`] into the state (§12.4/#245) — the boot
+    /// path's one call, replacing separate
+    /// [`with_modifiers`](Self::with_modifiers) /
+    /// [`with_loadout`](Self::with_loadout) calls: it records the config *and*
+    /// applies its two halves, so the token the help panel shows (#272) and the
+    /// rules the run actually plays under cannot disagree. A hand-built state simply
+    /// omits it and keeps the baseline.
+    #[must_use]
+    pub fn with_level(mut self, level: LevelSeed) -> Self {
+        self.level = Some(level);
+        self.with_modifiers(level.modifiers)
+            .with_loadout(level.abilities)
+    }
+
+    /// The run's reproducible starting config (§12.4/#245), or `None` for a
+    /// hand-built state. [`LevelSeed::encode`] turns it into the shareable
+    /// level-seed string the help panel displays (#272).
+    #[must_use]
+    pub fn level(&self) -> Option<LevelSeed> {
+        self.level
     }
 
     /// Thread the run's resolved ability **loadout** into the state (§8.3/#244) —
