@@ -771,16 +771,15 @@ fn cost_field(
     cost
 }
 
-/// Whether the player can move *through* `cell` when routing (§10.3). Floor and open
-/// doors are plain walk-through; a closed door opens on a bump, so it routes as
-/// passable; a hideout is enterable. Everything solid to the player — walls, hinges,
-/// tables, consoles, the exit — is not a through-cell (consoles and the exit are
-/// reached as goals, not crossed).
+/// Whether the player can move *through* `cell` when routing — the core's own rule
+/// ([`Terrain::routes_player`], §10.3), never a second copy of it here.
+///
+/// The bot plans on the player's channels so its metrics describe *this* game
+/// (§13.2/§13.4); a private terrain table is exactly how that quietly stops being
+/// true. This wrapper adds only the off-grid case: a cell with no terrain is outside
+/// the facility, so nothing routes through it.
 fn routable(facility: &Facility, cell: Cell) -> bool {
-    matches!(
-        facility.terrain(cell),
-        Some(Terrain::Floor | Terrain::DoorPanelOpen | Terrain::DoorPanelClosed | Terrain::Hideout)
-    )
+    facility.terrain(cell).is_some_and(Terrain::routes_player)
 }
 
 /// Every in-bounds cell of the facility, in row-major order — the deterministic
@@ -801,6 +800,93 @@ mod tests {
     use super::*;
     use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
     use intrusion_core::{generate_level, Direction, LevelConfig, Rng, State};
+
+    /// #276: the bot routes by **the core's rule**, never a table of its own.
+    ///
+    /// It used to hold a private `matches!` allow-list — which meant a new
+    /// [`Terrain`] compiled silently as unroutable, and it had already fallen a
+    /// variant behind (§10.7 duct entries). The bot plans on the player's own
+    /// channels so its metrics describe *this* game (§13.2/§13.4); a second terrain
+    /// table is exactly how that quietly stops being true.
+    ///
+    /// Swept over a whole generated facility, so it runs against the §10.3 table as
+    /// generation actually stamps it. Reintroducing a local allow-list here would
+    /// have to match the core's answer on every cell of a real level.
+    #[test]
+    fn the_bot_routes_by_the_cores_rule_not_its_own() {
+        let (state, _) = boot(4242);
+        let f = state.layout().facility();
+        let mut seen: Vec<Terrain> = Vec::new();
+        for y in 0..f.height() {
+            for x in 0..f.width() {
+                let cell = Cell::new(x, y);
+                let t = f.terrain(cell).expect("every in-bounds cell has terrain");
+                if !seen.contains(&t) {
+                    seen.push(t);
+                }
+                assert_eq!(
+                    routable(f, cell),
+                    t.routes_player(),
+                    "{t:?} at {cell:?}: the bot's routing must be the core's",
+                );
+            }
+        }
+        // The sweep only means something if it met the interesting kinds — a level of
+        // nothing but floor and wall would pass vacuously.
+        for t in [
+            Terrain::Floor,
+            Terrain::Wall,
+            Terrain::DoorHinge,
+            Terrain::DoorPanelClosed,
+            Terrain::Hideout,
+            Terrain::PartialCover,
+            Terrain::Console,
+            Terrain::Exit,
+        ] {
+            assert!(seen.contains(&t), "seed 4242 stamps no {t:?} to check");
+        }
+        // The wrapper's own contribution: off-grid is not routable, whatever the
+        // terrain table says.
+        assert!(
+            !routable(f, Cell::new(9_999, 9_999)),
+            "a cell outside the facility routes nowhere",
+        );
+    }
+
+    /// §10.7, stated deliberately rather than left to silence: the bot **cannot**
+    /// route through a duct entry, even though the player can enter one.
+    ///
+    /// Climbing in is a mode change into the crawlspace — movement confined to the
+    /// duct's recorded path, perception degraded — not a step a plain floor route can
+    /// take, and the bot has no crawl policy at all. Teaching it to use ducts is its
+    /// own piece of work; this test is what makes the current answer a decision
+    /// rather than the old allow-list's silence.
+    #[test]
+    fn the_bot_does_not_route_through_a_duct_entry() {
+        // Sweep seeds until one generates a duct — not every level carries one.
+        let entry = (0..40).find_map(|seed| {
+            let (state, _) = boot(seed);
+            let entry = state.layout().ducts().first()?.entries()[0];
+            Some((state, entry))
+        });
+        let Some((state, entry)) = entry else {
+            panic!("no seed in 0..40 generated a duct to check");
+        };
+        let f = state.layout().facility();
+        assert_eq!(
+            f.terrain(entry),
+            Some(Terrain::DuctEntry),
+            "an entry cell is stamped as one",
+        );
+        assert!(
+            !routable(f, entry),
+            "a duct is not a through-route for the bot (§10.7)",
+        );
+        assert!(
+            !Terrain::DuctEntry.routes_player(),
+            "and the core says the same, so the two cannot drift apart",
+        );
+    }
 
     /// Boot a real V1 level exactly as the harness does (§13.2), returning the state
     /// and the placement so a test can compare against the ground truth the bot must
