@@ -2029,6 +2029,18 @@ back to a fresh run, never a bricked page. One boot path (`start_level`) turns a
 headless sim alike, and the one token format is what saves (§12.5) and the replay
 Artifact build (#197 slice C) share so they cannot diverge.
 
+**Debug modifiers are not level modifiers.** A separate `DebugModifiers` value
+carries playtest-only switches over what is **drawn** — today one: *"reveal the whole
+level"*, which lifts the §11.5a fog entirely (contents, hidden duct paths, every
+guard wherever it stands) so a build can be watched rather than played blind. The
+renderer is its only reader, so a run under one plays the identical run; it is
+**never encoded into a level-seed string** and has no URL form, so no shared level
+can arrive with the fog lifted; and no generation seam sees it. It is baked into a
+build and nowhere else (the artifact-build skill's `assemble.py --debug reveal`). The
+line is worth keeping sharp: **a level modifier changes the game, a debug modifier
+changes only the picture** — anything that bends a rule is a level modifier and
+belongs in the token with the rest of the run's identity.
+
 **Constraints.** The *"always show vision cones"* modifier may only ever **widen**
 the §11.5 overlay — it reveals unseen guards' cones on top of the seen ones, and
 must never narrow or hide the red detection set (§11.5 is **[SETTLED]**). Modifiers

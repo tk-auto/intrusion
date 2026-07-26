@@ -186,6 +186,41 @@ for the live Pages URL, never for an artifact.
 > from the build (`--seed`) or the URL, not a box. If you re-enable it, the box loads
 > any level-seed string live and this section's "type it in" path returns.
 
+## 6b. Lift the fog for a playtest (`--debug reveal`, §12.6)
+
+A build can be baked with **debug switches** — playtest-only changes to what is
+*drawn*. There is one so far:
+
+```
+python3 .claude/skills/artifact-build/assemble.py \
+  --dist "$SCRATCH/dist" --index web/index.html \
+  --out "$SCRATCH/intrusion-8371-reveal.html" --seed 8371 \
+  --debug reveal --title intrusion-244-8371-reveal-1
+```
+
+`reveal` lifts the §11.5a fog and draws the **whole level**: contents the player has
+never scouted (consoles, cupboards), the ducts' hidden crawl paths (#134), and every
+guard, body and decoy wherever it stands — so you can watch a patrol on the far side
+of the facility do its rounds while you play. Cells and entities the player genuinely
+sees still draw *live* and everything the switch adds draws dimmed, so the real sight
+edge stays readable in a screenshot.
+
+**It changes only the picture.** No rule reads it (`crates/core/src/render.rs` is the
+sole reader), so the run plays identically — that is what makes watching it worth
+anything. To also paint every guard's cone, that is `always_show_vision_cones`, a
+*level* modifier: put it in the level-seed token instead (`--seed L1-8371-a-x`), and
+combine the two freely.
+
+**It is not part of the level.** A debug switch never travels in a level-seed string
+and has no `?debug=` URL form (`crates/web/src/debug.rs`) — a build is the only way to
+set one, so a level you hand to someone else can never arrive with the fog lifted.
+Flag names are validated at build time against the set the shell knows, so a typo
+fails here rather than publishing a build that quietly lacks its switch.
+
+Name the artifact with a `-reveal` slug (as above) and **say in the handoff that the
+fog is lifted** — a revealed frame looks nothing like the shipped game, and a stale
+tab shouldn't be mistaken for one.
+
 ## 7. Hand off a **bot replay** (§13.3/#197)
 
 A seed hands over the *level*; a replay hands over the **exact run** — you watch

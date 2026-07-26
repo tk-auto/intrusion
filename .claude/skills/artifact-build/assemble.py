@@ -27,6 +27,13 @@ def replace_once(text: str, old: str, new: str, what: str) -> str:
     return text.replace(old, new)
 
 
+# The debug switches the shell knows (crates/web/src/debug.rs) — the flag names it
+# parses out of `window.__intrusionDebug`. Kept here so a typo fails the build where
+# it is typed, rather than silently doing nothing in the browser; add a name here the
+# day the shell learns one.
+DEBUG_FLAGS = ("reveal",)
+
+
 def valid_level_seed(token: str) -> bool:
     """Whether `token` is a plausible level-seed string (crates/core/src/level_seed.rs).
 
@@ -68,6 +75,17 @@ def main() -> None:
                          "included. The build boots straight into the replay viewer "
                          "at K=0. It carries its own level, so do not also pass "
                          "--seed.")
+    ap.add_argument("--debug", default=None, metavar="FLAGS",
+                    help="bake playtest-only DEBUG switches into the page: a "
+                         "comma-separated list from " + ", ".join(DEBUG_FLAGS) +
+                         " (§12.6). `reveal` lifts the fog and draws the whole "
+                         "level — contents, hidden duct paths, and every guard "
+                         "wherever it stands — so a playtest can watch patrols it "
+                         "has not met. These change only what is DRAWN: no rule "
+                         "reads them, so the run plays identically. They are "
+                         "deliberately not part of a level-seed string, and there "
+                         "is no URL form — a build is the only way to set one, so a "
+                         "shared level can never arrive with the fog lifted.")
     ap.add_argument("--title", default=None,
                     help="set the page <title>, which is what NAMES the published "
                          "artifact (the Artifact tool's own title arg is overridden "
@@ -77,6 +95,17 @@ def main() -> None:
     if args.seed is not None and not valid_level_seed(args.seed):
         sys.exit(f"assemble: --seed must be a level-seed string — a u64, or an "
                  f"`L1-…` token from LevelSeed::encode — got {args.seed!r}")
+
+    # Debug flags are validated against the shell's own set: an unknown name would be
+    # ignored in the browser, so a typo would publish a build that quietly lacks the
+    # switch it was built for.
+    debug_flags = []
+    if args.debug is not None:
+        debug_flags = [f.strip() for f in args.debug.split(",") if f.strip()]
+        unknown = [f for f in debug_flags if f not in DEBUG_FLAGS]
+        if unknown or not debug_flags:
+            sys.exit(f"assemble: --debug takes a comma-separated list of "
+                     f"{', '.join(DEBUG_FLAGS)} — got {args.debug!r}")
 
     # A replay carries its own level (§12.4/#245), so it and --seed are exclusive.
     # Parse the `{seed, inputs}` pair from --emit-replay's output; the `seed` is the
@@ -140,6 +169,12 @@ def main() -> None:
         globals_js += f"window.__intrusionSeed = {json.dumps(bake_seed)};\n"
     if replay_inputs is not None:
         globals_js += f"window.__intrusionReplay = {json.dumps(replay_inputs)};\n"
+    # The debug carrier is its own global (crates/web/src/debug.rs), never a field of
+    # the level: a playtest switch must not be able to ride along with a level someone
+    # hands to someone else. It applies to whatever the page plays — a baked level, a
+    # replay, or a run rolled from the menu.
+    if debug_flags:
+        globals_js += f"window.__intrusionDebug = {json.dumps(','.join(debug_flags))};\n"
     seed_line = globals_js
 
     boot = f"""

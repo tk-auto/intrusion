@@ -58,7 +58,7 @@ use crate::facility::Terrain;
 use crate::generate::Layout;
 use crate::guard::{Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
 use crate::level_seed::LevelSeed;
-use crate::modifiers::LevelModifiers;
+use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::radio;
 use crate::region::{DoorCell, DoorId};
 use crate::rng::Rng;
@@ -465,6 +465,13 @@ pub struct State {
     /// unmodified game; a mode preset (#244) or a campaign source (#210) resolves
     /// a non-default set through [`ModifierSources`](crate::ModifierSources).
     modifiers: LevelModifiers,
+    /// The **debug** modifiers this build was baked with (§12.6) — playtest-only
+    /// switches over what the renderer draws, threaded in by
+    /// [`with_debug`](Self::with_debug). Deliberately *not* part of the
+    /// [`LevelSeed`] above: no rule and no generation seam reads them, and no shared
+    /// token can carry them, so a run under one plays exactly the run it plays
+    /// without one. Defaults to all off — the game as everybody else gets it.
+    debug: DebugModifiers,
     /// The run's reproducible starting config (§12.4/#245), threaded in at boot by
     /// [`with_level`](Self::with_level) — the one handle that reproduces *this* run
     /// exactly, which the help panel shows (#272). `None` for a hand-built state,
@@ -543,6 +550,7 @@ impl State {
             dwell_chance: GUARD_DWELL_CHANCE_PERCENT,
             auto_slide: traversal::AUTO_SLIDE_DEFAULT,
             modifiers: LevelModifiers::default(),
+            debug: DebugModifiers::default(),
             level: None,
         };
         // The level-start full turn (§4.2): sight and guards, no player phase.
@@ -580,6 +588,24 @@ impl State {
     #[must_use]
     pub fn modifiers(&self) -> LevelModifiers {
         self.modifiers
+    }
+
+    /// Thread this build's [`DebugModifiers`] into the state (§12.6) — the
+    /// playtest-only view switches, set by a baked build and by nothing else (a
+    /// level-seed token cannot carry them). Separate from
+    /// [`with_level`](Self::with_level) on purpose: the level is what the run *is*,
+    /// and these are only how it is drawn for whoever is watching it.
+    #[must_use]
+    pub fn with_debug(mut self, debug: DebugModifiers) -> Self {
+        self.debug = debug;
+        self
+    }
+
+    /// The debug modifiers this build was baked with (§12.6) — read by the renderer
+    /// ([`render`](crate::render)) and by nothing else.
+    #[must_use]
+    pub fn debug(&self) -> DebugModifiers {
+        self.debug
     }
 
     /// Thread the run's whole [`LevelSeed`] into the state (§12.4/#245) — the boot
