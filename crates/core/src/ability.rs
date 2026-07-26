@@ -153,6 +153,8 @@ pub enum AbilityId {
     Dephase,
     /// Salvaged tech (§8.3): doors open ahead and shut behind while active.
     Autodoors,
+    /// Salvaged tech (§8.3): blinds and freezes guards in a radius, through walls.
+    Confusion,
 }
 
 impl AbilityId {
@@ -160,25 +162,27 @@ impl AbilityId {
     /// display/iteration order only — hotkeys come from the identity map (§11.6),
     /// never from a position — but it *is* the order [`index`](Self::index) pins,
     /// so the two must not drift.
-    pub const ALL: [AbilityId; 5] = [
+    pub const ALL: [AbilityId; 6] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
         AbilityId::Autodoors,
+        AbilityId::Confusion,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
     /// opposed to innate [`Run`](AbilityId::Run). This is the default eligible pool
     /// a `starting_abilities` grant (#244) draws from: the shipped, non-experimental
     /// tech (the gated experiments #239/#243 are not economy abilities yet, so the
-    /// pool is exactly these four). Quick play grants the whole pool while its size
+    /// pool is exactly these five). Quick play grants the whole pool while its size
     /// meets the grant count; the draw only bites once the pool outgrows the grant.
-    pub const TECH: [AbilityId; 4] = [
+    pub const TECH: [AbilityId; 5] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
         AbilityId::Autodoors,
+        AbilityId::Confusion,
     ];
 
     /// Whether this ability is **innate** (§8.3) — always in the loadout, never
@@ -198,6 +202,7 @@ impl AbilityId {
             AbilityId::Decoy => "Decoy",
             AbilityId::Dephase => "Dephase",
             AbilityId::Autodoors => "Autodoors",
+            AbilityId::Confusion => "Confusion",
         }
     }
 
@@ -217,6 +222,7 @@ impl AbilityId {
             AbilityId::Decoy => &DECOY,
             AbilityId::Dephase => &DEPHASE,
             AbilityId::Autodoors => &AUTODOORS,
+            AbilityId::Confusion => &CONFUSION,
         }
     }
 
@@ -228,6 +234,7 @@ impl AbilityId {
             AbilityId::Decoy => 2,
             AbilityId::Dephase => 3,
             AbilityId::Autodoors => 4,
+            AbilityId::Confusion => 5,
         }
     }
 }
@@ -349,6 +356,12 @@ pub enum Effect {
     /// they step into it — no manual bump — and shuts behind them once they clear
     /// the throat, breaking a pursuer's line of sight (§10.3/§10.4).
     AutoDoors,
+    /// Confusion (§8.3, §9): while active, every guard within a radius of the player
+    /// is **blinded and frozen** — it does not sense and does not move — reaching
+    /// **through walls** like the guard sense (§9). A costed panic-buy of time, not a
+    /// kill: the guard resumes cleanly (its state and lead paused, not reset) when the
+    /// window ends. The radius is [`CONFUSION_RADIUS`](crate::CONFUSION_RADIUS).
+    Confuse,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -470,6 +483,22 @@ const AUTODOORS: Ability = Ability {
     duration: 16,
     cooldown: 40,
     behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
+};
+// Confusion [START] (§8.3, §9, #240): a blind-and-freeze bubble around the player,
+// through walls — powerful, so the cost is a *large* lockout that keeps it rare
+// (§2.3/§13.2). A self/area toggle: it centres on the player and reaches
+// [`CONFUSION_RADIUS`]. **Six** protected turns (§8.2 timing, the activation turn
+// covered) — enough of a window to actually walk out of the bubble you bought, which
+// three was not — then a long recharge before the next panic-buy. Duration and radius
+// were raised together from the first pass (3/4): the window and the bubble are the
+// levers, and the cooldown is what still makes spending it a real decision.
+const CONFUSION: Ability = Ability {
+    id: AbilityId::Confusion,
+    cost: 1,
+    targeting: TargetingMode::Itself,
+    duration: 6,
+    cooldown: 45,
+    behaviour: Behaviour::Effects(&[Effect::Confuse]),
 };
 
 /// The live economy state of one deck ability (§8.2): the three states the *time*
@@ -789,6 +818,14 @@ mod economy_tests {
                 40,
                 Effect::AutoDoors,
             ),
+            (
+                AbilityId::Confusion,
+                1,
+                TargetingMode::Itself,
+                6,
+                45,
+                Effect::Confuse,
+            ),
         ] {
             let def = id.def();
             assert_eq!(def.id(), id);
@@ -822,6 +859,7 @@ mod economy_tests {
         assert_eq!(AbilityId::Decoy.hotkey(), 'd');
         assert_eq!(AbilityId::Dephase.hotkey(), 'x');
         assert_eq!(AbilityId::Autodoors.hotkey(), 'a');
+        assert_eq!(AbilityId::Confusion.hotkey(), 'z');
     }
 
     /// A fresh deck is all Ready (§8.3: the v1 set is available from the start).

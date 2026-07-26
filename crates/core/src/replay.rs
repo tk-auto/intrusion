@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn malformed_notation_is_rejected() {
         assert!(parse_script("+").is_err(), "a bare sign needs a key");
-        assert!(parse_script("+z").is_err(), "z is no ability hotkey");
+        assert!(parse_script("+q").is_err(), "q is no ability hotkey");
         assert!(parse_script("Nq").is_err(), "q is not a move");
     }
 }

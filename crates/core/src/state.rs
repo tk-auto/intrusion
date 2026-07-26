@@ -118,6 +118,24 @@ const _: () = assert!(DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE);
 /// test.
 pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
 
+/// The **Confusion** blast radius (§8.3/§9/#240 **[START]**): while the Confusion
+/// ability is active ([`Effect::Confuse`](crate::Effect)), every guard within this
+/// Chebyshev box of the player is blinded and frozen — measured the same way as the
+/// guard sense (§6.1 box metric) and, like it, reaching **through walls** (§9).
+///
+/// It stays **smaller** than [`PLAYER_SENSE_RANGE`] (asserted below) so the bubble can
+/// never reach a guard the player cannot already sense — but it now covers a guard's
+/// whole *certain* zone (`CERTAIN_RANGE` = 5, §7.6), so the guards actually bearing
+/// down on you are the ones it catches. Raised from the first pass's 4, where the
+/// bubble was tight enough that a chaser could sit just outside it. Pinned by a test
+/// so a later change is a visible edit.
+pub const CONFUSION_RADIUS: u32 = 6;
+
+/// Confusion's bubble stays **within the guard sense** (§9/#240): a guard is never
+/// frozen before the player can even sense its dot, so the effect is always legible
+/// on the map. Pinned at compile time so the two ranges can never silently invert.
+const _: () = assert!(CONFUSION_RADIUS <= PLAYER_SENSE_RANGE);
+
 /// What the player asks to do on their phase. Input mapping (which key is which,
 /// §11.6) lives in the web shell; the loop knows only the actions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1152,6 +1170,13 @@ impl State {
         let player = self.player;
         self.guards
             .iter()
+            // A confused guard is blind (§8.3/#240): it detects nothing, so it has no
+            // cone to paint — dropped here *before* the show-all widening, since the
+            // modifier may only widen the *detection set you can see* (§11.5), and a
+            // frozen guard is not detecting at all. This is the "cone off" #240 asks
+            // for, read from the one [`guard_confused`](Self::guard_confused) query the
+            // guard phase also uses, so picture and rule cannot disagree.
+            .filter(move |guard| !self.guard_confused(guard))
             .filter(move |guard| show_all || self.player_fov.contains(guard.pos()))
             .flat_map(move |guard| {
                 let spare_player = self.concealed_from(guard.pos());
@@ -1203,6 +1228,25 @@ impl State {
         } else {
             None
         }
+    }
+
+    /// Whether `guard` is currently **confused** — blinded and frozen by an active
+    /// Confusion (§8.3/#240): the ability is active ([`Effect::Confuse`]) and the
+    /// guard is within [`CONFUSION_RADIUS`] of the player, measured by the §6.1 box
+    /// metric ([`sight_distance`](Cell::sight_distance)) **through walls**, exactly
+    /// like the guard sense (§9). The one query both the guard phase and the renderer
+    /// read: a confused guard neither senses nor moves this turn ([`guard_phase`]),
+    /// and its cone is dropped from the danger overlay ([`visible_cone_cells`]) — the
+    /// "cone off" §11.5 requires. The freeze is a **pause**, not a reset: skipping the
+    /// guard's sense leaves its state and lead untouched, so it resumes cleanly when
+    /// the window ends (§8.2).
+    ///
+    /// [`Effect::Confuse`]: crate::Effect::Confuse
+    /// [`guard_phase`]: Self::guard_phase
+    /// [`visible_cone_cells`]: Self::visible_cone_cells
+    pub fn guard_confused(&self, guard: &Guard) -> bool {
+        self.abilities.effect_active(Effect::Confuse)
+            && self.player.sight_distance(guard.pos()) <= CONFUSION_RADIUS
     }
 
     /// How many objectives are still out. The run can be won only at zero (§10.2).
@@ -2190,6 +2234,13 @@ impl State {
             .iter()
             .map(|guard| self.perceive_guard(guard) == Some(GuardPerception::Seen))
             .collect();
+        // Which guards are **confused** this turn (§8.3/#240): blinded and frozen by an
+        // active Confusion within [`CONFUSION_RADIUS`] of the player. Resolved once here
+        // — the player's cell and the ability's active window are fixed for the phase —
+        // so every skip below (sense, witness, body scan, hideout check, decoy, and the
+        // move) reads the *same* set. A confused guard takes no part in phase 3: it does
+        // not sense (its state and lead pause, not reset) and does not move.
+        let suppressed: Vec<bool> = self.guards.iter().map(|g| self.guard_confused(g)).collect();
         let mut spotters = Vec::new();
         for (index, ((guard, &concealed), &seen)) in self
             .guards
@@ -2198,6 +2249,12 @@ impl State {
             .zip(&seen)
             .enumerate()
         {
+            // A confused guard is blind and frozen (§8.3/#240): skip its whole sense so
+            // it neither detects nor witnesses, and — by not cooling its timers — holds
+            // its exact state and lead for a clean resume (§8.2).
+            if suppressed[index] {
+                continue;
+            }
             // Awareness is per-turn, so the pre-sense reading is last turn's: a
             // guard aware now that was not aware then has *freshly* found the
             // player — the transition [`Event::Detected`] reports, and the §13.2
@@ -2249,7 +2306,11 @@ impl State {
                 continue;
             }
             let mut seen = false;
-            for guard in &mut self.guards {
+            for (gi, guard) in self.guards.iter_mut().enumerate() {
+                // A confused guard is blind (§8.3/#240): it finds nothing this turn.
+                if suppressed[gi] {
+                    continue;
+                }
                 if guard.fov().contains(at) {
                     guard.find_body(at);
                     seen = true;
@@ -2278,7 +2339,11 @@ impl State {
         // value (§12.3), and passed to each guard's own check.
         let always_search = self.modifiers.guards_always_search_hideouts;
         if let Some(cell) = hidden_cell {
-            for guard in &mut self.guards {
+            for (gi, guard) in self.guards.iter_mut().enumerate() {
+                // A confused guard is blind and frozen (§8.3/#240): it checks nothing.
+                if suppressed[gi] {
+                    continue;
+                }
                 if guard.checks_hideout_at(cell, always_search) {
                     guard.check_hideout(cell);
                 }
@@ -2289,7 +2354,11 @@ impl State {
         // Investigate it. The precedence is the whole point: a guard that can
         // see you ignores the fake; decoys work on guards that have lost you.
         if let Some(decoy) = self.decoy {
-            for guard in &mut self.guards {
+            for (gi, guard) in self.guards.iter_mut().enumerate() {
+                // A confused guard is blind (§8.3/#240): the fake draws no frozen guard.
+                if suppressed[gi] {
+                    continue;
+                }
                 if !guard.detected_player() && guard.fov().contains(decoy) {
                     guard.investigate_decoy(decoy);
                 }
@@ -2298,6 +2367,17 @@ impl State {
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
+            }
+            // A confused guard is frozen (§8.3/#240): it takes no step this turn, so it
+            // cannot capture by moving into the player — the "a frozen adjacent guard
+            // can't capture while suppressed" edge (§4.5/#240). Confusion is no shield,
+            // though: a guard *outside* the bubble still moves and captures normally,
+            // and the frozen guard's cell stays solid — there is no walking through it.
+            // Read from the same query the `suppressed` snapshot did: guard `i` has not
+            // moved yet this phase, so the two agree, and neither the player nor the
+            // active window shifts mid-phase.
+            if self.guard_confused(&self.guards[i]) {
+                continue;
             }
             let facility = self.layout.facility();
             // Guards are solid to each other and path *around* a colleague (§7.8):

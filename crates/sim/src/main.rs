@@ -24,7 +24,7 @@ summary row (schema: crates/sim/README.md).
   --cap N        inputs issued per run before it is ruled a
                  timeout                                      (default 1000)
   --guards N     guards to place per facility — the §10.2
-                 recipe knob the balance sweep drives         (default 5)
+                 recipe knob the balance sweep drives         (default 4)
   --bot          play each run with the baseline stealth bot
                  instead of a script (design §13.2)           (default: off)
   --script MOVES inputs replayed from the start of every run:
