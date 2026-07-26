@@ -315,7 +315,7 @@ impl State {
             return;
         }
         if self.call_guards_to(at, finders, radio::BODY_CALL_GUARDS) {
-            events.push(Event::CalledIn { at });
+            events.push(Event::BodyCalledIn { at });
         }
     }
 

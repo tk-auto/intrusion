@@ -2127,7 +2127,7 @@ fn a_found_body_calls_two_guards_that_are_not_the_finder() {
     let mut called = None;
     for _ in 0..40 {
         for e in s.step(Input::Wait) {
-            if let Event::CalledIn { at } = e {
+            if let Event::BodyCalledIn { at } = e {
                 called = Some(at);
             }
         }
@@ -2174,7 +2174,7 @@ fn baseline_calls_nobody_to_a_body_but_the_finder_still_reacts() {
                 found = true;
             }
             assert!(
-                !matches!(e, Event::CalledIn { .. }),
+                !matches!(e, Event::BodyCalledIn { .. }),
                 "baseline never calls anyone to a body",
             );
         }
@@ -2234,7 +2234,7 @@ fn a_stowed_body_calls_nobody() {
     for _ in 0..40 {
         for e in s.step(Input::Wait) {
             assert!(
-                !matches!(e, Event::CalledIn { .. } | Event::BodyFound { .. }),
+                !matches!(e, Event::BodyCalledIn { .. } | Event::BodyFound { .. }),
                 "a stowed body is never found and so never called in (§7.2)",
             );
         }
@@ -2254,7 +2254,7 @@ fn a_body_is_called_in_once_not_every_turn() {
     let mut calls = 0;
     for _ in 0..60 {
         for e in s.step(Input::Wait) {
-            if matches!(e, Event::CalledIn { .. }) {
+            if matches!(e, Event::BodyCalledIn { .. }) {
                 calls += 1;
             }
         }

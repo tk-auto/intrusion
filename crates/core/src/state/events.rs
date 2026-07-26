@@ -118,6 +118,14 @@ pub enum Event {
     /// player reads it as this near line plus the caller's own sensed dot changing
     /// course (§9) — the visual tell, sound being gone (§9.3).
     CalledIn { at: Cell },
+    /// A guard that found a body **called it in** (§7.7/§7.2): two guards are
+    /// converging on `at` — the body's cell — to search it. Distinct from
+    /// [`CalledIn`](Event::CalledIn) because it reports a *body's* position, not
+    /// the player's, and it outranks the bare [`BodyFound`](Event::BodyFound) on
+    /// the §11.7 ladder: it says everything a find says, plus that help is on its
+    /// way. Fires only with the `body_found_calls_two_guards` modifier on (§12.6),
+    /// once per body, and only when someone was free to send.
+    BodyCalledIn { at: Cell },
     /// A second missed radio ping stepped the facility-wide alert to `level`
     /// (§7.3): the concrete, explainable escalation the alert system was always
     /// meant to provide (§2.3). Written here, read on the near line (§11.4).
@@ -192,6 +200,7 @@ impl Event {
             Event::BodyFound { .. }
             | Event::RadioSilence { .. }
             | Event::CalledIn { .. }
+            | Event::BodyCalledIn { .. }
             | Event::AlertRaised { .. } => Category::Warning,
             // A guard that sees you is hunting *you* — the same Danger band as
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
