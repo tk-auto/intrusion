@@ -1919,6 +1919,37 @@ and installed standalone, but the options dialog could not be closed by touch an
 the pause menu could not be opened by touch — together making it unreachable *and*
 inescapable. Either build touch properly or don't ship the manifest. **[OPEN]**
 
+**The touch model.** A **swipe** steps along the drag's dominant axis and *keeps*
+stepping while the finger stays down, the direction re-read live from the drag; a
+**press held in place** waits, repeatedly; a **quick tap** is a single Wait.
+Lifting the finger stops everything instantly.
+
+**Waiting is a tap on the board, well clear of the bars** (#306). A tap produces
+Wait only on a **map** row that no overlay owns *and* at least a **dead band** away
+from the chrome's inner edges — the two read-only status rows above, the ability bar
+below, and the lower edge of the deployed message list while it is up. Inside the
+band, on the chrome, and off the canvas, a tap that hits no control does **nothing**:
+no turn, no state change. The point is that the boundary is *forgiving*, not merely
+correct — a near-miss on the flush-right ability block (§11.4) must cost nothing,
+because in a permadeath run with no undo a silently spent turn is unrecoverable
+(§2.1/§2.2). **The fix is never to grow or move a target**: §11.4's nine-cell slot
+and its fixed position are settled; a miss is free, not impossible.
+
+Two rules keep the band from taking anything away. **Swipes are exempt** — a
+directional drag is unambiguous, so it may start anywhere, band included; only the
+ambiguous zero-displacement gesture is gated. And the keyboard is untouched: `w` /
+`5` waits without touching the board at all, so the band never leaves a player
+unable to wait. The band is one number for the touch feel, scaled from the swipe
+threshold and floored at one full map row so it never shrinks below a cell at a
+small fit. **[START]** — the cost is that a player near the bottom of the map can no
+longer wait by tapping right beside themselves.
+
+**Chrome controls resolve on the lift**, not the press: a press arms the control and
+the lift over that same control fires it, so a mis-press can be slid off and
+abandoned. That is the gesture pump's own fairness contract — *a turn must never
+burn on a gesture the player didn't finish* (§2.2/§4.5) — applied to buttons, and it
+puts both surfaces' resolution at the same moment so they behave alike.
+
 ### 11.7 Messages
 
 Messages feed the **near line** (§11.4). The usable line is *not* part of this

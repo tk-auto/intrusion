@@ -14,19 +14,25 @@
 //! finger stops everything instantly — fairness (§2.2/§4.5) demands no step or
 //! wait ever lands after the lift, and every repeat is one ordinary [`Input`]
 //! through the same seam as a held arrow key, never a batch.
+//!
+//! **Where** the finger is decides whether the ambiguous half of that model is
+//! allowed at all: the Wait-producing gestures resolve through
+//! [`Game::tap_at`](crate::tap) (§11.6/#306), so a tap or a held press that landed on
+//! the chrome, in its dead band, or off the canvas does nothing instead of silently
+//! spending a turn. Swipes are exempt — a directional drag is unambiguous.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_at, ability_for_key, help_hit, help_nav_for_key, input_for_key, is_help_button,
-    is_message_button, menu_nav_for_key, ui_command_for_key, AbilityId, Cell, Direction, HelpHit,
-    HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    ability_for_key, help_nav_for_key, input_for_key, menu_nav_for_key, ui_command_for_key, Cell,
+    Direction, HelpHit, HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, KeyboardEvent, PointerEvent};
 
+use crate::tap::{Control, Tap};
 use crate::Game;
 
 /// The input-facing half of [`Game`]: how a key or a gesture tick becomes a
@@ -111,7 +117,7 @@ impl Game {
     /// Feed one [`Input`] to the loop and repaint — the single seam every input
     /// source (a key, a gesture tick) drives, one ordinary input at a time against
     /// the current frame's state (§2.2 fairness: never a batched multi-step).
-    fn step_and_draw(&mut self, input: Input) {
+    pub(crate) fn step_and_draw(&mut self, input: Input) {
         self.state.step(input);
         self.draw();
     }
@@ -130,7 +136,7 @@ impl Game {
 
     /// Apply a shell-level [`UiCommand`] (§11.4) — a view toggle, never a game
     /// action, so it changes no [`State`](intrusion_core::State).
-    fn apply_ui_command(&mut self, command: UiCommand) {
+    pub(crate) fn apply_ui_command(&mut self, command: UiCommand) {
         match command {
             UiCommand::ToggleMessageLog => {
                 self.ui.message_log_open = !self.ui.message_log_open;
@@ -151,17 +157,9 @@ impl Game {
         }
     }
 
-    /// The [`HelpHit`] under a viewport point while the panel is open, or `None`
-    /// (§11.6/#248) — the core ([`help_hit`]) owns the tab bar's geometry, so a tap
-    /// resolves to exactly the control drawn (a tab, or the `[x]` close).
-    fn help_hit_at(&self, client_x: f64, client_y: f64) -> Option<HelpHit> {
-        let (col, row) = self.screen_cell(client_x, client_y)?;
-        help_hit(self.state.layout().facility().width(), col, row)
-    }
-
     /// Apply a [`HelpHit`] from a tap on the open panel: switch to the tapped tab or
     /// close. A view action like [`apply_help_nav`](Self::apply_help_nav).
-    fn apply_help_hit(&mut self, hit: HelpHit) {
+    pub(crate) fn apply_help_hit(&mut self, hit: HelpHit) {
         match hit {
             HelpHit::Close => self.ui.help_open = false,
             HelpHit::Tab(tab) => self.ui.help_tab = tab,
@@ -196,36 +194,6 @@ impl Game {
     /// so none of them can disagree with the frame the core drew.
     pub(crate) fn screen_height(&self) -> u32 {
         self.state.layout().facility().height() + TOP_ROWS + BOTTOM_ROWS
-    }
-
-    /// Whether the viewport point lands on the near line's help toggle (§14
-    /// v2/#139/#267) — the core ([`is_help_button`]) owns the `[?]` button's
-    /// geometry, so a tap can never miss the button drawn.
-    fn hit_help_button(&self, client_x: f64, client_y: f64) -> bool {
-        let Some((col, row)) = self.screen_cell(client_x, client_y) else {
-            return false;
-        };
-        is_help_button(self.state.layout().facility().width(), col, row)
-    }
-
-    /// Whether the viewport point lands on the near line's message-log toggle
-    /// (§11.7) — the core ([`is_message_button`]) owns the counter's geometry, and
-    /// whether there is a counter at all, so a click can never miss the toggle
-    /// drawn nor hit one that is not there.
-    fn hit_message_button(&self, client_x: f64, client_y: f64) -> bool {
-        let Some((col, row)) = self.screen_cell(client_x, client_y) else {
-            return false;
-        };
-        is_message_button(&self.state, col, row)
-    }
-
-    /// The ability under the viewport point, or `None` (§11.4). Maps the point to a
-    /// screen cell and asks the core hit-test ([`ability_at`]), which owns the bar's
-    /// geometry — so a click resolves to exactly the entry drawn, by identity, and
-    /// fires the one `Input::Activate` path a hotkey does.
-    fn ability_at_point(&self, client_x: f64, client_y: f64) -> Option<AbilityId> {
-        let (col, row) = self.screen_cell(client_x, client_y)?;
-        ability_at(&self.state, col, row)
     }
 }
 
@@ -340,6 +308,44 @@ pub(crate) fn clear_timer(timer: RepeatTimer) {
     }
 }
 
+/// What the pointer currently down is doing — decided once, at the press, by
+/// [`Game::tap_at`] (§11.6/#306). The two are exclusive: a press on a control arms
+/// **only** the control and never also a gesture, or a press dragged onto the board
+/// would both abandon the button and walk the player.
+enum Pointer {
+    /// A press that landed on a chrome control: **armed**, and fired on the lift over
+    /// that same control. Resolving on the lift rather than the press is what lets a
+    /// mis-press be slid off and abandoned (§2.2/§4.5) — the same rule the gesture
+    /// path already honours on `pointercancel` — and it puts both surfaces' resolution
+    /// at the same moment, so they behave alike.
+    Armed { pointer_id: i32, control: Control },
+    /// A press on the board (or on anything the controls declined): the swipe / hold /
+    /// tap gesture.
+    Gesture(Gesture),
+}
+
+impl Pointer {
+    /// The pointer that owns this press; other fingers are ignored while it lives.
+    fn pointer_id(&self) -> i32 {
+        match self {
+            Pointer::Armed { pointer_id, .. } => *pointer_id,
+            Pointer::Gesture(g) => g.pointer_id,
+        }
+    }
+}
+
+/// What a lift resolved to — decided while the pump's state is borrowed, applied
+/// after it is released.
+enum Lift {
+    /// The armed control, to fire only if the lift is still over it.
+    Control(Control),
+    /// The unfired gesture's own input: a tap's Wait, or a flick too fast for a
+    /// pointermove to have seen.
+    Gesture(Input),
+    /// Nothing to apply — a gesture that already fired, or an abandoned press.
+    Nothing,
+}
+
 /// One finger's live gesture: where it pressed, where it is now, and the timer
 /// keeping it repeating. Exists only while that pointer is down — release (or a
 /// browser cancel) destroys it and its timer together.
@@ -359,6 +365,16 @@ struct Gesture {
     timer: RepeatTimer,
 }
 
+impl Gesture {
+    /// Where the finger is **now**, in viewport CSS pixels — the origin plus the live
+    /// displacement. The Wait-producing gestures are routed against this rather than
+    /// the origin (#306), so it is the same point a lift would resolve at: drag out of
+    /// the dead band and a held press starts waiting, drag into it and it stops.
+    fn point(&self) -> (f64, f64) {
+        (self.origin.0 + self.delta.0, self.origin.1 + self.delta.1)
+    }
+}
+
 /// The gesture pump — §11.6's touch half, replacing the old edge-zone tap model.
 ///
 /// A **swipe** steps along the drag's dominant axis the instant it crosses
@@ -376,11 +392,14 @@ struct Gesture {
 /// release/cancel clears the timer before anything else can fire, so no step or
 /// wait ever lands after the finger lifts. A cancelled gesture (the browser took
 /// the pointer, or it left the page) emits nothing at all, not even the tap's
-/// Wait — a turn must never burn on a gesture the player didn't finish.
+/// Wait — a turn must never burn on a gesture the player didn't finish. **A tap the
+/// player aimed at a button is such a gesture** (#306), which is why every
+/// Wait-producing resolution here is routed through [`Game::tap_at`] and every chrome
+/// control resolves on the lift.
 struct GesturePump {
     game: Rc<RefCell<Game>>,
-    /// The live gesture, if a finger is down.
-    active: RefCell<Option<Gesture>>,
+    /// The live press, if a finger is down: an armed control or a gesture.
+    active: RefCell<Option<Pointer>>,
     /// The repeat tick — **one closure for the page's lifetime**, registered with
     /// `setTimeout`/`setInterval` afresh for each gesture. Storing it here (an Rc
     /// cycle, deliberately never freed) mirrors the `Closure::forget` lifetime
@@ -407,78 +426,47 @@ impl GesturePump {
         .expect("the browser arms a timer")
     }
 
-    /// A pointer pressed: the deploy button toggles the panel and an ability entry
-    /// activates it (§11.4 — neither doubles as a gesture), anything else starts the
-    /// gesture. Only the primary button gestures, and a second finger neither starts
-    /// a second gesture nor re-aims the first.
+    /// A pointer pressed: route the point once (§11.6/#306) and either **arm** the
+    /// control under it — nothing fires yet — or start the gesture. Only the primary
+    /// button presses, and a second finger neither starts a second press nor re-aims
+    /// the first.
     fn on_down(&self, e: &PointerEvent) {
         if e.button() != 0 {
             return; // secondary mouse buttons keep their browser meaning
         }
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
+        let tap = self.game.borrow().tap_at(x, y);
         {
-            let mut game = self.game.borrow_mut();
-            // The menu (§14/#268): before a run starts, every press on the board is
-            // the menu's. A tap on an entry row chooses it — the same path its key
-            // takes — and a press anywhere else is swallowed. Nothing starts a
-            // gesture: there is no player to walk yet. (The seed box's own presses
-            // never reach here; its panel stops them at itself.)
-            if game.ui.menu.is_some() {
-                if let Some(entry) = game.menu_entry_at(x, y) {
-                    game.choose(entry);
-                }
-                e.prevent_default();
-                return;
+            let mut active = self.active.borrow_mut();
+            if active.is_none() {
+                *active = match tap {
+                    // A control — the menu's entries, the help panel's tabs and `[x]`,
+                    // the `[?]` toggle, the message counter, an ability slot. Armed
+                    // only: it fires on the lift over the same control, and it starts
+                    // no gesture.
+                    Tap::Control(control) => Some(Pointer::Armed {
+                        pointer_id: e.pointer_id(),
+                        control,
+                    }),
+                    // A modal screen captured the press (§14/#268, §14 v2/#248): not
+                    // even a gesture starts, since there is no world underneath to
+                    // walk. (The seed box's own presses never reach here; its panel
+                    // stops them at itself.)
+                    Tap::Captured => None,
+                    // Anything else starts a gesture. It may begin *anywhere* the
+                    // controls declined — the dead band and the chrome included —
+                    // because a swipe from there is unambiguous and must still step;
+                    // it is only the Wait that the routing gates, at the moment the
+                    // gesture resolves.
+                    Tap::Wait | Tap::Nothing => Some(Pointer::Gesture(Gesture {
+                        pointer_id: e.pointer_id(),
+                        origin: (x, y),
+                        delta: (0.0, 0.0),
+                        fired: false,
+                        timer: RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false)),
+                    })),
+                };
             }
-            // Modal help (§14 v2/#248): while it is up, every press is the panel's — a
-            // tap on a tab switches, on `[x]` closes, anywhere else is swallowed.
-            // Nothing starts a gesture or steps the game while the panel captures input.
-            if game.ui.help_open {
-                if let Some(hit) = game.help_hit_at(x, y) {
-                    game.apply_help_hit(hit);
-                    game.draw();
-                }
-                e.prevent_default();
-                return;
-            }
-            // The help toggle, a pure view toggle (§14 v2/#139): a tap opens or closes
-            // the reference panel and never starts a gesture. The modal panel carries
-            // its own `[x]`, so the pair never traps (§11.6).
-            if game.hit_help_button(x, y) {
-                game.apply_ui_command(UiCommand::ToggleHelp);
-                game.draw();
-                e.prevent_default();
-                return;
-            }
-            // The near line's message-log counter, likewise a view toggle (§11.7):
-            // a tap deploys or folds the list and never starts a gesture.
-            if game.hit_message_button(x, y) {
-                game.apply_ui_command(UiCommand::ToggleMessageLog);
-                game.draw();
-                e.prevent_default();
-                return;
-            }
-            // A tap on an ability-bar entry drives the same input its hotkey does
-            // (§11.4/§11.6): the core resolves the toggle from the ability's live
-            // state, so tapping `Run[3]` switches the sprint off (#304) exactly as
-            // pressing `r` again would, and a cooling entry refuses for free in the
-            // economy (§4.4). Consumed either way, so it never also walks the player.
-            if let Some(id) = game.ability_at_point(x, y) {
-                let input = game.state.ability_input(id);
-                game.step_and_draw(input);
-                e.prevent_default();
-                return;
-            }
-        }
-        let mut active = self.active.borrow_mut();
-        if active.is_none() {
-            *active = Some(Gesture {
-                pointer_id: e.pointer_id(),
-                origin: (x, y),
-                delta: (0.0, 0.0),
-                fired: false,
-                timer: RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false)),
-            });
         }
         // Consumed either way (§11.6): gestures are game input, and the browser's
         // follow-ups (double-tap zoom, synthetic clicks) must not fire off them.
@@ -489,10 +477,15 @@ impl GesturePump {
     /// the drag first crosses the swipe threshold fire its step — the swipe
     /// declaring itself — restarting the repeat cadence from that input exactly
     /// as a fresh keydown would.
+    ///
+    /// An armed control ignores moves entirely: the lift re-routes the point, so
+    /// sliding off and back on again is decided once, at the end.
     fn on_move(&self, e: &PointerEvent) {
         let first_step = {
             let mut active = self.active.borrow_mut();
-            let Some(g) = active.as_mut().filter(|g| g.pointer_id == e.pointer_id()) else {
+            let Some(Pointer::Gesture(g)) =
+                active.as_mut().filter(|p| p.pointer_id() == e.pointer_id())
+            else {
                 return;
             };
             g.delta = (
@@ -518,18 +511,18 @@ impl GesturePump {
     /// a hold's Wait, a swipe's step, whichever the finger says *now* — and, if
     /// this was the one-shot delay, settle into the steady cadence.
     fn on_tick(&self) {
-        let input = {
+        let tick = {
             let mut active = self.active.borrow_mut();
-            let Some(g) = active.as_mut() else {
+            let Some(Pointer::Gesture(g)) = active.as_mut() else {
                 return; // released while the tick was in flight — nothing may fire
             };
             g.fired = true;
             if let RepeatTimer::Delay(_) = g.timer {
                 g.timer = RepeatTimer::Interval(self.arm(REPEAT_INTERVAL_MS, true));
             }
-            gesture_input(g.delta.0, g.delta.1)
+            gesture_input(g.delta.0, g.delta.1).map(|input| (input, g.point()))
         };
-        if let Some(input) = input {
+        if let Some((input, (x, y))) = tick {
             let mut game = self.game.borrow_mut();
             // A held swipe never auto-walks into visible danger (§11.6/#223): the
             // repeat is swallowed at the cone edge, the cadence left running so
@@ -539,46 +532,96 @@ impl GesturePump {
             if game.repeat_into_danger(input) {
                 return;
             }
+            // A press held **in place** only waits where a tap would (§11.6/#306): a
+            // resting finger on the chrome, in the dead band or off the canvas is more
+            // likely a missed button than a deliberate hold, so it produces nothing.
+            // The cadence is left running — drag out onto clear board and it waits.
+            if !gesture_lands(input, game.tap_at(x, y)) {
+                return;
+            }
             game.step_and_draw(input);
         }
     }
 
-    /// The gesture's pointer lifted: stop every repeat immediately, and if the
-    /// gesture never fired, resolve it as the tap it was — at the lift point, so
-    /// a press in place is one Wait and a flick too fast for a pointermove still
-    /// steps. That input is the gesture's own, not a repeat leaking past the lift.
+    /// The pointer lifted — **the one moment both surfaces resolve at** (§11.6/#306).
+    ///
+    /// An armed control fires only if the lift still lands on it, so a press slid off
+    /// its cells (or onto a different control) is abandoned, spending nothing. A
+    /// gesture stops every repeat immediately and, if it never fired, resolves as the
+    /// tap it was — at the lift point, so a press in place is one Wait and a flick too
+    /// fast for a pointermove still steps. That input is the gesture's own, not a
+    /// repeat leaking past the lift.
     fn on_up(&self, e: &PointerEvent) {
-        let tap = {
+        let (x, y) = (e.client_x() as f64, e.client_y() as f64);
+        let lift = {
             let mut active = self.active.borrow_mut();
-            if !matches!(active.as_ref(), Some(g) if g.pointer_id == e.pointer_id()) {
+            if !matches!(active.as_ref(), Some(p) if p.pointer_id() == e.pointer_id()) {
                 return;
             }
-            let g = active.take().expect("matched just above");
-            clear_timer(g.timer);
-            if g.fired {
-                None
-            } else {
-                gesture_input(
-                    e.client_x() as f64 - g.origin.0,
-                    e.client_y() as f64 - g.origin.1,
-                )
+            match active.take().expect("matched just above") {
+                Pointer::Armed { control, .. } => Lift::Control(control),
+                Pointer::Gesture(g) => {
+                    clear_timer(g.timer);
+                    match gesture_input(x - g.origin.0, y - g.origin.1) {
+                        Some(input) if !g.fired => Lift::Gesture(input),
+                        _ => Lift::Nothing,
+                    }
+                }
             }
         };
         e.prevent_default();
-        if let Some(input) = tap {
-            self.game.borrow_mut().step_and_draw(input);
+        match lift {
+            Lift::Nothing => {}
+            Lift::Control(armed) => {
+                let mut game = self.game.borrow_mut();
+                if armed_fires(armed, game.tap_at(x, y)) {
+                    game.apply_control(armed);
+                }
+            }
+            Lift::Gesture(input) => {
+                let mut game = self.game.borrow_mut();
+                // The tap's Wait is the ambiguous gesture this ticket gates: it lands
+                // only on board clear of the chrome's dead band (#306). A flick's
+                // `Step` is unambiguous and lands wherever it was aimed.
+                if gesture_lands(input, game.tap_at(x, y)) {
+                    game.step_and_draw(input);
+                }
+            }
         }
     }
 
-    /// The browser took the gesture away (`pointercancel`) or the pointer left the
+    /// The browser took the press away (`pointercancel`) or the pointer left the
     /// page (`pointerleave`): tear down without emitting anything — not even the
-    /// tap's Wait. A turn must never burn on a gesture the player didn't end.
+    /// tap's Wait, nor an armed control. A turn must never burn on a gesture the
+    /// player didn't end.
     fn on_abort(&self, e: &PointerEvent) {
         let mut active = self.active.borrow_mut();
-        if matches!(active.as_ref(), Some(g) if g.pointer_id == e.pointer_id()) {
-            clear_timer(active.take().expect("matched just above").timer);
+        if !matches!(active.as_ref(), Some(p) if p.pointer_id() == e.pointer_id()) {
+            return;
+        }
+        if let Some(Pointer::Gesture(g)) = active.take() {
+            clear_timer(g.timer);
         }
     }
+}
+
+/// Whether the `input` a gesture resolved to may land where the finger is (§11.6/#306)
+/// — the pure half of the dead band, in the spirit of [`gesture_input`].
+///
+/// A `Wait` is the **ambiguous** gesture: zero displacement says nothing about what
+/// the player meant, so it lands only on [`Tap::Wait`] — board clear of the chrome and
+/// its dead band. Every other input is unconditional: **swipes are exempt**, because a
+/// directional drag is unambiguous wherever it started, so the band costs no movement.
+fn gesture_lands(input: Input, tap: Tap) -> bool {
+    input != Input::Wait || tap == Tap::Wait
+}
+
+/// Whether an **armed** control fires on the lift: only when the lift still routes to
+/// that same control (§11.6/#306). Sliding off its cells — onto the board, onto a
+/// neighbouring control, into the letterbox — abandons it, spending nothing, the same
+/// rule the gesture path already honours on `pointercancel` (§2.2/§4.5).
+fn armed_fires(armed: Control, tap: Tap) -> bool {
+    tap == Tap::Control(armed)
 }
 
 /// Install the gesture pump (§11.6's touch half): pointer listeners anywhere on
@@ -619,6 +662,7 @@ pub(crate) fn install_gestures(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use intrusion_core::AbilityId;
 
     /// §11.6's hold rule: a press that never crosses the swipe threshold is Wait —
     /// from the zero-displacement press up to the last sub-threshold pixel, on
@@ -748,6 +792,55 @@ mod tests {
             Input::Activate(AbilityId::Run),
             all_danger
         ));
+    }
+
+    /// #306's dead band, from the gesture's side: **a swipe is exempt.** A `Step`
+    /// lands wherever the finger is — the band, the chrome, off the canvas — because a
+    /// directional drag is unambiguous, so the band costs no movement. Only the
+    /// zero-displacement `Wait` is gated, and it lands on [`Tap::Wait`] alone.
+    #[test]
+    fn only_the_ambiguous_wait_is_gated_by_where_the_finger_is() {
+        for tap in [Tap::Wait, Tap::Nothing, Tap::Captured] {
+            assert!(
+                gesture_lands(Input::Step(Direction::North), tap),
+                "a swipe steps at {tap:?}"
+            );
+        }
+        assert!(
+            gesture_lands(Input::Wait, Tap::Wait),
+            "board clear of the bars"
+        );
+        for tap in [
+            Tap::Nothing, // the chrome, the dead band, the letterbox
+            Tap::Captured,
+            Tap::Control(Control::HelpToggle),
+        ] {
+            assert!(
+                !gesture_lands(Input::Wait, tap),
+                "a tap or a held press at {tap:?} spends no turn"
+            );
+        }
+    }
+
+    /// #306's lift rule: an armed control fires only if the lift is still over that
+    /// same control. Sliding off onto the board, onto a *different* control, or into
+    /// the letterbox abandons the press — nothing fires and nothing steps.
+    #[test]
+    fn an_armed_control_fires_only_where_it_was_armed() {
+        let armed = Control::Ability(AbilityId::Run);
+        assert!(armed_fires(armed, Tap::Control(armed)));
+        for tap in [
+            Tap::Control(Control::HelpToggle),
+            Tap::Control(Control::Ability(AbilityId::Camouflage)),
+            Tap::Wait,
+            Tap::Nothing,
+            Tap::Captured,
+        ] {
+            assert!(
+                !armed_fires(armed, tap),
+                "lifting at {tap:?} abandons the press"
+            );
+        }
     }
 
     /// A step that would leave the grid's north/west edge has no destination cell
