@@ -399,12 +399,17 @@ impl State {
     /// guard's sense leaves its state and lead untouched, so it resumes cleanly when
     /// the window ends (§8.2).
     ///
+    /// Both halves come from the **area** itself ([`effect_area`](Self::effect_area),
+    /// #308) rather than being restated here, so the freeze, the mark the renderer
+    /// paints on a frozen guard and the footprint it washes over the board are three
+    /// readings of one object — the picture cannot disagree with the rule (§11.5).
+    ///
     /// [`Effect::Confuse`]: crate::Effect::Confuse
     /// [`guard_phase`]: Self::guard_phase
     /// [`visible_cone_cells`]: Self::visible_cone_cells
     pub fn guard_confused(&self, guard: &Guard) -> bool {
-        self.abilities.effect_active(Effect::Confuse)
-            && self.player.sight_distance(guard.pos()) <= CONFUSION_RADIUS
+        self.effect_area(Effect::Confuse)
+            .is_some_and(|area| area.contains(guard.pos()))
     }
 
     /// How many objectives are still out. The run can be won only at zero (§10.2).

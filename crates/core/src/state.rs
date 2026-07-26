@@ -71,12 +71,16 @@ use crate::DoorAction;
 
 mod abilities;
 mod doors;
+mod effects;
 mod events;
 mod guards;
 mod traversal;
 mod view;
 
+pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
+
+use effects::EffectFlash;
 
 /// The player and every guard are solid and exclusive — fill 1.0 (§4.3). A cell
 /// already holding one admits no other actor.
@@ -149,6 +153,22 @@ pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
 /// bubble was tight enough that a chaser could sit just outside it. Pinned by a test
 /// so a later change is a visible edit.
 pub const CONFUSION_RADIUS: u32 = 6;
+
+/// How many turns a fired area effect's **footprint flash** stays painted (§8.3/§11.5
+/// **[START]**, #308): the cyan box that teaches how far Confusion — or any later
+/// radius tech — actually reaches. **One turn** — a true flash, the activation frame
+/// and nothing after it. The wash exists to answer *how far* once, at the moment the
+/// player asks it, and a 13×13 field of background is a great deal of ink to leave on
+/// the board while the danger overlay is the thing that matters (§11.5 [SETTLED]).
+/// What carries the state for the rest of the window is the per-guard mark
+/// ([`guard_under_effect`](State::guard_under_effect)), which costs no ink at all.
+///
+/// Lit at full life the turn the ability fires and decremented once per spent turn,
+/// so the footprint shows for this many renders and is gone on the next — the same
+/// persist-and-fade shape as [`DOOR_CUE_DECAY_TURNS`], which is why raising it is a
+/// one-number change if playtest wants the boundary visible for longer. Pinned by a
+/// test.
+pub const EFFECT_FLASH_TURNS: u32 = 1;
 
 /// Confusion's bubble stays **within the guard sense** (§9/#240): a guard is never
 /// frozen before the player can even sense its dot, so the effect is always legible
@@ -428,6 +448,17 @@ pub struct State {
     /// handful of doors change in any few-turn window — so a plain `Vec` scan is
     /// cheaper than a map.
     door_cues: Vec<DoorCue>,
+    /// The area effects whose **footprint** is still being painted (§8.3/§11.5, #308):
+    /// one entry per fired area effect, each lasting [`EFFECT_FLASH_TURNS`] spent
+    /// turns. Lit in [`light_effect_flash`](Self::light_effect_flash) when the ability
+    /// switches on, dropped in [`clear_effect_flash`](Self::clear_effect_flash) the
+    /// moment its window ends either way (§8.2 expiry, §4.4 toggle-off), and decayed
+    /// with the duration clock in [`decay_effect_flashes`](Self::decay_effect_flashes).
+    /// It carries no geometry — the reach itself is a live query
+    /// ([`effect_area`](Self::effect_area)) so the bubble can travel with the player —
+    /// only *whether it is drawn*. At most one entry per area effect, so a plain `Vec`
+    /// scan beats a map.
+    effect_flashes: Vec<EffectFlash>,
     /// Doors the **Autodoors** ability (§8.3/§7.6) opened in the player's path and
     /// still owes a close-behind, as [`DoorId`]s. A door is armed here the turn the
     /// player steps through it ([`BumpKind::AutoDoor`]) and swings shut — via the
@@ -571,6 +602,7 @@ impl State {
             outcome: Outcome::Playing,
             last_events: Vec::new(),
             door_cues: Vec::new(),
+            effect_flashes: Vec::new(),
             autodoors_pending: Vec::new(),
             spotters: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
@@ -758,6 +790,11 @@ impl State {
             self.moved_this_turn = self.player != from;
             // Phases 2 and 3 only happen because the player spent the turn (§4.2/§4.4).
             events.extend(self.run_world_phases());
+            // Latch the footprint of any area effect fired in phase 1 (§8.3/#308),
+            // *after* the fade at the head of the world phases — exactly the door
+            // cues' shape (§9.4) — so a flash lit this turn keeps its full life
+            // instead of losing a turn to the very tick that placed it.
+            self.record_effect_flashes(&events);
             // Ability durations tick HERE — at end of turn, after all three phases —
             // so a freshly activated N-turn ability yields N protected turns and the
             // activation turn itself is covered (§8.2's N-yields-N−1 trap): the
@@ -774,6 +811,9 @@ impl State {
                 if declares(ability, Effect::SpawnDecoy) {
                     self.decoy = None;
                 }
+                // An area effect's footprint is its window's too (#308): whatever
+                // life the flash had left dies with the effect, never after it.
+                self.clear_effect_flash(ability);
             }
             events.extend(
                 expired
@@ -883,6 +923,9 @@ impl State {
                     if declares(id, Effect::SpawnDecoy) {
                         self.decoy = None;
                     }
+                    // The bubble is gone, so its footprint goes with it (#308) — an
+                    // early toggle-off leaves no residue to fade over nothing.
+                    self.clear_effect_flash(id);
                     events.push(Event::AbilityDeactivated { ability: id });
                 }
                 false
@@ -1381,6 +1424,10 @@ impl State {
         // them (§9.4/§10.4), so a cue placed this turn keeps its full life and a
         // re-change refreshes rather than double-decrements.
         self.decay_door_cues();
+        // The effect flashes fade on the same schedule and for the same reason
+        // (§8.3/#308): one turn of life spent before this turn's activation can light
+        // a fresh one ([`record_effect_flashes`](Self::record_effect_flashes)).
+        self.decay_effect_flashes();
         self.recompute_sight();
         self.radio_phase(&mut events);
         self.guard_phase(&mut events);
