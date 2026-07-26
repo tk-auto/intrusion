@@ -509,17 +509,31 @@ it has not recently looked at.
   across distances instead of shuffling locally, and it is why the emergent
   patrols read as purposeful. Keep it.
 - When no uninspected cell remains, it wipes its memory and starts over.
-- **Dwell (§153).** On reaching a patrol target, a Calm guard **sometimes holds
-  in place for a few turns** before picking the next — facing unchanged, no free
-  re-aim (§5). This is what makes a Takedown (§7.2) approachable: a guard that
-  walks every single turn can never be lined up on, so the pause is the *window
-  to act*, paired with the rear blind spot (§6.1/§155) for the behind-the-back
-  strike. **Calm only** — a Chasing/Investigating/Alerted/Responding guard never
-  dwells and a detection cancels an in-progress dwell the same turn (a hunt never
-  slows, the mirror of §7.1's "guards never accelerate"). The whether-to-dwell
-  roll and the dwell length are drawn from the run seed (§12.4), tuned by
-  **[START]** knobs: dwell chance (**50%**) and dwell length (**3–5** turns).
-  Dwelling lowers patrol coverage on purpose (§7.6/§7.7) — a sim knob to watch.
+- **Dwell (§153).** On reaching a patrol target, a Calm guard **holds in place for
+  3–7 turns** before picking the next — facing unchanged, no free re-aim (§5).
+  This is what makes a Takedown (§7.2) approachable: a guard that walks every
+  single turn can never be lined up on, so the pause is the *window to act*,
+  paired with the rear blind spot (§6.1/§155) for the behind-the-back strike.
+  **Calm only** — a Chasing/Investigating/Alerted/Responding guard never dwells
+  and a detection cancels an in-progress dwell the same turn (a hunt never slows,
+  the mirror of §7.1's "guards never accelerate"). The dwell length is drawn from
+  the run seed (§12.4); the **[START]** knobs are dwell chance (**100%** — every
+  arrival) and dwell length (**3–7** turns). Dwelling lowers patrol coverage on
+  purpose (§7.6/§7.7) — a sim knob to watch, and more so now it is unconditional.
+
+  **Why it is unconditional, and why the window grew.** The dwell was a 50% roll
+  over 3–5 turns, and at that rate it was not the thing a player saw. Measured
+  over twelve seeded runs, **92% of every stationary spell a patrolling guard took
+  lasted one or two turns** — not a dwell at all, but the slow 90° turn and the
+  two-rotation 180° about-face below. 42% of the two-turn stops were immediately
+  followed by the guard walking back the way it came, so *reach the end, spin,
+  come straight back* read as the patrol's actual rhythm, and the real pause —
+  under 8% of stops — was lost inside it. A pause that fires half the time is not
+  a rhythm a player can plan against; it is a thing that sometimes happens.
+  Note that the **stop the player sees** runs a little longer than the dwell: a
+  guard turning to leave spends one more turn rotating for a 90° heading, or two
+  for a reversal, so a 3–7 dwell reads as 3–9 turns of held ground. The dwell is
+  the part with the facing pinned, which is the part a Takedown needs.
 
 **Known weakness, worth fixing: territories are boxes around spawn points, which
 have no relationship to the building.** They straddle walls, spill into
