@@ -115,7 +115,7 @@ const PALETTE: [Swatch; 16] = [
     sw("#667a8a", STD_DIM, "#293138", "#14181c"),   //  4 slate — tile memory (§11.5a)
     sw("#4ea6ff", STD_DIM, "#1f4266", "#102133"),   //  5 blue — Owned
     sw("#2456b8", STD_DIM, "#0e224a", "#071125"),   //  6 deep blue — spare
-    sw("#2ee6d6", STD_DIM, "#0d2523", "#081413"),   //  7 cyan — spare
+    sw("#2ee6d6", "#1f9c92", "#134540", "#0b2926"), //  7 cyan — Effect (dim keeps the tint)
     sw("#3ecf5a", STD_DIM, "#195324", "#0c2a12"),   //  8 green — spare
     sw("#157f33", "#0e3f1a", "#083314", "#04190a"), //  9 deep green — spare (darker than STD_DIM)
     sw("#f0e442", STD_DIM, "#605b1a", "#302e0d"),   // 10 yellow — Caution
@@ -133,6 +133,7 @@ const WHITE: Swatch = PALETTE[1];
 const DIM_GRAY: Swatch = PALETTE[2];
 const SLATE: Swatch = PALETTE[4];
 const BLUE: Swatch = PALETTE[5];
+const CYAN: Swatch = PALETTE[7];
 const YELLOW: Swatch = PALETTE[10];
 const ORANGE: Swatch = PALETTE[11];
 const RED: Swatch = PALETTE[12];
@@ -174,6 +175,13 @@ fn swatch(category: Category) -> Swatch {
         // so the two never collide on screen. The door-change cue (§9.4) reuses this
         // same category, so a sensed guard and a sensed door change share the orange.
         Category::Sensed => ORANGE,
+        // An area effect of the player's own making (§8.3/#308): cyan, a hue nothing
+        // else on the board uses, so the one layer that is *advisory* can never be
+        // mistaken for red detection or orange attention — the risk §11.5 names. Its
+        // background is a quiet teal wash (the flash covers a 13×13 box, so it must
+        // recede) while its foreground is the bright row: a frozen guard's `g` is the
+        // loud half, and rightly so — that is the fact the player acts on.
+        Category::Effect => CYAN,
     }
 }
 
@@ -505,7 +513,13 @@ fn bg_color(bg: Category, vis: Visibility) -> &'static str {
     // both a guard and a door change — never fogged, so it paints at full strength
     // (the bright [`Swatch::bg`]) regardless of `vis`, rather than sinking into the dim
     // shade the fog would otherwise pick for an out-of-FOV cell.
-    if bg == Category::Sensed {
+    //
+    // The **effect layer** (§8.3/#308) takes the same exception, and for the same
+    // reason: how far your own gadget reaches is certain knowledge, through walls and
+    // over ground you have never seen. Most of a 13×13 footprint falls outside the
+    // forward FOV, so fogging it would teach the extent only where the player was
+    // already looking — which is precisely the corner the flash exists to light.
+    if matches!(bg, Category::Sensed | Category::Effect) {
         return swatch.bg;
     }
     match vis {
@@ -558,6 +572,9 @@ mod tests {
             Category::Danger,
             Category::Interest,
             Category::System,
+            // The effect layer's bright half — a frozen guard's `g` (§8.3/#308) — is a
+            // real foreground and must be tellable from every other glyph on the board.
+            Category::Effect,
         ];
         // ~70 in RGB distance: the old tan/yellow clash measured ~61 and must fail.
         const MIN_DIST2: i32 = 70 * 70;
@@ -586,6 +603,57 @@ mod tests {
         assert!(
             d >= MIN_DIST2 / 2,
             "dimmed and remembered blur (dist^2 {d})"
+        );
+    }
+
+    /// §8.3/§11.5 (#308): the **effect layer** must be tellable at a glance from both
+    /// of the meanings it sits beside — red detection and orange attention — or the
+    /// board degrades into "some coloured backgrounds", which is the one risk the
+    /// ticket names. Its wash is deliberately quiet (it covers a 13×13 box) but must
+    /// still read against the page, and like `Sensed` it paints at full strength in and
+    /// out of the FOV: how far your own gadget reaches is certain knowledge.
+    #[test]
+    fn the_effect_layer_is_distinct_from_danger_and_sensed() {
+        const MIN_BG_DIST2: i32 = 40 * 40;
+        let effect = bg_color(Category::Effect, Visibility::Dimmed);
+        assert_eq!(
+            effect,
+            bg_color(Category::Effect, Visibility::Live),
+            "the effect wash is full-strength in and out of the FOV alike",
+        );
+
+        let d = dist2(rgb(effect), rgb(BG));
+        assert!(
+            d >= MIN_BG_DIST2,
+            "the effect wash vanishes into the page background (dist^2 {d})"
+        );
+        // Cyan: green and blue both clearly above red — the one hue nothing else on the
+        // board uses, so it cannot be read as a threat level.
+        let (r, g, b) = rgb(effect);
+        assert!(
+            g > r + 20 && b > r + 20,
+            "the effect wash must read as cyan, not as another threat colour"
+        );
+
+        for other in [
+            bg_color(Category::Danger, Visibility::Live),
+            bg_color(Category::Danger, Visibility::Dimmed),
+            bg_color(Category::Sensed, Visibility::Live),
+        ] {
+            let d = dist2(rgb(effect), rgb(other));
+            assert!(
+                d >= MIN_BG_DIST2,
+                "the effect wash blurs into {other} (dist^2 {d})"
+            );
+        }
+        // The mark's foreground keeps its cyan out of the FOV as well: a frozen guard
+        // felt through a wall is exactly the case the mark exists for, so its row's dim
+        // shade must not collapse to the standard gray (as `Interest` keeps its tint).
+        let dim = swatch(Category::Effect).dim;
+        let (r, g, b) = rgb(dim);
+        assert!(
+            g > r + 20 && b > r + 20,
+            "the dimmed effect colour must keep its cyan tint, not fade to gray"
         );
     }
 

@@ -1636,6 +1636,7 @@ one-table edit.
 | **Sensed** | Orange (background) | **Sensed through a wall** (§9) — a guard, or a door that just changed away from you (§9.4); an eye-catching highlight, position only |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
+| **Effect** | Cyan | An **area effect of your own making** (§8.3) — how far it reaches, and which guards it holds; advisory, so it yields to both Danger and Sensed |
 
 **A guard the player can *see* is re-categorised every turn from its own state**,
 so the player reads the AI state machine directly off the colour of `g`: yellow →
@@ -1649,7 +1650,19 @@ overlay, orange not red. The bloom from an orange cell to a state-coloured
 *(Sensed reuses Warning's orange hue but only ever as a background, never a glyph,
 so the two never collide; the door-change cue (§9.4) shares this same Sensed
 background, so a sensed guard and a sensed door change read as one channel. The old
-§9.3 cyan "Noise" slot — a heard sound's source — stays freed, since sound is gone.)*
+§9.3 cyan "Noise" slot — a heard sound's source — was freed when sound went; the
+**Effect** layer now claims that cyan, and it is the one hue on the board that is
+never a threat level.)*
+
+**An area effect speaks in both channels**, because it has two things to say and they
+land on different cells (#308). Its **footprint** is a background — the §6.1 box it
+reaches, painted through walls like the reach itself — shown for a few turns when the
+ability fires (see §11.5) rather than for the whole window. Every guard it **holds** is
+marked for as long as it holds them: a *seen* guard's `g` leaves the yellow → orange →
+red ladder for cyan, because a mind switched off is not a rung on it, and a guard felt
+only through a wall takes the mark on its Sensed highlight instead, since it has no
+glyph to recolour. The mark only ever recolours a guard the player is already shown, so
+it can never reveal one the fog is hiding.
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant.
@@ -1830,6 +1843,17 @@ detection set — the same data the AI queries. If your cell isn't red, no guard
 can see will detect you. **The lose condition, painted.** It makes stealth
 plannable rather than guessy, which is the whole "enough information to strategise"
 pillar. **[SETTLED]** — keep it.
+
+**The effect layer is advisory and never outranks red** (§8.3/#308). An area effect
+of the player's own making — Confusion's bubble, Lockdown's radius — washes its
+footprint in cyan for **`EFFECT_FLASH_TURNS`** turns after it fires **[START]**: long
+enough to teach where the bubble ends, short enough that a 13×13 wash is not sitting
+over the danger overlay for the whole window. What carries the state for the remaining
+turns is the per-guard mark (§11.2), which costs no ink. The precedence is fixed —
+**Danger > Sensed > the effect footprint** — so an advisory layer can never masquerade
+as the detection set, nor hide it. The footprint is the live box, re-measured every
+turn from the same query the mechanic reads, so it travels with the player exactly as
+the effect does and the picture cannot disagree with the rule.
 
 Two problems from the old version to fix:
 

@@ -59,4 +59,30 @@ pub enum Category {
     /// event; it is still position only, never who passed or which way (§10.4). A
     /// coincident danger cone still outranks it (§11.5: being seen outranks).
     Sensed,
+    /// Cyan. An **area effect of your own making** (§8.3/§11.5) — Confusion's bubble
+    /// today, Lockdown's radius next. Its meaning is *reach*: how far the gadget you
+    /// just fired carries, and what it currently holds.
+    ///
+    /// It speaks in both channels, because an area effect has two things to say and
+    /// they land on different cells:
+    ///
+    /// - As a **background**, the effect's live footprint — the §6.1 box around the
+    ///   player, painted through walls like the reach it describes, and the **weakest**
+    ///   background there is: a [`Sensed`](Self::Sensed) cue and a
+    ///   [`Danger`](Self::Danger) cone both paint over it, so an advisory layer can
+    ///   never hide the detection set §11.5 settles as the board's one non-negotiable
+    ///   claim.
+    /// - As a **foreground**, on an actor the effect currently holds: a frozen guard's
+    ///   `g` recolours out of its state ladder (§11.2's yellow → orange → red *is* the
+    ///   guard's mind) into this — a mind switched off is not a threat level, so it
+    ///   leaves the ladder rather than pretending to sit on a rung. On a guard felt
+    ///   only through a wall there is no glyph to recolour, so the mark takes over its
+    ///   [`Sensed`](Self::Sensed) background instead: the stronger claim about the very
+    ///   same guard, position included, never a cell the fog was hiding.
+    ///
+    /// Deliberately **not** blue: [`Owned`](Self::Owned) is a *thing* of yours on the
+    /// board (you, a decoy, the cupboard you are hidden in), and a frozen guard is
+    /// emphatically not one of your things — it is a threat you have bought a few turns
+    /// from.
+    Effect,
 }
