@@ -49,8 +49,12 @@ impl State {
     /// (§8.4) — the seam a hotkey or an ability-panel click resolves an ability's
     /// target through, so no ability ever falls back to auto-targeting (the exact
     /// §8.4/§2.3 regression this system exists to prevent).
-    pub fn begin_ability_targeting(&self, ability: AbilityId) -> Targeting {
-        self.begin_targeting(ability.def().targeting())
+    ///
+    /// `None` for a **passive** (#264): it is never activated, so there is nothing
+    /// to aim and no session to open — the caller's key press is the free §4.4
+    /// no-op it already is for an ability on cooldown.
+    pub fn begin_ability_targeting(&self, ability: AbilityId) -> Option<Targeting> {
+        Some(self.begin_targeting(ability.def().economy()?.targeting()))
     }
 
     /// The player's field of view (§6): the ~180° forward half-disc, or the full

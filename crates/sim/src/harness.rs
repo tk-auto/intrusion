@@ -135,7 +135,9 @@ pub fn run_one_with(
                 // activation emits none, so it never counts (§4.4). The grab starts
                 // the drag; its half-speed steps that follow are Moves.
                 Event::AbilityActivated { ability } => {
-                    record.usage.record(Verb::of_ability(ability));
+                    if let Some(verb) = Verb::of_ability(ability) {
+                        record.usage.record(verb);
+                    }
                 }
                 Event::BodyGrabbed { .. } => record.usage.record(Verb::Drag),
                 Event::Won => record.outcome = RunOutcome::Win,

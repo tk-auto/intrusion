@@ -240,7 +240,9 @@ impl StealthBot {
         match state.ability_state(AbilityId::Camouflage) {
             AbilityState::Ready => return Input::Activate(AbilityId::Camouflage),
             AbilityState::Active { .. } => return Input::Wait,
-            AbilityState::Cooling { .. } | AbilityState::Unusable => {}
+            // A passive is never one of these (Camouflage is activated) — it is
+            // matched only so the arm stays exhaustive (#264).
+            AbilityState::Cooling { .. } | AbilityState::Unusable | AbilityState::Passive => {}
         }
 
         // Nowhere to run to and nothing to cloak with: back away from the nearest
@@ -317,7 +319,7 @@ impl StealthBot {
         match state.ability_state(AbilityId::Camouflage) {
             AbilityState::Ready => Some(Input::Activate(AbilityId::Camouflage)),
             AbilityState::Active { .. } => Some(Input::Wait),
-            AbilityState::Cooling { .. } | AbilityState::Unusable => None,
+            AbilityState::Cooling { .. } | AbilityState::Unusable | AbilityState::Passive => None,
         }
     }
 

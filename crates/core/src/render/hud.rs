@@ -519,14 +519,16 @@ fn overlay_ability_panel(grid: &mut Grid, origin: (u32, u32), statuses: &[Abilit
 }
 
 /// The §11.2 category an ability row reads in, by its state: an available ability
-/// — ready or active — is **Owned** (blue, "yours, in hand"); a cooling one is
-/// **System** (the muted furniture tan, "unavailable, will return"); an unusable
-/// one is **Ground** (dim gray, receding) — discoverable but plainly not an option
-/// now. The `[N]` / `/N/` notation carries the rest, so ready and active share a
-/// colour without ambiguity.
+/// — ready, active, or a passive in effect — is **Owned** (blue, "yours, in hand");
+/// a cooling one is **System** (the muted furniture tan, "unavailable, will
+/// return"); an unusable one is **Ground** (dim gray, receding) — discoverable but
+/// plainly not an option now. The `[N]` / `/N/` / `(on)` notation carries the rest,
+/// so those three share a colour without ambiguity.
 fn panel_category(state: AbilityState) -> Category {
     match state {
-        AbilityState::Ready | AbilityState::Active { .. } => Category::Owned,
+        AbilityState::Ready | AbilityState::Active { .. } | AbilityState::Passive => {
+            Category::Owned
+        }
         AbilityState::Cooling { .. } => Category::System,
         AbilityState::Unusable => Category::Ground,
     }
@@ -663,6 +665,7 @@ fn overlay_message_log(grid: &mut Grid, messages: &[Message]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ability::Loadout;
     use crate::cell::{Cell, Direction};
     use crate::guard::Guard;
     use crate::modifiers::LevelModifiers;
@@ -798,7 +801,8 @@ mod tests {
             Vec::new(),
             [Cell::new(3, 2)], // a console east of the player
             Cell::new(22, 4),
-        );
+        )
+        .with_loadout(Loadout::activated());
         let text = render_screen(&s, ScreenUi::default()).to_text();
         assert_eq!(
             text,
@@ -892,7 +896,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(28, 8),
-        );
+        )
+        .with_loadout(Loadout::activated());
         let g = render_screen(&s, ScreenUi::default());
         let bar = ability_row(10);
         assert_eq!(bar + BOTTOM_ROWS, g.height(), "the bar is the last row");
@@ -954,7 +959,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(28, 8),
-        );
+        )
+        .with_loadout(Loadout::activated());
         // Run: activate (Active 4 after the turn's tick) then toggle off — a free
         // action that drops it straight into its full 12 cooldown. Then activate
         // Camouflage: that turn's tick drains Run's cooldown to 11 and leaves
@@ -1005,6 +1011,11 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(28, 8),
+        )
+        .with_loadout(
+            Loadout::innate()
+                .with(AbilityId::Camouflage)
+                .with(AbilityId::Decoy),
         );
         let ui = ScreenUi::default();
         let bar = ability_row(10);
@@ -1063,7 +1074,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(28, 12),
-        );
+        )
+        .with_loadout(Loadout::activated());
         let closed = render_screen(&s, ScreenUi::default());
         let open = render_screen(
             &s,
@@ -1101,7 +1113,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(1, 1),
-        );
+        )
+        .with_loadout(Loadout::activated());
         let open2 = render_screen(
             &s2,
             ScreenUi {
@@ -1124,7 +1137,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(22, 2),
-        );
+        )
+        .with_loadout(Loadout::activated());
         // A 4-tall map cannot fit all six panel rows within its inset; the render
         // shows what fits and stops — no panic, and the screen height is intact.
         let g = render_screen(
@@ -1153,7 +1167,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(28, 8),
-        );
+        )
+        .with_loadout(Loadout::activated());
         let ui = ScreenUi::default();
         let bar = ability_row(10);
 
@@ -1212,7 +1227,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(28, 12),
-        );
+        )
+        .with_loadout(Loadout::activated());
         let open = ScreenUi {
             ability_panel_open: true,
             ..ScreenUi::default()
@@ -1259,7 +1275,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(28, 8),
-        );
+        )
+        .with_loadout(Loadout::activated());
         let ui = ScreenUi::default();
         let bar = ability_row(10);
 

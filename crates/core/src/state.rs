@@ -64,7 +64,8 @@ use crate::region::{DoorCell, DoorId};
 use crate::rng::Rng;
 use crate::targeting::Targeting;
 use crate::vision::{
-    field_of_view_with_peek, VisibleSet, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
+    field_of_view_with_peek, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC, PLAYER_SIGHT_ARC,
+    PLAYER_SIGHT_RANGE,
 };
 use crate::DoorAction;
 
@@ -517,10 +518,13 @@ impl State {
             dragging: None,
             decoy: None,
             drag_debt: false,
-            // A hand-built state holds the full loadout — the deck as it was before
-            // loadouts (#244); [`with_loadout`](Self::with_loadout) narrows it to a
-            // resolved preset at boot.
-            abilities: Deck::new(Loadout::full()),
+            // A hand-built state holds the **innate** set and nothing else (§8.3):
+            // loadouts are built up from empty, never carved down from everything,
+            // so a state that uses salvaged tech says which tech it has
+            // ([`with_loadout`](Self::with_loadout)) instead of inheriting the lot.
+            // That matters most for a passive, which reshapes perception for the
+            // whole run (§8.3/#265) — never something to acquire by default.
+            abilities: Deck::new(Loadout::innate()),
             objectives,
             exit,
             turn: 0,
@@ -1351,12 +1355,13 @@ impl State {
         self.player_fov = if self.in_duct() {
             self.duct_fov()
         } else {
-            let arc = if self.waited {
-                WAIT_SIGHT_ARC
-            } else {
-                PLAYER_SIGHT_ARC
-            };
-            field_of_view_with_peek(facility, self.player, self.facing, arc, PLAYER_SIGHT_RANGE)
+            field_of_view_with_peek(
+                facility,
+                self.player,
+                self.facing,
+                self.player_sight_arc(),
+                self.player_sight_range(),
+            )
         };
         // Tile memory (§11.5a) accumulates here, in the same phase that produced
         // the sight — every cell the player can see now is remembered forever. A
@@ -1382,9 +1387,36 @@ impl State {
             self.layout.facility(),
             self.player,
             self.duct_entry_facing(self.player),
-            PLAYER_SIGHT_ARC,
-            PLAYER_SIGHT_RANGE,
+            self.player_sight_arc(),
+            self.player_sight_range(),
         )
+    }
+
+    /// The player's sight arc this turn (§6.2): §5's ~180° half-disc, widened to the
+    /// full 360° ([`FULL_SIGHT_ARC`]) by **either** a turn spent waiting (§8.3/§9.1)
+    /// **or** the Vision passive (§8.3/#265).
+    ///
+    /// The two widenings meet here, in one expression, precisely so they cannot
+    /// stack: 360° is the whole circle and there is nothing past it, so waiting
+    /// while holding Vision buys the same arc it already had — the wait's other
+    /// half, the widened guard sense (§9.1), is what still makes it worth a turn.
+    fn player_sight_arc(&self) -> u8 {
+        if self.waited || self.abilities.effect_active(Effect::EnhancedSight) {
+            FULL_SIGHT_ARC
+        } else {
+            PLAYER_SIGHT_ARC
+        }
+    }
+
+    /// The player's sight range this turn (§5/§6.1): the §5 box, or the enlarged one
+    /// while the Vision passive is held (§8.3/#265). Waiting does **not** extend
+    /// range — it only ever bought the arc (§9.1).
+    fn player_sight_range(&self) -> u32 {
+        if self.abilities.effect_active(Effect::EnhancedSight) {
+            ENHANCED_SIGHT_RANGE
+        } else {
+            PLAYER_SIGHT_RANGE
+        }
     }
 
     /// The index of a guard standing on `cell`, if any.

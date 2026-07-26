@@ -300,6 +300,12 @@ sight, though its *cone* stays hidden until you can actually see it. This
 asymmetry is the foundation of the whole game: **avoidance is viable because you
 see them first.** Do not erode it casually.
 
+One thing erodes it **on purpose**: the **Vision** passive (§8.3/#265) lifts the
+held player's arc to 360° and their range to 20, removing the "can't see behind
+you" constraint that makes Wait and corners tense. That is not casual — it is a
+permanent loadout slot spent to buy it, and it is watched in the sim for whether
+it trivialises the hiding game.
+
 ---
 
 ## 6. Vision
@@ -677,6 +683,31 @@ and cooldown.
 > convention, write it down, and make the UI report the number the player
 > actually gets.
 
+**Passives: the cost is the slot, not the time.** **[SETTLED]** (#264) Some
+abilities are never activated — they are simply **in effect for as long as you
+hold them**. They have no turn cost, no duration and no cooldown, so the time
+economy above has nothing to charge them with, and §2.3 is explicit that an
+ability with no cost is not a decision. The reconciliation: **a passive pays with
+the loadout slot it occupies** (§8.3, capped at 3 — #266). You hold it *instead
+of* something else, for the whole run, and that is the whole price.
+
+Three consequences worth stating, because they are what keep the model honest:
+
+- **Held is on.** There is no activation moment — nothing for a replay, a save,
+  or a mid-run pickup to get out of step with. Picking a passive up switches it
+  on; dropping it is the only off.
+- **It reads as its own state**, `(on)` — not `Ready`, not `Active [N]`. The
+  four clock states all mean "and then it ends", and a passive never does;
+  reusing `Active` would make the number the panel shows a fiction, which is the
+  one thing the timing trap above forbids.
+- **It is still an `Effect` list** (§8.1). A passive is not a parallel system —
+  the same effect vocabulary, applied continuously instead of for a window.
+
+The balance watch this creates: a passive that meaningfully changes play for the
+price of a slot is exactly right; one that is strictly better than any activated
+ability is a smell, and that is what the power grades (#263) and the sim (§13.2)
+are for.
+
 ### 8.3 The starting set
 
 Everything here is **[START]**. This is the sandbox to experiment in — it is the
@@ -701,6 +732,7 @@ whole reason the architecture looks the way it does.
 | **Dephase** | 1 turn | 3 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** |
 | **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
 | **Confusion** | 1 turn | 6 | 45 | While active, every guard within `CONFUSION_RADIUS` of you (through walls like the guard sense, §9) is **blinded and frozen** — it neither sees nor moves. A costed panic-buy of time, not a kill: a frozen chaser **pauses** (keeps its lead), it does not reset; the guard resumes cleanly when the window ends. Capture-is-contact still holds (§4.5) — a frozen adjacent guard cannot step into you, but the freeze is no shield to walk into a guard *outside* the bubble, and a frozen guard's cell stays solid. The bubble stays inside the guard-sense range so it never freezes what you cannot sense, and the long cooldown is what keeps it rare (#240). |
+| **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 
 Notes carried forward, because they are good and non-obvious:
 
@@ -721,10 +753,11 @@ Notes carried forward, because they are good and non-obvious:
   you.
 - **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
   not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
-  tech from a pool that defaults to the shipped, non-experimental set (five tech now
-  ship, so "three random" is a genuine draw of three of the five — the pool has
+  tech from a pool that defaults to the shipped, non-experimental set (six tech now
+  ship, so "three random" is a genuine draw of three of the six — the pool has
   outgrown the grant and it finally bites, #241); a campaign accumulates its set
-  instead (§2.2). The resolved loadout is one of the three pieces of the shareable
+  instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
+  tech — it competes for the same slot, which is exactly what it pays with. The resolved loadout is one of the three pieces of the shareable
   level-seed string (§12.4/#245).
 - **Drag has no grab button.** A body is non-solid (§7.2), so you cross it like
   floor; the drag begins the moment you step *off* a cell with a body on it and your

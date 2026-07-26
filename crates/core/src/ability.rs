@@ -38,8 +38,8 @@
 
 use crate::input::ability_hotkey;
 
-/// The runtime state of one ability, as the player reads it (§11.4): the four
-/// cases the panel must keep discoverable — ready, active, cooling, unusable.
+/// The runtime state of one ability, as the player reads it (§11.4): the cases the
+/// panel must keep discoverable — ready, active, cooling, passive, unusable.
 ///
 /// The numbers are turn counts under the §8.2 economy — a duration ticking down
 /// while active, a cooldown draining once inactive — and [`AbilityState::suffix`]
@@ -52,6 +52,15 @@ pub enum AbilityState {
     Active { remaining: u32 },
     /// Recharging, with `remaining` turns of cooldown left — shown `/N/` (§11.4).
     Cooling { remaining: u32 },
+    /// A **passive** ability (§8.2/#264): in effect for as long as it is held, with
+    /// no activation, no duration and no cooldown — shown `(on)`.
+    ///
+    /// Its own state deliberately, rather than a permanent
+    /// [`Active`](AbilityState::Active): the clock states all carry "and then it
+    /// ends", and a passive never does. Stretching `Active` to mean always-on would
+    /// make the number the panel shows a fiction, which is the one thing §8.2's
+    /// timing note forbids.
+    Passive,
     /// Not usable right now for a reason other than cooldown — no adjacent target
     /// for a takedown, no body to drag (§8.3). Discoverable, but greyed.
     Unusable,
@@ -59,17 +68,20 @@ pub enum AbilityState {
 
 impl AbilityState {
     /// The state's notation appended after the ability name (§11.4): `[N]` while
-    /// active, `/N/` while cooling, a lone `—` while unusable, and nothing at all
-    /// when ready — a ready ability needs no decoration, only its name and key.
+    /// active, `/N/` while cooling, `(on)` for a passive, a lone `—` while
+    /// unusable, and nothing at all when ready — a ready ability needs no
+    /// decoration, only its name and key.
     ///
     /// The number is rendered verbatim from the state, so what the panel shows is
     /// exactly what the player gets (§8.2) — the advertised-vs-real gap the old UI
-    /// had cannot open here.
+    /// had cannot open here. A passive carries no number for the same reason: it
+    /// has none to carry (#264).
     pub fn suffix(self) -> String {
         match self {
             AbilityState::Ready => String::new(),
             AbilityState::Active { remaining } => format!("[{remaining}]"),
             AbilityState::Cooling { remaining } => format!("/{remaining}/"),
+            AbilityState::Passive => "(on)".to_string(),
             AbilityState::Unusable => "—".to_string(),
         }
     }
@@ -114,13 +126,14 @@ impl AbilityStatus {
     }
 
     /// The compact readout for the **always-on ability line** (§11.4): just the
-    /// hotkey, with the active/cooling number tucked inline (`c[7]`, `d/12/`).
-    /// Ready and unusable abilities show the bare key — their state is carried by
-    /// colour alone, keeping the strip to one glyph each so the whole set fits a
-    /// single row. The full name lives only in the deployed panel ([`Self::label`]).
+    /// hotkey, with the active/cooling number — or a passive's `(on)` — tucked
+    /// inline (`c[7]`, `d/12/`, `v(on)`). Ready and unusable abilities show the
+    /// bare key — their state is carried by colour alone, keeping the strip to one
+    /// glyph each so the whole set fits a single row. The full name lives only in
+    /// the deployed panel ([`Self::label`]).
     pub fn compact(&self) -> String {
         match self.state {
-            AbilityState::Active { .. } | AbilityState::Cooling { .. } => {
+            AbilityState::Active { .. } | AbilityState::Cooling { .. } | AbilityState::Passive => {
                 format!("{}{}", self.hotkey(), self.state.suffix())
             }
             AbilityState::Ready | AbilityState::Unusable => self.hotkey().to_string(),
@@ -132,8 +145,9 @@ impl AbilityStatus {
 // The economy model (§8.1, §8.2)
 // ---------------------------------------------------------------------------
 
-/// Identifies an ability governed by the **time economy** (§8.2) — the ones the
-/// [`Deck`] runs the clock on, activate → duration → cooldown.
+/// Identifies an ability the [`Deck`] holds — the activated ones it runs the clock
+/// on (§8.2: activate → duration → cooldown), plus the **passives** that are simply
+/// in effect while held (#264).
 ///
 /// It is deliberately *not* every §8.3 row. Move and Wait are the turn loop's own
 /// [`Input`](crate::Input)s, not deck abilities (§8.3: Move is "Not shown in the
@@ -155,6 +169,8 @@ pub enum AbilityId {
     Autodoors,
     /// Salvaged tech (§8.3): blinds and freezes guards in a radius, through walls.
     Confusion,
+    /// Salvaged tech (§8.3), **passive**: 360° sight at extended range while held.
+    Vision,
 }
 
 impl AbilityId {
@@ -162,27 +178,31 @@ impl AbilityId {
     /// display/iteration order only — hotkeys come from the identity map (§11.6),
     /// never from a position — but it *is* the order [`index`](Self::index) pins,
     /// so the two must not drift.
-    pub const ALL: [AbilityId; 6] = [
+    pub const ALL: [AbilityId; 7] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
         AbilityId::Autodoors,
         AbilityId::Confusion,
+        AbilityId::Vision,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
     /// opposed to innate [`Run`](AbilityId::Run). This is the default eligible pool
     /// a `starting_abilities` grant (#244) draws from: the shipped, non-experimental
     /// tech (the gated experiments #239/#243 are not economy abilities yet, so the
-    /// pool is exactly these five). Quick play grants the whole pool while its size
+    /// pool is exactly these six). Quick play grants the whole pool while its size
     /// meets the grant count; the draw only bites once the pool outgrows the grant.
-    pub const TECH: [AbilityId; 5] = [
+    /// A passive (#264) is drawn from here like any other tech — it competes for the
+    /// same slot, which is exactly what it pays with.
+    pub const TECH: [AbilityId; 6] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
         AbilityId::Autodoors,
         AbilityId::Confusion,
+        AbilityId::Vision,
     ];
 
     /// Whether this ability is **innate** (§8.3) — always in the loadout, never
@@ -203,7 +223,14 @@ impl AbilityId {
             AbilityId::Dephase => "Dephase",
             AbilityId::Autodoors => "Autodoors",
             AbilityId::Confusion => "Confusion",
+            AbilityId::Vision => "Vision",
         }
+    }
+
+    /// Whether this ability is **passive** (#264) — always on while held, with no
+    /// activation path and no clock ([`Ability::is_passive`]).
+    pub fn is_passive(self) -> bool {
+        self.def().is_passive()
     }
 
     /// The settled §11.6 hotkey, through the one explicit identity map — never a
@@ -223,6 +250,7 @@ impl AbilityId {
             AbilityId::Dephase => &DEPHASE,
             AbilityId::Autodoors => &AUTODOORS,
             AbilityId::Confusion => &CONFUSION,
+            AbilityId::Vision => &VISION,
         }
     }
 
@@ -235,6 +263,7 @@ impl AbilityId {
             AbilityId::Dephase => 3,
             AbilityId::Autodoors => 4,
             AbilityId::Confusion => 5,
+            AbilityId::Vision => 6,
         }
     }
 }
@@ -255,13 +284,30 @@ pub struct Loadout {
 }
 
 impl Loadout {
-    /// The **full** loadout: every economy ability present. This is what the deck
-    /// held before loadouts existed, so it is both the default a bare run boots and
-    /// what quick play resolves to while the tech pool is exactly three (#244).
+    /// The **full** loadout: every ability present, passives included.
     pub fn full() -> Self {
         Self {
             present: [true; AbilityId::ALL.len()],
         }
+    }
+
+    /// Every **activated** ability and no passives (#264) — the set the deck held
+    /// before passives existed.
+    ///
+    /// Built up from [`empty`](Self::empty), like every other loadout here: a
+    /// loadout is a set you *add* abilities to, never one you start full and carve
+    /// down, so "which abilities does this run hold" always has an explicit answer
+    /// rather than an implicit everything-minus. Handing a passive out implicitly
+    /// would be the worst version of that — it reshapes perception for the whole
+    /// run (Vision makes sight 360°, §8.3/#265), so it is always asked for.
+    pub fn activated() -> Self {
+        let mut loadout = Self::empty();
+        for id in AbilityId::ALL {
+            if !id.is_passive() {
+                loadout = loadout.with(id);
+            }
+        }
+        loadout
     }
 
     /// The **empty** loadout: no abilities at all. Not a state any *run* boots — a
@@ -362,6 +408,12 @@ pub enum Effect {
     /// kill: the guard resumes cleanly (its state and lead paused, not reset) when the
     /// window ends. The radius is [`CONFUSION_RADIUS`](crate::CONFUSION_RADIUS).
     Confuse,
+    /// Vision (§8.3, §5/§6.1, #265): while in effect, the player's own sight is the
+    /// full 360° arc ([`FULL_SIGHT_ARC`](crate::FULL_SIGHT_ARC)) at the extended
+    /// range ([`ENHANCED_SIGHT_RANGE`](crate::ENHANCED_SIGHT_RANGE)) instead of §5's
+    /// forward half-disc at 15. **Vision only** — the guard sense (§9) is a separate,
+    /// innate channel and is deliberately not widened with it.
+    EnhancedSight,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -382,32 +434,23 @@ pub enum Behaviour {
     Coded,
 }
 
-/// One ability declared as **data** (§8.1): the economy numbers the [`Deck`] runs
-/// the clock on, plus the targeting and behaviour the effect tickets consume.
+/// The **time economy** of an activated ability (§8.2): what it costs to switch
+/// on, how it is aimed, and the two clocks the [`Deck`] runs on it.
 ///
-/// Built as `const` catalog rows ([`AbilityId::def`]). Every field is `[START]`
-/// (§8.3) — tunable, and pinned by a test so a change is a visible decision.
+/// Held apart from [`Ability`] so that a **passive** (#264) — which has none of
+/// these — cannot state one. A passive is not "an ability with duration 0 and
+/// cooldown 0"; it is an ability with no clock at all, and
+/// [`AbilityMode`] is where that difference is made unrepresentable rather than
+/// merely conventional.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Ability {
-    id: AbilityId,
+pub struct Economy {
     cost: u32,
     targeting: TargetingMode,
     duration: u32,
     cooldown: u32,
-    behaviour: Behaviour,
 }
 
-impl Ability {
-    /// Which ability this defines.
-    pub fn id(&self) -> AbilityId {
-        self.id
-    }
-
-    /// The display name (§8.3), via [`AbilityId::name`].
-    pub fn name(&self) -> &'static str {
-        self.id.name()
-    }
-
+impl Economy {
     /// The turn cost of activating (§4.4). Always one turn in v1 — activation costs
     /// *the turn*, no more — and recorded here only because §8.1's field list names
     /// it: a future multi-turn ritual would raise it here, not special-case the loop.
@@ -415,7 +458,8 @@ impl Ability {
         self.cost
     }
 
-    /// How the ability targets (§8.4) — declared data until #100 resolves it.
+    /// How the ability targets (§8.4), resolved by the
+    /// [`Targeting`](crate::Targeting) session.
     pub fn targeting(&self) -> TargetingMode {
         self.targeting
     }
@@ -431,6 +475,70 @@ impl Ability {
     pub fn cooldown(&self) -> u32 {
         self.cooldown
     }
+}
+
+/// How an ability is paid for — the §8.2 economy, or the **passive** extension of
+/// it this repo added in #264.
+///
+/// §8.2 settles that the economy is *time*: turn cost, duration, cooldown. A
+/// passive spends none of those, so it would be free — and §2.3 is explicit that a
+/// costless ability is not a decision. The reconciliation: **a passive's cost is
+/// the loadout slot it occupies** (§8.3, capped at 3 by #266). You hold it
+/// *instead of* something else, permanently, and that is the whole price.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AbilityMode {
+    /// **Activated** (§8.2): switched on deliberately, for a turn, and governed by
+    /// the [`Deck`]'s duration/cooldown clocks.
+    Activated(Economy),
+    /// **Passive** (§8.2 extension, #264): never activated, never switched off, in
+    /// effect for exactly as long as the run holds it. It has no slot in the deck
+    /// to be in — "held" *is* "on" — so there is no activation moment for a replay
+    /// or a mid-run pickup to get out of step with.
+    Passive,
+}
+
+/// One ability declared as **data** (§8.1): how it is paid for ([`AbilityMode`])
+/// and the behaviour the effect tickets consume.
+///
+/// Built as `const` catalog rows ([`AbilityId::def`]). Every number is `[START]`
+/// (§8.3) — tunable, and pinned by a test so a change is a visible decision.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Ability {
+    id: AbilityId,
+    mode: AbilityMode,
+    behaviour: Behaviour,
+}
+
+impl Ability {
+    /// Which ability this defines.
+    pub fn id(&self) -> AbilityId {
+        self.id
+    }
+
+    /// The display name (§8.3), via [`AbilityId::name`].
+    pub fn name(&self) -> &'static str {
+        self.id.name()
+    }
+
+    /// How the ability is paid for (§8.2/#264) — a time economy, or the slot.
+    pub fn mode(&self) -> AbilityMode {
+        self.mode
+    }
+
+    /// The ability's time economy (§8.2), or `None` for a **passive** — which has
+    /// no cost, no targeting, no duration and no cooldown to report (#264).
+    pub fn economy(&self) -> Option<Economy> {
+        match self.mode {
+            AbilityMode::Activated(economy) => Some(economy),
+            AbilityMode::Passive => None,
+        }
+    }
+
+    /// Whether this ability is **passive** (#264): always on while held, never
+    /// activated, never stepped by the [`Deck`].
+    pub fn is_passive(&self) -> bool {
+        matches!(self.mode, AbilityMode::Passive)
+    }
 
     /// The ability's behaviour — data effects or the code escape hatch (§8.1).
     pub fn behaviour(&self) -> Behaviour {
@@ -441,36 +549,41 @@ impl Ability {
 // The §8.3 starting-set catalog. All numbers `[START]` (§8.3), pinned by
 // `the_catalog_matches_the_design`. Effects are declared here and applied by each
 // ability's own ticket; the economy is blind to them.
+
+/// An activated ability's §8.2 economy, as one `const` expression — the shape every
+/// [`AbilityMode::Activated`] row below is built from.
+const fn activated(
+    cost: u32,
+    targeting: TargetingMode,
+    duration: u32,
+    cooldown: u32,
+) -> AbilityMode {
+    AbilityMode::Activated(Economy {
+        cost,
+        targeting,
+        duration,
+        cooldown,
+    })
+}
+
 const RUN: Ability = Ability {
     id: AbilityId::Run,
-    cost: 1,
-    targeting: TargetingMode::Itself,
-    duration: 5,
-    cooldown: 12,
+    mode: activated(1, TargetingMode::Itself, 5, 12),
     behaviour: Behaviour::Effects(&[Effect::ExtraStep]),
 };
 const CAMOUFLAGE: Ability = Ability {
     id: AbilityId::Camouflage,
-    cost: 1,
-    targeting: TargetingMode::Itself,
-    duration: 10,
-    cooldown: 20,
+    mode: activated(1, TargetingMode::Itself, 10, 20),
     behaviour: Behaviour::Effects(&[Effect::ConcealWhileStill]),
 };
 const DECOY: Ability = Ability {
     id: AbilityId::Decoy,
-    cost: 1,
-    targeting: TargetingMode::Direction,
-    duration: 20,
-    cooldown: 30,
+    mode: activated(1, TargetingMode::Direction, 20, 30),
     behaviour: Behaviour::Effects(&[Effect::SpawnDecoy]),
 };
 const DEPHASE: Ability = Ability {
     id: AbilityId::Dephase,
-    cost: 1,
-    targeting: TargetingMode::Itself,
-    duration: 3,
-    cooldown: 30,
+    mode: activated(1, TargetingMode::Itself, 3, 30),
     behaviour: Behaviour::Effects(&[Effect::Phase]),
 };
 // Autodoors [START] (§8.3): a long active window — enough to walk a whole stretch
@@ -478,10 +591,7 @@ const DEPHASE: Ability = Ability {
 // next flight (§7.6). Self-target toggle; free to cancel (§4.4).
 const AUTODOORS: Ability = Ability {
     id: AbilityId::Autodoors,
-    cost: 1,
-    targeting: TargetingMode::Itself,
-    duration: 16,
-    cooldown: 40,
+    mode: activated(1, TargetingMode::Itself, 16, 40),
     behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
 };
 // Confusion [START] (§8.3, §9, #240): a blind-and-freeze bubble around the player,
@@ -494,11 +604,19 @@ const AUTODOORS: Ability = Ability {
 // levers, and the cooldown is what still makes spending it a real decision.
 const CONFUSION: Ability = Ability {
     id: AbilityId::Confusion,
-    cost: 1,
-    targeting: TargetingMode::Itself,
-    duration: 6,
-    cooldown: 45,
+    mode: activated(1, TargetingMode::Itself, 6, 45),
     behaviour: Behaviour::Effects(&[Effect::Confuse]),
+};
+// Vision [START] (§5/§6.1, §8.3, #265): the first **passive** — no activation, no
+// clock, in effect while held. Its whole price is the loadout slot (§8.2/#264),
+// which is why it is allowed to be this good: standing 360° sight plus a longer
+// reach ([`ENHANCED_SIGHT_RANGE`](crate::ENHANCED_SIGHT_RANGE)) is the strongest
+// standing awareness in the game, and it costs a slot that could have carried a
+// flight tool for the moment it all goes wrong.
+const VISION: Ability = Ability {
+    id: AbilityId::Vision,
+    mode: AbilityMode::Passive,
+    behaviour: Behaviour::Effects(&[Effect::EnhancedSight]),
 };
 
 /// The live economy state of one deck ability (§8.2): the three states the *time*
@@ -629,10 +747,15 @@ impl Deck {
 
     /// The economy state of `id`, as the panel reads it (§11.4). An ability the run
     /// does not hold (not in the loadout, #244) reads as
-    /// [`Unusable`](AbilityState::Unusable) — it is real but not yours.
+    /// [`Unusable`](AbilityState::Unusable) — it is real but not yours. A held
+    /// **passive** reads as [`Passive`](AbilityState::Passive) (#264): holding it is
+    /// the whole of its state, so its slot is never consulted.
     pub(crate) fn state(&self, id: AbilityId) -> AbilityState {
         if !self.loadout.contains(id) {
             return AbilityState::Unusable;
+        }
+        if id.is_passive() {
+            return AbilityState::Passive;
         }
         self.slots[id.index()].display()
     }
@@ -645,52 +768,78 @@ impl Deck {
 
     /// Activate `id` if the run holds it and it is [`Ready`](Slot::Ready). Returns
     /// whether it activated — `true` means the turn is spent (§4.4). Activating an
-    /// ability that is not in the loadout (#244), or one already active or cooling,
-    /// is a mis-input: a **free** no-op (`false`), like bumping a wall (§4.4).
+    /// ability that is not in the loadout (#244), a **passive** (#264 — there is no
+    /// activation path to take), or one already active or cooling, is a mis-input: a
+    /// **free** no-op (`false`), like bumping a wall (§4.4).
     pub(crate) fn activate(&mut self, id: AbilityId) -> bool {
         if !self.loadout.contains(id) {
             return false;
         }
+        let Some(economy) = id.def().economy() else {
+            return false; // a passive is already on; there is nothing to switch
+        };
         let slot = &mut self.slots[id.index()];
         if *slot != Slot::Ready {
             return false;
         }
-        let def = id.def();
-        *slot = Slot::activated(def.duration, def.cooldown);
+        *slot = Slot::activated(economy.duration, economy.cooldown);
         true
     }
 
     /// Toggle `id` off early if it is [`Active`](Slot::Active) (§4.4's free
     /// exception). Refunds nothing — the **full** cooldown still runs (§8.2:
     /// cancelling saves you nothing). Returns whether anything switched off; a
-    /// toggle of a ready or cooling ability is a no-op. Never spends the turn.
+    /// toggle of a ready or cooling ability is a no-op, and a **passive** can never
+    /// be switched off at all (#264: it ends when the loadout stops holding it, not
+    /// on a keypress). Never spends the turn.
     pub(crate) fn deactivate(&mut self, id: AbilityId) -> bool {
+        let Some(economy) = id.def().economy() else {
+            return false;
+        };
         let slot = &mut self.slots[id.index()];
         if !matches!(slot, Slot::Active { .. }) {
             return false;
         }
-        *slot = Slot::cooling(id.def().cooldown);
+        *slot = Slot::cooling(economy.cooldown);
         true
     }
 
-    /// Whether any **active** ability declares `effect` (§8.1) — how the turn
+    /// Whether any ability **in effect** declares `effect` (§8.1) — how the turn
     /// loop asks "is an extra step owed?" without naming an ability: the loop
     /// interprets the effect vocabulary, so a future ability declaring the same
     /// effect gets the same behaviour for free, and a `Coded` ability never
     /// matches (its behaviour lives in code keyed on its id, not here).
+    ///
+    /// "In effect" is `Active` for an activated ability and simply **held** for a
+    /// passive (#264) — the one place the two modes meet, so every effect the
+    /// vocabulary already has works passively without a parallel system.
     pub(crate) fn effect_active(&self, effect: Effect) -> bool {
         AbilityId::ALL.into_iter().any(|id| {
-            matches!(self.slots[id.index()], Slot::Active { .. })
+            self.in_effect(id)
                 && matches!(id.def().behaviour(), Behaviour::Effects(effects) if effects.contains(&effect))
         })
     }
 
-    /// The **end-of-turn** tick for every ability (§8.2 timing). Pushes one
+    /// Whether `id`'s behaviour applies right now: a held passive always, an
+    /// activated ability only while its duration runs (§8.2).
+    fn in_effect(&self, id: AbilityId) -> bool {
+        if id.is_passive() {
+            return self.loadout.contains(id);
+        }
+        matches!(self.slots[id.index()], Slot::Active { .. })
+    }
+
+    /// The **end-of-turn** tick for every activated ability (§8.2 timing). Pushes one
     /// [`AbilityId`] per ability whose duration ended this tick — in
     /// [`AbilityId::ALL`] order — so the caller can raise its "faded" event (§11.7).
+    /// Passives are not stepped (#264): they have no clock to advance and can never
+    /// expire, so they never appear in `expired`.
     pub(crate) fn tick(&mut self, expired: &mut Vec<AbilityId>) {
         for id in AbilityId::ALL {
-            let (next, just_expired) = self.slots[id.index()].ticked(id.def().cooldown);
+            let Some(economy) = id.def().economy() else {
+                continue;
+            };
+            let (next, just_expired) = self.slots[id.index()].ticked(economy.cooldown);
             self.slots[id.index()] = next;
             if just_expired {
                 expired.push(id);
@@ -750,6 +899,28 @@ mod tests {
         assert_eq!(compact(AbilityState::Cooling { remaining: 12 }), "c/12/");
     }
 
+    /// A passive reads as **its own** state everywhere the panel speaks (#264):
+    /// `(on)` — never `Ready` (which would invite a press), never `Active [N]`
+    /// (which would promise a countdown that does not exist).
+    #[test]
+    fn a_passive_reads_as_on_and_never_as_a_clock_state() {
+        assert_eq!(AbilityState::Passive.suffix(), "(on)");
+        let status = AbilityStatus {
+            id: AbilityId::Vision,
+            state: AbilityState::Passive,
+        };
+        assert_eq!(status.label(), "v Vision (on)");
+        assert_eq!(status.compact(), "v(on)");
+        // Distinct from every clock state, with no number to be a fiction.
+        assert_ne!(AbilityState::Passive.suffix(), AbilityState::Ready.suffix());
+        for n in 0..4 {
+            assert_ne!(
+                AbilityState::Passive.suffix(),
+                AbilityState::Active { remaining: n }.suffix(),
+            );
+        }
+    }
+
     /// A row's hotkey and name are the **explicit** §11.6 identity, taken from the
     /// [`AbilityId`] — not the row's position. Were they derived from list order,
     /// reordering the panel would shuffle the keys (the regression §11.6 rules out).
@@ -776,7 +947,7 @@ mod economy_tests {
     /// deliberate edit here, never a silent drift — and a moved number will move
     /// the emergent lockout with it (§8.2).
     #[test]
-    fn the_catalog_matches_the_design() {
+    fn the_catalog_matches_the_design_activated() {
         for (id, cost, targeting, duration, cooldown, effect) in [
             (
                 AbilityId::Run,
@@ -828,16 +999,73 @@ mod economy_tests {
             ),
         ] {
             let def = id.def();
+            let economy = def
+                .economy()
+                .unwrap_or_else(|| panic!("{} is an activated ability", id.name()));
             assert_eq!(def.id(), id);
-            assert_eq!(def.cost(), cost, "{}", id.name());
-            assert_eq!(def.targeting(), targeting, "{}", id.name());
-            assert_eq!(def.duration(), duration, "{}", id.name());
-            assert_eq!(def.cooldown(), cooldown, "{}", id.name());
+            assert_eq!(economy.cost(), cost, "{}", id.name());
+            assert_eq!(economy.targeting(), targeting, "{}", id.name());
+            assert_eq!(economy.duration(), duration, "{}", id.name());
+            assert_eq!(economy.cooldown(), cooldown, "{}", id.name());
             match def.behaviour() {
                 Behaviour::Effects(effects) => {
                     assert_eq!(effects, &[effect][..], "{}", id.name())
                 }
                 Behaviour::Coded => panic!("{} should be data-driven", id.name()),
+            }
+        }
+    }
+
+    /// The **passive** catalog (#264/#265), pinned: Vision is the one passive, it
+    /// declares [`Effect::EnhancedSight`], and — the property that matters — it has
+    /// **no economy at all**. Not a zeroed one: `economy()` is `None`, so there is no
+    /// duration or cooldown for the deck to run and none for a future edit to set by
+    /// accident (§8.2's extension, #264).
+    #[test]
+    fn the_catalog_matches_the_design_passive() {
+        let passives: Vec<AbilityId> = AbilityId::ALL
+            .into_iter()
+            .filter(|id| id.is_passive())
+            .collect();
+        assert_eq!(passives, vec![AbilityId::Vision], "the shipped passive set");
+
+        let def = AbilityId::Vision.def();
+        assert!(def.is_passive());
+        assert_eq!(def.mode(), AbilityMode::Passive);
+        assert_eq!(def.economy(), None, "a passive spends no time (§8.2/#264)");
+        match def.behaviour() {
+            Behaviour::Effects(effects) => {
+                assert_eq!(effects, &[Effect::EnhancedSight][..]);
+            }
+            Behaviour::Coded => panic!("Vision should be data-driven (§8.1)"),
+        }
+    }
+
+    /// Every ability is exactly one of the two modes, and the two accessors agree —
+    /// [`Ability::is_passive`] is `true` precisely when there is no economy. A row
+    /// that claimed both (or neither) would leave the deck without a rule to run it
+    /// by; the type makes that unrepresentable and this pins that it stays so.
+    #[test]
+    fn every_ability_is_activated_or_passive_and_never_both() {
+        for id in AbilityId::ALL {
+            let def = id.def();
+            assert_eq!(
+                def.is_passive(),
+                def.economy().is_none(),
+                "{} disagrees with itself about its mode",
+                id.name(),
+            );
+            match def.mode() {
+                AbilityMode::Activated(economy) => {
+                    assert_eq!(def.economy(), Some(economy), "{}", id.name());
+                    assert_eq!(
+                        economy.cost(),
+                        1,
+                        "{} costs the turn it is activated on (§4.4)",
+                        id.name(),
+                    );
+                }
+                AbilityMode::Passive => assert!(def.is_passive(), "{}", id.name()),
             }
         }
     }
@@ -862,13 +1090,36 @@ mod economy_tests {
         assert_eq!(AbilityId::Confusion.hotkey(), 'z');
     }
 
-    /// A fresh deck is all Ready (§8.3: the v1 set is available from the start).
+    /// A fresh deck is all Ready (§8.3: the v1 set is available from the start) —
+    /// bar the passives, which are never "ready" because there is nothing to ready
+    /// them for: they are already on (#264).
     #[test]
     fn a_fresh_deck_is_all_ready() {
         let deck = Deck::new(Loadout::full());
         for id in AbilityId::ALL {
-            assert_eq!(deck.state(id), AbilityState::Ready, "{}", id.name());
+            let expected = if id.is_passive() {
+                AbilityState::Passive
+            } else {
+                AbilityState::Ready
+            };
+            assert_eq!(deck.state(id), expected, "{}", id.name());
         }
+    }
+
+    /// [`Loadout::activated`] is exactly [`Loadout::full`] minus the passives — the
+    /// default a hand-built state boots with, so no test acquires a passive's
+    /// run-long perception change without asking for it (#264/#265).
+    #[test]
+    fn the_activated_loadout_is_the_full_one_without_passives() {
+        let activated = Loadout::activated();
+        for id in AbilityId::ALL {
+            assert_eq!(activated.contains(id), !id.is_passive(), "{}", id.name());
+        }
+        assert_ne!(
+            activated,
+            Loadout::full(),
+            "a passive ships, so they differ"
+        );
     }
 
     /// Activation moves a Ready ability to Active for its **whole** duration — the
@@ -981,10 +1232,7 @@ mod economy_tests {
         // A hypothetical coded ability whose behaviour the vocabulary can't express.
         const CODED: Ability = Ability {
             id: AbilityId::Run, // id is irrelevant to the economy; reuse one
-            cost: 1,
-            targeting: TargetingMode::Itself,
-            duration: 2,
-            cooldown: 3,
+            mode: activated(1, TargetingMode::Itself, 2, 3),
             behaviour: Behaviour::Coded,
         };
         // A data ability with the *same* numbers steps identically.
@@ -993,14 +1241,15 @@ mod economy_tests {
 
         assert!(matches!(CODED.behaviour(), Behaviour::Coded));
 
-        let coded = Slot::activated(CODED.duration(), CODED.cooldown());
+        let coded_economy = CODED.economy().expect("the coded ability is activated");
+        let coded = Slot::activated(coded_economy.duration(), coded_economy.cooldown());
         let data = Slot::activated(data_duration, data_cooldown);
         assert_eq!(coded, data, "activation ignores behaviour");
 
         // Walk both through the full lockout in lockstep.
         let (mut c, mut d) = (coded, data);
         for _ in 0..(2 + 3 + 1) {
-            let (cn, _) = c.ticked(CODED.cooldown());
+            let (cn, _) = c.ticked(coded_economy.cooldown());
             let (dn, _) = d.ticked(data_cooldown);
             assert_eq!(cn, dn, "each tick ignores behaviour");
             c = cn;
@@ -1043,6 +1292,92 @@ mod economy_tests {
             deck.state(AbilityId::Run),
             AbilityState::Active { .. }
         ));
+    }
+
+    /// A **passive** is on because it is *held* (#264) — there is no activation to
+    /// perform and no toggle to pull. Both inputs are refused as **free** no-ops
+    /// (§4.4, exactly like pressing a key for an ability you weren't granted), and
+    /// the effect is in force the whole time regardless.
+    #[test]
+    fn a_passive_is_in_effect_because_it_is_held() {
+        let mut deck = Deck::new(Loadout::innate().with(AbilityId::Vision));
+
+        assert_eq!(deck.state(AbilityId::Vision), AbilityState::Passive);
+        assert!(
+            deck.effect_active(Effect::EnhancedSight),
+            "held is on — no activation needed",
+        );
+
+        assert!(!deck.activate(AbilityId::Vision), "nothing to switch on");
+        assert!(!deck.deactivate(AbilityId::Vision), "nothing to switch off");
+        assert_eq!(
+            deck.state(AbilityId::Vision),
+            AbilityState::Passive,
+            "neither input moved it",
+        );
+        assert!(deck.effect_active(Effect::EnhancedSight));
+    }
+
+    /// A passive the run does **not** hold is [`Unusable`](AbilityState::Unusable)
+    /// like any ungranted ability, and — the half that matters — its effect is not
+    /// in force. Holding it is the whole switch, so not holding it is the off state.
+    #[test]
+    fn a_passive_not_held_is_unusable_and_out_of_effect() {
+        let deck = Deck::new(Loadout::innate());
+        assert_eq!(deck.state(AbilityId::Vision), AbilityState::Unusable);
+        assert!(!deck.effect_active(Effect::EnhancedSight));
+    }
+
+    /// A passive is **never stepped by the clock** (#264): ticking a deck that holds
+    /// one leaves it `Passive` forever and never reports it as expired, so it cannot
+    /// silently run out mid-run the way a duration does.
+    #[test]
+    fn a_passive_never_ticks_and_never_expires() {
+        let mut deck = Deck::new(Loadout::full());
+        for turn in 0..100 {
+            let mut expired = Vec::new();
+            deck.tick(&mut expired);
+            assert_eq!(
+                deck.state(AbilityId::Vision),
+                AbilityState::Passive,
+                "turn {turn}",
+            );
+            assert!(
+                !expired.contains(&AbilityId::Vision),
+                "turn {turn}: a passive has no duration to end",
+            );
+            assert!(deck.effect_active(Effect::EnhancedSight), "turn {turn}");
+        }
+    }
+
+    /// **The activated economy is untouched by the passive's arrival** (#264). Every
+    /// activated ability, in a deck that also holds the passive, walks its exact
+    /// §8.2 lockout — `duration` turns active then `cooldown` turns cooling, Ready on
+    /// the turn after — with the passive ticking alongside and changing nothing.
+    #[test]
+    fn a_passive_in_the_deck_changes_no_activated_ability_timing() {
+        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
+            let economy = id.def().economy().expect("activated");
+            let (duration, cooldown) = (economy.duration(), economy.cooldown());
+
+            let mut deck = Deck::new(Loadout::full());
+            assert!(deck.activate(id), "{}", id.name());
+
+            let mut active = 0;
+            let mut cooling = 0;
+            for _ in 0..(duration + cooldown) {
+                match deck.state(id) {
+                    AbilityState::Active { .. } => active += 1,
+                    AbilityState::Cooling { .. } => cooling += 1,
+                    other => panic!("{}: locked out, got {other:?}", id.name()),
+                }
+                let mut expired = Vec::new();
+                deck.tick(&mut expired);
+            }
+            assert_eq!(active, duration, "{} active turns", id.name());
+            assert_eq!(cooling, cooldown, "{} cooling turns", id.name());
+            assert_eq!(deck.state(id), AbilityState::Ready, "{}", id.name());
+        }
     }
 
     /// An **instant** ability (duration 0) has no active window: it activates

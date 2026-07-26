@@ -79,17 +79,24 @@ impl Verb {
         Verb::Drag,
     ];
 
-    /// The activated ability this verb is, if any — the bridge from an
-    /// [`AbilityId`] activation event to its histogram slot.
-    pub fn of_ability(id: AbilityId) -> Verb {
-        match id {
+    /// The verb an [`AbilityId`] activation counts as — the bridge from an
+    /// activation event to its histogram slot.
+    ///
+    /// `None` for a **passive** (#264): the histogram counts *decisions*, and a
+    /// passive is never activated, so there is no moment to count. Its influence
+    /// shows up in the outcome metrics instead, which is the honest place for it —
+    /// a slot in this histogram would sit at zero for a run the ability shaped
+    /// throughout.
+    pub fn of_ability(id: AbilityId) -> Option<Verb> {
+        Some(match id {
             AbilityId::Run => Verb::Run,
             AbilityId::Camouflage => Verb::Camouflage,
             AbilityId::Decoy => Verb::Decoy,
             AbilityId::Dephase => Verb::Dephase,
             AbilityId::Autodoors => Verb::Autodoors,
             AbilityId::Confusion => Verb::Confusion,
-        }
+            AbilityId::Vision => return None,
+        })
     }
 
     /// The stable JSON key for this verb (see `crates/sim/README.md`).
@@ -225,12 +232,32 @@ mod tests {
             ]
         );
         // Each ability activation lands in its own slot.
-        assert_eq!(Verb::of_ability(AbilityId::Run), Verb::Run);
-        assert_eq!(Verb::of_ability(AbilityId::Camouflage), Verb::Camouflage);
-        assert_eq!(Verb::of_ability(AbilityId::Decoy), Verb::Decoy);
-        assert_eq!(Verb::of_ability(AbilityId::Dephase), Verb::Dephase);
-        assert_eq!(Verb::of_ability(AbilityId::Autodoors), Verb::Autodoors);
-        assert_eq!(Verb::of_ability(AbilityId::Confusion), Verb::Confusion);
+        assert_eq!(Verb::of_ability(AbilityId::Run), Some(Verb::Run));
+        assert_eq!(
+            Verb::of_ability(AbilityId::Camouflage),
+            Some(Verb::Camouflage)
+        );
+        assert_eq!(Verb::of_ability(AbilityId::Decoy), Some(Verb::Decoy));
+        assert_eq!(Verb::of_ability(AbilityId::Dephase), Some(Verb::Dephase));
+        assert_eq!(
+            Verb::of_ability(AbilityId::Autodoors),
+            Some(Verb::Autodoors)
+        );
+        assert_eq!(
+            Verb::of_ability(AbilityId::Confusion),
+            Some(Verb::Confusion)
+        );
+        // A passive has no activation to count (#264) — and so no slot. Every
+        // activated ability does have one, so the histogram stays exhaustive over
+        // the decisions a run can actually make.
+        for id in AbilityId::ALL {
+            assert_eq!(
+                Verb::of_ability(id).is_none(),
+                id.is_passive(),
+                "{}",
+                id.name(),
+            );
+        }
     }
 
     /// Recording accumulates the exact per-verb counts, and `total` sums them —

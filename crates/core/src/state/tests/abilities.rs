@@ -27,7 +27,8 @@ fn dephased_movement_passes_through_solids_without_bumping() {
         Vec::new(),
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase));
     let events = s.step(Input::Step(Direction::East));
     assert_eq!(
@@ -62,7 +63,8 @@ fn dephased_movement_passes_through_solids_without_bumping() {
         Vec::new(),
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase));
     let events = s.step(Input::Step(Direction::East));
     assert_eq!(
@@ -91,7 +93,8 @@ fn a_dephased_player_passes_through_a_guard_without_a_takedown() {
         vec![Guard::stationary(Cell::new(5, 4))],
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase));
     let events = s.step(Input::Step(Direction::East));
     assert_eq!(
@@ -121,7 +124,8 @@ fn dephase_expiring_inside_a_wall_is_lethal() {
         Vec::new(),
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase)); // active turn 1
     s.step(Input::Step(Direction::East)); // turn 2: into the wall
     let events = s.step(Input::Wait); // turn 3: the duration ends in there
@@ -158,7 +162,8 @@ fn toggling_dephase_off_inside_a_wall_is_refused() {
         Vec::new(),
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase));
     s.step(Input::Step(Direction::East)); // inside the wall
     let turn = s.turn();
@@ -189,7 +194,8 @@ fn a_dephased_player_cannot_win_by_standing_on_the_exit() {
         Vec::new(),
         Vec::new(),
         Cell::new(5, 4),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase));
     let events = s.step(Input::Step(Direction::East));
     assert_eq!(
@@ -217,7 +223,8 @@ fn dephase_conceals_nothing_and_contact_still_captures() {
         vec![Guard::patrolling_to(Cell::new(5, 2), Cell::new(5, 9))],
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase));
     assert!(
         s.guards()[0].detected_player(),
@@ -244,7 +251,7 @@ fn dephase_conceals_nothing_and_contact_still_captures() {
 /// activation as a free mis-input: no turn spent, no cooldown started.
 #[test]
 fn a_decoy_spawns_in_the_faced_cell_or_refuses() {
-    let mut s = solo(Cell::new(7, 4));
+    let mut s = solo(Cell::new(7, 4)).with_loadout(Loadout::innate().with(AbilityId::Decoy));
     s.step(Input::Step(Direction::East)); // (8,4), facing the border wall
     let events = s.step(Input::Activate(AbilityId::Decoy));
     assert!(events.is_empty(), "a faced wall refuses: a free mis-input");
@@ -279,7 +286,8 @@ fn a_guard_that_lost_the_player_investigates_and_tramples_the_decoy() {
         vec![Guard::patrolling_to(Cell::new(2, 4), Cell::new(9, 4))],
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Decoy));
     assert_eq!(s.guards()[0].state(), GuardState::Calm, "nothing seen yet");
 
     s.step(Input::Activate(AbilityId::Decoy)); // the fake appears at (5,4)
@@ -329,7 +337,8 @@ fn a_guard_that_sees_the_player_ignores_the_decoy() {
         vec![Guard::stationary(Cell::new(5, 2))],
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Decoy));
     assert!(s.guards()[0].detected_player(), "precondition: it has you");
     assert_eq!(s.guards()[0].state(), GuardState::Chasing);
 
@@ -347,7 +356,7 @@ fn a_guard_that_sees_the_player_ignores_the_decoy() {
 /// taking the fake with it.
 #[test]
 fn a_stepped_on_decoy_dies_and_an_expired_one_fades() {
-    let mut s = solo(Cell::new(4, 4));
+    let mut s = solo(Cell::new(4, 4)).with_loadout(Loadout::innate().with(AbilityId::Decoy));
     s.step(Input::Step(Direction::East)); // (5,4), facing east
     s.step(Input::Activate(AbilityId::Decoy)); // decoy (6,4)
     let events = s.step(Input::Step(Direction::East)); // walk onto it
@@ -402,7 +411,8 @@ fn camouflage_conceals_for_its_full_duration_including_activation() {
         vec![Guard::stationary(Cell::new(5, 2))],
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Camouflage));
     // Control: exposed, the startup turn's cone detects the player.
     assert!(s.guards()[0].detected_player(), "precondition: in the cone");
 
@@ -454,7 +464,8 @@ fn moving_while_camouflaged_reveals_for_that_turn_only() {
         vec![Guard::stationary(Cell::new(5, 2))],
         Vec::new(),
         Cell::new(10, 18),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Camouflage));
     assert!(
         !s.guards()[0].detected_player(),
         "precondition: out of range"
@@ -488,7 +499,8 @@ fn camouflage_does_not_stop_capture_by_contact() {
         vec![Guard::patrolling_to(Cell::new(5, 2), Cell::new(5, 9))],
         Vec::new(),
         Cell::new(10, 10),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Camouflage));
     s.step(Input::Activate(AbilityId::Camouflage));
 
     // The guard marches down the column into the standing, cloaked player.
@@ -513,7 +525,7 @@ fn camouflage_does_not_stop_capture_by_contact() {
 #[test]
 fn runs_gain_is_the_certain_to_glimpse_distance() {
     assert_eq!(
-        AbilityId::Run.def().duration(),
+        AbilityId::Run.def().economy().unwrap().duration(),
         GLIMPSE_RANGE - CERTAIN_RANGE,
         "Run's gain and the §7.6 zones are designed as a pair",
     );

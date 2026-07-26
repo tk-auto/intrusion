@@ -193,7 +193,8 @@ fn auto_door_state(delay: u32) -> (State, DoorId) {
         Vec::new(),
         Vec::new(),
         Cell::new(4, 3), // exit parked in the right room, unused
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Autodoors));
     (s, door)
 }
 
@@ -855,6 +856,9 @@ fn autodoor_strip(width: u32, player: Cell) -> (State, Cell) {
         [Cell::new(6, 2)],
         DoorKind::Manual,
     );
+    // These are the Autodoors tests, so the run holds Autodoors — and only it, on
+    // top of the innate set (§8.3/#244): a loadout is built up from what the test
+    // needs, never inherited wholesale.
     let s = State::new(
         Layout::from_parts(f, g),
         player,
@@ -862,7 +866,8 @@ fn autodoor_strip(width: u32, player: Cell) -> (State, Cell) {
         Vec::new(),
         Vec::new(),
         Cell::new(width - 2, 4),
-    );
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Autodoors));
     (s, Cell::new(6, 2))
 }
 
@@ -955,7 +960,7 @@ fn autodoors_breaks_a_pursuers_sightline() {
         s.layout().facility(),
         vantage,
         Direction::East,
-        crate::vision::WAIT_SIGHT_ARC,
+        crate::vision::FULL_SIGHT_ARC,
         20,
     );
     assert!(
@@ -969,7 +974,7 @@ fn autodoors_breaks_a_pursuers_sightline() {
         s.layout().facility(),
         vantage,
         Direction::East,
-        crate::vision::WAIT_SIGHT_ARC,
+        crate::vision::FULL_SIGHT_ARC,
         20,
     );
     assert!(

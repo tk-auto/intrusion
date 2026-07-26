@@ -74,7 +74,8 @@ mod test_support;
 mod vision;
 
 pub use ability::{
-    Ability, AbilityId, AbilityState, AbilityStatus, Behaviour, Effect, Loadout, TargetingMode,
+    Ability, AbilityId, AbilityMode, AbilityState, AbilityStatus, Behaviour, Economy, Effect,
+    Loadout, TargetingMode,
 };
 pub use body::Body;
 pub use category::Category;
@@ -108,5 +109,6 @@ pub use status::{live_messages, message_for, near_line, Message};
 pub use targeting::{within_range, Target, Targeting, TileCursor};
 pub use vision::{
     field_of_view, field_of_view_with_peek, field_of_view_with_rear_blind_spot, VisibleSet,
-    GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE, WAIT_SIGHT_ARC,
+    ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE, PLAYER_SIGHT_ARC,
+    PLAYER_SIGHT_RANGE,
 };

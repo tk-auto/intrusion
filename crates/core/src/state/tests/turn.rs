@@ -58,12 +58,14 @@ fn opening_a_targeting_session_reads_the_ability_mode_and_the_player() {
     let s = solo(Cell::new(4, 4));
     // Run is self-targeted: resolves straight to the player's cell.
     assert_eq!(
-        s.begin_ability_targeting(AbilityId::Run).confirm(),
+        s.begin_ability_targeting(AbilityId::Run).unwrap().confirm(),
         Target::Itself(Cell::new(4, 4)),
     );
     // Decoy is direction-targeted: defaults to the player's facing.
     assert_eq!(
-        s.begin_ability_targeting(AbilityId::Decoy).confirm(),
+        s.begin_ability_targeting(AbilityId::Decoy)
+            .unwrap()
+            .confirm(),
         Target::Direction(Direction::North),
     );
     // A tile session (no v1 ability uses one) starts its cursor on the player.
@@ -112,11 +114,29 @@ fn activating_an_ability_spends_the_turn() {
 fn ability_statuses_are_the_economy_deck_in_order() {
     let mut s = solo(Cell::new(4, 4));
     let ids: Vec<AbilityId> = s.ability_statuses().iter().map(|st| st.id).collect();
+    // A hand-built state holds the innate set and nothing else (§8.3): the line
+    // lists exactly what the run holds, never a roster of what exists (#244).
+    let innate: Vec<AbilityId> = AbilityId::ALL
+        .into_iter()
+        .filter(|id| id.is_innate())
+        .collect();
+    assert_eq!(ids, innate, "one row per held ability, in order");
+
+    // A held passive earns a row of its own, reading `(on)` rather than any clock
+    // state (#264) — the line lists what you hold, whether or not you can press it.
+    let with_passive = solo(Cell::new(4, 4)).with_loadout(Loadout::full());
+    let rows = with_passive.ability_statuses();
     assert_eq!(
-        ids,
+        rows.iter().map(|st| st.id).collect::<Vec<_>>(),
         AbilityId::ALL.to_vec(),
-        "one row per economy ability, in order"
+        "the full loadout lists every ability",
     );
+    let vision = rows
+        .iter()
+        .find(|st| st.id == AbilityId::Vision)
+        .expect("the passive has a row");
+    assert_eq!(vision.state, AbilityState::Passive);
+    assert_eq!(vision.compact(), "v(on)");
 
     // Each row mirrors the live economy state.
     s.step(Input::Activate(AbilityId::Run));
