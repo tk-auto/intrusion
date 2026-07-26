@@ -141,8 +141,8 @@ pub struct Guard {
     fov: VisibleSet,
     state: GuardState,
     /// Turns of Calm patrol **dwell** remaining (§7.5 dwell, §153): a guard that has
-    /// reached a patrol destination sometimes holds in place for a few turns —
-    /// facing unchanged (§5) — before picking the next, a stationary window a
+    /// reached a patrol destination holds in place for a few turns — facing
+    /// unchanged (§5) — before picking the next, a stationary window a
     /// Takedown (§7.2) can exploit. Set on arrival by the seeded roll
     /// ([`GUARD_DWELL_CHANCE_PERCENT`]); counted down each Calm turn; **cleared the
     /// instant the guard turns reactive**, so a chase or search never pauses (§7.1
@@ -252,20 +252,36 @@ const _: () = assert!(BODY_ALERT_DURATION > ALERT_DURATION);
 
 /// How often a **Calm** guard, on reaching a patrol destination, dwells in place
 /// before picking the next one (§7.5 dwell, §153), as a percentage the seeded run
-/// RNG rolls against (§12.4, **[START] = 50%**). The pause is what makes a Takedown
-/// (§7.2) approachable — a guard that never stops moving cannot be lined up on —
-/// but it also lowers patrol coverage (§7.6/§7.7), so it is a playtest knob (see
-/// `State::set_guard_dwell_chance`). `0` draws no RNG and perturbs nothing.
-pub(crate) const GUARD_DWELL_CHANCE_PERCENT: u32 = 50;
+/// RNG rolls against (§12.4, **[START] = 100%** — *every* arrival).
+///
+/// It was 50%, and at that rate the pause was not the thing a player saw. Measured
+/// over twelve seeded runs, **92% of every stationary spell a patrolling guard took
+/// was one or two turns** — not a dwell at all, but [`commit_step`](Guard::commit_step)'s
+/// slow 90° turn and the two-rotation 180° about-face. A guard reached the end of
+/// its sweep, stood for two turns while it spun, and walked back the way it came;
+/// the real 3–5 turn pause fired on under 8% of stops. So the coin flip is gone: an
+/// arrival always pauses, which is what makes the pause a rhythm a player can read
+/// and plan a Takedown (§7.2) against, rather than a thing that sometimes happens.
+///
+/// Still a playtest knob (see `State::set_guard_dwell_chance`), because dwelling
+/// lowers patrol coverage on purpose (§7.6/§7.7) and unconditional dwelling lowers
+/// it further. Both extremes draw no RNG and perturb no stream — `0` never dwells,
+/// `100` always does — so the default costs one draw per arrival, for the length.
+pub(crate) const GUARD_DWELL_CHANCE_PERCENT: u32 = 100;
 
 /// The shortest and longest a Calm dwell lasts, in turns (§7.5 dwell, §153,
-/// **[START] = 3–5**): once a guard decides to dwell, its length is drawn
-/// uniformly from this inclusive range on the seeded run RNG (§12.4). Short enough
-/// to leave patrols covering ground, long enough to be a real window to act — a
-/// touch longer than the original 2–4 to widen the behind-the-back takedown window
-/// (§7.2/§153).
+/// **[START] = 3–7**): once a guard decides to dwell, its length is drawn
+/// uniformly from this inclusive range on the seeded run RNG (§12.4). Long enough
+/// that the stop reads as a guard *pausing* rather than a guard turning round —
+/// the two-turn about-face is what the shorter 3–5 window kept getting lost behind
+/// — and varied enough that the window is never a count the player can bank on.
+///
+/// The **stop the player sees** is a little longer than this: a guard that turns to
+/// leave spends a further turn rotating for a 90° heading, or two for a reversal
+/// (§7.5 slow turn), so a 3–7 dwell reads as 3–9 turns of held ground. The dwell is
+/// the part with the facing pinned, which is the part a Takedown needs (§7.2).
 pub(crate) const GUARD_DWELL_TURNS_MIN: u32 = 3;
-pub(crate) const GUARD_DWELL_TURNS_MAX: u32 = 5;
+pub(crate) const GUARD_DWELL_TURNS_MAX: u32 = 7;
 // A dwell is always at least one turn and the range is well-formed, whatever the
 // [START] numbers are retuned to.
 const _: () = assert!(GUARD_DWELL_TURNS_MIN >= 1 && GUARD_DWELL_TURNS_MIN <= GUARD_DWELL_TURNS_MAX);
@@ -722,8 +738,8 @@ impl Guard {
     /// its patrol. A lead that simply cools to zero ([`ALERT_DURATION`]) releases the
     /// same way — the anti-tracking-turret backstop.
     /// A **Calm** guard picks its next patrol target and steps toward it (§7.5) —
-    /// except that, on reaching a target, it sometimes **dwells** in place for a few
-    /// turns first (§153, the seeded [`roll_dwell`]), a stationary window a Takedown
+    /// except that, on reaching a target, it **dwells** in place for a few turns
+    /// first (§153, the seeded [`roll_dwell`]), a stationary window a Takedown
     /// (§7.2) can be lined up against. A held-in-place guard, or a Calm one with
     /// nowhere to go, holds. A Calm guard that must **change heading** by 90° first
     /// spends a turn rotating in place before it steps the new way, and no guard —
@@ -831,8 +847,9 @@ impl Guard {
             // *Arrived* at a sweep target (as opposed to never having had one — a
             // fresh guard picks and walks without pausing, and this keeps the §4.2
             // startup turn drawing no RNG, as `State::new` relies on): a new target
-            // is about to be picked, but a Calm guard sometimes dwells first
-            // (§7.5/§153).
+            // is about to be picked, but a Calm guard dwells first (§7.5/§153) —
+            // the pause comes **before** the repick, so the guard is never seen to
+            // arrive and about-face in the same breath.
             if let Some(turns) = roll_dwell(rng, dwell_chance) {
                 self.dwell = turns;
                 return None;
@@ -1039,7 +1056,9 @@ impl Guard {
 
 /// Roll the seeded run RNG (§12.4) for a Calm patrol dwell (§7.5/§153): `Some(n)`
 /// to dwell for `n` turns, `None` to walk on. `chance` is the percentage a dwell
-/// starts at all. Mirrors the close-behind discipline
+/// starts at all — [`GUARD_DWELL_CHANCE_PERCENT`] holds it at 100, so the shipped
+/// game always pauses and only the length is drawn. Mirrors the close-behind
+/// discipline
 /// ([`State::rolls_a_close`](crate::State)): the extremes draw nothing against the
 /// *chance* — a `0` never dwells and perturbs no stream, a `100` always does — so
 /// only the tuned middle spends a chance draw; a dwell that *does* start then
@@ -1349,13 +1368,63 @@ mod tests {
         }
         assert_eq!(
             (GUARD_DWELL_TURNS_MIN, GUARD_DWELL_TURNS_MAX),
-            (3, 5),
+            (3, 7),
             "the [START] dwell range",
         );
         assert!(
             (GUARD_DWELL_TURNS_MIN..=GUARD_DWELL_TURNS_MAX).contains(&holds),
             "the dwell lasted {holds} turns, outside the [START] {GUARD_DWELL_TURNS_MIN}..={GUARD_DWELL_TURNS_MAX} range",
         );
+    }
+
+    /// The pause a player actually *sees* (§7.5/§153), at the shipped
+    /// [`GUARD_DWELL_CHANCE_PERCENT`] rather than a forced 100: **every** Calm
+    /// arrival pauses, and the pause is the whole [START] window — never the two
+    /// turns a 180° about-face costs on its own.
+    ///
+    /// The measured symptom this pins against. Over twelve seeded runs of the real
+    /// generator, **92% of every stationary spell a patrolling guard took was one or
+    /// two turns** — [`commit_step`](Guard::commit_step)'s slow 90° turn and the
+    /// two-rotation reversal — and 42% of the two-turn ones were immediately
+    /// followed by the guard walking back the way it came. "Reach the end of the
+    /// corridor, spin, come straight back" was the patrol's whole visible rhythm,
+    /// and the 3–5 turn dwell, firing on under 8% of stops, was lost inside it.
+    /// Sweeping the seed here is the point: a single lucky draw proves nothing about
+    /// a behaviour that used to be a coin flip.
+    #[test]
+    fn every_calm_arrival_pauses_for_the_whole_dwell_window() {
+        let facility = Facility::walled_box(9, 9);
+        for seed in 0..64u64 {
+            // Standing on its own target: the "just arrived" fixture.
+            let mut guard = Guard::patrolling_to(Cell::new(4, 4), Cell::new(4, 4));
+            guard.look(&facility);
+            let (start, facing) = (guard.pos(), guard.facing());
+            let mut rng = Rng::new(seed);
+            let chance = GUARD_DWELL_CHANCE_PERCENT;
+
+            let first = guard.decide(&facility, &[], &mut rng, chance);
+            assert!(
+                first.is_none() && guard.is_dwelling(),
+                "seed {seed}: an arrival must pause, not pick the next target and walk",
+            );
+
+            let mut holds = 1;
+            loop {
+                let step = guard.decide(&facility, &[], &mut rng, chance);
+                if !guard.is_dwelling() {
+                    break; // the window elapsed and the sweep resumed this turn
+                }
+                assert_eq!(step, None, "seed {seed}: a dwelling guard holds");
+                assert_eq!(guard.pos(), start, "seed {seed}: a dwell does not move");
+                assert_eq!(guard.facing(), facing, "seed {seed}: no re-aim (§5)");
+                holds += 1;
+            }
+            assert!(
+                (GUARD_DWELL_TURNS_MIN..=GUARD_DWELL_TURNS_MAX).contains(&holds),
+                "seed {seed}: held {holds} turns, outside the [START] \
+                 {GUARD_DWELL_TURNS_MIN}..={GUARD_DWELL_TURNS_MAX} range",
+            );
+        }
     }
 
     /// §153: a detection cancels an in-progress dwell the same turn — a reactive
