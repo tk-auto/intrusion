@@ -271,7 +271,8 @@ fn a_decoy_spawns_in_the_faced_cell_or_refuses() {
     assert_eq!(
         events,
         vec![Event::AbilityActivated {
-            ability: AbilityId::Decoy
+            ability: AbilityId::Decoy,
+            uses_left: None,
         }]
     );
     assert_eq!(s.decoy(), Some(Cell::new(6, 4)), "the faced cell");

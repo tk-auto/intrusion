@@ -207,8 +207,10 @@ impl StealthBot {
         // Open a gap with Run (§8.3) — but only with room to spend the turn on it:
         // activating costs a turn standing still, which a guard already on top of
         // you turns into a capture, so run only when the nearest one is a step away.
-        if state.ability_state(AbilityId::Run) == AbilityState::Ready
-            && nearest_perceived_guard(state).is_none_or(|d| d > 1)
+        if matches!(
+            state.ability_state(AbilityId::Run),
+            AbilityState::Ready | AbilityState::Limited { .. }
+        ) && nearest_perceived_guard(state).is_none_or(|d| d > 1)
         {
             return Input::Activate(AbilityId::Run);
         }
@@ -238,11 +240,19 @@ impl StealthBot {
         // action that spends no turn and so never lets the hunt cool, stalling the run
         // out to the input cap instead of breaking contact.
         match state.ability_state(AbilityId::Camouflage) {
-            AbilityState::Ready => return Input::Activate(AbilityId::Camouflage),
+            AbilityState::Ready | AbilityState::Limited { .. } => {
+                return Input::Activate(AbilityId::Camouflage)
+            }
             AbilityState::Active { .. } => return Input::Wait,
-            // A passive is never one of these (Camouflage is activated) — it is
-            // matched only so the arm stays exhaustive (#264).
-            AbilityState::Cooling { .. } | AbilityState::Unusable | AbilityState::Passive => {}
+            // Camouflage is activated and unbudgeted, so a passive state and an
+            // exhausted one are both unreachable for it — matched so the arms stay
+            // exhaustive (#264/#302), and grouped with the states that mean "not
+            // this turn" so a budgeted ability arriving here would fall back to the
+            // retreat rather than press a key the deck refuses.
+            AbilityState::Cooling { .. }
+            | AbilityState::Exhausted
+            | AbilityState::Unusable
+            | AbilityState::Passive => {}
         }
 
         // Nowhere to run to and nothing to cloak with: back away from the nearest
@@ -317,9 +327,14 @@ impl StealthBot {
         // cloaked player is concealed from every viewer, so `being_hunted` will not
         // fire and this keeps holding until the coast clears.
         match state.ability_state(AbilityId::Camouflage) {
-            AbilityState::Ready => Some(Input::Activate(AbilityId::Camouflage)),
+            AbilityState::Ready | AbilityState::Limited { .. } => {
+                Some(Input::Activate(AbilityId::Camouflage))
+            }
             AbilityState::Active { .. } => Some(Input::Wait),
-            AbilityState::Cooling { .. } | AbilityState::Unusable | AbilityState::Passive => None,
+            AbilityState::Cooling { .. }
+            | AbilityState::Exhausted
+            | AbilityState::Unusable
+            | AbilityState::Passive => None,
         }
     }
 

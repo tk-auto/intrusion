@@ -1556,7 +1556,8 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
     let events = s.step(Input::Activate(AbilityId::Confusion));
     assert!(
         events.contains(&Event::AbilityActivated {
-            ability: AbilityId::Confusion
+            ability: AbilityId::Confusion,
+            uses_left: None,
         }),
         "the ability switched on: {events:?}",
     );

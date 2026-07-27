@@ -811,6 +811,39 @@ price of a slot is exactly right; one that is strictly better than any activated
 ability is a smell, and that is what the power grades (#263) and the sim (§13.2)
 are for.
 
+**Uses per level: a bound on the facility, not a resource.** **[SETTLED]** (#302)
+"No charges" above is the right instinct and this is the one thing it rules out
+that the game needs: an effect too strong to hand out on a cooldown alone —
+rewriting the level's geometry (#303), say. So an ability may also declare **how
+many times this facility lets it be used at all**. The reconciliation with the
+sentence it crosses: **there is nothing to spend, refill or manage.** The number
+only goes down, it goes down for the whole facility, and no decision anywhere in a
+run is about *getting more of it*. That is what makes it a bound rather than a
+bar, and it is why the time economy is still the only thing an ability charges you
+turn to turn.
+
+The fence, which is what stops it drifting into the charge economy this section
+rejects:
+
+- **Set at level start from the ability's own row. No recharge**, no
+  regeneration, no pickup or console that tops it up, no way to earn one back. A
+  fresh facility is the only thing that gives one, and it gives it by being fresh.
+- **Single digits.** A bound, not a bar — ten uses is an inventory. Enforced at
+  compile time, so raising it past that is a change the build has an opinion about.
+- **It composes with the time economy, it does not replace it.** An ability may
+  carry a cooldown *and* a use budget; the turn cost is untouched either way, and
+  §4.4 stands unchanged — activation costs the turn, and an activation refused for
+  want of a use is the free mis-input it already was, costing neither turn nor use.
+- **The player is told both numbers, and they are different numbers.** The bar
+  shows what is *left* (`Bore(2)` — a count in parentheses, the shape a passive's
+  `(on)` uses, because neither is a timer); the help panel's Legend shows what a
+  level *grants* (`3/level`). Spent reads as unusable, never as ready and never as
+  `/0/`. The timing trap above applies to both: each surface reports the number the
+  player actually gets.
+
+If something later wants uses that refresh, or uses shared between abilities, that
+is a different design conversation — not a quiet extension of this field.
+
 ### 8.3 The starting set
 
 Everything here is **[START]**. This is the sandbox to experiment in — it is the

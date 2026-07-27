@@ -909,8 +909,11 @@ impl State {
             // the world (the decoy's faced cell, §8.4 Direction targeting) must also
             // have a valid target — a faced cell that could not hold an intruder
             // refuses the activation as the same free mis-input (§11.4's contextual
-            // Unusable). A real activation is a spent action other than Wait, so it
-            // stands the player up and narrows the arc.
+            // Unusable). An ability whose per-level budget is spent (§8.2/#302) is
+            // that same free no-op, refused inside the deck — the turn cost is
+            // untouched by the budget in either direction (§4.4 stands). A real
+            // activation is a spent action other than Wait, so it stands the player
+            // up and narrows the arc.
             Input::Activate(id) => {
                 let spawn = if declares(id, Effect::SpawnDecoy) {
                     match self.decoy_spawn_cell() {
@@ -924,7 +927,12 @@ impl State {
                     if spawn.is_some() {
                         self.decoy = spawn;
                     }
-                    events.push(Event::AbilityActivated { ability: id });
+                    // The budget's remaining count is read *after* the deck spent
+                    // it (§8.2/#302), so the message speaks what is actually left.
+                    events.push(Event::AbilityActivated {
+                        ability: id,
+                        uses_left: self.abilities.uses_left(id),
+                    });
                     self.waited = false;
                     self.crouched_behind = None;
                     // A spent turn pays the haul debt (§8.3), like a Wait.

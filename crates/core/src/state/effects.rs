@@ -166,7 +166,7 @@ impl State {
     /// flash placed this turn keeps its full life.
     pub(super) fn record_effect_flashes(&mut self, events: &[Event]) {
         for event in events {
-            if let Event::AbilityActivated { ability } = *event {
+            if let Event::AbilityActivated { ability, .. } = *event {
                 self.light_effect_flash(ability);
             }
         }
