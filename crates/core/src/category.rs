@@ -90,3 +90,42 @@ pub enum Category {
     /// from.
     Effect,
 }
+
+/// Which of the shell's colour tables the screen is painted from (§11.2/#189) — the
+/// *only* thing the core knows about a theme.
+///
+/// A theme is a second [`Category`]→colour table, not a second set of meanings: the
+/// core still declares what a cell means and never names a colour, so all a theme
+/// changes is which column of the one table presentation reads. That is exactly the
+/// payoff §11.2 **[SETTLED]** was written to buy — "recolouring or reskinning for
+/// accessibility is a one-table edit" — and it is why this enum carries no colours
+/// itself. It rides on [`ScreenUi`](crate::ScreenUi) with the other view state
+/// (§11.4): flipping it changes no world and costs no turn (§4.4/§12.1).
+///
+/// [`Dark`](Self::Dark) is the default because the palette was tuned for a
+/// true-black backdrop and every screenshot, artifact and golden test assumes it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
+pub enum Theme {
+    /// The original palette: full-strength hues on a true-black page, everything
+    /// receding *toward black* out of the field of view.
+    #[default]
+    Dark,
+    /// The light theme: the same categories re-toned for a white page, everything
+    /// receding *toward the page* instead. The hues are re-chosen rather than
+    /// inverted — a yellow bright enough to carry Caution on black is illegible on
+    /// white — but every §11.5 guarantee the dark table holds, this one holds too.
+    Light,
+}
+
+impl Theme {
+    /// The other theme — what the toggle
+    /// ([`UiCommand::ToggleTheme`](crate::UiCommand::ToggleTheme)) flips to. There
+    /// are two, so this is the whole cycle; a third would make it a list.
+    #[must_use]
+    pub fn toggled(self) -> Self {
+        match self {
+            Theme::Dark => Theme::Light,
+            Theme::Light => Theme::Dark,
+        }
+    }
+}

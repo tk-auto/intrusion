@@ -22,6 +22,30 @@
         -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
       }
+      /* The page around the board follows the board's own theme (§11.2/#189). The
+         canvas keeps its aspect, so there is always a letterbox beside or beneath
+         it, and that strip is CSS rather than anything the shell paints — left
+         alone, a light board sat in a black frame, the one part of the screen still
+         wearing the other theme. The shell mirrors the live theme onto
+         `<body data-theme>` on every frame (crates/web/src/lib.rs); dark is the
+         default above, so only the light case is stated here. */
+      body[data-theme="light"] {
+        background: #f4f4f4;
+        color: #3f3f3f;
+      }
+      body[data-theme="light"] #replaybar {
+        color: #6e6e6e;
+        background: rgba(244, 244, 244, 0.72);
+      }
+      body[data-theme="light"] #replaybar .lbl {
+        color: #7b2fa0;
+      }
+      body[data-theme="light"] #replay-pos {
+        color: #0060c0;
+      }
+      body[data-theme="light"] #replaybar .hint {
+        color: #3f5f80;
+      }
       #app {
         display: grid;
         place-items: center;

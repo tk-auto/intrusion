@@ -25,7 +25,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use intrusion_core::{LevelSeed, MenuEntry, MenuNav, MenuUi, ScreenUi};
+use intrusion_core::{LevelSeed, MenuEntry, MenuHit, MenuNav, MenuUi, ScreenUi, UiCommand};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -106,6 +106,14 @@ impl Game {
             MenuNav::Prev if !menu.seed_entry => self.select(menu.selected.prev()),
             MenuNav::Next if !menu.seed_entry => self.select(menu.selected.next()),
             MenuNav::Activate if !menu.seed_entry => self.choose(menu.selected),
+            // Held back on the seed prompt, where `n` is an ordinary letter of the
+            // token being typed (§13.1/#245): the box has the keyboard there, and a
+            // key that recoloured the screen mid-token would be a trap, not an
+            // option. On the list it is the same free view toggle as everywhere else.
+            MenuNav::ToggleTheme if !menu.seed_entry => {
+                self.apply_ui_command(UiCommand::ToggleTheme);
+                self.draw();
+            }
             // Back out of the seed prompt. On the list itself there is nowhere
             // further back — the menu is the root — so Escape there does nothing.
             MenuNav::Back if menu.seed_entry => self.show_entries(),
@@ -116,6 +124,20 @@ impl Game {
     /// Choose an entry — by key or by tap, one path for both (§11.6). A disabled
     /// entry (§14 v2/v3) does nothing at all, deliberately: they are listed so the
     /// menu has room to grow, and nothing more (#268).
+    /// Apply a [`MenuHit`] from a tap on the title screen — choose an entry, or flip
+    /// the theme from the footer control (§11.2/#189). The pointer counterpart of
+    /// [`apply_menu_nav`](Self::apply_menu_nav), so a tap and a key do the same
+    /// thing through the same two calls.
+    pub(crate) fn apply_menu_hit(&mut self, hit: MenuHit) {
+        match hit {
+            MenuHit::Entry(entry) => self.choose(entry),
+            MenuHit::ToggleTheme => {
+                self.apply_ui_command(UiCommand::ToggleTheme);
+                self.draw();
+            }
+        }
+    }
+
     pub(crate) fn choose(&mut self, entry: MenuEntry) {
         match entry {
             MenuEntry::QuickPlay => self.start_run(seed::random_level()),

@@ -242,7 +242,9 @@ system anywhere names a colour.
 
 The base palette is a **16-colour, colour-blind-safe qualitative set**, hues leaning
 on Okabe–Ito and brightened for the dark backdrop. Ten rows carry categories today;
-the spares are claimed by naming them.
+the spares are claimed by naming them. The hex above is the **dark** theme's; §4.4
+covers the light one, which uses the same rows for the same categories and different
+values for all of them.
 
 Constraints the tests enforce, so a recolour cannot quietly break them:
 
@@ -277,7 +279,7 @@ The old game pushed every colour through a gamma curve that compressed everythin
 into a washed 0.1–0.9 band, and six of its sixteen colours were never used at all.
 Compression gets added back only if something demands it. **[START]**
 
-Three rows carry their own dim rather than the shared dark gray, each for a reason:
+Three rows carry their own dim rather than the shared gray, each for a reason:
 
 - **Ground** recedes further than everything else — the floor dots must whisper.
 - **Interest** keeps a readable purple tint, because the exit anchors every escape
@@ -285,6 +287,51 @@ Three rows carry their own dim rather than the shared dark gray, each for a reas
 - **Effect** keeps its cyan tint, so the help card's colour key names it in a shade
   nothing else claims. (Since #338 the layer paints no glyph on the board at all, so
   this row's dim shade is chrome, not board ink.)
+
+### 4.4 Two themes
+
+There are two palettes — **dark** (the default) and **light** — and switching between
+them is the whole payoff §11.2 was written to buy: no game system names a colour, so a
+theme is a second column of the one category→colour table and nothing else. The core
+carries a `Theme` flag on its view state and never a value from either column.
+
+| Category | Dark | Light |
+|---|---|---|
+| **Neutral** | `#ffffff` | `#000000` |
+| **Ground** | `#4a4a4a` | `#b8b8b8` |
+| **Owned** | `#4ea6ff` | `#0060c0` |
+| **Caution** | `#f0e442` | `#b09600` |
+| **Warning** / **Sensed** | `#e69f00` | `#cc4c00` |
+| **Danger** | `#ff3333` | `#b00000` |
+| **Interest** | `#bd6bd6` | `#7b2fa0` |
+| **System** | `#9a7040` | `#6b4320` |
+| **Effect** | `#2ee6d6` | `#00857c` |
+| *page backdrop* | `#000000` | `#ffffff` |
+| *memory slate* | `#667a8a` | `#3f5f80` |
+
+Every constraint in §4.1 is enforced over **both** palettes — they are claims about
+what a player can tell apart, not about a particular set of hex values. Two of them
+had to be restated to survive the second theme, because the dark table let a rule and
+its accident be spelled the same way:
+
+- **"Darkened variants" was really "variants that recede toward the page."** On black
+  those are the same sentence; on white they are opposites. Dim shades and background
+  variants are now measured by *distance from the backdrop*, which reads correctly in
+  both directions.
+- **"Ground recedes" was really "Ground stands off the page least."** On black the
+  floor dots are the darkest thing on screen; on white they are the lightest.
+
+What is *not* generalisable is the hues. A light theme is not the dark one inverted:
+Okabe–Ito's yellow is bright by construction and disappears on white, so Caution
+becomes a dark gold; Danger trades brightness for depth. The gold/orange/tan cluster
+is the whole difficulty — three warm hues that must stay pairwise distinct while all
+three are dark enough to read on a white page — and it is the reason the light
+Caution keeps as much green as it can while Warning is pushed toward red.
+
+**The toggle is `n`** (for *night*), listed on the help panel's controls and offered
+there as an `[n]` footer button for touch. It is the one key the modal help panel
+forwards rather than swallows, because the panel is where the option lives until v2
+grows an options screen. Nothing persists it yet: a reload comes back dark.
 
 ---
 

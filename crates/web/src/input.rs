@@ -36,7 +36,8 @@ use crate::tap::{Control, Tap};
 use crate::Game;
 
 /// The input-facing half of [`Game`]: how a key or a gesture tick becomes a
-/// turn. The rendering half (fit, paint) stays in `lib.rs` beside the palette.
+/// turn. The rendering half (fit, paint) stays in `lib.rs`, the colour table in
+/// [`palette`](crate::palette).
 impl Game {
     /// Map a key through the core's §11.6 table and, if it is one the loop takes,
     /// step and redraw. Returns whether the key was consumed (so the caller can
@@ -162,6 +163,12 @@ impl Game {
             UiCommand::ToggleHelp => {
                 self.ui.help_open = !self.ui.help_open;
             }
+            // The shell holds *both* colour tables and the core holds the flag
+            // (§11.2/#189), so switching theme is this one line here and a column of
+            // hex in [`palette`](crate::palette) — no game system learns a colour.
+            UiCommand::ToggleTheme => {
+                self.ui.theme = self.ui.theme.toggled();
+            }
         }
     }
 
@@ -172,6 +179,7 @@ impl Game {
             HelpNav::Close => self.ui.help_open = false,
             HelpNav::NextTab => self.ui.help_tab = self.ui.help_tab.next(),
             HelpNav::PrevTab => self.ui.help_tab = self.ui.help_tab.prev(),
+            HelpNav::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
         }
     }
 
@@ -181,6 +189,7 @@ impl Game {
         match hit {
             HelpHit::Close => self.ui.help_open = false,
             HelpHit::Tab(tab) => self.ui.help_tab = tab,
+            HelpHit::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
         }
     }
 

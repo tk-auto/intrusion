@@ -130,6 +130,16 @@ pub struct ScreenUi {
     /// panel opens on Level info. The shell cycles it from
     /// [`help_nav_for_key`](crate::help_nav_for_key) or a tab tap ([`help_hit`]).
     pub help_tab: HelpTab,
+    /// Which colour table the shell paints from (§11.2/#189). The core carries the
+    /// *flag* and never the colours: it says which of presentation's two columns is
+    /// live, and the shell owns both. Like every other field here it is a pure view
+    /// choice — no world change, no turn (§4.4) — flipped by
+    /// [`UiCommand::ToggleTheme`](crate::UiCommand::ToggleTheme), and from the title
+    /// screen or the help panel, the option's home until v2's options screen lands.
+    ///
+    /// In-session only for now: nothing persists it, so a reload comes back on the
+    /// [`Default`] dark theme.
+    pub theme: Theme,
     /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
     /// wording of the usable line's floor ([`usable_hint`]), and nothing else.
     /// The shell answers only *is this a touch session?*; the core keeps the words
@@ -1915,11 +1925,15 @@ mod tests {
         );
 
         // Open: the panel is escapable by touch — the `[x]` closes, a tab switches.
+        let height = closed.height;
         assert!(matches!(
-            help_hit(width, width - 2, 0),
+            help_hit(width, height, width - 2, 0),
             Some(HelpHit::Close)
         ));
-        assert!(matches!(help_hit(width, 2, 0), Some(HelpHit::Tab(_))));
+        assert!(matches!(
+            help_hit(width, height, 2, 0),
+            Some(HelpHit::Tab(_))
+        ));
     }
 
     /// The `[?]` toggle is the near line's alone (§11.4/#139/#267): it hit-tests on

@@ -1789,8 +1789,12 @@ If an effect background ever reads badly under the glyph standing on it, **shift
 Effect colour** — the channel is not negotiable, the hue is.
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
-foreground and as a darkened background variant. The concrete rows, the constraints
-the tests hold them to, and why each exception exists are in
+foreground and as a background variant that recedes toward the page. **There are two
+of them** — a dark theme and a light one (#189), toggled from the help panel until v2
+grows an options screen — which is exactly the reskin this section's rule was written
+to make cheap: the core gained a `Theme` flag and not one colour, and every §11.5
+guarantee is asserted over both tables. The concrete rows, the constraints the tests
+hold them to, and why each exception exists are in
 [`docs/render-reference.md`](render-reference.md) §4.
 
 > The old palette pushed every colour through a gamma curve that compressed
@@ -2187,6 +2191,7 @@ finally having a mechanism.
 | `5` / `w` | Wait |
 | `Enter` / `Space` | Confirm |
 | `Escape` | Cancel / menu |
+| `m` / `?` / `n` | Messages, help, colour theme — view toggles, never a turn (§11.2/§11.4) |
 | Letters | Ability hotkeys |
 
 **An ability hotkey is a toggle.** The key switches the ability on and, pressed

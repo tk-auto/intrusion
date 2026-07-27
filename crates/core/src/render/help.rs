@@ -65,6 +65,15 @@ use crate::place::LevelConfig;
 /// [`help_nav_for_key`](crate::help_nav_for_key) (to close).
 pub(crate) const HELP_KEY: char = '?';
 
+/// The key that flips the colour theme (§11.2/#189) — `n`, for *night* mode. It is
+/// the panel's own option for now (§14 v2 lists options next to this help screen),
+/// so it is drawn as a footer button here as well as listed in the controls, and it
+/// is matched in [`ui_command_for_key`](crate::input::ui_command_for_key) (on the
+/// board) and [`help_nav_for_key`](crate::help_nav_for_key) (with the panel up).
+/// The tests below pin the character against both tables, so the card and the
+/// binding can never drift apart.
+pub(crate) const THEME_KEY: char = 'n';
+
 /// The tabs the help panel pages between (§14 v2/#248). The panel opens on the
 /// leftmost ([`Default`]) and the tab bar switches between them; a shell keeps the
 /// current tab on [`ScreenUi`](super::ScreenUi) and hands it to [`render_help`].
@@ -127,12 +136,40 @@ pub enum HelpHit {
     Close,
     /// A tab in the tab bar — switch the panel to it.
     Tab(HelpTab),
+    /// The footer's `[n]` theme button — flip the colour table (§11.2/#189), the
+    /// touch half of the key. Without it the theme would be a keyboard-only option
+    /// on a game that is played on phones (§11.6: every control reachable by key
+    /// *and* touch).
+    ToggleTheme,
 }
 
 /// The `[x]` close control on the tab bar — three cells wide, like the header's
 /// other `[?]`/`[▾]` buttons, so the escape reads as a button.
 const CLOSE_BUTTON: &str = "[x]";
 const CLOSE_BUTTON_LEN: u32 = 3;
+
+/// The theme control on the panel's **footer** row (#189): the word it does,
+/// followed by the key it answers to — `theme [n]`.
+///
+/// **The label is part of the control, not prose beside it.** A bare `[n]` is only a
+/// target if you already know what `n` means, and the word is the larger and more
+/// obvious thing to reach for — so the whole `theme [n]` run is drawn in the button
+/// colour and the whole run hit-tests ([`help_hit`]). The bracketed key still teaches
+/// the shortcut, the way `[?]` and `[x]` do.
+///
+/// It sits on the footer rather than the tab bar because the tab bar is full at the
+/// v1 width (§10.2) and a fourth tab is already planned for it; the footer is the
+/// row that already teaches the panel's controls, and it is drawn on every tab, so
+/// [`help_hit`] needs no notion of which tab is showing.
+pub(super) const THEME_LABEL: &str = "theme";
+
+pub(super) fn theme_control() -> String {
+    format!("{THEME_LABEL} [{THEME_KEY}]")
+}
+
+pub(super) fn theme_control_len() -> u32 {
+    theme_control().chars().count() as u32
+}
 
 /// The column every Level info row is drawn from — one in from the section
 /// headings, the panel's standing content indent.
@@ -173,6 +210,16 @@ fn close_button_start(width: u32) -> u32 {
     width.saturating_sub(1 + CLOSE_BUTTON_LEN)
 }
 
+/// The column the footer's theme control starts at — right-aligned with the same
+/// one-cell margin the `[x]` keeps, so the two controls line up at the screen's right
+/// edge. Shared by [`draw_footer`] and [`help_hit`] so a tap lands on exactly the
+/// `theme [n]` drawn, label included — **and by the title screen** ([`super::menu`]),
+/// which puts the control in the very same corner of its own footer row, so the one
+/// option the game has so far is in one place wherever you meet it.
+pub(super) fn theme_control_start(width: u32) -> u32 {
+    width.saturating_sub(1 + theme_control_len())
+}
+
 /// Lay the tab bar out: each tab as `(tab, start col, width)`, drawn `[Label]`
 /// from a one-cell margin with a one-cell gap between. The width is independent of
 /// which tab is active (the brackets are always there), so switching tabs never
@@ -191,10 +238,23 @@ fn tab_layout() -> Vec<(HelpTab, u32, u32)> {
 
 /// The pointer→control hit-test for the open panel (§11.6/#248): which [`HelpHit`]
 /// screen cell `(x, y)` lands on, or `None` for the body (a press the modal panel
-/// swallows without acting). Only the tab-bar row (row 0) carries controls; the
-/// close `[x]` is tested first so it wins even if a layout ever abutted it.
+/// swallows without acting). Two rows carry controls — the tab bar (row 0) and the
+/// footer's `theme [n]` control on the last row (#189), label and key alike — and on
+/// the tab bar the close `[x]` is tested first so it wins even if a layout ever
+/// abutted it.
+///
+/// It takes the panel's `height` for the footer row's sake: the footer is drawn from
+/// the bottom up, so the hit-test has to measure from the same edge the drawing does
+/// or a tap would land a row off on a shorter screen.
 #[must_use]
-pub fn help_hit(width: u32, x: u32, y: u32) -> Option<HelpHit> {
+pub fn help_hit(width: u32, height: u32, x: u32, y: u32) -> Option<HelpHit> {
+    if height > 0 && y == height - 1 {
+        let theme = theme_control_start(width);
+        if x >= theme && x < theme + theme_control_len() {
+            return Some(HelpHit::ToggleTheme);
+        }
+        return None;
+    }
     if y != 0 {
         return None;
     }
@@ -443,18 +503,35 @@ const _: () = {
 /// Draw the footer hint on the last row: how to switch tabs and close, so a player
 /// who opened the modal panel always sees the way out (§11.6's no-trap rule, made
 /// explicit now the header `[?]` is covered).
+/// The footer row's left indent — where the hint prose starts on the panel and on
+/// the title screen alike (§11.4), leaving the row's right edge to the theme control.
+pub(super) const FOOTER_INDENT: u32 = 2;
+
 fn draw_footer(grid: &mut Grid) {
     if grid.height == 0 {
         return;
     }
+    let row = grid.height - 1;
+    draw(grid, FOOTER_INDENT, row, FOOTER_HINT, Category::Ground);
+    // The theme control, right-aligned on the same row. **Label and key together** in
+    // System — the HUD-control colour the `[x]` and the near line's `[?]` share — so
+    // the word reads as part of the button rather than as more footer prose, which is
+    // what makes it obvious the word is the thing to press (#189).
     draw(
         grid,
-        2,
-        grid.height - 1,
-        "Tab switches   Esc or [?] closes",
-        Category::Ground,
+        theme_control_start(grid.width),
+        row,
+        &theme_control(),
+        Category::System,
     );
 }
+
+/// The footer hint — the keys the panel answers that have no on-screen control of
+/// their own. Named so the layout test can measure it against
+/// [`theme_control_start`] rather than trusting that a longer sentence would have
+/// been noticed: [`draw`] clips in silence, and here it would clip the control, not
+/// the prose.
+const FOOTER_HINT: &str = "Tab switches   Esc closes";
 
 /// The glyph legend (§11.3): each `(glyph, category, meaning)`, glyph and category
 /// pulled from the real source — [`Terrain`] for the terrain rows, the [`super`]
@@ -530,7 +607,8 @@ const fn category_meaning(category: Category) -> &'static str {
 }
 
 /// The **standing** controls (§11.6/#296), each `(keys, action)` — the shortcuts that
-/// are true of every run: move, wait, the message log, and this panel.
+/// are true of every run: move, wait, the message log, this panel, and the colour
+/// theme (#189).
 ///
 /// It used to list the abilities too, one row per [`AbilityId::ALL`] entry. That was
 /// wrong twice over: it named all eight when a run holds at most four (§8.3), so half
@@ -545,6 +623,9 @@ fn control_rows() -> Vec<(String, String)> {
         ("w / 5 / .".to_string(), "wait & sense".to_string()),
         ("m".to_string(), "messages".to_string()),
         (HELP_KEY.to_string(), "this help".to_string()),
+        // The theme toggle (#189) is a standing shortcut like the rest: it is true of
+        // every run, and it is the one row that also works *while this card is up*.
+        (THEME_KEY.to_string(), "colour theme".to_string()),
     ]
 }
 
@@ -691,20 +772,27 @@ mod tests {
         }
     }
 
-    /// The controls card keeps only the **standing** shortcuts (#296): the four rows
-    /// that are true of every run, and no ability. It documents its own key, too.
+    /// The controls card keeps only the **standing** shortcuts (#296): the five rows
+    /// that are true of every run, and no ability. It documents its own keys, too.
     #[test]
     fn the_control_rows_are_the_standing_shortcuts_only() {
         let rows = control_rows();
-        for action in ["move", "wait & sense", "messages", "this help"] {
+        for action in [
+            "move",
+            "wait & sense",
+            "messages",
+            "this help",
+            "colour theme",
+        ] {
             assert!(
                 rows.iter().any(|(_, a)| a == action),
                 "the controls list {action:?}",
             );
         }
-        assert_eq!(rows.len(), 4, "and nothing else — no ability rows");
-        // The help key documents itself.
+        assert_eq!(rows.len(), 5, "and nothing else — no ability rows");
+        // The panel's own two keys document themselves.
         assert!(rows.iter().any(|(k, _)| *k == HELP_KEY.to_string()));
+        assert!(rows.iter().any(|(k, _)| *k == THEME_KEY.to_string()));
     }
 
     /// **Nothing on the Legend varies with the run** (#296) — no ability name, no bar
@@ -1045,19 +1133,98 @@ mod tests {
     fn the_panel_is_escapable_and_switchable_by_touch() {
         // The close control at the right edge → Close, and nothing just left of it.
         let close = close_button_start(W);
-        assert_eq!(help_hit(W, close, 0), Some(HelpHit::Close));
-        assert_eq!(help_hit(W, close + 1, 0), Some(HelpHit::Close));
-        assert_ne!(help_hit(W, close - 1, 0), Some(HelpHit::Close));
+        assert_eq!(help_hit(W, H, close, 0), Some(HelpHit::Close));
+        assert_eq!(help_hit(W, H, close + 1, 0), Some(HelpHit::Close));
+        assert_ne!(help_hit(W, H, close - 1, 0), Some(HelpHit::Close));
 
         // Each tab's whole `[Label]` region resolves to that tab, by identity.
         for (tab, start, len) in tab_layout() {
             for x in start..start + len {
-                assert_eq!(help_hit(W, x, 0), Some(HelpHit::Tab(tab)), "tab cell {x}");
+                assert_eq!(
+                    help_hit(W, H, x, 0),
+                    Some(HelpHit::Tab(tab)),
+                    "tab cell {x}"
+                );
             }
         }
         // The body (below the tab bar) and the gap left of the first tab are inert.
-        assert_eq!(help_hit(W, 5, 3), None, "the body swallows presses");
-        assert_eq!(help_hit(W, 0, 0), None, "the left margin is not a tab");
+        assert_eq!(help_hit(W, H, 5, 3), None, "the body swallows presses");
+        assert_eq!(help_hit(W, H, 0, 0), None, "the left margin is not a tab");
+    }
+
+    /// §11.6/#189: the theme is reachable **by touch**, not just by key — the
+    /// footer's `theme [n]` hit-tests to [`HelpHit::ToggleTheme`] over exactly the
+    /// cells it is drawn on, and the rest of the footer row is inert like the body. A
+    /// phone has no `n` key, so without this the light theme would be a desktop-only
+    /// option on a game that fits its whole board to a phone screen.
+    ///
+    /// **The word is a target too, not only the bracketed key.** `theme` is the
+    /// larger and more obvious thing to reach for, and a bare `[n]` is only a target
+    /// if you already know what `n` means — so every cell of the label presses the
+    /// control, which is what this walks.
+    #[test]
+    fn the_theme_control_is_reachable_by_touch() {
+        let start = theme_control_start(W);
+        for x in start..start + theme_control_len() {
+            assert_eq!(
+                help_hit(W, H, x, H - 1),
+                Some(HelpHit::ToggleTheme),
+                "footer cell {x}"
+            );
+        }
+        // The label's own first cell — the regression this guards is a control that
+        // only answered on its last three cells.
+        let label_end = start + THEME_LABEL.chars().count() as u32;
+        assert_eq!(help_hit(W, H, start, H - 1), Some(HelpHit::ToggleTheme));
+        assert_eq!(
+            help_hit(W, H, label_end - 1, H - 1),
+            Some(HelpHit::ToggleTheme)
+        );
+
+        assert_eq!(help_hit(W, H, start - 1, H - 1), None, "the hint is inert");
+        assert_eq!(help_hit(W, H, start, H - 2), None, "only the footer row");
+        // Measured from the *bottom* edge, so a shorter screen moves it with the
+        // drawing rather than leaving the hit region a row adrift.
+        assert_eq!(help_hit(W, 20, start, 19), Some(HelpHit::ToggleTheme));
+        assert_eq!(help_hit(W, 20, start, H - 1), None);
+    }
+
+    /// The footer's hint and its theme control share one row, so the prose must stop
+    /// before the control starts — [`draw`] would clip the control in silence, and a
+    /// half-drawn control is one the player cannot see they can press.
+    #[test]
+    fn the_footer_hint_stops_short_of_the_theme_control() {
+        let end = FOOTER_INDENT + FOOTER_HINT.chars().count() as u32;
+        assert!(
+            end < theme_control_start(W),
+            "the footer hint runs into the theme control ({end} vs {})",
+            theme_control_start(W),
+        );
+        // And the control itself clears the board's right margin.
+        assert_eq!(theme_control(), format!("{THEME_LABEL} [{THEME_KEY}]"));
+        assert!(theme_control_start(W) + theme_control_len() <= W);
+    }
+
+    /// The card and the key tables cannot drift (#189): the controls row, the footer
+    /// button and both bindings all name the same character. The theme is the one
+    /// key the open panel *forwards* rather than swallows, because the panel is
+    /// where the option lives — so pressing it on the card actually does something.
+    #[test]
+    fn the_theme_key_is_the_same_on_the_card_and_in_both_tables() {
+        let key = THEME_KEY.to_string();
+        assert_eq!(
+            crate::input::ui_command_for_key(&key),
+            Some(crate::input::UiCommand::ToggleTheme),
+        );
+        assert_eq!(
+            crate::help_nav_for_key(&key),
+            Some(crate::input::HelpNav::ToggleTheme),
+            "the modal panel forwards its own option's key",
+        );
+        assert!(theme_control().ends_with(&format!("[{key}]")));
+        // It shadows nothing: not a movement key, not an ability hotkey.
+        assert_eq!(crate::input_for_key(&key), None);
+        assert_eq!(crate::ability_for_key(&key), None);
     }
 
     /// The tabs cycle, wrapping at both ends (§14 v2/#248) — the Tab / arrow motion.

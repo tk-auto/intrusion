@@ -22,6 +22,7 @@
 //! is a full-width tap target ([`menu_hit`]), the seed prompt carries its own DOM
 //! *back* button beside the *play* one, and the footer always spells out the way on.
 
+use super::help::{theme_control, theme_control_len, theme_control_start, FOOTER_INDENT};
 use super::{blank_grid, draw, Grid};
 use crate::category::Category;
 
@@ -124,7 +125,12 @@ const TAGLINE: &str = "one tunnel in, the same tunnel out";
 
 /// The footer of the entry list. It names **both** input paths on purpose (§11.6):
 /// a touch player who cannot see a keyboard still reads that tapping a row plays it.
-const MENU_FOOTER: &str = "↑↓ choose · Enter or tap plays";
+///
+/// Left-aligned at [`FOOTER_INDENT`] rather than centred, and pruned to fit, because
+/// the row's right edge now belongs to the theme control (#189) — the footer is one
+/// strip with prose on the left and the control on the right, the same on this screen
+/// as on the help panel. A test pins that the two never meet.
+const MENU_FOOTER: &str = "↑↓ choose · Enter/tap plays";
 
 /// The footer of the seed prompt — the way back out, spelled out beside the box's
 /// own *back* button, so the sub-screen is never a dead end (§11.6's no-trap rule).
@@ -220,27 +226,48 @@ fn draw_centred(grid: &mut Grid, y: u32, text: &str, category: Category) {
     draw(grid, centre(grid.width(), len), y, text, category);
 }
 
-/// What a press on the menu lands on (§11.6) — the touch counterpart of
-/// [`menu_nav_for_key`](crate::menu_nav_for_key). A shell maps the tap to a screen
-/// cell and asks this; `None` means the press hit nothing and is swallowed.
+/// What a press on the title screen lands on (§11.6/#268) — the menu's counterpart
+/// of [`HelpHit`](super::HelpHit), and the touch half of
+/// [`menu_nav_for_key`](crate::menu_nav_for_key).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenuHit {
+    /// An entry row — choose it (start the run, or open the seed prompt).
+    Entry(MenuEntry),
+    /// The footer's `theme [n]` control — flip the colour table (§11.2/#189). The
+    /// same control the help panel carries, in the same corner: the title screen is
+    /// the first thing a player sees, so it is where a theme they cannot read is
+    /// most worth being able to change.
+    ToggleTheme,
+}
+
+/// Which [`MenuHit`] screen cell `(x, y)` lands on, or `None` for a press that hit
+/// nothing and is swallowed. A shell maps the tap to a screen cell and asks this.
 ///
-/// **The whole row is the target**, at any column: nothing else is drawn on an
-/// entry's row, and a generous target is the difference between a menu that works
-/// on a phone and one that does not. The blank row between entries
-/// ([`ENTRY_SPACING`]) is the buffer that keeps a low tap off the next entry.
+/// **The whole row is the target** for an entry, at any column: nothing else is
+/// drawn on an entry's row, and a generous target is the difference between a menu
+/// that works on a phone and one that does not. The blank row between entries
+/// ([`ENTRY_SPACING`]) is the buffer that keeps a low tap off the next entry. The
+/// theme control is the one thing tested by column as well, because it shares its
+/// row with the footer prose — and, like the panel's, its **label** is inside the
+/// target, not only the bracketed key.
 ///
 /// The seed prompt answers `None` everywhere — its controls are the DOM box's own
-/// *play* and *back* buttons, which handle their taps before the board sees them.
+/// *play* and *back* buttons, which handle their taps before the board sees them,
+/// and a theme control under a floating text box is a control half hidden.
 #[must_use]
-pub fn menu_hit(height: u32, ui: MenuUi, y: u32) -> Option<MenuEntry> {
+pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<MenuHit> {
     if ui.seed_entry {
         return None;
+    }
+    if height > 0 && y == height - 1 {
+        let theme = theme_control_start(width);
+        return (x >= theme && x < theme + theme_control_len()).then_some(MenuHit::ToggleTheme);
     }
     MenuEntry::ALL
         .iter()
         .enumerate()
         .find(|&(i, _)| entry_row(height, i) == y)
-        .map(|(_, &entry)| entry)
+        .map(|(_, &entry)| MenuHit::Entry(entry))
 }
 
 /// Render the title screen (§11.4/§14, #268) — the whole `width × height` screen,
@@ -295,17 +322,32 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
         }
     }
 
+    let footer_row = height.saturating_sub(1);
     let footer = if ui.seed_entry {
         SEED_FOOTER
     } else {
         MENU_FOOTER
     };
-    draw_centred(
+    draw(
         &mut grid,
-        height.saturating_sub(1),
+        FOOTER_INDENT,
+        footer_row,
         footer,
         Category::Ground,
     );
+    // The theme control, in the same corner of the same row as the help panel's
+    // (#189) — label and key together in System, so the word is visibly part of the
+    // button and is a target in its own right. Not on the seed prompt: the DOM text
+    // box floats over that screen, and a control it might cover is worse than none.
+    if !ui.seed_entry {
+        draw(
+            &mut grid,
+            theme_control_start(width),
+            footer_row,
+            &theme_control(),
+            Category::System,
+        );
+    }
     grid
 }
 
@@ -452,16 +494,79 @@ mod tests {
         for (i, &entry) in MenuEntry::ALL.iter().enumerate() {
             let row = entry_row(H, i);
             for x in [0, W / 2, W - 1] {
-                let _ = x; // the row is the whole target; the column is not read
-                assert_eq!(menu_hit(H, ui, row), Some(entry));
+                assert_eq!(
+                    menu_hit(W, H, ui, x, row),
+                    Some(MenuHit::Entry(entry)),
+                    "column {x} of {entry:?}'s row",
+                );
             }
             assert_eq!(
-                menu_hit(H, ui, row + 1),
+                menu_hit(W, H, ui, W / 2, row + 1),
                 None,
                 "the gap under {entry:?} is not a target",
             );
         }
-        assert_eq!(menu_hit(H, ui, 0), None, "the title row is not a target");
+        assert_eq!(
+            menu_hit(W, H, ui, W / 2, 0),
+            None,
+            "the title row is not a target"
+        );
+    }
+
+    /// The title screen carries the theme control too (#189), **in the same corner of
+    /// the same row** as the help panel's — so the one option the game has is in one
+    /// place wherever you meet it, and a player who cannot comfortably read the
+    /// current theme can change it before starting a run rather than after.
+    ///
+    /// Its whole run is the target, the word included, and the footer prose beside it
+    /// is inert — the same two facts the panel's control is held to.
+    #[test]
+    fn the_title_screen_carries_the_theme_control_in_the_panel_s_corner() {
+        let ui = MenuUi::default();
+        let start = theme_control_start(W);
+        for x in start..start + theme_control_len() {
+            assert_eq!(
+                menu_hit(W, H, ui, x, H - 1),
+                Some(MenuHit::ToggleTheme),
+                "footer cell {x}",
+            );
+        }
+        assert_eq!(
+            menu_hit(W, H, ui, start - 1, H - 1),
+            None,
+            "the footer prose is inert",
+        );
+        // It is drawn where it is tested, and the footer prose stops short of it —
+        // `draw` clips in silence, and a half-drawn control cannot be seen to be one.
+        let screen = text_of(&render_menu(W, H, ui));
+        let footer = screen.lines().last().expect("a footer row").to_string();
+        assert!(footer.contains(&theme_control()), "footer: {footer:?}");
+        let prose_end = FOOTER_INDENT + MENU_FOOTER.chars().count() as u32;
+        assert!(
+            prose_end < start,
+            "the menu footer runs into the theme control ({prose_end} vs {start})",
+        );
+    }
+
+    /// **Not on the seed prompt.** The DOM text box floats over the middle of that
+    /// screen and `n` is an ordinary letter of a level-seed token, so a control there
+    /// would be half hidden and its key a trap mid-token — the prompt keeps its own
+    /// *back* button as the way out (§11.6's no-trap rule) and nothing else.
+    #[test]
+    fn the_seed_prompt_carries_no_theme_control() {
+        let ui = MenuUi {
+            seed_entry: true,
+            ..MenuUi::default()
+        };
+        let start = theme_control_start(W);
+        for x in start..start + theme_control_len() {
+            assert_eq!(menu_hit(W, H, ui, x, H - 1), None, "footer cell {x}");
+        }
+        let screen = text_of(&render_menu(W, H, ui));
+        assert!(
+            !screen.contains(&theme_control()),
+            "the seed prompt drew a theme control",
+        );
     }
 
     /// The token the prompt shows as an example is **a real one** — it decodes. A
