@@ -35,7 +35,7 @@
 //! lands the whole cone is one zone. Colour *values* are the shell's table
 //! (§11.2); this module only speaks in categories.
 
-use crate::category::Category;
+use crate::category::{Category, Theme};
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::state::{GuardPerception, State};

@@ -32,7 +32,9 @@
 //! the game state plus the shell's `ScreenUi` view state. Keys map through
 //! `core::input_for_key` (§11.6) for game actions, `core::ability_for_key` for the
 //! ability shortcuts, and `core::ui_command_for_key` for view toggles (`m` deploys
-//! the message list, `?` opens help); an ability shortcut is a **toggle**, so the
+//! the message list, `?` opens help, `n` flips the colour theme — the shell picks
+//! which of [`palette`]'s two tables to paint from, and the core only ever moves the
+//! flag, §11.2/#189); an ability shortcut is a **toggle**, so the
 //! resolved identity goes through `core::State::ability_input` for the
 //! activate-or-switch-off choice (§4.4/#304), and for pointer and touch a tap on an
 //! ability-bar entry (`core::ability_at`) drives that same input — so the picture,
@@ -55,13 +57,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    render_screen, start_level, Grid, LevelSeed, ScreenUi, State, Visibility, BOTTOM_ROWS, TOP_ROWS,
+    render_screen, start_level, Grid, LevelSeed, ScreenUi, State, Theme, Visibility, BOTTOM_ROWS,
+    TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, Element, HtmlCanvasElement, Window};
 
-use crate::palette::{bg_color, swatch, BG, MEMORY_COLOR};
+use crate::palette::{bg_color, memory, page, swatch};
 
 /// The glyph cell's base aspect (width:height); a monospace glyph reads best in a
 /// slightly tall box. Actual on-screen cell size is this scaled to fit the viewport.
@@ -293,6 +296,7 @@ impl Game {
             &self.ctx,
             &render_screen(&self.state, self.ui),
             &self.metrics,
+            self.ui.theme,
         );
         // In replay mode, keep the `K / total` HUD in step with the board every
         // frame; a no-op in live play (§12.4/#197).
@@ -337,8 +341,12 @@ fn install_resize(game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
 /// non-blank glyph centred in its cell, coloured by its category ([`swatch`]).
 /// Blank cells (floor) are left as background. This is the shell's whole rendering
 /// job — the glyphs, overlaps and categories were all decided by `core::render`.
-fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
-    ctx.set_fill_style_str(BG);
+///
+/// `theme` picks which of [`palette`]'s two columns every colour is read from
+/// (§11.2/#189) and is the only thing about it this loop knows: the grid is
+/// identical either way, because the core never named a colour to begin with.
+fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics, theme: Theme) {
+    ctx.set_fill_style_str(page(theme));
     ctx.fill_rect(
         0.0,
         0.0,
@@ -356,7 +364,7 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
             // The danger overlay (§11.5) first: a background paints even under a
             // blank glyph — a watched open doorway is still watched.
             if let Some(bg) = cell.bg {
-                ctx.set_fill_style_str(bg_color(bg, cell.vis));
+                ctx.set_fill_style_str(bg_color(theme, bg, cell.vis));
                 ctx.fill_rect(x as f64 * m.cell_w, y as f64 * m.cell_h, m.cell_w, m.cell_h);
             }
             if cell.glyph == ' ' {
@@ -364,7 +372,7 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
             }
             let color = match cell.vis {
                 // Live: the full category colour (§11.5).
-                Visibility::Live => swatch(cell.fg).fg,
+                Visibility::Live => swatch(theme, cell.fg).fg,
                 // Out-of-FOV geometry: the row's dim shade (§11.5) — the standard
                 // dark gray for most, quieter for Ground, tinted for the exit.
                 //
@@ -375,9 +383,9 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
                 // Ground's already-quiet dim, where a dark palette has no room,
                 // and it would have owed a second set of values to light mode
                 // (#189). Nothing here changes when the ladder gains a rung.
-                Visibility::Explored | Visibility::Unexplored => swatch(cell.fg).dim,
+                Visibility::Explored | Visibility::Unexplored => swatch(theme, cell.fg).dim,
                 // Remembered contents read as memory, not as the live thing (§11.5a).
-                Visibility::Remembered => MEMORY_COLOR,
+                Visibility::Remembered => memory(theme),
             };
             ctx.set_fill_style_str(color);
             draw_char(ctx, x as f64, y as f64, cell.glyph, m);

@@ -78,7 +78,7 @@ pub use ability::{
     Loadout, TargetingMode,
 };
 pub use body::Body;
-pub use category::Category;
+pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
 pub use door::DoorAction;
 pub use duct::Duct;

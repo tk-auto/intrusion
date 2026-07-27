@@ -145,6 +145,12 @@ impl Game {
             UiCommand::ToggleHelp => {
                 self.ui.help_open = !self.ui.help_open;
             }
+            // The shell holds *both* colour tables and the core holds the flag
+            // (§11.2/#189), so switching theme is this one line here and a column of
+            // hex in [`palette`](crate::palette) — no game system learns a colour.
+            UiCommand::ToggleTheme => {
+                self.ui.theme = self.ui.theme.toggled();
+            }
         }
     }
 
@@ -155,6 +161,7 @@ impl Game {
             HelpNav::Close => self.ui.help_open = false,
             HelpNav::NextTab => self.ui.help_tab = self.ui.help_tab.next(),
             HelpNav::PrevTab => self.ui.help_tab = self.ui.help_tab.prev(),
+            HelpNav::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
         }
     }
 
@@ -164,6 +171,7 @@ impl Game {
         match hit {
             HelpHit::Close => self.ui.help_open = false,
             HelpHit::Tab(tab) => self.ui.help_tab = tab,
+            HelpHit::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
         }
     }
 

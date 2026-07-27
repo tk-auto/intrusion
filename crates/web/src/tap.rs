@@ -198,7 +198,7 @@ impl Game {
             return menu_hit(self.screen_height(), menu, row).map(Control::Menu);
         }
         if self.ui.help_open {
-            return help_hit(width, col, row).map(Control::Help);
+            return help_hit(width, self.screen_height(), col, row).map(Control::Help);
         }
         if is_help_button(width, col, row) {
             return Some(Control::HelpToggle);

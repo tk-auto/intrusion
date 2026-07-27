@@ -35,6 +35,13 @@ pub enum UiCommand {
     /// guard moves while it is up. The header's `[?]` button drives the same toggle
     /// for touch and mouse.
     ToggleHelp,
+    /// Flip the screen between the dark and the light colour table (§11.2/#189).
+    /// Like the other two it is a pure view toggle — the world is untouched, no turn
+    /// is spent (§4.4), and the *core* only ever moves a
+    /// [`Theme`](crate::Theme) flag: which colours the flag names is presentation's
+    /// business alone. The help panel drives the same toggle for touch and mouse,
+    /// and answers the same key while it is up ([`HelpNav::ToggleTheme`]).
+    ToggleTheme,
 }
 
 /// A navigation command inside the **open** help panel (§14 v2/#248) — distinct
@@ -54,6 +61,11 @@ pub enum HelpNav {
     /// Move to the previous tab, cycling — the leftward movement keys (`←` / `h` /
     /// `4`).
     PrevTab,
+    /// Flip the colour theme without leaving the panel (§11.2/#189) — the same
+    /// [`UiCommand::ToggleTheme`] the board answers, re-offered here because the
+    /// panel is where the option lives until v2 grows an options screen, and its
+    /// colour key is the best thing on the screen to judge a theme against.
+    ToggleTheme,
 }
 
 /// Map a key to the [`HelpNav`] it drives **while the help panel is open**, or
@@ -65,12 +77,16 @@ pub enum HelpNav {
 /// The movement keys are re-read as tab motion — `→`/`l`/`6` next, `←`/`h`/`4`
 /// prev — so the same left/right the board uses walks the tab bar; `Tab`, which
 /// binds to nothing in game (#287), advances the tabs here. `?` and `Escape` both
-/// close, the two conventional exits.
+/// close, the two conventional exits — and `n` flips the theme (#189), the one key
+/// the panel forwards rather than swallows.
 pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
     match key {
         "?" | "Escape" => Some(HelpNav::Close),
         "Tab" | "ArrowRight" | "l" | "6" => Some(HelpNav::NextTab),
         "ArrowLeft" | "h" | "4" => Some(HelpNav::PrevTab),
+        // The one binding the modal panel does **not** swallow (#189): the theme
+        // toggle lives on this panel, so it has to work with the panel up.
+        "n" => Some(HelpNav::ToggleTheme),
         _ => None,
     }
 }
@@ -115,7 +131,8 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
 /// toggles view state and redraws without ever touching [`State`](crate::State).
 ///
 /// `m` deploys the message list: a free letter (no movement key, no ability
-/// hotkey), mnemonic for *messages*. `Tab` used to deploy the ability panel and no
+/// hotkey), mnemonic for *messages*; `n` flips the colour theme (#189), a free
+/// letter for *night* mode. `Tab` used to deploy the ability panel and no
 /// longer binds to anything (#287) — the bar names every held ability on every
 /// frame, so there is no panel left to toggle.
 pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
@@ -124,6 +141,12 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
         // `?` opens the help card (§14 v2/#139): the conventional roguelike help key,
         // a free character that collides with no movement key or ability hotkey.
         "?" => Some(UiCommand::ToggleHelp),
+        // `n` for *night* (#189). The obvious mnemonics were all spoken for — `t`
+        // for theme is Takedown's, `d` for dark is Decoy's, and `l` for light is the
+        // vim-east step, which a binding may never shadow (§11.6) — so the key goes
+        // to the one word for the choice whose letter is free. Pinned against every
+        // other table below, like each of them.
+        "n" => Some(UiCommand::ToggleTheme),
         _ => None,
     }
 }
@@ -251,20 +274,25 @@ mod tests {
         }
     }
 
-    /// The UI-command table (§11.4/§11.7): `m` deploys the message list and `?` the
-    /// help card, and both are *shell* commands, never a game [`Input`] — so
-    /// `input_for_key` stays `None` for them and neither toggle enters the turn
-    /// loop. Being UI keys, they also own no ability activation. Other keys own no
-    /// UI command — including `Tab`, which stopped binding to anything when the
-    /// ability bar started naming every held ability (#287) and there was no longer
-    /// a panel to deploy.
+    /// The UI-command table (§11.4/§11.7): `m` deploys the message list, `?` the
+    /// help card and `n` the colour theme, and all three are *shell* commands, never
+    /// a game [`Input`] — so `input_for_key` stays `None` for them and no toggle
+    /// enters the turn loop. Being UI keys, they also own no ability activation.
+    /// Other keys own no UI command — including `Tab`, which stopped binding to
+    /// anything when the ability bar started naming every held ability (#287) and
+    /// there was no longer a panel to deploy.
     #[test]
     fn the_ui_keys_toggle_their_panels_and_are_not_game_inputs() {
         assert_eq!(ui_command_for_key("m"), Some(UiCommand::ToggleMessageLog));
         // `?` opens the help card (§14 v2/#139) — a view toggle, so it never steps
         // the world: no turn passes and no guard moves while help is up (§4.4).
         assert_eq!(ui_command_for_key("?"), Some(UiCommand::ToggleHelp));
-        for key in ["m", "?"] {
+        // `n` flips dark/light (§11.2/#189) — the same kind of pure view toggle, and
+        // the only one of the three the *open* help panel forwards rather than
+        // swallows, because the panel is where the option lives.
+        assert_eq!(ui_command_for_key("n"), Some(UiCommand::ToggleTheme));
+        assert_eq!(help_nav_for_key("n"), Some(HelpNav::ToggleTheme));
+        for key in ["m", "?", "n"] {
             assert_eq!(input_for_key(key), None, "{key:?} is not a game action");
             assert_eq!(
                 ability_for_key(key),
@@ -409,8 +437,14 @@ mod tests {
         }
     }
 
-    /// No two abilities share a key, and no ability claims a movement key — the
-    /// two collisions that would make a mis-key routine.
+    /// Every single-character key a **UI command** claims (§11.4). An ability hotkey
+    /// must never collide with one of these either: a mis-key that opened the help
+    /// card instead of sprinting is the same lost run as one that walked the wrong
+    /// way.
+    const UI_KEYS: [&str; 3] = ["m", "?", "n"];
+
+    /// No two abilities share a key, and no ability claims a movement key or a UI
+    /// key — the collisions that would make a mis-key routine.
     #[test]
     fn hotkeys_collide_with_nothing() {
         let keys: Vec<char> = ABILITIES
@@ -423,10 +457,22 @@ mod tests {
             }
         }
         for key in keys {
+            let key = key.to_string();
             assert!(
-                !MOVEMENT_KEYS.contains(&key.to_string().as_str()),
+                !MOVEMENT_KEYS.contains(&key.as_str()),
                 "{key:?} is a movement key"
             );
+            assert!(!UI_KEYS.contains(&key.as_str()), "{key:?} is a UI key");
+        }
+        // And the UI keys hold their own half of the bargain, including the theme
+        // toggle (#189), which had to go to `n` precisely because `t`, `d` and `l`
+        // were already spoken for.
+        for key in UI_KEYS {
+            assert!(
+                ui_command_for_key(key).is_some(),
+                "{key:?} owns a UI command"
+            );
+            assert!(!MOVEMENT_KEYS.contains(&key), "{key:?} is a movement key");
         }
     }
 }
