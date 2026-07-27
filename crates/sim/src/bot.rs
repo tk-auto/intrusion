@@ -959,45 +959,52 @@ mod tests {
     /// The numbers are `[START]` in the sense that any deliberate change to the bot
     /// moves them — that is what makes them useful. Update them *with* the change
     /// and say what moved, never to make a red test green.
+    ///
+    /// **A change to *generation* moves them too**, and #361 did: a cupboard now
+    /// needs solid back diagonals, so these twelve seeds build different facilities
+    /// and the bot's identical policy meets different levels in them. Rows were
+    /// regenerated there — the cue seam itself is untouched, which is why the
+    /// *shape* of the batch (endings mixed, the cloak pressed) is what carries the
+    /// assertion when the levels underneath it move.
     #[test]
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 36] = [
-            "baseline 0 lost 97 rrrr",
-            "baseline 1 won 187 rr",
-            "baseline 2 won 145 rr",
-            "baseline 3 lost 173 rrr",
-            "baseline 4 lost 63 r",
-            "baseline 5 lost 7 rc",
-            "baseline 6 lost 62 rr",
-            "baseline 7 lost 164 rr",
-            "baseline 8 lost 205 rrr",
-            "baseline 9 lost 21 r",
-            "baseline 10 won 262 ",
-            "baseline 11 lost 115 rr",
-            "cautious 0 lost 116 rr",
-            "cautious 1 won 248 rr",
-            "cautious 2 won 88 ",
-            "cautious 3 lost 92 rrr",
-            "cautious 4 lost 95 rr",
-            "cautious 5 won 58 c",
-            "cautious 6 won 141 r",
-            "cautious 7 lost 175 rrr",
-            "cautious 8 lost 28 r",
-            "cautious 9 lost 125 r",
-            "cautious 10 lost 403 crrr",
-            "cautious 11 won 632 rrrrrr",
-            "aggressive 0 lost 187 rrrrr",
-            "aggressive 1 lost 151 rrrr",
-            "aggressive 2 lost 40 r",
-            "aggressive 3 won 224 rrrrrrr",
-            "aggressive 4 lost 25 r",
-            "aggressive 5 lost 7 rc",
-            "aggressive 6 lost 109 rrrrr",
-            "aggressive 7 won 156 r",
-            "aggressive 8 lost 12 r",
-            "aggressive 9 won 303 rrrrr",
-            "aggressive 10 lost 267 rrrr",
-            "aggressive 11 lost 128 rcrrr",
+            "baseline 0 won 63 ",
+            "baseline 1 won 325 rrrrrrc",
+            "baseline 2 lost 220 r",
+            "baseline 3 playing 1000 rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "baseline 4 won 56 ",
+            "baseline 5 lost 116 r",
+            "baseline 6 won 137 ",
+            "baseline 7 won 96 ",
+            "baseline 8 lost 51 ",
+            "baseline 9 lost 399 rrrrrrrrrrrrrrrr",
+            "baseline 10 lost 40 rc",
+            "baseline 11 won 359 crrcrrrrrr",
+            "cautious 0 won 67 ",
+            "cautious 1 lost 166 rrrr",
+            "cautious 2 won 658 rrrr",
+            "cautious 3 lost 50 r",
+            "cautious 4 lost 129 rcr",
+            "cautious 5 won 217 cr",
+            "cautious 6 won 157 ",
+            "cautious 7 won 96 ",
+            "cautious 8 lost 88 r",
+            "cautious 9 won 381 rrr",
+            "cautious 10 won 339 rrcr",
+            "cautious 11 lost 635 crrrrrrrrrr",
+            "aggressive 0 lost 41 c",
+            "aggressive 1 won 158 rc",
+            "aggressive 2 won 224 ",
+            "aggressive 3 lost 160 rrr",
+            "aggressive 4 won 60 ",
+            "aggressive 5 lost 110 rr",
+            "aggressive 6 won 135 ",
+            "aggressive 7 won 100 ",
+            "aggressive 8 won 99 ",
+            "aggressive 9 lost 43 rr",
+            "aggressive 10 lost 43 rrc",
+            "aggressive 11 lost 313 rcrrrrrrr",
         ];
 
         let mut played = Vec::new();
