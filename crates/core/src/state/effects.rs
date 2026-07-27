@@ -17,7 +17,8 @@
 //!   guard a blast froze).
 //! - **How long it lives** ([`MarkLife`]) — **momentary** where the effect *is* a
 //!   moment (a bore, a blast's reach: [`EFFECT_FLASH_TURNS`], or as long as the moment's
-//!   consequence runs — an eject is lit for the stun it dealt), or **standing** where
+//!   consequence runs — an eject is lit on just the frames its stun holds the player
+//!   down), or **standing** where
 //!   the effect is a state (a guard still frozen, and later a live decoy or
 //!   concealment in force). One decay schedule serves both
 //!   ([`decay_effect_marks`](State::decay_effect_marks)); there is no second timer.
@@ -163,10 +164,14 @@ pub(super) enum MarkLife {
     ///
     /// Usually [`EFFECT_FLASH_TURNS`], the one frame. It is a **count** rather than a
     /// flag because an event whose consequence outlasts it should be readable for as
-    /// long as that consequence runs: the safety eject is lit for the stun it deals
-    /// (#339), so the mark cannot expire while the player it is speaking to is still
-    /// unable to act. Still a moment, still on the one decay schedule — what varies is
-    /// how long the report is left up, never whether something has to notice it end.
+    /// long as that consequence runs, and no longer: the safety eject is lit for the
+    /// stun it deals (#339), so the mark neither expires while the player it is
+    /// speaking to is still unable to act nor survives into the frame they act from.
+    /// Still a moment, still on the one decay schedule — what varies is how long the
+    /// report is left up, never whether something has to notice it end.
+    ///
+    /// A life of N is **N renders**, the frame it was lit in being the first — the
+    /// decay runs at the head of the next spent turn, not at the end of this one.
     Momentary(u32),
     /// A **state**: shown for exactly as long as the effect holds, with no countdown.
     /// It ends when the thing it marks stops being held, or when the ability's window
@@ -383,15 +388,24 @@ impl State {
                 // ([`phase_eject_stun`]), and the `@` simply appearing several cells away
                 // says nothing about where it came from.
                 //
-                // **The pair is lit for exactly as long as the player cannot act**: the
-                // throw's own frame plus one per stunned turn, so it goes out on the very
-                // turn the controls come back. A one-frame flash would be the one cue in
-                // the game that expires while its reader is held down — the eject is
-                // followed immediately by turns the player spends helpless, and telling
-                // them where they were thrown from *after* it stopped mattering is the
-                // #339 complaint restated rather than fixed. The life comes off the
-                // event's own `stunned`, so the mark and the helplessness can never
-                // disagree, however the stun is later priced.
+                // **The pair is lit on exactly the frames the player cannot act from**,
+                // and not one more. A one-frame flash would be the one cue in the game
+                // that expires while its reader is held down — the eject is followed
+                // immediately by turns the player spends helpless, and telling them where
+                // they were thrown from *after* it stopped mattering is the #339
+                // complaint restated rather than fixed. Overshooting is its own fault:
+                // a mark still lit on the frame the player is choosing a real move from
+                // is reporting an event they have already finished paying for.
+                //
+                // `stunned` is exactly that count, with no adjustment. A
+                // [`MarkLife::Momentary`] life of N yields N renders, the throw's own
+                // frame being the first — and that frame is already one the player cannot
+                // act from, since the stun is set before it is drawn. So the mark is lit
+                // on every frame whose press will be eaten and dark on the first frame
+                // whose press is answered, which is the same thing as saying it is lit
+                // exactly while [`stunned`](State::stunned) is non-zero. Taken off the
+                // event, so the mark and the helplessness cannot disagree however the
+                // stun is later priced.
                 //
                 // It stays **momentary**, not standing: this is one event given a stated
                 // life, not a state being reported. Nothing has to notice when it ends.
@@ -411,7 +425,7 @@ impl State {
                 Event::Ejected { from, to, stunned } => self.light_mark(
                     AbilityId::Dephase,
                     MarkPlace::Cells(vec![from, to]),
-                    MarkLife::Momentary(stunned + EFFECT_FLASH_TURNS),
+                    MarkLife::Momentary(stunned),
                 ),
                 // The eject with nowhere to go (§8.3): one cell, and it is the one that
                 // entombed you. The run is over on this frame, so the mark's whole job is
@@ -875,37 +889,45 @@ mod tests {
         );
     }
 
-    /// The pair is lit for **exactly as long as the player cannot act** (#339): the
-    /// throw's own frame and every stunned turn after it, going out on the turn the
-    /// controls come back. Asserted against [`State::stunned`] rather than against a
-    /// number, so the mark cannot drift from the helplessness it is explaining however
-    /// the stun is later priced (§8.3 **[START]**).
+    /// The pair is lit on **exactly the frames the player cannot act from** (#339) —
+    /// stated as the invariant rather than as a count, since the two ways to get this
+    /// wrong are opposite and both are bugs: go out too early and the cue expires while
+    /// its reader is still held down; stay one frame too long and it is still reporting
+    /// the throw on the frame they are choosing a real move from.
+    ///
+    /// `stunned() > 0` is precisely "the next press will be eaten", so asserting the
+    /// mark against it — rather than against a number — leaves nothing for a later
+    /// repricing of the stun (§8.3 **[START]**) to knock out of step.
     #[test]
-    fn the_eject_marks_last_exactly_as_long_as_the_stun() {
+    fn the_eject_marks_are_lit_exactly_while_the_player_cannot_act() {
         let mut s = phased_into_a_wall();
         s.step(Input::Wait);
         let stun = s.stunned();
         assert!(stun > 0, "precondition: the throw cost some helplessness");
         let landed = s.player();
 
-        // The throw's frame, then one render per stunned turn.
-        for turn in 0..=stun {
+        let mut helpless_frames = 0;
+        while s.stunned() > 0 {
             assert_eq!(
                 s.effect_cell_marks().count(),
                 2,
-                "both ends are still lit on render {turn} of {stun}",
+                "both ends are lit on a frame the player cannot act from",
             );
             assert_eq!(
                 s.player(),
                 landed,
                 "a stunned player cannot move off the mark"
             );
+            helpless_frames += 1;
             s.step(Input::Wait);
         }
-        assert_eq!(s.stunned(), 0, "the stun is served");
+        assert_eq!(
+            helpless_frames, stun,
+            "precondition: one wasted press per turn of stun",
+        );
         assert!(
             s.effect_cell_marks().next().is_none(),
-            "…and the marks go out with it, not before",
+            "the first frame whose press is answered is already dark",
         );
     }
 
