@@ -486,16 +486,19 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
-    // The effect layer's marks on **things** (§11.5, #308/#338): every actor an ability
-    // effect currently holds — today, every guard a blast froze and the player can
-    // perceive. Painted *after* the sense channel and *before* the danger overlay,
-    // because it is not a competing claim about the cell but a **refinement of the cue
-    // the thing already draws**: a sensed guard's filled cell still says "a guard is
-    // exactly here", and cyan adds "and it cannot move". Losing that to the orange it
-    // refines would throw away the whole point of a layer that reaches through walls —
-    // the blast freezes what you cannot see, so this is the common case, not the corner
-    // one. It is only ever a recolour of a thing already drawn
-    // ([`State::effect_thing_marks`] gates on perception), never a new mark, so the fog
+    // The effect layer's marks on **things** (§11.5, #308/#338/#340): every actor an
+    // ability effect currently holds — every guard a blast froze and the player can
+    // perceive, and the live decoy, whose `@` is otherwise the player's own ink told
+    // apart by position alone. Painted *after* the sense channel and *before* the danger
+    // overlay, because it is not a competing claim about the cell but a **refinement of
+    // the cue the thing already draws**: a sensed guard's filled cell still says "a
+    // guard is exactly here", and cyan adds "and it cannot move"; the decoy's `@` still
+    // says "something of yours stands here", and cyan adds "and it is the ability
+    // running". Losing that to the orange it refines would throw away the whole point of
+    // a layer that reaches through walls — the blast freezes what you cannot see, so
+    // this is the common case, not the corner one. It is only ever a recolour of a thing
+    // already drawn ([`State::effect_thing_marks`] carries each thing's own visibility
+    // rule — perception for a guard, always for the decoy), never a new mark, so the fog
     // gives nothing away.
     for cell in state.effect_thing_marks() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
@@ -881,6 +884,67 @@ mod tests {
         assert_eq!(g.get(4, 6).fg, Category::Owned);
         assert_eq!(g.get(4, 5).glyph, '@', "the real player still draws");
         assert_eq!(g.get(4, 6).vis, Visibility::Live, "in view: drawn live");
+    }
+
+    /// §8.3/§11.5 (#338/#340): a live decoy is a **running ability**, not merely a
+    /// thing of yours, so its cell carries the standing effect mark. The `@` above it
+    /// stays Owned and the glyph priority is untouched — the effect speaks in the
+    /// background, always — which makes the wash the one thing telling the two blue
+    /// `@`s apart by anything other than position.
+    #[test]
+    fn a_live_decoy_draws_the_effect_mark_under_its_owned_at() {
+        use crate::AbilityId;
+        let mut s = state_holding(10, 10, Cell::new(4, 4), Vec::new(), AbilityId::Decoy);
+        s.step(Input::Step(Direction::South)); // (4,5), facing south
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,6)
+        let g = render(&s);
+
+        let fake = g.get(4, 6);
+        assert_eq!(fake.glyph, '@', "the glyph is untouched");
+        assert_eq!(fake.fg, Category::Owned, "…and so is its ink");
+        assert_eq!(
+            fake.bg,
+            Some(Category::Effect),
+            "the ability running, said in the background",
+        );
+        assert_ne!(
+            g.get(4, 5).bg,
+            Some(Category::Effect),
+            "the *real* player is not the ability: only the fake is washed",
+        );
+
+        // The mark goes with the fake, on the frame it dies (§8.3).
+        s.step(Input::Step(Direction::South));
+        assert_eq!(s.decoy(), None, "precondition: the player stomped it");
+        assert_ne!(render(&s).get(4, 6).bg, Some(Category::Effect));
+    }
+
+    /// §8.3/§11.5a (#321/#340): the fake's mark follows the glyph it sits under, so it
+    /// is painted out of the FOV too — a wash you could only read by standing next to
+    /// the fake would be a wash the ability cannot use.
+    #[test]
+    fn a_live_decoy_keeps_its_effect_mark_out_of_view() {
+        use crate::AbilityId;
+        let mut s = state_holding(10, 10, Cell::new(4, 4), Vec::new(), AbilityId::Decoy);
+        s.step(Input::Step(Direction::South)); // (4,5), facing south
+        s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,6)
+        let decoy = Cell::new(4, 6);
+        while s.player_fov().contains(decoy) {
+            s.step(Input::Step(Direction::North));
+        }
+        assert_eq!(
+            s.decoy(),
+            Some(decoy),
+            "precondition: nothing stepped on it"
+        );
+
+        let cell = render(&s).get(decoy.x, decoy.y);
+        assert_eq!(
+            cell.bg,
+            Some(Category::Effect),
+            "still marked, out of sight"
+        );
+        assert_eq!(cell.vis, Visibility::Remembered, "…and honest about it");
     }
 
     /// §8.3/§11.5a (#321): a decoy is the player's *own* placed object, so it is

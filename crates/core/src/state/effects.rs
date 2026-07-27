@@ -1,5 +1,5 @@
 //! The **effect layer**: how an ability's effect is shown on the board (§8.3/§11.5,
-//! #308/#324/#338).
+//! #308/#324/#338/#340).
 //!
 //! # One vocabulary
 //!
@@ -12,15 +12,15 @@
 //! What varies is not the channel but two things:
 //!
 //! - **Where the mark lands** ([`MarkPlace`]) — a fixed **cell set**, decided when the
-//!   mark is lit and never re-derived (a blast's footprint, a bored cell, an eject's
-//!   landing), or the **thing** in a cell, which carries the mark wherever it goes (a
-//!   guard a blast froze).
+//!   mark is lit and never re-derived (a blast's footprint, a bored cell, the pair a
+//!   safety eject threw you between), or the **thing** in a cell, which carries the mark
+//!   wherever it goes and for exactly as long as it exists (a guard a blast froze, a
+//!   decoy still standing).
 //! - **How long it lives** ([`MarkLife`]) — **momentary** where the effect *is* a
 //!   moment (a bore, a blast's reach: [`EFFECT_FLASH_TURNS`], or as long as the moment's
 //!   consequence runs — an eject is lit on just the frames its stun holds the player
-//!   down), or **standing** where
-//!   the effect is a state (a guard still frozen, and later a live decoy or
-//!   concealment in force). One decay schedule serves both
+//!   down), or **standing** where the effect is a state (a guard still frozen, a live
+//!   decoy, and later concealment in force). One decay schedule serves both
 //!   ([`decay_effect_marks`](State::decay_effect_marks)); there is no second timer.
 //!
 //! A mark is keyed by the **ability** it came from, not by which [`Effect`] is running:
@@ -41,8 +41,9 @@
 //!   **[SETTLED]** calls the board's one non-negotiable claim.
 //! - [`effect_thing_marks`](State::effect_thing_marks) — a **recolour of a cue the
 //!   thing already draws**, never a new mark. It refines the sense channel rather than
-//!   competing with it ("a guard is exactly here, *and* it is frozen"), so it sits
-//!   above `Sensed` and still below `Danger`.
+//!   competing with it ("a guard is exactly here, *and* it is frozen"; "that `@` is
+//!   not a thing you left, it is the ability running"), so it sits above `Sensed` and
+//!   still below `Danger`.
 //!
 //! Net precedence, unchanged from #324: **Danger > a mark on a thing > Sensed / door
 //! cues > the wash.**
@@ -55,6 +56,12 @@
 //! mark on **cells** needs no such gate and takes none: how far your own gadget reached
 //! is your own knowledge, through walls and over ground you have never seen, and it
 //! says nothing about the facility's contents.
+//!
+//! The decoy is a thing whose perception gate is *already* "always" (§11.5a's second
+//! exception, #321/#326): it is the player's own placed object, drawn in the FOV and
+//! out of it, so its mark follows the glyph it sits under and needs no gate of its own.
+//! That is the rule holding, not an exemption from it — the mark is shown exactly when
+//! the thing is.
 //!
 //! # Fired, not carried (#325)
 //!
@@ -154,6 +161,14 @@ pub(super) enum MarkPlace {
     /// The guards an effect currently **holds** — the mark rides each one wherever it
     /// walks, for as long as it is held, and is gated on perception (§11.5a).
     HeldGuards,
+    /// The **live decoy** an effect is running (§8.3/#340) — the mark sits on the fake
+    /// for exactly as long as it exists, and on nothing at all once it does not.
+    ///
+    /// Read live from [`State::decoy`] rather than latched as a cell, which is what
+    /// makes "no mark outlives the decoy" a property of the shape instead of a clear
+    /// call to remember: a decoy stomped in the guard phase — after this turn's decay
+    /// has already run — stops being drawn on the very frame it dies.
+    LiveDecoy,
 }
 
 /// How long an effect mark lives (§11.5/#338). Both arms run on the one decay schedule
@@ -270,28 +285,36 @@ impl State {
             .iter()
             .flat_map(|mark| match &mark.place {
                 MarkPlace::Cells(cells) => cells.as_slice(),
-                MarkPlace::HeldGuards => NO_CELLS,
+                MarkPlace::HeldGuards | MarkPlace::LiveDecoy => NO_CELLS,
             })
             .copied()
     }
 
-    /// The cells where a mark rides a **thing** (#338): the position of every guard an
-    /// effect currently holds and the player can perceive.
+    /// The cells where a mark rides a **thing** (#338/#340): the position of every guard
+    /// an effect currently holds and the player can perceive, and the cell of a live
+    /// decoy.
     ///
     /// A *recolour* of a cue the thing already draws, never a new mark, which is why it
     /// outranks the `Sensed` channel it refines and can give nothing away to the fog —
     /// [`guard_under_effect`](Self::guard_under_effect) carries the perception gate.
     /// It reads the guards' own counters rather than the box a blast once covered, so
     /// it stays truthful for the guard the player fired at and then ran away from.
+    ///
+    /// The decoy is read the same way — off [`decoy`](Self::decoy) itself, not off a
+    /// cell the mark remembers — so the wash is on the fake exactly while the fake is
+    /// on the board and never for a frame after. It carries no perception gate because
+    /// the thing it recolours carries none either (§11.5a's second exception, #321):
+    /// the fake is drawn wherever it stands, in view or out of it, and a mark that
+    /// vanished when you walked away would be a mark the ability cannot use.
     pub fn effect_thing_marks(&self) -> impl Iterator<Item = Cell> + '_ {
-        let held = self
-            .effect_marks
-            .iter()
-            .any(|mark| mark.place == MarkPlace::HeldGuards);
+        let riding = |place: MarkPlace| self.effect_marks.iter().any(|mark| mark.place == place);
+        let held = riding(MarkPlace::HeldGuards);
+        let decoyed = riding(MarkPlace::LiveDecoy);
         self.guards
             .iter()
             .filter(move |guard| held && self.guard_under_effect(guard))
             .map(|guard| guard.pos())
+            .chain(self.decoy.filter(|_| decoyed))
     }
 
     /// Whether `guard` is currently held by an area effect the player can read — the
@@ -480,6 +503,21 @@ impl State {
                     MarkPlace::Cells(vec![at]),
                     MarkLife::Momentary(EFFECT_FLASH_TURNS),
                 ),
+                // A live decoy is a running ability, not a thing you happened to leave
+                // (§8.3/#340). The fake already wears the player's own `Owned` `@` and
+                // is told from the real one by position alone; the standing mark is what
+                // says *this one is the ability*, and it says it for the decoy's whole
+                // life, in the same place and on the same clock as the bar's `[12]`.
+                //
+                // There is no spawn event of its own — the decoy is placed by the
+                // activation — so the arm keys on the activation that placed it. Which
+                // ability that is comes off the event rather than being assumed, so a
+                // second decoy-spawning ability would join the layer for free.
+                Event::AbilityActivated { ability, .. }
+                    if declares(ability, Effect::SpawnDecoy) =>
+                {
+                    self.light_mark(ability, MarkPlace::LiveDecoy, MarkLife::Standing)
+                }
                 _ => {}
             }
         }
@@ -529,6 +567,10 @@ impl State {
     /// daze. It stays because an effect *with* a duration — Lockdown (#242), a live
     /// decoy (#340), concealment in force (#341) — is exactly what a standing mark is
     /// for, and a mark outliving its effect is the bug this closes.
+    ///
+    /// For the decoy it is the belt to [`MarkPlace::LiveDecoy`]'s braces: expiry and an
+    /// early toggle-off both take the fake with them (§8.3), so the live read has
+    /// already gone quiet by the time this sweeps the record.
     pub(super) fn clear_effect_marks(&mut self, id: AbilityId) {
         self.effect_marks.retain(|mark| mark.source != id);
     }
@@ -540,11 +582,18 @@ impl State {
     ///
     /// A **momentary** mark counts down and is dropped at zero. A **standing** mark
     /// never counts: it is dropped when what it marks stops being held, which for
-    /// [`MarkPlace::HeldGuards`] is the turn the last daze runs out. A standing mark
-    /// over a fixed cell set outlives every clock here and ends only with its ability's
-    /// window ([`clear_effect_marks`](Self::clear_effect_marks)).
+    /// [`MarkPlace::HeldGuards`] is the turn the last daze runs out and for
+    /// [`MarkPlace::LiveDecoy`] the turn the fake dies. A standing mark over a fixed
+    /// cell set outlives every clock here and ends only with its ability's window
+    /// ([`clear_effect_marks`](Self::clear_effect_marks)).
+    ///
+    /// For the marks that ride a thing this is only **housekeeping**: both readings are
+    /// live, so a thing that has gone stops being drawn the instant it goes, whether or
+    /// not the record has been swept yet. Dropping the record here is what keeps the
+    /// layer from carrying a mark that can never paint again.
     pub(super) fn decay_effect_marks(&mut self) {
         let any_held = self.guards.iter().any(|guard| guard.is_dazed());
+        let decoy_alive = self.decoy.is_some();
         self.effect_marks.retain_mut(|mark| match &mut mark.life {
             MarkLife::Momentary(ttl) => {
                 *ttl -= 1;
@@ -552,6 +601,7 @@ impl State {
             }
             MarkLife::Standing => match mark.place {
                 MarkPlace::HeldGuards => any_held,
+                MarkPlace::LiveDecoy => decoy_alive,
                 MarkPlace::Cells(_) => true,
             },
         });
@@ -585,6 +635,28 @@ mod tests {
     /// since a blast that would catch nobody is refused (§8.3/#325).
     fn level_with_a_target() -> State {
         level_with(vec![Guard::stationary(Cell::new(22, 20))])
+    }
+
+    /// A player at (10, 10) of a 40×40 room facing south with a decoy already out at
+    /// (10, 11) — the world the #340 tests need, with room to walk away from the fake
+    /// in every direction and no guard to stomp it by accident.
+    fn level_with_a_live_decoy() -> State {
+        let mut s = State::new(
+            open_room(40, 40),
+            Cell::new(10, 10),
+            Direction::South,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 38),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Decoy));
+        s.step(Input::Activate(AbilityId::Decoy));
+        assert_eq!(
+            s.decoy(),
+            Some(Cell::new(10, 11)),
+            "precondition: the fake is out, on the faced cell"
+        );
+        s
     }
 
     /// Fire Confusion, spending the turn (§4.4).
@@ -1028,6 +1100,122 @@ mod tests {
             vec![entombing],
             "the entombing cell, and only it",
         );
+    }
+
+    /// §8.3/#340: a live decoy wears the mark on the **thing**, not a wash on the
+    /// board. The fake is what is running, so the mark rides it and claims no geometry
+    /// around it.
+    #[test]
+    fn a_live_decoy_wears_a_mark_on_the_thing() {
+        let s = level_with_a_live_decoy();
+        assert_eq!(
+            s.effect_thing_marks().collect::<Vec<_>>(),
+            vec![s.decoy().expect("the fake is out")],
+            "the fake, and nothing else",
+        );
+        assert!(
+            s.effect_cell_marks().next().is_none(),
+            "a decoy washes no cells: it is a thing, not a footprint",
+        );
+    }
+
+    /// §8.3/#340: the mark is **standing**, so it lasts the whole of the decoy's life
+    /// rather than flashing — and it ends with the window that placed it, leaving
+    /// nothing behind. The two halves of "for as long as it lives", asserted against
+    /// the ability's own duration rather than a hand-copied number.
+    #[test]
+    fn the_decoy_mark_lasts_the_window_and_dies_with_it() {
+        let mut s = level_with_a_live_decoy();
+        let duration = AbilityId::Decoy
+            .def()
+            .economy()
+            .expect("Decoy is an activated ability")
+            .duration();
+        assert!(
+            duration > EFFECT_FLASH_TURNS,
+            "precondition: a standing mark is only distinguishable past the flash life",
+        );
+        // The activation turn is the first of the window (§8.2) and the clock is ticked
+        // at the **end** of each turn, so the fake is still out after every wait up to
+        // the window's last turn, and gone the moment that one is spent.
+        for turn in 2..duration {
+            s.step(Input::Wait);
+            assert!(
+                s.decoy().is_some(),
+                "precondition: the fake is still alive on turn {turn}",
+            );
+            assert_eq!(
+                s.effect_thing_marks().count(),
+                1,
+                "still marked on turn {turn}",
+            );
+        }
+        s.step(Input::Wait);
+        assert!(s.decoy().is_none(), "the window ran out and took the fake");
+        assert!(
+            s.effect_thing_marks().next().is_none(),
+            "the mark went with it",
+        );
+        assert!(s.effect_marks.is_empty(), "…and left nothing behind");
+    }
+
+    /// §11.5a's second exception (#321/#326/#340): the mark follows the glyph it sits
+    /// under, and the decoy's glyph is drawn out of the FOV. A fake you have walked
+    /// away from is the whole point of the ability, so a mark that needed line of sight
+    /// would be a mark the ability cannot use.
+    #[test]
+    fn the_decoy_mark_is_drawn_out_of_view() {
+        let mut s = level_with_a_live_decoy();
+        let decoy = s.decoy().expect("the fake is out");
+        while s.player_fov().contains(decoy) {
+            s.step(Input::Step(Direction::North));
+        }
+        assert_eq!(
+            s.decoy(),
+            Some(decoy),
+            "precondition: nothing stepped on it"
+        );
+        assert!(
+            s.effect_thing_marks().any(|cell| cell == decoy),
+            "the fake is still marked with the player's back to it",
+        );
+    }
+
+    /// §8.3/#340: no mark outlives the decoy. A stomp kills the fake in the middle of a
+    /// turn — after the layer's own decay has already run — and the mark is gone on
+    /// that very frame, because the mark reads the decoy itself rather than a cell it
+    /// once remembered.
+    #[test]
+    fn the_mark_dies_on_the_same_turn_the_decoy_does() {
+        let mut s = level_with_a_live_decoy();
+        let decoy = s.decoy().expect("the fake is out");
+        let events = s.step(Input::Step(Direction::South));
+        assert!(
+            events.contains(&Event::DecoyDied { at: decoy }),
+            "precondition: the player stepped on their own fake: {events:?}",
+        );
+        assert!(
+            s.effect_thing_marks().next().is_none(),
+            "the mark went on the same turn",
+        );
+        // …and the record is swept on the next turn's decay, so the layer never carries
+        // a mark that can no longer paint.
+        s.step(Input::Wait);
+        assert!(s.effect_marks.is_empty(), "the record went too");
+    }
+
+    /// §4.4/§8.3 (#340): an early toggle-off is free and takes the fake with it, so the
+    /// mark is cleared outright rather than merely falling silent.
+    #[test]
+    fn the_decoy_mark_goes_with_an_early_toggle_off() {
+        let mut s = level_with_a_live_decoy();
+        s.step(Input::Deactivate(AbilityId::Decoy));
+        assert!(s.decoy().is_none(), "precondition: the fake is gone");
+        assert!(
+            s.effect_thing_marks().next().is_none(),
+            "and so is its mark"
+        );
+        assert!(s.effect_marks.is_empty(), "cleared, not merely quiet");
     }
 
     /// Refiring replaces a mark rather than stacking one: the layer holds at most one

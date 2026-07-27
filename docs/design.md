@@ -1763,8 +1763,8 @@ and **how long it lives**:
 
 - **Place.** Over an explicit **cell set**, fixed when the mark is lit — Confusion's
   §6.1 box, the cell Pierce Wall opened, the pair a safety eject threw you between — or
-  over the **thing** in a
-  cell, which carries the mark wherever it goes (a guard a blast froze).
+  over the **thing** in a cell, which carries the mark wherever it goes and for exactly
+  as long as it exists (a guard a blast froze, a decoy still standing).
 - **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
   the firing frame and nothing after it, see §11.5), or **standing** where the effect is
   a state (a guard still held, a live decoy, concealment in force). A momentary mark may
@@ -1780,7 +1780,9 @@ a cue that thing already draws* rather than a competing claim — on a guard fel
 wall, cyan replaces the Sensed orange to say "exactly here, **and** it cannot move" — so
 it outranks Sensed and still yields to Danger. Net: **Danger > a mark on a thing > Sensed
 > the wash.** A mark on a thing only ever recolours something the player is already
-shown, so it can never reveal what the fog is hiding.
+shown, so it can never reveal what the fog is hiding — it inherits that thing's own
+visibility rule rather than adding one, which for a decoy (§11.5a's second exception)
+means it is drawn out of the FOV exactly as the `@` under it is.
 
 If an effect background ever reads badly under the glyph standing on it, **shift the
 Effect colour** — the channel is not negotiable, the hue is.

@@ -297,15 +297,16 @@ Backgrounds are the threat channel, and there is a fixed precedence:
 | Background | Means |
 |---|---|
 | **Danger** (red) | This cell is watched by a guard **you can see** |
-| **Effect** on a thing (cyan) | The guard here is held by one of your effects |
+| **Effect** on a thing (cyan) | The guard here is held by one of your effects, or the `@` here is a live decoy rather than you |
 | **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
 | **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
 
 The effect layer appears twice on purpose (#338). Its **wash** is advisory geometry and
 the weakest cue on the board. Its mark on a **thing** is not a competing claim about the
 cell but a *refinement of the cue that thing already draws* — "exactly here" becomes
-"exactly here, and it cannot move" — so it sits above the orange it refines and still
-below the red that outranks everything.
+"exactly here, and it cannot move"; a second Owned `@` becomes "and that one is the
+ability running" — so it sits above the orange it refines and still below the red that
+outranks everything.
 
 **The danger overlay is the best idea in the old game, and it is [SETTLED].** It
 paints the *literal* detection set — the same sight data the guard AI queries, not a
