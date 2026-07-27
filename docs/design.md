@@ -2192,6 +2192,7 @@ finally having a mechanism.
 | Arrows / `h` `j` `k` `l` / numpad `4` `6` `8` `2` | Move |
 | `w` / numpad `5` / `.` | Wait |
 | `1` `2` `3` `4` (top row) | Fire ability bar slots 1–4 |
+| The bar's marked letters | Fire the same four, by mnemonic |
 | `Enter` / `Space` | Confirm |
 | `Escape` | Cancel / menu |
 | `m` / `?` / `n` | Messages, help, colour theme — view toggles, never a turn (§11.2/§11.4) |
@@ -2224,6 +2225,33 @@ name changed**, silently, between one run and the next, with nothing on screen t
 say so. A bar slot is visible, stable within the run, and the same thing your thumb
 taps.
 
+**A second way in: the mnemonic letter** (#360). Beside the digit, each entry
+claims a **letter** — the first character of its bar name that is neither bound by
+this table already nor taken by an entry to its left — and the bar **draws that one
+letter in the ink colour**, lifted out of the name around it, in the entry it fires
+(§11.4). `1` and `c` both fire `Camo`. Nothing is drawn behind it and nothing is
+added beside it: the bar stays the quiet strip §11.4 settled on, and the mark costs
+no width. **An entry you cannot use is not marked** — an exhausted or unusable entry
+recedes whole (§11.2's Ground), because an ink letter says *press this* and the eye
+should not be pulled to the one thing on the bar that is not on offer. Its letter
+still resolves, and still refuses for free (§4.4). The digit is the primary key: stable by position, and there whether or
+not a letter could be claimed. The letter is the one you reach for when you know
+*what* you want rather than *where* it sits. An entry that could claim nothing keeps
+its digit alone; nothing is silently reassigned. Letters resolve on the **character**
+(`key`), not the code — you press the key labelled with the letter you can see, which
+is the mirror of why a position binds by position.
+
+**Why this is not the derivation this section designed out.** The paragraph below
+warns about exactly this shape of rule, and three things separate them. The claim set
+is the **run's four**, not the catalogue's twelve-and-growing, so a letter can only be
+taken by something you are also holding. It is **not silent** — the letter is drawn,
+marked, on the entry it fires, so the key is a fact you read off the bar like its
+state and its name; the old scheme's whole failure was invisibility. And the **digit
+is always underneath**, so a player who never learns a letter loses nothing. What
+remains true, and should not be glossed: **the same ability can carry different
+letters in different runs** — Dephase is `p` alone and something else beside Pierce
+Wall. It is a fact about the loadout, like a bar slot.
+
 **An ability key is a toggle.** The key switches the ability on and, pressed
 again while it is **active**, switches it off — the free action §4.4 grants, which
 otherwise has no key at all. One key with two meanings is safe here because the
@@ -2238,7 +2266,8 @@ resolution is one place too, so a tap on the bar and its digit can never diverge
 Camouflage) is what a replay script spells an ability with (§12.4), and *there*
 identity-keyed is exactly right: a stored script has to name the same ability in
 every run, so a letter moving would silently re-point old replays. It is pinned
-letter by letter for that reason. It is no longer a keyboard binding.
+letter by letter for that reason. It is **not** the mnemonic above and not a keyboard
+binding: one is a fact about the ability, the other a fact about the run.
 
 **Touch is a real target and was never finished.** The manifest pinned landscape
 and installed standalone, but the options dialog could not be closed by touch and

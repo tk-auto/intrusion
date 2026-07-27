@@ -2,8 +2,8 @@
 //! both feeding the same one-input-at-a-time seam ([`Game::step_and_draw`]).
 //!
 //! The shell never interprets a key — the §11.6 bindings live in
-//! `core::input_for_key` / `core::ui_command_for_key` / `core::ability_slot_for_code`,
-//! pinned by native tests. What lives *here* is the plumbing the core cannot own:
+//! `core::input_for_key` / `core::ui_command_for_key` / `core::ability_slot_for_code`
+//! / `core::ability_slot_for_letter`, pinned by native tests. What lives *here* is the plumbing the core cannot own:
 //! browser listeners, the gesture's live state, and the repeat timers. The one pure
 //! rule of this module, [`gesture_input`], is natively tested below like any core
 //! table.
@@ -26,9 +26,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_in_slot, ability_slot_for_code, help_nav_for_key, input_for_key, key_for_code,
-    menu_nav_for_key, ui_command_for_key, Cell, Direction, HelpHit, HelpNav, Input, InputModality,
-    UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    ability_in_slot, ability_slot_for_code, ability_slot_for_letter, help_nav_for_key,
+    input_for_key, key_for_code, menu_nav_for_key, ui_command_for_key, Cell, Direction, HelpHit,
+    HelpNav, Input, InputModality, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -51,7 +51,9 @@ impl Game {
     /// character, but the digits bind by position (#359) — the ability bar's `1`–`4`
     /// straight off `Digit1`–`Digit4`, and the numpad folded onto the movement digits
     /// by `key_for_code` before any character table is consulted — so an AZERTY or
-    /// Dvorak player presses the same physical keys as a QWERTY one.
+    /// Dvorak player presses the same physical keys as a QWERTY one. The abilities'
+    /// mnemonic letters (#360) go the other way, on the character, because there the
+    /// binding is the letter the bar is showing.
     fn handle_key(&mut self, key: &str, code: &str, is_repeat: bool) -> bool {
         // The numpad's meaning is its position, not the character the layout put on
         // it, so it is folded to the digit the §11.6 tables spell it with — once,
@@ -69,7 +71,7 @@ impl Game {
             }
             return ui_command_for_key(key).is_some()
                 || input_for_key(key).is_some()
-                || ability_slot_for_code(code).is_some();
+                || self.ability_slot_for_key(key, code).is_some();
         }
         // While the help panel is open it is **modal** (§14 v2/#248): it captures
         // input, so keys route to help navigation first and the world never steps
@@ -85,7 +87,7 @@ impl Game {
             }
             return ui_command_for_key(key).is_some()
                 || input_for_key(key).is_some()
-                || ability_slot_for_code(code).is_some();
+                || self.ability_slot_for_key(key, code).is_some();
         }
         // UI commands (§11.4) come next: they toggle view state and redraw without
         // ever touching the turn loop. `m` deploys the message list; `?` opens help.
@@ -95,16 +97,20 @@ impl Game {
             return true;
         }
         // A game action (movement/wait) or an ability key (§11.6): both resolve in the
-        // core and drive the one turn seam. A digit names a **bar slot**
-        // (`ability_slot_for_code`), the core turns that slot into the ability drawn
-        // there (`ability_in_slot`, #359) and then into this turn's input
+        // core and drive the one turn seam. An ability has **two** keys, and they
+        // differ in what binds them: the digit names a bar slot by *position*, off the
+        // physical code (`ability_slot_for_code`, #359), and the mnemonic names one by
+        // the *letter* the bar is highlighting, off the character the layout produced
+        // (`ability_slot_for_letter`, #360) — a position binds by position, a letter by
+        // letter. Both land on a slot, the core turns that slot into the ability drawn
+        // there (`ability_in_slot`) and then into this turn's input
         // (`State::ability_input`) — a **toggle**, so the key that switched the ability
         // on switches it off again (§4.4/#304). A tap on the bar entry goes through the
-        // same calls from `ability_at` on, so a digit and the entry above it can never
-        // disagree.
+        // same calls from `ability_at` on, so neither key can disagree with the entry
+        // above it.
         let input = if let Some(input) = input_for_key(key) {
             input
-        } else if let Some(slot) = ability_slot_for_code(code) {
+        } else if let Some(slot) = self.ability_slot_for_key(key, code) {
             // A **held** ability key is swallowed (§11.6/#304): now that the key is a
             // toggle, letting the browser's auto-repeat through would switch the
             // ability straight back off a frame after switching it on. Toggling takes
@@ -117,7 +123,8 @@ impl Game {
             // change (§11.6 — a miss is free). Still consumed, because the four digits
             // are the game's whether or not this run filled them, and a `4` that
             // scrolled the page on a three-ability run would be worse than one that
-            // does nothing.
+            // does nothing. (A mnemonic never lands here — a letter no entry claimed
+            // resolves to no slot at all, and stays the page's.)
             let Some(id) = ability_in_slot(&self.state, slot) else {
                 return true;
             };
@@ -135,6 +142,15 @@ impl Game {
         }
         self.step_and_draw(input);
         true
+    }
+
+    /// The ability-bar slot this keypress fires, by either of its two keys (§11.6):
+    /// the slot's **digit**, resolved from the physical code (#359), or its
+    /// **mnemonic letter**, resolved from the character (#360). The digit is asked
+    /// first — it is the primary, stable-by-position key — but the two can never
+    /// answer the same press, since a mnemonic is never a digit.
+    fn ability_slot_for_key(&self, key: &str, code: &str) -> Option<usize> {
+        ability_slot_for_code(code).or_else(|| ability_slot_for_letter(&self.state, key))
     }
 
     /// Feed one [`Input`] to the loop and repaint — the single seam every input

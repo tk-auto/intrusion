@@ -30,6 +30,7 @@
 use super::*;
 use crate::ability::{AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::cell::Direction;
+use crate::mnemonic;
 use crate::place::LevelConfig;
 use crate::status::{live_messages, near_line, Message};
 
@@ -398,6 +399,19 @@ fn ability_line_layout(width: u32, statuses: &[AbilityStatus]) -> Vec<(usize, u3
 /// strip right-aligned into the bottom-right corner. Slots are a fixed width so a
 /// number appearing or ticking never shifts a neighbour. No band — the bar reads as
 /// a quiet HUD strip, not a message.
+///
+/// One cell of each entry is the **mnemonic** (§11.6/#360): the letter that entry
+/// answers to, lifted to [`Category::Neutral`] — the ink colour, the brightest thing
+/// the palette has — so it stands out of the name around it as *the key you press*.
+/// It recolours a cell the entry had already drawn, so it costs no width and §11.4's
+/// compile-time slot arithmetic is untouched.
+///
+/// **An entry you cannot use keeps its letter dim.** A [`Category::Ground`] entry —
+/// exhausted or unusable, the two states §11.4 draws as "plainly not an option now" —
+/// recedes whole: brightening one cell of it would advertise a key for something that
+/// is not on offer, and the eye would be pulled to exactly the entry it should skip.
+/// The letter still *works* there (it resolves like any other, and refuses for free in
+/// the economy, §4.4); it simply does not shout.
 fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
     let blank = GlyphCell {
         glyph: ' ',
@@ -420,16 +434,74 @@ fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
         }
     };
 
-    for (i, start) in ability_line_layout(width, statuses) {
+    let layout = ability_line_layout(width, statuses);
+    let mnemonics = mnemonic::claim(&drawn_bar_names(&layout, statuses));
+    for ((i, start), letter) in layout.into_iter().zip(mnemonics) {
         let status = &statuses[i];
-        put(
-            &mut cells,
-            start,
-            &status.bar_entry(),
-            bar_category(status.state),
-        );
+        let category = bar_category(status.state);
+        put(&mut cells, start, &status.bar_entry(), category);
+        // The mark is the letter's own colour — no band behind it, nothing added
+        // beside it — so the bar stays the quiet strip §11.4 asks for and the entry
+        // reads as one word with one letter picked out of it.
+        if category == Category::Ground {
+            continue; // an entry you cannot use does not advertise its key
+        }
+        if let Some(x) = letter.map(|l| start + l as u32).filter(|x| *x < width) {
+            cells[x as usize].fg = Category::Neutral;
+        }
     }
     cells
+}
+
+/// The bar names of the **drawn** slots, in slot order — what the mnemonic claim
+/// (§11.6/#360) runs over.
+///
+/// Drawn rather than held, so a letter is never claimed by an entry the row
+/// truncated away: the mark *is* the binding's only announcement, so a key nobody
+/// can see must not exist.
+fn drawn_bar_names(layout: &[(usize, u32)], statuses: &[AbilityStatus]) -> Vec<&'static str> {
+    layout
+        .iter()
+        .map(|&(i, _)| statuses[i].id.bar_name())
+        .collect()
+}
+
+/// The **mnemonic letter** of bar slot `slot`, or `None` where that slot has none
+/// (§11.6/#360) — the secondary key beside the slot's digit.
+///
+/// Derived from the run's own drawn bar, so it is the letter the row is highlighting
+/// at this very moment ([`ability_bar`]) and the letter the help panel prints — one
+/// derivation, three readers, no chance of the screen naming a key that does not fire.
+pub fn ability_mnemonic(state: &State, slot: usize) -> Option<char> {
+    let statuses = state.ability_statuses();
+    let layout = ability_line_layout(state.layout().facility().width(), &statuses);
+    let names = drawn_bar_names(&layout, &statuses);
+    let index = (*mnemonic::claim(&names).get(slot)?)?;
+    Some(mnemonic::letter_at(names[slot], index))
+}
+
+/// The bar slot a **mnemonic letter** fires (§11.6/#360), or `None` for a character
+/// no entry of this run claimed — the letter counterpart of
+/// [`ability_slot_for_code`](crate::ability_slot_for_code).
+///
+/// Case is folded, so a stray Shift (or Caps Lock) still fires the ability rather
+/// than silently costing the turn it was meant to spend. It lands on a *slot*, like
+/// the digit and like a tap, so all three meet at [`ability_in_slot`] and none of
+/// them can name a different ability from the one under the highlight.
+pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
+    let mut chars = key.chars();
+    let ch = match (chars.next(), chars.next()) {
+        (Some(c), None) => c.to_ascii_lowercase(),
+        _ => return None, // named keys ("Tab", "ArrowUp") are never a mnemonic
+    };
+    let statuses = state.ability_statuses();
+    let layout = ability_line_layout(state.layout().facility().width(), &statuses);
+    let names = drawn_bar_names(&layout, &statuses);
+    mnemonic::claim(&names)
+        .into_iter()
+        .enumerate()
+        .find(|&(slot, index)| index.is_some_and(|i| mnemonic::letter_at(names[slot], i) == ch))
+        .map(|(slot, _)| slot)
 }
 
 /// Draw the help toggle over the already-built near line `row` (§14 v2/#139/#267):
@@ -1341,7 +1413,13 @@ mod tests {
                 .map(|x| g.get(x, bar).glyph)
                 .collect();
             assert_eq!(drawn, name, "{name} at col {col}");
-            assert_eq!(g.get(col, bar).fg, Category::Owned, "{name} ready colour");
+            // Sampled one cell in: the entry's *first* cell is its mnemonic, lifted to
+            // the ink colour (§11.6/#360), so the state colour is read off any other.
+            assert_eq!(
+                g.get(col + 1, bar).fg,
+                Category::Owned,
+                "{name} ready colour"
+            );
         }
         // Each name left-aligned in its slot, the strip flush right, one cell of air
         // after the last: the four slots exactly fill the v1 row.
@@ -1391,12 +1469,18 @@ mod tests {
             let g = render_screen(s, ScreenUi::default());
             (0..g.width()).map(|x| g.get(x, bar).glyph).collect()
         };
-        let colour = |s: &State| render_screen(s, ScreenUi::default()).get(30, bar).fg;
+        // Bore's entry starts at column 30, so 30 is its mnemonic `B` and 31 is the
+        // first cell carrying the plain state colour (§11.6/#360).
+        let colour = |s: &State| render_screen(s, ScreenUi::default()).get(31, bar).fg;
+        let letter = |s: &State| render_screen(s, ScreenUi::default()).get(30, bar).fg;
 
         // In the middle of the room: nothing to bore.
         let s = borer(open_room(40, 10));
         assert_eq!(row(&s), "                    Run       Bore—     ");
         assert_eq!(colour(&s), Category::Ground, "greyed, not promised");
+        // …and its mnemonic greys with it (#360): an entry that is not on offer does
+        // not advertise a key, so the letter is *not* lifted out of the name here.
+        assert_eq!(letter(&s), Category::Ground, "the letter recedes too");
 
         // In a corridor: two side walls, so the target is ambiguous and refused.
         let mut layout = open_room(40, 10);
@@ -1413,6 +1497,8 @@ mod tests {
         let s = borer(layout);
         assert_eq!(row(&s), "                    Run       Bore(3)   ");
         assert_eq!(colour(&s), Category::Owned, "available, and says how often");
+        // Usable again, so the `B` lifts back out of the name and says "press this".
+        assert_eq!(letter(&s), Category::Neutral, "the letter marks the key");
     }
 
     /// The bar's live states (§11.4): an **active** ability tucks its `[n]` against
@@ -1452,10 +1538,16 @@ mod tests {
         // `Run/11/` cooling (System) and `Camo[9]` active (Owned) grew into their
         // slots — and **every name is still in the column it started in**.
         assert_eq!(row, "Run/11/   Camo[9]   Decoy     Phase     ", "{row:?}");
-        assert_eq!(g.get(0, bar).fg, Category::System, "cooling reads System");
+        // Read one cell in from each entry's start: cells 0 and 10 are the mnemonics
+        // `R` and `C`, drawn in the ink colour whatever the state (§11.6/#360).
+        assert_eq!(g.get(1, bar).fg, Category::System, "cooling reads System");
         assert_eq!(g.get(3, bar).glyph, '/', "cooling shows /N/");
         assert_eq!(g.get(10, bar).glyph, 'C');
-        assert_eq!(g.get(10, bar).fg, Category::Owned, "active reads Owned");
+        assert_eq!(g.get(11, bar).fg, Category::Owned, "active reads Owned");
+        // The mark survives both states — a cooling ability's key is still its key.
+        for x in [0, 10] {
+            assert_eq!(g.get(x, bar).fg, Category::Neutral, "the mnemonic at {x}");
+        }
         assert_eq!(g.get(14, bar).glyph, '[', "active shows [N]");
     }
 
@@ -1562,9 +1654,14 @@ mod tests {
                 .expect("drawn")
                 .1
         };
-        assert_eq!(g.get(entry(AbilityId::Run), bar).fg, Category::System);
-        assert_eq!(g.get(entry(AbilityId::Camouflage), bar).fg, Category::Owned);
-        assert_eq!(g.get(entry(AbilityId::Decoy), bar).fg, Category::Owned);
+        // One cell in from each entry's start, since the first cell is its mnemonic
+        // and carries the ink colour whatever the state (§11.6/#360).
+        assert_eq!(g.get(entry(AbilityId::Run) + 1, bar).fg, Category::System);
+        assert_eq!(
+            g.get(entry(AbilityId::Camouflage) + 1, bar).fg,
+            Category::Owned
+        );
+        assert_eq!(g.get(entry(AbilityId::Decoy) + 1, bar).fg, Category::Owned);
     }
 
     /// A **passive** on the bar (#264/#287): it reads `Sight(on)` — named like every
@@ -1591,7 +1688,8 @@ mod tests {
         // In effect, so Owned — the same colour as the ready entries it sits beside,
         // with the marker rather than the colour carrying "you cannot press this".
         let sight = row.find("Sight").expect("the passive's entry") as u32;
-        assert_eq!(g.get(sight, bar).fg, Category::Owned);
+        // One cell in: `S` is the entry's mnemonic and carries the ink colour (#360).
+        assert_eq!(g.get(sight + 1, bar).fg, Category::Owned);
         assert_eq!(
             s.ability_state(AbilityId::Vision),
             AbilityState::Passive,
@@ -1721,6 +1819,180 @@ mod tests {
         // The map above the bar is not the bar.
         assert_eq!(ability_at(&s, 0, bar - 1), None, "the row above is map");
         assert_eq!(ability_at(&s, 0, NEAR_ROW), None, "nor is the near line");
+    }
+
+    /// #360's named case, on a real bar: a loadout of Decoy + Doors + Daze — three bar
+    /// names starting `D` — gives three **distinct** letters, each firing its own
+    /// ability, none of them a key §11.6 had already bound.
+    ///
+    /// The letters are the payload, but the assertion that matters is the last one:
+    /// each letter resolves to the slot whose entry the bar *highlighted*, so what the
+    /// row promises is what the keyboard does.
+    #[test]
+    fn three_names_starting_d_get_three_distinct_working_letters() {
+        let held = [AbilityId::Decoy, AbilityId::Autodoors, AbilityId::Confusion];
+        let s = State::new(
+            open_room(40, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 8),
+        )
+        .with_loadout(held.into_iter().fold(Loadout::empty(), Loadout::with));
+
+        let letters: Vec<Option<char>> = (0..held.len())
+            .map(|slot| ability_mnemonic(&s, slot))
+            .collect();
+        assert_eq!(
+            letters,
+            vec![Some('d'), Some('o'), Some('a')],
+            "Decoy keeps `d`; Doors and Daze fall through their own names",
+        );
+
+        for (slot, id) in held.into_iter().enumerate() {
+            let letter = letters[slot].expect("each of the three claimed a letter");
+            assert_eq!(
+                ability_slot_for_letter(&s, &letter.to_string()),
+                Some(slot),
+                "{letter:?} fires slot {slot}",
+            );
+            assert_eq!(
+                ability_in_slot(&s, slot),
+                Some(id),
+                "…which is where {id:?} is drawn",
+            );
+            // Uppercase lands on the same slot: a stray Shift must not cost the turn.
+            assert_eq!(
+                ability_slot_for_letter(&s, &letter.to_uppercase().to_string()),
+                Some(slot),
+                "{letter:?} fires with Shift held too",
+            );
+        }
+        // A letter nobody claimed fires nothing, and stays the page's.
+        for key in ["z", "q", "ArrowUp", "1"] {
+            assert_eq!(ability_slot_for_letter(&s, key), None, "{key:?}");
+        }
+    }
+
+    /// The mark **is** the binding's announcement (§11.6/#360), so the cell the bar
+    /// lifts has to be the cell of the letter that fires it — for every entry of a
+    /// loadout, not just the ones whose initial was free.
+    #[test]
+    fn the_marked_cell_is_the_letter_that_fires_it() {
+        let held = [
+            AbilityId::Run,
+            AbilityId::Decoy,
+            AbilityId::Autodoors,
+            AbilityId::Confusion,
+        ];
+        let s = State::new(
+            open_room(40, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 8),
+        )
+        .with_loadout(held.into_iter().fold(Loadout::empty(), Loadout::with));
+        let grid = render_screen(&s, ScreenUi::default());
+        let bar = ability_row(10);
+        let layout = ability_line_layout(40, &s.ability_statuses());
+
+        for (slot, start) in layout.iter().map(|&(_, start)| start).enumerate() {
+            let letter = ability_mnemonic(&s, slot).expect("every entry here claims one");
+            let state = bar_category(s.ability_statuses()[slot].state);
+            // Exactly one cell **of the entry** is lifted to the ink colour. The
+            // slot's trailing blanks are Neutral too — they are the row's own filler,
+            // not part of the word — so the scan is over the glyphs the entry drew.
+            let marked: Vec<u32> = (start..start + MAX_BAR_ENTRY as u32)
+                .filter(|&x| {
+                    let cell = grid.get(x, bar);
+                    cell.glyph != ' ' && cell.fg == Category::Neutral
+                })
+                .collect();
+            if state == Category::Ground {
+                // Autodoors has no door to work in an open room, so its entry is
+                // unusable and unmarked — the rule the sibling test pins, asserted
+                // here too so this sweep cannot quietly skip an entry.
+                assert!(marked.is_empty(), "slot {slot} is unusable and unmarked");
+                continue;
+            }
+            assert_eq!(marked.len(), 1, "slot {slot} marks one cell");
+            // …it is the letter that fires the slot…
+            let cell = grid.get(marked[0], bar);
+            assert_eq!(
+                cell.glyph.to_ascii_lowercase(),
+                letter,
+                "slot {slot} marks the cell of {letter:?}",
+            );
+            assert_eq!(ability_slot_for_letter(&s, &letter.to_string()), Some(slot));
+            // …and nothing is drawn behind it: the mark is the letter's own colour, so
+            // the bar stays a quiet strip rather than growing a band (§11.4).
+            assert_eq!(
+                cell.bg, None,
+                "slot {slot} paints no ground under its letter"
+            );
+            // The rest of the entry still carries the state colour, which is what the
+            // mark must not swallow. Sampled off the first glyph that is *not* the
+            // marked one — Daze claims `a`, its second character, so "the cell after
+            // the start" is not a safe stand-in for "not the mnemonic".
+            let plain = (start..start + MAX_BAR_ENTRY as u32)
+                .find(|&x| x != marked[0] && grid.get(x, bar).glyph != ' ')
+                .expect("an entry is more than its mnemonic");
+            assert_eq!(
+                grid.get(plain, bar).fg,
+                state,
+                "slot {slot} still says what state it is in",
+            );
+        }
+    }
+
+    /// An entry the player **cannot use** keeps its letter dim (§11.6/#360): the ink
+    /// mark says "press this", so putting one on an entry that is not on offer would
+    /// pull the eye to exactly the thing to skip. Pierce Wall in open ground has no
+    /// target, so its whole entry — the `B` included — reads Ground.
+    #[test]
+    fn an_unusable_entry_does_not_mark_its_letter() {
+        let s = State::new(
+            open_room(40, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 8),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::PierceWall));
+        let grid = render_screen(&s, ScreenUi::default());
+        let bar = ability_row(10);
+        let layout = ability_line_layout(40, &s.ability_statuses());
+        let (_, bore_start) = layout[1];
+
+        assert_eq!(
+            s.ability_state(AbilityId::PierceWall),
+            AbilityState::Unusable,
+            "nothing to bore in an open room",
+        );
+        assert_eq!(
+            ability_mnemonic(&s, 1),
+            Some('b'),
+            "it still claims its letter"
+        );
+        assert_eq!(
+            ability_slot_for_letter(&s, "b"),
+            Some(1),
+            "…and the key still resolves — it refuses for free (§4.4), not silently",
+        );
+        for x in bore_start..bore_start + "Bore".len() as u32 {
+            assert_eq!(
+                grid.get(x, bar).fg,
+                Category::Ground,
+                "the whole entry recedes, mnemonic included (col {x})",
+            );
+        }
+        // Run, beside it, is usable — so its letter *is* marked. Same frame, so this
+        // is the contrast the rule is made of rather than a second run's.
+        assert_eq!(grid.get(layout[0].1, bar).fg, Category::Neutral);
     }
 
     /// #359's binding, against the row it is a binding *on*: a **three**-ability run
