@@ -169,6 +169,16 @@ pub fn message_for(event: Event) -> Option<Message> {
         // like a bump. It still has to be said: the player asked to solidify and is
         // still phased, and silence would read as a dropped key.
         Event::RematerializeRefused => ("no room to rematerialize".to_string(), 0),
+        // The one permanent mark you leave on a facility (§8.3/#303). Quiet
+        // self-narration like the rest of your tools, but it says *both* halves —
+        // the hole is open, and it is open for them as well — because "the route you
+        // cut is a route they get" is the whole shape of the decision, and a player
+        // who only reads "wall bored" has been told the good half.
+        Event::WallBored { .. } => ("a way through, for them too".to_string(), 0),
+        // A refused bore (§8.4/#303): free, changed nothing, and — like the refused
+        // rematerialization beside it — has to say why. The reason *is* the message:
+        // each one names a different thing to do about it.
+        Event::BoreRefused { reason } => (reason.message().to_string(), 0),
     };
     Some(Message {
         text,

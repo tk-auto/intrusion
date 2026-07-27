@@ -611,7 +611,7 @@ mod tests {
     use crate::cell::{Cell, Direction};
     use crate::guard::Guard;
     use crate::modifiers::LevelModifiers;
-    use crate::state::{Event, Input, State};
+    use crate::state::{BoreRefusal, Event, Input, State};
     use crate::test_support::open_room;
 
     /// A **legal** run loadout (§8.3/#244): innate Run plus a three-tech grant — the
@@ -739,7 +739,20 @@ mod tests {
             Event::DecoyDied { at },
             Event::Entombed { at },
             Event::RematerializeRefused,
+            Event::WallBored { at },
         ];
+        // Every bore refusal is a near-line message of its own (§8.4/#303), so each
+        // wording is measured rather than just one representative.
+        let events = events.into_iter().chain(
+            [
+                BoreRefusal::NothingToBore,
+                BoreRefusal::TooManyWalls,
+                BoreRefusal::TheOuterShell,
+                BoreRefusal::TooThick,
+                BoreRefusal::NoUsesLeft,
+            ]
+            .map(|reason| Event::BoreRefused { reason }),
+        );
         let max = near_line_text_max();
         for event in events {
             let Some(m) = crate::status::message_for(event) else {

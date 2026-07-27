@@ -319,6 +319,19 @@ impl Layout {
     pub(crate) fn place(&mut self, cell: Cell, terrain: Terrain) {
         self.facility.set_terrain(cell.x, cell.y, terrain);
     }
+
+    /// Claim a formerly-solid cell for `region` — the graph half of a mid-level
+    /// terrain change that makes a wall walkable (§10.5).
+    ///
+    /// Generation reshapes regions as it carves; this is the one path that does so
+    /// *during a run*, for Pierce Wall (§8.3/#303): the bored cell becomes floor, and
+    /// a walkable cell must belong to exactly one region or the invariant §10.5 rests
+    /// on breaks. It is the same claim a recessed cupboard makes
+    /// ([`RegionGraph::add_cell`]), reached through the [`Layout`] so the grid and the
+    /// graph are moved by the same owner.
+    pub(crate) fn claim_cell(&mut self, region: RegionId, cell: Cell) {
+        self.regions.add_cell(region, cell);
+    }
 }
 
 /// A bare layout over `facility` with no regions or doors — for tests and tools

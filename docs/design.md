@@ -868,6 +868,7 @@ whole reason the architecture looks the way it does.
 | **Dephase** | 1 turn | 3 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** |
 | **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
 | **Confusion** | 1 turn | 6 | 45 | While active, every guard within `CONFUSION_RADIUS` of you (through walls like the guard sense, §9) is **blinded and frozen** — it neither sees nor moves. A costed panic-buy of time, not a kill: a frozen chaser **pauses** (keeps its lead), it does not reset; the guard resumes cleanly when the window ends. Capture-is-contact still holds (§4.5) — a frozen adjacent guard cannot step into you, but the freeze is no shield to walk into a guard *outside* the bubble, and a frozen guard's cell stays solid. The bubble stays inside the guard-sense range so it never freezes what you cannot sense, and the long cooldown is what keeps it rare (#240). |
+| **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5), and a wall more than one cell thick is refused rather than opening a dead pocket (§10.1.5): a bore opens a **route** or it does not happen. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 
 Notes carried forward, because they are good and non-obvious:
@@ -889,8 +890,8 @@ Notes carried forward, because they are good and non-obvious:
   you.
 - **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
   not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
-  tech from a pool that defaults to the shipped, non-experimental set (six tech now
-  ship, so "three random" is a genuine draw of three of the six — the pool has
+  tech from a pool that defaults to the shipped, non-experimental set (seven tech now
+  ship, so "three random" is a genuine draw of three of the seven — the pool has
   outgrown the grant and it finally bites, #241); a campaign accumulates its set
   instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
   tech — it competes for the same slot, which is exactly what it pays with. The
@@ -1194,6 +1195,15 @@ stated as "no unbroken sightline", and the pass stamped 1-cell *wall* blockers
 — which read as floating wall noise, not a building. The table restatement
 replaced them; the cupboard clause came with the no-tables-in-corridors rule
 below: same assertion machinery, honest architecture.)
+
+**The rule constrains the generator, not the player.** **[SETTLED]** (#303) Pierce
+Wall can punch a hole into a corridor's long wall from the room side and create
+exactly the uncovered straight run this rule forbids — and that is correct, not a
+loophole to close. The rule exists so a level is never *born* with an unsurvivable
+sightline; a player who cuts one has made a choice, and the danger overlay (§11.5)
+draws the new cone the moment a guard's line reaches down it, so the consequence
+reads as their own doing rather than as a bug. The assertion below is a property of
+*generation*, and it is checked there.
 
 This is a **testable property of a generated level**, not a vibe. Assert it, the
 same way reachability is asserted (§10.6):

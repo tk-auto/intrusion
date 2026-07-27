@@ -54,13 +54,13 @@ use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::cover;
 use crate::duct::Duct;
-use crate::facility::Terrain;
+use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
 use crate::guard::{Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::radio;
-use crate::region::{DoorCell, DoorId};
+use crate::region::{DoorCell, DoorId, RegionId};
 use crate::rng::Rng;
 use crate::targeting::Targeting;
 use crate::vision::{
@@ -70,6 +70,7 @@ use crate::vision::{
 use crate::DoorAction;
 
 mod abilities;
+mod bore;
 mod doors;
 mod effects;
 mod events;
@@ -77,6 +78,7 @@ mod guards;
 mod traversal;
 mod view;
 
+pub use bore::BoreRefusal;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
 
@@ -923,6 +925,24 @@ impl State {
                 } else {
                     None
                 };
+                // Pierce Wall's target is unique by precondition rather than aimed
+                // (§8.4/#303), so the geometry is checked here — *before* the deck
+                // spends a use — and a refusal is the free no-op the decoy's missing
+                // cell already was. It speaks, because the rule is the thing the
+                // player is learning and silence teaches nothing (§11.7).
+                let bore = if id == AbilityId::PierceWall {
+                    match self.bore_target() {
+                        Ok(wall) => Some(wall),
+                        Err(reason) => {
+                            if self.abilities.loadout().contains(id) {
+                                events.push(Event::BoreRefused { reason });
+                            }
+                            return false;
+                        }
+                    }
+                } else {
+                    None
+                };
                 if self.abilities.activate(id) {
                     if spawn.is_some() {
                         self.decoy = spawn;
@@ -933,6 +953,14 @@ impl State {
                         ability: id,
                         uses_left: self.abilities.uses_left(id),
                     });
+                    // The bore lands *after* its own activation line, so on a turn
+                    // that opens a wall the near line leads with the hole rather than
+                    // the tally (§11.7 breaks a priority tie toward the later event).
+                    // The count is still one line down in the deployed list, which is
+                    // the right way round: the lesson first, the bookkeeping second.
+                    if let Some(wall) = bore {
+                        self.bore_wall(wall, events);
+                    }
                     self.waited = false;
                     self.crouched_behind = None;
                     // A spent turn pays the haul debt (§8.3), like a Wait.
