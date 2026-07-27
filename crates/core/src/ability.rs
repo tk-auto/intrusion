@@ -365,7 +365,7 @@ impl AbilityId {
     /// opposed to innate [`Run`](AbilityId::Run). This is the default eligible pool
     /// a `starting_abilities` grant (#244) draws from: the shipped, non-experimental
     /// tech (the gated experiments #239/#243 are not economy abilities yet, so the
-    /// pool is exactly these six). Quick play grants the whole pool while its size
+    /// pool is exactly the rows listed here). Quick play grants the whole pool while its size
     /// meets the grant count; the draw only bites once the pool outgrows the grant.
     /// A passive (#264) is drawn from here like any other tech — it competes for the
     /// same slot, which is exactly what it pays with.
@@ -504,7 +504,7 @@ pub struct Loadout {
 impl Loadout {
     /// The **full** loadout: every ability present, passives included.
     ///
-    /// It is **not a loadout a run can hold** — seven abilities is well over the
+    /// It is **not a loadout a run can hold** — the whole catalog is well over the
     /// [`AbilityId::MAX_HELD`] cap (§8.3), so no preset resolves to it and the
     /// ability bar's compile-time width bound (§11.4) does not cover it. A bar this
     /// long simply truncates, as it does on any oversized hand-built state.
