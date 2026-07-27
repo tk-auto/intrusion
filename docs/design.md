@@ -1756,7 +1756,10 @@ and **how long it lives**:
   cell, which carries the mark wherever it goes (a guard a blast froze).
 - **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
   the firing frame and nothing after it, see §11.5), or **standing** where the effect is
-  a state (a guard still held, a live decoy, concealment in force).
+  a state (a guard still held, a live decoy, concealment in force). A momentary mark may
+  be given a longer stated life when the moment's *consequence* outlasts it: the safety
+  eject's pair is lit for exactly as long as the stun it dealt, so the cue cannot expire
+  while the player it explains is still unable to act.
 
 The two places also sit differently in the §11.5 precedence, because they make different
 claims. A **cell** mark is a wash and the weakest background there is: a door cue, a

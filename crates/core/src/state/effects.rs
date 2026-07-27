@@ -16,7 +16,8 @@
 //!   landing), or the **thing** in a cell, which carries the mark wherever it goes (a
 //!   guard a blast froze).
 //! - **How long it lives** ([`MarkLife`]) — **momentary** where the effect *is* a
-//!   moment ([`EFFECT_FLASH_TURNS`], a bore, a blast's reach), or **standing** where
+//!   moment (a bore, a blast's reach: [`EFFECT_FLASH_TURNS`], or as long as the moment's
+//!   consequence runs — an eject is lit for the stun it dealt), or **standing** where
 //!   the effect is a state (a guard still frozen, and later a live decoy or
 //!   concealment in force). One decay schedule serves both
 //!   ([`decay_effect_marks`](State::decay_effect_marks)); there is no second timer.
@@ -158,7 +159,14 @@ pub(super) enum MarkPlace {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum MarkLife {
     /// A **moment**: this many more spent turns, then gone. The effect *is* an event —
-    /// a blast's reach, a bore — and the mark is the one frame that reports it.
+    /// a blast's reach, a bore — and the mark is the frame that reports it.
+    ///
+    /// Usually [`EFFECT_FLASH_TURNS`], the one frame. It is a **count** rather than a
+    /// flag because an event whose consequence outlasts it should be readable for as
+    /// long as that consequence runs: the safety eject is lit for the stun it deals
+    /// (#339), so the mark cannot expire while the player it is speaking to is still
+    /// unable to act. Still a moment, still on the one decay schedule — what varies is
+    /// how long the report is left up, never whether something has to notice it end.
     Momentary(u32),
     /// A **state**: shown for exactly as long as the effect holds, with no countdown.
     /// It ends when the thing it marks stops being held, or when the ability's window
@@ -370,10 +378,28 @@ impl State {
                 ),
                 // The safety eject is one event with **two ends** (§8.3/#329/#339): the
                 // solid the phase stranded you in, and the cell it threw you onto. Both
-                // are washed for the one frame, because what the stunned player needs is
-                // not either cell but the *distance between them* — that span is what
-                // priced the stun ([`phase_eject_stun`]), and the `@` simply appearing
-                // several cells away says nothing about where it came from.
+                // are washed, because what the stunned player needs is not either cell
+                // but the *distance between them* — that span is what priced the stun
+                // ([`phase_eject_stun`]), and the `@` simply appearing several cells away
+                // says nothing about where it came from.
+                //
+                // **The pair is lit for exactly as long as the player cannot act**: the
+                // throw's own frame plus one per stunned turn, so it goes out on the very
+                // turn the controls come back. A one-frame flash would be the one cue in
+                // the game that expires while its reader is held down — the eject is
+                // followed immediately by turns the player spends helpless, and telling
+                // them where they were thrown from *after* it stopped mattering is the
+                // #339 complaint restated rather than fixed. The life comes off the
+                // event's own `stunned`, so the mark and the helplessness can never
+                // disagree, however the stun is later priced.
+                //
+                // It stays **momentary**, not standing: this is one event given a stated
+                // life, not a state being reported. Nothing has to notice when it ends.
+                //
+                // Marking the *player* while stunned would draw the same picture — they
+                // are stunned in place on the landing end, and a thing mark and the wash
+                // are one background — so the layer keeps the cheaper of the two shapes
+                // and needs no new placement.
                 //
                 // The origin is a **solid**, and it is marked anyway: the layer paints
                 // over the geometry it finds rather than only over floor, and a cell the
@@ -382,10 +408,10 @@ impl State {
                 // `self.player`, so a decoy stomped on arrival — or anything else that
                 // moves them afterwards — cannot shift the mark off the cell the throw
                 // actually ended on.
-                Event::Ejected { from, to, .. } => self.light_mark(
+                Event::Ejected { from, to, stunned } => self.light_mark(
                     AbilityId::Dephase,
                     MarkPlace::Cells(vec![from, to]),
-                    MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                    MarkLife::Momentary(stunned + EFFECT_FLASH_TURNS),
                 ),
                 // The eject with nowhere to go (§8.3): one cell, and it is the one that
                 // entombed you. The run is over on this frame, so the mark's whole job is
@@ -849,24 +875,37 @@ mod tests {
         );
     }
 
-    /// Momentary means momentary: the throw is a moment, so the pair shows for
-    /// [`EFFECT_FLASH_TURNS`] renders and is gone on the next spent turn — served, like
-    /// every turn after an eject, by a stunned player who cannot act (§8.3).
+    /// The pair is lit for **exactly as long as the player cannot act** (#339): the
+    /// throw's own frame and every stunned turn after it, going out on the turn the
+    /// controls come back. Asserted against [`State::stunned`] rather than against a
+    /// number, so the mark cannot drift from the helplessness it is explaining however
+    /// the stun is later priced (§8.3 **[START]**).
     #[test]
-    fn the_eject_marks_burn_out_with_the_turn() {
+    fn the_eject_marks_last_exactly_as_long_as_the_stun() {
         let mut s = phased_into_a_wall();
         s.step(Input::Wait);
-        for turn in 0..EFFECT_FLASH_TURNS {
+        let stun = s.stunned();
+        assert!(stun > 0, "precondition: the throw cost some helplessness");
+        let landed = s.player();
+
+        // The throw's frame, then one render per stunned turn.
+        for turn in 0..=stun {
             assert_eq!(
                 s.effect_cell_marks().count(),
                 2,
-                "both ends are still lit on render {turn}",
+                "both ends are still lit on render {turn} of {stun}",
+            );
+            assert_eq!(
+                s.player(),
+                landed,
+                "a stunned player cannot move off the mark"
             );
             s.step(Input::Wait);
         }
+        assert_eq!(s.stunned(), 0, "the stun is served");
         assert!(
             s.effect_cell_marks().next().is_none(),
-            "neither end outlives the frame that reported the throw",
+            "…and the marks go out with it, not before",
         );
     }
 
