@@ -30,6 +30,7 @@
 use super::*;
 use crate::ability::{AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::cell::Direction;
+use crate::mnemonic;
 use crate::place::LevelConfig;
 use crate::status::{live_messages, near_line, Message};
 
@@ -398,6 +399,14 @@ fn ability_line_layout(width: u32, statuses: &[AbilityStatus]) -> Vec<(usize, u3
 /// strip right-aligned into the bottom-right corner. Slots are a fixed width so a
 /// number appearing or ticking never shifts a neighbour. No band — the bar reads as
 /// a quiet HUD strip, not a message.
+///
+/// One cell of each entry carries the **mnemonic highlight** (§11.6/#360): the letter
+/// that entry answers to, given a [`Category::System`] ground — the HUD-control colour
+/// the `[?]` toggle and the panel's `[x]` already use, so it reads as *a key you can
+/// press* rather than as anything the ability is doing. It is a **background** only:
+/// the glyph keeps the entry's state colour, so the mark adds a fact without taking
+/// one away. And it recolours a cell the entry had already drawn, so it costs no
+/// width and §11.4's compile-time slot arithmetic is untouched.
 fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
     let blank = GlyphCell {
         glyph: ' ',
@@ -420,7 +429,9 @@ fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
         }
     };
 
-    for (i, start) in ability_line_layout(width, statuses) {
+    let layout = ability_line_layout(width, statuses);
+    let mnemonics = mnemonic::claim(&drawn_bar_names(&layout, statuses));
+    for ((i, start), letter) in layout.into_iter().zip(mnemonics) {
         let status = &statuses[i];
         put(
             &mut cells,
@@ -428,8 +439,68 @@ fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
             &status.bar_entry(),
             bar_category(status.state),
         );
+        // **Background only.** The letter keeps the entry's own state colour like every
+        // other cell of it, so the highlight adds a fact ("this is a key") without
+        // taking one away: an active entry still reads Owned under its mark and a
+        // cooling one still reads System. A receding entry's letter recedes with it,
+        // which is the right way round — the ability is not usable, and the highlight
+        // is still visible because it is the *ground* that carries it.
+        if let Some(x) = letter.map(|l| start + l as u32).filter(|x| *x < width) {
+            cells[x as usize].bg = Some(Category::System);
+        }
     }
     cells
+}
+
+/// The bar names of the **drawn** slots, in slot order — what the mnemonic claim
+/// (§11.6/#360) runs over.
+///
+/// Drawn rather than held, so a letter is never claimed by an entry the row
+/// truncated away: the highlight *is* the binding's only announcement, so a key
+/// nobody can see must not exist.
+fn drawn_bar_names(layout: &[(usize, u32)], statuses: &[AbilityStatus]) -> Vec<&'static str> {
+    layout
+        .iter()
+        .map(|&(i, _)| statuses[i].id.bar_name())
+        .collect()
+}
+
+/// The **mnemonic letter** of bar slot `slot`, or `None` where that slot has none
+/// (§11.6/#360) — the secondary key beside the slot's digit.
+///
+/// Derived from the run's own drawn bar, so it is the letter the row is highlighting
+/// at this very moment ([`ability_bar`]) and the letter the help panel prints — one
+/// derivation, three readers, no chance of the screen naming a key that does not fire.
+pub fn ability_mnemonic(state: &State, slot: usize) -> Option<char> {
+    let statuses = state.ability_statuses();
+    let layout = ability_line_layout(state.layout().facility().width(), &statuses);
+    let names = drawn_bar_names(&layout, &statuses);
+    let index = (*mnemonic::claim(&names).get(slot)?)?;
+    Some(mnemonic::letter_at(names[slot], index))
+}
+
+/// The bar slot a **mnemonic letter** fires (§11.6/#360), or `None` for a character
+/// no entry of this run claimed — the letter counterpart of
+/// [`ability_slot_for_code`](crate::ability_slot_for_code).
+///
+/// Case is folded, so a stray Shift (or Caps Lock) still fires the ability rather
+/// than silently costing the turn it was meant to spend. It lands on a *slot*, like
+/// the digit and like a tap, so all three meet at [`ability_in_slot`] and none of
+/// them can name a different ability from the one under the highlight.
+pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
+    let mut chars = key.chars();
+    let ch = match (chars.next(), chars.next()) {
+        (Some(c), None) => c.to_ascii_lowercase(),
+        _ => return None, // named keys ("Tab", "ArrowUp") are never a mnemonic
+    };
+    let statuses = state.ability_statuses();
+    let layout = ability_line_layout(state.layout().facility().width(), &statuses);
+    let names = drawn_bar_names(&layout, &statuses);
+    mnemonic::claim(&names)
+        .into_iter()
+        .enumerate()
+        .find(|&(slot, index)| index.is_some_and(|i| mnemonic::letter_at(names[slot], i) == ch))
+        .map(|(slot, _)| slot)
 }
 
 /// Draw the help toggle over the already-built near line `row` (§14 v2/#139/#267):
@@ -1721,6 +1792,109 @@ mod tests {
         // The map above the bar is not the bar.
         assert_eq!(ability_at(&s, 0, bar - 1), None, "the row above is map");
         assert_eq!(ability_at(&s, 0, NEAR_ROW), None, "nor is the near line");
+    }
+
+    /// #360's named case, on a real bar: a loadout of Decoy + Doors + Daze — three bar
+    /// names starting `D` — gives three **distinct** letters, each firing its own
+    /// ability, none of them a key §11.6 had already bound.
+    ///
+    /// The letters are the payload, but the assertion that matters is the last one:
+    /// each letter resolves to the slot whose entry the bar *highlighted*, so what the
+    /// row promises is what the keyboard does.
+    #[test]
+    fn three_names_starting_d_get_three_distinct_working_letters() {
+        let held = [AbilityId::Decoy, AbilityId::Autodoors, AbilityId::Confusion];
+        let s = State::new(
+            open_room(40, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 8),
+        )
+        .with_loadout(held.into_iter().fold(Loadout::empty(), Loadout::with));
+
+        let letters: Vec<Option<char>> = (0..held.len())
+            .map(|slot| ability_mnemonic(&s, slot))
+            .collect();
+        assert_eq!(
+            letters,
+            vec![Some('d'), Some('o'), Some('a')],
+            "Decoy keeps `d`; Doors and Daze fall through their own names",
+        );
+
+        for (slot, id) in held.into_iter().enumerate() {
+            let letter = letters[slot].expect("each of the three claimed a letter");
+            assert_eq!(
+                ability_slot_for_letter(&s, &letter.to_string()),
+                Some(slot),
+                "{letter:?} fires slot {slot}",
+            );
+            assert_eq!(
+                ability_in_slot(&s, slot),
+                Some(id),
+                "…which is where {id:?} is drawn",
+            );
+            // Uppercase lands on the same slot: a stray Shift must not cost the turn.
+            assert_eq!(
+                ability_slot_for_letter(&s, &letter.to_uppercase().to_string()),
+                Some(slot),
+                "{letter:?} fires with Shift held too",
+            );
+        }
+        // A letter nobody claimed fires nothing, and stays the page's.
+        for key in ["z", "q", "ArrowUp", "1"] {
+            assert_eq!(ability_slot_for_letter(&s, key), None, "{key:?}");
+        }
+    }
+
+    /// The highlight **is** the binding's announcement (§11.6/#360), so the cell the
+    /// bar marks has to be the cell of the letter that fires it — for every entry of a
+    /// loadout, not just the ones whose initial was free.
+    #[test]
+    fn the_highlighted_cell_is_the_letter_that_fires_it() {
+        let held = [
+            AbilityId::Run,
+            AbilityId::Decoy,
+            AbilityId::Autodoors,
+            AbilityId::Confusion,
+        ];
+        let s = State::new(
+            open_room(40, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 8),
+        )
+        .with_loadout(held.into_iter().fold(Loadout::empty(), Loadout::with));
+        let grid = render_screen(&s, ScreenUi::default());
+        let bar = ability_row(10);
+        let layout = ability_line_layout(40, &s.ability_statuses());
+
+        for (slot, start) in layout.iter().map(|&(_, start)| start).enumerate() {
+            let letter = ability_mnemonic(&s, slot).expect("every entry here claims one");
+            // Exactly one cell of the slot is highlighted…
+            let marked: Vec<u32> = (start..start + MAX_BAR_ENTRY as u32)
+                .filter(|&x| grid.get(x, bar).bg == Some(Category::System))
+                .collect();
+            assert_eq!(marked.len(), 1, "slot {slot} marks one cell");
+            // …it is the letter that fires the slot…
+            let cell = grid.get(marked[0], bar);
+            assert_eq!(
+                cell.glyph.to_ascii_lowercase(),
+                letter,
+                "slot {slot} marks the cell of {letter:?}",
+            );
+            assert_eq!(ability_slot_for_letter(&s, &letter.to_string()), Some(slot));
+            // …and the glyph keeps the entry's own state colour: the mark is a ground,
+            // so it adds "this is a key" without overwriting what the state says.
+            assert_eq!(
+                cell.fg,
+                bar_category(s.ability_statuses()[slot].state),
+                "slot {slot} keeps its state colour under the mark",
+            );
+        }
     }
 
     /// #359's binding, against the row it is a binding *on*: a **three**-ability run

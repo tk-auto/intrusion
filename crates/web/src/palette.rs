@@ -631,6 +631,40 @@ mod tests {
         }
     }
 
+    /// §11.6/#360: the **mnemonic highlight** on the ability bar is a
+    /// [`Category::System`] ground behind one letter of an entry, and it is the only
+    /// announcement that letter's binding ever gets — so it has to be seen. It must
+    /// stand off the page in both themes (or the marked cell would look unmarked), and
+    /// it must stay clear of the two grounds that carry *meaning* on the board, Danger
+    /// and Sensed, so nobody reads a highlighted key as something happening to the
+    /// ability.
+    ///
+    /// The glyph on top keeps the entry's own state colour, which for an
+    /// [`AbilityState::Unusable`](intrusion_core::AbilityState) entry is the receding
+    /// Ground — deliberately faint, since the mark is carried by the ground beneath it
+    /// and the ability is not usable anyway.
+    #[test]
+    fn the_mnemonic_highlight_reads_and_is_not_a_board_layer() {
+        for theme in THEMES {
+            let mark = bg_color(theme, Category::System, Visibility::Live);
+            let d = dist2(rgb(mark), rgb(page(theme)));
+            assert!(
+                d >= MIN_BG_DIST2,
+                "{theme:?}: the mnemonic highlight {mark} vanishes into the page \
+                 (dist^2 {d}) — the key would have no mark at all"
+            );
+            for layer in [Category::Danger, Category::Sensed, Category::Effect] {
+                let other = bg_color(theme, layer, Visibility::Live);
+                let d = dist2(rgb(mark), rgb(other));
+                assert!(
+                    d >= MIN_BG_DIST2,
+                    "{theme:?}: the highlight {mark} reads as the {layer:?} ground \
+                     {other} (dist^2 {d})"
+                );
+            }
+        }
+    }
+
     /// §7.6/§11.5a: the exit anchors every escape plan and is always visible — so
     /// out of the FOV the `E` must not sink into wall gray the way it briefly did.
     /// Interest's dim shade still reads as purple, apart from both the standard

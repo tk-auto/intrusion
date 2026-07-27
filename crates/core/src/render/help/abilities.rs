@@ -33,6 +33,7 @@
 use super::{ability_keys_column_start, CONTENT_INDENT};
 use crate::ability::{AbilityId, Loadout};
 use crate::category::Category;
+use crate::mnemonic;
 use crate::place::LevelConfig;
 use crate::render::{draw, Grid};
 
@@ -67,12 +68,19 @@ pub(super) fn draw_abilities(grid: &mut Grid, mut y: u32, loadout: Loadout) {
     y += 2;
 
     let mut any = false;
+    // The mnemonics are claimed over the **whole bar at once** (§11.6/#360) — a letter
+    // depends on what the entries to its left already took — so they are derived here,
+    // from the same loadout order the bar draws across, rather than per entry.
+    let ids: Vec<AbilityId> = loadout.iter().collect();
+    let names: Vec<&str> = ids.iter().map(|id| id.bar_name()).collect();
+    let mnemonics = mnemonic::claim(&names);
     // Enumerated, because the key an entry shows *is* its position: the loadout
     // iterates in ability-bar slot order (§11.4), so the nth entry here is the nth
     // entry on the bar and answers to the nth digit (§11.6/#359).
-    for (slot, id) in loadout.iter().enumerate() {
+    for (slot, id) in ids.iter().copied().enumerate() {
         any = true;
-        y = draw_entry(grid, y, slot, id);
+        let letter = mnemonics[slot].map(|i| mnemonic::letter_at(names[slot], i));
+        y = draw_entry(grid, y, slot, id, letter);
     }
     if !any {
         // No run boots this — a loadout always carries its innate set (§8.3) — but a
@@ -85,7 +93,13 @@ pub(super) fn draw_abilities(grid: &mut Grid, mut y: u32, loadout: Loadout) {
 /// One ability's entry, returning the row the next one starts on: the name and its
 /// key pairing on one row, the economy line under it, then the blurb, then a blank
 /// row of air.
-fn draw_entry(grid: &mut Grid, mut y: u32, slot: usize, id: AbilityId) -> u32 {
+fn draw_entry(
+    grid: &mut Grid,
+    mut y: u32,
+    slot: usize,
+    id: AbilityId,
+    mnemonic: Option<char>,
+) -> u32 {
     // Owned — "you and your things" (§11.2). An ability *is* one of your things, and
     // drawing the name in the player's own colour is what separates the four headings
     // from the prose hanging under them at a glance.
@@ -96,7 +110,7 @@ fn draw_entry(grid: &mut Grid, mut y: u32, slot: usize, id: AbilityId) -> u32 {
         grid,
         ability_keys_column_start(),
         y,
-        &ability_row_keys(slot, id),
+        &ability_row_keys(slot, id, mnemonic),
         Category::System,
     );
     y += 1;
@@ -174,12 +188,13 @@ fn turns(n: u32) -> String {
 /// panel says what a level ever grants. The two numbers differ the moment the first
 /// use is spent and that is not a contradiction — one is the supply, the other the
 /// remainder.
-pub(super) fn ability_row_keys(slot: usize, id: AbilityId) -> String {
+pub(super) fn ability_row_keys(slot: usize, id: AbilityId, mnemonic: Option<char>) -> String {
     if id.is_passive() {
         return format!("{} {}", id.bar_name(), crate::ability::PASSIVE_MARKER);
     }
     activated_row_keys(
         slot_key(slot),
+        mnemonic,
         id.bar_name(),
         id.def().economy().and_then(|e| e.uses_per_level()),
     )
@@ -198,11 +213,25 @@ fn slot_key(slot: usize) -> char {
         .unwrap_or('-')
 }
 
-/// The activated half of [`ability_row_keys`], as a pure function of the three things
+/// The activated half of [`ability_row_keys`], as a pure function of the four things
 /// it prints — so the widest entry a legal catalogue can produce can be measured
 /// against the column even while no shipping ability declares both a long name and a
 /// budget.
-fn activated_row_keys(key: char, bar_name: &str, uses_per_level: Option<u32>) -> String {
+///
+/// The mnemonic rides against the digit, `1·c`, sharing the digit's own cells rather
+/// than opening a column of its own: the keys column is the tightest on the panel
+/// (§11.4), and the two are one answer to one question — *what do I press for this?*
+/// An entry that claimed no letter (§11.6/#360) prints the digit alone.
+fn activated_row_keys(
+    key: char,
+    mnemonic: Option<char>,
+    bar_name: &str,
+    uses_per_level: Option<u32>,
+) -> String {
+    let key = match mnemonic {
+        Some(letter) => format!("{key}\u{b7}{letter}"),
+        None => key.to_string(),
+    };
     let keys = format!("{key} / {bar_name}");
     match uses_per_level {
         Some(uses) => format!("{keys} ({uses}/level)"),
@@ -260,6 +289,14 @@ mod tests {
         text_of(&render_tab(HelpTab::Abilities, Loadout::empty().with(id)))
     }
 
+    /// The mnemonic an ability claims when it is the **only** thing held — nothing
+    /// ahead of it, so it takes the first character of its bar name that §11.6 has not
+    /// already spoken for (#360).
+    fn alone(id: AbilityId) -> Option<char> {
+        let name = id.bar_name();
+        mnemonic::claim(&[name])[0].map(|i| mnemonic::letter_at(name, i))
+    }
+
     /// The tab lists exactly the **held** abilities, in bar order, and an ability the
     /// run does not hold appears nowhere on it (§11.4) — the whole point of deriving
     /// from the loadout rather than from [`AbilityId::ALL`].
@@ -268,16 +305,14 @@ mod tests {
         let loadout = held([AbilityId::Run, AbilityId::Decoy, AbilityId::Vision]);
         let text = text_of(&render_tab(HelpTab::Abilities, loadout));
 
-        for (slot, id) in [AbilityId::Run, AbilityId::Decoy, AbilityId::Vision]
-            .into_iter()
-            .enumerate()
-        {
+        let ids = [AbilityId::Run, AbilityId::Decoy, AbilityId::Vision];
+        let names: Vec<&str> = ids.iter().map(|id| id.bar_name()).collect();
+        let mnemonics = mnemonic::claim(&names);
+        for (slot, id) in ids.into_iter().enumerate() {
+            let letter = mnemonics[slot].map(|i| mnemonic::letter_at(names[slot], i));
+            let keys = ability_row_keys(slot, id, letter);
             assert!(text.contains(id.name()), "the tab names {}", id.name());
-            assert!(
-                text.contains(&ability_row_keys(slot, id)),
-                "…under {:?}",
-                ability_row_keys(slot, id),
-            );
+            assert!(text.contains(&keys), "…under {keys:?}");
         }
         for id in [
             AbilityId::Camouflage,
@@ -385,7 +420,11 @@ mod tests {
         // (§11.6 — its key was already the free no-op, and now there is not even a
         // key to be a no-op).
         for slot in 0..AbilityId::MAX_HELD {
-            assert_eq!(ability_row_keys(slot, AbilityId::Vision), "Sight (on)");
+            assert_eq!(
+                ability_row_keys(slot, AbilityId::Vision, Some('s')),
+                "Sight (on)",
+                "a passive shows neither key, whatever it claimed",
+            );
         }
         let line = economy_line(AbilityId::Vision);
         assert!(line.contains("always on") && line.contains("slot"));
@@ -400,12 +439,20 @@ mod tests {
     /// controls card, which no longer carries ability rows (#296).
     #[test]
     fn the_entries_explain_the_bar_names() {
-        assert_eq!(ability_row_keys(0, AbilityId::Camouflage), "1 / Camo");
-        assert_eq!(ability_row_keys(0, AbilityId::Run), "1 / Run");
+        assert_eq!(
+            ability_row_keys(0, AbilityId::Camouflage, Some('c')),
+            "1\u{b7}c / Camo"
+        );
+        assert_eq!(
+            ability_row_keys(0, AbilityId::Run, Some('r')),
+            "1\u{b7}r / Run"
+        );
+        // An entry that claimed nothing shows the digit alone (§11.6/#360).
+        assert_eq!(ability_row_keys(0, AbilityId::Run, None), "1 / Run");
         for (id, keys, name) in [
-            (AbilityId::Camouflage, "1 / Camo", "Camouflage"),
+            (AbilityId::Camouflage, "1\u{b7}c / Camo", "Camouflage"),
             (AbilityId::Vision, "Sight (on)", "Vision"),
-            (AbilityId::Autodoors, "1 / Doors", "Autodoors"),
+            (AbilityId::Autodoors, "1\u{b7}d / Doors", "Autodoors"),
         ] {
             let text = tab_holding(id);
             assert!(text.contains(keys), "the tab shows {keys:?}");
@@ -419,7 +466,7 @@ mod tests {
     #[test]
     fn the_entries_carry_the_bar_slot_digit() {
         for id in AbilityId::ALL {
-            let keys = ability_row_keys(0, id);
+            let keys = ability_row_keys(0, id, alone(id));
             assert!(
                 tab_holding(id).contains(&keys),
                 "the tab must list {} under {keys:?}",
@@ -451,14 +498,16 @@ mod tests {
 
         let loadout = held([AbilityId::Run, AbilityId::Camouflage, AbilityId::Decoy]);
         let text = text_of(&render_tab(HelpTab::Abilities, loadout));
-        for (digit, id) in [
-            ('1', AbilityId::Run),
-            ('2', AbilityId::Camouflage),
-            ('3', AbilityId::Decoy),
+        // …and beside each digit, the letter that entry claimed (§11.6/#360): the
+        // three initials are all free here, so they read as a player would guess.
+        for (digit, letter, id) in [
+            ('1', 'r', AbilityId::Run),
+            ('2', 'c', AbilityId::Camouflage),
+            ('3', 'd', AbilityId::Decoy),
         ] {
             assert!(
-                text.contains(&format!("{digit} / {}", id.bar_name())),
-                "{} is the run's {digit} key",
+                text.contains(&format!("{digit}\u{b7}{letter} / {}", id.bar_name())),
+                "{} is the run's {digit} (and {letter}) key",
                 id.name(),
             );
         }
@@ -469,10 +518,13 @@ mod tests {
     #[test]
     fn a_use_budget_is_stated_on_the_key_and_the_economy() {
         assert_eq!(
-            activated_row_keys('4', "Bore", Some(3)),
-            "4 / Bore (3/level)"
+            activated_row_keys('4', Some('b'), "Bore", Some(3)),
+            "4\u{b7}b / Bore (3/level)"
         );
-        assert_eq!(activated_row_keys('4', "Bore", None), "4 / Bore");
+        assert_eq!(
+            activated_row_keys('4', Some('b'), "Bore", None),
+            "4\u{b7}b / Bore"
+        );
         for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
             let declared = id
                 .def()
@@ -480,7 +532,7 @@ mod tests {
                 .and_then(|e| e.uses_per_level())
                 .is_some();
             assert_eq!(
-                ability_row_keys(0, id).contains("/level"),
+                ability_row_keys(0, id, alone(id)).contains("/level"),
                 declared,
                 "{} states its budget exactly when it has one",
                 id.name(),
@@ -511,7 +563,7 @@ mod tests {
             .map(|id| id.bar_name().chars().count())
             .max()
             .expect("the catalogue is not empty");
-        let widest = activated_row_keys('4', &"W".repeat(longest_bar_name), Some(9));
+        let widest = activated_row_keys('4', Some('w'), &"W".repeat(longest_bar_name), Some(9));
         let right_margin = LevelConfig::V1.width - 1;
         assert!(
             ability_keys_column_start() + widest.chars().count() as u32 <= right_margin,
