@@ -64,6 +64,10 @@ impl RunOutcome {
 pub struct RunRecord {
     /// The seed the run booted from — with the policy's script, the whole replay (§12.4).
     pub seed: u64,
+    /// The playstyle profile that played the run (§13.2), or `None` when the policy
+    /// has no temperament (a script). What makes a batch's rows attributable: two
+    /// profiles over the same seeds are two rows that say which is which.
+    pub profile: Option<&'static str>,
     /// How the run ended.
     pub outcome: RunOutcome,
     /// Spent turns at the end of the run ([`State::turn`]) — free actions excluded.
@@ -117,6 +121,7 @@ pub fn run_one_with(
 
     let mut record = RunRecord {
         seed,
+        profile: policy.profile_name(),
         outcome: RunOutcome::Timeout,
         turns: 0,
         detections: 0,

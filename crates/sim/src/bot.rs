@@ -52,51 +52,7 @@ use intrusion_core::{
 };
 
 use crate::policy::PlayerPolicy;
-
-/// A cost penalty added to a step that enters a cell a visible guard is watching
-/// (§11.5). Far larger than any real path distance on the v1 footprint (a 40×40
-/// facility bounds any route well under this), so a watched step is always dearer
-/// than any unwatched one, while still being *comparable* — when every option is
-/// watched, the least-watched, shortest route still wins.
-const WATCHED_PENALTY: u64 = 1_000_000;
-
-/// How near a perceived guard a cell must be to draw a keep-away penalty (Manhattan).
-/// Inside this radius the bot steers wide; outside it, a guard is far enough to
-/// ignore while routing. Also the range within which a held bot sidesteps rather
-/// than standing.
-///
-/// The same radius covers seen and sensed guards. A *wider* berth for sensed-only
-/// guards (whose facing is unknown, §9.2) was tried under #196 and rejected: the
-/// §13.2 sim showed it did not lower detections and cost the bot wins/timeouts —
-/// steering omnidirectionally away from an exact cell is as apt to walk into the
-/// unseen cone as away from it, and the bigger halo just lengthens exposed routes.
-const PROXIMITY_RADIUS: u32 = 5;
-
-/// How near a perceived guard must be (Manhattan) for the bot to break off and take
-/// cover before it is seen (§7.6). Wide enough to react while the guard is still out
-/// of striking range, narrow enough not to hide from a patrol two rooms away.
-const THREAT_RADIUS: u32 = 6;
-
-/// The furthest a hideout may be (Manhattan) and still be worth diverting to for
-/// cover. A bolthole further than this is not shelter — reaching it means marching
-/// across the very patrol being dodged — so the bot routes carefully on instead.
-const COVER_REACH: u32 = 8;
-
-/// Once hidden, the bot stays put until the nearest perceived guard is beyond this
-/// (Manhattan) — wider than [`THREAT_RADIUS`] so a guard loitering just outside does
-/// not make it pop in and out, glimpsed on every step. Set at the sense range: come
-/// out only once no guard is sensed at all.
-const CLEAR_RADIUS: u32 = 8;
-
-/// The most turns the bot will wait out a patrol from one cover stint. A guard whose
-/// beat keeps it parked nearby would otherwise pin the bot in its cupboard forever;
-/// past this it gives up hiding and pushes on, trading a certain timeout for a chance.
-const MAX_HIDE: u32 = 12;
-
-/// Turns of committed pursuit after leaving cover before the bot may hide again — the
-/// anti-oscillation guard that keeps a patrol looping past a cupboard from trapping it
-/// in an endless in-and-out (see [`StealthBot::cover_cooldown`]).
-const COVER_COOLDOWN: u32 = 8;
+use crate::profile::{Descent, Profile};
 
 /// How far a found body's §7.6 search reaches, as a keep-away radius the bot honours when
 /// choosing a bolthole (§15 Q5, the found-a-body-nearby check). It mirrors the core
@@ -105,41 +61,39 @@ const COVER_COOLDOWN: u32 = 8;
 /// core's constants; conservative, so the bot errs toward not hiding beside a body it left.
 const BODY_HIDE_CLEARANCE: u32 = 4;
 
-/// The keep-away weight per unit of closeness-squared (see [`proximity_penalty`]).
-/// Sized to dominate raw path distance on the v1 footprint — so the bot will take a
-/// long way round to keep its distance — while staying well under [`WATCHED_PENALTY`],
-/// which no amount of proximity may ever outweigh.
-const PROXIMITY_UNIT: u64 = 1_000;
-
 /// A keep-away cost for stepping onto `cell`: the closer a perceived guard, the
-/// steeper it climbs (with the square of how far inside [`PROXIMITY_RADIUS`] the
-/// guard sits), so the bot gives patrols a wide berth instead of brushing past a
-/// cone's edge where the next sweep would catch it. Zero when no guard is near.
-fn proximity_penalty(cell: Cell, guards: &[Cell]) -> u64 {
+/// steeper it climbs (with the square of how far inside the profile's
+/// [`proximity_radius`](Profile::proximity_radius) the guard sits), so the bot gives
+/// patrols a wide berth instead of brushing past a cone's edge where the next sweep
+/// would catch it. Zero when no guard is near.
+fn proximity_penalty(cell: Cell, guards: &[Cell], profile: &Profile) -> u64 {
     guards
         .iter()
         .map(|&guard| cell.manhattan_distance(guard))
-        .filter(|&distance| distance <= PROXIMITY_RADIUS)
+        .filter(|&distance| distance <= profile.proximity_radius)
         .map(|distance| {
-            let closeness = u64::from(PROXIMITY_RADIUS + 1 - distance);
-            closeness * closeness * PROXIMITY_UNIT
+            let closeness = u64::from(profile.proximity_radius + 1 - distance);
+            closeness * closeness * profile.proximity_unit
         })
         .sum()
 }
 
-/// The greedy baseline stealth bot (§13.2). Holds only what a player would carry in
-/// their head across turns: which consoles it has already emptied — the game keeps
-/// a taken console stamped as terrain, so without this the bot would keep routing to
-/// intel it has already taken.
+/// The greedy baseline stealth bot (§13.2), playing one [`Profile`]'s temperament.
+/// Holds only what a player would carry in their head across turns: which consoles it
+/// has already emptied — the game keeps a taken console stamped as terrain, so without
+/// this the bot would keep routing to intel it has already taken.
 #[derive(Clone, Debug, Default)]
 pub struct StealthBot {
+    /// The temperament this bot plays: every threshold it weighs its options by
+    /// (§13.2). One policy, one row of numbers — see [`Profile`].
+    profile: Profile,
     /// Consoles the bot has taken. Recorded optimistically the turn it steps onto a
     /// known untaken console: a bump into an untaken console in the field of view
     /// always takes it (§4.3/§6.2, the touching ring is always seen), so the take is
     /// certain and this never drifts from the game's own objective count.
     taken: HashSet<Cell>,
     /// Turns spent waiting in the current cover stint. Bounds how long the bot will
-    /// sit in a cupboard for a patrol that will not leave: past [`MAX_HIDE`] it gives
+    /// sit in a cupboard for a patrol that will not leave: past the profile's [`max_hide`](Profile::max_hide) it gives
     /// up and pushes on, so a lingering guard turns into a timeout- or capture-risk,
     /// never an endless wait. Reset to zero the moment it is not hidden.
     hide_turns: u32,
@@ -152,13 +106,33 @@ pub struct StealthBot {
 }
 
 impl StealthBot {
-    /// A fresh bot with nothing taken yet.
+    /// A fresh bot with nothing taken yet, playing the [`Profile::BASELINE`]
+    /// temperament — today's bot, so metrics stay comparable across the seam.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A fresh bot playing `profile`'s temperament (§13.2). The same policy as
+    /// [`StealthBot::new`]; only the numbers it weighs its options by differ.
+    pub fn with_profile(profile: Profile) -> Self {
+        Self {
+            profile,
+            ..Self::default()
+        }
+    }
+
+    /// The temperament this bot is playing — the name every emitted row carries,
+    /// so a batch's output is attributable to the profile that produced it.
+    pub fn profile(&self) -> Profile {
+        self.profile
     }
 }
 
 impl PlayerPolicy for StealthBot {
+    fn profile_name(&self) -> Option<&'static str> {
+        Some(self.profile.name)
+    }
+
     fn decide(&mut self, state: &State) -> Input {
         // A cover stint only counts while actually in a cupboard; stepping out of one
         // (or never being in one) resets it.
@@ -227,7 +201,7 @@ impl StealthBot {
             .into_iter()
             .filter(|h| !witnessed.contains(h) && !near_findable_body(&bodies, *h))
             .collect();
-        if let Some(dir) = self.descend(state, &boltholes, danger, blocked, Descent::flee()) {
+        if let Some(dir) = self.descend(state, &boltholes, danger, blocked, self.profile.flee) {
             return Input::Step(dir);
         }
 
@@ -261,13 +235,13 @@ impl StealthBot {
     }
 
     /// Take cover from a closing patrol before it ever sees you: when a guard is
-    /// perceived within [`THREAT_RADIUS`], slip into a near hideout — or, with none to
+    /// perceived within the profile's [`threat_radius`](Profile::threat_radius), slip into a near hideout — or, with none to
     /// hand, cloak with Camouflage — and wait the patrol out (§7.6/§8.3/§10.3).
     /// Returns `None` when there is no near threat, or nothing to take cover with,
     /// leaving the bot to pursue as normal.
     ///
     /// Inside the cupboard it holds until the coast clears (no guard within
-    /// [`CLEAR_RADIUS`]), then pursuit resumes: the "hide, let it pass, carry on" loop
+    /// [`clear_radius`](Profile::clear_radius)), then pursuit resumes: the "hide, let it pass, carry on" loop
     /// that is the whole point of a hideout.
     fn take_cover(
         &mut self,
@@ -285,9 +259,9 @@ impl StealthBot {
             // still on its doorstep and duck straight back, glimpsed each time. And
             // never wait forever: past the cap, give up and push on. On leaving, set
             // a cooldown so the bot makes real progress before it may hide again.
-            let clear = nearest.is_none_or(|d| d > CLEAR_RADIUS);
-            if clear || self.hide_turns > MAX_HIDE {
-                self.cover_cooldown = COVER_COOLDOWN;
+            let clear = nearest.is_none_or(|d| d > self.profile.clear_radius);
+            if clear || self.hide_turns > self.profile.max_hide {
+                self.cover_cooldown = self.profile.cover_cooldown;
                 return None;
             }
             return Some(Input::Wait);
@@ -299,7 +273,7 @@ impl StealthBot {
             return None;
         }
         // Duck in only when a patrol is genuinely closing.
-        if nearest.is_none_or(|d| d > THREAT_RADIUS) {
+        if nearest.is_none_or(|d| d > self.profile.threat_radius) {
             return None;
         }
         // Only worth a detour to a hideout that is genuinely close by; a far one is
@@ -312,12 +286,12 @@ impl StealthBot {
         let hideouts: Vec<Cell> = known_hideouts(state)
             .into_iter()
             .filter(|h| {
-                player.manhattan_distance(*h) <= COVER_REACH
+                player.manhattan_distance(*h) <= self.profile.cover_reach
                     && !witnessed.contains(h)
                     && !near_findable_body(&bodies, *h)
             })
             .collect();
-        if let Some(dir) = self.descend(state, &hideouts, danger, blocked, Descent::flee()) {
+        if let Some(dir) = self.descend(state, &hideouts, danger, blocked, self.profile.flee) {
             return Some(Input::Step(dir));
         }
 
@@ -343,9 +317,11 @@ impl StealthBot {
     fn pursue(&mut self, state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Cell>) -> Input {
         let goals = if !state.exit_ready() {
             // No intel in hand yet: head for the nearest known console, since a single
-            // objective now opens the exit (§10.2 experiment). This baseline grabs the
-            // first intel it can reach and leaves — the shortest honest run; aggressive
-            // profiles (a later ticket, §13.2) are what press on for more.
+            // objective now opens the exit (§10.2 experiment). Every profile grabs the
+            // first intel it can reach and leaves — the shortest honest run. Pressing
+            // on for a *second* console is a different decision, not a different
+            // number, so it is deliberately not a profile field (§13.4): profiles are
+            // one policy at different temperatures, never a forked `decide`.
             let known = self.known_intel(state);
             // Nothing seen to head for: sweep the facility until the consoles show.
             if known.is_empty() {
@@ -358,12 +334,14 @@ impl StealthBot {
             exit_cell(state).into_iter().collect()
         };
 
-        let Some(dir) = self.descend(state, &goals, danger, blocked, Descent::pursue()) else {
+        let Some(dir) = self.descend(state, &goals, danger, blocked, self.profile.pursue) else {
             // No safe progress. Standing still next to a patrol is how you get
             // walked into, so if one is close, sidestep to open ground; otherwise
             // hold a beat and let the cone sweep past (waiting also widens the
             // senses, §8.3/§9.1).
-            return if nearest_perceived_guard(state).is_some_and(|d| d <= PROXIMITY_RADIUS) {
+            return if nearest_perceived_guard(state)
+                .is_some_and(|d| d <= self.profile.proximity_radius)
+            {
                 retreat_step(state, danger, blocked).map_or(Input::Wait, Input::Step)
             } else {
                 Input::Wait
@@ -420,7 +398,7 @@ impl StealthBot {
         } else {
             Vec::new()
         };
-        let field = cost_field(facility, goals, blocked, danger, &guards);
+        let field = cost_field(facility, goals, blocked, danger, &guards, &self.profile);
 
         let mut best: Option<(u64, bool, Direction)> = None;
         for dir in Direction::ALL {
@@ -452,39 +430,6 @@ impl StealthBot {
             return None;
         }
         Some(dir)
-    }
-}
-
-/// How [`StealthBot::descend`] weighs its options — the difference between picking
-/// a careful route to an objective and bolting for cover.
-#[derive(Clone, Copy)]
-struct Descent {
-    /// Add a keep-away cost near every perceived guard, so a route gives patrols a
-    /// wide berth rather than skimming them. On when pursuing; off when fleeing,
-    /// where the only thing that matters is reaching the refuge.
-    keep_clear: bool,
-    /// Refuse a step into a cone from a currently-safe cell (hold instead). On when
-    /// pursuing — there is no rush; off when fleeing, where standing still loses.
-    hold_watched: bool,
-}
-
-impl Descent {
-    /// Careful routing to an objective: keep clear of guards and never walk into a
-    /// cone from safety.
-    fn pursue() -> Self {
-        Self {
-            keep_clear: true,
-            hold_watched: true,
-        }
-    }
-
-    /// Bolting for cover: shortest line to the refuge, cones penalised but never a
-    /// reason to stand still.
-    fn flee() -> Self {
-        Self {
-            keep_clear: false,
-            hold_watched: false,
-        }
     }
 }
 
@@ -730,7 +675,7 @@ fn perceived_guard_cells(state: &State) -> Vec<Cell> {
 }
 
 /// A Dijkstra cost-field from `goals` outward: each routable cell's least total cost
-/// to reach a goal, with a guard's cone ([`WATCHED_PENALTY`]) and its keep-away
+/// to reach a goal, with a guard's cone ([`Profile::watched_penalty`]) and its keep-away
 /// halo ([`proximity_penalty`]) folded into the cost of *entering* each cell. Following
 /// this field downhill is the bot's routing — it threads the cheapest safe way to a
 /// goal, and, being a true potential, offers no local minimum to get stuck in.
@@ -746,6 +691,7 @@ fn cost_field(
     blocked: &HashSet<Cell>,
     danger: &HashSet<Cell>,
     guards: &[Cell],
+    profile: &Profile,
 ) -> HashMap<Cell, u64> {
     let mut cost: HashMap<Cell, u64> = HashMap::new();
     // Min-heap on cost, tie-broken by cell order for determinism.
@@ -773,11 +719,11 @@ fn cost_field(
             // The price of *entering* the neighbour: one step, plus a cone's weight
             // and the keep-away halo of any nearby guard.
             let watched = if danger.contains(&neighbour) {
-                WATCHED_PENALTY
+                profile.watched_penalty
             } else {
                 0
             };
-            let entry = 1 + watched + proximity_penalty(neighbour, guards);
+            let entry = 1 + watched + proximity_penalty(neighbour, guards, profile);
             let next = here + entry;
             if cost.get(&neighbour).is_none_or(|&old| next < old) {
                 cost.insert(neighbour, next);
@@ -927,19 +873,146 @@ mod tests {
         (state, placement)
     }
 
-    /// §12.4: the same seed under the bot produces byte-identical rows, twice. The
-    /// bot carries its own state (taken consoles, cover timers), so this pins that
-    /// none of it leaks non-determinism into the run.
+    /// §12.4: the same `(seed, profile)` under the bot produces byte-identical
+    /// rows, twice. The bot carries its own state (taken consoles, cover timers),
+    /// so this pins that none of it leaks non-determinism into the run — and it
+    /// sweeps **every** shipped profile (#198), not just the baseline, since a
+    /// temperament is only a regression instrument if it reproduces.
     #[test]
-    fn the_bot_is_deterministic_per_seed() {
-        for seed in [0, 7, 200] {
-            let a = run_one(seed, &mut StealthBot::new(), 300).expect("generates");
-            let b = run_one(seed, &mut StealthBot::new(), 300).expect("generates");
-            assert_eq!(a, b, "seed {seed}: a bot run reproduces");
+    fn the_bot_is_deterministic_per_seed_and_profile() {
+        for profile in Profile::ALL {
+            for seed in [0, 7, 200] {
+                let play = || {
+                    run_one(seed, &mut StealthBot::with_profile(profile), 300).expect("generates")
+                };
+                let (a, b) = (play(), play());
+                assert_eq!(a, b, "{} seed {seed}: a bot run reproduces", profile.name);
+                assert_eq!(
+                    a.to_json_line(),
+                    b.to_json_line(),
+                    "{} seed {seed}: identical bytes",
+                    profile.name,
+                );
+                assert_eq!(
+                    a.profile,
+                    Some(profile.name),
+                    "seed {seed}: the row names the temperament that played it",
+                );
+            }
+        }
+    }
+
+    /// #198's behaviour-preservation clause: the [`Profile::BASELINE`] row of
+    /// numbers **is** the constants the bot carried before the seam existed, so
+    /// every metric captured under it stays comparable with the batches that came
+    /// before. Asserted as byte-identical rows between the default bot and one
+    /// explicitly given the baseline profile, over a spread of seeds — the numbers
+    /// are pinned by the profile literal, and this pins that the policy actually
+    /// reads them rather than a stray leftover constant.
+    #[test]
+    fn the_baseline_profile_is_the_default_bot() {
+        assert_eq!(StealthBot::new().profile(), Profile::BASELINE);
+        for seed in 30..40 {
+            let default = run_one(seed, &mut StealthBot::new(), 300).expect("generates");
+            let explicit = run_one(seed, &mut StealthBot::with_profile(Profile::BASELINE), 300)
+                .expect("generates");
             assert_eq!(
-                a.to_json_line(),
-                b.to_json_line(),
-                "seed {seed}: identical bytes"
+                default.to_json_line(),
+                explicit.to_json_line(),
+                "seed {seed}: the baseline profile must reproduce today's bot",
+            );
+        }
+    }
+
+    /// The profiles are **distinguishable** over a batch — a shape assertion, never
+    /// a leaderboard (§13.4). Three directions the temperaments are built to differ
+    /// in, checked over the same seeds so the facility is held fixed:
+    ///
+    /// - **`cautious` is seen less often, per turn it plays.** Rate, not raw count:
+    ///   waiting a sweep out costs turns, so the careful temperament racks up a
+    ///   longer run and would lose a raw-total comparison it is actually winning.
+    ///   `aggressive` routes with `hold_watched: false` — it walks a watched cell
+    ///   rather than waiting — and gives a third of the berth, so being seen more
+    ///   often is the *cost* of its temperament, not a verdict on it.
+    /// - **`cautious` spends a bigger share of its turns waiting.** The direct
+    ///   signature of "ducks into cover early and waits long" against "hides late
+    ///   and briefly".
+    /// - **The two play differently at all** — their usage histograms are not the
+    ///   same numbers. Identical histograms would mean the profile seam changed
+    ///   nothing, and the batch would be measuring one bot twice.
+    ///
+    /// Deliberately loose and direction-only, in the spirit of the mixed-outcome
+    /// test: never "cautious wins more" (§13.4 — a profile is a temperament, not a
+    /// better player, and on this batch the win rates are close enough that either
+    /// could lead).
+    #[test]
+    fn the_profiles_play_the_same_seeds_differently() {
+        let seeds = 30..70;
+        let batch = |profile: Profile| {
+            crate::Summary::of(
+                &run_batch(seeds.clone(), DEFAULT_INPUT_CAP, move |_| {
+                    StealthBot::with_profile(profile)
+                })
+                .expect("generates"),
+            )
+        };
+        let cautious = batch(Profile::CAUTIOUS);
+        let aggressive = batch(Profile::AGGRESSIVE);
+
+        let seen_per_turn = |s: &crate::Summary| s.detections as f64 / s.total_turns as f64;
+        assert!(
+            seen_per_turn(&cautious) <= seen_per_turn(&aggressive),
+            "the cautious profile was seen more often per turn than the aggressive \
+             one ({:.4} vs {:.4}) — the temperaments are not what they claim",
+            seen_per_turn(&cautious),
+            seen_per_turn(&aggressive),
+        );
+
+        let waiting =
+            |s: &crate::Summary| f64::from(s.usage.count(Verb::Wait)) / s.total_turns as f64;
+        assert!(
+            waiting(&cautious) > waiting(&aggressive),
+            "the cautious profile did not wait more than the aggressive one \
+             ({:.4} vs {:.4}) — cover patience is its whole signature",
+            waiting(&cautious),
+            waiting(&aggressive),
+        );
+
+        assert_ne!(
+            cautious.usage, aggressive.usage,
+            "the two temperaments spent their turns identically — the profile \
+             seam is not reaching the policy",
+        );
+    }
+
+    /// Every shipped profile still **plays the game** (§13.4), not just the
+    /// baseline: over a batch each one reaches real endings rather than stalling
+    /// out en masse. A temperament whose numbers livelock the bot would quietly
+    /// turn its rows into a measurement of the bot instead of the game (§13.3),
+    /// which is exactly what this catches. Loose, like the baseline's own
+    /// mixed-outcome test: the exact counts are free to move.
+    #[test]
+    fn every_profile_finishes_its_runs() {
+        let runs = 40;
+        for profile in Profile::ALL {
+            let records = run_batch(30..30 + runs, DEFAULT_INPUT_CAP, move |_| {
+                StealthBot::with_profile(profile)
+            })
+            .expect("generates");
+            let count = |o: RunOutcome| records.iter().filter(|r| r.outcome == o).count();
+            let timeouts = count(RunOutcome::Timeout);
+            assert!(
+                timeouts <= runs as usize / 5,
+                "{}: too many timeouts ({timeouts}/{runs}) — this temperament \
+                 stalls rather than plays",
+                profile.name,
+            );
+            assert!(
+                count(RunOutcome::Win) >= 1 && count(RunOutcome::Capture) >= 1,
+                "{}: a degenerate outcome profile ({} wins, {} captures)",
+                profile.name,
+                count(RunOutcome::Win),
+                count(RunOutcome::Capture),
             );
         }
     }

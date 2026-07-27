@@ -24,12 +24,20 @@ fn usage_counts_json(usage: &UsageHistogram) -> String {
     format!("{{{}}}", body.join(","))
 }
 
+/// A profile name as a JSON string, or `null` when the policy had no temperament
+/// (a script). The `null` says "no profile"; naming `"baseline"` there would claim
+/// a bot played the run.
+fn profile_json(profile: Option<&'static str>) -> String {
+    profile.map_or_else(|| "null".to_string(), |name| format!("\"{name}\""))
+}
+
 impl RunRecord {
     /// The run's JSONL row. Field order is fixed; see `crates/sim/README.md`.
     pub fn to_json_line(&self) -> String {
         format!(
-            "{{\"seed\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":null}}",
+            "{{\"seed\":{},\"profile\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":null}}",
             self.seed,
+            profile_json(self.profile),
             self.outcome.as_str(),
             self.turns,
             self.detections,
@@ -44,6 +52,12 @@ impl RunRecord {
 /// from §13.2's table. Numbers, never verdicts (§13.4).
 #[derive(Clone, PartialEq, Debug)]
 pub struct Summary {
+    /// The playstyle profile the batch was played under (§13.2), when every run
+    /// agrees on one — `None` for a scripted batch, and equally `None` for a
+    /// batch whose rows disagree, since no single name would describe it. The
+    /// per-profile comparison the playtest skill reports is one summary per
+    /// profile, each attributable; a mixed batch honestly refuses to claim one.
+    pub profile: Option<&'static str>,
     /// Runs in the batch.
     pub runs: usize,
     /// Runs ending in each [`RunOutcome`], in the same order.
@@ -99,7 +113,12 @@ impl Summary {
                 f64::from(win_turns[mid - 1] + win_turns[mid]) / 2.0
             }
         });
+        // One name only when every row carries it: a batch mixing profiles (or one
+        // with none at all) is `None` rather than borrowing the first row's label.
+        let first = records.first().and_then(|r| r.profile);
+        let profile = first.filter(|name| records.iter().all(|r| r.profile == Some(*name)));
         Self {
+            profile,
             runs: records.len(),
             wins,
             captures: count(RunOutcome::Capture),
@@ -152,7 +171,8 @@ impl Summary {
             .map(|(&v, s)| format!("\"{}\":{s:.4}", v.key()))
             .collect();
         format!(
-            "{{\"summary\":{{\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak\":null}}}}",
+            "{{\"summary\":{{\"profile\":{},\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak\":null}}}}",
+            profile_json(self.profile),
             self.runs,
             self.wins,
             self.captures,
@@ -185,6 +205,7 @@ mod tests {
         usage.record(Verb::Run);
         RunRecord {
             seed,
+            profile: Some("baseline"),
             outcome,
             turns,
             detections: 2,
@@ -200,7 +221,7 @@ mod tests {
     fn the_run_row_schema_is_pinned() {
         assert_eq!(
             record(17, RunOutcome::Win, 214).to_json_line(),
-            "{\"seed\":17,\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0},\"alert_peak\":null}"
+            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0},\"alert_peak\":null}"
         );
     }
 
@@ -218,7 +239,7 @@ mod tests {
         let summary = Summary::of(&records);
         assert_eq!(
             summary.to_json_line(),
-            "{\"summary\":{\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000},\"diversity\":0.0000,\"alert_peak\":null}}"
+            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000},\"diversity\":0.0000,\"alert_peak\":null}}"
         );
     }
 
@@ -238,6 +259,40 @@ mod tests {
         assert_eq!(empty.runs, 0);
         assert_eq!(empty.diversity, 0.0, "an empty batch has no diversity");
         assert_eq!(empty.total_turns, 0);
+    }
+
+    /// #198: a row's `profile` is what makes a batch attributable, so the summary
+    /// claims a name **only** when every run agrees on one. A scripted batch has
+    /// no temperament (`null`, never a fake `"baseline"`), and a batch whose rows
+    /// disagree refuses to pick one rather than borrowing the first row's label.
+    #[test]
+    fn a_summary_only_claims_a_profile_every_run_agrees_on() {
+        let one_profile = Summary::of(&[
+            record(1, RunOutcome::Win, 100),
+            record(2, RunOutcome::Capture, 40),
+        ]);
+        assert_eq!(one_profile.profile, Some("baseline"));
+        assert!(one_profile
+            .to_json_line()
+            .starts_with("{\"summary\":{\"profile\":\"baseline\","));
+
+        let mut cautious = record(3, RunOutcome::Win, 90);
+        cautious.profile = Some("cautious");
+        let mixed = Summary::of(&[record(1, RunOutcome::Win, 100), cautious]);
+        assert_eq!(mixed.profile, None, "two temperaments name neither");
+        assert!(mixed
+            .to_json_line()
+            .starts_with("{\"summary\":{\"profile\":null,"));
+
+        let mut scripted = record(4, RunOutcome::Timeout, 10);
+        scripted.profile = None;
+        assert!(scripted.to_json_line().contains("\"profile\":null"));
+        assert_eq!(Summary::of(&[scripted]).profile, None);
+        assert_eq!(
+            Summary::of(&[]).profile,
+            None,
+            "nothing played, nothing claimed"
+        );
     }
 
     /// The §13.2 diversity signal at the batch level (#137): a batch whose runs
