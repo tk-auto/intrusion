@@ -894,11 +894,6 @@ impl State {
             self.moved_this_turn = self.player != from;
             // Phases 2 and 3 only happen because the player spent the turn (§4.2/§4.4).
             events.extend(self.run_world_phases());
-            // Latch the marks of any effect that acted in phase 1 (§11.5/#308/#338),
-            // *after* the fade at the head of the world phases — exactly the door
-            // cues' shape (§9.4) — so a flash lit this turn keeps its full life
-            // instead of losing a turn to the very tick that placed it.
-            self.record_effect_marks(&events);
             // Ability durations tick HERE — at end of turn, after all three phases —
             // so a freshly activated N-turn ability yields N protected turns and the
             // activation turn itself is covered (§8.2's N-yields-N−1 trap): the
@@ -949,6 +944,20 @@ impl State {
             if phase_ended && self.outcome == Outcome::Playing && !self.can_rematerialize() {
                 self.eject_from_solid(&mut events);
             }
+            // Latch the marks of every effect that acted this turn (§11.5/#308/#338),
+            // once, at the very end of it — *after* the fade at the head of the world
+            // phases, exactly the door cues' shape (§9.4), so a flash lit this turn
+            // keeps its full life instead of losing a turn to the very tick that placed
+            // it, and after the last phase that can still produce an effect event.
+            //
+            // That last part is why this sits below the eject rather than beside the
+            // world phases: the safety eject resolves after the ability clocks, so an
+            // `Ejected` latched any earlier would be latched from a list it was not yet
+            // in and never drawn at all (#339). Running here also means a mark from an
+            // ability whose window ended this very turn survives `clear_effect_marks`
+            // above — which is exactly right for the eject, an event whose whole
+            // occasion *is* the window ending.
+            self.record_effect_marks(&events);
         }
 
         // Every action replaces the near line's source, free bumps included —
