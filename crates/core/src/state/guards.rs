@@ -54,9 +54,10 @@ struct GuardSenses {
     /// couldn't sense" unfairness §2.2 forbids. This is also exactly the channel the
     /// §13.2 bot plans on (`perceive_guard`), so core and bot never disagree.
     seen: Vec<bool>,
-    /// Per guard: whether it is **confused** (§8.3/#240) — blinded and frozen by an
-    /// active Confusion within [`CONFUSION_RADIUS`] of the player. Read through
-    /// [`acts`](Self::acts), never directly, so no pass can forget the skip.
+    /// Per guard: whether it is **dazed** (§8.3/#240/#325) — blinded and frozen by a
+    /// Confusion blast it was standing in when the flash went off, counting down its own
+    /// clock. Read through [`acts`](Self::acts), never directly, so no pass can forget
+    /// the skip.
     suppressed: Vec<bool>,
     /// The `guards_always_search_hideouts` modifier (§12.6), read once off the one
     /// resolved config value (§12.3) and handed to each guard's own check.
@@ -93,12 +94,13 @@ impl GuardSenses {
 
     /// Whether guard `index` takes part in phase 3 at all.
     ///
-    /// A confused guard takes **no** part (§8.3/#240): it does not sense (so its state
+    /// A dazed guard takes **no** part (§8.3/#240/#325): it does not sense (so its state
     /// and lead pause rather than reset, for a clean resume, §8.2), does not witness a
     /// dive, finds no body, checks no cupboard, is not drawn by a decoy, and does not
     /// move — so it cannot capture by stepping into the player (§4.5). Confusion is no
-    /// shield, though: a guard *outside* the bubble still moves and captures normally,
-    /// and a frozen guard's cell stays solid — there is no walking through it.
+    /// shield, though: a guard the blast never caught still moves and captures normally
+    /// — including one that walks into the cells it passed through afterwards — and a
+    /// frozen guard's cell stays solid, so there is no walking through it either.
     fn acts(&self, index: usize) -> bool {
         !self.suppressed[index]
     }

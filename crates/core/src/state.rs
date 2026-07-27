@@ -143,18 +143,35 @@ const _: () = assert!(DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE);
 /// test.
 pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
 
-/// The **Confusion** blast radius (§8.3/§9/#240 **[START]**): while the Confusion
-/// ability is active ([`Effect::Confuse`](crate::Effect)), every guard within this
-/// Chebyshev box of the player is blinded and frozen — measured the same way as the
-/// guard sense (§6.1 box metric) and, like it, reaching **through walls** (§9).
+/// The **Confusion** blast radius (§8.3/§9/#240/#325 **[START]**): the ability fires
+/// once, and every guard standing within this Chebyshev box of the player *at that
+/// moment* is dazed — measured the same way as the guard sense (§6.1 box metric) and,
+/// like it, reaching **through walls** (§9).
 ///
-/// It stays **smaller** than [`PLAYER_SENSE_RANGE`] (asserted below) so the bubble can
-/// never reach a guard the player cannot already sense — but it now covers a guard's
-/// whole *certain* zone (`CERTAIN_RANGE` = 5, §7.6), so the guards actually bearing
-/// down on you are the ones it catches. Raised from the first pass's 4, where the
-/// bubble was tight enough that a chaser could sit just outside it. Pinned by a test
-/// so a later change is a visible edit.
+/// It stays **smaller** than [`PLAYER_SENSE_RANGE`] (asserted below) so the blast can
+/// never reach a guard the player cannot already sense — but it covers a guard's whole
+/// *certain* zone (`CERTAIN_RANGE` = 5, §7.6), so the guards actually bearing down on
+/// you are the ones it catches. Raised from the first pass's 4, where the blast was
+/// tight enough that a chaser could sit just outside it. Pinned by a test so a later
+/// change is a visible edit.
+///
+/// This is the **cap**, not the answer: the reach actually fired is
+/// [`confusion_blast`](State::confusion_blast), which clamps it down to the live
+/// [`sense_range`](State::sense_range) so the blast can never outreach what the player
+/// perceives — inside a duct, that is [`DUCT_SENSE_RANGE`].
 pub const CONFUSION_RADIUS: u32 = 6;
+
+/// How long a guard caught by a Confusion blast stays **dazed** (§8.3/#325
+/// **[START]**): blinded and frozen for this many turns, counted down on the guard's
+/// own clock ([`Guard::shake_off_daze`](crate::Guard)) rather than on the player's.
+///
+/// Six, on §8.2's convention — the firing turn is the first of them, every phase of
+/// which already saw the guard frozen, so N means N. It is deliberately the same
+/// number as the six-turn *window* the fired model replaced: what changed is when the
+/// set of guards is decided and where the timer lives, not how much time the panic-buy
+/// buys, so the retune (if the sim wants one, §13.2) stays a separate, visible edit.
+/// Pinned by a test.
+pub const CONFUSION_DAZE_TURNS: u32 = 6;
 
 /// How many turns a fired area effect's **footprint flash** stays painted (§8.3/§11.5
 /// **[START]**, #308): the cyan box that teaches how far Confusion — or any later
@@ -162,8 +179,12 @@ pub const CONFUSION_RADIUS: u32 = 6;
 /// and nothing after it. The wash exists to answer *how far* once, at the moment the
 /// player asks it, and a 13×13 field of background is a great deal of ink to leave on
 /// the board while the danger overlay is the thing that matters (§11.5 [SETTLED]).
-/// What carries the state for the rest of the window is the per-guard mark
+/// What carries the state for the rest of the daze is the per-guard mark
 /// ([`guard_under_effect`](State::guard_under_effect)), which costs no ink at all.
+/// That division is why one turn is the right life: the flash reports **the blast** —
+/// a single event, where it landed and how far it went — while *who is still frozen*
+/// is a standing fact the marks say better, and say truthfully for a guard that has
+/// since walked out of the box (§8.3/#325).
 ///
 /// Lit at full life the turn the ability fires and decremented once per spent turn,
 /// so the footprint shows for this many renders and is gone on the next — the same
@@ -172,9 +193,15 @@ pub const CONFUSION_RADIUS: u32 = 6;
 /// test.
 pub const EFFECT_FLASH_TURNS: u32 = 1;
 
-/// Confusion's bubble stays **within the guard sense** (§9/#240): a guard is never
+/// Confusion's blast stays **within the guard sense** (§9/#240): a guard is never
 /// frozen before the player can even sense its dot, so the effect is always legible
 /// on the map. Pinned at compile time so the two ranges can never silently invert.
+///
+/// This is the **open-floor** half of the promise, and only that. Where the sense
+/// itself shrinks below the cap — inside a duct, §10.7 — what keeps the promise is the
+/// clamp in [`confusion_blast`](State::confusion_blast). The two are deliberately not
+/// interchangeable: this one states a fact about the catalog's numbers at compile time,
+/// the clamp states the rule at every firing, and neither stands in for the other.
 const _: () = assert!(CONFUSION_RADIUS <= PLAYER_SENSE_RANGE);
 
 /// The flat part of the **stun** the safety eject costs (§8.3 **[START]**, #329) —
@@ -518,14 +545,13 @@ pub struct State {
     door_cues: Vec<DoorCue>,
     /// The area effects whose **footprint** is still being painted (§8.3/§11.5, #308):
     /// one entry per fired area effect, each lasting [`EFFECT_FLASH_TURNS`] spent
-    /// turns. Lit in [`light_effect_flash`](Self::light_effect_flash) when the ability
-    /// switches on, dropped in [`clear_effect_flash`](Self::clear_effect_flash) the
-    /// moment its window ends either way (§8.2 expiry, §4.4 toggle-off), and decayed
-    /// with the duration clock in [`decay_effect_flashes`](Self::decay_effect_flashes).
-    /// It carries no geometry — the reach itself is a live query
-    /// ([`effect_area`](Self::effect_area)) so the bubble can travel with the player —
-    /// only *whether it is drawn*. At most one entry per area effect, so a plain `Vec`
-    /// scan beats a map.
+    /// turns. Lit in [`light_effect_flash`](Self::light_effect_flash) with the area the
+    /// effect actually fired over, dropped in
+    /// [`clear_effect_flash`](Self::clear_effect_flash) the moment an effect *with* a
+    /// window ends either way (§8.2 expiry, §4.4 toggle-off), and faded turn by turn in
+    /// [`decay_effect_flashes`](Self::decay_effect_flashes). It carries the geometry
+    /// itself, so what is drawn is the very box the effect resolved against (#325). At
+    /// most one entry per area effect, so a plain `Vec` scan beats a map.
     effect_flashes: Vec<EffectFlash>,
     /// Doors the **Autodoors** ability (§8.3/§7.6) opened in the player's path and
     /// still owes a close-behind, as [`DoorId`]s. A door is armed here the turn the
@@ -880,6 +906,13 @@ impl State {
             // *spent* turn reaches this, so a free action never advances the clock.
             let mut expired = Vec::new();
             self.abilities.tick(&mut expired);
+            // The guards' daze counters run on the same convention, in the same beat
+            // (§8.2/#325): a guard caught by this turn's blast gets its full N turns,
+            // the firing turn — every phase of which already saw it frozen — being the
+            // first, and only now does its own count drop. The clock lives on the
+            // guard rather than on the player, which is what makes distance stop
+            // mattering once the flash has gone off.
+            self.tick_guard_daze();
             let phase_ended = expired.iter().any(|&id| declares(id, Effect::Phase));
             for &ability in &expired {
                 // The decoy's lifetime is its ability's active window (§8.3):
@@ -1006,6 +1039,37 @@ impl State {
                 } else {
                     None
                 };
+                // Confusion fires once, from where you stand (§8.3/#325): its blast is
+                // measured here — *before* the deck is touched — so a flash that would
+                // catch nobody is refused as the same free no-op a missing decoy cell
+                // and a missing wall already are (§4.4/§8.4), and a 45-turn lockout is
+                // never spent on nothing. The refusal is fair rather than fiddly
+                // because the blast is clamped inside the guard sense: anything it
+                // could have caught is a guard the player was already shown.
+                let blast = if declares(id, Effect::Confuse) {
+                    // The reach is read with the previous turn's Wait already spent:
+                    // §9.1's widened sense belongs to that Wait, and this action is not
+                    // it. The flag goes down for the read and back up again, because a
+                    // *refused* activation is free and must change nothing (§4.4) —
+                    // the real clearing happens below, when the turn is actually spent.
+                    let waited = std::mem::replace(&mut self.waited, false);
+                    let blast = self.confusion_blast();
+                    self.waited = waited;
+                    let caught = self
+                        .guards
+                        .iter()
+                        .filter(|g| blast.contains(g.pos()))
+                        .count();
+                    if caught == 0 {
+                        if self.abilities.loadout().contains(id) {
+                            events.push(Event::ConfusionMissed);
+                        }
+                        return false;
+                    }
+                    Some(blast)
+                } else {
+                    None
+                };
                 if self.abilities.activate(id) {
                     if spawn.is_some() {
                         self.decoy = spawn;
@@ -1018,6 +1082,9 @@ impl State {
                     });
                     if let Some(wall) = bore {
                         self.bore_wall(wall, events);
+                    }
+                    if let Some(blast) = blast {
+                        self.fire_confusion(blast, events);
                     }
                     self.waited = false;
                     self.crouched_behind = None;
@@ -1050,7 +1117,7 @@ impl State {
                     if declares(id, Effect::SpawnDecoy) {
                         self.decoy = None;
                     }
-                    // The bubble is gone, so its footprint goes with it (#308) — an
+                    // The area is gone, so its footprint goes with it (#308) — an
                     // early toggle-off leaves no residue to fade over nothing.
                     self.clear_effect_flash(id);
                     events.push(Event::AbilityDeactivated { ability: id });

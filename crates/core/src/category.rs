@@ -59,9 +59,9 @@ pub enum Category {
     /// event; it is still position only, never who passed or which way (§10.4). A
     /// coincident danger cone still outranks it (§11.5: being seen outranks).
     Sensed,
-    /// Cyan. An **area effect of your own making** (§8.3/§11.5) — Confusion's bubble
+    /// Cyan. An **area effect of your own making** (§8.3/§11.5) — Confusion's blast
     /// today, Lockdown's radius next. Its meaning is *reach*: how far the gadget you
-    /// just fired carries, and what it currently holds.
+    /// just fired carried, and what it still holds.
     ///
     /// It speaks in both channels, because an area effect has two things to say and
     /// they land on different cells:

@@ -646,11 +646,14 @@ pub enum Effect {
     /// they step into it — no manual bump — and shuts behind them once they clear
     /// the throat, breaking a pursuer's line of sight (§10.3/§10.4).
     AutoDoors,
-    /// Confusion (§8.3, §9): while active, every guard within a radius of the player
-    /// is **blinded and frozen** — it does not sense and does not move — reaching
-    /// **through walls** like the guard sense (§9). A costed panic-buy of time, not a
-    /// kill: the guard resumes cleanly (its state and lead paused, not reset) when the
-    /// window ends. The radius is [`CONFUSION_RADIUS`](crate::CONFUSION_RADIUS).
+    /// Confusion (§8.3, §9, #325): **fired once**, from the cell it is pressed in.
+    /// Every guard standing within the blast at that moment is **blinded and frozen**
+    /// for [`CONFUSION_DAZE_TURNS`](crate::CONFUSION_DAZE_TURNS) — it does not sense
+    /// and does not move — and the blast reaches **through walls** like the guard sense
+    /// (§9). A costed panic-buy of time, not a kill: each guard resumes cleanly (its
+    /// state and lead paused, not reset) when its own count runs out. The reach is
+    /// [`CONFUSION_RADIUS`](crate::CONFUSION_RADIUS), clamped down to what the player
+    /// can actually sense.
     Confuse,
     /// Vision (§8.3, §5/§6.1, #265): while in effect, the player's own sight is the
     /// full 360° arc ([`FULL_SIGHT_ARC`](crate::FULL_SIGHT_ARC)) at the extended
@@ -877,17 +880,21 @@ const AUTODOORS: Ability = Ability {
     mode: activated(1, TargetingMode::Itself, 16, 40),
     behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
 };
-// Confusion [START] (§8.3, §9, #240): a blind-and-freeze bubble around the player,
-// through walls — powerful, so the cost is a *large* lockout that keeps it rare
-// (§2.3/§13.2). A self/area toggle: it centres on the player and reaches
-// [`CONFUSION_RADIUS`]. **Six** protected turns (§8.2 timing, the activation turn
-// covered) — enough of a window to actually walk out of the bubble you bought, which
-// three was not — then a long recharge before the next panic-buy. Duration and radius
-// were raised together from the first pass (3/4): the window and the bubble are the
-// levers, and the cooldown is what still makes spending it a real decision.
+// Confusion [START] (§8.3, §9, #240/#325): a blind-and-freeze blast around the
+// player, through walls — powerful, so the cost is a *large* lockout that keeps it
+// rare (§2.3/§13.2). It is **instant** (`duration: 0`), the second such ability after
+// Pierce Wall: it fires once from the cell it is pressed in, dazes the guards standing
+// inside [`CONFUSION_RADIUS`] then and there, and goes straight to its cooldown. There
+// is no window to switch off, and nothing to carry — the time it buys runs down on the
+// guards' own counters ([`CONFUSION_DAZE_TURNS`](crate::CONFUSION_DAZE_TURNS)), which
+// is what makes it a panic-buy of time rather than a mobile shield (§8.3).
+//
+// The felt length is unchanged from the six-turn window it replaces: the guards get
+// exactly the turns the player used to, only on their own clock. The cooldown is what
+// still makes spending it a real decision.
 const CONFUSION: Ability = Ability {
     id: AbilityId::Confusion,
-    mode: activated(1, TargetingMode::Itself, 6, 45),
+    mode: activated(1, TargetingMode::Itself, 0, 45),
     behaviour: Behaviour::Effects(&[Effect::Confuse]),
 };
 // Vision [START] (§5/§6.1, §8.3, #265): the first **passive** — no activation, no
@@ -1458,11 +1465,13 @@ mod economy_tests {
                 40,
                 Effect::AutoDoors,
             ),
+            // Instant since #325 — the blast fires once and the guards carry the
+            // time it bought, so there is no player-side window here to state.
             (
                 AbilityId::Confusion,
                 1,
                 TargetingMode::Itself,
-                6,
+                0,
                 45,
                 Effect::Confuse,
             ),

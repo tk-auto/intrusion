@@ -867,7 +867,7 @@ whole reason the architecture looks the way it does.
 | **Decoy** | 1 turn | 20 | 30 | A fake intruder in the cell you face. Draws Investigating, not Chasing. Dies when anything steps on it. |
 | **Dephase** | 1 turn | 3 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** |
 | **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
-| **Confusion** | 1 turn | 6 | 45 | While active, every guard within `CONFUSION_RADIUS` of you (through walls like the guard sense, §9) is **blinded and frozen** — it neither sees nor moves. A costed panic-buy of time, not a kill: a frozen chaser **pauses** (keeps its lead), it does not reset; the guard resumes cleanly when the window ends. Capture-is-contact still holds (§4.5) — a frozen adjacent guard cannot step into you, but the freeze is no shield to walk into a guard *outside* the bubble, and a frozen guard's cell stays solid. The bubble stays inside the guard-sense range so it never freezes what you cannot sense, and the long cooldown is what keeps it rare (#240). |
+| **Confusion** | 1 turn | — (instant) | 45 | **Fired once**, from the cell you press it in (#325). Every guard standing within the blast at that moment — `CONFUSION_RADIUS`, through walls like the guard sense (§9) — is **blinded and frozen** for `CONFUSION_DAZE_TURNS` (**6** **[START]**), a countdown each guard carries itself. A costed panic-buy of time, not a kill: a dazed chaser **pauses** (keeps its lead), it does not reset, and resumes cleanly when its own count runs out. **After the flash, distance stops mattering** — a guard you run away from stays dazed, and one that walks into the cells the blast covered was never in it and is untouched. That is what keeps the ability from being a no-guard-may-act field you carry: it has no window, nothing to toggle off, and no `[6]` on the bar. Capture-is-contact still holds (§4.5) — a dazed adjacent guard cannot step into you, but the daze is no shield to walk into a guard the blast never caught, and a frozen guard's cell stays solid. **The clamp [SETTLED]:** the reach fired is `min(CONFUSION_RADIUS, sense_range())`, read off the live guard sense, so the blast can never freeze what you cannot sense — inert on open floor (`min(6, 10)`), and shrunk to **5** inside a duct (§10.7), where degraded information is the crawlspace's whole cost. It can only ever shrink the blast, never widen it. A firing with nothing in reach is a **free no-op** with a near-line message (§4.4/§8.4) — fair, because the clamp means anything it could have caught you were already shown — and a real firing says how many it caught (§11.7). The long cooldown is what keeps it rare (#240). |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket** off the room rather than a route, and that is a use of the tool, not a waste of it: a dead-end alcove out of the through-routes is somewhere to sit a sweep out. It conceals nothing (it is not a cupboard, §10.3), so whether it is shelter or a trap is the player's judgement — and three walls around you means you can dig a hole to hide in, never a tunnel. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 
@@ -1946,17 +1946,18 @@ can see will detect you. **The lose condition, painted.** It makes stealth
 plannable rather than guessy, which is the whole "enough information to strategise"
 pillar. **[SETTLED]** — keep it.
 
-**The effect layer is advisory and never outranks red** (§8.3/#308). An area effect
-of the player's own making — Confusion's bubble, Lockdown's radius — washes its
+**The effect layer is advisory and never outranks red** (§8.3/#308/#325). An area
+effect of the player's own making — Confusion's blast, Lockdown's radius — washes its
 footprint in cyan for **`EFFECT_FLASH_TURNS`** turns after it fires — **one**, the
-activation frame **[START]**: enough to answer *how far* at the moment the player asks
-it, without leaving a 13×13 field of background over the board while the danger overlay
-is the thing that matters. What carries the state for every turn after that is the
+firing frame **[START]**: enough to answer *how far* at the moment the player asks it,
+without leaving a 13×13 field of background over the board while the danger overlay is
+the thing that matters. What carries the state for every turn after that is the
 per-guard mark (§11.2), which costs no ink. The precedence is fixed —
 **Danger > Sensed > the effect footprint** — so an advisory layer can never masquerade
-as the detection set, nor hide it. The footprint is the live box, re-measured every
-turn from the same query the mechanic reads, so it travels with the player exactly as
-the effect does and the picture cannot disagree with the rule.
+as the detection set, nor hide it. The footprint is the box the effect actually fired
+with, carried by value from the mechanic that resolved against it, so the picture
+cannot disagree with the rule — and it stays where it went off rather than following
+the player, because that is what the blast did.
 
 Two problems from the old version to fix:
 
