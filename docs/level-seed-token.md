@@ -82,9 +82,17 @@ makes that structurally impossible rather than merely detected.
 ### The discipline it costs
 
 - **Slot numbers are load-bearing forever.** Appending is free; renumbering silently
-  rewrites every token ever shared.
-- **A retired entry leaves a tombstone**, not a reusable slot.
-- Reserving 256 against a target of ~100 live entries is what makes that affordable.
+  rewrites every token ever shared — with no error, and nothing to notice it by.
+- **Retire an entry in place, never by removing it.** Leave a **placeholder** in its
+  slot: a reserved entry that holds the position and is never granted, drawn, or
+  offered. Deleting the entry and closing the gap shifts every entry after it, so
+  every token in the wild starts naming different abilities. A tombstone, not a hole.
+- **Don't reorder for tidiness.** The list's order is data that tokens depend on, not
+  a style choice.
+- Reusing a slot, or renumbering, is a **format version bump** (§8) and its own
+  ticket — never a quiet edit inside another one.
+- Reserving 256 against a target of ~100 live entries is what makes the churn
+  affordable: a placeholder costs a slot, and there are 256 of them.
 
 The compiler helps: `modifier_slots` destructures `LevelModifiers` by name, so a new
 modifier will not compile until it is given a slot.
