@@ -218,6 +218,21 @@ pub enum Event {
     /// it* — walk to a wall, step off the corner, find a thinner one — and a player
     /// who is only ever told "no" learns the rule slowly and by accident.
     BoreRefused { reason: BoreRefusal },
+    /// Lockdown shut and sealed `count` doors around `at` (§8.3/§10.4/#242) — the one
+    /// act, reported once, rather than a [`DoorClosed`](Event::DoorClosed) per door: a
+    /// lockdown is not three doors swinging shut of their own accord, and narrating it
+    /// door by door would spend the near line's single row on what the board has
+    /// already drawn (§11.7).
+    ///
+    /// `count` is what the seal actually took, so a test and the record agree with the
+    /// world rather than with the radius; `reach` is the very box the doors were picked
+    /// out of, carried by value rather than as a recipe for redrawing one, so the wash
+    /// the layer paints is the geometry the rule actually used (#338).
+    DoorsSealed { reach: EffectArea, count: usize },
+    /// A Lockdown activation was **refused** because no door is in reach (§8.3/#242) —
+    /// free, and nothing changed, like a wall bump. Carries no reason, because there is
+    /// only ever the one: the ability seals doors, and there were none to seal.
+    LockdownRefused,
     /// Confusion fired (§8.3/#325): `blast` went off, and the `caught` guards standing
     /// inside it are dazed for [`CONFUSION_DAZE_TURNS`](crate::CONFUSION_DAZE_TURNS)
     /// from now. A turn-costing action (§4.4), pushed alongside the activation.
@@ -269,6 +284,8 @@ impl Event {
             | Event::RematerializeRefused
             | Event::WallBored { .. }
             | Event::BoreRefused { .. }
+            | Event::DoorsSealed { .. }
+            | Event::LockdownRefused
             | Event::ConfusionFired { .. }
             | Event::ConfusionMissed
             | Event::DecoyDied { .. } => Category::Owned,

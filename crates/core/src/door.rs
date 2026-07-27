@@ -23,10 +23,19 @@
 //!
 //! Occupancy is supplied by the caller: "is a panel occupied?" is a predicate the
 //! turn loop passes in, built from the live actors (the player, guards, bodies).
+//!
+//! Locking is the one exception to §10.4's *"anyone can operate any door"*
+//! (**[START]**), and it lives here too: [`seal_door`](Layout::seal_door) shuts and
+//! locks a door for the Lockdown window (§8.3/#242) and
+//! [`release_sealed_doors`](Layout::release_sealed_doors) unlocks them all when it
+//! closes. The lock is stored on the door itself ([`DoorLock`]) so that a second lock
+//! source has one representation to extend rather than a second to invent; who a lock
+//! *refuses* is the caller's rule, not the door's — the turn loop declines a guard's
+//! walk-in open on a locked door, and the player's own bump is untouched.
 
 use crate::cell::Cell;
 use crate::facility::Terrain;
-use crate::region::{DoorCell, DoorId, DoorKind};
+use crate::region::{DoorCell, DoorId, DoorKind, DoorLock};
 use crate::Layout;
 
 /// What operating a door did (§10.4).
@@ -163,6 +172,57 @@ impl Layout {
         self.set_door_open(door, true);
     }
 
+    /// **Seal** `door` for the Lockdown window (§8.3/#242): shut it if it can be shut,
+    /// and lock it either way. Returns what the shut attempt did, so the caller can
+    /// tell a door that swung closed from one held open by whoever stands in it.
+    ///
+    /// The two halves are deliberately independent. The **lock** always lands — it is
+    /// the ability's actual effect, and a door the player is standing in the throat of
+    /// is still a door the guards may not work. The **shut** goes through the ordinary
+    /// crush-safe close ([`close_door`](Self::close_door)), so §10.4's "a door cannot
+    /// close if anything occupies a panel" holds against an ability exactly as it holds
+    /// against a bump: a lockdown never crushes anyone, and a door it could not shut is
+    /// simply a locked door standing open until something closes it.
+    ///
+    /// Shutting is part of the seal rather than a separate nicety, because a lock on a
+    /// door that is already open raises no wall at all — and a wall is the whole
+    /// ability (§7.6: the pursuer routes the long way).
+    pub(crate) fn seal_door(
+        &mut self,
+        door: DoorId,
+        occupied: impl Fn(Cell) -> bool,
+    ) -> Option<DoorAction> {
+        let shut = self
+            .regions()
+            .door(door)
+            .is_open()
+            .then(|| self.close_door(door, occupied));
+        self.parts_mut().1.door_mut(door).set_lock(DoorLock::Sealed);
+        shut
+    }
+
+    /// Release every [`Sealed`](DoorLock::Sealed) lock in the level (§8.3/#242) — the
+    /// end of the Lockdown window, whether it expired or was toggled off early (§4.4).
+    ///
+    /// Total by construction: it walks *every* door rather than a remembered list, so
+    /// there is no set to fall out of step with the world and no door a seal can
+    /// outlive its window on. That is what discharges §2.2/§7.2's soft-lock worry —
+    /// the guarantee is structural, not a matter of every caller remembering.
+    ///
+    /// Locks from other sources (#236's key) are untouched: this releases the seal it
+    /// placed, not the concept of a lock.
+    pub(crate) fn release_sealed_doors(&mut self) {
+        let sealed: Vec<DoorId> = self
+            .regions()
+            .doors()
+            .filter(|(_, door)| door.lock() == DoorLock::Sealed)
+            .map(|(id, _)| id)
+            .collect();
+        for id in sealed {
+            self.parts_mut().1.door_mut(id).set_lock(DoorLock::Unlocked);
+        }
+    }
+
     /// Close `door` unless a panel is occupied, restamping the panels solid. Refuses
     /// (leaving the door open) when an actor stands on a panel — doors never crush.
     fn close_door(&mut self, door: DoorId, occupied: impl Fn(Cell) -> bool) -> DoorAction {
@@ -204,7 +264,7 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use crate::facility::Facility;
-    use crate::region::{DoorId, DoorKind, RegionGraph, RegionKind};
+    use crate::region::{DoorId, DoorKind, DoorLock, RegionGraph, RegionKind};
     use crate::test_support::seed_sweep;
     use crate::{generate, Cell, DoorAction, Layout, Rng, Terrain};
 
@@ -501,6 +561,88 @@ mod tests {
         // The throat clear, the guard's close-behind shuts it.
         assert_eq!(layout.close_behind(door, vacant), Some(DoorAction::Closed));
         assert!(!layout.regions().door(door).is_open());
+    }
+
+    /// §8.3/#242: sealing a door **shuts it and locks it**, and the two are
+    /// independent — the shut goes through the ordinary crush-safe close, so an
+    /// occupied doorway stays open, and the lock lands either way. Every door
+    /// generates unlocked (§10.4's baseline).
+    #[test]
+    fn sealing_shuts_a_door_and_locks_it_without_ever_crushing() {
+        let (mut layout, door) = one_door();
+        assert!(
+            !layout.regions().door(door).is_locked(),
+            "§10.4's baseline: no keys, no locks"
+        );
+        let panel = layout.regions().door(door).panels()[0];
+
+        // A closed door has nothing to shut; the lock still lands.
+        assert_eq!(layout.seal_door(door, vacant), None, "already shut");
+        assert!(layout.regions().door(door).is_locked());
+        assert_eq!(layout.regions().door(door).lock(), DoorLock::Sealed);
+
+        // An open one is shut *and* locked, its panels restamped solid.
+        layout.release_sealed_doors();
+        layout.bump_door(panel, vacant);
+        assert_eq!(
+            layout.seal_door(door, vacant),
+            Some(DoorAction::Closed),
+            "the seal raises a wall, so it shuts what it finds open",
+        );
+        assert!(!layout.regions().door(door).is_open());
+        assert!(layout.regions().door(door).is_locked());
+        assert_eq!(
+            layout.facility().terrain_at(panel.x, panel.y),
+            Some(Terrain::DoorPanelClosed),
+        );
+
+        // …but never on an occupant: the door stays open and is merely locked.
+        layout.release_sealed_doors();
+        layout.bump_door(panel, vacant);
+        assert_eq!(
+            layout.seal_door(door, |c| c == panel),
+            Some(DoorAction::Obstructed),
+        );
+        assert!(
+            layout.regions().door(door).is_open(),
+            "doors never crush, ability or not (§10.4)",
+        );
+        assert!(layout.regions().door(door).is_locked());
+    }
+
+    /// §8.3/#242: the release is **total** — it walks every door rather than a
+    /// remembered set, so no seal can outlive the window that placed it (§2.2/§7.2's
+    /// soft-lock class). It is idempotent, and it leaves each door in whatever pose it
+    /// was in: releasing a lock does not spring a door open.
+    #[test]
+    fn releasing_unlocks_every_sealed_door_and_leaves_the_pose_alone() {
+        let mut layout = generate(40, 40, &mut Rng::new(7)).unwrap();
+        let ids: Vec<DoorId> = layout.regions().doors().map(|(id, _)| id).collect();
+        assert!(ids.len() > 2, "a facility has several doors");
+
+        // Open one, leave the rest shut, and seal them all.
+        let open_panel = layout.regions().door(ids[0]).panels()[0];
+        layout.bump_door(open_panel, vacant);
+        for &id in &ids {
+            layout.seal_door(id, |c| c == open_panel);
+        }
+        assert!(layout.regions().doors().all(|(_, d)| d.is_locked()));
+        assert!(layout.regions().door(ids[0]).is_open(), "held open");
+
+        layout.release_sealed_doors();
+        assert!(
+            layout
+                .regions()
+                .doors()
+                .all(|(_, d)| d.lock() == DoorLock::Unlocked),
+            "every seal, not a remembered subset",
+        );
+        assert!(
+            layout.regions().door(ids[0]).is_open(),
+            "the pose survives the release — the wall was time, not a hold",
+        );
+        layout.release_sealed_doors(); // idempotent
+        assert!(layout.regions().doors().all(|(_, d)| !d.is_locked()));
     }
 
     /// §10.4/#147: an automatic door never shuts on an occupant — an actor on a

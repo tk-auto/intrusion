@@ -343,6 +343,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#303): bore through your one adjacent wall, permanently,
     /// a few times per level.
     PierceWall,
+    /// Salvaged tech (§8.3/#242): seal the doors around you for a window — guards
+    /// cannot work them, you still can.
+    Lockdown,
 }
 
 impl AbilityId {
@@ -350,7 +353,7 @@ impl AbilityId {
     /// display/iteration order only — hotkeys come from the identity map (§11.6),
     /// never from a position — but it *is* the order [`index`](Self::index) pins,
     /// so the two must not drift.
-    pub const ALL: [AbilityId; 8] = [
+    pub const ALL: [AbilityId; 9] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -359,6 +362,7 @@ impl AbilityId {
         AbilityId::Confusion,
         AbilityId::Vision,
         AbilityId::PierceWall,
+        AbilityId::Lockdown,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
@@ -369,7 +373,7 @@ impl AbilityId {
     /// meets the grant count; the draw only bites once the pool outgrows the grant.
     /// A passive (#264) is drawn from here like any other tech — it competes for the
     /// same slot, which is exactly what it pays with.
-    pub const TECH: [AbilityId; 7] = [
+    pub const TECH: [AbilityId; 8] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -377,6 +381,7 @@ impl AbilityId {
         AbilityId::Confusion,
         AbilityId::Vision,
         AbilityId::PierceWall,
+        AbilityId::Lockdown,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -436,6 +441,7 @@ impl AbilityId {
             AbilityId::Confusion => "Confusion",
             AbilityId::Vision => "Vision",
             AbilityId::PierceWall => "Pierce Wall",
+            AbilityId::Lockdown => "Lockdown",
         }
     }
 
@@ -460,6 +466,7 @@ impl AbilityId {
             AbilityId::Confusion => "Daze",
             AbilityId::Vision => "Sight",
             AbilityId::PierceWall => "Bore",
+            AbilityId::Lockdown => "Lock",
         }
     }
 
@@ -511,6 +518,10 @@ impl AbilityId {
                 "Bores through your one adjacent wall for good. Needs exactly one wall \
                  neighbour — a corridor or a corner will not do."
             }
+            AbilityId::Lockdown => {
+                "Seals the doors near you for a while. Guards cannot work a sealed \
+                 door and route the long way round; you still open yours."
+            }
         }
     }
 
@@ -540,6 +551,7 @@ impl AbilityId {
             AbilityId::Confusion => &CONFUSION,
             AbilityId::Vision => &VISION,
             AbilityId::PierceWall => &PIERCE_WALL,
+            AbilityId::Lockdown => &LOCKDOWN,
         }
     }
 
@@ -554,6 +566,7 @@ impl AbilityId {
             AbilityId::Confusion => 5,
             AbilityId::Vision => 6,
             AbilityId::PierceWall => 7,
+            AbilityId::Lockdown => 8,
         }
     }
 }
@@ -712,6 +725,18 @@ pub enum Effect {
     /// forward half-disc at 15. **Vision only** — the guard sense (§9) is a separate,
     /// innate channel and is deliberately not widened with it.
     EnhancedSight,
+    /// Lockdown (§8.3, §10.4, #242): while active, every door within
+    /// [`LOCKDOWN_RADIUS`](crate::LOCKDOWN_RADIUS) of the cell it fired on is **shut
+    /// and sealed** — a guard cannot work the handle, so its route goes the long way
+    /// round (§7.6). The player can still bump one open, because it is their lock;
+    /// doing so spends a turn and hands the door to whoever is behind them. Every seal
+    /// is released when the window closes (§8.2), which is what keeps a temporary wall
+    /// from ever becoming the permanent one §2.2/§7.2 forbid.
+    ///
+    /// Unlike [`Confuse`](Effect::Confuse), the set is a **snapshot** taken where the
+    /// ability fired: a door does not unseal because you walked away from it, or the
+    /// wall you raised behind you would dissolve exactly as you fled down it.
+    SealDoors,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -977,6 +1002,29 @@ const PIERCE_WALL: Ability = Ability {
     id: AbilityId::PierceWall,
     mode: budgeted(1, TargetingMode::Itself, 0, 0, PIERCE_WALL_USES),
     behaviour: Behaviour::Coded,
+};
+
+// Lockdown [START] (§8.3/§10.4, #242): shut and seal the doors around you, then hand
+// them all back. A **short** window against a **long** lockout, because what it buys is
+// not a hiding place but a detour — a pursuer that has to route around a sealed doorway
+// loses the turns the long way costs, and once you have those turns the wall has done
+// its work. Eight turns is enough to spend them; the 40-turn lockout is what makes
+// spending it a decision rather than a habit (§2.3).
+//
+// **The cost is not only the lockout.** The seal is a snapshot around *you*, so it
+// takes the doors ahead as readily as the ones behind: fire it in a junction you still
+// have to cross and you have walled your own route, and reopening one costs a turn and
+// gives the door to whoever is chasing you. That is the "when would a good player not
+// use this" the design asks for — a lockdown is worth its turn when the geometry is
+// already behind you, and worth nothing when it is not.
+//
+// Data-driven, not [`Behaviour::Coded`]: sealing an area's doors is the same shape as
+// freezing an area's guards, so it is one more row in the vocabulary (§8.1) rather than
+// an escape hatch — the effect table already knew it was coming.
+const LOCKDOWN: Ability = Ability {
+    id: AbilityId::Lockdown,
+    mode: activated(1, TargetingMode::Itself, 8, 40),
+    behaviour: Behaviour::Effects(&[Effect::SealDoors]),
 };
 
 /// How many walls one facility lets you bore through — **[START]** (§8.3/#303).
@@ -1526,6 +1574,14 @@ mod economy_tests {
                 45,
                 Effect::Confuse,
             ),
+            (
+                AbilityId::Lockdown,
+                1,
+                TargetingMode::Itself,
+                8,
+                40,
+                Effect::SealDoors,
+            ),
         ] {
             let def = id.def();
             let economy = def
@@ -1596,13 +1652,14 @@ mod economy_tests {
 
     /// The data-driven rows [`the_catalog_matches_the_design_activated`] walks — kept
     /// beside it so the completeness check above reads off the same list.
-    const PINNED_ACTIVATED: [AbilityId; 6] = [
+    const PINNED_ACTIVATED: [AbilityId; 7] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
         AbilityId::Autodoors,
         AbilityId::Confusion,
+        AbilityId::Lockdown,
     ];
 
     /// The **passive** catalog (#264/#265), pinned: Vision is the one passive, it

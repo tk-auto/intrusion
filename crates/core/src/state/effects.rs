@@ -131,6 +131,7 @@ impl EffectArea {
 fn area_radius(effect: Effect) -> Option<u32> {
     match effect {
         Effect::Confuse => Some(CONFUSION_RADIUS),
+        Effect::SealDoors => Some(LOCKDOWN_RADIUS),
         // Everything else acts on the player themselves, not on a region around them.
         Effect::ExtraStep
         | Effect::ConcealWhileStill
@@ -219,6 +220,26 @@ impl State {
             radius: area_radius(Effect::Confuse)
                 .expect("Confusion is an area effect")
                 .min(self.sense_range()),
+        }
+    }
+
+    /// The area **a Lockdown fired from where the player stands would seal** (§8.3/#242):
+    /// the §6.1 box of [`LOCKDOWN_RADIUS`], read from the one [`area_radius`] table so
+    /// the ability's reach and the table cannot drift apart.
+    ///
+    /// The firing seam, in [`confusion_blast`](Self::confusion_blast)'s shape and for the
+    /// same reason: one object carries the geometry to the rule that picks the doors
+    /// ([`lockdown_doors`](Self::lockdown_doors)), to the event, and to the mark the
+    /// player reads — so what is painted is what was measured, never a redrawing of it.
+    ///
+    /// **Unclamped**, unlike the blast. Confusion is narrowed to what the player can
+    /// *perceive*, because freezing a guard you cannot sense is unreadable; a seal is a
+    /// fact about doors, and a door sealed out of sense range is still sealed and still
+    /// marked when you walk back to it. The door sense is not the guard sense.
+    pub fn lockdown_area(&self) -> EffectArea {
+        EffectArea {
+            centre: self.player,
+            radius: area_radius(Effect::SealDoors).expect("Lockdown is an area effect"),
         }
     }
 
@@ -361,6 +382,30 @@ impl State {
                 // it opened is washed for exactly the turn it opened in. One glyph
                 // flipping `#` → floor on a 40×40 board is otherwise the whole of a
                 // bore's feedback.
+                // Lockdown wears **both** lifetimes over cells (§8.3/#242), which is
+                // Confusion's shape with the placements swapped: a momentary wash over
+                // the box it fired with, and a standing mark on the doorways it holds.
+                // The two answer different questions and neither substitutes for the
+                // other — *this far*, once, and *these ones*, throughout.
+                Event::DoorsSealed { reach, .. } => {
+                    // The **wash**: how far the seal reached, for the firing frame only
+                    // — the one thing the doors themselves cannot say, and the same
+                    // question Confusion's box answers.
+                    self.light_mark(
+                        AbilityId::Lockdown,
+                        MarkPlace::Cells(reach.cells(self.layout.facility())),
+                        MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                    );
+                    // The **state**: which doorways are actually held, for as long as
+                    // the window holds them. This is the layer's first *standing cell*
+                    // mark — the case #338 left open — and it is what the player plays
+                    // off once the wash has gone: a route the guards cannot work.
+                    self.light_mark(
+                        AbilityId::Lockdown,
+                        MarkPlace::Cells(self.sealed_door_cells().collect()),
+                        MarkLife::Standing,
+                    );
+                }
                 Event::WallBored { at } => self.light_mark(
                     AbilityId::PierceWall,
                     MarkPlace::Cells(vec![at]),
@@ -373,8 +418,17 @@ impl State {
 
     /// Light (or relight, at full life) `source`'s mark over `place` (§11.5/#338).
     ///
-    /// At most one mark per (ability, placement): refiring replaces the geometry and
-    /// resets the life rather than stacking a second wash over the same board. Called
+    /// At most one mark per (ability, placement, **lifetime**): refiring replaces the
+    /// geometry and resets the life rather than stacking a second wash over the same
+    /// board. The lifetime joins the key because one firing may legitimately want both
+    /// kinds over the same placement — Lockdown says *this far* for a frame and *these
+    /// doors* for its whole window, and both are cell marks (#242). Confusion's pair
+    /// wants the same thing and merely got it for free, its two marks landing on
+    /// different placements. Without the lifetime in the key the second call would
+    /// silently overwrite the first, which is the bug this shape now cannot have.
+    ///
+    /// It still cannot stack without bound: the key is finite and small — an ability,
+    /// two placements, two lifetimes. Called
     /// with the very geometry the effect resolved against, and after
     /// [`decay_effect_marks`](Self::decay_effect_marks) has already spent the older
     /// marks' turn — exactly as [`record_door_cues`](Self::record_door_cues) is — so a
@@ -383,6 +437,7 @@ impl State {
         let same = |mark: &EffectMark| {
             mark.source == source
                 && std::mem::discriminant(&mark.place) == std::mem::discriminant(&place)
+                && std::mem::discriminant(&mark.life) == std::mem::discriminant(&life)
         };
         if let Some(mark) = self.effect_marks.iter_mut().find(|mark| same(mark)) {
             mark.place = place;
@@ -487,14 +542,17 @@ mod tests {
             .expect("the blast went off")
     }
 
-    /// [`area_radius`] is Confusion's **own reach** and nothing else's (§8.3): exactly
-    /// one row is `Some` today, and the layer's geometry no longer reads the table at
-    /// all. Pinned so adding a radius tech (Lockdown, #242) is a visible edit here
-    /// rather than a silent one at the firing seam.
+    /// [`area_radius`] holds each effect's **own reach** and nothing else's (§8.3): the
+    /// two that act on a region around the player, and no row for the rest. The layer's
+    /// geometry no longer reads the table at all — it is read at each firing seam
+    /// ([`confusion_blast`](State::confusion_blast),
+    /// [`lockdown_doors`](State::lockdown_doors)) — so this is pinned to keep a new
+    /// radius tech a visible edit here rather than a silent one at the seam.
     #[test]
-    fn only_confusion_declares_an_area_radius() {
+    fn only_the_area_effects_declare_a_radius() {
         for effect in [
             Effect::Confuse,
+            Effect::SealDoors,
             Effect::ExtraStep,
             Effect::ConcealWhileStill,
             Effect::SpawnDecoy,
@@ -504,7 +562,7 @@ mod tests {
         ] {
             assert_eq!(
                 area_radius(effect).is_some(),
-                effect == Effect::Confuse,
+                matches!(effect, Effect::Confuse | Effect::SealDoors),
                 "{effect:?}: only an effect that acts on a region has a radius",
             );
         }

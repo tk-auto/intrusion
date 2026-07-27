@@ -75,6 +75,7 @@ mod doors;
 mod effects;
 mod events;
 mod guards;
+mod lockdown;
 mod traversal;
 mod view;
 
@@ -160,6 +161,24 @@ pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
 /// [`sense_range`](State::sense_range) so the blast can never outreach what the player
 /// perceives — inside a duct, that is [`DUCT_SENSE_RANGE`].
 pub const CONFUSION_RADIUS: u32 = 6;
+
+/// The **Lockdown** seal radius (§8.3/§10.4/#242 **[START]**): activating Lockdown
+/// shuts and seals every door with a cell inside this Chebyshev box of the player —
+/// measured the same way as the guard sense and Confusion's bubble (§6.1 box metric)
+/// and, like them, reaching **through walls**.
+///
+/// Deliberately **small**, and smaller than [`CONFUSION_RADIUS`]: the doors it takes
+/// are the ones in the room you are standing in and the corridor you just left, not a
+/// whole wing. A radius that sealed a wing would freeze the level's traffic for its
+/// whole window — an ability that plays the map for you — where this one buys a
+/// pursuer's detour and nothing more (§7.6). It is the ability's main power lever, so
+/// it is pinned by a test and expected to move in playtest.
+pub const LOCKDOWN_RADIUS: u32 = 4;
+
+/// Lockdown's reach stays **within the guard sense** (§9/§8.3), for the same reason
+/// Confusion's does: a door sealed beyond the range the player can perceive would be a
+/// wall they had no way to read. Pinned at compile time.
+const _: () = assert!(LOCKDOWN_RADIUS <= PLAYER_SENSE_RANGE);
 
 /// How long a guard caught by a Confusion blast stays **dazed** (§8.3/#325
 /// **[START]**): blinded and frozen for this many turns, counted down on the guard's
@@ -922,6 +941,12 @@ impl State {
                 if declares(ability, Effect::SpawnDecoy) {
                     self.decoy = None;
                 }
+                // Every seal is released with the window that placed it (§8.3/#242).
+                // This is the guarantee that a temporary wall is temporary: the
+                // duration is the only clock, so a door cannot stay sealed past it.
+                if declares(ability, Effect::SealDoors) {
+                    self.release_lockdown();
+                }
                 // An effect's marks live exactly as long as its window (#308/#338):
                 // whatever life a mark had left dies with the effect, never after it.
                 self.clear_effect_marks(ability);
@@ -1041,6 +1066,24 @@ impl State {
                 } else {
                     None
                 };
+                // Lockdown's target is the set of doors in reach (§8.3/#242), and a
+                // lockdown with no door to seal would spend the turn and the whole
+                // lockout on nothing. So the set is resolved here — before the deck
+                // commits — and an empty one refuses exactly as the decoy's missing
+                // cell does: free, nothing changed (§4.4). It speaks, because a press
+                // that did nothing must say why (§11.7).
+                let seal = if declares(id, Effect::SealDoors) {
+                    let doors = self.lockdown_doors();
+                    if doors.is_empty() {
+                        if self.abilities.loadout().contains(id) {
+                            events.push(Event::LockdownRefused);
+                        }
+                        return false;
+                    }
+                    Some(doors)
+                } else {
+                    None
+                };
                 // Confusion fires once, from where you stand (§8.3/#325): its blast is
                 // measured here — *before* the deck is touched — so a flash that would
                 // catch nobody is refused as the same free no-op a missing decoy cell
@@ -1085,6 +1128,9 @@ impl State {
                     if let Some(wall) = bore {
                         self.bore_wall(wall, events);
                     }
+                    if let Some(doors) = seal {
+                        self.seal_doors(&doors, events);
+                    }
                     if let Some(blast) = blast {
                         self.fire_confusion(blast, events);
                     }
@@ -1118,6 +1164,12 @@ impl State {
                 if self.abilities.deactivate(id) {
                     if declares(id, Effect::SpawnDecoy) {
                         self.decoy = None;
+                    }
+                    // The seals are the window (§8.3/#242): ending it early hands every
+                    // door back at once. Free, like every toggle-off, and it refunds
+                    // nothing — the full lockout still runs (§8.2).
+                    if declares(id, Effect::SealDoors) {
+                        self.release_lockdown();
                     }
                     // The effect is gone, so its marks go with it (#308/#338) — an
                     // early toggle-off leaves no residue to fade over nothing.

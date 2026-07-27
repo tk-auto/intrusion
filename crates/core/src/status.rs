@@ -207,6 +207,16 @@ pub fn message_for(event: Event) -> Option<Message> {
         // rematerialization beside it — has to say why. The reason *is* the message:
         // each one names a different thing to do about it.
         Event::BoreRefused { reason } => (reason.message().to_string(), 0),
+        // Silent, for [`Event::WallBored`]'s reason exactly (§11.7): the sealed doors
+        // are *marked on the board* the moment they seal, and which doors they are is
+        // the fact the player is playing off — a count in the near line restates a
+        // picture that says it better. The window itself still announces, through the
+        // ordinary "Lockdown active" beside it.
+        Event::DoorsSealed { .. } => return None,
+        // A refused lockdown (§8.3/#242): free, changed nothing, and — like the refused
+        // bore and the refused rematerialization beside it — has to say why, or a press
+        // that did nothing reads as a dropped key.
+        Event::LockdownRefused => ("no door in reach to seal".to_string(), 0),
         // The blast, reported (§8.3/§11.7/#325). Confusion is the most expensive press
         // in the game — a 45-turn lockout — and most of what it catches is behind a
         // wall, felt as a dot rather than seen, so *what it bought* is exactly the kind

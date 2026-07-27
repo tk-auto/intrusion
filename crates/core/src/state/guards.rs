@@ -364,6 +364,16 @@ impl State {
     /// any cell that admits it and holds no other actor; a guard with nowhere to go, or
     /// whose step is blocked, simply holds.
     fn move_guards(&mut self, senses: &GuardSenses, events: &mut Vec<Event>) {
+        // A **sealed** door is solid to every guard's route (§8.3/§7.6/#242): the guard
+        // cannot work a locked handle, so it plans the long way round rather than
+        // walking into a doorway that will refuse it. That detour is the whole of what
+        // the ability buys, and it is handed to the router as blocked cells rather than
+        // stamped into terrain, because the *player's* routing is deliberately
+        // unchanged by their own lock. The same for every guard this turn — a seal is a
+        // fact about the level, not about who is looking — so it is read once here
+        // rather than per guard. Empty on every turn no lockdown is running, which is
+        // nearly all of them.
+        let sealed = self.sealed_route_blocks();
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
@@ -378,14 +388,15 @@ impl State {
             // straight over one, which is what stops a body in a chokepoint from
             // freezing an investigation or a patrol (#182). Positions are read fresh
             // here, so a guard sees where the colleagues that already moved this turn
-            // now stand.
-            let blocked: Vec<Cell> = self
+            // now stand. The sealed doorways read above join them as obstacles.
+            let mut blocked: Vec<Cell> = self
                 .guards
                 .iter()
                 .enumerate()
                 .filter(|(j, _)| *j != i)
                 .map(|(_, g)| g.pos())
                 .collect();
+            blocked.extend_from_slice(&sealed);
             // §7.7: a chase that ends *this turn* is what calls it in, so the state
             // is read either side of the decision. Chasing is exactly the certain
             // zone (§7.6) — an Investigating guard only ever had a glimpse and
@@ -431,6 +442,16 @@ impl State {
             // up over a level; the Calm close-behind below is the counter-pressure
             // (§10.4/#146), not a symmetric one — an open door still spreads.
             if self.layout.facility().terrain(target) == Some(Terrain::DoorPanelClosed) {
+                // …unless the door is **locked** (§10.4/#242). A seal refuses the
+                // guards' handle and only theirs, so the walk-in open simply does not
+                // happen and the guard holds this turn. Its route already plans around
+                // sealed doorways, so this is the arrival the route could not avoid — a
+                // destination on the doorway itself, or a door sealed under its feet —
+                // and it is a *wait*, never a deadlock: the window ends, and the door
+                // opens on the ordinary bump the turn after.
+                if self.door_locked_at(target) {
+                    continue;
+                }
                 self.operate_door(target);
                 events.push(Event::DoorOpened {
                     at: target,

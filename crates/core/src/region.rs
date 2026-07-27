@@ -94,6 +94,30 @@ pub enum DoorKind {
     Automatic { delay: u32 },
 }
 
+/// Whether a door may be worked at all, and by whom (§10.4).
+///
+/// §10.4's baseline is **[START]** and unambiguous — *"anyone can operate any door.
+/// No keys, no locks."* — so [`Unlocked`](DoorLock::Unlocked) is what every door
+/// generates as and what all but a handful ever are. This enum is the **one**
+/// representation of the exception, deliberately: Lockdown (§8.3/#242) seals doors
+/// for a window, and the locked-doors modifier (#236) will gate them behind a key.
+/// Two lock *sources* asking two different questions of two different fields is how
+/// "is this door locked?" ends up with two answers, so they share this one — a new
+/// source is a new variant here, read through the same
+/// [`is_locked`](Door::is_locked) predicate every consumer already calls.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum DoorLock {
+    /// §10.4's baseline: no keys, no locks. Anyone bumps it open.
+    #[default]
+    Unlocked,
+    /// **Sealed** by the player's Lockdown (§8.3/#242): a guard cannot work the
+    /// handle while the window lasts. It carries no clock of its own — the ability's
+    /// duration is the clock, and every seal is released together when that window
+    /// closes (§8.2), which is what makes a permanent seal (§2.2/§7.2's soft-lock
+    /// class) unrepresentable rather than merely unlikely.
+    Sealed,
+}
+
 /// One door: the two regions it joins, its hinge/panel structure, and its runtime
 /// open/closed state (§10.4).
 ///
@@ -121,6 +145,10 @@ pub struct Door {
     /// each time it opens or is re-occupied, counted down each vacant turn, and `0`
     /// otherwise. A manual door ignores it entirely.
     auto_timer: u32,
+    /// Whether this door is locked, and by what (§10.4/#242). Every door generates
+    /// [`Unlocked`](DoorLock::Unlocked) — §10.4's baseline — and only an ability or a
+    /// modifier ever moves it.
+    lock: DoorLock,
 }
 
 impl Door {
@@ -172,6 +200,30 @@ impl Door {
     /// it on open, resets it while the doorway is occupied, and counts it down.
     pub(crate) fn set_auto_timer(&mut self, turns: u32) {
         self.auto_timer = turns;
+    }
+
+    /// Whether this door is **locked** — the one predicate every consumer asks, so a
+    /// second lock source (#236's key) is read by everything that already respects
+    /// Lockdown's seal (§10.4/#242).
+    ///
+    /// A locked door is not a *closed* door: the two states are orthogonal, and a
+    /// locked door standing open is exactly as passable as any other open door. What
+    /// the lock refuses is the **handle** — a guard's walk-in open (§10.4) — never the
+    /// doorway itself.
+    pub fn is_locked(&self) -> bool {
+        !matches!(self.lock, DoorLock::Unlocked)
+    }
+
+    /// What is locking this door, if anything (§10.4/#242).
+    pub fn lock(&self) -> DoorLock {
+        self.lock
+    }
+
+    /// Set the lock (§10.4/#242). Crate-internal, like [`set_open`](Self::set_open):
+    /// the ability that seals doors owns the window they are released in, and nothing
+    /// outside the crate may leave one locked.
+    pub(crate) fn set_lock(&mut self, lock: DoorLock) {
+        self.lock = lock;
     }
 
     /// Which part of the door `cell` is, or `None` if the cell is not on this door.
@@ -318,6 +370,8 @@ impl RegionGraph {
             open: false,
             kind,
             auto_timer: 0,
+            // §10.4's baseline: anyone can operate any door.
+            lock: DoorLock::Unlocked,
         });
         self.regions[a.0 as usize].doors.push(id);
         self.regions[b.0 as usize].doors.push(id);
