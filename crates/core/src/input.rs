@@ -168,6 +168,9 @@ pub fn ability_hotkey(ability: &str) -> Option<char> {
         "Confusion" => 'z',
         "Vision" => 'v',
         "Pierce Wall" => 'b',
+        // `s` for *seal*, not for the initial: `l` is already the vim-east step
+        // (§11.6), and a movement key is the one thing an ability must never shadow.
+        "Lockdown" => 's',
         _ => return None,
     })
 }

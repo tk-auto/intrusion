@@ -72,6 +72,7 @@ impl EffectArea {
 fn area_radius(effect: Effect) -> Option<u32> {
     match effect {
         Effect::Confuse => Some(CONFUSION_RADIUS),
+        Effect::SealDoors => Some(LOCKDOWN_RADIUS),
         // Everything else acts on the player themselves, not on a region around them.
         Effect::ExtraStep
         | Effect::ConcealWhileStill
@@ -111,10 +112,31 @@ impl State {
     /// on screen is the rule itself rather than a drawing of it (§11.5).
     pub fn effect_area(&self, effect: Effect) -> Option<EffectArea> {
         let radius = area_radius(effect)?;
-        self.abilities.effect_active(effect).then_some(EffectArea {
-            centre: self.player,
+        if !self.abilities.effect_active(effect) {
+            return None;
+        }
+        Some(EffectArea {
+            centre: self.area_centre(effect)?,
             radius,
         })
+    }
+
+    /// Where a live area effect is measured **from** (§8.3): the player's current cell
+    /// for the effects that travel with them, and the recorded firing cell for the ones
+    /// that snapshot.
+    ///
+    /// The split is not cosmetic — it is what each effect *is*. Confusion holds the
+    /// guards near you, so stepping away thaws them and the box must follow you.
+    /// Lockdown seals doors, and a sealed door stays sealed wherever you go, so its box
+    /// must stay where it fired: a footprint that trailed after the player would draw
+    /// the wall they raised behind them as though it were moving with them, which is
+    /// precisely the lie §11.5 forbids. A snapshot effect with no recorded origin is not
+    /// running, whatever the deck says.
+    fn area_centre(&self, effect: Effect) -> Option<Cell> {
+        match effect {
+            Effect::SealDoors => self.lockdown_centre,
+            _ => Some(self.player),
+        }
     }
 
     /// The cells the §11.5 **effect layer** paints as a background: the in-bounds
@@ -213,7 +235,7 @@ impl State {
 /// Every effect with a footprint, for the activation hook to scan. Kept beside
 /// [`area_radius`] — its rows are exactly the `Some` arms — so one edit adds an effect
 /// to the table and to the flash together.
-const AREA_EFFECTS: [Effect; 1] = [Effect::Confuse];
+const AREA_EFFECTS: [Effect; 2] = [Effect::Confuse, Effect::SealDoors];
 
 #[cfg(test)]
 mod tests {

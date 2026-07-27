@@ -296,7 +296,7 @@ Backgrounds are the threat channel, and there is a fixed precedence:
 |---|---|
 | **Danger** (red) | This cell is watched by a guard **you can see** |
 | **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
-| **Effect** (cyan) | How far your own gadget just reached |
+| **Effect** (cyan) | How far your own gadget just reached, and what it is holding |
 
 **The danger overlay is the best idea in the old game, and it is [SETTLED].** It
 paints the *literal* detection set — the same sight data the guard AI queries, not a
@@ -316,6 +316,13 @@ Two consequences that follow, and must not regress:
 
 Cones of guards you **cannot** see paint nothing — that is information you have not
 earned, and painting it would leak what you have not scouted.
+
+The cyan channel carries two things, and the difference is worth knowing. The
+**footprint** is the one-frame wash that answers *how far* — Confusion's bubble,
+Lockdown's radius — and then goes. The **marks** are what carry the state for the rest
+of the window and cost almost no ink: a frozen guard recoloured cyan (§8.3 Confusion)
+and every cell of a **sealed door** while Lockdown holds it (#242). A mark says *this
+one*, where the footprint said *this far*.
 
 **Sensed and Effect are not fogged.** Both are certain, position-only knowledge that
 travels through walls, so they paint at full strength regardless of the knowledge

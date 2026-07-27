@@ -218,6 +218,19 @@ pub enum Event {
     /// it* — walk to a wall, step off the corner, find a thinner one — and a player
     /// who is only ever told "no" learns the rule slowly and by accident.
     BoreRefused { reason: BoreRefusal },
+    /// Lockdown shut and sealed `count` doors around `at` (§8.3/§10.4/#242) — the one
+    /// act, reported once, rather than a [`DoorClosed`](Event::DoorClosed) per door: a
+    /// lockdown is not three doors swinging shut of their own accord, and narrating it
+    /// door by door would spend the near line's single row on what the board has
+    /// already drawn (§11.7).
+    ///
+    /// `count` is what the seal actually took, so a test and the record agree with the
+    /// world rather than with the radius.
+    DoorsSealed { count: usize, at: Cell },
+    /// A Lockdown activation was **refused** because no door is in reach (§8.3/#242) —
+    /// free, and nothing changed, like a wall bump. Carries no reason, because there is
+    /// only ever the one: the ability seals doors, and there were none to seal.
+    LockdownRefused,
 }
 
 impl Event {
@@ -250,6 +263,8 @@ impl Event {
             | Event::RematerializeRefused
             | Event::WallBored { .. }
             | Event::BoreRefused { .. }
+            | Event::DoorsSealed { .. }
+            | Event::LockdownRefused
             | Event::DecoyDied { .. } => Category::Owned,
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it

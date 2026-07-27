@@ -75,6 +75,7 @@ mod doors;
 mod effects;
 mod events;
 mod guards;
+mod lockdown;
 mod traversal;
 mod view;
 
@@ -155,6 +156,24 @@ pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
 /// bubble was tight enough that a chaser could sit just outside it. Pinned by a test
 /// so a later change is a visible edit.
 pub const CONFUSION_RADIUS: u32 = 6;
+
+/// The **Lockdown** seal radius (§8.3/§10.4/#242 **[START]**): activating Lockdown
+/// shuts and seals every door with a cell inside this Chebyshev box of the player —
+/// measured the same way as the guard sense and Confusion's bubble (§6.1 box metric)
+/// and, like them, reaching **through walls**.
+///
+/// Deliberately **small**, and smaller than [`CONFUSION_RADIUS`]: the doors it takes
+/// are the ones in the room you are standing in and the corridor you just left, not a
+/// whole wing. A radius that sealed a wing would freeze the level's traffic for its
+/// whole window — an ability that plays the map for you — where this one buys a
+/// pursuer's detour and nothing more (§7.6). It is the ability's main power lever, so
+/// it is pinned by a test and expected to move in playtest.
+pub const LOCKDOWN_RADIUS: u32 = 4;
+
+/// Lockdown's reach stays **within the guard sense** (§9/§8.3), for the same reason
+/// Confusion's does: a door sealed beyond the range the player can perceive would be a
+/// wall they had no way to read. Pinned at compile time.
+const _: () = assert!(LOCKDOWN_RADIUS <= PLAYER_SENSE_RANGE);
 
 /// How many turns a fired area effect's **footprint flash** stays painted (§8.3/§11.5
 /// **[START]**, #308): the cyan box that teaches how far Confusion — or any later
@@ -538,6 +557,18 @@ pub struct State {
     /// promptly too. A small set — a player passes through one door at a time — so a
     /// plain `Vec` scan beats a map.
     autodoors_pending: Vec<DoorId>,
+    /// Where the live **Lockdown** window fired, if one is running (§8.3/#242) — the
+    /// cell its [`LOCKDOWN_RADIUS`] box was measured from.
+    ///
+    /// Which doors are sealed is not stored here: that lives on the doors themselves
+    /// ([`DoorLock`](crate::DoorLock)), the one representation every lock source shares.
+    /// This is only the **snapshot's origin**, kept so the footprint the renderer paints
+    /// stays where the ability fired instead of following the player the way Confusion's
+    /// travelling bubble does (§8.3) — a wall you raised behind you must not appear to
+    /// move with you. Set by [`seal_doors`](Self::seal_doors) and cleared by
+    /// [`release_lockdown`](Self::release_lockdown), so it lives exactly as long as the
+    /// window does.
+    lockdown_centre: Option<Cell>,
     /// The guards that **freshly** detected the player on the last spent turn — the
     /// transition [`Event::Detected`] reports (§7.6) — as indices into
     /// [`guards`](Self::guards), for the momentary **spot flash** (§11.5/§9.2, #222).
@@ -674,6 +705,7 @@ impl State {
             door_cues: Vec::new(),
             effect_flashes: Vec::new(),
             autodoors_pending: Vec::new(),
+            lockdown_centre: None,
             spotters: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
@@ -887,6 +919,12 @@ impl State {
                 if declares(ability, Effect::SpawnDecoy) {
                     self.decoy = None;
                 }
+                // Every seal is released with the window that placed it (§8.3/#242).
+                // This is the guarantee that a temporary wall is temporary: the
+                // duration is the only clock, so a door cannot stay sealed past it.
+                if declares(ability, Effect::SealDoors) {
+                    self.release_lockdown();
+                }
                 // An area effect's footprint is its window's too (#308): whatever
                 // life the flash had left dies with the effect, never after it.
                 self.clear_effect_flash(ability);
@@ -1006,6 +1044,24 @@ impl State {
                 } else {
                     None
                 };
+                // Lockdown's target is the set of doors in reach (§8.3/#242), and a
+                // lockdown with no door to seal would spend the turn and the whole
+                // lockout on nothing. So the set is resolved here — before the deck
+                // commits — and an empty one refuses exactly as the decoy's missing
+                // cell does: free, nothing changed (§4.4). It speaks, because a press
+                // that did nothing must say why (§11.7).
+                let seal = if declares(id, Effect::SealDoors) {
+                    let doors = self.lockdown_doors();
+                    if doors.is_empty() {
+                        if self.abilities.loadout().contains(id) {
+                            events.push(Event::LockdownRefused);
+                        }
+                        return false;
+                    }
+                    Some(doors)
+                } else {
+                    None
+                };
                 if self.abilities.activate(id) {
                     if spawn.is_some() {
                         self.decoy = spawn;
@@ -1018,6 +1074,9 @@ impl State {
                     });
                     if let Some(wall) = bore {
                         self.bore_wall(wall, events);
+                    }
+                    if let Some(doors) = seal {
+                        self.seal_doors(&doors, events);
                     }
                     self.waited = false;
                     self.crouched_behind = None;
@@ -1049,6 +1108,12 @@ impl State {
                 if self.abilities.deactivate(id) {
                     if declares(id, Effect::SpawnDecoy) {
                         self.decoy = None;
+                    }
+                    // The seals are the window (§8.3/#242): ending it early hands every
+                    // door back at once. Free, like every toggle-off, and it refunds
+                    // nothing — the full lockout still runs (§8.2).
+                    if declares(id, Effect::SealDoors) {
+                        self.release_lockdown();
                     }
                     // The bubble is gone, so its footprint goes with it (#308) — an
                     // early toggle-off leaves no residue to fade over nothing.

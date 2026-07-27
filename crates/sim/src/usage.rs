@@ -66,13 +66,18 @@ pub enum Verb {
     /// budget that the histogram says directly whether the ability is being used at
     /// all, or is unreachable from where the bot ever stands.
     PierceWall,
+    /// Sealed the doors around the bot with Lockdown (§8.3/#242). Worth watching for
+    /// the opposite reason to Pierce Wall's: it is refused outright where no door is in
+    /// reach, so a flat zero here is as likely to mean "never stands near a doorway" as
+    /// "never chooses it".
+    Lockdown,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 10] = [
+    pub const ALL: [Verb; 11] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -83,6 +88,7 @@ impl Verb {
         Verb::Takedown,
         Verb::Drag,
         Verb::PierceWall,
+        Verb::Lockdown,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -102,6 +108,7 @@ impl Verb {
             AbilityId::Autodoors => Verb::Autodoors,
             AbilityId::Confusion => Verb::Confusion,
             AbilityId::PierceWall => Verb::PierceWall,
+            AbilityId::Lockdown => Verb::Lockdown,
             AbilityId::Vision => return None,
         })
     }
@@ -119,6 +126,7 @@ impl Verb {
             Verb::Takedown => "takedown",
             Verb::Drag => "drag",
             Verb::PierceWall => "pierce_wall",
+            Verb::Lockdown => "lockdown",
         }
     }
 
@@ -237,7 +245,8 @@ mod tests {
                 "confusion",
                 "takedown",
                 "drag",
-                "pierce_wall"
+                "pierce_wall",
+                "lockdown"
             ]
         );
         // Each ability activation lands in its own slot.

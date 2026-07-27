@@ -448,6 +448,19 @@ pub fn render(state: &State) -> Grid {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
     }
 
+    // The **sealed doors** (§8.3/§10.4/#242): every cell of every door a live Lockdown
+    // holds, in the same `Category::Effect` channel — the door-side twin of the mark a
+    // frozen guard carries, and for the same reason. The footprint flash above says
+    // *how far* for one frame; these say *which doors*, for as long as the window
+    // lasts, which is the fact the player is actually playing off (a route that is shut
+    // to the guards and one turn's bump from being open to them). Painted with the
+    // advisory layers, before every mark that outranks it, so a sealed doorway a cone
+    // reaches still reads red first (§11.5: being seen outranks). It draws through the
+    // fog because your own lock is not something the building can keep from you.
+    for cell in state.sealed_door_cells() {
+        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
+    }
+
     // The spot flash (§11.5/§9.2/§7.6, #222): the one-beat sightline of a guard that
     // *freshly* spotted the player from **outside their view** — the "a guard just saw
     // you, and here is where it is" cue the loop was missing (§7.6). It lights the
@@ -2884,6 +2897,48 @@ mod tests {
                 "the door cue at (3,{y}) outranks the effect wash",
             );
         }
+    }
+
+    /// §8.3/§11.5 (#242): a **sealed door** carries the effect mark over its whole
+    /// footprint — the door-side twin of a frozen guard's — and keeps it for the rest
+    /// of the window, long after the one-turn footprint flash has gone. That mark is
+    /// what tells the player which doors the guards can no longer work.
+    #[test]
+    fn a_sealed_door_is_marked_for_the_whole_window() {
+        use crate::AbilityId;
+        let mut s = State::new(
+            crate::test_support::region_strip(),
+            Cell::new(2, 2),
+            Direction::East,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(14, 4),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Lockdown));
+
+        assert!(
+            render(&s).get(4, 2).bg != Some(Category::Effect),
+            "precondition: nothing sealed yet",
+        );
+        s.step(Input::Activate(AbilityId::Lockdown));
+        // A turn later the flash has burned out; the marks are all that is left.
+        s.step(Input::Wait);
+        let g = render(&s);
+        assert!(
+            s.effect_footprint().next().is_none(),
+            "precondition: the flash is a flash",
+        );
+        for y in 1..4 {
+            assert_eq!(
+                g.get(4, y).bg,
+                Some(Category::Effect),
+                "the sealed door is marked over its whole footprint at (4,{y})",
+            );
+        }
+        assert!(
+            g.get(7, 2).bg != Some(Category::Effect),
+            "and the door out of reach is not",
+        );
     }
 
     /// §8.3 (#308): the bubble travels with the player, so the marks are re-read every

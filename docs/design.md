@@ -869,6 +869,7 @@ whole reason the architecture looks the way it does.
 | **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
 | **Confusion** | 1 turn | 6 | 45 | While active, every guard within `CONFUSION_RADIUS` of you (through walls like the guard sense, §9) is **blinded and frozen** — it neither sees nor moves. A costed panic-buy of time, not a kill: a frozen chaser **pauses** (keeps its lead), it does not reset; the guard resumes cleanly when the window ends. Capture-is-contact still holds (§4.5) — a frozen adjacent guard cannot step into you, but the freeze is no shield to walk into a guard *outside* the bubble, and a frozen guard's cell stays solid. The bubble stays inside the guard-sense range so it never freezes what you cannot sense, and the long cooldown is what keeps it rare (#240). |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket** off the room rather than a route, and that is a use of the tool, not a waste of it: a dead-end alcove out of the through-routes is somewhere to sit a sweep out. It conceals nothing (it is not a cupboard, §10.3), so whether it is shelter or a trap is the player's judgement — and three walls around you means you can dig a hole to hide in, never a tunnel. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. |
+| **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot work the handle, so its route goes the long way round (§7.6/§10.4). A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it, or the wall you raised behind you would dissolve exactly as you fled down it. **You** are never refused — it is your lock, so a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in. That costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake, and unmaking it is paid in the very turns the ability was bought to save. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4), like a wall bump. |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 
 Notes carried forward, because they are good and non-obvious:
@@ -923,7 +924,7 @@ Notes carried forward, because they are good and non-obvious:
   you.
 - **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
   not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
-  tech from a pool that defaults to the shipped, non-experimental set (seven tech now
+  tech from a pool that defaults to the shipped, non-experimental set (eight tech now
   ship, so "three random" is a genuine draw of three of the seven — the pool has
   outgrown the grant and it finally bites, #241); a campaign accumulates its set
   instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
@@ -1485,6 +1486,16 @@ one unit.
     always. The window's length is the tuning lever, not the rule.
 - **Anyone can operate any door.** No keys, no locks. **[START]** — keys are an
   obvious future axis, and one the fiction supports.
+  - **One bounded exception so far (#242): a lock that expires.** The **Lockdown**
+    tech (§8.3) seals the doors around you for its window — a sealed door refuses a
+    *guard's* walk-in open, so guard routes treat it as solid and go the long way,
+    while the player bumps it open as always. It is a lock on the **handle**, not a
+    hold on the door: a sealed door standing open is as passable as any other. The
+    lock lives on the door itself, one representation for every lock source, so the
+    key-gated doors of the locked-doors modifier extend it rather than inventing a
+    second — and the ability's duration is the only clock any seal has, which is
+    what keeps this side of the **[START]** baseline and clear of §2.2/§7.2's
+    soft-lock class.
 - **A door cannot close if anything occupies a panel cell.** Doors never crush
   anyone.
 - **Closed panels do not block pathfinding** — deliberately. Guards route through
@@ -1952,11 +1963,15 @@ footprint in cyan for **`EFFECT_FLASH_TURNS`** turns after it fires — **one**,
 activation frame **[START]**: enough to answer *how far* at the moment the player asks
 it, without leaving a 13×13 field of background over the board while the danger overlay
 is the thing that matters. What carries the state for every turn after that is the
-per-guard mark (§11.2), which costs no ink. The precedence is fixed —
+per-guard mark, and Lockdown's mark on each sealed door (§11.2/#242), which cost no
+ink. The precedence is fixed —
 **Danger > Sensed > the effect footprint** — so an advisory layer can never masquerade
-as the detection set, nor hide it. The footprint is the live box, re-measured every
-turn from the same query the mechanic reads, so it travels with the player exactly as
-the effect does and the picture cannot disagree with the rule.
+as the detection set, nor hide it. The footprint is measured from the same query the
+mechanic reads, so the picture cannot disagree with the rule — which means it travels
+with the player where the effect does (Confusion's bubble, which thaws a guard you
+step away from) and stays put where the effect does (Lockdown's seal, which does not
+unseal because you walked off; a wall you raised behind you must not appear to move
+with you).
 
 Two problems from the old version to fix:
 

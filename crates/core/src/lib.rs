@@ -94,7 +94,9 @@ pub use modifiers::{
     ActiveModifier, DebugModifiers, IntelGate, LevelModifiers, ModifierDirection, ModifierSources,
 };
 pub use place::{LevelConfig, Placement};
-pub use region::{Door, DoorCell, DoorId, DoorKind, Region, RegionGraph, RegionId, RegionKind};
+pub use region::{
+    Door, DoorCell, DoorId, DoorKind, DoorLock, Region, RegionGraph, RegionId, RegionKind,
+};
 pub use render::{
     ability_at, ascii_grid, help_hit, is_help_button, is_message_button, menu_hit,
     message_log_rows, render, render_screen, GlyphCell, Grid, HelpHit, HelpTab, MenuEntry, MenuUi,
@@ -104,8 +106,8 @@ pub use replay::{input_token, parse_script, to_script};
 pub use rng::Rng;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
-    State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS, PHASE_EJECT_STUN_BASE,
-    PLAYER_SENSE_RANGE, PLAYER_SENSE_RANGE_WAITING,
+    State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS, LOCKDOWN_RADIUS,
+    PHASE_EJECT_STUN_BASE, PLAYER_SENSE_RANGE, PLAYER_SENSE_RANGE_WAITING,
 };
 pub use status::{live_messages, message_for, near_line, Message};
 pub use targeting::{within_range, Target, Targeting, TileCursor};
