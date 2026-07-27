@@ -182,7 +182,16 @@ pub enum Event {
     /// never to a mis-pressed key (§4.4: cancelling is never a trap).
     RematerializeRefused,
     /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
-    AbilityActivated { ability: AbilityId },
+    ///
+    /// `uses_left` is what the ability's **per-level budget** has left *after* this
+    /// use (§8.2/#302), or `None` for the abilities the clocks alone govern. It rides
+    /// on the event rather than being looked up when the message is built, so the
+    /// number the near line speaks is the number the deck actually decremented — the
+    /// same one the bar draws — and the two cannot drift (§8.2's timing rule).
+    AbilityActivated {
+        ability: AbilityId,
+        uses_left: Option<u32>,
+    },
     /// The player toggled an ability off early (§4.4) — free; its cooldown still
     /// runs (§8.2).
     AbilityDeactivated { ability: AbilityId },

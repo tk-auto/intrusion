@@ -145,7 +145,23 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::DecoyDied { .. } => ("the decoy is trampled".to_string(), 0),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
-        Event::AbilityActivated { ability } => (format!("{} active", ability.name()), 0),
+        // A budgeted ability (§8.2/#302) narrates what the level has left instead of
+        // that it is on: the count is the fact the next decision turns on, and for an
+        // instant one there is no "on" to report anyway. The number is the event's
+        // own — the one the deck just decremented — so this line, the bar and the
+        // legend can never disagree about it (§8.2's timing rule).
+        Event::AbilityActivated {
+            ability,
+            uses_left: Some(0),
+        } => (format!("{} — none left", ability.name()), 0),
+        Event::AbilityActivated {
+            ability,
+            uses_left: Some(left),
+        } => (format!("{} — {left} left", ability.name()), 0),
+        Event::AbilityActivated {
+            ability,
+            uses_left: None,
+        } => (format!("{} active", ability.name()), 0),
         Event::AbilityDeactivated { ability } => (format!("{} off", ability.name()), 0),
         Event::AbilityExpired { ability } => (format!("{} fades", ability.name()), 0),
         // A refused toggle-off (§8.3/#304): the same quiet band as the tools it
@@ -262,6 +278,7 @@ fn ambient(state: &State) -> Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ability::AbilityId;
     use crate::cell::{Cell, Direction};
     use crate::facility::Terrain;
     use crate::guard::Guard;
@@ -784,6 +801,36 @@ mod tests {
         s.step(Input::Step(Direction::South));
         assert_eq!(s.turn(), 0, "a refused exit is free (§4.5)");
         assert_eq!(s.player(), Cell::new(5, 5), "and moves nobody");
+    }
+
+    /// A **budgeted** ability narrates what the level has left, not that it is on
+    /// (§8.2/#302) — the count is the fact the next decision turns on, and for an
+    /// instant ability there is no "on" to report. The number comes off the event, so
+    /// it is the one the deck decremented and the one the bar draws. An unbudgeted
+    /// ability keeps the wording it has always had, which is every ability shipping
+    /// today; and the whole family stays quiet self-narration in the Owned band.
+    #[test]
+    fn a_budgeted_activation_speaks_what_is_left() {
+        let spoken = |uses_left| {
+            message_for(Event::AbilityActivated {
+                ability: AbilityId::Dephase,
+                uses_left,
+            })
+            .expect("an activation speaks")
+        };
+        assert_eq!(spoken(None).text, "Dephase active");
+        assert_eq!(spoken(Some(2)).text, "Dephase — 2 left");
+        assert_eq!(spoken(Some(1)).text, "Dephase — 1 left");
+        assert_eq!(
+            spoken(Some(0)).text,
+            "Dephase — none left",
+            "spent says so in words, as the bar says it in a dash",
+        );
+        for uses_left in [None, Some(0), Some(3)] {
+            let m = spoken(uses_left);
+            assert_eq!(m.category, Category::Owned, "your own tool");
+            assert_eq!(m.priority, 0, "quiet self-narration, like a bump");
+        }
     }
 
     /// A quiet action raises no message: [`live_messages`] is empty and the near

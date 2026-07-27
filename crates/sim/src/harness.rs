@@ -134,7 +134,7 @@ pub fn run_one_with(
                 // Ability usage counted from the activation event (#137): a refused
                 // activation emits none, so it never counts (§4.4). The grab starts
                 // the drag; its half-speed steps that follow are Moves.
-                Event::AbilityActivated { ability } => {
+                Event::AbilityActivated { ability, .. } => {
                     if let Some(verb) = Verb::of_ability(ability) {
                         record.usage.record(verb);
                     }

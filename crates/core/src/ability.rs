@@ -28,7 +28,11 @@
 //! ([`Effect`]) and the code escape hatch ([`Behaviour`]), and the [`Deck`] the
 //! turn loop steps: activation, early toggle-off, and the end-of-turn
 //! duration/cooldown tick, with the `duration + cooldown` lockout *emergent* from
-//! the rules rather than stored. The deck reads each ability's state as one of the
+//! the rules rather than stored. Alongside the two clocks sits the one non-time
+//! axis (§8.2/#302): an optional **per-level use budget**
+//! ([`Economy::uses_per_level`]), set at level start, counted down by use, and never
+//! given back — scarcity for an effect too strong to hand out on a cooldown alone.
+//! The deck reads each ability's state as one of the
 //! display [`AbilityState`]s ([`Deck::state`]) — the number the player actually
 //! gets (§8.2 timing) — which is how the two halves meet.
 //! [`State::ability_statuses`](crate::State::ability_statuses) builds the bar
@@ -63,6 +67,23 @@ pub enum AbilityState {
     Active { remaining: u32 },
     /// Recharging, with `remaining` turns of cooldown left — shown `/N/` (§11.4).
     Cooling { remaining: u32 },
+    /// Usable, and **budgeted** (§8.2/#302): the level allows `uses` more presses of
+    /// it, ever. Shown [`(N)`](AbilityState::suffix) — the parenthetical shape is
+    /// borrowed from [`PASSIVE_MARKER`] deliberately, because both mean *not a
+    /// timer*. A bracket or a slash would have put this number on the same footing
+    /// as a duration or a cooldown, and it is the opposite of those: nothing counts
+    /// it down but the player, and nothing ever counts it back up.
+    ///
+    /// Its own state rather than a payload on [`Ready`](AbilityState::Ready), so no
+    /// surface can show a budgeted ability as plain ready and quietly drop the one
+    /// number that says how much of the level's supply is left.
+    Limited { uses: u32 },
+    /// The per-level use budget is **spent** (§8.2/#302) — for the rest of this
+    /// facility, there is nothing to press. Draws exactly as
+    /// [`Unusable`](AbilityState::Unusable) does, because that is what it is; but it
+    /// is never [`Ready`](AbilityState::Ready) and never `/0/`, because it is not
+    /// waiting for anything. There is no recharge (§8.2's fence).
+    Exhausted,
     /// A **passive** ability (§8.2/#264): in effect for as long as it is held, with
     /// no activation, no duration and no cooldown.
     ///
@@ -99,8 +120,10 @@ impl AbilityState {
             AbilityState::Ready => String::new(),
             AbilityState::Active { remaining } => format!("[{remaining}]"),
             AbilityState::Cooling { remaining } => format!("/{remaining}/"),
+            AbilityState::Limited { uses } => format!("({uses})"),
             AbilityState::Passive => PASSIVE_MARKER.to_string(),
-            AbilityState::Unusable => "—".to_string(),
+            // Spent is unusable, and says so in the one word the bar has for it.
+            AbilityState::Exhausted | AbilityState::Unusable => "—".to_string(),
         }
     }
 }
@@ -208,6 +231,15 @@ const fn max_state_notation() -> usize {
                 if cooldown > widest {
                     widest = cooldown;
                 }
+                // A use budget is a third number the bar can show — `(N)` (#302) —
+                // so it is measured here like the two clocks, and a budget wide
+                // enough to push the row over fails the build rather than the frame.
+                if let Some(uses) = economy.uses {
+                    let notation = decimal_width(uses) + 2;
+                    if notation > widest {
+                        widest = notation;
+                    }
+                }
             }
         }
         i += 1;
@@ -251,6 +283,31 @@ const fn bar_names_are_ascii() -> bool {
 const _: () = assert!(
     bar_names_are_ascii(),
     "an ability bar name must be ASCII: one byte is one grid cell (§11.1)",
+);
+
+/// Whether every declared per-level use budget stays inside its fence (§8.2/#302):
+/// **at least one** — a row granting zero uses would ship an ability born
+/// [`Exhausted`](AbilityState::Exhausted), which is a deleted ability written the
+/// long way — and **single digits**, because it is a bound on what the level lets
+/// you do, not a bar to manage. Ten uses is not scarcity, it is an inventory.
+const fn use_budgets_are_single_digit() -> bool {
+    let mut i = 0;
+    while i < AbilityId::ALL.len() {
+        if let AbilityMode::Activated(economy) = AbilityId::ALL[i].def().mode {
+            if let Some(uses) = economy.uses {
+                if uses == 0 || uses > 9 {
+                    return false;
+                }
+            }
+        }
+        i += 1;
+    }
+    true
+}
+
+const _: () = assert!(
+    use_budgets_are_single_digit(),
+    "a per-level use budget is 1–9 (§8.2/#302): a bound on the level, not a resource bar",
 );
 
 // ---------------------------------------------------------------------------
@@ -605,6 +662,7 @@ pub struct Economy {
     targeting: TargetingMode,
     duration: u32,
     cooldown: u32,
+    uses: Option<u32>,
 }
 
 impl Economy {
@@ -631,6 +689,20 @@ impl Economy {
     /// true lockout is `duration + cooldown`.
     pub fn cooldown(&self) -> u32 {
         self.cooldown
+    }
+
+    /// How many times this **whole facility** lets the ability be used, or `None`
+    /// for the abilities the time economy alone governs (§8.2/#302).
+    ///
+    /// It is not a resource: there is nothing to spend it on, nothing that refills
+    /// it, and no way to earn one back. It composes *with* the clocks rather than
+    /// replacing them — an ability may carry a cooldown and a budget both, and the
+    /// turn cost is untouched either way (§4.4) — and it exists so an effect too
+    /// strong to hand out on a cooldown alone can still ship (#303). Set at level
+    /// start from this row and counted down by the [`Deck`]; the level is the only
+    /// thing that ever gives one back, by being a new level.
+    pub fn uses_per_level(&self) -> Option<u32> {
+        self.uses
     }
 }
 
@@ -708,7 +780,9 @@ impl Ability {
 // ability's own ticket; the economy is blind to them.
 
 /// An activated ability's §8.2 economy, as one `const` expression — the shape every
-/// [`AbilityMode::Activated`] row below is built from.
+/// [`AbilityMode::Activated`] row below is built from. The time economy alone
+/// governs it: no per-level use budget ([`Economy::uses_per_level`] is `None`), which
+/// is every ability shipping today.
 const fn activated(
     cost: u32,
     targeting: TargetingMode,
@@ -720,6 +794,7 @@ const fn activated(
         targeting,
         duration,
         cooldown,
+        uses: None,
     })
 }
 
@@ -889,16 +964,29 @@ pub(crate) struct Deck {
     /// §4.4 no-op), and reads as [`Unusable`](AbilityState::Unusable). For the full
     /// loadout — every bare run today — the deck behaves exactly as before.
     loadout: Loadout,
+    /// Uses left this **level** for each ability that declares a budget
+    /// ([`Economy::uses_per_level`], §8.2/#302), `None` for the ones the clocks alone
+    /// govern. Seeded from the catalog when the deck is built — which is once, at
+    /// level start — decremented on each use that actually happens, and never
+    /// written upward by anything: a fresh level is the only way a budget comes back,
+    /// and it comes back by being a fresh deck.
+    uses: [Option<u32>; AbilityId::ALL.len()],
 }
 
 impl Deck {
     /// A fresh deck holding `loadout`, every held ability [`Ready`](Slot::Ready)
-    /// (§8.3 — the starting set is available from the start, #104). Abilities not in
-    /// the loadout are inert (see [`Deck::loadout`]).
+    /// (§8.3 — the starting set is available from the start, #104) and every use
+    /// budget full (§8.2/#302 — this constructor *is* the level-start boot path).
+    /// Abilities not in the loadout are inert (see [`Deck::loadout`]).
     pub(crate) fn new(loadout: Loadout) -> Self {
+        let mut uses = [None; AbilityId::ALL.len()];
+        for id in AbilityId::ALL {
+            uses[id.index()] = id.def().economy().and_then(|e| e.uses_per_level());
+        }
         Deck {
             slots: [Slot::Ready; AbilityId::ALL.len()],
             loadout,
+            uses,
         }
     }
 
@@ -907,6 +995,24 @@ impl Deck {
     /// [`Unusable`](AbilityState::Unusable) — it is real but not yours. A held
     /// **passive** reads as [`Passive`](AbilityState::Passive) (#264): holding it is
     /// the whole of its state, so its slot is never consulted.
+    ///
+    /// **The clock and the budget are ranked, so they cannot contradict each other**
+    /// (§8.2/#302). Each state reports the number that actually governs the ability
+    /// right now (§8.2's timing rule), in this order:
+    ///
+    /// - **Active wins outright.** The effect is *running*, and how long it has left
+    ///   is the fact the player is playing off. A budget spent down to nothing does
+    ///   not hide the window it just bought.
+    /// - Otherwise a **spent budget** is [`Exhausted`](AbilityState::Exhausted), over
+    ///   a cooldown — a cooldown on an ability that is never usable again is a
+    ///   countdown to nothing, and reporting it would promise a return that is not
+    ///   coming.
+    /// - Otherwise the **cooldown** leads while it runs: it is the nearer gate, and
+    ///   the uses behind it are still there when it clears.
+    /// - Otherwise the budget is what stands between the player and the next use
+    ///   ([`Limited`](AbilityState::Limited)) — or nothing does ([`Ready`]).
+    ///
+    /// [`Ready`]: AbilityState::Ready
     pub(crate) fn state(&self, id: AbilityId) -> AbilityState {
         if !self.loadout.contains(id) {
             return AbilityState::Unusable;
@@ -914,7 +1020,20 @@ impl Deck {
         if id.is_passive() {
             return AbilityState::Passive;
         }
-        self.slots[id.index()].display()
+        let uses = self.uses[id.index()];
+        match (self.slots[id.index()].display(), uses) {
+            (active @ AbilityState::Active { .. }, _) => active,
+            (_, Some(0)) => AbilityState::Exhausted,
+            (AbilityState::Ready, Some(uses)) => AbilityState::Limited { uses },
+            (state, _) => state,
+        }
+    }
+
+    /// Uses left this level for `id` (§8.2/#302), or `None` for an ability with no
+    /// budget — the number the near line and a test read, and the same number
+    /// [`state`](Deck::state) shows on the bar.
+    pub(crate) fn uses_left(&self, id: AbilityId) -> Option<u32> {
+        self.uses[id.index()]
     }
 
     /// The run's loadout — the abilities it holds (#244), for the UI line to list
@@ -926,8 +1045,15 @@ impl Deck {
     /// Activate `id` if the run holds it and it is [`Ready`](Slot::Ready). Returns
     /// whether it activated — `true` means the turn is spent (§4.4). Activating an
     /// ability that is not in the loadout (#244), a **passive** (#264 — there is no
-    /// activation path to take), or one already active or cooling, is a mis-input: a
-    /// **free** no-op (`false`), like bumping a wall (§4.4).
+    /// activation path to take), one already active or cooling, or one whose
+    /// per-level budget is spent (#302), is a mis-input: a **free** no-op (`false`),
+    /// like bumping a wall (§4.4).
+    ///
+    /// A use is spent **only when the ability actually switches on** — the decrement
+    /// is the last thing here, after every refusal has had its say, so a press that
+    /// changed nothing costs nothing. Callers that gate on a target of their own
+    /// (the decoy's faced cell, §8.4) refuse *before* reaching this, so their
+    /// refusals cost neither a use nor the turn either.
     pub(crate) fn activate(&mut self, id: AbilityId) -> bool {
         if !self.loadout.contains(id) {
             return false;
@@ -935,11 +1061,17 @@ impl Deck {
         let Some(economy) = id.def().economy() else {
             return false; // a passive is already on; there is nothing to switch
         };
+        if self.uses[id.index()] == Some(0) {
+            return false; // the level's supply is spent, and nothing refills it
+        }
         let slot = &mut self.slots[id.index()];
         if *slot != Slot::Ready {
             return false;
         }
         *slot = Slot::activated(economy.duration, economy.cooldown);
+        if let Some(left) = &mut self.uses[id.index()] {
+            *left -= 1; // the `Some(0)` guard above is what makes this safe
+        }
         true
     }
 
@@ -1019,6 +1151,59 @@ mod tests {
         assert_eq!(AbilityState::Cooling { remaining: 2 }.suffix(), "/2/");
         assert_eq!(AbilityState::Passive.suffix(), "(on)");
         assert_eq!(AbilityState::Unusable.suffix(), "—");
+    }
+
+    /// The **use-budget notation** (§8.2/#302), pinned: a count in parentheses, the
+    /// shape [`PASSIVE_MARKER`] uses — because neither is a timer — and never a
+    /// clock's brackets or slashes. Exhausted borrows the unusable dash rather than
+    /// inventing a `(0)`: `(0)` would read as a number you still have.
+    #[test]
+    fn a_use_budget_reads_as_a_count_not_a_countdown() {
+        assert_eq!(AbilityState::Limited { uses: 3 }.suffix(), "(3)");
+        assert_eq!(AbilityState::Limited { uses: 1 }.suffix(), "(1)");
+        assert_eq!(
+            AbilityState::Exhausted.suffix(),
+            AbilityState::Unusable.suffix(),
+            "spent draws as unusable, because that is what it is",
+        );
+        assert_ne!(AbilityState::Limited { uses: 0 }.suffix(), "—");
+
+        // The states themselves stay distinct, so nothing can quietly treat a
+        // budgeted ability as an unbounded one or a spent one as merely cooling.
+        assert_ne!(AbilityState::Limited { uses: 2 }, AbilityState::Ready);
+        assert_ne!(AbilityState::Exhausted, AbilityState::Unusable);
+        assert_ne!(AbilityState::Exhausted, AbilityState::Ready);
+        for n in 0..4 {
+            assert_ne!(
+                AbilityState::Exhausted,
+                AbilityState::Cooling { remaining: n }
+            );
+            assert_ne!(
+                AbilityState::Limited { uses: n },
+                AbilityState::Active { remaining: n }
+            );
+        }
+    }
+
+    /// A budgeted entry draws its count against the bar name, exactly as the ticket's
+    /// worked example reads — `Bore(2)` — and the widest one a legal budget can
+    /// produce still fits the per-entry budget (§11.4). The single-digit fence is a
+    /// `const` assertion over the catalog; this pins what that fence buys.
+    #[test]
+    fn a_budgeted_bar_entry_fits_the_row() {
+        let entry = |id, state| AbilityStatus { id, state }.bar_entry();
+        assert_eq!(
+            entry(AbilityId::Decoy, AbilityState::Limited { uses: 2 }),
+            "Decoy(2)"
+        );
+        assert_eq!(entry(AbilityId::Run, AbilityState::Exhausted), "Run—");
+        for id in AbilityId::ALL {
+            let widest = entry(id, AbilityState::Limited { uses: 9 });
+            assert!(
+                widest.chars().count() <= MAX_BAR_ENTRY,
+                "{widest:?} overflows the per-entry budget",
+            );
+        }
     }
 
     /// A bar entry is the ability's **bar name** with the notation tucked straight
@@ -1594,5 +1779,206 @@ mod economy_tests {
         assert_eq!(Slot::activated(0, 4), Slot::Cooling { remaining: 4 });
         // Instant with no cooldown loops right back to Ready.
         assert_eq!(Slot::activated(0, 0), Slot::Ready);
+    }
+
+    // -----------------------------------------------------------------------
+    // The per-level use budget (§8.2/#302)
+    // -----------------------------------------------------------------------
+
+    /// A deck in which `id` carries a per-level budget of `uses` — byte for byte the
+    /// runtime a catalog row declaring [`Economy::uses_per_level`] produces, seeded
+    /// here by hand because **no shipping row declares one yet**: #302 lands the axis
+    /// and #303 is the ability that spends it. Everything else is exactly
+    /// [`Deck::new`]'s deck, so these tests exercise the real activate/tick/state
+    /// paths rather than a parallel model of them.
+    fn deck_budgeting(loadout: Loadout, id: AbilityId, uses: u32) -> Deck {
+        let mut deck = Deck::new(loadout);
+        deck.uses[id.index()] = Some(uses);
+        deck
+    }
+
+    /// Run one full lockout so a budgeted ability is ready to be used again.
+    fn wait_out_the_lockout(deck: &mut Deck, id: AbilityId) {
+        let economy = id.def().economy().expect("activated");
+        for _ in 0..(economy.duration() + economy.cooldown()) {
+            deck.tick(&mut Vec::new());
+        }
+    }
+
+    /// A fresh deck seeds **every** budget from the catalog, and only from there
+    /// (§8.2/#302). This is the level-start boot path — [`Deck::new`] is called once
+    /// per level and nowhere else — so "set at level start" is a property of where
+    /// this code lives, and the assertion is that the seeding reads the row rather
+    /// than any number written down twice.
+    #[test]
+    fn a_fresh_deck_seeds_every_use_budget_from_the_catalog() {
+        let deck = Deck::new(Loadout::full());
+        for id in AbilityId::ALL {
+            assert_eq!(
+                deck.uses_left(id),
+                id.def().economy().and_then(|e| e.uses_per_level()),
+                "{}",
+                id.name(),
+            );
+        }
+    }
+
+    /// **Uses deplete and never come back** (§8.2/#302's fence). Each use costs one,
+    /// the last one leaves the ability [`Exhausted`](AbilityState::Exhausted), and no
+    /// amount of time moves it off that: a hundred turns of ticking is a whole level
+    /// of waiting, and there is nothing to wait for.
+    #[test]
+    fn uses_deplete_and_never_recharge_across_a_level() {
+        let id = AbilityId::Dephase; // dur 3 / cd 30
+        let mut deck = deck_budgeting(Loadout::full(), id, 2);
+
+        assert_eq!(deck.state(id), AbilityState::Limited { uses: 2 });
+        assert!(deck.activate(id));
+        assert_eq!(deck.uses_left(id), Some(1), "one use spent");
+        wait_out_the_lockout(&mut deck, id);
+        assert_eq!(
+            deck.state(id),
+            AbilityState::Limited { uses: 1 },
+            "off cooldown, and the budget is what is left to report",
+        );
+
+        assert!(deck.activate(id), "the last use is a use like any other");
+        assert_eq!(deck.uses_left(id), Some(0));
+        wait_out_the_lockout(&mut deck, id);
+
+        assert_eq!(deck.state(id), AbilityState::Exhausted);
+        for turn in 0..100 {
+            deck.tick(&mut Vec::new());
+            assert_eq!(deck.state(id), AbilityState::Exhausted, "turn {turn}");
+            assert_eq!(deck.uses_left(id), Some(0), "turn {turn}");
+            assert!(!deck.activate(id), "turn {turn}: nothing to activate");
+        }
+    }
+
+    /// **A use is spent only when the ability actually switches on** (§8.2/#302).
+    /// Every refusal the deck can give — not held, already cooling, already spent —
+    /// leaves the count exactly where it was, so a mis-pressed key never costs a use
+    /// any more than it costs a turn (§4.4).
+    #[test]
+    fn a_refused_activation_consumes_no_use() {
+        let id = AbilityId::Dephase;
+
+        // Refused for want of the ability itself: the run does not hold it.
+        let mut ungranted = deck_budgeting(Loadout::innate(), id, 3);
+        assert!(!ungranted.activate(id));
+        assert_eq!(ungranted.uses_left(id), Some(3), "not yours, and not spent");
+
+        // Refused because it is mid-lockout: one use bought the window, and
+        // hammering the key through it buys nothing more.
+        let mut deck = deck_budgeting(Loadout::full(), id, 3);
+        assert!(deck.activate(id));
+        assert_eq!(deck.uses_left(id), Some(2));
+        for _ in 0..5 {
+            assert!(!deck.activate(id), "already running");
+            assert_eq!(deck.uses_left(id), Some(2), "a refused press costs nothing");
+        }
+
+        // Refused because the budget is gone: the count cannot go below zero, and
+        // pressing again does not try to.
+        let mut spent = deck_budgeting(Loadout::full(), id, 1);
+        assert!(spent.activate(id));
+        wait_out_the_lockout(&mut spent, id);
+        assert!(!spent.activate(id));
+        assert_eq!(
+            spent.uses_left(id),
+            Some(0),
+            "no underflow, no second spend"
+        );
+    }
+
+    /// **The two lockouts coexist without contradicting each other** (§8.2/#302).
+    /// While the clock runs it is the clock that is reported — it is the nearer gate,
+    /// and it is true. The moment the clock clears, the budget takes over. A spent
+    /// budget outranks the *cooldown*, because a cooldown on an ability that is never
+    /// coming back would be a countdown to nothing — but never the **duration**: the
+    /// window your last use bought is still running, and hiding its clock would be
+    /// the one lie §8.2's timing rule names.
+    #[test]
+    fn a_cooldown_and_a_budget_report_the_nearer_gate() {
+        let id = AbilityId::Dephase; // dur 3 / cd 30
+        let mut deck = deck_budgeting(Loadout::full(), id, 2);
+
+        assert!(deck.activate(id));
+        assert_eq!(deck.state(id), AbilityState::Active { remaining: 3 });
+        for _ in 0..3 {
+            deck.tick(&mut Vec::new());
+        }
+        assert_eq!(
+            deck.state(id),
+            AbilityState::Cooling { remaining: 30 },
+            "the clock leads while it runs — the budget is not the wait",
+        );
+        for _ in 0..30 {
+            deck.tick(&mut Vec::new());
+        }
+        assert_eq!(
+            deck.state(id),
+            AbilityState::Limited { uses: 1 },
+            "clock clear, so the budget is what stands between you and the next use",
+        );
+
+        // The last use. It spends the budget to zero the instant it is pressed — but
+        // the window it bought is running, and that is what the player is playing
+        // off, so the duration keeps the entry for as long as it lasts.
+        assert!(deck.activate(id));
+        assert_eq!(deck.uses_left(id), Some(0));
+        assert_eq!(
+            deck.state(id),
+            AbilityState::Active { remaining: 3 },
+            "a spent budget never hides the window it just bought",
+        );
+        for _ in 0..3 {
+            deck.tick(&mut Vec::new());
+        }
+        assert_eq!(
+            deck.state(id),
+            AbilityState::Exhausted,
+            "spent outranks the cooldown: there is no use left for it to lead to",
+        );
+    }
+
+    /// A **fresh level** restores the budget (§8.2/#302): the only thing that ever
+    /// gives one back is a new deck, and a new deck is what a new level builds.
+    /// Nothing inside a level can reach this.
+    #[test]
+    fn a_fresh_level_restores_the_budget() {
+        let id = AbilityId::Dephase;
+        let mut deck = deck_budgeting(Loadout::full(), id, 1);
+        assert!(deck.activate(id));
+        wait_out_the_lockout(&mut deck, id);
+        assert_eq!(deck.state(id), AbilityState::Exhausted);
+
+        // The next facility is a new deck off the same catalog row.
+        let next = deck_budgeting(Loadout::full(), id, 1);
+        assert_eq!(next.state(id), AbilityState::Limited { uses: 1 });
+    }
+
+    /// **An ability with no budget behaves exactly as it did before #302.** Every
+    /// shipping row is one of these, so this is the compatibility statement: the
+    /// states are the clock's alone, `uses_left` is `None`, and no number of
+    /// activations ever exhausts anything.
+    #[test]
+    fn an_unbudgeted_ability_is_untouched_by_the_axis() {
+        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
+            let mut deck = Deck::new(Loadout::full());
+            assert_eq!(deck.uses_left(id), None, "{}", id.name());
+            assert_eq!(deck.state(id), AbilityState::Ready, "{}", id.name());
+            for _ in 0..3 {
+                assert!(deck.activate(id), "{}", id.name());
+                wait_out_the_lockout(&mut deck, id);
+                assert_eq!(
+                    deck.state(id),
+                    AbilityState::Ready,
+                    "{} is never Limited and never Exhausted",
+                    id.name(),
+                );
+                assert_eq!(deck.uses_left(id), None, "{}", id.name());
+            }
+        }
     }
 }
