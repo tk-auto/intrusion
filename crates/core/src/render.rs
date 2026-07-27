@@ -51,21 +51,20 @@ pub(crate) const BODY_GLYPH: char = 'z';
 /// across open ground. Named so the legend shows the same mark the board does.
 pub(crate) const FLOOR_DOT: char = '·';
 
-/// How much the player currently knows about what a drawn cell shows — the three
-/// visual states of §11.5a's implementation note (live / remembered / never-seen,
-/// where "never-seen" contents are simply not drawn and their cell falls back to
-/// its geometry). The shell styles each distinctly; remembered must **not** be
-/// collapsed into the §11.5 dimming scheme.
+/// How much the player currently knows about what a drawn cell shows — the
+/// visual states of §11.5a's implementation note (live / remembered / never-seen).
+/// The shell styles each distinctly; remembered must **not** be collapsed into the
+/// §11.5 dimming scheme.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Visibility {
     /// Inside the player's FOV right now — drawn full colour (§11.5).
     Live,
-    /// Outside the FOV, showing the always-visible layer: geometry, or the
-    /// geometry masking a never-seen content. The shell renders this dark gray —
-    /// dim but legible (§11.5).
-    Dimmed,
+    /// Outside the FOV but the cell has been in it before — geometry the player
+    /// has stood in and looked at, drawn as itself in the §11.5 dim shade: dark
+    /// gray, dim but legible.
+    Explored,
     /// Outside the FOV, drawn from tile memory: a content seen earlier this run
-    /// (§11.5a) — its own visual state, distinct from both live and dimmed.
+    /// (§11.5a) — its own visual state, distinct from both live and explored.
     Remembered,
 }
 
@@ -80,8 +79,8 @@ pub struct GlyphCell {
     /// The background category, or `None` for the default backdrop. `Danger` is
     /// the §11.5 overlay: this cell is watched by a guard the player can see.
     pub bg: Option<Category>,
-    /// The knowledge state this cell is drawn in (§11.5a): live, dimmed geometry,
-    /// or remembered content. The shell styles the three distinctly.
+    /// The knowledge state this cell is drawn in (§11.5a): live, explored
+    /// geometry, or remembered content. The shell styles the three distinctly.
     pub vis: Visibility,
 }
 
@@ -489,11 +488,11 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
         | Terrain::DoorHinge
         | Terrain::Exit
         | Terrain::DuctEntry
-        | Terrain::PartialCover => (terrain, Visibility::Dimmed),
+        | Terrain::PartialCover => (terrain, Visibility::Explored),
         // A door's *position* is geometry but its open/closed pose is live state,
         // never remembered: out of view a panel always draws canonically closed.
         Terrain::DoorPanelClosed | Terrain::DoorPanelOpen => {
-            (Terrain::DoorPanelClosed, Visibility::Dimmed)
+            (Terrain::DoorPanelClosed, Visibility::Explored)
         }
         // Contents: hidden until seen, then remembered (§11.5a). The comms console
         // (§7.3/§7.7) is contents like the intel console: the counterplay it offers
@@ -505,8 +504,8 @@ fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
         // Never seen: masked by the geometry naturally in its place — plain floor
         // where a console stands, plain wall over a hideout alcove, so the map
         // gives neither away before the player has scouted it.
-        Terrain::Console | Terrain::CommsConsole => (Terrain::Floor, Visibility::Dimmed),
-        Terrain::Hideout => (Terrain::Wall, Visibility::Dimmed),
+        Terrain::Console | Terrain::CommsConsole => (Terrain::Floor, Visibility::Explored),
+        Terrain::Hideout => (Terrain::Wall, Visibility::Explored),
     }
 }
 
@@ -725,7 +724,7 @@ mod tests {
         }
         let masked = render(&s).get(5, 4);
         assert_eq!(masked.glyph, '·', "an unseen body draws as the floor dot");
-        assert_eq!(masked.vis, Visibility::Dimmed);
+        assert_eq!(masked.vis, Visibility::Explored);
     }
 
     /// §8.3/§10.3/§11.3: the decoy draws as an Owned `@` — a thing you made,
@@ -1167,7 +1166,7 @@ mod tests {
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
-            ('π', Category::System, Visibility::Dimmed),
+            ('π', Category::System, Visibility::Explored),
             "an out-of-FOV table still draws, dimmed"
         );
     }
@@ -1188,7 +1187,7 @@ mod tests {
     /// §11.5a: **geometry is never fogged.** Walls far beyond sight range — and the
     /// exit, part of the layout the player entered by — draw from turn one, so a
     /// route can be planned before the first risky step. Out-of-FOV geometry
-    /// carries [`Visibility::Dimmed`]; what the player sees now is `Live`.
+    /// carries [`Visibility::Explored`]; what the player sees now is `Live`.
     #[test]
     fn geometry_draws_from_turn_one_even_far_out_of_sight() {
         let mut layout = open_room(40, 30);
@@ -1206,12 +1205,12 @@ mod tests {
         // The far corner wall is way outside the 15-range box, yet drawn.
         let far_wall = g.get(39, 29);
         assert_eq!(far_wall.glyph, '#');
-        assert_eq!(far_wall.vis, Visibility::Dimmed);
+        assert_eq!(far_wall.vis, Visibility::Explored);
         // So is the exit: geometry, not a hidden content.
         let exit = g.get(35, 5);
         assert_eq!(exit.glyph, 'E');
         assert_eq!(exit.fg, Category::Interest);
-        assert_eq!(exit.vis, Visibility::Dimmed);
+        assert_eq!(exit.vis, Visibility::Explored);
         // What is in the FOV right now is live.
         assert_eq!(g.get(2, 4).vis, Visibility::Live);
     }
@@ -1278,7 +1277,7 @@ mod tests {
             '·',
             "a guard does not persist out of FOV",
         );
-        assert_eq!(g.get(guard.x, guard.y).vis, Visibility::Dimmed);
+        assert_eq!(g.get(guard.x, guard.y).vis, Visibility::Explored);
     }
 
     /// §11.2 spent objectives: a live console is Interest `$`; once its intel is
@@ -1396,7 +1395,7 @@ mod tests {
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
-            ('#', Category::Neutral, Visibility::Dimmed),
+            ('#', Category::Neutral, Visibility::Explored),
             "an unscouted hideout reads as plain wall"
         );
 
@@ -1435,7 +1434,7 @@ mod tests {
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
-            ('+', Category::System, Visibility::Dimmed),
+            ('+', Category::System, Visibility::Explored),
             "an unseen door always shows the canonical closed pose"
         );
 
@@ -1450,7 +1449,7 @@ mod tests {
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.vis),
-            ('+', Visibility::Dimmed),
+            ('+', Visibility::Explored),
             "door state is never remembered (§11.5a)"
         );
     }
@@ -1475,7 +1474,7 @@ mod tests {
         let lit = g.get(10, 8); // ahead: floor in the FOV
         assert_eq!((lit.glyph, lit.vis), ('·', Visibility::Live));
         let dark = g.get(10, 14); // behind: floor out of the FOV
-        assert_eq!((dark.glyph, dark.vis), ('·', Visibility::Dimmed));
+        assert_eq!((dark.glyph, dark.vis), ('·', Visibility::Explored));
         assert_eq!(g.get(12, 8).glyph, ' ', "an open panel renders blank");
     }
 
@@ -1543,7 +1542,7 @@ mod tests {
         assert_eq!(cell.bg, Some(Category::Danger), "red even though unseen");
         assert_eq!(
             (cell.glyph, cell.vis),
-            ('·', Visibility::Dimmed),
+            ('·', Visibility::Explored),
             "the glyph below stays the dimmed geometry"
         );
     }
@@ -1901,7 +1900,7 @@ mod tests {
         assert_eq!(cell.glyph, '·', "the guard's cell is just dimmed floor");
         assert_eq!(cell.fg, Category::Ground, "…not a sensed highlight");
         assert_eq!(cell.bg, None, "…and no orange background");
-        assert_eq!(cell.vis, Visibility::Dimmed);
+        assert_eq!(cell.vis, Visibility::Explored);
     }
 
     // --- Duct interior view (§10.7/#134) -------------------------------------

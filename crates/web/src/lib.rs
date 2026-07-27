@@ -485,7 +485,7 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
                 Visibility::Live => swatch(cell.fg).fg,
                 // Out-of-FOV geometry: the row's dim shade (§11.5) — the standard
                 // dark gray for most, quieter for Ground, tinted for the exit.
-                Visibility::Dimmed => swatch(cell.fg).dim,
+                Visibility::Explored => swatch(cell.fg).dim,
                 // Remembered contents read as memory, not as the live thing (§11.5a).
                 Visibility::Remembered => MEMORY_COLOR,
             };
@@ -525,7 +525,7 @@ fn bg_color(bg: Category, vis: Visibility) -> &'static str {
     }
     match vis {
         Visibility::Live => swatch.bg,
-        Visibility::Dimmed | Visibility::Remembered => swatch.bg_dim,
+        Visibility::Explored | Visibility::Remembered => swatch.bg_dim,
     }
 }
 
@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn the_effect_layer_is_distinct_from_danger_and_sensed() {
         const MIN_BG_DIST2: i32 = 40 * 40;
-        let effect = bg_color(Category::Effect, Visibility::Dimmed);
+        let effect = bg_color(Category::Effect, Visibility::Explored);
         assert_eq!(
             effect,
             bg_color(Category::Effect, Visibility::Live),
@@ -638,7 +638,7 @@ mod tests {
 
         for other in [
             bg_color(Category::Danger, Visibility::Live),
-            bg_color(Category::Danger, Visibility::Dimmed),
+            bg_color(Category::Danger, Visibility::Explored),
             bg_color(Category::Sensed, Visibility::Live),
         ] {
             let d = dist2(rgb(effect), rgb(other));
@@ -668,7 +668,7 @@ mod tests {
         // read on area colour even where 70 is the bar for thin glyph strokes.
         const MIN_BG_DIST2: i32 = 40 * 40;
         let live = bg_color(Category::Danger, Visibility::Live);
-        let dimmed = bg_color(Category::Danger, Visibility::Dimmed);
+        let dimmed = bg_color(Category::Danger, Visibility::Explored);
         for shade in [live, dimmed] {
             let d = dist2(rgb(shade), rgb(BG));
             assert!(
@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn the_sensed_background_is_orange_and_distinct_from_danger() {
         const MIN_BG_DIST2: i32 = 40 * 40;
-        let sensed = bg_color(Category::Sensed, Visibility::Dimmed);
+        let sensed = bg_color(Category::Sensed, Visibility::Explored);
         assert_eq!(
             sensed,
             bg_color(Category::Sensed, Visibility::Live),
@@ -713,7 +713,7 @@ mod tests {
         // cell must never look alike.
         for danger in [
             bg_color(Category::Danger, Visibility::Live),
-            bg_color(Category::Danger, Visibility::Dimmed),
+            bg_color(Category::Danger, Visibility::Explored),
         ] {
             let d = dist2(rgb(sensed), rgb(danger));
             assert!(
