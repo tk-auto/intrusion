@@ -643,6 +643,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         sighting_lost_calls_a_guard,
         body_found_calls_two_guards,
         always_show_vision_cones,
+        full_layout_known,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -651,6 +652,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         sighting_lost_calls_a_guard,
         body_found_calls_two_guards,
         always_show_vision_cones,
+        full_layout_known,
     ]
     .into_iter()
     .enumerate()
@@ -671,13 +673,14 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known] =
         active;
     Some(LevelModifiers {
         guards_always_search_hideouts,
         sighting_lost_calls_a_guard,
         body_found_calls_two_guards,
         always_show_vision_cones,
+        full_layout_known,
         intel_to_exit: gate,
     })
 }
@@ -685,7 +688,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// How many modifier toggles this build actually has — the live count, against which
 /// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
 /// the format.
-const MODIFIER_FIELDS: usize = 4;
+const MODIFIER_FIELDS: usize = 5;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1011,24 +1014,27 @@ mod tests {
             for cones in [false, true] {
                 for sighting in [false, true] {
                     for body in [false, true] {
-                        for gate in gates {
-                            for abilities in loadouts {
-                                let level = LevelSeed {
-                                    seed: 12345,
-                                    modifiers: LevelModifiers {
-                                        guards_always_search_hideouts: search,
-                                        sighting_lost_calls_a_guard: sighting,
-                                        body_found_calls_two_guards: body,
-                                        always_show_vision_cones: cones,
-                                        intel_to_exit: gate,
-                                    },
-                                    abilities,
-                                };
-                                assert_eq!(
-                                    LevelSeed::decode(&token(level)),
-                                    Some(level),
-                                    "round-trip failed for {level:?}",
-                                );
+                        for layout in [false, true] {
+                            for gate in gates {
+                                for abilities in loadouts {
+                                    let level = LevelSeed {
+                                        seed: 12345,
+                                        modifiers: LevelModifiers {
+                                            guards_always_search_hideouts: search,
+                                            sighting_lost_calls_a_guard: sighting,
+                                            body_found_calls_two_guards: body,
+                                            always_show_vision_cones: cones,
+                                            full_layout_known: layout,
+                                            intel_to_exit: gate,
+                                        },
+                                        abilities,
+                                    };
+                                    assert_eq!(
+                                        LevelSeed::decode(&token(level)),
+                                        Some(level),
+                                        "round-trip failed for {level:?}",
+                                    );
+                                }
                             }
                         }
                     }
@@ -1122,6 +1128,7 @@ mod tests {
                 sighting_lost_calls_a_guard: false,
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: false,
+                full_layout_known: false,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1247,6 +1254,7 @@ mod tests {
             sighting_lost_calls_a_guard: true,
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
+            full_layout_known: true,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {

@@ -32,7 +32,10 @@
 //! the game never steps underneath. It stays escapable (§11.6's no-trap rule): `?`
 //! or `Escape` closes it, and the tab bar carries a touchable `[x]`.
 
-use super::{blank_grid, draw, Grid, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH};
+use super::{
+    blank_grid, draw, Grid, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH, SCHEMATIC_GROUND,
+    SCHEMATIC_WALL,
+};
 use crate::ability::{AbilityId, PASSIVE_MARKER};
 use crate::category::Category;
 use crate::facility::Terrain;
@@ -395,6 +398,11 @@ fn glyph_rows() -> Vec<(char, Category, &'static str)> {
         terrain(Terrain::CommsConsole, "comms — bump to kill the radio"),
         terrain(Terrain::Exit, "the exit"),
         (FLOOR_DOT, Category::Ground, "floor"),
+        // The schematic (§11.5a/#307): what the plans give you before you have been
+        // there. Two rows, because the two marks are the whole vocabulary — walking
+        // in resolves either one into what is really there.
+        (SCHEMATIC_WALL, Category::Neutral, "building — not yet seen"),
+        (SCHEMATIC_GROUND, Category::Ground, "floor — not yet seen"),
     ]
 }
 
@@ -740,6 +748,7 @@ mod tests {
                 sighting_lost_calls_a_guard: true,
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: true,
+                full_layout_known: true,
                 intel_to_exit: gate,
             };
             let g = render_help(W, H, HelpTab::LevelInfo, None, all_on);

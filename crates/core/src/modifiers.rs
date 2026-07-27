@@ -148,6 +148,23 @@ pub struct LevelModifiers {
     /// [SETTLED] contract ("if your cell isn't red, no guard detects you") is
     /// kept and, if anything, strengthened.
     pub always_show_vision_cones: bool,
+    /// **Easier.** Hand over the **full layout** (§11.5a): geometry the player has
+    /// never had eyes on draws as the real building rather than as the schematic
+    /// `≈`/`~`, so doorways, duct mouths and furniture are all on the map from turn
+    /// one. Exactly the picture the game gave everyone before the schematic landed
+    /// (#307), which is what makes the modifier easy to state and easy to price.
+    ///
+    /// It reveals the **layout and nothing else**: a console and a cupboard are
+    /// contents, still hidden until seen (§11.5a), so this never shortcuts the
+    /// scouting that finds the objectives — it removes the *architectural* unknown
+    /// only. The knowledge state on the seam stays truthful either way: an
+    /// unexplored cell still reports itself unexplored, it is simply drawn in full.
+    ///
+    /// **It has to be paid for.** Route-planning through unscouted wings is a real
+    /// advantage, so this sits on the *easier* side of the §12.6 directed pool: under
+    /// the difficulty draw it spends budget that must be found by taking a harder
+    /// rule elsewhere. A modifier that only ever gave would not be a modifier.
+    pub full_layout_known: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -215,11 +232,12 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 6] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 7] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
     SHOWS_ALL_CONES,
+    KNOWS_FULL_LAYOUT,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -244,6 +262,12 @@ const CALLS_IN_BODIES: ActiveModifier = ActiveModifier {
 
 const SHOWS_ALL_CONES: ActiveModifier = ActiveModifier {
     name: "All vision cones shown",
+    direction: ModifierDirection::Easier,
+    detail: None,
+};
+
+const KNOWS_FULL_LAYOUT: ActiveModifier = ActiveModifier {
+    name: "Full layout known",
     direction: ModifierDirection::Easier,
     detail: None,
 };
@@ -281,6 +305,7 @@ impl LevelModifiers {
             sighting_lost_calls_a_guard,
             body_found_calls_two_guards,
             always_show_vision_cones,
+            full_layout_known,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -297,6 +322,9 @@ impl LevelModifiers {
         }
         if always_show_vision_cones {
             active.push(SHOWS_ALL_CONES);
+        }
+        if full_layout_known {
+            active.push(KNOWS_FULL_LAYOUT);
         }
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
         // settings are "active", each with the direction its exposure rank implies.
@@ -324,6 +352,7 @@ impl LevelModifiers {
                 || other.body_found_calls_two_guards,
             always_show_vision_cones: self.always_show_vision_cones
                 || other.always_show_vision_cones,
+            full_layout_known: self.full_layout_known || other.full_layout_known,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
             // in its documented direction, so sources add pressure, never cancel.
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
@@ -548,9 +577,10 @@ mod tests {
             sighting_lost_calls_a_guard: true,
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
+            full_layout_known: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 5);
+        assert_eq!(stacked.active().len(), 6);
     }
 
     #[test]
@@ -560,6 +590,7 @@ mod tests {
             sighting_lost_calls_a_guard: true,
             body_found_calls_two_guards: true,
             always_show_vision_cones: false,
+            full_layout_known: false,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -567,6 +598,7 @@ mod tests {
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: true,
+            full_layout_known: true,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);

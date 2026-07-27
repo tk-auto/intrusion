@@ -993,6 +993,13 @@ mod tests {
     /// the top-right corner; the usable line offers the adjacent console; the bar
     /// **names** every held ability, flush to the bottom-right with its one-cell
     /// margin. Nothing covers the board — there is no panel left to deploy.
+    ///
+    /// The map half also pins the §11.5a schematic (#307) end to end, which a
+    /// whole-frame golden shows better than any single assertion: the player's own
+    /// ~180° half-disc reads in real glyphs, and everything they have never had eyes
+    /// on — the run of wall behind them, the far two-thirds of the room — reads as
+    /// `≈` fabric and `~` floor space. The exit keeps its `E` out there regardless,
+    /// the one thing on this map that is theirs (§4.5).
     #[test]
     fn the_full_screen_renders_golden() {
         let s = State::new(
@@ -1010,12 +1017,12 @@ mod tests {
             vec![
                 " 1 more intel to leave              [?] ".to_string(),
                 " → console: take intel                  ".to_string(),
-                "########################################".to_string(),
-                "#······································#".to_string(),
-                "#·@$···································#".to_string(),
-                "#······································#".to_string(),
-                "#·····································E#".to_string(),
-                "########################################".to_string(),
+                "##################≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈".to_string(),
+                "#·················~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
+                "#·@$··············~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
+                "#·················~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
+                "≈~~~~~············~~~~~~~~~~~~~~~~~~~~E≈".to_string(),
+                "≈≈≈≈≈≈≈≈##########≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈".to_string(),
                 "Run       Camo      Decoy     Phase     ".to_string(),
             ]
         );

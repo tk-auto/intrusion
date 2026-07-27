@@ -1682,7 +1682,21 @@ impl State {
         // duct's interior path is deliberately *not* accumulated: it lives in its own
         // layer, shown only while crawled and never remembered (§11.5a/§10.7), so the
         // crawlspace's route is given away to nobody once the player has left it.
-        self.memory.absorb(&self.player_fov);
+        //
+        // The crawl view (`duct_fov`) always contains the occupied cell, so honouring
+        // that rule means holding that one cell back while it is an **interior** cell.
+        // An **entry** is geometry (§10.7) and accumulates like any other cell. This
+        // used to be prose only: the cell went in, harmlessly, because memory drove
+        // nothing but *contents*. Once memory drives how geometry is drawn, a crawled
+        // duct would otherwise light its interior as explored — a thread of known wall
+        // tracing the shortcut across the map, which is exactly the tell §11.5a keeps
+        // the path in its own layer to avoid.
+        let crawled_interior = self
+            .occupied_duct()
+            .filter(|duct| !duct.is_entry(self.player))
+            .map(|_| self.player);
+        self.memory
+            .absorb_except(&self.player_fov, crawled_interior);
         for guard in &mut self.guards {
             guard.look(facility);
         }

@@ -62,7 +62,7 @@ no token (§6).
 
 A held set — the active modifiers, the tech a run holds — is encoded as a
 **combination index over 256 reserved slots**, not over the entries that exist today
-(six tech and four modifier toggles as of writing).
+(six tech and five modifier toggles as of writing).
 
 This is the single most important property of the format.
 

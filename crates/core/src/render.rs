@@ -51,21 +51,55 @@ pub(crate) const BODY_GLYPH: char = 'z';
 /// across open ground. Named so the legend shows the same mark the board does.
 pub(crate) const FLOOR_DOT: char = '·';
 
-/// How much the player currently knows about what a drawn cell shows — the three
-/// visual states of §11.5a's implementation note (live / remembered / never-seen,
-/// where "never-seen" contents are simply not drawn and their cell falls back to
-/// its geometry). The shell styles each distinctly; remembered must **not** be
-/// collapsed into the §11.5 dimming scheme.
+/// The **schematic** glyphs (§11.5a, #307): how geometry the player has never had
+/// eyes on is drawn — the building as its *plans* give it, not as it has been seen.
+///
+/// A cell that has never been in the player's FOV collapses to one of these two
+/// marks. `≈` is the building's **fabric** — a wall run and the recesses and
+/// openings cut into it — and `~` is the **floor space** between it. Both are
+/// deliberately *approximate*: `≈` is the mathematical "approximately", which is
+/// exactly the claim the plan makes about a stretch of building nobody has walked.
+/// Standing somewhere resolves the schematic into what is really there, and
+/// permanently — tile memory is monotonic (§11.5a).
+///
+/// **Why shape rather than a darker shade.** The obvious alternative was a fourth
+/// rung on the §11.5 brightness ladder, and it is the worse channel: on a dark
+/// palette the gap below Ground's already-quiet dim is too small to read on a
+/// phone, and pushing it darker turns the readout into de-facto fog, which §11.5a
+/// settles against. Shape costs no colour, cannot compete with the threat channels
+/// (§11.2 Danger and Sensed keep the background to themselves), and needs nothing
+/// extra from a second palette (#189). It also degrades safely: even where the two
+/// marks blur at a small font, wall and floor keep their own colour rows, so the
+/// layout stays as readable as it is today.
+pub(crate) const SCHEMATIC_WALL: char = '≈';
+/// The floor half of the schematic — see [`SCHEMATIC_WALL`].
+pub(crate) const SCHEMATIC_GROUND: char = '~';
+
+/// How much the player currently knows about what a drawn cell shows — the
+/// visual states of §11.5a's implementation note (live / remembered / never-seen).
+/// The shell styles each distinctly; remembered must **not** be collapsed into the
+/// §11.5 dimming scheme.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Visibility {
     /// Inside the player's FOV right now — drawn full colour (§11.5).
     Live,
-    /// Outside the FOV, showing the always-visible layer: geometry, or the
-    /// geometry masking a never-seen content. The shell renders this dark gray —
-    /// dim but legible (§11.5).
-    Dimmed,
+    /// Outside the FOV but the cell has been in it before — geometry the player
+    /// has stood in and looked at, drawn as itself in the §11.5 dim shade: dark
+    /// gray, dim but legible.
+    Explored,
+    /// Never in the player's FOV — geometry known from the building's plans and
+    /// nothing else (§11.5a). Drawn as the **schematic** (see [`SCHEMATIC_WALL`]):
+    /// the fabric of the building and the floor between it, with everything
+    /// standing in the rooms yet to be discovered.
+    ///
+    /// It is the *knowledge* that is recorded here, not the styling — the shell
+    /// paints this in the same dim shade as [`Explored`](Self::Explored), because
+    /// the schematic separates itself by **shape**. That keeps the distinction on
+    /// the seam for anything that needs to reason about coverage rather than draw
+    /// it (the §12.6 full-layout modifier, a future fog-the-geometry rule).
+    Unexplored,
     /// Outside the FOV, drawn from tile memory: a content seen earlier this run
-    /// (§11.5a) — its own visual state, distinct from both live and dimmed.
+    /// (§11.5a) — its own visual state, distinct from both live and explored.
     Remembered,
 }
 
@@ -80,8 +114,8 @@ pub struct GlyphCell {
     /// The background category, or `None` for the default backdrop. `Danger` is
     /// the §11.5 overlay: this cell is watched by a guard the player can see.
     pub bg: Option<Category>,
-    /// The knowledge state this cell is drawn in (§11.5a): live, dimmed geometry,
-    /// or remembered content. The shell styles the three distinctly.
+    /// The knowledge state this cell is drawn in (§11.5a): live, explored
+    /// geometry, or remembered content. The shell styles the three distinctly.
     pub vis: Visibility,
 }
 
@@ -194,6 +228,10 @@ pub fn render(state: &State) -> Grid {
     let (width, height) = (facility.width(), facility.height());
     let fov = state.player_fov();
     let memory = state.memory();
+    // The §12.6 `full_layout_known` modifier: draw the architecture of cells the
+    // player has never had eyes on, instead of the schematic. Contents stay hidden —
+    // it buys the building, not the objectives.
+    let layout_known = state.modifiers().full_layout_known;
 
     // Terrain layer, through the fog: what the player knows of each cell.
     let mut cells: Vec<GlyphCell> = (0..height)
@@ -203,17 +241,31 @@ pub fn render(state: &State) -> Grid {
                 .terrain_at(x, y)
                 .expect("in-bounds by construction");
             let cell = Cell::new(x, y);
-            let (shown, vis) = if fov.contains(cell) {
-                (terrain, Visibility::Live)
+            let Fogged {
+                shown,
+                vis,
+                schematic,
+            } = if fov.contains(cell) {
+                Fogged {
+                    shown: terrain,
+                    vis: Visibility::Live,
+                    schematic: false,
+                }
             } else {
-                fogged_view(terrain, memory.contains(cell))
+                fogged_view(terrain, memory.contains(cell), layout_known)
             };
             // Floor dots (§11.5): give open ground a foreground so the FOV edge
             // reads across it. Masked contents dot too — they *show* floor.
-            let glyph = if shown == Terrain::Floor {
-                FLOOR_DOT
-            } else {
-                shown.glyph()
+            //
+            // Unexplored geometry draws the schematic instead (§11.5a/#307).
+            // `fogged_view` has already collapsed it to bare wall or bare floor, so
+            // the swap is total: every unexplored cell wears one of two marks and
+            // none of them can be told apart by glyph *or* by category.
+            let glyph = match (schematic, shown) {
+                (true, Terrain::Wall) => SCHEMATIC_WALL,
+                (true, Terrain::Floor) => SCHEMATIC_GROUND,
+                (_, Terrain::Floor) => FLOOR_DOT,
+                _ => shown.glyph(),
             };
             GlyphCell {
                 glyph,
@@ -469,44 +521,132 @@ pub fn render(state: &State) -> Grid {
     }
 }
 
+/// What [`fogged_view`] decided about one out-of-FOV cell.
+///
+/// `schematic` is carried rather than re-derived from `vis` because the two can
+/// legitimately disagree: with the §12.6 `full_layout_known` modifier on, a cell is
+/// still honestly `Unexplored` — the player has not been there — but draws as the
+/// real building. Keeping the decision in one place is what stops the glyph choice
+/// and the masking choice from drifting into two different answers.
+struct Fogged {
+    /// The terrain to draw, after any masking.
+    shown: Terrain,
+    /// The knowledge state to draw it in.
+    vis: Visibility,
+    /// Draw the schematic mark instead of `shown`'s own glyph.
+    schematic: bool,
+}
+
 /// What an out-of-FOV cell shows (§11.5a), given whether its cell is in tile
 /// memory: the terrain to draw and the knowledge state to draw it in. One
 /// exhaustive match, so every new terrain kind is forced to declare its layer —
 /// geometry, contents, or live state — the day it is added.
-fn fogged_view(terrain: Terrain, remembered: bool) -> (Terrain, Visibility) {
+///
+/// # Explored versus unexplored (§11.5a, #307)
+///
+/// The `explored` flag is the whole fog in one bit. **Explored** — the cell has
+/// been in the FOV at some point — draws the building as the player found it:
+/// real glyphs, contents they saw kept as [`Remembered`](Visibility::Remembered).
+/// **Unexplored** draws the **schematic** ([`SCHEMATIC_WALL`]) instead: the
+/// player has the building's plans, so they read the fabric and the floor space,
+/// and nothing else.
+///
+/// The line the schematic draws is architectural rather than mechanical: `≈` is
+/// the building's **load-bearing fabric** — a wall run, and the recesses cut back
+/// into it — and `~` is everything that is not holding the building up. So a
+/// hideout alcove and a duct mouth are backed by structure and read `≈`; a table
+/// and a console stand in a room and read `~`. Neither reading follows
+/// passability, and deliberately so — the plan shows the building's bones, not
+/// what has been put in it.
+///
+/// A **doorway** is the case that makes the rule concrete: it bears no load, so it
+/// reads `~` and shows on the plans as a **gap in the wall line**, exactly as an
+/// architectural plan draws one. Its *frame* is still structure and stays `≈`, so
+/// an unexplored wing reads `≈≈≈~≈≈≈` and the ways between its rooms can be
+/// planned before setting foot in them — which is §11.5a's *"you can plan your
+/// escape route before you're spotted"* surviving the schematic intact.
+///
+/// **Everything unexplored must collapse to exactly two appearances**, or the
+/// schematic leaks what it is meant to withhold: a lone real glyph among the
+/// schematic marks would advertise the very content the player has not found.
+/// That is why the masking here returns bare [`Terrain::Wall`] and
+/// [`Terrain::Floor`] — the glyph *and* the §11.2 category then both come from
+/// the mask, so the colour channel cannot give away what the glyph channel hides.
+///
+/// The **exit** is the sole exception: it is the tunnel the player dug and came in
+/// by (§4.5), the one piece of this building that is theirs and that they could
+/// not fail to know. It keeps its `E` and its Interest tint from turn one, and
+/// goes on anchoring every escape plan (§7.6).
+fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
+    let vis = if explored {
+        Visibility::Explored
+    } else {
+        Visibility::Unexplored
+    };
+    let real = |shown| Fogged {
+        shown,
+        vis,
+        schematic: false,
+    };
+    // The exit first: known from turn one whatever else is (§4.5/§7.6).
+    if terrain == Terrain::Exit {
+        return real(terrain);
+    }
+    if !explored && !layout_known {
+        // The schematic (§11.5a/#307). Fabric — what holds the building up: a wall
+        // run, a door's *frame*, and the recesses cut back into a run (a hideout
+        // alcove, a duct mouth), which are backed by structure and read as part of
+        // it. Everything else is floor space: the room's own area, the furniture and
+        // equipment standing in it, and a **doorway**, which bears no load and so
+        // draws as the gap in the wall line that a plan would show.
+        //
+        // The crawl *path* between a duct's two entries is not classified here at
+        // all: its interior cells keep their own terrain and are never in memory
+        // (§11.5a/§10.7), so they read as whatever the building around them reads
+        // as, giving the shortcut away to nobody.
+        let fabric = matches!(
+            terrain,
+            Terrain::Wall | Terrain::DoorHinge | Terrain::DuctEntry | Terrain::Hideout
+        );
+        return Fogged {
+            shown: if fabric {
+                Terrain::Wall
+            } else {
+                Terrain::Floor
+            },
+            vis: Visibility::Unexplored,
+            schematic: true,
+        };
+    }
+    // Either the cell is explored, or the §12.6 `full_layout_known` modifier is
+    // handing the architecture over. Both draw the real building; they differ only
+    // in what they do with a **content**, which the modifier never reveals.
     match terrain {
-        // Geometry: always visible, never fogged (§11.5a). The exit is geometry —
-        // the player entered by it (§4.5) and plans escape routes around it (§7.6).
-        // A table is geometry too: it replaced a stamped wall (§10.1a), and being
-        // surprised by furniture mid-flight is as bad as being surprised by a wall.
-        // A duct **entry** is geometry as well (§10.7): visible from turn one like a
-        // door, an `=` in the wall you can plan a shortcut around. The crawl *path*
-        // between the entries is not geometry — its interior cells keep their own
-        // terrain (they may cross floor) and the path is drawn only while crawled,
-        // never here (§11.5a/#134), so nothing gives the shortcut's route away.
+        // Geometry the player has walked (or been given): drawn as itself, dim but
+        // legible (§11.5).
         Terrain::Floor
         | Terrain::Wall
         | Terrain::DoorHinge
         | Terrain::Exit
         | Terrain::DuctEntry
-        | Terrain::PartialCover => (terrain, Visibility::Dimmed),
-        // A door's *position* is geometry but its open/closed pose is live state,
-        // never remembered: out of view a panel always draws canonically closed.
-        Terrain::DoorPanelClosed | Terrain::DoorPanelOpen => {
-            (Terrain::DoorPanelClosed, Visibility::Dimmed)
-        }
+        | Terrain::PartialCover => real(terrain),
+        // A door's *position* is known once explored, but its open/closed pose is
+        // live state, never remembered: out of view a panel draws canonically closed.
+        Terrain::DoorPanelClosed | Terrain::DoorPanelOpen => real(Terrain::DoorPanelClosed),
         // Contents: hidden until seen, then remembered (§11.5a). The comms console
         // (§7.3/§7.7) is contents like the intel console: the counterplay it offers
         // has to be *found*, so the map never advertises it before the player has
         // scouted the room.
-        Terrain::Console | Terrain::CommsConsole | Terrain::Hideout if remembered => {
-            (terrain, Visibility::Remembered)
-        }
-        // Never seen: masked by the geometry naturally in its place — plain floor
-        // where a console stands, plain wall over a hideout alcove, so the map
-        // gives neither away before the player has scouted it.
-        Terrain::Console | Terrain::CommsConsole => (Terrain::Floor, Visibility::Dimmed),
-        Terrain::Hideout => (Terrain::Wall, Visibility::Dimmed),
+        Terrain::Console | Terrain::CommsConsole | Terrain::Hideout if explored => Fogged {
+            shown: terrain,
+            vis: Visibility::Remembered,
+            schematic: false,
+        },
+        // Layout handed over but the cell never seen: the content is still hidden,
+        // masked by the geometry naturally in its place. The modifier buys the
+        // architecture, never the objectives.
+        Terrain::Console | Terrain::CommsConsole => real(Terrain::Floor),
+        Terrain::Hideout => real(Terrain::Wall),
     }
 }
 
@@ -725,7 +865,7 @@ mod tests {
         }
         let masked = render(&s).get(5, 4);
         assert_eq!(masked.glyph, '·', "an unseen body draws as the floor dot");
-        assert_eq!(masked.vis, Visibility::Dimmed);
+        assert_eq!(masked.vis, Visibility::Explored);
     }
 
     /// §8.3/§10.3/§11.3: the decoy draws as an Owned `@` — a thing you made,
@@ -1150,13 +1290,20 @@ mod tests {
         );
     }
 
-    /// §11.5a: a table is **geometry** — it replaced a stamped wall (§10.1a), so
-    /// like a wall it draws from turn one, dimmed beyond the FOV, never masked.
+    /// §11.5a (#307): a table stands **in a room**, not in the building's fabric, so
+    /// the plans do not carry it. Unexplored it reads as schematic floor like the rest
+    /// of the room's area; walk in and it resolves into the `π` you can crouch behind,
+    /// and stays that way (memory is monotonic).
+    ///
+    /// The furniture is genuinely a surprise, then — including the fact that it blocks
+    /// the cell. That is the deliberate trade of putting only the bones on the plan:
+    /// what you can *plan* is the building, and what a room turns out to contain is
+    /// what exploring is for.
     #[test]
-    fn a_table_is_geometry_and_never_fogged() {
+    fn a_table_is_discovered_not_given() {
         let mut layout = open_room(20, 20);
         layout.place(Cell::new(10, 14), Terrain::PartialCover); // behind the spawn facing
-        let s = State::new(
+        let mut s = State::new(
             layout,
             Cell::new(10, 10),
             Direction::North,
@@ -1167,9 +1314,254 @@ mod tests {
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
-            ('π', Category::System, Visibility::Dimmed),
-            "an out-of-FOV table still draws, dimmed"
+            (SCHEMATIC_GROUND, Category::Ground, Visibility::Unexplored),
+            "unscouted, a table is indistinguishable from the floor around it"
         );
+
+        // Turn to face it: seen, it is the real thing.
+        s.step(Input::Step(Direction::South));
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.fg, cell.vis),
+            ('π', Category::System, Visibility::Live),
+            "in view, a table draws as itself"
+        );
+
+        // And it stays drawn after looking away — geometry once explored.
+        s.step(Input::Step(Direction::North));
+        let cell = render(&s).get(10, 14);
+        assert_eq!(
+            (cell.glyph, cell.fg, cell.vis),
+            ('π', Category::System, Visibility::Explored),
+            "a table you found stays found"
+        );
+    }
+
+    /// The #307 acceptance test: **walking somewhere lights it up, permanently.**
+    /// A cell the player has never had eyes on draws the schematic; sweeping the FOV
+    /// over it promotes it to the real geometry, and it stays that way after they
+    /// look away, because tile memory is monotonic (§11.5a).
+    ///
+    /// Asserted on the built frame rather than on the memory set, so what is pinned
+    /// is what the player actually sees.
+    #[test]
+    fn exploring_promotes_the_schematic_to_real_geometry_for_good() {
+        let mut s = State::new(
+            open_room(20, 20),
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        // A stretch of the south wall, behind the north-facing player.
+        let behind = Cell::new(10, 19);
+        let cell = render(&s).get(behind.x, behind.y);
+        assert_eq!(
+            (cell.glyph, cell.vis),
+            (SCHEMATIC_WALL, Visibility::Unexplored),
+            "never looked at: the plans and nothing more",
+        );
+
+        // Turn south and walk toward it until it is in view.
+        for _ in 0..4 {
+            s.step(Input::Step(Direction::South));
+        }
+        let cell = render(&s).get(behind.x, behind.y);
+        assert_eq!(
+            (cell.glyph, cell.vis),
+            ('#', Visibility::Live),
+            "in view: the real wall",
+        );
+
+        // Walk away north again — well out of sight range.
+        for _ in 0..8 {
+            s.step(Input::Step(Direction::North));
+        }
+        let cell = render(&s).get(behind.x, behind.y);
+        assert_eq!(
+            (cell.glyph, cell.vis),
+            ('#', Visibility::Explored),
+            "explored stays explored: memory never decays (§11.5a)",
+        );
+    }
+
+    /// The schematic must not leak through **either** channel (§11.5a, #307). Every
+    /// unexplored cell wears one of exactly two glyphs and one of exactly two
+    /// categories, whatever is really on it — so a cupboard cannot be spotted as the
+    /// one System-tan mark in a Neutral wall run, nor a console as the odd glyph in a
+    /// field of floor. If this ever fails, the fog has a hole in it.
+    #[test]
+    fn nothing_unexplored_is_distinguishable_from_its_neighbours() {
+        let mut layout = open_room(20, 20);
+        // One of everything worth hiding, all behind the north-facing player.
+        layout.place(Cell::new(8, 15), Terrain::Hideout);
+        layout.place(Cell::new(9, 15), Terrain::DuctEntry);
+        layout.place(Cell::new(10, 15), Terrain::DoorPanelClosed);
+        layout.place(Cell::new(11, 15), Terrain::DoorHinge);
+        layout.place(Cell::new(12, 16), Terrain::PartialCover);
+        layout.place(Cell::new(13, 16), Terrain::CommsConsole);
+        let s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(14, 16)], // an intel console too
+            Cell::new(18, 18),
+        );
+        let g = render(&s);
+
+        let mut seen: Vec<(char, Category)> = Vec::new();
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                // The exit is the one documented exception: yours, and never
+                // schematic (§4.5/§7.6). It is asserted on its own below.
+                if Cell::new(x, y) == Cell::new(18, 18) {
+                    continue;
+                }
+                let cell = g.get(x, y);
+                if cell.vis == Visibility::Unexplored && !seen.contains(&(cell.glyph, cell.fg)) {
+                    seen.push((cell.glyph, cell.fg));
+                }
+            }
+        }
+        seen.sort_by_key(|&(glyph, _)| glyph);
+        assert_eq!(
+            seen,
+            vec![
+                (SCHEMATIC_GROUND, Category::Ground),
+                (SCHEMATIC_WALL, Category::Neutral),
+            ],
+            "unexplored geometry must speak exactly two marks in two colours",
+        );
+
+        // And spot-check the maskings individually, so a failure says which leaked.
+        for (cell, mark) in [
+            (Cell::new(8, 15), SCHEMATIC_WALL), // hideout alcove — backed by structure
+            (Cell::new(9, 15), SCHEMATIC_WALL), // duct mouth — likewise
+            (Cell::new(10, 15), SCHEMATIC_GROUND), // doorway — an opening, bears no load
+            (Cell::new(11, 15), SCHEMATIC_WALL), // door frame — structure
+            (Cell::new(12, 16), SCHEMATIC_GROUND), // table
+            (Cell::new(13, 16), SCHEMATIC_GROUND), // comms console
+            (Cell::new(14, 16), SCHEMATIC_GROUND), // intel console
+        ] {
+            assert_eq!(
+                g.get(cell.x, cell.y).glyph,
+                mark,
+                "{cell:?} leaks through the schematic",
+            );
+        }
+
+        // The exit, by contrast, is meant to stand out from turn one.
+        let exit = g.get(18, 18);
+        assert_eq!(
+            (exit.glyph, exit.fg, exit.vis),
+            ('E', Category::Interest, Visibility::Unexplored),
+            "the tunnel you came in by is never hidden (§4.5/§7.6)",
+        );
+    }
+
+    /// A doorway in an unscouted wall run reads as a **gap** (#307): the run draws
+    /// `≈`, the opening `~`, so the ways between rooms you have never entered are
+    /// still plannable. This is §11.5a's *"you can plan your escape route before
+    /// you're spotted"* holding under the schematic, and the reason the fabric line
+    /// is load-bearing structure rather than "anything solid" — a door bears no
+    /// load, and a plan draws it as a break in the wall.
+    #[test]
+    fn an_unscouted_doorway_reads_as_a_gap_in_the_wall_line() {
+        // A wall run across the room, well behind the north-facing player, with a
+        // framed doorway in the middle of it.
+        let mut layout = open_room(20, 20);
+        for x in 6..=12 {
+            layout.place(Cell::new(x, 15), Terrain::Wall);
+        }
+        layout.place(Cell::new(8, 15), Terrain::DoorHinge);
+        layout.place(Cell::new(9, 15), Terrain::DoorPanelClosed);
+        layout.place(Cell::new(10, 15), Terrain::DoorHinge);
+        let s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        let g = render(&s);
+
+        let run: String = (6..=12).map(|x| g.get(x, 15).glyph).collect();
+        let expected = format!(
+            "{w}{w}{w}{g}{w}{w}{w}",
+            w = SCHEMATIC_WALL,
+            g = SCHEMATIC_GROUND,
+        );
+        assert_eq!(
+            run, expected,
+            "the wall run should show its doorway as a gap, frame included",
+        );
+    }
+
+    /// The §12.6 `full_layout_known` modifier, directional (§2.3's anti-facade
+    /// guard): with it on, geometry the player has never had eyes on draws as the
+    /// real building instead of the schematic — the same picture the game gave
+    /// everyone before #307.
+    ///
+    /// And the line it must not cross: it buys the **architecture, not the
+    /// objectives**. A console and a cupboard are contents (§11.5a), so they stay
+    /// masked by the geometry in their place, exactly as they were without the
+    /// modifier. If this test ever goes green on a revealed `$`, the modifier has
+    /// quietly become a cheat rather than a difficulty knob.
+    #[test]
+    fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
+        let build = |layout_known: bool| {
+            let mut layout = open_room(20, 20);
+            layout.place(Cell::new(8, 15), Terrain::DoorPanelClosed);
+            layout.place(Cell::new(9, 15), Terrain::DuctEntry);
+            layout.place(Cell::new(10, 15), Terrain::Hideout);
+            layout.place(Cell::new(12, 16), Terrain::PartialCover);
+            State::new(
+                layout,
+                Cell::new(10, 10),
+                Direction::North,
+                Vec::new(),
+                [Cell::new(14, 16)],
+                Cell::new(18, 18),
+            )
+            .with_modifiers(LevelModifiers {
+                full_layout_known: layout_known,
+                ..LevelModifiers::default()
+            })
+        };
+
+        // Baseline: the schematic, as everywhere else in this module.
+        let g = render(&build(false));
+        assert_eq!(
+            g.get(8, 15).glyph,
+            SCHEMATIC_GROUND,
+            "the doorway shows only as a gap — the panel's pose is unknown",
+        );
+        assert_eq!(g.get(9, 15).glyph, SCHEMATIC_WALL, "duct mouth hidden");
+        assert_eq!(g.get(12, 16).glyph, SCHEMATIC_GROUND, "table hidden");
+
+        // Modifier on: the building, drawn — and still honestly reported as
+        // never-explored on the seam, because it has not been.
+        let g = render(&build(true));
+        assert_eq!(g.get(8, 15).glyph, '+', "the doorway is on the plans");
+        assert_eq!(g.get(9, 15).glyph, '=', "so is the duct mouth");
+        assert_eq!(g.get(12, 16).glyph, 'π', "so is the furniture");
+        assert_eq!(g.get(4, 4).glyph, '·', "and plain floor is floor again");
+        assert_eq!(
+            g.get(8, 15).vis,
+            Visibility::Unexplored,
+            "given, not explored — the seam still tells the truth",
+        );
+
+        // But the contents are untouched: still masked by their own geometry.
+        assert_eq!(
+            g.get(10, 15).glyph,
+            '#',
+            "a cupboard stays hidden — the modifier buys the building, not the goals",
+        );
+        assert_eq!(g.get(14, 16).glyph, '·', "and so does an unscouted console");
     }
 
     /// Terrain categories follow §11.2: an exit and a console are Interest, a hideout
@@ -1185,10 +1577,14 @@ mod tests {
         assert_eq!(Terrain::DoorPanelClosed.category(), Category::System);
     }
 
-    /// §11.5a: **geometry is never fogged.** Walls far beyond sight range — and the
-    /// exit, part of the layout the player entered by — draw from turn one, so a
-    /// route can be planned before the first risky step. Out-of-FOV geometry
-    /// carries [`Visibility::Dimmed`]; what the player sees now is `Live`.
+    /// §11.5a: **geometry is never fogged.** Walls far beyond sight range still
+    /// draw, so a route can be planned before the first risky step — as the
+    /// schematic `≈` where the player has never been (#307), the real `#` where
+    /// they have. What is fogged is what is *in* the building, never the building.
+    ///
+    /// The **exit** is the exception that never fogs at all: the player dug that
+    /// tunnel and came in by it (§4.5), so it keeps its `E` and its Interest tint
+    /// from turn one and goes on anchoring every escape plan (§7.6).
     #[test]
     fn geometry_draws_from_turn_one_even_far_out_of_sight() {
         let mut layout = open_room(40, 30);
@@ -1203,16 +1599,23 @@ mod tests {
         );
         let g = render(&s);
 
-        // The far corner wall is way outside the 15-range box, yet drawn.
+        // The far corner wall is way outside the 15-range box, yet drawn — as the
+        // plans give it, since nobody has been down there.
         let far_wall = g.get(39, 29);
-        assert_eq!(far_wall.glyph, '#');
-        assert_eq!(far_wall.vis, Visibility::Dimmed);
-        // So is the exit: geometry, not a hidden content.
+        assert_eq!(far_wall.glyph, SCHEMATIC_WALL);
+        assert_eq!(far_wall.fg, Category::Neutral, "still a wall's colour");
+        assert_eq!(far_wall.vis, Visibility::Unexplored);
+        // The exit shows as itself even so: yours, and never schematic.
         let exit = g.get(35, 5);
         assert_eq!(exit.glyph, 'E');
         assert_eq!(exit.fg, Category::Interest);
-        assert_eq!(exit.vis, Visibility::Dimmed);
-        // What is in the FOV right now is live.
+        assert_eq!(exit.vis, Visibility::Unexplored);
+        // Wall the player has eyes on right now draws as the real thing, live. (On
+        // turn one memory *is* the FOV, so no cell is explored-but-unlit yet; the
+        // transition into `Explored` is pinned by the contents tests above.)
+        let near_wall = g.get(0, 4);
+        assert_eq!(near_wall.glyph, '#');
+        assert_eq!(near_wall.vis, Visibility::Live);
         assert_eq!(g.get(2, 4).vis, Visibility::Live);
     }
 
@@ -1237,10 +1640,14 @@ mod tests {
             Cell::new(38, 38),
         );
 
-        // Never seen and out of sense range: the intel masks as plain floor and the
-        // guard is not drawn at all.
+        // Never seen and out of sense range: the intel masks as the schematic floor
+        // of the unexplored room it stands in, and the guard is not drawn at all.
         let g = render(&s);
-        assert_eq!(g.get(10, 14).glyph, '·', "unseen intel is invisible");
+        assert_eq!(
+            g.get(10, 14).glyph,
+            SCHEMATIC_GROUND,
+            "unseen intel is invisible"
+        );
         assert_eq!(
             g.get(10, 14).fg,
             Category::Ground,
@@ -1248,7 +1655,7 @@ mod tests {
         );
         assert_eq!(
             g.get(guard.x, guard.y).glyph,
-            '·',
+            SCHEMATIC_GROUND,
             "an out-of-range guard is not drawn",
         );
 
@@ -1278,7 +1685,7 @@ mod tests {
             '·',
             "a guard does not persist out of FOV",
         );
-        assert_eq!(g.get(guard.x, guard.y).vis, Visibility::Dimmed);
+        assert_eq!(g.get(guard.x, guard.y).vis, Visibility::Explored);
     }
 
     /// §11.2 spent objectives: a live console is Interest `$`; once its intel is
@@ -1393,11 +1800,15 @@ mod tests {
             Cell::new(18, 18),
         );
 
+        // A cupboard is an alcove recessed into a wall run, so on the plans it is
+        // fabric: schematic wall, exactly like the run it sits in (#307). Both the
+        // glyph *and* the category come from the mask — a lone System-tan mark among
+        // Neutral ones would give the alcove away through the colour channel.
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
-            ('#', Category::Neutral, Visibility::Dimmed),
-            "an unscouted hideout reads as plain wall"
+            (SCHEMATIC_WALL, Category::Neutral, Visibility::Unexplored),
+            "an unscouted hideout reads as the wall run it is cut into"
         );
 
         s.step(Input::Step(Direction::South)); // face it: live
@@ -1415,9 +1826,15 @@ mod tests {
         );
     }
 
-    /// §11.5a: a door's **position** is geometry but its open/closed pose is live
-    /// state — out of the FOV a panel draws canonically closed, *even after the
-    /// player has seen it open*. Memory holds contents, never state.
+    /// §11.5a: a door's **position** is part of the building's fabric, but its
+    /// open/closed pose is live state — once explored, a panel out of the FOV draws
+    /// canonically closed, *even after the player has seen it open*. Memory holds
+    /// contents, never state.
+    ///
+    /// Before it is explored the panel's *pose* is unknown but its **position is
+    /// not** (#307): a doorway bears no load, so the schematic draws it as the gap
+    /// in the wall line a plan would show, and the ways between unscouted rooms stay
+    /// plannable (§11.5a).
     #[test]
     fn a_doors_pose_is_live_state_never_remembered() {
         let mut layout = open_room(20, 20);
@@ -1431,12 +1848,12 @@ mod tests {
             Cell::new(18, 18),
         );
 
-        // Out of the FOV: the actually-open panel draws in its closed pose.
+        // Never explored: the opening shows, the pose does not.
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
-            ('+', Category::System, Visibility::Dimmed),
-            "an unseen door always shows the canonical closed pose"
+            (SCHEMATIC_GROUND, Category::Ground, Visibility::Unexplored),
+            "an unscouted doorway reads as a gap in the wall line"
         );
 
         // In the FOV: the true, live pose — open, blank.
@@ -1450,7 +1867,7 @@ mod tests {
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.vis),
-            ('+', Visibility::Dimmed),
+            ('+', Visibility::Explored),
             "door state is never remembered (§11.5a)"
         );
     }
@@ -1474,8 +1891,14 @@ mod tests {
 
         let lit = g.get(10, 8); // ahead: floor in the FOV
         assert_eq!((lit.glyph, lit.vis), ('·', Visibility::Live));
-        let dark = g.get(10, 14); // behind: floor out of the FOV
-        assert_eq!((dark.glyph, dark.vis), ('·', Visibility::Dimmed));
+        // Behind: never-explored floor takes the schematic mark instead of the dot,
+        // which is the sight boundary reading across open ground just as well —
+        // by shape now rather than only by shade (#307).
+        let dark = g.get(10, 14);
+        assert_eq!(
+            (dark.glyph, dark.vis),
+            (SCHEMATIC_GROUND, Visibility::Unexplored)
+        );
         assert_eq!(g.get(12, 8).glyph, ' ', "an open panel renders blank");
     }
 
@@ -1541,10 +1964,14 @@ mod tests {
 
         let cell = render(&s).get(9, 13);
         assert_eq!(cell.bg, Some(Category::Danger), "red even though unseen");
+        // Threat outranks knowledge (§11.5 **[SETTLED]**): the cone paints over
+        // never-explored ground exactly as over explored ground. The schematic
+        // changes what the glyph *claims*, never what the detection set says — so
+        // fix #1 holds on a cell in a wing the player has not entered.
         assert_eq!(
             (cell.glyph, cell.vis),
-            ('·', Visibility::Dimmed),
-            "the glyph below stays the dimmed geometry"
+            (SCHEMATIC_GROUND, Visibility::Unexplored),
+            "the glyph below stays the geometry, schematic here"
         );
     }
 
@@ -1807,10 +2234,11 @@ mod tests {
             Some(Category::Sensed),
             "an orange highlight on the cell"
         );
-        // The glyph is the geometry the cell masks as (dimmed floor here), *not* a
-        // glyph of the guard's own — the sensed marker is a background, not a `g`.
+        // The glyph is the geometry the cell masks as (schematic floor here, the
+        // room being unexplored), *not* a glyph of the guard's own — the sensed
+        // marker is a background, not a `g`.
         assert_eq!(
-            cell.glyph, '·',
+            cell.glyph, SCHEMATIC_GROUND,
             "the geometry shows through, no guard glyph"
         );
         assert_eq!(
@@ -1898,10 +2326,13 @@ mod tests {
         );
 
         let cell = render(&s).get(guard.x, guard.y);
-        assert_eq!(cell.glyph, '·', "the guard's cell is just dimmed floor");
+        assert_eq!(
+            cell.glyph, SCHEMATIC_GROUND,
+            "the guard's cell is just unexplored floor"
+        );
         assert_eq!(cell.fg, Category::Ground, "…not a sensed highlight");
         assert_eq!(cell.bg, None, "…and no orange background");
-        assert_eq!(cell.vis, Visibility::Dimmed);
+        assert_eq!(cell.vis, Visibility::Unexplored);
     }
 
     // --- Duct interior view (§10.7/#134) -------------------------------------
@@ -1932,6 +2363,75 @@ mod tests {
             Vec::new(),
             Cell::new(7, 7),
         )
+    }
+
+    /// The crawl leaves **no trace on the base map** (§11.5a/§10.7, #307). A duct
+    /// buried in a thick wall — interior invisible from either room — is crawled end
+    /// to end, and afterwards its interior still reads as schematic wall,
+    /// indistinguishable from the run it threads through.
+    ///
+    /// This is the payoff of keeping interior cells out of tile memory: memory is
+    /// what tells explored geometry from unexplored, so a remembered interior would
+    /// draw the shortcut as a line of known `#` across the plans, giving away a route
+    /// the design puts in its own private layer precisely so that nobody gets it for
+    /// free.
+    #[test]
+    fn a_crawled_duct_leaves_no_trace_on_the_base_map() {
+        let mut f = Facility::walled_box(9, 9);
+        for y in 3..=5 {
+            for x in 1..=7 {
+                f.set_terrain(x, y, Terrain::Wall);
+            }
+        }
+        f.set_terrain(2, 3, Terrain::DuctEntry);
+        f.set_terrain(6, 5, Terrain::DuctEntry);
+        let duct = crate::Duct::new(vec![
+            Cell::new(2, 3),
+            Cell::new(2, 4),
+            Cell::new(3, 4),
+            Cell::new(4, 4),
+            Cell::new(5, 4),
+            Cell::new(6, 4),
+            Cell::new(6, 5),
+        ]);
+        let layout = crate::Layout::from_facility(f).with_ducts(vec![duct]);
+        let mut s = State::new(
+            layout,
+            Cell::new(2, 2),
+            Direction::South,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(7, 7),
+        );
+
+        for step in [
+            Direction::South, // climb in at (2,3)
+            Direction::South,
+            Direction::East,
+            Direction::East,
+            Direction::East,
+            Direction::East,
+            Direction::South, // reach the far entry (6,5)
+            Direction::South, // climb out into the lower room
+        ] {
+            s.step(Input::Step(step));
+        }
+        assert!(!s.in_duct(), "climbed out the far side");
+
+        let g = render(&s);
+        // The band's own unexplored wall, for comparison: a cell of the same hidden
+        // middle row that no duct passes through. It has to come from row 4 — rows 3
+        // and 5 are the band's faces and are plainly visible from the rooms.
+        let plain = g.get(7, 4);
+        assert_eq!(plain.glyph, SCHEMATIC_WALL);
+        for x in 2..=6 {
+            let cell = g.get(x, 4);
+            assert_eq!(
+                (cell.glyph, cell.fg, cell.vis),
+                (plain.glyph, plain.fg, plain.vis),
+                "interior cell ({x},4) must be indistinguishable from plain wall",
+            );
+        }
     }
 
     /// With no duct occupied the view is ordinary (§11.5a): an **entry** is geometry,
@@ -2097,9 +2597,21 @@ mod tests {
             Cell::new(38, 38),
         );
         let g = render(&fogged);
-        assert_eq!(g.get(10, 14).glyph, '\u{b7}', "the console masks as floor");
-        assert_eq!(g.get(20, 30).glyph, '#', "the cupboard masks as wall");
-        assert_eq!(g.get(guard.x, guard.y).glyph, '\u{b7}', "no guard drawn");
+        assert_eq!(
+            g.get(10, 14).glyph,
+            SCHEMATIC_GROUND,
+            "the console masks as schematic floor"
+        );
+        assert_eq!(
+            g.get(20, 30).glyph,
+            SCHEMATIC_WALL,
+            "the cupboard masks as schematic wall"
+        );
+        assert_eq!(
+            g.get(guard.x, guard.y).glyph,
+            SCHEMATIC_GROUND,
+            "no guard drawn"
+        );
 
         let revealed = fogged.with_debug(DebugModifiers {
             reveal_whole_level: true,
