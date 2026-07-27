@@ -883,8 +883,41 @@ Notes carried forward, because they are good and non-obvious:
 - **Dephase does not conceal.** It's a movement tool. And while dephased you
   cannot *bump*, so you cannot open doors, use consoles, or win — you pass
   straight through everything you came for. That constraint is excellent; keep it.
-- **Dephasing should be lethal if the duration expires while you're inside a
-  wall.** It never was, which made it consequence-free. **[START]**
+- **A duration that expires while you're inside something solid throws you clear and
+  leaves you stunned.** The tech's **safety eject** drops you on a cell drawn at
+  random from the nearest ones that can hold a solid body, and afterwards you cannot
+  act at all for **one turn per cell you were thrown, plus one**: every key is
+  swallowed, the turn is spent, and the guards keep moving (§4.4's turn cost applied
+  *to* you rather than by you). **[START]** — the rate and the flat `+1` are the
+  numbers to tune; the shape is not.
+  **The stun is as long as the throw**, because that is what prices recklessness.
+  Clipping the corner of a table strands you one cell from open floor and costs the
+  smallest stun there is; burying yourself a ring deeper into a wall block costs more,
+  because the eject had to reach further to find you anywhere to stand. A flat rate
+  charged the near miss and the deep dive the same, which made the worst case as
+  cheap as the safest. In practice the ability caps its own damage: Dephase runs
+  three turns counting its activation, so a phase begun outside buys two steps in and
+  the stun tops out at three turns — the arithmetic goes further, the ability does
+  not.
+  It is *any* solid, not just a wall — a shut door, a table, a cupboard, a console —
+  which is why the near line names the **tech** rather than the terrain
+  ("safety eject — stunned"): a message that said "the wall" would be untrue in most
+  of the cases it covers. Naming the tech also gives the fiction for why this is
+  survivable at all: the salvaged rig throws you out rather than letting you set
+  inside the furniture.
+  This is the third answer to a question that has now been asked twice. It was
+  free, which made phasing consequence-free; then it was **lethal**, which made it
+  the one death §2.2 forbids — the timer is on screen but the *lethal half* never
+  is (`can_rematerialize` is invisible, and while phased you cannot bump, so you
+  cannot even probe the cell you stand in), and §4.5 is **[SETTLED]** that a guard's
+  touch is the only loss condition. So the cost stays and the death goes: turns spent
+  helpless on a cell you did not choose, in a facility where contact captures, are a
+  price a player can see coming and choose to pay. The **randomness is
+  load-bearing** — a predictable eject would make phasing into a wall a reliable way
+  *through* one, and you may well be dropped back on the side you came from.
+  Deliberately **not** extended to the early toggle-off (§4.4): pressing the key
+  inside a wall is still refused, because a free press that teleported you clear
+  would be exactly the escape tool this is designed not to be (#304/#329).
 - **Decoy draws Investigating, never Chasing** — a guard that can see *you*
   ignores it. Decoys work on guards that have lost you, not on guards that have
   you.

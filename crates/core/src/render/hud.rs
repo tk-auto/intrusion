@@ -737,6 +737,10 @@ mod tests {
             Event::BodyReleased { at },
             Event::BodyStored { at },
             Event::DecoyDied { at },
+            Event::Ejected {
+                to: at,
+                stunned: crate::phase_eject_stun(1),
+            },
             Event::Entombed { at },
             Event::RematerializeRefused,
             Event::WallBored { at },
