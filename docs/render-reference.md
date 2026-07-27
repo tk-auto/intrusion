@@ -156,16 +156,30 @@ keeping:
 - **A second palette gets it for free.** Light mode (#189) needs no extra values
   for a shape channel.
 
-> **The cost, measured rather than assumed.** The first build of this was drawn
-> `≈` against `~`, and on a real 40×40 board the unexplored region read closer to
-> uniform texture than to a floor plan. The reason is worth recording, because it
-> is easy to get wrong twice: in the explored picture, wall-versus-floor is carried
-> by **ink density** — `#` is a dense glyph, `·` is one dot — far more than by the
-> colour gap between the Neutral and Ground dims. Two marks of *similar* density
-> throw that away and leave the colour gap working alone, which is not enough. So
-> the fabric mark has to be visibly heavier than the floor mark, not merely a
-> different shape. Any future change here should be judged on a screenshot of a
-> full board, never on a unit test — the text frame looks correct in both cases.
+> **Tried against a denser mark, and kept.** The schematic was built twice on the
+> same seed and compared on a real 40×40 board: `≈` as shipped, and `▒` — a shade
+> block, the architectural hatch for a wall in section.
+>
+> `▒` unquestionably reads the *building* better. Corridors, room shapes and
+> doorway gaps are legible across the whole unexplored region at a glance, where
+> with `≈` they are closer to texture. The reason is worth knowing: in the explored
+> picture wall-versus-floor is carried by **ink density** (`#` is dense, `·` is one
+> dot) far more than by the colour gap between the Neutral and Ground dims, and two
+> marks of similar density leave that colour gap working alone.
+>
+> It was rejected anyway, because it **inverts the lighting**. A filled block puts
+> down so much ink that unexplored territory becomes the loudest thing on the
+> board — the explored room reads as a dark patch inside a bright mass — which is
+> backwards for §11.5, where live is bright and the unknown recedes, and it puts a
+> heavy fill in the register the danger overlay needs to own. A quieter plan that
+> never competes with threat beat a legible one that does.
+>
+> The live option if this is revisited is neither mark but a third: `▒`'s density
+> with a **darker shade of its own** for the schematic fabric, so structure reads
+> without shouting. That spends a palette value, which the shape channel was chosen
+> to avoid — so it is a real trade, not a free improvement. Whatever is tried, judge
+> it on a screenshot of a full board and never on a unit test: the text frame looks
+> correct in every one of these variants.
 
 ---
 
