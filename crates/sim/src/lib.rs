@@ -15,6 +15,9 @@
 //! bot ([`StealthBot`]) actually *plays*, which is what turns the per-run metrics
 //! (the §13.2 ability-usage histogram and the batch strategy-diversity score,
 //! [`UsageHistogram`], [`diversity`]) from replay checksums into balance signals.
+//! The bot plays one [`Profile`]'s temperament — the same policy at different
+//! settings — so the same seeds can be raided cautiously and aggressively, which
+//! is what makes §13.2's strategy-diversity signal visible at all.
 //!
 //! The output schema is documented in `crates/sim/README.md` — the playtest
 //! skill parses it, so changes there are breaking changes.
@@ -26,6 +29,7 @@
 mod bot;
 mod harness;
 mod policy;
+mod profile;
 mod replay;
 mod report;
 mod usage;
@@ -36,6 +40,7 @@ pub use harness::{
     RunRecord, DEFAULT_INPUT_CAP,
 };
 pub use policy::{PlayerPolicy, Recording, Scripted};
+pub use profile::{Descent, Profile};
 pub use replay::Replay;
 pub use report::Summary;
 pub use usage::{diversity, UsageHistogram, Verb};

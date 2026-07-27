@@ -13,7 +13,7 @@ not a judge.
 ## Running
 
 ```
-cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--guards N] [--bot | --script MOVES] [--emit-replay]
+cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--guards N] [--bot [--profile NAME] | --script MOVES] [--emit-replay]
 ```
 
 | Flag | Meaning | Default |
@@ -23,6 +23,7 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--guard
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
 | `--guards N` | guards to place per facility — the §10.2 recipe knob the balance sweep drives (all else stays v1) | 4 |
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
+| `--profile NAME` | which **playstyle profile** the bot plays (below); needs `--bot` | `baseline` |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
 | `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed token (#245) — instead of the metrics batch | off |
 
@@ -110,6 +111,42 @@ so its win rate is not a difficulty verdict (§13.4). **Flag, never judge:** a
 histogram spike or a win-rate cliff under `--bot` is a seed to go *play*, not a
 ruling. The bot is deliberately crude; sharper policies are follow-up work.
 
+### Playstyle profiles (`--profile`, §13.2)
+
+The bot's behaviour is governed by a handful of thresholds — how wide a berth it
+gives a patrol, how early it ducks into cover, how long it waits there. Those
+numbers *are* its temperament, so they live in a [`Profile`](src/profile.rs) the
+bot reads, and each profile is **one row of numbers over the same policy** — not
+a second bot:
+
+| Profile | Its temperament |
+|---|---|
+| `baseline` | today's bot, unchanged — the numbers the policy carried as constants, so metrics stay comparable across the seam |
+| `cautious` | gives patrols a wide berth, ducks into cover early and waits long; even bolting, it would rather round a patrol than brush past one. Trades speed for not being seen |
+| `aggressive` | pushes toward the objective, **tolerates a cone to save turns** (it walks a watched cell rather than waiting the sweep out), hides late and briefly |
+
+Why more than one: §13.2 calls strategy diversity *"the most important and the
+least obvious"* metric — **win rate tells you if the game is hard, strategy
+diversity tells you if it is interesting.** A single fixed bot can never surface
+it, because it always plays the one way. Running two temperaments over the *same*
+seeds is how the sim says a facility is solvable two ways (healthy) or that both
+collapse onto the same line (a puzzle with one answer). Where the two **disagree**
+— one wins by waiting, the other is caught pushing — is precisely the §13.3 flag
+worth playing.
+
+A profile is a **temperament, not a solver** (§13.4). `aggressive` is not a
+min-maxer hunting the optimal line; it is an impatient player, and it *should* be
+seen more often. Every number in a profile is a `[START]` value, pinned only by
+shape assertions (each profile finishes its runs; the careful one is seen less
+often per turn than the impatient one), never by a leaderboard. And profiles must
+stay one policy: if a temperament ever wants a different *decision* rather than a
+different number, that is a signal to stop and reconsider, not to fork `decide`.
+Pressing on for a second console, for instance, is deliberately **not** a profile
+field for exactly that reason.
+
+Every emitted row names the profile that produced it, so a batch's output is
+attributable and two profiles' rows can be read side by side.
+
 ## Output schema
 
 One JSON object per line on stdout: one **run row** per run, then one final
@@ -120,12 +157,13 @@ it is a deliberate, visible break.
 ### Run row
 
 ```json
-{"seed":17,"outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1},"alert_peak":null}
+{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1},"alert_peak":null}
 ```
 
 | Field | Meaning |
 |---|---|
 | `seed` | the run's seed — with the script, the whole replay |
+| `profile` | the **playstyle profile** that played the run (above), so a batch's rows are attributable. `null` under `--script`: a script has no temperament, and naming `"baseline"` there would claim a bot played it |
 | `outcome` | `"win"` \| `"capture"` \| `"entombed"` \| `"timeout"` |
 | `turns` | spent turns at the end of the run (free actions excluded) |
 | `detections` | fresh detections (`Event::Detected`): how often stealth broke — a held chase counts once, not once per turn |
@@ -137,12 +175,23 @@ it is a deliberate, visible break.
 ### Summary row
 
 ```json
-{"summary":{"runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038},"diversity":0.1837,"alert_peak":null}}
+{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038},"diversity":0.1837,"alert_peak":null}}
 ```
 
 `win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the
 *winning* runs only and `null` when nothing won. `detections`/`takedowns`/`bodies_found`
-are batch totals of the per-run metrics.
+are batch totals of the per-run metrics. `profile` names the temperament only when
+**every** run in the batch agrees on one — a scripted batch, or one whose rows mix
+profiles, reports `null` rather than borrowing a label that describes part of it.
+
+Comparing temperaments is therefore one batch per profile, each summary
+self-describing:
+
+```
+for p in baseline cautious aggressive; do
+  cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 | tail -1
+done
+```
 
 The §13.2 signature metrics (#137):
 
@@ -165,6 +214,8 @@ broken — the playtest skill (#140) owns that framing.
 
 ## Determinism
 
-Same `(seed, policy)` → byte-identical rows, asserted in `src/harness.rs`.
-That property is what makes the batch a regression instrument: same seeds +
-same script producing different rows means the game changed.
+Same `(seed, policy)` → byte-identical rows, asserted in `src/harness.rs`; under
+the bot that is per `(seed, profile)`, asserted for **every** shipped profile in
+`src/bot.rs`. That property is what makes the batch a regression instrument: same
+seeds + same script (or same seeds + same profile) producing different rows means
+the game changed.

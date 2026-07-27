@@ -16,6 +16,17 @@ use intrusion_core::{Input, State};
 pub trait PlayerPolicy {
     /// The next input to feed [`State::step`].
     fn decide(&mut self, state: &State) -> Input;
+
+    /// The name of the playstyle profile driving this policy, when there is one
+    /// (§13.2) — the string every emitted row carries so a batch's output is
+    /// attributable to the temperament that produced it.
+    ///
+    /// A scripted policy plays no temperament, so it answers `None` and its rows
+    /// emit `null`: "no profile", never a fake `"baseline"` that would claim a
+    /// bot ran the batch. Defaulted, so a new policy is honest by omission.
+    fn profile_name(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// The scripted policy (§13.2): replay a fixed input list, then hold with
@@ -81,6 +92,12 @@ impl<P: PlayerPolicy> PlayerPolicy for Recording<P> {
         let input = self.inner.decide(state);
         self.inputs.push(input);
         input
+    }
+
+    /// Transparent: a captured run reports the profile that actually played it,
+    /// so a recorded row is attributable exactly like an unwrapped one.
+    fn profile_name(&self) -> Option<&'static str> {
+        self.inner.profile_name()
     }
 }
 
