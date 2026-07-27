@@ -128,12 +128,13 @@ fn wall_to_phase_into(guards: Vec<Guard>, seed: u64) -> State {
     .with_rng(crate::Rng::new(seed))
 }
 
-/// Phase east into the wall of [`wall_to_phase_into`] and let the duration run out
-/// in there, returning the expiry turn's events.
-fn phase_into_the_wall(s: &mut State) -> Vec<Event> {
+/// Phase east into the solid at `(5,4)` — a wall in [`wall_to_phase_into`], any other
+/// solid in the terrain sweep — and let the duration run out in there, returning the
+/// expiry turn's events.
+fn phase_into_the_solid(s: &mut State) -> Vec<Event> {
     s.step(Input::Activate(AbilityId::Dephase)); // active turn 1
     s.step(Input::Step(Direction::East)); // turn 2: into the wall
-    assert_eq!(s.player(), Cell::new(5, 4), "standing inside the wall");
+    assert_eq!(s.player(), Cell::new(5, 4), "standing inside the solid");
     s.step(Input::Wait) // turn 3: the duration ends in there
 }
 
@@ -145,7 +146,7 @@ fn phase_into_the_wall(s: &mut State) -> Vec<Event> {
 #[test]
 fn dephase_expiring_inside_a_wall_throws_you_clear_and_stuns() {
     let mut s = wall_to_phase_into(Vec::new(), 7);
-    let events = phase_into_the_wall(&mut s);
+    let events = phase_into_the_solid(&mut s);
 
     let to = match events.as_slice() {
         [Event::AbilityExpired {
@@ -174,7 +175,7 @@ fn dephase_expiring_inside_a_wall_throws_you_clear_and_stuns() {
 fn the_eject_lands_on_a_nearest_legal_cell() {
     for seed in 0..24 {
         let mut s = wall_to_phase_into(Vec::new(), seed);
-        phase_into_the_wall(&mut s);
+        phase_into_the_solid(&mut s);
         let landed = s.player();
         assert_eq!(
             Cell::new(5, 4).sight_distance(landed),
@@ -186,14 +187,14 @@ fn the_eject_lands_on_a_nearest_legal_cell() {
 }
 
 /// §12.4: the draw comes off the run's threaded stream, so a seed reproduces the
-/// landing exactly — and §8.3's randomness is real: across seeds the wall spits the
-/// player out on more than one side, which is what stops "phase into a wall" being a
-/// reliable way *through* one.
+/// landing exactly — and §8.3's randomness is real: across seeds the eject lands on
+/// more than one side, which is what stops "phase into a wall" being a reliable way
+/// *through* one.
 #[test]
 fn the_eject_is_random_but_reproducible() {
     let landing = |seed| {
         let mut s = wall_to_phase_into(Vec::new(), seed);
-        phase_into_the_wall(&mut s);
+        phase_into_the_solid(&mut s);
         s.player()
     };
     for seed in 0..8 {
@@ -217,7 +218,7 @@ fn the_eject_is_random_but_reproducible() {
 #[test]
 fn the_stun_swallows_exactly_its_turns() {
     let mut s = wall_to_phase_into(Vec::new(), 3);
-    phase_into_the_wall(&mut s);
+    phase_into_the_solid(&mut s);
     let landed = s.player();
 
     for owed in (1..=PHASE_EJECT_STUN_TURNS).rev() {
@@ -246,7 +247,7 @@ fn every_input_kind_is_swallowed_while_stunned() {
         Input::Deactivate(AbilityId::Dephase),
     ] {
         let mut s = wall_to_phase_into(Vec::new(), 11);
-        phase_into_the_wall(&mut s);
+        phase_into_the_solid(&mut s);
         let (landed, turn) = (s.player(), s.turn());
 
         let events = s.step(input);
@@ -283,7 +284,7 @@ fn the_usable_line_is_empty_while_stunned() {
         "the console is on offer before the phase",
     );
 
-    phase_into_the_wall(&mut s);
+    phase_into_the_solid(&mut s);
     assert!(s.stunned() > 0);
     assert!(
         s.affordances().is_empty(),
@@ -400,7 +401,10 @@ fn the_eject_drops_a_dragged_body() {
 /// §8.3: expiry somewhere a solid body *can* stand is unchanged — no eject, no stun.
 /// Open floor is the ordinary case; a **duct** is the non-obvious one (§10.7 admits
 /// it as a legal place to rematerialize), and a crawling player must never be spat
-/// out of the crawlspace they deliberately climbed into.
+/// out of the crawlspace they deliberately climbed into. An **empty cupboard** is the
+/// third: it admits an actor's fill (that is what climbing into one is), so a phase
+/// that ends inside one simply leaves the player hidden in it — the eject is about
+/// having nowhere to be, not about being somewhere furnished.
 #[test]
 fn a_legal_expiry_neither_ejects_nor_stuns() {
     // On open floor: phase into the wall and back out before the duration ends.
@@ -434,6 +438,29 @@ fn a_legal_expiry_neither_ejects_nor_stuns() {
     assert!(s.in_duct());
     assert_eq!(s.stunned(), 0);
     assert_eq!(s.outcome(), Outcome::Playing);
+
+    // Inside an empty cupboard (§10.3): a legal place to stand, so the phase just
+    // fades and leaves the player concealed in it.
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 4), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+    .with_rng(crate::Rng::new(2));
+    let events = phase_into_the_solid(&mut s);
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Ejected { .. })),
+        "a cupboard admits an actor, so there is nothing to throw clear of: {events:?}",
+    );
+    assert_eq!(s.player(), Cell::new(5, 4), "left standing in the cupboard");
+    assert!(s.hidden(), "…and concealed by it");
+    assert_eq!(s.stunned(), 0);
 }
 
 /// §8.3: [`Event::Entombed`] survives as the **degenerate** case only — a facility
@@ -476,6 +503,46 @@ fn with_nowhere_to_go_the_wall_still_takes_you() {
     assert_eq!(s.outcome(), Outcome::Lost);
     assert_eq!(s.stunned(), 0, "no stun to serve — there is no run left");
     assert!(s.step(Input::Wait).is_empty(), "the run is over");
+}
+
+/// §8.3: the eject is about **solidity**, not about walls — a phase that ends inside
+/// a table, a cupboard, a console or a shut door throws you clear exactly the same
+/// way. This is what the near line's wording has to survive: "the wall spits you out"
+/// would be untrue for every one of these, which is why the message names the tech.
+#[test]
+fn any_solid_ejects_you_not_just_a_wall() {
+    for terrain in [
+        Terrain::Wall,
+        Terrain::PartialCover,
+        Terrain::Console,
+        Terrain::DoorPanelClosed,
+    ] {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), terrain);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+        .with_rng(crate::Rng::new(6));
+
+        let events = phase_into_the_solid(&mut s);
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Ejected { .. })),
+            "{terrain:?} is solid, so the phase ends the same way: {events:?}",
+        );
+        assert_eq!(s.outcome(), Outcome::Playing, "{terrain:?}");
+        assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS, "{terrain:?}");
+        assert_ne!(
+            s.player(),
+            Cell::new(5, 4),
+            "{terrain:?}: no longer inside it"
+        );
+    }
 }
 
 /// §8.3 **[START]**: the stun's own number, pinned so a later change is a visible

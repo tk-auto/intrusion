@@ -103,14 +103,20 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::CommsSilenced { .. } => ("the radio net goes dead".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
-        // The wall letting go (§8.3/#329). Ranked at the top of the threat ladder
+        // The phase safety firing (§8.3/#329). Ranked at the top of the threat ladder
         // short of the run ending: the player has been moved somewhere they did not
         // choose and cannot act for the next turns, and no guard event on the same
         // turn may bury either fact. How *long* the stun lasts is not repeated here —
         // the ambient floor carries the countdown for every turn it runs (§11.4),
         // which is where a standing state belongs and what keeps this line inside the
         // row's budget.
-        Event::Ejected { .. } => ("the wall spits you out".to_string(), 6),
+        //
+        // It names the **tech**, not the terrain, because the terrain varies: a phase
+        // can end inside a wall, a shut door, a table, a cupboard or a console, and a
+        // line that said "the wall" would be plainly untrue for most of them. The
+        // salvaged tech throwing you clear is also the fiction for why this is
+        // survivable at all.
+        Event::Ejected { .. } => ("safety eject — stunned".to_string(), 6),
         // The degenerate case (§8.3): nowhere in the facility to be thrown clear to.
         // The top of the ladder, like the capture — it ends the run.
         Event::Entombed { .. } => ("the wall takes you".to_string(), 10),
@@ -550,18 +556,20 @@ mod tests {
         );
     }
 
-    /// §8.3/#329: the wall letting go is a Warning-band message ranked above every
+    /// §8.3/#329: the safety eject is a Warning-band message ranked above every
     /// guard event short of the capture — the player has been moved somewhere they
     /// did not choose and cannot act, and neither fact may be buried by a detection
-    /// landing the same turn.
+    /// landing the same turn. It names the **tech**, never the terrain: the same
+    /// eject fires out of a table or a shut door, so "the wall" would be a lie in
+    /// most of the cases it covers.
     #[test]
     fn the_eject_outranks_every_guard_event_but_the_capture() {
         let msg = message_for(Event::Ejected {
             to: Cell::new(3, 3),
             stunned: crate::PHASE_EJECT_STUN_TURNS,
         })
-        .expect("the wall letting go is never silent");
-        assert_eq!(msg.text, "the wall spits you out");
+        .expect("the safety eject is never silent");
+        assert_eq!(msg.text, "safety eject — stunned");
         assert_eq!(msg.category, Category::Warning);
 
         let alert = message_for(Event::AlertRaised { level: 3 }).expect("an alert speaks");
@@ -602,7 +610,7 @@ mod tests {
         s.step(Input::Wait); // the duration ends: thrown clear and stunned
 
         // The eject's own turn speaks the message; the floor carries the rest.
-        assert_eq!(near_line(&s).text, "the wall spits you out");
+        assert_eq!(near_line(&s).text, "safety eject — stunned");
         assert_eq!(s.stunned(), 2);
 
         s.step(Input::Wait); // swallowed, and nothing else is live

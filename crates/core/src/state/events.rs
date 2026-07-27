@@ -171,7 +171,8 @@ pub enum Event {
     /// would. Expiry by duration is [`Event::AbilityExpired`], not this.
     DecoyDied { at: Cell },
     /// Dephase ran out while the player stood somewhere that cannot admit a solid
-    /// body — inside a wall, a door, or furniture — and the wall threw them clear
+    /// body — inside a wall, a shut door, a table, a cupboard or a console — and the
+    /// tech's **safety eject** threw them clear
     /// (§8.3/#329): they now stand on `to`, a cell drawn at random from the nearest
     /// ones that can hold them, **stunned** for `stunned` turns. The run continues;
     /// what phasing costs is those turns and the position, not the run itself
@@ -240,7 +241,7 @@ impl Event {
             // that had you has *lost* you, and the one converging has never seen
             // you. The threat is spreading, not closing.
             //
-            // Being thrown clear of a wall and left helpless (§8.3/#329) reads in the
+            // The safety eject leaving you helpless (§8.3/#329) reads in the
             // same band for the mirror-image reason: nothing has you — no guard need
             // even know — but the next two turns are not yours, and that is a bad
             // fact about now rather than self-narration. Not Danger: the Danger band
