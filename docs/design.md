@@ -1726,7 +1726,7 @@ one-table edit.
 | **Sensed** | Orange (background) | **Sensed through a wall** (§9) — a guard, or a door that just changed away from you (§9.4); an eye-catching highlight, position only |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
-| **Effect** | Cyan | An **area effect of your own making** (§8.3) — how far it reaches, and which guards it holds; advisory, so it yields to both Danger and Sensed |
+| **Effect** | Cyan (background only) | An **ability effect of your own making** (§8.3) — where it acted, and what it holds; advisory, so it yields to Danger, and its wash yields to Sensed too |
 
 **A guard the player can *see* is re-categorised every turn from its own state**,
 so the player reads the AI state machine directly off the colour of `g`: yellow →
@@ -1744,15 +1744,30 @@ background, so a sensed guard and a sensed door change read as one channel. The 
 **Effect** layer now claims that cyan, and it is the one hue on the board that is
 never a threat level.)*
 
-**An area effect speaks in both channels**, because it has two things to say and they
-land on different cells (#308). Its **footprint** is a background — the §6.1 box it
-reaches, painted through walls like the reach itself — flashed on the turn the ability
-fires (see §11.5) rather than held for the whole window. Every guard it **holds** is
-marked for as long as it holds them: a *seen* guard's `g` leaves the yellow → orange →
-red ladder for cyan, because a mind switched off is not a rung on it, and a guard felt
-only through a wall takes the mark on its Sensed highlight instead, since it has no
-glyph to recolour. The mark only ever recolours a guard the player is already shown, so
-it can never reveal one the fog is hiding.
+**An ability effect always colourises the background** (#338) **[SETTLED]**. The glyph
+keeps its own meaning — a guard stays on the yellow → orange → red ladder, a thing of
+yours stays Owned — and the effect is the wash underneath it. One channel for every
+effect the game grows; what varies is not *where it is said* but **where the mark lands**
+and **how long it lives**:
+
+- **Place.** Over an explicit **cell set**, fixed when the mark is lit — Confusion's
+  §6.1 box, the cell Pierce Wall opened, an eject's landing — or over the **thing** in a
+  cell, which carries the mark wherever it goes (a guard a blast froze).
+- **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
+  the firing frame and nothing after it, see §11.5), or **standing** where the effect is
+  a state (a guard still held, a live decoy, concealment in force).
+
+The two places also sit differently in the §11.5 precedence, because they make different
+claims. A **cell** mark is a wash and the weakest background there is: a door cue, a
+sensed guard and a danger cone all paint over it. A mark on a **thing** is a *recolour of
+a cue that thing already draws* rather than a competing claim — on a guard felt through a
+wall, cyan replaces the Sensed orange to say "exactly here, **and** it cannot move" — so
+it outranks Sensed and still yields to Danger. Net: **Danger > a mark on a thing > Sensed
+> the wash.** A mark on a thing only ever recolours something the player is already
+shown, so it can never reveal what the fog is hiding.
+
+If an effect background ever reads badly under the glyph standing on it, **shift the
+Effect colour** — the channel is not negotiable, the hue is.
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant. The concrete rows, the constraints
@@ -1946,18 +1961,25 @@ can see will detect you. **The lose condition, painted.** It makes stealth
 plannable rather than guessy, which is the whole "enough information to strategise"
 pillar. **[SETTLED]** — keep it.
 
-**The effect layer is advisory and never outranks red** (§8.3/#308/#325). An area
-effect of the player's own making — Confusion's blast, Lockdown's radius — washes its
-footprint in cyan for **`EFFECT_FLASH_TURNS`** turns after it fires — **one**, the
-firing frame **[START]**: enough to answer *how far* at the moment the player asks it,
-without leaving a 13×13 field of background over the board while the danger overlay is
-the thing that matters. What carries the state for every turn after that is the
-per-guard mark (§11.2), which costs no ink. The precedence is fixed —
-**Danger > Sensed > the effect footprint** — so an advisory layer can never masquerade
-as the detection set, nor hide it. The footprint is the box the effect actually fired
-with, carried by value from the mechanic that resolved against it, so the picture
-cannot disagree with the rule — and it stays where it went off rather than following
-the player, because that is what the blast did.
+**The effect layer is advisory and never outranks red** (§8.3/#308/#325/#338). An
+ability effect of the player's own making marks the board in cyan, always as a
+background (§11.2), over a fixed cell set or over the thing in a cell.
+
+A **momentary** mark — Confusion's blast box, the cell Pierce Wall opened — shows for
+**`EFFECT_FLASH_TURNS`** turns after the effect acts: **one**, the acting frame
+**[START]**. Enough to answer *what just happened, and where* at the moment the player
+asks it, without leaving a 13×13 field of background over the board while the danger
+overlay is the thing that matters. What carries a state for every turn after that is a
+**standing** mark instead — a guard still held, a live decoy, concealment in force —
+which costs no ink beyond the cell it rides.
+
+The precedence is fixed — **Danger > a mark on a thing > Sensed > the wash** — so an
+advisory layer can never masquerade as the detection set, nor hide it; the wash yields
+to the sense channel, while a mark on a thing merely refines the cue that thing already
+draws. Every mark carries the geometry the mechanic resolved against, by value, so the
+picture cannot disagree with the rule — and it stays where it happened rather than
+following the player, because that is what the effect did. A **refusal** marks nothing:
+a press that changed nothing is a message (§11.7), not an effect.
 
 Two problems from the old version to fix:
 

@@ -59,26 +59,30 @@ pub enum Category {
     /// event; it is still position only, never who passed or which way (§10.4). A
     /// coincident danger cone still outranks it (§11.5: being seen outranks).
     Sensed,
-    /// Cyan. An **area effect of your own making** (§8.3/§11.5) — Confusion's blast
-    /// today, Lockdown's radius next. Its meaning is *reach*: how far the gadget you
-    /// just fired carried, and what it still holds.
+    /// Cyan. An **ability effect of your own making** (§8.3/§11.5) — Confusion's blast
+    /// and Pierce Wall's hole today, Lockdown's radius next. Its meaning is *what your
+    /// gadget did*: where it acted, and what it still holds.
     ///
-    /// It speaks in both channels, because an area effect has two things to say and
-    /// they land on different cells:
+    /// **Background only** (#338). The glyph on the cell keeps its own meaning — a
+    /// guard stays on the §11.2 threat ladder, a thing of yours stays
+    /// [`Owned`](Self::Owned) — and the effect is the wash underneath it. One channel
+    /// for every effect the game grows, so a new one arrives without inventing a
+    /// vocabulary; what varies is where the mark lands (a fixed cell set, or the thing
+    /// in a cell) and how long it lives (a moment, or as long as the effect holds).
     ///
-    /// - As a **background**, the effect's live footprint — the §6.1 box around the
-    ///   player, painted through walls like the reach it describes, and the **weakest**
-    ///   background there is: a [`Sensed`](Self::Sensed) cue and a
-    ///   [`Danger`](Self::Danger) cone both paint over it, so an advisory layer can
-    ///   never hide the detection set §11.5 settles as the board's one non-negotiable
-    ///   claim.
-    /// - As a **foreground**, on an actor the effect currently holds: a frozen guard's
-    ///   `g` recolours out of its state ladder (§11.2's yellow → orange → red *is* the
-    ///   guard's mind) into this — a mind switched off is not a threat level, so it
-    ///   leaves the ladder rather than pretending to sit on a rung. On a guard felt
-    ///   only through a wall there is no glyph to recolour, so the mark takes over its
-    ///   [`Sensed`](Self::Sensed) background instead: the stronger claim about the very
-    ///   same guard, position included, never a cell the fog was hiding.
+    /// Two strengths, because the two placements make different claims:
+    ///
+    /// - A mark over **cells** is the **weakest** background there is: a
+    ///   [`Sensed`](Self::Sensed) cue and a [`Danger`](Self::Danger) cone both paint
+    ///   over it, so an advisory layer can never hide the detection set §11.5 settles
+    ///   as the board's one non-negotiable claim. It is painted through walls and fog,
+    ///   because the reach of your own gadget is your own knowledge.
+    /// - A mark over the **thing** in a cell is a *recolour of a cue that thing already
+    ///   draws*, not a competing claim: on a guard felt through a wall it replaces the
+    ///   [`Sensed`](Self::Sensed) orange with the stronger statement about the very same
+    ///   guard — position included, and it cannot move. So it outranks `Sensed`, and
+    ///   still yields to `Danger`. It never paints a thing the player cannot perceive,
+    ///   so the fog gives nothing away.
     ///
     /// Deliberately **not** blue: [`Owned`](Self::Owned) is a *thing* of yours on the
     /// board (you, a decoy, the cupboard you are hidden in), and a frozen guard is

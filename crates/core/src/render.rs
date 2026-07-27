@@ -203,18 +203,22 @@ impl Grid {
 /// looked like the safest cells on the map. Cones of guards the player cannot
 /// see are unknown information and paint nothing.
 ///
-/// # The effect layer (§8.3/§11.5, #308)
+/// # The effect layer (§8.3/§11.5, #308/#338)
 ///
-/// An **area effect** of the player's own making — Confusion's blast today, Lockdown's
-/// radius next — draws in `Category::Effect`, in two places and one meaning. Its
-/// **footprint** washes the §6.1 box it reached for the one frame of its flash, and
-/// every guard it **holds** is marked for as long as it holds them: the seen guard's `g`
-/// recolours out of the threat ladder, and a guard felt only through a wall takes the
-/// mark on its sensed highlight, since it has no glyph to recolour. The precedence is
-/// pinned by paint order — `Danger` > `Sensed` > the footprint — because an advisory
-/// layer must never masquerade as the detection set, nor hide it (§11.5 **[SETTLED]**).
-/// Both readings come from one query apiece on [`State`], keyed by the effect rather
-/// than by any one ability, so the picture cannot disagree with what is frozen.
+/// An **ability effect of the player's own making** always colourises the
+/// **background**, in `Category::Effect`, and never the glyph: the glyph keeps its own
+/// meaning (a guard's threat ladder, `Owned` for a thing of yours) and the effect is
+/// the wash underneath it. The core owns *where* and *how long* — an explicit cell set
+/// or the thing in a cell, momentary or standing (`crate::state::effects`) — so a new
+/// effect becomes visible without this function changing at all.
+///
+/// It reads two queries because the two placements make different claims:
+/// [`State::effect_cell_marks`] is the **wash**, the weakest background on the board,
+/// and [`State::effect_thing_marks`] is a **recolour of a cue the thing already
+/// draws**, which is why it outranks the `Sensed` channel it refines rather than
+/// competing with it. The precedence is pinned by paint order — `Danger` > a mark on a
+/// thing > `Sensed` > the wash — because an advisory layer must never masquerade as the
+/// detection set, nor hide it (§11.5 **[SETTLED]**).
 ///
 /// # Floor dots (§11.5)
 ///
@@ -376,20 +380,15 @@ pub fn render(state: &State) -> Grid {
     // *background* highlight instead, painted below alongside the danger overlay — no
     // glyph of its own. A guard perceived neither way draws nothing and is never
     // remembered (§11.5a), so leaving both view and sense range erases it.
-    // A guard an **area effect** holds (§8.3/#308) leaves the §11.2 threat ladder
-    // altogether: a frozen mind is not a rung on yellow → orange → red, so its `g`
-    // draws in `Category::Effect` instead of its state colour — "this one cannot
-    // move", said in the very channel that exists to show what a guard is thinking.
-    // The absence of its cone from the danger overlay (dropped upstream in
-    // `visible_cone_cells`) is truthful but negative; this is the positive half.
+    // A guard an **area effect** holds keeps its ladder colour (§11.2/#338): the effect
+    // speaks in the background, always, so a frozen guard reads as "still a hunting
+    // threat, currently held" rather than losing the one channel that says what it was
+    // doing when the blast caught it. The mark itself is painted with the backgrounds
+    // below. The absence of its cone from the danger overlay (dropped upstream in
+    // `visible_cone_cells`) is truthful but negative; the mark is the positive half.
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Seen) {
-            let fg = if state.guard_under_effect(guard) {
-                Category::Effect
-            } else {
-                guard.state().category()
-            };
-            put(guard.pos(), GUARD_GLYPH, fg);
+            put(guard.pos(), GUARD_GLYPH, guard.state().category());
         }
     }
     // The player, always Owned — trivially inside their own FOV. Inside a hideout
@@ -433,18 +432,16 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
-    // The effect layer's footprint (§8.3/§11.5, #308/#325): the §6.1 box a just-fired
-    // area effect actually reached, washed over the board in `Category::Effect` for the
-    // flash's own turn ([`EFFECT_FLASH_TURNS`](crate::EFFECT_FLASH_TURNS)) so the player
-    // learns where Confusion's blast landed — the one thing the count in the near line
-    // cannot say. Painted **first of all the backgrounds**, so it is the weakest cue on
-    // the board: every mark below overwrites it, and an advisory layer can never hide
-    // the §11.5 [SETTLED] detection set or a sensed cue. It reaches through walls and
-    // over unseen ground because that is what the effect does — your own gadget's range
-    // is not something the fog can keep from you — and it is the *fired* box
-    // ([`State::effect_footprint`]), fixed where it went off rather than following the
-    // player, exactly as the daze it dealt out is.
-    for cell in state.effect_footprint() {
+    // The effect layer's **wash** (§11.5, #308/#325/#338): every fixed-cell mark an
+    // ability effect has lit — the §6.1 box a blast reached, the cell a bore opened —
+    // painted in `Category::Effect`. Painted **first of all the backgrounds**, so it is
+    // the weakest cue on the board: every mark below overwrites it, and an advisory
+    // layer can never hide the §11.5 [SETTLED] detection set or a sensed cue. It
+    // reaches through walls and over unseen ground because that is what the effect does
+    // — your own gadget's reach is not something the fog can keep from you — and each
+    // set is the geometry the mechanic resolved against ([`State::effect_cell_marks`]),
+    // fixed where it happened rather than following the player.
+    for cell in state.effect_cell_marks() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
     }
 
@@ -483,23 +480,25 @@ pub fn render(state: &State) -> Grid {
     // *seen* guard also watches reads danger first (§11.5: being seen outranks) — and
     // *after* the door cue, so a sensed guard sitting on a just-changed door reads as
     // the guard, not the trace.
-    // A **sensed** guard an area effect holds carries its mark here instead (#308):
-    // it has no glyph to recolour, so the mark takes over its own highlight, cyan in
-    // place of orange. Nothing is lost by the swap — a filled cell still says "a guard
-    // is exactly here", which is all the orange ever claimed — and the swap is the
-    // whole point of the layer through walls: the blast freezes what you cannot see,
-    // so this is the common case, not the corner one. It is only ever a *recolour* of
-    // a guard already drawn ([`State::guard_under_effect`] gates on perception), never
-    // a new mark, so the fog gives nothing away.
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Sensed) {
-            let bg = if state.guard_under_effect(guard) {
-                Category::Effect
-            } else {
-                Category::Sensed
-            };
-            cells[(guard.pos().y * width + guard.pos().x) as usize].bg = Some(bg);
+            cells[(guard.pos().y * width + guard.pos().x) as usize].bg = Some(Category::Sensed);
         }
+    }
+
+    // The effect layer's marks on **things** (§11.5, #308/#338): every actor an ability
+    // effect currently holds — today, every guard a blast froze and the player can
+    // perceive. Painted *after* the sense channel and *before* the danger overlay,
+    // because it is not a competing claim about the cell but a **refinement of the cue
+    // the thing already draws**: a sensed guard's filled cell still says "a guard is
+    // exactly here", and cyan adds "and it cannot move". Losing that to the orange it
+    // refines would throw away the whole point of a layer that reaches through walls —
+    // the blast freezes what you cannot see, so this is the common case, not the corner
+    // one. It is only ever a recolour of a thing already drawn
+    // ([`State::effect_thing_marks`] gates on perception), never a new mark, so the fog
+    // gives nothing away.
+    for cell in state.effect_thing_marks() {
+        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
     }
 
     // The danger overlay's cone pass (§11.5), last, across terrain and entities
@@ -2649,14 +2648,14 @@ mod tests {
         );
     }
 
-    /// §8.3/§11.5 (#308): the **effect layer's footprint**. Firing Confusion washes the
+    /// §8.3/§11.5 (#308/#338): the effect layer's **wash**. Firing Confusion washes the
     /// §6.1 box it reached in `Category::Effect` — asserted against the rule's own
     /// [`EffectArea`](crate::EffectArea) rather than a hand-drawn shape, so the picture
     /// and the blast can never drift apart, and painted **through walls and fog** (the
     /// reach of your own gadget is not something the fog can keep from you).
     #[test]
-    fn the_effect_flash_paints_the_rules_own_box() {
-        use crate::{AbilityId, Effect};
+    fn the_effect_wash_paints_the_rules_own_box() {
+        use crate::AbilityId;
         // One guard, so the blast has something to catch and is not refused (#325). It
         // stands behind the player, out of the north-facing FOV, so it is *sensed*
         // rather than seen — and a dazed sensed guard's dot is `Effect` too, so it does
@@ -2676,8 +2675,7 @@ mod tests {
             "with no effect fired the frame is exactly today's",
         );
 
-        s.step(Input::Activate(AbilityId::Confusion));
-        let area = s.effect_area(Effect::Confuse).expect("the blast is lit");
+        let area = fired_blast(s.step(Input::Activate(AbilityId::Confusion)));
         let g = render(&s);
         for y in 0..g.height() {
             for x in 0..g.width() {
@@ -2694,12 +2692,13 @@ mod tests {
         assert_eq!(g.get(15, 15 + CONFUSION_RADIUS + 1).bg, None);
     }
 
-    /// §8.3/§11.2 (#308): a dazed guard the player **sees** leaves the threat ladder.
-    /// Its `g` recolours from its state category to `Category::Effect` — a mind
-    /// switched off is not a rung on yellow → orange → red — and it climbs straight
-    /// back on when its own count runs out, since the freeze is a pause, not a reset.
+    /// §8.3/§11.2 (#308/#338): a dazed guard the player **sees** keeps its threat-ladder
+    /// glyph and takes the mark on its **background**. The effect always speaks in the
+    /// background, so the `g` never loses the one channel that says what the guard was
+    /// doing when the blast caught it — and the mark clears with the daze, since the
+    /// freeze is a pause, not a reset.
     #[test]
-    fn a_seen_frozen_guard_wears_the_effect_colour() {
+    fn a_seen_frozen_guard_takes_the_mark_on_its_background() {
         use crate::state::CONFUSION_DAZE_TURNS;
         use crate::AbilityId;
         // Guard three cells north, inside the blast and in the FOV of a north-facing
@@ -2724,25 +2723,36 @@ mod tests {
         s.step(Input::Activate(AbilityId::Confusion));
         let g = render(&s);
         assert_eq!(g.get(10, 7).glyph, 'g', "still the guard glyph");
-        assert_eq!(g.get(10, 7).fg, Category::Effect, "…with its mind off");
+        assert_eq!(g.get(10, 7).fg, ladder, "…still on the ladder it was on");
+        assert_eq!(
+            g.get(10, 7).bg,
+            Some(Category::Effect),
+            "…with the freeze said in the background",
+        );
 
         // Let the daze run out on the guard's own clock (#325 — there is no window to
-        // switch off any more): it resumes exactly where it was, and its colour climbs
-        // back onto the ladder.
+        // switch off any more): it resumes exactly where it was, and the mark under it
+        // goes with the daze.
         for _ in 0..CONFUSION_DAZE_TURNS {
             s.step(Input::Wait);
         }
+        let thawed = render(&s).get(10, 7);
         assert_eq!(
-            render(&s).get(10, 7).fg,
-            ladder,
-            "the mark clears with the daze — no residue, and the pause was a pause",
+            thawed.fg, ladder,
+            "the pause was a pause — the ladder never moved",
+        );
+        assert_ne!(
+            thawed.bg,
+            Some(Category::Effect),
+            "the mark clears with the daze — no residue",
         );
     }
 
-    /// §9.2/§8.3 (#308): a frozen guard felt only **through a wall** carries the mark on
-    /// its sensed highlight instead — it has no glyph to recolour. This is the common
+    /// §9.2/§8.3 (#308/#338): a frozen guard felt only **through a wall** carries the
+    /// same background mark, cyan in place of the orange it refines. This is the common
     /// case, not the corner one: the blast reaches through walls, so most of what it
-    /// freezes is exactly what the player cannot see.
+    /// freezes is exactly what the player cannot see — and the mark outranking `Sensed`
+    /// on the guard's own cell is what keeps "and it cannot move" readable there.
     #[test]
     fn a_sensed_frozen_guard_takes_the_mark_on_its_highlight() {
         use crate::AbilityId;
@@ -2802,7 +2812,7 @@ mod tests {
             ],
             AbilityId::Confusion,
         );
-        s.step(Input::Activate(AbilityId::Confusion));
+        let area = fired_blast(s.step(Input::Activate(AbilityId::Confusion)));
         assert!(s.guard_confused(&s.guards()[0]), "the near guard is frozen");
         assert!(
             !s.guard_confused(&s.guards()[1]),
@@ -2815,17 +2825,12 @@ mod tests {
         );
 
         let g = render(&s);
-        let frozen = g.get(10, 10);
-        assert_eq!(frozen.fg, Category::Effect, "the freeze still shows");
         assert_eq!(
-            frozen.bg,
+            g.get(10, 10).bg,
             Some(Category::Danger),
-            "…and the red it stands in outranks the wash",
+            "the red the frozen guard stands in outranks its own mark",
         );
         // Every watched cell inside the footprint is red, not cyan.
-        let area = s
-            .effect_area(crate::Effect::Confuse)
-            .expect("the blast is lit");
         for &cell in watcher_cone.iter().filter(|&&c| area.contains(c)) {
             assert_eq!(
                 g.get(cell.x, cell.y).bg,
@@ -2835,11 +2840,13 @@ mod tests {
         }
     }
 
-    /// §9.4/§11.5 (#308): the **orange sense channel** beats the effect wash too. A door
+    /// §9.4/§11.5 (#308/#338): the **orange sense channel** beats the effect wash. A door
     /// that shuts itself inside the blast keeps its `Sensed` cue — evidence someone
-    /// passed is a fact about the world, and an advisory layer never paints over one.
+    /// passed is a fact about the world, and an advisory wash never paints over one.
+    /// (A mark on a *thing* is the other case, and rightly the other way round: it
+    /// refines a cue rather than competing with it.)
     #[test]
-    fn a_sensed_door_cue_survives_the_footprint() {
+    fn a_sensed_door_cue_survives_the_wash() {
         use crate::region::{DoorKind, RegionGraph, RegionKind};
         use crate::AbilityId;
         // Two rooms joined by an automatic door down column 3 (§10.4/#147); the player
@@ -2922,13 +2929,12 @@ mod tests {
             AbilityId::Confusion,
         );
         s.step(Input::Activate(AbilityId::Confusion));
-        let g = render(&s);
-        assert_eq!(g.get(caught.x, caught.y).fg, Category::Effect, "caught");
-        assert_ne!(
-            g.get(missed.x, missed.y).fg,
-            Category::Effect,
-            "one cell past the edge: awake",
-        );
+        let marked: Vec<Cell> = s.effect_thing_marks().collect();
+        assert_eq!(marked, vec![caught], "caught — and only it");
+        // Asserted on the layer rather than on the frame, because the awake guard's own
+        // cone paints its neighbour red and `Danger` outranks the mark (§11.5): what
+        // this test is about is which guards are *held*, and the two render tests above
+        // already pin how a held guard is drawn.
 
         // Run: four steps south carry the caught guard well outside the box the blast
         // covered, and behind the player's back besides. It is still dazed — the count
@@ -2941,9 +2947,8 @@ mod tests {
             s.player().sight_distance(caught) > CONFUSION_RADIUS,
             "precondition: outside the box the blast covered",
         );
-        assert_eq!(
-            render(&s).get(caught.x, caught.y).bg,
-            Some(Category::Effect),
+        assert!(
+            s.effect_thing_marks().any(|c| c == caught),
             "running away thaws nobody",
         );
 
@@ -2956,15 +2961,29 @@ mod tests {
             s.player().sight_distance(missed) <= CONFUSION_RADIUS,
             "precondition: inside the reach the blast had",
         );
-        assert_ne!(
-            render(&s).get(missed.x, missed.y).fg,
-            Category::Effect,
+        assert!(
+            s.effect_thing_marks().next().is_none(),
             "walking into range dazes nobody: the blast is over",
         );
     }
 
-    /// Whether any cell of `grid` speaks the effect vocabulary in either channel — the
-    /// "with nothing running, the frame is exactly today's" check (#308).
+    /// The [`EffectArea`](crate::EffectArea) a `step`'s events say Confusion fired with
+    /// — the object the daze was computed from, and so the one a painted wash is
+    /// asserted against.
+    fn fired_blast(events: Vec<Event>) -> crate::EffectArea {
+        events
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ConfusionFired { blast, .. } => Some(blast),
+                _ => None,
+            })
+            .expect("the blast went off")
+    }
+
+    /// Whether any cell of `grid` speaks the effect vocabulary at all — the "with
+    /// nothing running, the frame is exactly today's" check (#308). It looks at both
+    /// channels even though #338 settles the layer on the background alone, so a glyph
+    /// that ever claimed `Category::Effect` would fail this too.
     fn any_effect_ink(grid: &Grid) -> bool {
         (0..grid.height()).any(|y| {
             (0..grid.width()).any(|x| {
