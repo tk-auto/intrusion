@@ -340,6 +340,9 @@ pub enum AbilityId {
     Confusion,
     /// Salvaged tech (§8.3), **passive**: 360° sight at extended range while held.
     Vision,
+    /// Salvaged tech (§8.3/#303): bore through your one adjacent wall, permanently,
+    /// a few times per level.
+    PierceWall,
 }
 
 impl AbilityId {
@@ -347,7 +350,7 @@ impl AbilityId {
     /// display/iteration order only — hotkeys come from the identity map (§11.6),
     /// never from a position — but it *is* the order [`index`](Self::index) pins,
     /// so the two must not drift.
-    pub const ALL: [AbilityId; 7] = [
+    pub const ALL: [AbilityId; 8] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -355,23 +358,25 @@ impl AbilityId {
         AbilityId::Autodoors,
         AbilityId::Confusion,
         AbilityId::Vision,
+        AbilityId::PierceWall,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
     /// opposed to innate [`Run`](AbilityId::Run). This is the default eligible pool
     /// a `starting_abilities` grant (#244) draws from: the shipped, non-experimental
     /// tech (the gated experiments #239/#243 are not economy abilities yet, so the
-    /// pool is exactly these six). Quick play grants the whole pool while its size
+    /// pool is exactly the rows listed here). Quick play grants the whole pool while its size
     /// meets the grant count; the draw only bites once the pool outgrows the grant.
     /// A passive (#264) is drawn from here like any other tech — it competes for the
     /// same slot, which is exactly what it pays with.
-    pub const TECH: [AbilityId; 6] = [
+    pub const TECH: [AbilityId; 7] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
         AbilityId::Autodoors,
         AbilityId::Confusion,
         AbilityId::Vision,
+        AbilityId::PierceWall,
     ];
 
     /// The most **salvaged tech** a run holds at once (§8.3/§10.2/#266) — the
@@ -409,6 +414,7 @@ impl AbilityId {
             AbilityId::Autodoors => "Autodoors",
             AbilityId::Confusion => "Confusion",
             AbilityId::Vision => "Vision",
+            AbilityId::PierceWall => "Pierce Wall",
         }
     }
 
@@ -432,6 +438,7 @@ impl AbilityId {
             AbilityId::Autodoors => "Doors",
             AbilityId::Confusion => "Daze",
             AbilityId::Vision => "Sight",
+            AbilityId::PierceWall => "Bore",
         }
     }
 
@@ -460,6 +467,7 @@ impl AbilityId {
             AbilityId::Autodoors => &AUTODOORS,
             AbilityId::Confusion => &CONFUSION,
             AbilityId::Vision => &VISION,
+            AbilityId::PierceWall => &PIERCE_WALL,
         }
     }
 
@@ -473,6 +481,7 @@ impl AbilityId {
             AbilityId::Autodoors => 4,
             AbilityId::Confusion => 5,
             AbilityId::Vision => 6,
+            AbilityId::PierceWall => 7,
         }
     }
 }
@@ -495,7 +504,7 @@ pub struct Loadout {
 impl Loadout {
     /// The **full** loadout: every ability present, passives included.
     ///
-    /// It is **not a loadout a run can hold** — seven abilities is well over the
+    /// It is **not a loadout a run can hold** — the whole catalog is well over the
     /// [`AbilityId::MAX_HELD`] cap (§8.3), so no preset resolves to it and the
     /// ability bar's compile-time width bound (§11.4) does not cover it. A bar this
     /// long simply truncates, as it does on any oversized hand-built state.
@@ -798,6 +807,27 @@ const fn activated(
     })
 }
 
+/// An activated ability whose real scarcity is the **per-level use budget**
+/// (§8.2/#302) rather than the clock — the shape a row with `uses_per_level` is built
+/// from. Held apart from [`activated`] so that declaring a budget is a different
+/// keystroke from forgetting one: a row either says a number here or does not have
+/// the field at all.
+const fn budgeted(
+    cost: u32,
+    targeting: TargetingMode,
+    duration: u32,
+    cooldown: u32,
+    uses: u32,
+) -> AbilityMode {
+    AbilityMode::Activated(Economy {
+        cost,
+        targeting,
+        duration,
+        cooldown,
+        uses: Some(uses),
+    })
+}
+
 const RUN: Ability = Ability {
     id: AbilityId::Run,
     mode: activated(1, TargetingMode::Itself, 5, 12),
@@ -850,6 +880,33 @@ const VISION: Ability = Ability {
     mode: AbilityMode::Passive,
     behaviour: Behaviour::Effects(&[Effect::EnhancedSight]),
 };
+// Pierce Wall [START] (§8.3/§8.4, #303): **instant** — `duration: 0`, so it resolves
+// the turn it is pressed and there is nothing to switch off — and **no cooldown at
+// all**. The clock is deliberately empty here because the scarcity is the budget:
+// three holes a facility, and no fourth however long you wait (§8.2/#302). Adding a
+// cooldown on top would only blur which number the player is actually managing, and
+// the ability paces itself anyway — a bore consumes the very wall the precondition
+// needed, so the next one is always a walk away.
+//
+// It is the first **[`Behaviour::Coded`]** ability, which is §8.1's own prescription
+// rather than a shortcut: turning a solid into floor is not a primitive the effect
+// vocabulary has, and it is a genuine one-off — no second ability would ever declare
+// it — so it takes the escape hatch instead of widening the vocabulary for one row.
+// The economy does not care: it reads only the numbers, so this steps through
+// activation and its budget exactly as a data ability does.
+const PIERCE_WALL: Ability = Ability {
+    id: AbilityId::PierceWall,
+    mode: budgeted(1, TargetingMode::Itself, 0, 0, PIERCE_WALL_USES),
+    behaviour: Behaviour::Coded,
+};
+
+/// How many walls one facility lets you bore through — **[START]** (§8.3/#303).
+///
+/// Three is enough to be a plan (break a dead end, cut to a console the partition put
+/// a long way round, open a room-to-room route) and few enough that spending one is a
+/// decision you feel. It is the balance lever this ability is tuned on, and §8.2's
+/// fence keeps it a single digit.
+pub const PIERCE_WALL_USES: u32 = 3;
 
 /// The live economy state of one deck ability (§8.2): the three states the *time*
 /// economy moves an ability through.
@@ -1407,6 +1464,66 @@ mod economy_tests {
         }
     }
 
+    /// The **coded** catalog (§8.1's escape hatch, #303), pinned separately because
+    /// it is the arm the other pin cannot reach: Pierce Wall declares no effects at
+    /// all, so its row is `cost 1`, self-targeted, **instant** (`duration: 0`), with
+    /// **no cooldown** and a per-level budget instead — the scarcity is the budget,
+    /// not the clock (§8.2/#302). Every number here is [START].
+    #[test]
+    fn the_catalog_matches_the_design_coded() {
+        let def = AbilityId::PierceWall.def();
+        let economy = def.economy().expect("Pierce Wall is activated");
+        assert_eq!(economy.cost(), 1, "activation costs the turn (§4.4)");
+        assert_eq!(economy.targeting(), TargetingMode::Itself);
+        assert_eq!(economy.duration(), 0, "instant — no window to manage");
+        assert_eq!(
+            economy.cooldown(),
+            0,
+            "no clock: the budget is the scarcity"
+        );
+        assert_eq!(economy.uses_per_level(), Some(PIERCE_WALL_USES));
+        assert_eq!(PIERCE_WALL_USES, 3, "[START]");
+        assert!(
+            matches!(def.behaviour(), Behaviour::Coded),
+            "turning a solid into floor is not a primitive (§8.1)",
+        );
+        assert_eq!(AbilityId::PierceWall.name(), "Pierce Wall");
+        assert_eq!(
+            AbilityId::PierceWall.bar_name(),
+            "Bore",
+            "§11.4 fits 5 cells"
+        );
+        assert_eq!(AbilityId::PierceWall.hotkey(), 'b');
+    }
+
+    /// **Every** activated ability is pinned by one of the catalog tests — the
+    /// guard against a row being added and quietly escaping the value-by-value pin,
+    /// which a hand-written list of tuples otherwise invites.
+    #[test]
+    fn every_activated_ability_is_pinned_by_a_catalog_test() {
+        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
+            let pinned = match id.def().behaviour() {
+                // The data rows are covered by `..._activated`, which walks a literal
+                // list; a row missing from it fails here rather than silently.
+                Behaviour::Effects(_) => PINNED_ACTIVATED.contains(&id),
+                // The coded rows are covered one by one by `..._coded`.
+                Behaviour::Coded => id == AbilityId::PierceWall,
+            };
+            assert!(pinned, "{} is in no catalog pin", id.name());
+        }
+    }
+
+    /// The data-driven rows [`the_catalog_matches_the_design_activated`] walks — kept
+    /// beside it so the completeness check above reads off the same list.
+    const PINNED_ACTIVATED: [AbilityId; 6] = [
+        AbilityId::Run,
+        AbilityId::Camouflage,
+        AbilityId::Decoy,
+        AbilityId::Dephase,
+        AbilityId::Autodoors,
+        AbilityId::Confusion,
+    ];
+
     /// The **passive** catalog (#264/#265), pinned: Vision is the one passive, it
     /// declares [`Effect::EnhancedSight`], and — the property that matters — it has
     /// **no economy at all**. Not a zeroed one: `economy()` is `None`, so there is no
@@ -1481,17 +1598,23 @@ mod economy_tests {
         assert_eq!(AbilityId::Confusion.hotkey(), 'z');
     }
 
-    /// A fresh deck is all Ready (§8.3: the v1 set is available from the start) —
-    /// bar the passives, which are never "ready" because there is nothing to ready
-    /// them for: they are already on (#264).
+    /// A fresh deck is available from the start (§8.3: the v1 set is), in whichever
+    /// way each ability *is* available — plain [`Ready`](AbilityState::Ready), or a
+    /// **full budget** for one that carries one (§8.2/#302), or [`Passive`] for one
+    /// that is simply on because it is held (#264). None of the three is a lockout,
+    /// which is the property this pins.
+    ///
+    /// [`Passive`]: AbilityState::Passive
     #[test]
     fn a_fresh_deck_is_all_ready() {
         let deck = Deck::new(Loadout::full());
         for id in AbilityId::ALL {
-            let expected = if id.is_passive() {
-                AbilityState::Passive
-            } else {
-                AbilityState::Ready
+            let expected = match id.def().mode() {
+                AbilityMode::Passive => AbilityState::Passive,
+                AbilityMode::Activated(economy) => match economy.uses_per_level() {
+                    Some(uses) => AbilityState::Limited { uses },
+                    None => AbilityState::Ready,
+                },
             };
             assert_eq!(deck.state(id), expected, "{}", id.name());
         }
@@ -1767,7 +1890,13 @@ mod economy_tests {
             }
             assert_eq!(active, duration, "{} active turns", id.name());
             assert_eq!(cooling, cooldown, "{} cooling turns", id.name());
-            assert_eq!(deck.state(id), AbilityState::Ready, "{}", id.name());
+            // Available again — for a budgeted ability that means one use lighter
+            // (§8.2/#302), which is the budget doing its job, not the clock failing.
+            let expected = match economy.uses_per_level() {
+                Some(uses) => AbilityState::Limited { uses: uses - 1 },
+                None => AbilityState::Ready,
+            };
+            assert_eq!(deck.state(id), expected, "{}", id.name());
         }
     }
 
@@ -1964,7 +2093,12 @@ mod economy_tests {
     /// activations ever exhausts anything.
     #[test]
     fn an_unbudgeted_ability_is_untouched_by_the_axis() {
-        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
+        let unbudgeted = AbilityId::ALL.into_iter().filter(|id| {
+            id.def()
+                .economy()
+                .is_some_and(|e| e.uses_per_level().is_none())
+        });
+        for id in unbudgeted {
             let mut deck = Deck::new(Loadout::full());
             assert_eq!(deck.uses_left(id), None, "{}", id.name());
             assert_eq!(deck.state(id), AbilityState::Ready, "{}", id.name());
