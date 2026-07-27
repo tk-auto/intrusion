@@ -36,7 +36,8 @@ use crate::tap::{Control, Tap};
 use crate::Game;
 
 /// The input-facing half of [`Game`]: how a key or a gesture tick becomes a
-/// turn. The rendering half (fit, paint) stays in `lib.rs` beside the palette.
+/// turn. The rendering half (fit, paint) stays in `lib.rs`, the colour table in
+/// [`palette`](crate::palette).
 impl Game {
     /// Map a key through the core's §11.6 table and, if it is one the loop takes,
     /// step and redraw. Returns whether the key was consumed (so the caller can
