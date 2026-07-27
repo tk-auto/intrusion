@@ -53,9 +53,12 @@ impl State {
     /// player started on one). It is kept so that impossible case is a truthful loss
     /// rather than a silently impossible state.
     pub(super) fn eject_from_solid(&mut self, events: &mut Vec<Event>) {
+        // The solid they were stranded in, read before anything moves them: one half of
+        // the throw the event reports and the mark draws (§11.5/#339).
+        let from = self.player;
         let Some(to) = self.eject_target() else {
             self.outcome = Outcome::Lost;
-            events.push(Event::Entombed { at: self.player });
+            events.push(Event::Entombed { at: from });
             return;
         };
         // Teleported, not walked: the pose cannot survive a cell it is not adjacent to
@@ -70,10 +73,10 @@ impl State {
         // the solid to the landing — the very radius the search stopped at — plus the
         // flat base. Measured here, from the two cells, so the price can never drift
         // from the distance actually travelled.
-        let stunned = phase_eject_stun(self.player.sight_distance(to));
+        let stunned = phase_eject_stun(from.sight_distance(to));
         self.player = to;
         self.stunned = stunned;
-        events.push(Event::Ejected { to, stunned });
+        events.push(Event::Ejected { from, to, stunned });
         // Anything arriving on the decoy tramples it (§8.3) — arriving by wall
         // included.
         self.stomp_decoy(to, events);

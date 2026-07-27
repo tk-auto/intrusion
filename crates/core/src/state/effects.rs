@@ -16,7 +16,9 @@
 //!   landing), or the **thing** in a cell, which carries the mark wherever it goes (a
 //!   guard a blast froze).
 //! - **How long it lives** ([`MarkLife`]) — **momentary** where the effect *is* a
-//!   moment ([`EFFECT_FLASH_TURNS`], a bore, a blast's reach), or **standing** where
+//!   moment (a bore, a blast's reach: [`EFFECT_FLASH_TURNS`], or as long as the moment's
+//!   consequence runs — an eject is lit on just the frames its stun holds the player
+//!   down), or **standing** where
 //!   the effect is a state (a guard still frozen, and later a live decoy or
 //!   concealment in force). One decay schedule serves both
 //!   ([`decay_effect_marks`](State::decay_effect_marks)); there is no second timer.
@@ -159,7 +161,18 @@ pub(super) enum MarkPlace {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum MarkLife {
     /// A **moment**: this many more spent turns, then gone. The effect *is* an event —
-    /// a blast's reach, a bore — and the mark is the one frame that reports it.
+    /// a blast's reach, a bore — and the mark is the frame that reports it.
+    ///
+    /// Usually [`EFFECT_FLASH_TURNS`], the one frame. It is a **count** rather than a
+    /// flag because an event whose consequence outlasts it should be readable for as
+    /// long as that consequence runs, and no longer: the safety eject is lit for the
+    /// stun it deals (#339), so the mark neither expires while the player it is
+    /// speaking to is still unable to act nor survives into the frame they act from.
+    /// Still a moment, still on the one decay schedule — what varies is how long the
+    /// report is left up, never whether something has to notice it end.
+    ///
+    /// A life of N is **N renders**, the frame it was lit in being the first — the
+    /// decay runs at the head of the next spent turn, not at the end of this one.
     Momentary(u32),
     /// A **state**: shown for exactly as long as the effect holds, with no countdown.
     /// It ends when the thing it marks stops being held, or when the ability's window
@@ -343,7 +356,9 @@ impl State {
     /// turn's events (§11.5/#308/#325/#338). Called after
     /// [`decay_effect_marks`](Self::decay_effect_marks) has already spent the older
     /// marks' turn, exactly as [`record_door_cues`](Self::record_door_cues) is, so a
-    /// mark placed this turn keeps its full life.
+    /// mark placed this turn keeps its full life — and **once, at the very end of the
+    /// spent turn**, so that every phase that can produce an effect event has already
+    /// run (the safety eject, #339, resolves after the ability clocks).
     ///
     /// **This is the whole extension point.** A new effect becomes visible by adding an
     /// arm here that names its place and its lifetime — nothing else in the layer, and
@@ -408,6 +423,60 @@ impl State {
                 }
                 Event::WallBored { at } => self.light_mark(
                     AbilityId::PierceWall,
+                    MarkPlace::Cells(vec![at]),
+                    MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                ),
+                // The safety eject is one event with **two ends** (§8.3/#329/#339): the
+                // solid the phase stranded you in, and the cell it threw you onto. Both
+                // are washed, because what the stunned player needs is not either cell
+                // but the *distance between them* — that span is what priced the stun
+                // ([`phase_eject_stun`]), and the `@` simply appearing several cells away
+                // says nothing about where it came from.
+                //
+                // **The pair is lit on exactly the frames the player cannot act from**,
+                // and not one more. A one-frame flash would be the one cue in the game
+                // that expires while its reader is held down — the eject is followed
+                // immediately by turns the player spends helpless, and telling them where
+                // they were thrown from *after* it stopped mattering is the #339
+                // complaint restated rather than fixed. Overshooting is its own fault:
+                // a mark still lit on the frame the player is choosing a real move from
+                // is reporting an event they have already finished paying for.
+                //
+                // `stunned` is exactly that count, with no adjustment. A
+                // [`MarkLife::Momentary`] life of N yields N renders, the throw's own
+                // frame being the first — and that frame is already one the player cannot
+                // act from, since the stun is set before it is drawn. So the mark is lit
+                // on every frame whose press will be eaten and dark on the first frame
+                // whose press is answered, which is the same thing as saying it is lit
+                // exactly while [`stunned`](State::stunned) is non-zero. Taken off the
+                // event, so the mark and the helplessness cannot disagree however the
+                // stun is later priced.
+                //
+                // It stays **momentary**, not standing: this is one event given a stated
+                // life, not a state being reported. Nothing has to notice when it ends.
+                //
+                // Marking the *player* while stunned would draw the same picture — they
+                // are stunned in place on the landing end, and a thing mark and the wash
+                // are one background — so the layer keeps the cheaper of the two shapes
+                // and needs no new placement.
+                //
+                // The origin is a **solid**, and it is marked anyway: the layer paints
+                // over the geometry it finds rather than only over floor, and a cell the
+                // player occupied a moment ago is their own knowledge, not a reveal
+                // (§11.5a). The landing is drawn from the event too, not from
+                // `self.player`, so a decoy stomped on arrival — or anything else that
+                // moves them afterwards — cannot shift the mark off the cell the throw
+                // actually ended on.
+                Event::Ejected { from, to, stunned } => self.light_mark(
+                    AbilityId::Dephase,
+                    MarkPlace::Cells(vec![from, to]),
+                    MarkLife::Momentary(stunned),
+                ),
+                // The eject with nowhere to go (§8.3): one cell, and it is the one that
+                // entombed you. The run is over on this frame, so the mark's whole job is
+                // to say *where* — the last thing the board has to tell.
+                Event::Entombed { at } => self.light_mark(
+                    AbilityId::Dephase,
                     MarkPlace::Cells(vec![at]),
                     MarkLife::Momentary(EFFECT_FLASH_TURNS),
                 ),
@@ -790,6 +859,174 @@ mod tests {
         assert!(
             s.effect_cell_marks().next().is_none(),
             "a refusal paints nothing",
+        );
+    }
+
+    /// A 12×12 room with a wall at `(5,4)` and the player one cell west of it holding
+    /// Dephase, seeded so the landing is reproducible (§12.4). Phasing east and waiting
+    /// out the duration strands them inside the wall and fires the safety eject.
+    fn phased_into_a_wall() -> State {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+        .with_rng(crate::Rng::new(7));
+        s.step(Input::Activate(AbilityId::Dephase));
+        s.step(Input::Step(Direction::East));
+        assert_eq!(
+            s.player(),
+            Cell::new(5, 4),
+            "precondition: inside the solid"
+        );
+        s
+    }
+
+    /// The two ends of the throw the last `step` reported, straight off the event — the
+    /// pair the stun was priced from, which is what the mark is asserted against.
+    fn last_throw(state: &State) -> (Cell, Cell) {
+        state
+            .last_events()
+            .iter()
+            .find_map(|e| match e {
+                Event::Ejected { from, to, .. } => Some((*from, *to)),
+                _ => None,
+            })
+            .expect("the eject fired")
+    }
+
+    /// §8.3/#329/#339: the safety eject lights a **momentary** mark on both of its ends
+    /// — the solid it stranded you in and the cell it threw you onto — and on nothing
+    /// else. Two marks for one event, because the span between them is the fact the
+    /// stunned player is being told.
+    #[test]
+    fn an_eject_marks_both_ends_of_the_throw() {
+        let mut s = phased_into_a_wall();
+        s.step(Input::Wait); // the duration ends inside the wall
+        let (from, to) = last_throw(&s);
+        assert_eq!(
+            from,
+            Cell::new(5, 4),
+            "precondition: thrown out of the wall"
+        );
+        assert_eq!(s.player(), to, "precondition: standing where it put them");
+
+        let mut painted: Vec<Cell> = s.effect_cell_marks().collect();
+        painted.sort_by_key(|c| (c.y, c.x));
+        let mut both = vec![from, to];
+        both.sort_by_key(|c| (c.y, c.x));
+        assert_eq!(painted, both, "both ends, and only them");
+        assert!(
+            s.effect_thing_marks().next().is_none(),
+            "an eject holds nothing",
+        );
+    }
+
+    /// The origin end is a **solid** and is washed anyway (§11.5a/#339): the layer paints
+    /// over whatever geometry it finds, and a cell the player occupied a moment ago is
+    /// their own knowledge rather than a reveal. Gating the mark on walkability would
+    /// silently drop the half of the throw that explains it.
+    #[test]
+    fn the_origin_mark_draws_even_though_it_is_solid() {
+        let mut s = phased_into_a_wall();
+        s.step(Input::Wait);
+        let (from, _) = last_throw(&s);
+        assert!(
+            !s.layout().facility().can_enter(from, ACTOR_FILL),
+            "precondition: {from:?} is a solid no body can stand in",
+        );
+        assert!(
+            s.effect_cell_marks().any(|c| c == from),
+            "the solid end is marked all the same",
+        );
+    }
+
+    /// The pair is lit on **exactly the frames the player cannot act from** (#339) —
+    /// stated as the invariant rather than as a count, since the two ways to get this
+    /// wrong are opposite and both are bugs: go out too early and the cue expires while
+    /// its reader is still held down; stay one frame too long and it is still reporting
+    /// the throw on the frame they are choosing a real move from.
+    ///
+    /// `stunned() > 0` is precisely "the next press will be eaten", so asserting the
+    /// mark against it — rather than against a number — leaves nothing for a later
+    /// repricing of the stun (§8.3 **[START]**) to knock out of step.
+    #[test]
+    fn the_eject_marks_are_lit_exactly_while_the_player_cannot_act() {
+        let mut s = phased_into_a_wall();
+        s.step(Input::Wait);
+        let stun = s.stunned();
+        assert!(stun > 0, "precondition: the throw cost some helplessness");
+        let landed = s.player();
+
+        let mut helpless_frames = 0;
+        while s.stunned() > 0 {
+            assert_eq!(
+                s.effect_cell_marks().count(),
+                2,
+                "both ends are lit on a frame the player cannot act from",
+            );
+            assert_eq!(
+                s.player(),
+                landed,
+                "a stunned player cannot move off the mark"
+            );
+            helpless_frames += 1;
+            s.step(Input::Wait);
+        }
+        assert_eq!(
+            helpless_frames, stun,
+            "precondition: one wasted press per turn of stun",
+        );
+        assert!(
+            s.effect_cell_marks().next().is_none(),
+            "the first frame whose press is answered is already dark",
+        );
+    }
+
+    /// §8.3: the entombment — nowhere in the facility to be thrown clear to — marks
+    /// **one** cell, the one that took you. The run ends on this frame, so saying where
+    /// is the last thing the board has to do.
+    #[test]
+    fn an_entombment_marks_the_one_cell_that_took_you() {
+        let mut f = crate::facility::Facility::walled_box(9, 9);
+        for y in 0..9 {
+            for x in 0..9 {
+                f.set_terrain(x, y, Terrain::Wall);
+            }
+        }
+        let entombing = Cell::new(4, 4);
+        let mut s = State::new(
+            crate::Layout::from_facility(f),
+            entombing,
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(7, 7),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Dephase));
+
+        s.step(Input::Activate(AbilityId::Dephase));
+        for _ in 0..4 {
+            if s.last_events().contains(&Event::Entombed { at: entombing }) {
+                break;
+            }
+            s.step(Input::Wait);
+        }
+        assert_eq!(
+            s.outcome(),
+            Outcome::Lost,
+            "precondition: the wall took them"
+        );
+        assert_eq!(
+            s.effect_cell_marks().collect::<Vec<_>>(),
+            vec![entombing],
+            "the entombing cell, and only it",
         );
     }
 

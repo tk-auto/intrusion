@@ -151,11 +151,16 @@ fn dephase_expiring_inside_a_wall_throws_you_clear_and_stuns() {
     let to = match events.as_slice() {
         [Event::AbilityExpired {
             ability: AbilityId::Dephase,
-        }, Event::Ejected { to, stunned }] => {
+        }, Event::Ejected { from, to, stunned }] => {
             assert_eq!(
                 *stunned,
                 phase_eject_stun(1),
                 "one cell out, one cell's stun"
+            );
+            assert_eq!(
+                *from,
+                Cell::new(5, 4),
+                "the event names the solid it threw them out of",
             );
             *to
         }
@@ -613,6 +618,7 @@ fn a_deeper_eject_stuns_for_longer() {
         );
         assert!(
             events.contains(&Event::Ejected {
+                from: stuck,
                 to: s.player(),
                 stunned: s.stunned(),
             }),

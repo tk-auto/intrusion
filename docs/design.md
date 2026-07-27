@@ -1762,11 +1762,16 @@ effect the game grows; what varies is not *where it is said* but **where the mar
 and **how long it lives**:
 
 - **Place.** Over an explicit **cell set**, fixed when the mark is lit — Confusion's
-  §6.1 box, the cell Pierce Wall opened, an eject's landing — or over the **thing** in a
+  §6.1 box, the cell Pierce Wall opened, the pair a safety eject threw you between — or
+  over the **thing** in a
   cell, which carries the mark wherever it goes (a guard a blast froze).
 - **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
   the firing frame and nothing after it, see §11.5), or **standing** where the effect is
-  a state (a guard still held, a live decoy, concealment in force).
+  a state (a guard still held, a live decoy, concealment in force). A momentary mark may
+  be given a longer stated life when the moment's *consequence* outlasts it: the safety
+  eject's pair is lit on exactly the frames the player cannot act from, so the cue
+  neither expires while its reader is still held down nor lingers into the frame they
+  choose a real move from.
 
 The two places also sit differently in the §11.5 precedence, because they make different
 claims. A **cell** mark is a wash and the weakest background there is: a door cue, a

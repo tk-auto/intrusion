@@ -629,6 +629,7 @@ mod tests {
     #[test]
     fn the_eject_outranks_every_guard_event_but_the_capture() {
         let msg = message_for(Event::Ejected {
+            from: Cell::new(3, 4),
             to: Cell::new(3, 3),
             stunned: crate::phase_eject_stun(1),
         })
