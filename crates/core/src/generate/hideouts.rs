@@ -23,7 +23,7 @@ use super::*;
 /// A recess is a **wall → hideout** rewrite, which is why it needs no `severs_pathing`
 /// guard: a wall blocks pathing and so does a hideout, so the walkable graph is
 /// untouched (only the current floor→hideout of the old design could pinch a route).
-/// The site test ([`recess_site`]) demands three solid sides, so the cupboard can
+/// The site test ([`recess_site`]) demands a full backing, so the cupboard can
 /// never be walked or seen *through* to the far side; the spacing then keeps a
 /// cupboard's own solid backing intact — the corridor-facing and room-facing cells of
 /// one thickened stretch sit one apart, so taking one bars the other.
@@ -94,12 +94,23 @@ pub(super) fn place_hideouts(
 /// **mouth** the player bumps it from (§10.1.6).
 ///
 /// A clean recess is a wall cell with **exactly one floor neighbour and three wall
-/// neighbours** — flush with the wall line, backed and flanked by solid opaque wall.
-/// The three-wall requirement is the safety guarantee: a cupboard cut here can be
-/// neither walked nor seen *through* to whatever is on the far side (§10.1.6). It is
-/// the very geometry a two-thick wall (its inner and outer courses) and a pillar face
-/// both offer — which is why [`thicken_walls`] runs first. Any door cell on a flank
-/// fails the exactly-three-wall count, so doorways stay clear without a special case.
+/// neighbours**, whose two **back diagonals** are wall as well — flush with the wall
+/// line, and sitting in a genuine 2×3 block of solid structure. That is the safety
+/// guarantee: a cupboard cut here can be neither walked nor seen *through* to whatever
+/// is on the far side (§10.1.6). It is the very geometry a two-thick wall (its inner
+/// and outer courses) and a pillar face both offer — which is why [`thicken_walls`]
+/// runs first. Any door cell on a flank fails the exactly-three-wall count, so doorways
+/// stay clear without a special case.
+///
+/// The diagonals are checked because the cardinal count alone does not settle sight
+/// (#361). Where the backing course is only *locally* thick, a back diagonal can be
+/// floor of the room behind — and the always-seen touching ring (§6.1 **[SETTLED]**,
+/// unqualified for the player) then hands that cell over the moment the player ducks
+/// in: a peephole into a space the run had not earned (§11.5a). The recess is also
+/// see-through while empty, so the same diagonal leaks to anyone standing at the mouth.
+/// The fix belongs here, where the site is chosen, and not in vision: blanking part of
+/// the ring would trade a settled guarantee for a placement that should never have been
+/// offered.
 pub(super) fn recess_site(facility: &Facility, cell: Cell) -> Option<Cell> {
     if facility.terrain(cell) != Some(Terrain::Wall) {
         return None;
@@ -121,11 +132,25 @@ pub(super) fn recess_site(facility: &Facility, cell: Cell) -> Option<Cell> {
         }
     }
     // An interior cell has four neighbours, so this is exactly one floor + three wall.
-    if walls == 3 {
-        mouth
-    } else {
-        None
+    if walls != 3 {
+        return None;
     }
+    let mouth = mouth?;
+    back_diagonals(cell, mouth)?
+        .into_iter()
+        .all(|d| facility.terrain(d) == Some(Terrain::Wall))
+        .then_some(mouth)
+}
+
+/// The two cells diagonally **behind** a recess at `cell` whose mouth is `mouth` —
+/// the pair flanking its backing cell, and the pair `Facility::neighbours` (cardinal
+/// only) never looks at. `None` if any of them would fall off the grid, which for an
+/// interior recess cannot happen.
+pub(super) fn back_diagonals(cell: Cell, mouth: Cell) -> Option<[Cell; 2]> {
+    let back = Direction::between(cell, mouth)?.opposite();
+    let behind = cell.step(back)?;
+    let [left, right] = back.perpendicular();
+    Some([behind.step(left)?, behind.step(right)?])
 }
 
 /// Whether turning `cell` into a hideout would sever guard pathing (§10.3) — the
