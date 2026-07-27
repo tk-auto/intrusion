@@ -98,11 +98,15 @@ fn no_adjacent_wall_is_a_free_refusal_that_speaks() {
     );
     assert_eq!(s.turn(), 0, "a refused activation is free (§4.4)");
     assert_eq!(
-        s.ability_state(AbilityId::PierceWall),
-        AbilityState::Limited {
-            uses: PIERCE_WALL_USES
-        },
+        s.abilities.uses_left(AbilityId::PierceWall),
+        Some(PIERCE_WALL_USES),
         "and costs no use (§8.2/#302)",
+    );
+    // The bar had already said so, from this same verdict (§11.4/#345): the supply is
+    // intact, and greyed anyway, because from open floor the press cannot fire.
+    assert_eq!(
+        s.ability_state(AbilityId::PierceWall),
+        AbilityState::Unusable,
     );
 }
 
@@ -209,10 +213,8 @@ fn a_thick_wall_bores_into_a_pocket_the_player_can_hide_in() {
         "the alcove is real floor like any other hole",
     );
     assert_eq!(
-        s.ability_state(AbilityId::PierceWall),
-        AbilityState::Limited {
-            uses: PIERCE_WALL_USES - 1
-        },
+        s.abilities.uses_left(AbilityId::PierceWall),
+        Some(PIERCE_WALL_USES - 1),
         "and it cost a use, like any other bore",
     );
 

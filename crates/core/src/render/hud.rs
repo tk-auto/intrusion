@@ -1133,6 +1133,64 @@ mod tests {
         assert!(!row.contains("Doors"), "Autodoors was not in the loadout");
     }
 
+    /// **The bar greys a press that cannot fire** (§11.4/#345): the contextual
+    /// `Unusable` the catalog always documented and nothing ever produced. Pierce
+    /// Wall is the clearest case, because its precondition is *exactly one adjacent
+    /// wall* (§8.3/#303) and the same three cells of board decide it.
+    ///
+    /// Three stands, one grid each:
+    ///
+    /// - **in a room** — no wall touches the player, so there is nothing to bore;
+    /// - **in a corridor** — two side walls, and the target would be ambiguous, which
+    ///   this ability never resolves (§8.4 [SETTLED]);
+    /// - **against one wall** — the one geometry it works in.
+    ///
+    /// The first two draw `Bore—` receding into [`Category::Ground`] beside the other
+    /// things you cannot do; the third draws `Bore(3)` in Owned, its budget intact
+    /// throughout. Same run, same supply, three cells apart: what changed is the
+    /// board, which is exactly what the bar could not say before.
+    #[test]
+    fn the_bar_greys_an_ability_with_no_target() {
+        let borer = |layout| {
+            State::new(
+                layout,
+                Cell::new(15, 5),
+                Direction::North,
+                Vec::new(),
+                Vec::new(),
+                Cell::new(38, 8),
+            )
+            .with_loadout(Loadout::innate().with(AbilityId::PierceWall))
+        };
+        let bar = ability_row(10);
+        let row = |s: &State| -> String {
+            let g = render_screen(s, ScreenUi::default());
+            (0..g.width()).map(|x| g.get(x, bar).glyph).collect()
+        };
+        let colour = |s: &State| render_screen(s, ScreenUi::default()).get(30, bar).fg;
+
+        // In the middle of the room: nothing to bore.
+        let s = borer(open_room(40, 10));
+        assert_eq!(row(&s), "                    Run       Bore—     ");
+        assert_eq!(colour(&s), Category::Ground, "greyed, not promised");
+
+        // In a corridor: two side walls, so the target is ambiguous and refused.
+        let mut layout = open_room(40, 10);
+        layout.place(Cell::new(14, 5), Terrain::Wall);
+        layout.place(Cell::new(16, 5), Terrain::Wall);
+        let s = borer(layout);
+        assert_eq!(row(&s), "                    Run       Bore—     ");
+        assert_eq!(colour(&s), Category::Ground, "two walls is no target");
+
+        // Square against one wall face: the one geometry it works in, and the budget
+        // it had all along finally shows.
+        let mut layout = open_room(40, 10);
+        layout.place(Cell::new(16, 5), Terrain::Wall);
+        let s = borer(layout);
+        assert_eq!(row(&s), "                    Run       Bore(3)   ");
+        assert_eq!(colour(&s), Category::Owned, "available, and says how often");
+    }
+
     /// The bar's live states (§11.4): an **active** ability tucks its `[n]` against
     /// its name in Owned, a **cooling** one its `/n/` in System — the exact numbers
     /// the economy hands over (§8.2). Driven to Run cooling and Camouflage active,

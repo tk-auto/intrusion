@@ -1107,12 +1107,16 @@ mod tests {
             let (armed, _) = boot(seed);
             let armed =
                 armed.with_loadout(intrusion_core::Loadout::innate().with(AbilityId::PierceWall));
+            // Held, read off the bar's own roster rather than off the ability's
+            // state: since #345 that state is **contextual**, so a fresh run standing
+            // anywhere but square against one wall reads `Unusable` — which is the
+            // ability working as designed, not a loadout that failed to take.
             assert!(
-                matches!(
-                    armed.ability_state(AbilityId::PierceWall),
-                    AbilityState::Limited { .. }
-                ),
-                "seed {seed}: the run holds the ability, with its budget full",
+                armed
+                    .ability_statuses()
+                    .iter()
+                    .any(|s| s.id == AbilityId::PierceWall),
+                "seed {seed}: the run holds the ability",
             );
 
             let bare = play(bare);

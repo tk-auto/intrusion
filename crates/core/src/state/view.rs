@@ -258,13 +258,34 @@ impl State {
     /// widens it (§10.7): the crawlspace's cost is degraded information, and taking
     /// stock of the whole area is exactly the open-floor affordance a duct removes.
     pub fn sense_range(&self) -> u32 {
+        self.sense_range_after(self.waited)
+    }
+
+    /// The guard-sense range an **action taken now** reads (§9.1/§8.3, #325/#345):
+    /// [`sense_range`](Self::sense_range) with §9.1's widened Wait already spent.
+    ///
+    /// Acting is not waiting. A Wait on turn T widens the sense for the look it
+    /// bought; an action on turn T+1 is not that Wait, so by the time it resolves the
+    /// flag is down — and a reach measured off the widened box would be measuring a
+    /// look the player has already spent. Confusion's blast is read through this
+    /// ([`confusion_blast`](Self::confusion_blast)), which is what makes the reach a
+    /// **pure** function of the board rather than of when it is asked: the ability
+    /// bar may ask on the very frame after a Wait (#345), and must get the same
+    /// answer the press would.
+    fn sense_range_after(&self, waited: bool) -> u32 {
         if self.in_duct() {
             DUCT_SENSE_RANGE
-        } else if self.waited {
+        } else if waited {
             PLAYER_SENSE_RANGE_WAITING
         } else {
             PLAYER_SENSE_RANGE
         }
+    }
+
+    /// The guard-sense range with the widening Wait spent — see
+    /// [`sense_range_after`](Self::sense_range_after).
+    pub(super) fn acting_sense_range(&self) -> u32 {
+        self.sense_range_after(false)
     }
 
     /// The player's current **door-sense** range (§9.4/§10.4): [`DOOR_SENSE_RANGE`]
@@ -532,13 +553,54 @@ impl State {
         &self.last_events
     }
 
-    /// The economy state of ability `id` (§8.2), as the panel reads it (§11.4):
-    /// `Ready`, `Active` with the duration left, or `Cooling` with the cooldown
-    /// left — the exact number the player gets (§8.2 timing). The show-on-wait
-    /// render ticket wires the panel to this; the display's contextual `Unusable`
-    /// (a missing target) is not an economy state and is never returned here.
+    /// The state of ability `id` as the bar draws it (§11.4): the §8.2 economy —
+    /// `Ready`, `Active` with the duration left, `Cooling` with the cooldown left,
+    /// `Limited` with the uses left, the exact number the player gets (§8.2 timing) —
+    /// and, over the top of it, the **contextual** `Unusable` (#345): a press that
+    /// would be refused for want of a target, from the one precondition ladder
+    /// ([`aim`](Self::aim)) the turn loop itself gates on.
+    ///
+    /// # The precedence rule
+    ///
+    /// **The economy is asked first, and the context only speaks when the economy has
+    /// nothing left to say.** `Active`, `Cooling`, `Exhausted` and `Passive` are
+    /// returned untouched, whatever the surroundings; only `Ready` and `Limited` —
+    /// the two that mean *press it now* — can be overruled into `Unusable`.
+    ///
+    /// One rule for every pair, and the reasoning is the same one that ranks the
+    /// economy's own states ([`Deck::state`](crate::ability::Deck::state)): each
+    /// state should report the fact that actually governs the ability right now.
+    ///
+    /// - **`Active` + no target.** The effect is *running*. A missing target is a
+    ///   fact about the *next* press, and blanking the window the player is currently
+    ///   playing off to say so would be a lie about the ability's own state.
+    /// - **`Cooling` + no target.** The clock leads, because it carries a number and
+    ///   `Unusable` carries a dash. Both gates are shut; only one of them can be
+    ///   counted, and the other the player fixes with a step.
+    /// - **`Exhausted` + no target.** Exhausted, which draws identically (`—`) and is
+    ///   the deeper fact: no target is about this cell, a spent budget is about the
+    ///   rest of the facility.
+    /// - **`Ready`/`Limited` + no target → `Unusable`.** Here and only here the bar
+    ///   would otherwise say *press me* about a press that cannot fire — `Bore(3)`
+    ///   from the middle of a room — which is exactly §8.2's advertised-vs-real gap,
+    ///   transposed from a number to a state. The uses count is worth losing for that:
+    ///   it is one step away from being shown again, and a supply is no use where the
+    ///   ability cannot be spent anyway.
+    ///
+    /// The press itself is **unchanged** either way (§4.4): an `Unusable` entry's key
+    /// still resolves to the activation that refuses for free, and still speaks
+    /// (§11.7). This decides what the player is told, never what they are charged.
     pub fn ability_state(&self, id: AbilityId) -> AbilityState {
-        self.abilities.state(id)
+        match self.abilities.state(id) {
+            // `Ready`/`Limited` are the states that promise the press does something.
+            // They are the only ones the context may overrule, and it overrules them
+            // to the state the catalog has always documented as "discoverable, but
+            // greyed" (§11.4).
+            AbilityState::Ready | AbilityState::Limited { .. } if !self.would_fire(id) => {
+                AbilityState::Unusable
+            }
+            economy => economy,
+        }
     }
 
     /// What pressing ability `id`'s shortcut does **right now** (§11.6/#304): the
