@@ -220,7 +220,7 @@ pub(crate) fn new_run(level: &LevelSeed) -> Result<State, JsValue> {
 /// from the URL when a `…#seed=<token>` link was shared, from a baked global in a
 /// seed-locked artifact, and otherwise off the clock ([`seed`]). It is the whole
 /// reproducible config `(seed, modifiers, abilities)` (#245), re-enterable through
-/// the menu's seed prompt ([`menu`]) as a compact level-seed string — the
+/// the menu's seed prompt ([`menu`]) as a compact level-seed token — the
 /// seed-sharing loop (§13.1/#110/#244).
 ///
 /// **Where a load lands** (#268): a load that was *told* which level to play — a
@@ -232,7 +232,7 @@ pub(crate) fn new_run(level: &LevelSeed) -> Result<State, JsValue> {
 #[wasm_bindgen]
 pub fn start() -> Result<(), JsValue> {
     // The level comes from #110's surface (baked global or URL), decoded from its
-    // level-seed string (#245); a replay widens the payload again to `(level,
+    // level-seed token (#245); a replay widens the payload again to `(level,
     // inputs)` (§12.4/#197). When one is present the shell boots into the **replay
     // viewer** — a pure playback of the captured run — otherwise into ordinary live
     // play. The mode is fixed here, at boot, behind this one flag: the two input maps
@@ -327,7 +327,7 @@ struct Game {
     ui: ScreenUi,
     /// The level the current run booted from (§12.4/#245) — the shell's, not the
     /// core's: the whole reproducible config `(seed, modifiers, abilities)`. Held so
-    /// the seed bar can show its [level-seed string](LevelSeed::encode) and a
+    /// the seed bar can show its [level-seed token](LevelSeed::encode) and a
     /// `…#seed=<token>` link can carry it, modifiers and loadout and all ([`seed`]).
     level: LevelSeed,
     /// The replay being played back, or `None` in ordinary live play (#197). When

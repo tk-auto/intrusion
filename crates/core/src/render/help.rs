@@ -239,7 +239,7 @@ fn draw_tab_bar(grid: &mut Grid, active: HelpTab) {
     );
 }
 
-/// The **Level info** tab (§12.6/#248/#272): the run's **level-seed string** in
+/// The **Level info** tab (§12.6/#248/#272): the run's **level-seed token** in
 /// full — the one token that reproduces this exact run (§13.1/#245), spelling out
 /// its modifiers and loadout rather than implying them — then its active level
 /// modifiers, each by name and direction, or a clear "none active" when the run is
@@ -256,19 +256,19 @@ fn draw_level_info(
     draw(grid, 2, y, "THIS RUN", Category::Interest);
     y += 2;
 
-    // The level-seed string (§13.1/#245): the handle that hands this run around.
+    // The level-seed token (§13.1/#245/#333): the handle that hands this run around.
     // A hand-built state has none — it was assembled cell by cell, and there is no
-    // token that reproduces it — so the section is simply absent rather than
-    // showing an honest-looking string that boots something else.
-    if let Some(level) = level {
+    // token that reproduces it — and neither has a config no run can hold
+    // ([`LevelSeed::encode`]). Both answer `None` here, and both mean the same thing,
+    // so the section is simply absent rather than showing an honest-looking string
+    // that boots something else.
+    if let Some(token) = level.and_then(|level| level.encode()) {
         draw(grid, 2, y, "LEVEL SEED", Category::System);
         y += 1;
         // Interest, the goal/reward colour: this is the thing worth taking away
-        // from the panel. The **full** form ([`LevelSeed::encode_full`]), even for
-        // the default preset whose link form is the bare seed: this surface exists
-        // to show what the run *is*, and `8371` alone says nothing about the
-        // modifiers and loadout it implies. It decodes to the same run either way.
-        draw(grid, 3, y, &level.encode_full(), Category::Interest);
+        // from the panel. One form — the token spells the whole config out, so what
+        // the player copies off this panel is exactly what a link carries (#333).
+        draw(grid, 3, y, &token, Category::Interest);
         y += 2;
     }
 
@@ -775,18 +775,18 @@ mod tests {
         }
     }
 
-    /// The **level-seed string** on the Level info tab (§13.1/#245/#272): the run's
+    /// The **level-seed token** on the Level info tab (§13.1/#245/#272): the run's
     /// own token, drawn under its heading — and it **decodes back to the very run
     /// showing it**, config and all, so the panel can never hand out a string that
-    /// boots a different game. The panel always shows the **full** form, including
-    /// for the default preset whose link form is a bare seed: this surface is where
-    /// you read what the run *is*, so it spells the initial situation out.
+    /// boots a different game. There is one form now (#333), so what the player
+    /// reads here is character-for-character what a shared link carries: the panel
+    /// and the address bar can no longer disagree about what the run is.
     #[test]
     fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
         for level in [
-            // The default preset: a bare decimal seed.
+            // The default preset.
             LevelSeed::quick_play(8371),
-            // A run carrying a chosen modifier set and loadout: the versioned form.
+            // A run carrying a chosen modifier set and loadout.
             LevelSeed {
                 seed: 8371,
                 modifiers: LevelModifiers {
@@ -798,13 +798,9 @@ mod tests {
         ] {
             let g = render_help(W, H, HelpTab::LevelInfo, Some(level), level.modifiers);
             let text = text_of(&g);
-            let token = level.encode_full();
+            let token = level.encode().expect("a config a run can hold");
             assert!(text.contains("LEVEL SEED"), "the section is labelled");
-            assert!(text.contains(&token), "the full token is shown: {text:?}");
-            assert!(
-                token.starts_with("L1-"),
-                "…in the versioned form, whatever the preset"
-            );
+            assert!(text.contains(&token), "the token is shown: {text:?}");
             // The round trip: what a player reads off the panel boots this run.
             assert_eq!(
                 LevelSeed::decode(&token),
@@ -813,16 +809,23 @@ mod tests {
             );
         }
 
-        // The default preset is *not* collapsed to its bare-seed link form here:
-        // the panel spells the initial situation out (the loadout letters and all).
+        // The default preset is spelled out like any other config — it no longer
+        // collapses to a bare seed, which named the preset rather than the run
+        // (#333, superseding #328). This assertion is the reverse of the pin that
+        // recorded the old decision, and is here to record the new one.
         let quick = LevelSeed::quick_play(8371);
-        let g = render_help(W, H, HelpTab::LevelInfo, Some(quick), quick.modifiers);
-        let text = text_of(&g);
-        assert!(
-            text.contains(&quick.encode_full()),
-            "quick play shows its full token: {text:?}"
+        let token = quick.encode().expect("a config a run can hold");
+        assert_ne!(token, "8371", "the link form is no longer a bare seed");
+        assert_eq!(
+            token.len(),
+            crate::level_seed::TOKEN_LEN,
+            "one fixed-width form"
         );
-        assert_eq!(quick.encode(), "8371", "…while its link form stays bare");
+        let g = render_help(W, H, HelpTab::LevelInfo, Some(quick), quick.modifiers);
+        assert!(
+            text_of(&g).contains(&token),
+            "quick play shows the same token it shares",
+        );
 
         // A hand-built state has no reproducible token, so the section is absent
         // rather than showing a string that boots something else.
@@ -848,8 +851,12 @@ mod tests {
         assert!(text.contains("Guards search hideouts"));
         assert!(!text.contains("none active"));
         // THIS RUN@2, LEVEL SEED@4, the token@5, MODIFIERS@7, the first row@8.
-        // A chosen modifier set encodes as the versioned `L1-…` form.
-        assert_eq!(g.get(3, 5).glyph, 'L', "the token sits under its heading");
+        let token = level.encode().expect("a config a run can hold");
+        assert_eq!(
+            g.get(3, 5).glyph,
+            token.chars().next().expect("a token has letters"),
+            "the token sits under its heading",
+        );
         assert_eq!(g.get(3, 5).fg, Category::Interest);
         assert_eq!(g.get(3, 8).glyph, 'G');
         assert_eq!(

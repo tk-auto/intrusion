@@ -33,7 +33,7 @@
 //!
 //! [`DebugModifiers`] lives here as the *contrast*, not as a fourth source: a
 //! playtest-only view switch that no rule and no generation seam may read, and that
-//! never travels in a level-seed string. See its own documentation for why the two
+//! never travels in a level-seed token. See its own documentation for why the two
 //! are deliberately kept apart.
 
 /// The exit's **intel gate** (§4.5/§10.2/#244): how much intel a run must hold
@@ -111,7 +111,7 @@ impl Ord for IntelGate {
 /// §4.5 [START] value, the game exactly as it plays without the system. Quick
 /// play (#244) is a *named preset* over this — it flips [`intel_to_exit`] to
 /// [`IntelGate::All`] and is carried alongside its ability loadout in the
-/// shareable level-seed string ([`LevelSeed`](crate::LevelSeed), #245).
+/// shareable level-seed token ([`LevelSeed`](crate::LevelSeed), #245).
 ///
 /// [`intel_to_exit`]: LevelModifiers::intel_to_exit
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -408,7 +408,7 @@ impl ModifierSources {
 ///
 /// A level modifier bends the **rules** and is part of a level's identity: it is
 /// resolved from sources at facility start, some are read at the generation seam
-/// (§12.6), and every one of them travels in the shareable level-seed string
+/// (§12.6), and every one of them travels in the shareable level-seed token
 /// ([`LevelSeed`](crate::LevelSeed), #245). A debug modifier is none of that. It bends
 /// only what the **player perceives** — never the facility, the guards, or the seed's
 /// stream — so a run under one plays exactly the run it plays without one, and the

@@ -34,19 +34,24 @@ def replace_once(text: str, old: str, new: str, what: str) -> str:
 DEBUG_FLAGS = ("reveal",)
 
 
-def valid_level_seed(token: str) -> bool:
-    """Whether `token` is a plausible level-seed string (crates/core/src/level_seed.rs).
+# The level-seed token's width (crates/core/src/level_seed.rs, TOKEN_LEN).
+TOKEN_LEN = 18
 
-    Two shapes, matching `LevelSeed::encode`: a bare decimal u64 (quick play), or a
-    versioned `L1-…` token carrying a modifier set and loadout. This is a *shape*
-    guard so a typo fails the build loudly instead of silently baking a token the
-    shell can't decode (which would fall through to a random-seed page — the opposite
-    of seed-locked). The core is the real validator; the split here is deliberately
-    light so it cannot drift from `LevelSeed::decode`."""
-    if token.isdigit():
-        return 0 <= int(token) < 2**64
-    # A versioned token: `L<version>-…`. Leave the field-level validation to the core.
-    return bool(re.fullmatch(r"L\d+-[0-9A-Za-z-]+", token))
+
+def valid_level_seed(token: str) -> bool:
+    """Whether `token` is a plausible level-seed token (crates/core/src/level_seed.rs).
+
+    One shape, matching `LevelSeed::encode` (#333): exactly TOKEN_LEN letters. This is
+    a *shape* guard so a typo fails the build loudly instead of silently baking a
+    token the shell can't decode (which would fall through to a random-seed page — the
+    opposite of seed-locked). The core is the real validator — it also checks the
+    magic and the checksum — and the split is deliberately light so it cannot drift
+    from `LevelSeed::decode`.
+
+    A bare decimal seed is deliberately *not* accepted: it named the build's quick-play
+    preset rather than a run, so a seed-locked artifact baked with one drifted with
+    every rebuild (#333, superseding #328)."""
+    return bool(re.fullmatch(rf"[A-Za-z]{{{TOKEN_LEN}}}", token))
 
 
 def main() -> None:
@@ -59,18 +64,19 @@ def main() -> None:
                     help="bake a fixed level into the page for live play. The build "
                          "boots this level with no URL and no typing — how a "
                          "seed-locked artifact pins the exact level the sim played "
-                         "(#110). The value is a level-seed string (#245): a bare "
-                         "u64 boots quick play (#244), or a full `L1-<seed>-<mods>-"
-                         "<abils>` token carries a chosen modifier set and ability "
-                         "loadout (e.g. `L1-8371-a-x` — cones shown, Dephase only). "
+                         "(#110). The value is a level-seed token (#245/#333): "
+                         f"exactly {TOKEN_LEN} letters, carrying the seed, the "
+                         "modifier set and the ability loadout together (e.g. "
+                         "`prbjdokbxcqgjnrnco`), as printed by LevelSeed::encode and shown "
+                         "on the help panel's Level info tab. "
                          "Omit for the normal random-seed build. For a *replay* "
                          "build (boots the scrub viewer) use --replay-json instead.")
     ap.add_argument("--replay-json", default=None,
                     help="bake a captured replay into the page: a path (or '-' for "
                          "stdin) to the `{\"seed\":S,\"inputs\":\"...\"}` line that "
                          "`sim --bot --emit-replay` prints (#197). `S` is a "
-                         "level-seed string (#245) — a bare seed or an `L1-…` token "
-                         "carrying the captured preset — baked verbatim so the "
+                         "level-seed token (#245/#333) carrying the captured "
+                         "preset — baked verbatim so the "
                          "playback boots the exact run, its modifiers and loadout "
                          "included. The build boots straight into the replay viewer "
                          "at K=0. It carries its own level, so do not also pass "
@@ -85,7 +91,7 @@ def main() -> None:
                          "met. These change only what the PLAYER PERCEIVES: guards "
                          "look with their own cones, so the run plays identically. "
                          "They are "
-                         "deliberately not part of a level-seed string, and there "
+                         "deliberately not part of a level-seed token, and there "
                          "is no URL form — a build is the only way to set one, so a "
                          "shared level can never arrive with the fog lifted.")
     ap.add_argument("--title", default=None,
@@ -95,8 +101,8 @@ def main() -> None:
                          "intrusion-110-8371-1.")
     args = ap.parse_args()
     if args.seed is not None and not valid_level_seed(args.seed):
-        sys.exit(f"assemble: --seed must be a level-seed string — a u64, or an "
-                 f"`L1-…` token from LevelSeed::encode — got {args.seed!r}")
+        sys.exit(f"assemble: --seed must be a level-seed token — {TOKEN_LEN} "
+                 f"letters from LevelSeed::encode — got {args.seed!r}")
 
     # Debug flags are validated against the shell's own set: an unknown name would be
     # ignored in the browser, so a typo would publish a build that quietly lacks the
@@ -111,7 +117,7 @@ def main() -> None:
 
     # A replay carries its own level (§12.4/#245), so it and --seed are exclusive.
     # Parse the `{seed, inputs}` pair from --emit-replay's output; the `seed` is the
-    # replay's **level-seed string** (an opaque token the core decodes, #245) which
+    # replay's **level-seed token** (opaque here; the core decodes it, #245) which
     # pins the facility, modifiers, and loadout, and the inputs stream drives the
     # viewer. It is baked verbatim — the core validates it, not this script.
     replay_token = replay_inputs = None
@@ -129,8 +135,8 @@ def main() -> None:
             sys.exit(f"assemble: --replay-json is not a {{seed,inputs}} line "
                      f"(from `sim --emit-replay`): {e}")
         if not valid_level_seed(replay_token):
-            sys.exit(f"assemble: --replay-json seed is not a level-seed string "
-                     f"(a u64 or an `L1-…` token): {replay_token!r}")
+            sys.exit(f"assemble: --replay-json seed is not a level-seed token "
+                     f"({TOKEN_LEN} letters): {replay_token!r}")
 
     dist = pathlib.Path(args.dist)
     glue = (dist / "intrusion_web.js").read_text()
@@ -161,10 +167,10 @@ def main() -> None:
     # ahead of the URL and the clock (crates/web/src/seed.rs, crates/web/src/replay.rs).
     # This is the artifact-safe carrier: the host strips a `…#seed=N`/`inputs=` URL
     # before the framed page sees it, but a global set inside the page always wins.
-    # A replay bakes both — the level-seed string pins the facility/modifiers/loadout,
-    # the inputs boot the viewer (#197/#245); a bare --seed bakes only the seed, which
-    # the shell decodes as quick play (#110/#244). Either way __intrusionSeed is a
-    # string the core's `LevelSeed::decode` reads.
+    # A replay bakes both — the level-seed token pins the facility/modifiers/loadout,
+    # the inputs boot the viewer (#197/#245); --seed bakes the token alone. Either way
+    # __intrusionSeed is a string the core's `LevelSeed::decode` reads, and it carries
+    # the whole config: a baked artifact pins a *run*, never a preset (#333).
     bake_seed = replay_token if replay_inputs is not None else args.seed
     globals_js = ""
     if bake_seed is not None:
