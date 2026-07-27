@@ -238,7 +238,7 @@ system anywhere names a colour.
 | **Interest** | Purple | `#bd6bd6` | Goals and rewards |
 | **System** | Tan | `#9a7040` | Doors, cupboards — neutral furniture |
 | **Sensed** | Orange | `#e69f00` | Felt through a wall — **background only** |
-| **Effect** | Cyan | `#2ee6d6` | An area effect of your own making |
+| **Effect** | Cyan | `#2ee6d6` | An ability effect of your own making — **background only** |
 
 The base palette is a **16-colour, colour-blind-safe qualitative set**, hues leaning
 on Okabe–Ito and brightened for the dark backdrop. Ten rows carry categories today;
@@ -282,7 +282,9 @@ Three rows carry their own dim rather than the shared dark gray, each for a reas
 - **Ground** recedes further than everything else — the floor dots must whisper.
 - **Interest** keeps a readable purple tint, because the exit anchors every escape
   plan and must never sink into wall gray.
-- **Effect** keeps its cyan tint, so an advisory layer stays identifiable when dim.
+- **Effect** keeps its cyan tint, so the help card's colour key names it in a shade
+  nothing else claims. (Since #338 the layer paints no glyph on the board at all, so
+  this row's dim shade is chrome, not board ink.)
 
 ---
 
@@ -290,13 +292,20 @@ Three rows carry their own dim rather than the shared dark gray, each for a reas
 
 Backgrounds are the threat channel, and there is a fixed precedence:
 
-**Danger > Sensed > Effect footprint.**
+**Danger > Effect mark on a thing > Sensed > Effect wash.**
 
 | Background | Means |
 |---|---|
 | **Danger** (red) | This cell is watched by a guard **you can see** |
+| **Effect** on a thing (cyan) | The guard here is held by one of your effects |
 | **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
-| **Effect** (cyan) | How far your own gadget just reached |
+| **Effect** wash (cyan) | Where your own gadget just acted — a blast's box, a bored cell |
+
+The effect layer appears twice on purpose (#338). Its **wash** is advisory geometry and
+the weakest cue on the board. Its mark on a **thing** is not a competing claim about the
+cell but a *refinement of the cue that thing already draws* — "exactly here" becomes
+"exactly here, and it cannot move" — so it sits above the orange it refines and still
+below the red that outranks everything.
 
 **The danger overlay is the best idea in the old game, and it is [SETTLED].** It
 paints the *literal* detection set — the same sight data the guard AI queries, not a

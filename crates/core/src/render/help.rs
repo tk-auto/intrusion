@@ -437,7 +437,7 @@ fn category_meaning(category: Category) -> &'static str {
         Category::Interest => "a goal or reward",
         Category::System => "door / cupboard / duct",
         Category::Sensed => "guard or door, felt through a wall",
-        Category::Effect => "your gadget's reach, and what it holds",
+        Category::Effect => "what your gadget did, and what it holds",
     }
 }
 

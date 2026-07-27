@@ -409,8 +409,9 @@ impl State {
     /// once, at the moment it fires, and each guard carries its own countdown from
     /// there — so this says nothing about where the player is standing now, and neither
     /// running away from a dazed guard nor walking toward an undazed one changes the
-    /// answer. Where the blast *landed* is a separate fact with a separate life
-    /// ([`effect_area`](Self::effect_area)).
+    /// answer. Where the blast *landed* is a separate fact with a separate life — its
+    /// own momentary mark on the §11.5 effect layer
+    /// ([`effect_cell_marks`](Self::effect_cell_marks)).
     ///
     /// [`guard_phase`]: Self::guard_phase
     /// [`visible_cone_cells`]: Self::visible_cone_cells

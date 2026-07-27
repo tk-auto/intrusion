@@ -82,7 +82,7 @@ pub use bore::BoreRefusal;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
 
-use effects::EffectFlash;
+use effects::EffectMark;
 
 /// The player and every guard are solid and exclusive — fill 1.0 (§4.3). A cell
 /// already holding one admits no other actor.
@@ -173,21 +173,23 @@ pub const CONFUSION_RADIUS: u32 = 6;
 /// Pinned by a test.
 pub const CONFUSION_DAZE_TURNS: u32 = 6;
 
-/// How many turns a fired area effect's **footprint flash** stays painted (§8.3/§11.5
-/// **[START]**, #308): the cyan box that teaches how far Confusion — or any later
-/// radius tech — actually reaches. **One turn** — a true flash, the activation frame
-/// and nothing after it. The wash exists to answer *how far* once, at the moment the
-/// player asks it, and a 13×13 field of background is a great deal of ink to leave on
-/// the board while the danger overlay is the thing that matters (§11.5 [SETTLED]).
-/// What carries the state for the rest of the daze is the per-guard mark
-/// ([`guard_under_effect`](State::guard_under_effect)), which costs no ink at all.
-/// That division is why one turn is the right life: the flash reports **the blast** —
-/// a single event, where it landed and how far it went — while *who is still frozen*
-/// is a standing fact the marks say better, and say truthfully for a guard that has
-/// since walked out of the box (§8.3/#325).
+/// How many turns a **momentary** effect mark stays painted (§11.5 **[START]**,
+/// #308/#338): the cyan wash that reports an effect which *is* a moment — Confusion's
+/// box, the cell a bore opened, and every later fixed-cell effect. **One turn** — a
+/// true flash, the acting frame and nothing after it. It exists to answer *what just
+/// happened, and where* once, at the moment the player asks it, and a 13×13 field of
+/// background is a great deal of ink to leave on the board while the danger overlay is
+/// the thing that matters (§11.5 [SETTLED]).
 ///
-/// Lit at full life the turn the ability fires and decremented once per spent turn,
-/// so the footprint shows for this many renders and is gone on the next — the same
+/// What carries a *state* for longer is a **standing** mark instead (a guard still
+/// frozen, later a live decoy or concealment in force), which costs no ink beyond the
+/// cell it rides. That division is why one turn is the right life here: a momentary
+/// mark reports **an event** — where it landed and how far it went — while *what is
+/// still held* is a standing fact the other lifetime says better, and says truthfully
+/// for a guard that has since walked out of the box (§8.3/#325).
+///
+/// Lit at full life the turn the effect acts and decremented once per spent turn, so
+/// the mark shows for this many renders and is gone on the next — the same
 /// persist-and-fade shape as [`DOOR_CUE_DECAY_TURNS`], which is why raising it is a
 /// one-number change if playtest wants the boundary visible for longer. Pinned by a
 /// test.
@@ -543,16 +545,16 @@ pub struct State {
     /// handful of doors change in any few-turn window — so a plain `Vec` scan is
     /// cheaper than a map.
     door_cues: Vec<DoorCue>,
-    /// The area effects whose **footprint** is still being painted (§8.3/§11.5, #308):
-    /// one entry per fired area effect, each lasting [`EFFECT_FLASH_TURNS`] spent
-    /// turns. Lit in [`light_effect_flash`](Self::light_effect_flash) with the area the
-    /// effect actually fired over, dropped in
-    /// [`clear_effect_flash`](Self::clear_effect_flash) the moment an effect *with* a
-    /// window ends either way (§8.2 expiry, §4.4 toggle-off), and faded turn by turn in
-    /// [`decay_effect_flashes`](Self::decay_effect_flashes). It carries the geometry
-    /// itself, so what is drawn is the very box the effect resolved against (#325). At
-    /// most one entry per area effect, so a plain `Vec` scan beats a map.
-    effect_flashes: Vec<EffectFlash>,
+    /// The §11.5 **effect layer**: every ability effect currently made visible as a
+    /// background mark, one entry per (ability, placement) (#308/#338). Lit from the
+    /// turn's events in [`record_effect_marks`](Self::record_effect_marks) with the very
+    /// geometry the effect resolved against, aged on the one schedule in
+    /// [`decay_effect_marks`](Self::decay_effect_marks) — momentary marks count down,
+    /// standing ones end with the state they report — and dropped in
+    /// [`clear_effect_marks`](Self::clear_effect_marks) the moment an effect *with* a
+    /// window ends either way (§8.2 expiry, §4.4 toggle-off). A handful of entries at
+    /// most, so a plain `Vec` scan beats a map.
+    effect_marks: Vec<EffectMark>,
     /// Doors the **Autodoors** ability (§8.3/§7.6) opened in the player's path and
     /// still owes a close-behind, as [`DoorId`]s. A door is armed here the turn the
     /// player steps through it ([`BumpKind::AutoDoor`]) and swings shut — via the
@@ -698,7 +700,7 @@ impl State {
             outcome: Outcome::Playing,
             last_events: Vec::new(),
             door_cues: Vec::new(),
-            effect_flashes: Vec::new(),
+            effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
             spotters: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
@@ -892,11 +894,11 @@ impl State {
             self.moved_this_turn = self.player != from;
             // Phases 2 and 3 only happen because the player spent the turn (§4.2/§4.4).
             events.extend(self.run_world_phases());
-            // Latch the footprint of any area effect fired in phase 1 (§8.3/#308),
+            // Latch the marks of any effect that acted in phase 1 (§11.5/#308/#338),
             // *after* the fade at the head of the world phases — exactly the door
             // cues' shape (§9.4) — so a flash lit this turn keeps its full life
             // instead of losing a turn to the very tick that placed it.
-            self.record_effect_flashes(&events);
+            self.record_effect_marks(&events);
             // Ability durations tick HERE — at end of turn, after all three phases —
             // so a freshly activated N-turn ability yields N protected turns and the
             // activation turn itself is covered (§8.2's N-yields-N−1 trap): the
@@ -920,9 +922,9 @@ impl State {
                 if declares(ability, Effect::SpawnDecoy) {
                     self.decoy = None;
                 }
-                // An area effect's footprint is its window's too (#308): whatever
-                // life the flash had left dies with the effect, never after it.
-                self.clear_effect_flash(ability);
+                // An effect's marks live exactly as long as its window (#308/#338):
+                // whatever life a mark had left dies with the effect, never after it.
+                self.clear_effect_marks(ability);
             }
             events.extend(
                 expired
@@ -1117,9 +1119,9 @@ impl State {
                     if declares(id, Effect::SpawnDecoy) {
                         self.decoy = None;
                     }
-                    // The area is gone, so its footprint goes with it (#308) — an
+                    // The effect is gone, so its marks go with it (#308/#338) — an
                     // early toggle-off leaves no residue to fade over nothing.
-                    self.clear_effect_flash(id);
+                    self.clear_effect_marks(id);
                     events.push(Event::AbilityDeactivated { ability: id });
                 }
                 false
@@ -1634,10 +1636,10 @@ impl State {
         // them (§9.4/§10.4), so a cue placed this turn keeps its full life and a
         // re-change refreshes rather than double-decrements.
         self.decay_door_cues();
-        // The effect flashes fade on the same schedule and for the same reason
-        // (§8.3/#308): one turn of life spent before this turn's activation can light
-        // a fresh one ([`record_effect_flashes`](Self::record_effect_flashes)).
-        self.decay_effect_flashes();
+        // The effect marks age on the same schedule and for the same reason
+        // (§11.5/#308/#338): one turn of life spent before this turn's activation can
+        // light a fresh one ([`record_effect_marks`](Self::record_effect_marks)).
+        self.decay_effect_marks();
         self.recompute_sight();
         self.radio_phase(&mut events);
         self.guard_phase(&mut events);
