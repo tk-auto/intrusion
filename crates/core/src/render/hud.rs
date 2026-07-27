@@ -1593,7 +1593,7 @@ mod tests {
             row0.contains("[Level info]"),
             "the tab bar heads the panel: {row0:?}"
         );
-        assert!(row0.contains("[Legend]"));
+        assert!(row0.contains("[Abilities]") && row0.contains("[Help]"));
         assert!(row0.contains("[x]"), "a touchable close control");
         assert!(
             !row0.contains("intel remaining"),

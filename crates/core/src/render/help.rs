@@ -11,7 +11,7 @@
 //!   the active [`LevelModifiers`], by name and direction (§12.6).
 //! - **Abilities** ([`HelpTab::Abilities`]) — what each of the run's abilities
 //!   actually *does*, and what it costs (§8.2/§8.3; #343, and see [`abilities`]).
-//! - **Legend** ([`HelpTab::Legend`]) — the glyph legend, the colour key, and the
+//! - **Help** ([`HelpTab::Help`]) — the glyph legend, the colour key, and the
 //!   **standing** controls, the original reference card (#139/#296).
 //! - *Options* land as a fourth tab (§14 v2 "options"; #189 light mode, #237
 //!   difficulty).
@@ -26,10 +26,15 @@
 //! appears here on its own. The tests assert each derivation.
 //!
 //! **What varies with the run, and what does not.** The Level info and Abilities
-//! tabs are drawn *per run*; the Legend is the same card for every run, which is
-//! what makes it a legend (#296). That split is why the ability rows left the
-//! Legend's controls card: it listed all eight of the catalogue when a run holds at
-//! most four (§8.3), so half its rows named a key that did nothing this run.
+//! tabs are drawn *per run*; **Help** is the same card for every run. That split is
+//! why the ability rows left its controls block (#296): it listed all eight of the
+//! catalogue when a run holds at most four (§8.3), so half its rows named a key that
+//! did nothing this run.
+//!
+//! It was called *Legend* until the abilities left it. The name fitted a card that
+//! was only the glyph key, but the tab now answers "how do I play this?" — glyphs,
+//! colours and the standing keys — while the glyph *legend* is one section inside
+//! it. The tab is what it is for, not what its first section is.
 //!
 //! Opening and closing the panel is a pure **view** action owned by the shell
 //! ([`ScreenUi::help_open`](super::ScreenUi)): it changes no world and costs no
@@ -76,7 +81,7 @@ pub enum HelpTab {
     Abilities,
     /// The glyph legend, colour key, and standing controls (#139) — the reference
     /// card, the same one for every run (#296).
-    Legend,
+    Help,
 }
 
 impl HelpTab {
@@ -85,14 +90,14 @@ impl HelpTab {
     ///
     /// Ordered outward from *this run*: the run's rules, then the run's abilities,
     /// then the standing reference that never changes.
-    pub const ALL: [HelpTab; 3] = [HelpTab::LevelInfo, HelpTab::Abilities, HelpTab::Legend];
+    pub const ALL: [HelpTab; 3] = [HelpTab::LevelInfo, HelpTab::Abilities, HelpTab::Help];
 
     /// The label shown on the tab bar and used to size its hit region.
     fn label(self) -> &'static str {
         match self {
             HelpTab::LevelInfo => "Level info",
             HelpTab::Abilities => "Abilities",
-            HelpTab::Legend => "Legend",
+            HelpTab::Help => "Help",
         }
     }
 
@@ -233,7 +238,7 @@ pub(super) fn render_help(
     match tab {
         HelpTab::LevelInfo => draw_level_info(&mut grid, 2, level, modifiers),
         HelpTab::Abilities => abilities::draw_abilities(&mut grid, 2, loadout),
-        HelpTab::Legend => draw_legend(&mut grid, 2),
+        HelpTab::Help => draw_help_card(&mut grid, 2),
     }
     draw_footer(&mut grid);
     grid
@@ -337,19 +342,19 @@ fn direction_category(direction: ModifierDirection) -> Category {
     }
 }
 
-/// The **Legend** tab (#139/#296): the glyph legend, the colour key, and the
+/// The **Help** tab (#139/#296): the glyph legend, the colour key, and the
 /// **standing** controls — the original reference card, now one tab of the panel.
 ///
-/// Nothing here varies with the run, which is what makes it a *legend*: it takes no
-/// loadout, no modifiers and no seed, so the card a player learns is the same card
-/// every run. The abilities that used to sit in `CONTROLS` moved to their own tab
-/// (#343), where they can say what they do rather than only which key they answer to.
-fn draw_legend(grid: &mut Grid, mut y: u32) {
+/// Nothing here varies with the run: it takes no loadout, no modifiers and no seed,
+/// so the card a player learns is the same card every run. The abilities that used
+/// to sit in `CONTROLS` moved to their own tab (#343), where they can say what they
+/// do rather than only which key they answer to.
+fn draw_help_card(grid: &mut Grid, mut y: u32) {
     draw(grid, 2, y, "GLYPHS", Category::System);
     y += 1;
     for (glyph, category, meaning) in glyph_rows() {
         draw(grid, 3, y, &glyph.to_string(), category);
-        draw(grid, 6, y, meaning, Category::Neutral);
+        draw(grid, GLYPH_MEANING_X, y, meaning, Category::Neutral);
         y += 1;
     }
     y += 1;
@@ -360,7 +365,13 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
         // The name is drawn *in its own colour*, so the player reads the colour and
         // its meaning on one line.
         draw(grid, 3, y, category_name(category), category);
-        draw(grid, 14, y, category_meaning(category), Category::Neutral);
+        draw(
+            grid,
+            COLOUR_MEANING_X,
+            y,
+            category_meaning(category),
+            Category::Neutral,
+        );
         y += 1;
     }
     y += 1;
@@ -381,6 +392,53 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
 /// applied to the panel rather than the bar).
 const CONTROL_KEYS_X: u32 = 3;
 const CONTROL_ACTION_X: u32 = 26;
+
+/// Where the glyph legend's meaning column starts — three cells in from the glyph,
+/// which is one cell wide.
+const GLYPH_MEANING_X: u32 = 6;
+
+/// Where the colour key's meaning column starts, clear of the widest
+/// [`category_name`].
+const COLOUR_MEANING_X: u32 = 14;
+
+/// **The right margin every card column is measured against** (#248's `CAPTION_MAX`,
+/// generalised). The panel fills the board, so the narrowest screen a real run
+/// renders on is the v1 board (40 wide — §10.2), and every text column leaves the
+/// same one cell of right margin the `[x]` control keeps.
+///
+/// This is the bound the colour key was missing. `Sensed` and `Effect` had meanings
+/// of 33 and 38 cells in a 25-cell column, so the card shipped reading
+/// `guard or door, felt throug` and `what your gadget did, and ` — [`draw`] clips in
+/// silence, exactly as it did for the modifier caption that reached a screenshot as
+/// `…one guard conver`. A truncated explanation is worse than a short one: it looks
+/// like the whole sentence.
+const fn column_width(start: u32) -> usize {
+    (LevelConfig::V1.width - start - 1) as usize
+}
+
+// The bound bites at **compile time**, over every fixed column of the card, so a
+// meaning that would not fit fails the build instead of the eye (§2.3 — a check that
+// cannot be bypassed, because both lists are exhaustive matches over their enums).
+//
+// Measured in **bytes**, which is conservative rather than exact: a UTF-8 string is
+// never fewer bytes than cells, so passing this guarantees the row fits. A meaning
+// written with an em-dash therefore has to be a little shorter than one without —
+// a fair price for a check that runs at build time.
+const _: () = {
+    let mut i = 0;
+    while i < CATEGORIES.len() {
+        assert!(
+            category_name(CATEGORIES[i]).len() <= column_width(3) - column_width(COLOUR_MEANING_X),
+            "a colour-key name runs into the meaning beside it (see COLOUR_MEANING_X)",
+        );
+        assert!(
+            category_meaning(CATEGORIES[i]).len() <= column_width(COLOUR_MEANING_X),
+            "a colour-key meaning is too long for the Help card — shorten it \
+             (see column_width in render::help)",
+        );
+        i += 1;
+    }
+};
 
 /// Draw the footer hint on the last row: how to switch tabs and close, so a player
 /// who opened the modal panel always sees the way out (§11.6's no-trap rule, made
@@ -452,7 +510,7 @@ const CATEGORIES: [Category; 10] = [
 /// What each colour category *means* (§11.2), as one line for the legend. An
 /// exhaustive match, so adding a [`Category`] will not compile until it is given a
 /// meaning here — the card can never silently omit a colour.
-fn category_meaning(category: Category) -> &'static str {
+const fn category_meaning(category: Category) -> &'static str {
     match category {
         Category::Neutral => "inert scenery",
         Category::Ground => "floor you can cross",
@@ -462,8 +520,12 @@ fn category_meaning(category: Category) -> &'static str {
         Category::Danger => "you're in its cone",
         Category::Interest => "a goal or reward",
         Category::System => "door / cupboard / duct",
-        Category::Sensed => "guard or door, felt through a wall",
-        Category::Effect => "what your gadget did, and what it holds",
+        // Both of these used to run off the board and clip mid-word. Shortened to
+        // the fact each colour actually carries — that it was *not seen* (§9.2), and
+        // that it is *your* gadget's mark (§11.5/#344) — because the neighbouring
+        // GLYPHS section already says what the things themselves are.
+        Category::Sensed => "guard or door, unseen",
+        Category::Effect => "what your gadget did",
     }
 }
 
@@ -501,7 +563,7 @@ const fn ability_keys_column_start() -> u32 {
 
 /// The category's display name for the colour key — its own identifier, so the key
 /// names exactly the [`Category`] the renderer tags cells with.
-fn category_name(category: Category) -> &'static str {
+const fn category_name(category: Category) -> &'static str {
     match category {
         Category::Neutral => "Neutral",
         Category::Ground => "Ground",
@@ -574,6 +636,50 @@ mod tests {
         }
     }
 
+    /// **No row of the card clips.** Every column of the Help tab is measured in
+    /// *cells* against the v1 board's right margin — the glyph meanings, the colour
+    /// names and meanings, and both control columns.
+    ///
+    /// The `const` guard above covers the colour key in bytes, which is conservative
+    /// but blind to the em-dashes the glyph rows carry ("cupboard — bump to hide"),
+    /// so this is the exact check over everything the card draws. It is the guard
+    /// `Sensed` and `Effect` did not have: they shipped clipped mid-word as
+    /// `guard or door, felt throug` and `what your gadget did, and `, and nothing
+    /// failed — [`draw`] truncates in silence, which is why a bound has to exist
+    /// somewhere that does not.
+    #[test]
+    fn no_row_of_the_help_card_is_clipped() {
+        let fits = |text: &str, start: u32, what: &str| {
+            let room = (LevelConfig::V1.width - start - 1) as usize;
+            assert!(
+                text.chars().count() <= room,
+                "{what} {text:?} is {} cells and its column has {room}",
+                text.chars().count(),
+            );
+        };
+        for (_, _, meaning) in glyph_rows() {
+            fits(meaning, GLYPH_MEANING_X, "glyph meaning");
+        }
+        for category in CATEGORIES {
+            fits(
+                category_meaning(category),
+                COLOUR_MEANING_X,
+                "colour meaning",
+            );
+            // A name has to clear the meaning column beside it, not just the margin.
+            fits(category_name(category), COLOUR_MEANING_X, "colour name");
+            let name_end = CONTENT_INDENT + category_name(category).chars().count() as u32;
+            assert!(
+                name_end < COLOUR_MEANING_X,
+                "{category:?}'s name runs into the meaning beside it",
+            );
+        }
+        for (keys, action) in control_rows() {
+            fits(&keys, CONTROL_KEYS_X, "control keys");
+            fits(&action, CONTROL_ACTION_X, "control action");
+        }
+    }
+
     /// Every colour category has a meaning *and* a name in the key — an exhaustive
     /// match guarantees the meaning, and the name list must stay complete too.
     #[test]
@@ -606,9 +712,9 @@ mod tests {
     /// what makes it a legend rather than a per-run card, and it is what keeps the
     /// Abilities tab (#343) the single place a loadout-derived ability list is drawn.
     #[test]
-    fn no_ability_reaches_the_legend_tab() {
+    fn no_ability_reaches_the_help_tab() {
         for loadout in [Loadout::full(), Loadout::innate(), Loadout::empty()] {
-            let text = text_of(&render_tab(HelpTab::Legend, loadout));
+            let text = text_of(&render_tab(HelpTab::Help, loadout));
             for id in AbilityId::ALL {
                 assert!(
                     !text.contains(id.name()),
@@ -646,8 +752,8 @@ mod tests {
     /// The **Legend** tab still carries the whole reference card — the three
     /// sections and a glyph derived from the real terrain table (the duct `=`, §10.7).
     #[test]
-    fn the_legend_tab_carries_the_glyphs_colours_and_controls() {
-        let text = text_of(&render_tab(HelpTab::Legend, Loadout::innate()));
+    fn the_help_tab_carries_the_glyphs_colours_and_controls() {
+        let text = text_of(&render_tab(HelpTab::Help, Loadout::innate()));
         assert!(text.contains("GLYPHS") && text.contains("COLOURS") && text.contains("CONTROLS"));
         for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
             assert!(text.contains(glyph), "the legend shows {glyph:?}");

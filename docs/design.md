@@ -1811,8 +1811,8 @@ last-writer-wins, so a guard in a doorway rendered arbitrarily. Define the order
 > the *rules*; the reference records what they resolve to, in one place, so a
 > question like *"what does `≈` mean?"* has one answer rather than four. The values
 > themselves live in code (`Terrain::glyph`, the shell's one palette table) and the
-> in-game Legend derives from those same sources, so neither can drift from the
-> board.
+> in-game glyph legend (the help panel's **Help** tab) derives from those same
+> sources, so neither can drift from the board.
 
 ### 11.4 Layout
 
@@ -1896,10 +1896,11 @@ is never covered. A tap on any entry activates exactly what its hotkey would. Th
 bar is a **projection** of the §11.6 keys, never their source — the keys are
 unchanged and unconditional, and the help panel's **Abilities** tab is where a
 player reads them off, each one paired with the bar name it fires (`c / Camo` →
-*Camouflage*) and with what the ability actually does (#343). The Legend card
-keeps only the **standing** controls — move, wait, messages, help — because it
-listed the whole eight-ability catalogue when a run holds at most four, and a
-card that changes with the loadout is not a legend (#296).
+*Camouflage*) and with what the ability actually does (#343). The **Help** tab —
+called *Legend* until the abilities left it — keeps only the **standing** controls:
+move, wait, messages, help. It listed the whole eight-ability catalogue when a run
+holds at most four, and a reference card that changes with the loadout is not a
+reference card (#296).
 
 **Fixed slots: the names never move.** Each ability owns a **10-cell slot** — 9
 of entry, 1 of air — and its entry is drawn **left-aligned inside it**, whatever
