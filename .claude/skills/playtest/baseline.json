@@ -1,6 +1,6 @@
 {
   "_note": "Baseline metrics snapshot the playtest skill diffs against (§13.2, #140). It is a snapshot of the --bot batch below on the commit named, now one block PER PLAYSTYLE PROFILE (#198): a profile is a temperament, so each has its own numbers and they are never compared against each other as a leaderboard. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself, a profile's numbers), refresh every block with the commands below and commit the new snapshot in the same PR. A stale baseline compared silently is the anti-pattern this file exists to avoid.",
-  "captured_at_commit": "802c372+profiles",
+  "captured_at_commit": "44d5e28+search-duration-12",
   "command": "for p in baseline cautious aggressive; do cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 --cap 1000 | tail -1; done",
   "config": {
     "policy": "bot",
@@ -14,19 +14,19 @@
       "summary": {
         "profile": "baseline",
         "runs": 100,
-        "wins": 44,
-        "captures": 54,
+        "wins": 32,
+        "captures": 68,
         "entombed": 0,
-        "timeouts": 2,
-        "win_rate": 0.44,
-        "turns_to_win_mean": 148.8,
-        "turns_to_win_median": 131.5,
-        "detections": 525,
+        "timeouts": 0,
+        "win_rate": 0.32,
+        "turns_to_win_mean": 136.5,
+        "turns_to_win_median": 124.0,
+        "detections": 588,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 2581,
-          "run": 186,
+          "wait": 2059,
+          "run": 204,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -38,8 +38,8 @@
           "lockdown": 0
         },
         "usage_share": {
-          "wait": 0.1927,
-          "run": 0.0139,
+          "wait": 0.1825,
+          "run": 0.0181,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -50,7 +50,7 @@
           "pierce_wall": 0.0,
           "lockdown": 0.0
         },
-        "diversity": 0.648,
+        "diversity": 0.6249,
         "alert_peak": null
       }
     },
@@ -59,19 +59,19 @@
       "summary": {
         "profile": "cautious",
         "runs": 100,
-        "wins": 48,
+        "wins": 47,
         "captures": 50,
         "entombed": 0,
-        "timeouts": 2,
-        "win_rate": 0.48,
-        "turns_to_win_mean": 235.7,
-        "turns_to_win_median": 199.0,
-        "detections": 756,
+        "timeouts": 3,
+        "win_rate": 0.47,
+        "turns_to_win_mean": 262.2,
+        "turns_to_win_median": 192.0,
+        "detections": 821,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 7880,
-          "run": 315,
+          "wait": 7187,
+          "run": 299,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -83,8 +83,8 @@
           "lockdown": 0
         },
         "usage_share": {
-          "wait": 0.3304,
-          "run": 0.0132,
+          "wait": 0.3154,
+          "run": 0.0131,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -95,7 +95,7 @@
           "pierce_wall": 0.0,
           "lockdown": 0.0
         },
-        "diversity": 0.4406,
+        "diversity": 0.4349,
         "alert_peak": null
       }
     },
@@ -104,19 +104,19 @@
       "summary": {
         "profile": "aggressive",
         "runs": 100,
-        "wins": 33,
-        "captures": 67,
+        "wins": 31,
+        "captures": 69,
         "entombed": 0,
         "timeouts": 0,
-        "win_rate": 0.33,
-        "turns_to_win_mean": 133.8,
-        "turns_to_win_median": 138.0,
-        "detections": 553,
+        "win_rate": 0.31,
+        "turns_to_win_mean": 140.7,
+        "turns_to_win_median": 137.0,
+        "detections": 609,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 488,
-          "run": 182,
+          "wait": 597,
+          "run": 203,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -128,8 +128,8 @@
           "lockdown": 0
         },
         "usage_share": {
-          "wait": 0.0526,
-          "run": 0.0196,
+          "wait": 0.0611,
+          "run": 0.0208,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -140,7 +140,7 @@
           "pierce_wall": 0.0,
           "lockdown": 0.0
         },
-        "diversity": 0.6739,
+        "diversity": 0.6805,
         "alert_peak": null
       }
     }
