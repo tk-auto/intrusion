@@ -152,7 +152,11 @@ fn dephase_expiring_inside_a_wall_throws_you_clear_and_stuns() {
         [Event::AbilityExpired {
             ability: AbilityId::Dephase,
         }, Event::Ejected { to, stunned }] => {
-            assert_eq!(*stunned, PHASE_EJECT_STUN_TURNS);
+            assert_eq!(
+                *stunned,
+                phase_eject_stun(1),
+                "one cell out, one cell's stun"
+            );
             *to
         }
         other => panic!("expected the expiry and the eject, got {other:?}"),
@@ -164,7 +168,7 @@ fn dephase_expiring_inside_a_wall_throws_you_clear_and_stuns() {
         s.layout().facility().can_enter(to, ACTOR_FILL),
         "{to:?} must admit a solid body",
     );
-    assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS);
+    assert_eq!(s.stunned(), phase_eject_stun(1));
 }
 
 /// §8.3: the landing is the **nearest** legal cell — the wall in this room is one
@@ -213,7 +217,7 @@ fn the_eject_is_random_but_reproducible() {
     );
 }
 
-/// §8.3/#329: the stun is exactly [`PHASE_EJECT_STUN_TURNS`] turns of agency — that
+/// §8.3/#329: the stun is exactly as many turns of agency as it was priced at — that
 /// many inputs are swallowed as spent turns, and the next one is the player's again.
 #[test]
 fn the_stun_swallows_exactly_its_turns() {
@@ -221,7 +225,8 @@ fn the_stun_swallows_exactly_its_turns() {
     phase_into_the_solid(&mut s);
     let landed = s.player();
 
-    for owed in (1..=PHASE_EJECT_STUN_TURNS).rev() {
+    let owed_at_first = s.stunned();
+    for owed in (1..=owed_at_first).rev() {
         assert_eq!(s.stunned(), owed);
         let turn = s.turn();
         let events = s.step(Input::Step(Direction::West));
@@ -248,13 +253,13 @@ fn every_input_kind_is_swallowed_while_stunned() {
     ] {
         let mut s = wall_to_phase_into(Vec::new(), 11);
         phase_into_the_solid(&mut s);
-        let (landed, turn) = (s.player(), s.turn());
+        let (landed, turn, owed) = (s.player(), s.turn(), s.stunned());
 
         let events = s.step(input);
         assert!(events.is_empty(), "{input:?} said something: {events:?}");
         assert_eq!(s.player(), landed, "{input:?} moved the player");
         assert_eq!(s.turn(), turn + 1, "{input:?} did not spend the turn");
-        assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS - 1, "{input:?}");
+        assert_eq!(s.stunned(), owed - 1, "{input:?}");
         assert!(
             matches!(s.ability_state(AbilityId::Run), AbilityState::Ready),
             "{input:?} switched Run on while stunned",
@@ -333,7 +338,7 @@ fn a_stunned_player_can_still_be_captured() {
         "the wall let go: {events:?}",
     );
     assert_eq!(s.player(), Cell::new(9, 4), "the pocket's one legal cell");
-    assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS);
+    assert_eq!(s.stunned(), phase_eject_stun(1), "one cell out");
 
     s.step(Input::Wait); // swallowed; the guard closes to (8,4), now adjacent
     assert_eq!(s.stunned(), 1, "still owed a turn, still unable to move");
@@ -536,7 +541,7 @@ fn any_solid_ejects_you_not_just_a_wall() {
             "{terrain:?} is solid, so the phase ends the same way: {events:?}",
         );
         assert_eq!(s.outcome(), Outcome::Playing, "{terrain:?}");
-        assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS, "{terrain:?}");
+        assert_eq!(s.stunned(), phase_eject_stun(1), "{terrain:?}");
         assert_ne!(
             s.player(),
             Cell::new(5, 4),
@@ -545,11 +550,97 @@ fn any_solid_ejects_you_not_just_a_wall() {
     }
 }
 
-/// §8.3 **[START]**: the stun's own number, pinned so a later change is a visible
-/// edit rather than a silent retune.
+/// §8.3/#329: **the stun is as long as the throw.** Burying yourself further inside a
+/// block is further from anywhere to stand, and costs proportionally more helplessness
+/// to undo — which is what prices recklessness rather than charging the near miss and
+/// the deep dive the same flat rate.
+///
+/// A 5×5 wall block spanning x 5..=9, y 2..=6, with open floor either side. Phasing to
+/// its western face `(5,4)` is one cell from floor; one deeper, `(6,4)`, is two. Two
+/// depths, two prices, each asserted against the distance actually travelled.
+///
+/// Two is also as deep as this ability can put you from open ground: Dephase runs for
+/// three turns counting its activation, so a phase begun outside buys exactly two
+/// steps. The stun therefore tops out at `phase_eject_stun(2)` in ordinary play — the
+/// arithmetic goes further, the ability does not.
+#[test]
+fn a_deeper_eject_stuns_for_longer() {
+    let block = |player: Cell| {
+        let mut layout = open_room(16, 12);
+        for y in 2..=6 {
+            for x in 5..=9 {
+                layout.place(Cell::new(x, y), Terrain::Wall);
+            }
+        }
+        State::new(
+            layout,
+            player,
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(13, 10),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+        .with_rng(crate::Rng::new(13))
+    };
+
+    let mut stuns = Vec::new();
+    // Each start is two steps west of the cell the phase strands the player in, so the
+    // expiry lands exactly there.
+    for (start, stuck, depth) in [
+        (Cell::new(3, 4), Cell::new(5, 4), 1u32), // the block's face
+        (Cell::new(4, 4), Cell::new(6, 4), 2),    // one ring deeper
+    ] {
+        let mut s = block(start);
+        s.step(Input::Activate(AbilityId::Dephase)); // turn 1
+        s.step(Input::Step(Direction::East)); // turn 2
+        let events = s.step(Input::Step(Direction::East)); // turn 3: the duration ends
+        assert_eq!(
+            events.first(),
+            Some(&Event::Moved { to: stuck }),
+            "the second step should strand the player at {stuck:?}",
+        );
+
+        let thrown = stuck.sight_distance(s.player());
+        assert_eq!(
+            thrown, depth,
+            "from {stuck:?} the nearest cell that admits a body is {depth} away",
+        );
+        assert_eq!(
+            s.stunned(),
+            phase_eject_stun(thrown),
+            "stuck at {stuck:?}, thrown {thrown} cells: the stun is priced off the throw",
+        );
+        assert!(
+            events.contains(&Event::Ejected {
+                to: s.player(),
+                stunned: s.stunned(),
+            }),
+            "…and the event carries the same number: {events:?}",
+        );
+        stuns.push(s.stunned());
+    }
+
+    assert!(
+        stuns[1] > stuns[0],
+        "the deep dive must cost more than the clip: {stuns:?}",
+    );
+}
+
+/// §8.3 **[START]**: the stun's own numbers, pinned so a later change is a visible
+/// edit rather than a silent retune. The shortest eject there is — one cell — costs
+/// two turns, and every further cell thrown costs one more.
 #[test]
 fn the_stun_length_is_pinned() {
-    assert_eq!(PHASE_EJECT_STUN_TURNS, 2);
+    assert_eq!(PHASE_EJECT_STUN_BASE, 1);
+    assert_eq!(phase_eject_stun(1), 2, "the ordinary clip");
+    for cells in 1..6 {
+        assert_eq!(
+            phase_eject_stun(cells + 1),
+            phase_eject_stun(cells) + 1,
+            "one more cell thrown is one more turn owed",
+        );
+    }
 }
 
 /// §8.3/§2.2: toggling Dephase off while inside a solid is **refused** — a

@@ -732,7 +732,7 @@ mod tests {
             Event::DecoyDied { at },
             Event::Ejected {
                 to: at,
-                stunned: crate::PHASE_EJECT_STUN_TURNS,
+                stunned: crate::phase_eject_stun(1),
             },
             Event::Entombed { at },
             Event::RematerializeRefused,

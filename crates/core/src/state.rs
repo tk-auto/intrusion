@@ -175,19 +175,36 @@ pub const EFFECT_FLASH_TURNS: u32 = 1;
 /// on the map. Pinned at compile time so the two ranges can never silently invert.
 const _: () = assert!(CONFUSION_RADIUS <= PLAYER_SENSE_RANGE);
 
-/// How many turns the player is **stunned** after Dephase throws them clear of a
-/// solid (§8.3 **[START]**, #329): the cost that replaced the old lethal expiry.
+/// The flat part of the **stun** the safety eject costs (§8.3 **[START]**, #329) —
+/// the turns owed for being thrown *at all*, on top of one turn per cell thrown
+/// ([`phase_eject_stun`]).
 ///
 /// While the counter runs, every [`Input`] resolves as a *stunned pass* — the turn is
 /// spent, the world phases run, and the player changes nothing (see
-/// [`player_phase`](State::player_phase)). It is a real price in a patrolled
-/// facility: capture is contact (§4.5 **[SETTLED]**), so two turns of standing still
-/// on a cell the RNG picked can end the run just as the wall used to — only now by a
-/// guard the player could see coming. Two, not one, because one turn is a single
-/// guard step and would rarely be felt; not five, because a helpless player watching
-/// the game play itself is no longer playing (§2.3 cuts both ways). Pinned by a test
-/// so a later change is a deliberate, visible edit.
-pub const PHASE_EJECT_STUN_TURNS: u32 = 2;
+/// [`player_phase`](State::player_phase)). It is a real price in a patrolled facility:
+/// capture is contact (§4.5 **[SETTLED]**), so standing still on a cell the RNG picked
+/// can end the run just as the wall used to — only now by a guard the player could see
+/// coming. Pinned by a test so a later change is a deliberate, visible edit.
+pub const PHASE_EJECT_STUN_BASE: u32 = 1;
+
+/// How long the safety eject leaves the player **stunned** (§8.3 **[START]**, #329):
+/// [`PHASE_EJECT_STUN_BASE`] plus **one turn per cell thrown** — the §6.1 box distance
+/// from the solid they were stuck in to where they landed.
+///
+/// The length scales with the throw because that is what *prices recklessness*. A
+/// phase that ends clipping the corner of a table is one cell out and costs the
+/// smallest stun there is; burying yourself in the middle of a thick wall block is
+/// three cells out and costs three times as much helplessness to undo. A flat rate
+/// charged both the same, which let the worst case — deep inside a structure, far from
+/// anywhere to stand — be as cheap as the near miss. The distance is the one the eject
+/// search already found ([`eject_from_solid`](State::eject_from_solid)), so the price
+/// cannot disagree with the throw that set it.
+///
+/// The flat base is what stops the cheapest case being free: you are on the floor
+/// however short the trip was.
+pub fn phase_eject_stun(cells_thrown: u32) -> u32 {
+    PHASE_EJECT_STUN_BASE + cells_thrown
+}
 
 /// What bumping an orthogonally adjacent cell would do (§4.3) — the interaction a
 /// cell offers, in the one priority order shared by execution and prediction. This
@@ -399,7 +416,8 @@ pub struct State {
     moved_this_turn: bool,
     /// Turns of **stun** left (§8.3/#329): how many more inputs are swallowed as
     /// stunned passes after Dephase threw the player clear of a solid. Set to
-    /// [`PHASE_EJECT_STUN_TURNS`] by the eject and decremented once per spent turn,
+    /// [`phase_eject_stun`] of the throw's length by the eject, and decremented once
+    /// per spent turn,
     /// at the same end-of-turn beat as the ability clocks — so the eject's own turn
     /// (already spent by the action that ran the duration out) is not one of them and
     /// the player loses exactly that many turns of agency. Zero is the ordinary

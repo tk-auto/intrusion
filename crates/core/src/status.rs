@@ -566,7 +566,7 @@ mod tests {
     fn the_eject_outranks_every_guard_event_but_the_capture() {
         let msg = message_for(Event::Ejected {
             to: Cell::new(3, 3),
-            stunned: crate::PHASE_EJECT_STUN_TURNS,
+            stunned: crate::phase_eject_stun(1),
         })
         .expect("the safety eject is never silent");
         assert_eq!(msg.text, "safety eject — stunned");

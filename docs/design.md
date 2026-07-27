@@ -851,10 +851,20 @@ Notes carried forward, because they are good and non-obvious:
   straight through everything you came for. That constraint is excellent; keep it.
 - **A duration that expires while you're inside something solid throws you clear and
   leaves you stunned.** The tech's **safety eject** drops you on a cell drawn at
-  random from the nearest ones that can hold a solid body, and for **2 turns**
-  afterwards you cannot act at all: every key is swallowed, the turn is spent, and
-  the guards keep moving (§4.4's turn cost applied *to* you rather than by you).
-  **[START]** — the 2 is the number to tune; the shape is not.
+  random from the nearest ones that can hold a solid body, and afterwards you cannot
+  act at all for **one turn per cell you were thrown, plus one**: every key is
+  swallowed, the turn is spent, and the guards keep moving (§4.4's turn cost applied
+  *to* you rather than by you). **[START]** — the rate and the flat `+1` are the
+  numbers to tune; the shape is not.
+  **The stun is as long as the throw**, because that is what prices recklessness.
+  Clipping the corner of a table strands you one cell from open floor and costs the
+  smallest stun there is; burying yourself a ring deeper into a wall block costs more,
+  because the eject had to reach further to find you anywhere to stand. A flat rate
+  charged the near miss and the deep dive the same, which made the worst case as
+  cheap as the safest. In practice the ability caps its own damage: Dephase runs
+  three turns counting its activation, so a phase begun outside buys two steps in and
+  the stun tops out at three turns — the arithmetic goes further, the ability does
+  not.
   It is *any* solid, not just a wall — a shut door, a table, a cupboard, a console —
   which is why the near line names the **tech** rather than the terrain
   ("safety eject — stunned"): a message that said "the wall" would be untrue in most
@@ -866,8 +876,8 @@ Notes carried forward, because they are good and non-obvious:
   the one death §2.2 forbids — the timer is on screen but the *lethal half* never
   is (`can_rematerialize` is invisible, and while phased you cannot bump, so you
   cannot even probe the cell you stand in), and §4.5 is **[SETTLED]** that a guard's
-  touch is the only loss condition. So the cost stays and the death goes: two turns
-  helpless on a cell you did not choose, in a facility where contact captures, is a
+  touch is the only loss condition. So the cost stays and the death goes: turns spent
+  helpless on a cell you did not choose, in a facility where contact captures, are a
   price a player can see coming and choose to pay. The **randomness is
   load-bearing** — a predictable eject would make phasing into a wall a reliable way
   *through* one, and you may well be dropped back on the side you came from.

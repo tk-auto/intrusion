@@ -37,7 +37,12 @@ impl State {
     /// (§12.4, so a seed reproduces the landing). Random rather than deterministic on
     /// purpose — a predictable eject would make phasing into a wall a reliable way
     /// *through* it, which is precisely the consequence-free version §8.3 warns about.
-    /// You may well be spat back out the side you came from.
+    /// You may well be dropped back on the side you came from.
+    ///
+    /// **The stun is as long as the throw** ([`phase_eject_stun`]): that same radius,
+    /// plus a flat base. Clipping the corner of a table is the cheapest eject there
+    /// is; burying yourself deep in a wall block is the dearest, because the search
+    /// had to reach further to find you anywhere to stand.
     ///
     /// A dragged body does not come along (§8.3): it is released where it lies, since
     /// hauling it through the wall with you would be a free teleport for the one thing
@@ -61,12 +66,14 @@ impl State {
                 at: self.bodies[i].cell(),
             });
         }
+        // The stun is priced off the throw itself (§8.3): the §6.1 box distance from
+        // the solid to the landing — the very radius the search stopped at — plus the
+        // flat base. Measured here, from the two cells, so the price can never drift
+        // from the distance actually travelled.
+        let stunned = phase_eject_stun(self.player.sight_distance(to));
         self.player = to;
-        self.stunned = PHASE_EJECT_STUN_TURNS;
-        events.push(Event::Ejected {
-            to,
-            stunned: PHASE_EJECT_STUN_TURNS,
-        });
+        self.stunned = stunned;
+        events.push(Event::Ejected { to, stunned });
         // Anything arriving on the decoy tramples it (§8.3) — arriving by wall
         // included.
         self.stomp_decoy(to, events);
