@@ -107,6 +107,12 @@ pub enum MenuNav {
     /// Step back out of the seed prompt to the entry list. On the list itself there
     /// is nowhere further back — the menu *is* the root — so it does nothing there.
     Back,
+    /// Flip the colour theme from the title screen (§11.2/#189) — the same
+    /// [`UiCommand::ToggleTheme`] the board and the help panel answer. The menu is
+    /// the first thing a load puts on screen, so it is where a player who cannot
+    /// comfortably read the current theme most needs to be able to change it, rather
+    /// than having to start a run first.
+    ToggleTheme,
 }
 
 /// Map a key to the [`MenuNav`] it drives **while the menu is up**, or `None` for a
@@ -122,6 +128,11 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
         "ArrowDown" | "j" | "2" => Some(MenuNav::Next),
         "Enter" | " " => Some(MenuNav::Activate),
         "Escape" => Some(MenuNav::Back),
+        // The theme toggle reaches every modal screen (#189), here as on the help
+        // panel. The seed prompt is where it stops: `n` is an ordinary letter of a
+        // level-seed token, and a key that retyped the screen's colours mid-token
+        // would be a trap — the shell holds it back there (`apply_menu_nav`).
+        "n" => Some(MenuNav::ToggleTheme),
         _ => None,
     }
 }

@@ -699,7 +699,7 @@ pub use hud::{
     ability_at, is_help_button, is_message_button, message_log_rows, render_screen, ScreenUi,
     BOTTOM_ROWS, TOP_ROWS,
 };
-pub use menu::{menu_hit, MenuEntry, MenuUi};
+pub use menu::{menu_hit, MenuEntry, MenuHit, MenuUi};
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row
 /// (§11.1) — no entities. This is the generator's debug view: generation works on a

@@ -25,7 +25,7 @@
 
 use intrusion_core::{
     ability_at, help_hit, is_help_button, is_message_button, menu_hit, message_log_rows, AbilityId,
-    HelpHit, MenuEntry, UiCommand, TOP_ROWS,
+    HelpHit, MenuHit, UiCommand, TOP_ROWS,
 };
 
 use crate::input::SWIPE_THRESHOLD_PX;
@@ -38,7 +38,7 @@ use crate::Game;
 pub(crate) enum Control {
     /// A title-screen entry (§14/#268). The menu is modal, so while it is up this is
     /// the only control there is.
-    Menu(MenuEntry),
+    Menu(MenuHit),
     /// A control inside the open help panel (§14 v2/#248) — a tab, or the `[x]` close
     /// that keeps the touch path from ever trapping (§11.6).
     Help(HelpHit),
@@ -195,7 +195,7 @@ impl Game {
     fn control_at(&self, col: u32, row: u32) -> Option<Control> {
         let width = self.state.layout().facility().width();
         if let Some(menu) = self.ui.menu {
-            return menu_hit(self.screen_height(), menu, row).map(Control::Menu);
+            return menu_hit(width, self.screen_height(), menu, col, row).map(Control::Menu);
         }
         if self.ui.help_open {
             return help_hit(width, self.screen_height(), col, row).map(Control::Help);
@@ -227,7 +227,7 @@ impl Game {
     /// would, and a cooling entry refuses for free in the economy (§4.4).
     pub(crate) fn apply_control(&mut self, control: Control) {
         match control {
-            Control::Menu(entry) => self.choose(entry),
+            Control::Menu(hit) => self.apply_menu_hit(hit),
             Control::Help(hit) => {
                 self.apply_help_hit(hit);
                 self.draw();

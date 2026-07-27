@@ -161,13 +161,13 @@ const CLOSE_BUTTON_LEN: u32 = 3;
 /// v1 width (§10.2) and a fourth tab is already planned for it; the footer is the
 /// row that already teaches the panel's controls, and it is drawn on every tab, so
 /// [`help_hit`] needs no notion of which tab is showing.
-const THEME_LABEL: &str = "theme";
+pub(super) const THEME_LABEL: &str = "theme";
 
-fn theme_control() -> String {
+pub(super) fn theme_control() -> String {
     format!("{THEME_LABEL} [{THEME_KEY}]")
 }
 
-fn theme_control_len() -> u32 {
+pub(super) fn theme_control_len() -> u32 {
     theme_control().chars().count() as u32
 }
 
@@ -213,8 +213,10 @@ fn close_button_start(width: u32) -> u32 {
 /// The column the footer's theme control starts at — right-aligned with the same
 /// one-cell margin the `[x]` keeps, so the two controls line up at the screen's right
 /// edge. Shared by [`draw_footer`] and [`help_hit`] so a tap lands on exactly the
-/// `theme [n]` drawn, label included.
-fn theme_control_start(width: u32) -> u32 {
+/// `theme [n]` drawn, label included — **and by the title screen** ([`super::menu`]),
+/// which puts the control in the very same corner of its own footer row, so the one
+/// option the game has so far is in one place wherever you meet it.
+pub(super) fn theme_control_start(width: u32) -> u32 {
     width.saturating_sub(1 + theme_control_len())
 }
 
@@ -501,12 +503,16 @@ const _: () = {
 /// Draw the footer hint on the last row: how to switch tabs and close, so a player
 /// who opened the modal panel always sees the way out (§11.6's no-trap rule, made
 /// explicit now the header `[?]` is covered).
+/// The footer row's left indent — where the hint prose starts on the panel and on
+/// the title screen alike (§11.4), leaving the row's right edge to the theme control.
+pub(super) const FOOTER_INDENT: u32 = 2;
+
 fn draw_footer(grid: &mut Grid) {
     if grid.height == 0 {
         return;
     }
     let row = grid.height - 1;
-    draw(grid, 2, row, FOOTER_HINT, Category::Ground);
+    draw(grid, FOOTER_INDENT, row, FOOTER_HINT, Category::Ground);
     // The theme control, right-aligned on the same row. **Label and key together** in
     // System — the HUD-control colour the `[x]` and the near line's `[?]` share — so
     // the word reads as part of the button rather than as more footer prose, which is
@@ -1188,7 +1194,7 @@ mod tests {
     /// half-drawn control is one the player cannot see they can press.
     #[test]
     fn the_footer_hint_stops_short_of_the_theme_control() {
-        let end = 2 + FOOTER_HINT.chars().count() as u32;
+        let end = FOOTER_INDENT + FOOTER_HINT.chars().count() as u32;
         assert!(
             end < theme_control_start(W),
             "the footer hint runs into the theme control ({end} vs {})",
