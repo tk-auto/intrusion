@@ -173,11 +173,18 @@ pub enum Event {
     /// Dephase ran out while the player stood somewhere that cannot admit a solid
     /// body — inside a wall, a shut door, a table, a cupboard or a console — and the
     /// tech's **safety eject** threw them clear
-    /// (§8.3/#329): they now stand on `to`, a cell drawn at random from the nearest
-    /// ones that can hold them, **stunned** for `stunned` turns. The run continues;
+    /// (§8.3/#329): they were standing in the solid `from` and now stand on `to`, a
+    /// cell drawn at random from the nearest ones that can hold them, **stunned** for
+    /// `stunned` turns. The run continues;
     /// what phasing costs is those turns and the position, not the run itself
     /// (§4.5 **[SETTLED]**: contact is the only loss).
-    Ejected { to: Cell, stunned: u32 },
+    ///
+    /// It carries **both ends** of the throw rather than the landing alone, because the
+    /// two are one event and the distance between them is what set the stun
+    /// ([`phase_eject_stun`](crate::phase_eject_stun)) — so the effect mark drawn from
+    /// this event (§11.5/#338) names the very pair the price was measured from, instead
+    /// of the layer re-deriving an origin the player has already left.
+    Ejected { from: Cell, to: Cell, stunned: u32 },
     /// Dephase ran out somewhere solid and there was **nowhere in the facility** to
     /// throw the player clear to (§8.3): the run ends. The degenerate case only — no
     /// generated level can be without a standable cell (§10.6) — kept so the

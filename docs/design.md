@@ -1751,7 +1751,8 @@ effect the game grows; what varies is not *where it is said* but **where the mar
 and **how long it lives**:
 
 - **Place.** Over an explicit **cell set**, fixed when the mark is lit — Confusion's
-  §6.1 box, the cell Pierce Wall opened, an eject's landing — or over the **thing** in a
+  §6.1 box, the cell Pierce Wall opened, the pair a safety eject threw you between — or
+  over the **thing** in a
   cell, which carries the mark wherever it goes (a guard a blast froze).
 - **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
   the firing frame and nothing after it, see §11.5), or **standing** where the effect is

@@ -740,6 +740,7 @@ mod tests {
             Event::BodyStored { at },
             Event::DecoyDied { at },
             Event::Ejected {
+                from: at,
                 to: at,
                 stunned: crate::phase_eject_stun(1),
             },
