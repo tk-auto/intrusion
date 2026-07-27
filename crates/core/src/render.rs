@@ -746,6 +746,51 @@ mod tests {
         )
     }
 
+    /// **The theme changes nothing the core renders** (§11.2/#189). Presentation owns
+    /// the category→colour table, so a [`ScreenUi::theme`] flip must move no glyph, no
+    /// category and no background anywhere on the screen — the same grid, painted from
+    /// the other column of the shell's one table.
+    ///
+    /// This is what keeps the toggle free: it changes no world, costs no turn (§4.4)
+    /// and cannot perturb a replay (§12.4), because the core never reads it at all.
+    #[test]
+    fn the_theme_changes_nothing_the_core_renders() {
+        let mut s = state(
+            12,
+            12,
+            Cell::new(3, 3),
+            vec![Guard::stationary(Cell::new(5, 6))],
+        );
+        s.step(Input::Wait);
+        for tab in HelpTab::ALL {
+            for help_open in [false, true] {
+                let ui = |theme| ScreenUi {
+                    help_open,
+                    help_tab: tab,
+                    theme,
+                    ..ScreenUi::default()
+                };
+                let dark = render_screen(&s, ui(Theme::Dark));
+                let light = render_screen(&s, ui(Theme::Light));
+                assert_eq!(
+                    dark.to_text(),
+                    light.to_text(),
+                    "{tab:?} (help_open {help_open}): the theme moved a glyph",
+                );
+                for y in 0..dark.height {
+                    for x in 0..dark.width {
+                        let (d, l) = (dark.get(x, y), light.get(x, y));
+                        assert_eq!(
+                            (d.fg, d.bg, d.vis),
+                            (l.fg, l.bg, l.vis),
+                            "{tab:?}: cell ({x},{y}) declares a different meaning",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// The same bare board, holding one salvaged-tech ability (§8.3/#244): a
     /// loadout is built up from the innate set, so a render test that drives a
     /// tech says which tech it has rather than inheriting the lot.
