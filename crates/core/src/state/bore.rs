@@ -24,23 +24,23 @@
 //! that survives is a tool for re-routing the facility on your own time, which is a
 //! better ability than the escape hatch it would otherwise have been.
 //!
-//! # The two refusals this ticket decided
+//! # What is behind the wall is the player's business
 //!
-//! The ticket left "what is behind the wall?" open, and the generator settles it:
-//! [`thicken_walls`](crate::generate) deliberately fattens about a third of the
-//! interior wall runs to two cells (§10.1.5), so a bore that only checked the near
-//! face would routinely spend a use to open a **pocket that goes nowhere** — and,
-//! worse, an irrecoverable one, since standing in that pocket leaves three walls
-//! around you and the ability refuses. So the far side is part of the precondition:
-//! a bore opens a **route** or it is refused. The cost is that the tool reads the
-//! *thickness* of the wall it is pressed against — it says nothing whatever about
-//! what is on the other side, which stays fogged (§11.5a), so it leaks no layout.
+//! The ticket left "what is behind the wall?" open, and the answer is: the ability
+//! does not ask. [`thicken_walls`](crate::generate) deliberately fattens about a
+//! third of the interior wall runs to two cells (§10.1.5), so boring one of those
+//! opens a one-cell **pocket** rather than a route — and a pocket is a *use* of this
+//! tool, not a waste of it. A dead-end alcove off the room, out of the through-routes
+//! a patrol sweeps, is somewhere to sit a sweep out. It conceals nothing — it is not
+//! a cupboard (§10.3) — so whether it is shelter or a trap is the player's judgement,
+//! which is exactly the kind of decision worth handing them. Refusing it would have
+//! bought a "no" in place of a choice.
 //!
-//! The facility's **outer shell** is refused outright and separately (§1/§4.5): the
-//! intruder enters and leaves by their own tunnel and there is no other exit, so
-//! boring out through the shell must never become a route. Refusing it does not make
-//! a boundary wall stop *counting*, either — standing beside one boundary wall and
-//! one interior wall is two adjacent walls, and is refused twice over.
+//! The facility's **outer shell** is the one thing refused (§1/§4.5): the intruder
+//! enters and leaves by their own tunnel and there is no other exit, so boring out
+//! through the shell must never become a route. Refusing it does not make a boundary
+//! wall stop *counting*, either — standing beside one boundary wall and one interior
+//! wall is two adjacent walls, and is refused twice over.
 //!
 //! # The hole is real, and it cuts both ways
 //!
@@ -88,9 +88,6 @@ pub enum BoreRefusal {
     /// is the only way in and the exit the only way out; the shell is not a wall,
     /// it is the edge of the world.
     TheOuterShell,
-    /// The one adjacent wall is more than one cell thick (§10.1.5), so boring it
-    /// would open a dead pocket rather than a route.
-    TooThick,
     /// The run does not hold Pierce Wall, or its per-level budget is spent
     /// (§8.2/#302). Not a fact about where the player stands, so it is checked last
     /// and reported only when the geometry would otherwise have allowed the bore.
@@ -106,7 +103,6 @@ impl BoreRefusal {
             BoreRefusal::NothingToBore => "no wall to bore",
             BoreRefusal::TooManyWalls => "too many walls to choose one",
             BoreRefusal::TheOuterShell => "that is the outer shell",
-            BoreRefusal::TooThick => "the wall is too thick",
             BoreRefusal::NoUsesLeft => "the borer is spent",
         }
     }
@@ -123,19 +119,26 @@ impl State {
     /// unusable as the player walks is a *teaching* signal rather than a lie.
     ///
     /// The order of the checks is the order of the rules: count the walls first
-    /// (§8.4 — the target must be unique), then judge the one wall found (the shell,
-    /// then its thickness), then the budget. The budget is last on purpose, so a
+    /// (§8.4 — the target must be unique), then judge the one wall found — only the
+    /// shell is off limits — then the budget. The budget is last on purpose, so a
     /// player standing somewhere they could never bore is told about the geometry
     /// rather than about their supply.
+    ///
+    /// **What is behind the wall is not asked.** The thickness of the wall is the
+    /// player's business, not the ability's: boring into a two-cell wall (§10.1.5)
+    /// opens a one-cell **pocket** off the room, and that is a use of the tool rather
+    /// than a waste of it — a dead-end alcove out of the through-routes to sit out a
+    /// sweep in. It is not a hideout (§10.3 conceals; this does not), so it is shelter
+    /// you have to judge, which is the right kind of decision to hand a player.
     pub fn bore_target(&self) -> Result<Cell, BoreRefusal> {
         let facility = self.layout.facility();
-        let walls: Vec<(Direction, Cell)> = Direction::ALL
+        let walls: Vec<Cell> = Direction::ALL
             .into_iter()
-            .filter_map(|dir| self.player.step(dir).map(|cell| (dir, cell)))
-            .filter(|&(_, cell)| facility.terrain(cell) == Some(Terrain::Wall))
+            .filter_map(|dir| self.player.step(dir))
+            .filter(|&cell| facility.terrain(cell) == Some(Terrain::Wall))
             .collect();
 
-        let (dir, wall) = match walls.as_slice() {
+        let wall = match walls.as_slice() {
             [] => return Err(BoreRefusal::NothingToBore),
             [one] => *one,
             _ => return Err(BoreRefusal::TooManyWalls),
@@ -144,13 +147,6 @@ impl State {
         // The shell is the edge of the world, not a wall you may open (§1/§4.5).
         if is_outer_shell(facility, wall) {
             return Err(BoreRefusal::TheOuterShell);
-        }
-        // A route or nothing: the cell the hole would open onto must not itself be
-        // wall, or the bore buys a pocket it can never bore its way out of.
-        match wall.step(dir).and_then(|beyond| facility.terrain(beyond)) {
-            None => return Err(BoreRefusal::TheOuterShell),
-            Some(Terrain::Wall) => return Err(BoreRefusal::TooThick),
-            Some(_) => {}
         }
 
         if !matches!(

@@ -953,11 +953,6 @@ impl State {
                         ability: id,
                         uses_left: self.abilities.uses_left(id),
                     });
-                    // The bore lands *after* its own activation line, so on a turn
-                    // that opens a wall the near line leads with the hole rather than
-                    // the tally (§11.7 breaks a priority tie toward the later event).
-                    // The count is still one line down in the deployed list, which is
-                    // the right way round: the lesson first, the bookkeeping second.
                     if let Some(wall) = bore {
                         self.bore_wall(wall, events);
                     }

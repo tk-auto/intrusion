@@ -145,19 +145,14 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::DecoyDied { .. } => ("the decoy is trampled".to_string(), 0),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
-        // A budgeted ability (§8.2/#302) narrates what the level has left instead of
-        // that it is on: the count is the fact the next decision turns on, and for an
-        // instant one there is no "on" to report anyway. The number is the event's
-        // own — the one the deck just decremented — so this line, the bar and the
-        // legend can never disagree about it (§8.2's timing rule).
+        // A **budgeted** ability's activation is silent (§8.2/#302). The count it
+        // would have narrated is already on the bar, live and permanent
+        // (`Bore(2)`), so saying it again buys a duplicate and costs the row — and
+        // a budgeted ability is typically instant, so there is no "active" window to
+        // announce either. The near line is a status line, not a receipt.
         Event::AbilityActivated {
-            ability,
-            uses_left: Some(0),
-        } => (format!("{} — none left", ability.name()), 0),
-        Event::AbilityActivated {
-            ability,
-            uses_left: Some(left),
-        } => (format!("{} — {left} left", ability.name()), 0),
+            uses_left: Some(_), ..
+        } => return None,
         Event::AbilityActivated {
             ability,
             uses_left: None,
@@ -169,12 +164,13 @@ pub fn message_for(event: Event) -> Option<Message> {
         // like a bump. It still has to be said: the player asked to solidify and is
         // still phased, and silence would read as a dropped key.
         Event::RematerializeRefused => ("no room to rematerialize".to_string(), 0),
-        // The one permanent mark you leave on a facility (§8.3/#303). Quiet
-        // self-narration like the rest of your tools, but it says *both* halves —
-        // the hole is open, and it is open for them as well — because "the route you
-        // cut is a route they get" is the whole shape of the decision, and a player
-        // who only reads "wall bored" has been told the good half.
-        Event::WallBored { .. } => ("a way through, for them too".to_string(), 0),
+        // Silent, like [`Event::Moved`] and for the same reason (§11.7): the wall is
+        // *gone from the screen* the moment it is bored, so narrating it tells the
+        // player something they have already seen and spends the one row the near
+        // line has. That the hole serves the guards too is real and load-bearing
+        // (§2.3) — but it is taught by a guard walking through it, which is a lesson
+        // the near line cannot deliver as well as the board can.
+        Event::WallBored { .. } => return None,
         // A refused bore (§8.4/#303): free, changed nothing, and — like the refused
         // rematerialization beside it — has to say why. The reason *is* the message:
         // each one names a different thing to do about it.
@@ -813,34 +809,27 @@ mod tests {
         assert_eq!(s.player(), Cell::new(5, 5), "and moves nobody");
     }
 
-    /// A **budgeted** ability narrates what the level has left, not that it is on
-    /// (§8.2/#302) — the count is the fact the next decision turns on, and for an
-    /// instant ability there is no "on" to report. The number comes off the event, so
-    /// it is the one the deck decremented and the one the bar draws. An unbudgeted
-    /// ability keeps the wording it has always had, which is every ability shipping
-    /// today; and the whole family stays quiet self-narration in the Owned band.
+    /// A **budgeted** ability's activation is **silent** (§8.2/#302). The count it
+    /// could narrate is already on the bar, live and permanent, so a message would be
+    /// a duplicate paid for with the near line's one row — and a budgeted ability is
+    /// typically instant, so there is no "active" window to announce either. An
+    /// unbudgeted ability keeps the wording it has always had, which is every other
+    /// ability in the catalog.
     #[test]
-    fn a_budgeted_activation_speaks_what_is_left() {
+    fn a_budgeted_activation_says_nothing_and_leaves_the_others_alone() {
         let spoken = |uses_left| {
             message_for(Event::AbilityActivated {
                 ability: AbilityId::Dephase,
                 uses_left,
             })
-            .expect("an activation speaks")
         };
-        assert_eq!(spoken(None).text, "Dephase active");
-        assert_eq!(spoken(Some(2)).text, "Dephase — 2 left");
-        assert_eq!(spoken(Some(1)).text, "Dephase — 1 left");
-        assert_eq!(
-            spoken(Some(0)).text,
-            "Dephase — none left",
-            "spent says so in words, as the bar says it in a dash",
-        );
-        for uses_left in [None, Some(0), Some(3)] {
-            let m = spoken(uses_left);
-            assert_eq!(m.category, Category::Owned, "your own tool");
-            assert_eq!(m.priority, 0, "quiet self-narration, like a bump");
+        for left in [0, 1, 2, 9] {
+            assert_eq!(spoken(Some(left)), None, "the bar already says {left}");
         }
+        let unbudgeted = spoken(None).expect("an ordinary activation still speaks");
+        assert_eq!(unbudgeted.text, "Dephase active");
+        assert_eq!(unbudgeted.category, Category::Owned, "your own tool");
+        assert_eq!(unbudgeted.priority, 0, "quiet self-narration, like a bump");
     }
 
     /// A quiet action raises no message: [`live_messages`] is empty and the near

@@ -748,7 +748,6 @@ mod tests {
                 BoreRefusal::NothingToBore,
                 BoreRefusal::TooManyWalls,
                 BoreRefusal::TheOuterShell,
-                BoreRefusal::TooThick,
                 BoreRefusal::NoUsesLeft,
             ]
             .map(|reason| Event::BoreRefused { reason }),
@@ -792,7 +791,11 @@ mod tests {
                 Event::AbilityDeactivated { ability },
                 Event::AbilityExpired { ability },
             ] {
-                let m = crate::status::message_for(event).expect("an ability speaks");
+                // A budgeted activation is deliberately silent (§8.2/#302) — nothing
+                // to measure, so nothing to fit.
+                let Some(m) = crate::status::message_for(event) else {
+                    continue;
+                };
                 assert!(
                     m.text.chars().count() <= max,
                     "{:?} does not fit the near line",

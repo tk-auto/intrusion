@@ -171,36 +171,61 @@ fn the_outer_shell_is_refused_and_still_counts_as_a_wall() {
     assert_eq!(s.bore_target(), Err(BoreRefusal::TooManyWalls));
 }
 
-/// **A bore opens a route or it is refused** — the ticket's open question, decided.
+/// **A thick wall bores into a pocket, and the pocket is the point** — the ticket's
+/// open question, decided the other way.
 ///
 /// The generator deliberately thickens about a third of the interior wall runs to
-/// two cells (§10.1.5), so a bore that checked only the near face would routinely
-/// spend a use on a dead pocket — and an irrecoverable one, since standing in that
-/// pocket leaves three walls around you and the ability refuses again. So the far
-/// side is part of the precondition. The cost is that the tool reads the *thickness*
-/// of the wall it is pressed against; it reveals nothing about what is beyond it.
+/// two cells (§10.1.5), so boring one opens a one-cell alcove rather than a route.
+/// The ability does not ask what is behind the wall and does not refuse this: a
+/// dead-end pocket off the room, out of the through-routes a patrol sweeps, is
+/// somewhere to sit a sweep out. It conceals nothing — it is not a cupboard (§10.3)
+/// — so whether it is shelter or a trap is the player's judgement, which is the kind
+/// of decision worth handing them rather than a refusal.
+///
+/// The one thing the pocket is *not* is a way onward: standing in it leaves three
+/// walls around you, so the ability is unusable from inside — you can dig a hole to
+/// hide in, never a tunnel.
 #[test]
-fn a_wall_more_than_one_cell_thick_is_refused_rather_than_opening_a_pocket() {
+fn a_thick_wall_bores_into_a_pocket_the_player_can_hide_in() {
+    // A two-cell-thick wall course, exactly as `thicken_walls` builds them, so the
+    // alcove a bore opens is genuinely enclosed on three sides.
     let mut layout = open_room(12, 12);
-    layout.place(Cell::new(6, 5), Terrain::Wall);
-    layout.place(Cell::new(7, 5), Terrain::Wall);
+    for y in 1..11 {
+        layout.place(Cell::new(6, y), Terrain::Wall);
+        layout.place(Cell::new(7, y), Terrain::Wall);
+    }
     let mut s = borer(layout, Cell::new(5, 5));
 
-    assert_eq!(s.bore_target(), Err(BoreRefusal::TooThick));
-    let events = s.step(Input::Activate(AbilityId::PierceWall));
+    let pocket = Cell::new(6, 5);
     assert_eq!(
-        events,
-        vec![Event::BoreRefused {
-            reason: BoreRefusal::TooThick
-        }],
+        s.bore_target(),
+        Ok(pocket),
+        "thickness is not the ability's business"
     );
-    assert_eq!(s.turn(), 0, "free");
+    s.step(Input::Activate(AbilityId::PierceWall));
+    assert_eq!(
+        s.layout().facility().terrain(pocket),
+        Some(Terrain::Floor),
+        "the alcove is real floor like any other hole",
+    );
     assert_eq!(
         s.ability_state(AbilityId::PierceWall),
         AbilityState::Limited {
-            uses: PIERCE_WALL_USES
+            uses: PIERCE_WALL_USES - 1
         },
-        "and no use spent on a pocket",
+        "and it cost a use, like any other bore",
+    );
+
+    // The player can stand in it — that is what makes it shelter rather than damage.
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), pocket);
+
+    // But not dig on from inside it: three walls is no target at all (§8.4).
+    assert_eq!(s.bore_target(), Err(BoreRefusal::TooManyWalls));
+    assert_eq!(
+        s.layout().facility().terrain(Cell::new(7, 5)),
+        Some(Terrain::Wall),
+        "a hole to hide in, never a tunnel",
     );
 }
 
