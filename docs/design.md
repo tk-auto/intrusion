@@ -1764,7 +1764,8 @@ and **how long it lives**:
 - **Place.** Over an explicit **cell set**, fixed when the mark is lit — Confusion's
   §6.1 box, the cell Pierce Wall opened, the pair a safety eject threw you between — or
   over the **thing** in a cell, which carries the mark wherever it goes and for exactly
-  as long as it exists (a guard a blast froze, a decoy still standing).
+  as long as it exists (a guard a blast froze, a decoy still standing, the player while
+  concealment holds).
 - **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
   the firing frame and nothing after it, see §11.5), or **standing** where the effect is
   a state (a guard still held, a live decoy, concealment in force). A momentary mark may
@@ -1995,6 +1996,16 @@ overlay is the thing that matters. What carries a state for every turn after tha
 **standing** mark instead — a guard still held, the doorways a Lockdown has sealed
 (§8.3/#242), a live decoy, concealment in force — which costs no ink beyond the place it
 rides.
+
+**A mark earns its place by saying what the bar cannot** (§11.4/#341). The ability bar
+is a projection of state and already reports *the window is open*; a mark that lit
+whenever an entry read `(on)` would carry nothing. So the player's own cell is marked for
+**Camouflage** and for no other effect on them: its concealment holds only on the turns
+they do not move, so the mark and the bar entry can **disagree** — `Camo[7]` while you
+walk across a lit corridor in plain sight — and that disagreement *is* the mechanic.
+Marking a Run, an Autodoors or a running Dephase would just restate the bar. A later
+ability joins this rule when its effect is likewise **conditional**, not because it is an
+ability.
 
 **One firing may wear both**, and the two answer different questions. Confusion washes
 the box it went off in and then rides the guards it froze; Lockdown washes the box it

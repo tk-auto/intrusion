@@ -15,12 +15,12 @@
 //!   mark is lit and never re-derived (a blast's footprint, a bored cell, the pair a
 //!   safety eject threw you between), or the **thing** in a cell, which carries the mark
 //!   wherever it goes and for exactly as long as it exists (a guard a blast froze, a
-//!   decoy still standing).
+//!   decoy still standing, the player while concealment holds).
 //! - **How long it lives** ([`MarkLife`]) — **momentary** where the effect *is* a
 //!   moment (a bore, a blast's reach: [`EFFECT_FLASH_TURNS`], or as long as the moment's
 //!   consequence runs — an eject is lit on just the frames its stun holds the player
 //!   down), or **standing** where the effect is a state (a guard still frozen, a live
-//!   decoy, and later concealment in force). One decay schedule serves both
+//!   decoy, concealment in force). One decay schedule serves both
 //!   ([`decay_effect_marks`](State::decay_effect_marks)); there is no second timer.
 //!
 //! A mark is keyed by the **ability** it came from, not by which [`Effect`] is running:
@@ -61,7 +61,19 @@
 //! exception, #321/#326): it is the player's own placed object, drawn in the FOV and
 //! out of it, so its mark follows the glyph it sits under and needs no gate of its own.
 //! That is the rule holding, not an exemption from it — the mark is shown exactly when
-//! the thing is.
+//! the thing is. The player is the same case, trivially: they are always drawn.
+//!
+//! # A mark that blinks (§8.3/#341)
+//!
+//! Camouflage conceals you on any turn you do not move, so the ability being **on** and
+//! concealment actually **holding** are two facts, and the §11.4 bar can only report the
+//! first. So [`MarkPlace::ConcealedPlayer`] is a standing mark whose drawing is gated on
+//! the live rule ([`camouflage_holding`](State::camouflage_holding)): lit once at the
+//! activation, dark on a turn the player moved, back on the next still turn. It is the
+//! one placement whose mark and whose bar entry can **disagree** — and that disagreement
+//! is the whole reason it earns a mark at all. An effect that were simply on for its
+//! window (Run, Autodoors, a running Dephase) would say nothing the bar does not, which
+//! is why the rule is "a conditional effect", not "an effect".
 //!
 //! # Fired, not carried (#325)
 //!
@@ -169,6 +181,17 @@ pub(super) enum MarkPlace {
     /// call to remember: a decoy stomped in the guard phase — after this turn's decay
     /// has already run — stops being drawn on the very frame it dies.
     LiveDecoy,
+    /// The player, on the turns an effect's **condition** is actually met (§8.3/#341) —
+    /// today Camouflage, whose concealment holds only while you stand still.
+    ///
+    /// The only placement whose mark **blinks while its ability runs**, and that is the
+    /// whole of its job: the §11.4 bar can say the window is open and nothing more, so a
+    /// mark that were merely "the ability is on" would repeat it. This one goes dark on
+    /// a turn the player moves and comes back the next still turn, which is the fact the
+    /// bar has no room to carry. A later conditional effect joins for that reason —
+    /// because its mark and its bar entry can **disagree** — and an unconditional one
+    /// (Run, Autodoors, a running Dephase) never does.
+    ConcealedPlayer,
 }
 
 /// How long an effect mark lives (§11.5/#338). Both arms run on the one decay schedule
@@ -285,14 +308,16 @@ impl State {
             .iter()
             .flat_map(|mark| match &mark.place {
                 MarkPlace::Cells(cells) => cells.as_slice(),
-                MarkPlace::HeldGuards | MarkPlace::LiveDecoy => NO_CELLS,
+                MarkPlace::HeldGuards | MarkPlace::LiveDecoy | MarkPlace::ConcealedPlayer => {
+                    NO_CELLS
+                }
             })
             .copied()
     }
 
-    /// The cells where a mark rides a **thing** (#338/#340): the position of every guard
-    /// an effect currently holds and the player can perceive, and the cell of a live
-    /// decoy.
+    /// The cells where a mark rides a **thing** (#338/#340/#341): the position of every
+    /// guard an effect currently holds and the player can perceive, the cell of a live
+    /// decoy, and the player's own cell on the turns concealment is in force.
     ///
     /// A *recolour* of a cue the thing already draws, never a new mark, which is why it
     /// outranks the `Sensed` channel it refines and can give nothing away to the fog —
@@ -306,15 +331,44 @@ impl State {
     /// the thing it recolours carries none either (§11.5a's second exception, #321):
     /// the fake is drawn wherever it stands, in view or out of it, and a mark that
     /// vanished when you walked away would be a mark the ability cannot use.
+    ///
+    /// The player is read live too, through the very predicate the concealment rule
+    /// consumes ([`camouflage_holding`](Self::camouflage_holding)), so the mark cannot
+    /// claim a turn the rule does not. It is the one mark that **blinks while its
+    /// ability runs** — dark on a turn the player moved, back on the next still one —
+    /// which is exactly the half of the ability the §11.4 bar has no room to say (#341).
     pub fn effect_thing_marks(&self) -> impl Iterator<Item = Cell> + '_ {
         let riding = |place: MarkPlace| self.effect_marks.iter().any(|mark| mark.place == place);
         let held = riding(MarkPlace::HeldGuards);
         let decoyed = riding(MarkPlace::LiveDecoy);
+        let concealed = riding(MarkPlace::ConcealedPlayer) && self.camouflage_holding();
         self.guards
             .iter()
             .filter(move |guard| held && self.guard_under_effect(guard))
             .map(|guard| guard.pos())
             .chain(self.decoy.filter(|_| decoyed))
+            .chain(concealed.then_some(self.player))
+    }
+
+    /// Whether Camouflage's concealment is **in force right now** (§8.3): its window is
+    /// open *and* the last spent turn did not move the player.
+    ///
+    /// The one statement of "am I hidden by the camo this turn?", read by the rule
+    /// ([`concealed_from`](Self::concealed_from)) and by the mark that reports it
+    /// ([`effect_thing_marks`](Self::effect_thing_marks)) alike, so the board and the
+    /// detection set cannot drift apart — the §11.5 discipline that the picture is the
+    /// rule rather than a second derivation of it.
+    ///
+    /// It is deliberately **narrower** than concealment: a cupboard and a duct conceal
+    /// too (§10.3/§10.7), and neither is this ability. Marking those would say
+    /// "Camouflage is working" about a player who is merely indoors.
+    ///
+    /// The activation turn counts (§8.2): activating is a spent action that does not
+    /// move, so `moved_this_turn` is already false on the frame drawn straight after the
+    /// press and the mark is up from the first turn the ability protects — never lagging
+    /// a turn behind the rule it draws.
+    pub fn camouflage_holding(&self) -> bool {
+        self.abilities.effect_active(Effect::ConcealWhileStill) && !self.moved_this_turn
     }
 
     /// Whether `guard` is currently held by an area effect the player can read — the
@@ -518,6 +572,23 @@ impl State {
                 {
                     self.light_mark(ability, MarkPlace::LiveDecoy, MarkLife::Standing)
                 }
+                // Camouflage conceals you on any turn you do not move (§8.3/#341), so
+                // "the ability is on" and "you are hidden right now" are two different
+                // facts, and the §11.4 bar can only ever report the first — it reads
+                // `Camo[7]` whether you are standing still and invisible or walking
+                // across a lit corridor in plain sight. The mark carries the other half,
+                // which is the board answering the only question this ability raises.
+                //
+                // Lit **once**, at the activation, and then left to blink: the placement
+                // is a live read of the concealment rule, so the turns it goes dark on
+                // are the turns the rule lapses and nothing has to relight it. A mark
+                // relit per still turn would be the same picture drawn by a second
+                // schedule that could disagree with the first.
+                Event::AbilityActivated { ability, .. }
+                    if declares(ability, Effect::ConcealWhileStill) =>
+                {
+                    self.light_mark(ability, MarkPlace::ConcealedPlayer, MarkLife::Standing)
+                }
                 _ => {}
             }
         }
@@ -591,9 +662,16 @@ impl State {
     /// live, so a thing that has gone stops being drawn the instant it goes, whether or
     /// not the record has been swept yet. Dropping the record here is what keeps the
     /// layer from carrying a mark that can never paint again.
+    ///
+    /// [`MarkPlace::ConcealedPlayer`] is kept for the ability's whole **window**, not
+    /// for the turns its condition holds (#341). The distinction is load-bearing: the
+    /// mark is *drawn* only while concealment is in force, but dropping the record on a
+    /// turn the player moved would delete a mark nothing ever relights, and the
+    /// concealment they walk back into the next still turn would go unreported.
     pub(super) fn decay_effect_marks(&mut self) {
         let any_held = self.guards.iter().any(|guard| guard.is_dazed());
         let decoy_alive = self.decoy.is_some();
+        let camouflaged = self.abilities.effect_active(Effect::ConcealWhileStill);
         self.effect_marks.retain_mut(|mark| match &mut mark.life {
             MarkLife::Momentary(ttl) => {
                 *ttl -= 1;
@@ -602,6 +680,7 @@ impl State {
             MarkLife::Standing => match mark.place {
                 MarkPlace::HeldGuards => any_held,
                 MarkPlace::LiveDecoy => decoy_alive,
+                MarkPlace::ConcealedPlayer => camouflaged,
                 MarkPlace::Cells(_) => true,
             },
         });
@@ -635,6 +714,27 @@ mod tests {
     /// since a blast that would catch nobody is refused (§8.3/#325).
     fn level_with_a_target() -> State {
         level_with(vec![Guard::stationary(Cell::new(22, 20))])
+    }
+
+    /// A player at (10, 10) of a 40×40 room with Camouflage **already running** — the
+    /// world the #341 tests need. Bare floor and no guards, so the only thing that can
+    /// move the mark is the player's own stillness.
+    fn level_with_camouflage_on() -> State {
+        let mut s = State::new(
+            open_room(40, 40),
+            Cell::new(10, 10),
+            Direction::South,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 38),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Camouflage));
+        s.step(Input::Activate(AbilityId::Camouflage));
+        assert!(
+            s.abilities.effect_active(Effect::ConcealWhileStill),
+            "precondition: the camo is on"
+        );
+        s
     }
 
     /// A player at (10, 10) of a 40×40 room facing south with a decoy already out at
@@ -1215,6 +1315,128 @@ mod tests {
             s.effect_thing_marks().next().is_none(),
             "and so is its mark"
         );
+        assert!(s.effect_marks.is_empty(), "cleared, not merely quiet");
+    }
+
+    /// §8.3/#341: the mark **blinks with the rule**, which is the whole of what it adds
+    /// to the bar. Still → marked, move → unmarked *while the ability is still running
+    /// and still counting down*, still again → marked. The bar reads `Camo[n]` through
+    /// every one of these frames; the board does not.
+    #[test]
+    fn the_camouflage_mark_follows_the_stillness_and_not_the_window() {
+        let mut s = level_with_camouflage_on();
+        let marked = |s: &State| s.effect_thing_marks().any(|cell| cell == s.player());
+
+        // The activation turn is itself a still turn (§8.2), so the mark is up on the
+        // very first frame the ability protects rather than a turn behind it.
+        assert!(
+            marked(&s),
+            "activating does not move: concealed from turn one"
+        );
+
+        s.step(Input::Wait);
+        assert!(marked(&s), "a wait is a still turn");
+
+        s.step(Input::Step(Direction::East));
+        assert!(
+            s.abilities.effect_active(Effect::ConcealWhileStill),
+            "precondition: the window is still open — the bar would still read Camo[n]",
+        );
+        assert!(!marked(&s), "…but the board says the concealment lapsed");
+
+        s.step(Input::Wait);
+        assert!(marked(&s), "and it resumes on the next still turn");
+    }
+
+    /// §11.5/#341: the mark is the concealment **rule**, not a second derivation of it.
+    /// Asserted against [`camouflage_holding`](State::camouflage_holding) — the very
+    /// predicate [`concealed_from`](State::concealed_from) consumes — over a run of
+    /// mixed turns, so no future change to the rule can move the picture out of step
+    /// with the detection set.
+    #[test]
+    fn the_camouflage_mark_is_exactly_the_concealment_rule() {
+        let mut s = level_with_camouflage_on();
+        for (turn, input) in [
+            Input::Wait,
+            Input::Step(Direction::East),
+            Input::Step(Direction::West),
+            Input::Wait,
+            Input::Wait,
+            Input::Step(Direction::East),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            s.step(input);
+            assert_eq!(
+                s.effect_thing_marks().any(|cell| cell == s.player()),
+                s.camouflage_holding(),
+                "turn {turn}: the mark and the rule are one fact",
+            );
+        }
+    }
+
+    /// §8.3/#341: a **cupboard** conceals too (§10.3), and it is not this ability. The
+    /// mark says "the camo is working", so it must not light for a player who is merely
+    /// concealed — otherwise it reports a protection that ends the moment they step out.
+    #[test]
+    fn concealment_that_is_not_the_camouflage_lights_nothing() {
+        let mut layout = open_room(20, 20);
+        layout.place(Cell::new(10, 11), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::South,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        s.step(Input::Step(Direction::South));
+        assert!(s.hidden(), "precondition: inside the cupboard");
+        assert!(s.concealed_from(Cell::new(10, 5)), "…and concealed by it");
+        assert!(
+            !s.camouflage_holding(),
+            "but not by the ability, which is not even held",
+        );
+        assert!(
+            s.effect_thing_marks().next().is_none(),
+            "so the effect layer says nothing",
+        );
+    }
+
+    /// §8.2/§4.4 (#341): the mark ends with its window — by expiry and by an early
+    /// toggle-off alike — and leaves no record behind either way.
+    #[test]
+    fn the_camouflage_mark_ends_with_its_window() {
+        let duration = AbilityId::Camouflage
+            .def()
+            .economy()
+            .expect("Camouflage is an activated ability")
+            .duration();
+
+        // Expiry: the clock is ticked at the end of each spent turn, so the window's
+        // last turn is the `duration`-th and the mark is gone the moment it is spent.
+        let mut s = level_with_camouflage_on();
+        for _ in 2..duration {
+            s.step(Input::Wait);
+        }
+        assert!(
+            s.effect_thing_marks().next().is_some(),
+            "precondition: still concealed on the window's last turn",
+        );
+        s.step(Input::Wait);
+        assert!(
+            !s.abilities.effect_active(Effect::ConcealWhileStill),
+            "precondition: the window ran out",
+        );
+        assert!(s.effect_marks.is_empty(), "the mark went with it");
+
+        // Early toggle-off: free (§4.4), and it clears outright rather than falling
+        // silent — a still player would otherwise keep drawing a mark for an ability
+        // they switched off.
+        let mut s = level_with_camouflage_on();
+        s.step(Input::Deactivate(AbilityId::Camouflage));
+        assert!(!s.camouflage_holding(), "precondition: switched off");
         assert!(s.effect_marks.is_empty(), "cleared, not merely quiet");
     }
 
