@@ -4,15 +4,28 @@
 //! to [`State::step`](crate::State::step); it never interprets a key itself, so
 //! every binding is pinned by a native test instead of discovered in a browser.
 //!
-//! Two tables live here. [`input_for_key`] maps the movement keys — the §11.6
-//! rows that drive actions the loop already has. [`ability_hotkey`] is the
-//! **explicit** ability→letter assignment: the old game derived hotkeys from
-//! labels (each ability claimed the first letter not taken by one above it), so
-//! `Dephase` answered to `e` because `Decoy` had taken `d`, and **an ability's
-//! key silently changed when the list above it changed**. Muscle memory is not
-//! optional in a game where a mis-key ends a run, so here every assignment is a
-//! named constant fact: keyed by the ability's *identity*, independent of any
-//! list, and pinned one-by-one in the tests below.
+//! Keys arrive here two ways, and which way is itself a design decision (#359).
+//! Most are matched on the **character** the layout produced (`w`, `h`, `?`) —
+//! [`input_for_key`] and the tables beside it. A few bind to the **physical key**
+//! instead, by its `KeyboardEvent.code`, because for those it is the position
+//! under the finger that is the binding and not the character printed on it:
+//! [`ability_slot_for_code`] fires the ability bar's slots off the top-row digits,
+//! and [`key_for_code`] folds the numpad onto the digit characters the §11.6 table
+//! spells its movement rows with. An AZERTY player's top row is `& é " '`, so a
+//! binding on the *character* `1` would want Shift in the turn things go wrong.
+//!
+//! **Abilities are bound by bar slot, not by identity** (§11.6/§11.4). Each one
+//! used to own a letter, keyed by identity so no reordering could ever move it —
+//! but that made every new ability need a free letter it could keep forever, and
+//! the catalogue grows (§8.3's salvaged tech) while the four keys a run can press
+//! do not. `1`–`4` fire the first through fourth entries **of the bar as drawn**,
+//! so the catalogue may grow without bound and the keyboard never notices. What
+//! that trades away is cross-run constancy — `c` was Camouflage in every run ever
+//! played and `1` is not — which is the deliberate half of the change; within a
+//! run the loadout is fixed (§8.3) and the slots are on screen at all times, so a
+//! digit is never ambiguous where it is pressed. The letters live on as the replay
+//! script's notation ([`ability_script_letter`](crate::replay::ability_script_letter)),
+//! which is where identity-keyed spelling was always the right answer.
 
 use crate::ability::AbilityId;
 use crate::cell::Direction;
@@ -141,16 +154,17 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
 /// control. The shell consults this *before* [`input_for_key`]: a key claimed here
 /// toggles view state and redraws without ever touching [`State`](crate::State).
 ///
-/// `m` deploys the message list: a free letter (no movement key, no ability
-/// hotkey), mnemonic for *messages*; `n` flips the colour theme (#189), a free
-/// letter for *night* mode. `Tab` used to deploy the ability panel and no
-/// longer binds to anything (#287) — the bar names every held ability on every
-/// frame, so there is no panel left to toggle.
+/// `m` deploys the message list: a free letter (no movement key), mnemonic for
+/// *messages*; `n` flips the colour theme (#189), a free letter for *night* mode.
+/// `Tab` used to deploy the ability panel and no longer binds to anything (#287) —
+/// the bar names every held ability on every frame, so there is no panel left to
+/// toggle.
 pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
     match key {
         "m" => Some(UiCommand::ToggleMessageLog),
         // `?` opens the help card (§14 v2/#139): the conventional roguelike help key,
-        // a free character that collides with no movement key or ability hotkey.
+        // a free character that collides with no movement key — and the ability keys
+        // are digits now (#359), so it cannot collide with one of those either.
         "?" => Some(UiCommand::ToggleHelp),
         // `n` for *night* (#189). The obvious mnemonics were all spoken for — `t`
         // for theme is Takedown's, `d` for dark is Decoy's, and `l` for light is the
@@ -170,7 +184,13 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
 /// keys `h` `j` `k` `l` and `.`-to-wait as roguelike comfort. Note `w` *waits*
 /// (§11.6): it is not a WASD movement key, and no movement binding may ever
 /// claim it. `Enter`/`Space` confirm and `Escape` cancel arrive with the first
-/// menu; letters route to [`ability_hotkey`] when abilities land (§8.3).
+/// menu; the abilities are on the digits and resolve by *position*, through
+/// [`ability_slot_for_code`], before this table ever sees them.
+///
+/// The digit rows here are the **numpad**'s meaning (#359): the shell folds
+/// `Numpad4` and its siblings onto these characters through [`key_for_code`]
+/// before consulting this table, so a numpad steps on any layout, while the top
+/// row's `1`–`4` are claimed by the ability bar.
 pub fn input_for_key(key: &str) -> Option<Input> {
     Some(match key {
         "ArrowUp" | "8" | "k" => Input::Step(Direction::North),
@@ -182,79 +202,59 @@ pub fn input_for_key(key: &str) -> Option<Input> {
     })
 }
 
-/// The explicit ability hotkey (§11.6 **[SETTLED]**) for a §8.3 ability, by name.
+/// The **physical** codes of the ability keys, in bar order: the top row's digits,
+/// one per slot a run can hold ([`AbilityId::MAX_HELD`], §8.3).
 ///
-/// The assignment is a `match` on the ability's identity — there is no list to
-/// be ordered, so no reordering, insertion or removal can ever move a key; the
-/// tests pin each pair so even an *edit* here is a visible decision, not a
-/// silent shift. Activation (letter → ability → [`Input`]) wires up with the
-/// ability ticket; the contract these keys honour is settled now, before any UI
-/// exists to derive them from.
-pub fn ability_hotkey(ability: &str) -> Option<char> {
-    Some(match ability {
-        "Run" => 'r',
-        "Takedown" => 't',
-        "Drag" => 'g',
-        "Camouflage" => 'c',
-        "Decoy" => 'd',
-        "Dephase" => 'x',
-        "Autodoors" => 'a',
-        "Confusion" => 'z',
-        "Vision" => 'v',
-        "Pierce Wall" => 'b',
-        // `s` for *seal*, not for the initial: `l` is already the vim-east step
-        // (§11.6), and a movement key is the one thing an ability must never shadow.
-        "Lockdown" => 's',
-        _ => return None,
-    })
+/// Sized by the cap rather than written to length, so raising the held count is a
+/// compile error here — a fifth slot with no key would be a silently unpressable
+/// ability, and this is where that gets noticed.
+const ABILITY_SLOT_CODES: [&str; AbilityId::MAX_HELD] = ["Digit1", "Digit2", "Digit3", "Digit4"];
+
+/// The **ability bar slot** a physical key code fires (§11.6/§11.4, #359), or `None`
+/// for a code that is not one of the four — counting from `0` at the bar's leftmost
+/// *drawn* entry, as [`ability_in_slot`](crate::ability_in_slot) resolves it.
+///
+/// This is the keyboard half of the resolution a pointer tap also drives
+/// ([`ability_at`](crate::ability_at)): both land on a slot and both turn that slot
+/// into an ability through the one function, so a digit and the entry under the
+/// thumb can never name different abilities (§11.4).
+///
+/// It takes a `KeyboardEvent.code`, not a character, because the binding **is** the
+/// position: the key left of `2` fires the bar's first entry whether the layout
+/// prints `1`, `&` or `"` on it. And it stops at the slot deliberately — which
+/// ability sits there, and whether the key activates or deactivates it (§4.4's free
+/// toggle, #304), are facts about live state that this pure table has no business
+/// knowing.
+pub fn ability_slot_for_code(code: &str) -> Option<usize> {
+    ABILITY_SLOT_CODES.iter().position(|c| *c == code)
 }
 
-/// Map a key to the **ability** its §11.6 shortcut names, or `None`.
+/// The character a **physical** key stands for when its position is what binds, or
+/// `None` for a code the character tables can read straight off `KeyboardEvent.key`.
 ///
-/// A single-character key is matched by **identity** against the settled hotkey of
-/// each economy ability ([`AbilityId::ALL`]) — never a list position. This is the
-/// keyboard half of the one resolution a pointer click also drives
-/// ([`ability_at`](crate::ability_at)): a key and a click name the same ability, so
-/// they can never disagree on what a shortcut does. The bump verbs Takedown and
-/// Drag are **not** driven from here (they are done by walking into their target,
-/// §7.2/§8.3), so their letters resolve to nothing.
+/// Only the numpad folds (#359). Its digits are the §11.6 movement rows — `8` `2`
+/// `4` `6` step and `5` waits — and a numpad is the same shape under every layout,
+/// so binding them by code is what keeps that path working where the character
+/// tables would need a modifier. The top row does not fold: its `1`–`4` belong to
+/// [`ability_slot_for_code`], and a shell resolves those first.
 ///
-/// It stops at the *identity* deliberately. Which [`Input`] the key then drives is
-/// a **toggle** (§4.4: switching an ability off is a free action of its own), and
-/// that depends on the ability's live state, which this pure key table has no
-/// business knowing — so the shell hands the id to
-/// [`State::ability_input`](crate::State::ability_input) for the
-/// `Activate`/`Deactivate` choice (#304). Both shells go through that one seam
-/// rather than each branching for itself, which is the drift §11.6 pins against.
-pub fn ability_for_key(key: &str) -> Option<AbilityId> {
-    let mut chars = key.chars();
-    let ch = match (chars.next(), chars.next()) {
-        (Some(c), None) => c,
-        _ => return None, // named keys ("Tab", "ArrowUp") are never a hotkey
-    };
-    AbilityId::ALL.into_iter().find(|id| id.hotkey() == ch)
+/// The shell substitutes the folded character before consulting *any* character
+/// table, so the numpad walks the board, the help panel's tabs and the menu's list
+/// with the one fold rather than a code table per screen.
+pub fn key_for_code(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "Numpad8" => "8",
+        "Numpad2" => "2",
+        "Numpad4" => "4",
+        "Numpad6" => "6",
+        "Numpad5" => "5",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The §8.3 starting set, in design-doc order — the order the old scheme
-    /// derived keys from, kept here only to prove it no longer matters.
-    const ABILITIES: [&str; 8] = [
-        "Run",
-        "Takedown",
-        "Drag",
-        "Camouflage",
-        "Decoy",
-        "Dephase",
-        "Autodoors",
-        "Confusion",
-    ];
-
-    /// Every single-character key the movement table owns; ability hotkeys must
-    /// never collide with these.
-    const MOVEMENT_KEYS: [&str; 11] = ["8", "2", "4", "6", "5", "w", "k", "j", "h", "l", "."];
 
     /// The §11.6 movement table, pinned: arrows, numpad and vi keys step; `5`,
     /// `w` and `.` wait. `w` waiting is the regression to watch — a WASD
@@ -305,11 +305,6 @@ mod tests {
         assert_eq!(help_nav_for_key("n"), Some(HelpNav::ToggleTheme));
         for key in ["m", "?", "n"] {
             assert_eq!(input_for_key(key), None, "{key:?} is not a game action");
-            assert_eq!(
-                ability_for_key(key),
-                None,
-                "{key:?} is a UI key, not an ability"
-            );
         }
         for key in ["w", "5", "r", "ArrowUp", "Escape", "Tab"] {
             assert_eq!(
@@ -388,96 +383,89 @@ mod tests {
         }
     }
 
-    /// §11.6's core demand, pinned pair by pair: each ability's key is an
-    /// explicit fact. If any of these assertions ever fails, a hotkey moved —
-    /// which must be a deliberate, visible decision, never a side effect.
+    /// #359's binding, pinned: the top row's four digits are the bar's four slots,
+    /// left to right, and nothing else is. The codes matter more than the order —
+    /// they are what makes the binding a *position* rather than a character.
     #[test]
-    fn every_ability_hotkey_is_pinned() {
-        for (ability, key) in [
-            ("Run", 'r'),
-            ("Takedown", 't'),
-            ("Drag", 'g'),
-            ("Camouflage", 'c'),
-            ("Decoy", 'd'),
-            ("Dephase", 'x'),
-            ("Autodoors", 'a'),
-            ("Confusion", 'z'),
+    fn the_top_row_digits_are_the_bar_slots_in_order() {
+        for (code, slot) in [("Digit1", 0), ("Digit2", 1), ("Digit3", 2), ("Digit4", 3)] {
+            assert_eq!(ability_slot_for_code(code), Some(slot), "{code}");
+        }
+        // A fifth digit is not a slot — a run holds at most four (§8.3) — and neither
+        // is a numpad digit (those step, §11.6) nor any named key.
+        for code in ["Digit5", "Digit0", "Numpad1", "Numpad4", "KeyC", "ArrowUp"] {
+            assert_eq!(ability_slot_for_code(code), None, "{code} fires no slot");
+        }
+    }
+
+    /// The keys the bar can be driven by are exactly the slots a run can hold
+    /// (§8.3): four keys, forever, however far the catalogue grows past them.
+    #[test]
+    fn there_is_one_ability_key_per_held_slot() {
+        let slots: Vec<usize> = ABILITY_SLOT_CODES
+            .iter()
+            .filter_map(|code| ability_slot_for_code(code))
+            .collect();
+        assert_eq!(slots, (0..AbilityId::MAX_HELD).collect::<Vec<_>>());
+        assert!(
+            AbilityId::ALL.len() > AbilityId::MAX_HELD,
+            "the catalogue already outgrows the keys — which is the point (#359)",
+        );
+    }
+
+    /// The numpad binds by **position** (#359): each of its movement digits folds
+    /// onto the character the §11.6 table spells that row with, so the same physical
+    /// key steps on QWERTY, AZERTY and Dvorak alike.
+    #[test]
+    fn the_numpad_folds_onto_the_movement_digits() {
+        for (code, key, expected) in [
+            ("Numpad8", "8", Input::Step(Direction::North)),
+            ("Numpad2", "2", Input::Step(Direction::South)),
+            ("Numpad4", "4", Input::Step(Direction::West)),
+            ("Numpad6", "6", Input::Step(Direction::East)),
+            ("Numpad5", "5", Input::Wait),
         ] {
-            assert_eq!(ability_hotkey(ability), Some(key), "{ability}");
+            assert_eq!(key_for_code(code), Some(key), "{code}");
+            assert_eq!(input_for_key(key), Some(expected), "{code} → {key}");
+        }
+        // The top row does not fold: its digits are the bar's, and a letter key needs
+        // no folding at all — the character it produced is the binding.
+        for code in ["Digit1", "Digit4", "Digit8", "KeyW", "ArrowUp"] {
+            assert_eq!(key_for_code(code), None, "{code} is read as a character");
         }
     }
 
-    /// The old failure, made impossible: keys are a function of identity, not of
-    /// position, so any reordering — or removal — of the ability list leaves
-    /// every key exactly where it was. (`Decoy` losing its slot must not turn
-    /// `Dephase` into `d`.)
+    /// The two digit paths are **disjoint**, which is the collision #359 had to
+    /// resolve: no code both fires a slot and folds to a movement character, so a
+    /// press is never both a step and an ability.
     #[test]
-    fn hotkeys_survive_any_reordering_of_the_ability_list() {
-        let baseline: Vec<Option<char>> = ABILITIES.iter().map(|a| ability_hotkey(a)).collect();
-        let mut reordered = ABILITIES;
-        reordered.reverse();
-        for (ability, &expected) in reordered.iter().rev().zip(&baseline) {
-            assert_eq!(ability_hotkey(ability), expected, "{ability} shifted");
+    fn no_key_is_both_an_ability_slot_and_a_movement_digit() {
+        for code in ABILITY_SLOT_CODES {
+            assert_eq!(key_for_code(code), None, "{code} is the bar's alone");
         }
-        // Even with Decoy gone entirely, Dephase keeps its own key.
-        assert_eq!(ability_hotkey("Dephase"), Some('x'));
-    }
-
-    /// The keyboard ability shortcut (§11.6): each economy ability's settled hotkey
-    /// resolves to *that ability* by identity — the same resolution a pointer click
-    /// makes — while the bump verbs Takedown and Drag, which are not driven from the
-    /// bar, resolve to nothing even though they own hotkeys. Which [`Input`] the
-    /// identity then drives is the toggle
-    /// [`State::ability_input`](crate::State::ability_input) decides (#304), tested
-    /// with the live state it needs.
-    #[test]
-    fn an_ability_hotkey_resolves_by_identity() {
-        use crate::ability::AbilityId;
-        for id in AbilityId::ALL {
-            let key = id.hotkey().to_string();
-            assert_eq!(ability_for_key(&key), Some(id), "{} shortcut", id.name());
-        }
-        // The bump verbs own hotkeys but are not activated (§7.2/§8.3): 't' and 'g'
-        // name no ability here.
-        for key in ["t", "g"] {
-            assert_eq!(ability_for_key(key), None, "bump verb key {key:?}");
-        }
-        // A movement key and a named key own no ability shortcut.
-        for key in ["k", "5", "Tab", "ArrowUp"] {
-            assert_eq!(ability_for_key(key), None, "key {key:?}");
+        for code in ["Numpad8", "Numpad2", "Numpad4", "Numpad6", "Numpad5"] {
+            assert_eq!(
+                ability_slot_for_code(code),
+                None,
+                "{code} moves, so it fires no slot",
+            );
         }
     }
 
-    /// Every single-character key a **UI command** claims (§11.4). An ability hotkey
-    /// must never collide with one of these either: a mis-key that opened the help
-    /// card instead of sprinting is the same lost run as one that walked the wrong
-    /// way.
+    /// Every single-character key a **UI command** claims (§11.4). Abilities no
+    /// longer take letters (#359), so the collision that mattered is the one left:
+    /// a UI key must never also be a movement key. A mis-key that opened the help
+    /// card instead of stepping is the same lost run as one that walked the wrong way.
     const UI_KEYS: [&str; 3] = ["m", "?", "n"];
 
-    /// No two abilities share a key, and no ability claims a movement key or a UI
-    /// key — the collisions that would make a mis-key routine.
+    /// Every single-character key the movement table owns.
+    const MOVEMENT_KEYS: [&str; 11] = ["8", "2", "4", "6", "5", "w", "k", "j", "h", "l", "."];
+
+    /// The UI keys hold their half of the bargain, including the theme toggle (#189),
+    /// which had to go to `n` precisely because `t`, `d` and `l` were already spoken
+    /// for.
     #[test]
-    fn hotkeys_collide_with_nothing() {
-        let keys: Vec<char> = ABILITIES
-            .iter()
-            .map(|a| ability_hotkey(a).expect("every §8.3 ability has a key"))
-            .collect();
-        for (i, a) in keys.iter().enumerate() {
-            for b in &keys[i + 1..] {
-                assert_ne!(a, b, "two abilities share {a:?}");
-            }
-        }
-        for key in keys {
-            let key = key.to_string();
-            assert!(
-                !MOVEMENT_KEYS.contains(&key.as_str()),
-                "{key:?} is a movement key"
-            );
-            assert!(!UI_KEYS.contains(&key.as_str()), "{key:?} is a UI key");
-        }
-        // And the UI keys hold their own half of the bargain, including the theme
-        // toggle (#189), which had to go to `n` precisely because `t`, `d` and `l`
-        // were already spoken for.
+    fn the_ui_keys_collide_with_no_movement_key() {
         for key in UI_KEYS {
             assert!(
                 ui_command_for_key(key).is_some(),

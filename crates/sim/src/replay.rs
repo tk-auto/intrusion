@@ -103,8 +103,20 @@ mod tests {
             let reparsed = parse_script(&script).expect("a captured stream re-parses");
             assert_eq!(reparsed, replay.inputs, "seed {seed}: notation is lossy");
 
-            // Replaying it reproduces the run exactly (§12.4).
-            let round_trip = run_one(seed, &mut Scripted::new(reparsed), cap).expect("generates");
+            // Replaying it reproduces the run exactly (§12.4). The one field that
+            // legitimately differs is `profile`: it records *who decided*, not what
+            // happened, and a script has no temperament — so a replayed row says
+            // `null` where the bot's said `baseline` (#198). Every game metric
+            // must still match, so the comparison normalises that field rather
+            // than dropping the byte-for-byte check.
+            let mut round_trip =
+                run_one(seed, &mut Scripted::new(reparsed), cap).expect("generates");
+            assert_eq!(
+                (original.profile, round_trip.profile),
+                (Some("baseline"), None),
+                "seed {seed}: a replayed row must not claim the bot's temperament",
+            );
+            round_trip.profile = original.profile;
             assert_eq!(
                 round_trip, original,
                 "seed {seed}: the replay did not reproduce the bot run"

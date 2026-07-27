@@ -702,7 +702,7 @@ fn an_active_ability_resolves_to_the_toggle_off() {
 }
 
 /// #264/#304: a **passive** is never a toggle. Holding it is the whole of its state,
-/// so its hotkey resolves to the activation that has always been a free no-op — the
+/// so its slot's digit resolves to the activation that has always been a free no-op — the
 /// `(on)` marker cannot be pressed off, and only dropping the ability ends it.
 #[test]
 fn a_passive_cannot_be_switched_off() {

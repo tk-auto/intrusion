@@ -46,7 +46,7 @@ impl State {
     }
 
     /// Open a targeting session for `ability` by its declared [`TargetingMode`]
-    /// (§8.4) — the seam a hotkey or an ability-panel click resolves an ability's
+    /// (§8.4) — the seam an ability key or a bar tap resolves an ability's
     /// target through, so no ability ever falls back to auto-targeting (the exact
     /// §8.4/§2.3 regression this system exists to prevent).
     ///
@@ -617,12 +617,14 @@ impl State {
     /// uses left it activates, and [`Exhausted`](AbilityState::Exhausted) it resolves
     /// to the activation that refuses for free, exactly as `Unusable` does.
     ///
-    /// Both input paths call this — the hotkey after
-    /// [`ability_for_key`](crate::ability_for_key), a tap after
-    /// [`ability_at`](crate::ability_at) — so the bar stays a *projection* of the
-    /// keys (§11.4) and neither shell duplicates the rule. The key's live meaning is
-    /// already on screen before it is pressed: the bar draws `Run[3]` while active
-    /// and `Run` while ready ([`AbilityStatus::bar_entry`]).
+    /// Both input paths call this — a digit after
+    /// [`ability_slot_for_code`](crate::ability_slot_for_code), a tap after
+    /// [`ability_at`](crate::ability_at), the two of them meeting at
+    /// [`ability_in_slot`](crate::ability_in_slot) — so a key and the bar entry it
+    /// names can never disagree (§11.4/#359) and neither shell duplicates the rule.
+    /// The key's live meaning is already on screen before it is pressed: the bar
+    /// draws `Run[3]` while active and `Run` while ready
+    /// ([`AbilityStatus::bar_entry`]).
     pub fn ability_input(&self, id: AbilityId) -> Input {
         match self.ability_state(id) {
             AbilityState::Active { .. } => Input::Deactivate(id),
