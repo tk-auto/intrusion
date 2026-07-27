@@ -279,5 +279,20 @@ In those cases, report the PR URL, the CI state, and exactly why you're holding.
   new mechanic or able to exploit it. A bot that no longer plays the game makes its
   metrics measure the bot, not the game (§13.3) — which is the one thing the sim
   exists to avoid.
+- **Never renumber an ability or a modifier — retire it in place.** Their positions
+  in `AbilityId::ALL` / `AbilityId::TECH` and in `modifier_slots` are **permanent
+  slot numbers** that the level-seed token encodes by index
+  ([`docs/level-seed-token.md`](../../../docs/level-seed-token.md) §3). Appending is
+  free and costs no shared link. Removing an entry and closing the gap silently
+  shifts every entry after it, so every token ever shared starts naming *different*
+  abilities — the #286 break, with no error and nothing to notice it by.
+  - **To remove one: leave a placeholder in its slot** — a retired/reserved entry
+    that keeps the position and is never granted, drawn, or offered. A tombstone,
+    not a hole. Say in the PR which slot it froze.
+  - The same applies to reordering for tidiness: **don't**. The list's order is data
+    with tokens depending on it, not a style choice.
+  - If a slot genuinely must be reused or the list renumbered, that is a **format
+    version bump** (`FORMAT_MAJOR`, a new `TOKEN_LEN`, the whole §8 upgrade path) —
+    its own ticket, never a quiet edit inside another one.
 - Keep the PR scoped to one ticket. New work you discover becomes a new ticket
   (use the create-tickets skill), not scope creep.

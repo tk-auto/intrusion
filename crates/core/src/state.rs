@@ -773,7 +773,7 @@ impl State {
 
     /// The run's reproducible starting config (§12.4/#245), or `None` for a
     /// hand-built state. [`LevelSeed::encode`] turns it into the shareable
-    /// level-seed string the help panel displays (#272).
+    /// level-seed token the help panel displays (#272).
     #[must_use]
     pub fn level(&self) -> Option<LevelSeed> {
         self.level
@@ -795,7 +795,7 @@ impl State {
     }
 
     /// The run's ability loadout (§8.3/#244) — the abilities it holds, for a test
-    /// to assert what a preset resolved and for the level-seed string to carry.
+    /// to assert what a preset resolved and for the level-seed token to carry.
     #[must_use]
     pub fn loadout(&self) -> Loadout {
         self.abilities.loadout()

@@ -1,7 +1,7 @@
 //! Debug switches baked into a **build** (§12.6) — the playtest channel, kept
 //! deliberately separate from the level channel next door in [`seed`](crate::seed).
 //!
-//! A level is shared: it travels as a level-seed string in a link, a typed token or a
+//! A level is shared: it travels as a level-seed token in a link, a typed token or a
 //! `window.__intrusionSeed` global, and everything it carries is part of what the run
 //! *is* (#245). A [`DebugModifiers`] switch is the opposite of shared — it changes
 //! only what the player perceives for whoever is watching, never the facility or the

@@ -1599,7 +1599,7 @@ mod tests {
     }
 
     /// #272, end to end: a **booted** run's help panel shows that run's own
-    /// level-seed string — the whole chain, `start_level` → `State::level` →
+    /// level-seed token — the whole chain, `start_level` → `State::level` →
     /// `render_screen` → the Level info tab — and looking at it is still free: no
     /// turn, no state written, the frame beneath byte-identical afterwards (§4.4).
     #[test]
@@ -1620,7 +1620,7 @@ mod tests {
         let text = open.to_text().join("\n");
         assert!(text.contains("LEVEL SEED"), "the section is there");
         assert!(
-            text.contains(&level.encode_full()),
+            text.contains(&level.encode().expect("a config a run can hold")),
             "…showing this run's own token, in full"
         );
         assert_eq!(s.turn(), before, "looking costs no turn");
