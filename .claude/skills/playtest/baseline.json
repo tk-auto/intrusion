@@ -1,6 +1,6 @@
 {
   "_note": "Baseline metrics snapshot the playtest skill diffs against (\u00a713.2, #140). It is a snapshot of the --bot batch below on the commit named. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself), refresh it with the command below and commit the new snapshot in the same PR. A stale baseline compared silently is the anti-pattern this file exists to avoid.",
-  "captured_at_commit": "5eaacb0+dwell",
+  "captured_at_commit": "cb8e214+search-duration-12",
   "command": "cargo run --release -p intrusion-sim -- --bot --runs 100 --seed 0 --cap 1000",
   "config": {
     "policy": "bot",
@@ -10,39 +10,43 @@
   },
   "summary": {
     "runs": 100,
-    "wins": 41,
-    "captures": 59,
+    "wins": 32,
+    "captures": 68,
     "entombed": 0,
     "timeouts": 0,
-    "win_rate": 0.41,
-    "turns_to_win_mean": 128.4,
-    "turns_to_win_median": 129.0,
-    "detections": 523,
+    "win_rate": 0.32,
+    "turns_to_win_mean": 136.5,
+    "turns_to_win_median": 124.0,
+    "detections": 588,
     "takedowns": 0,
     "bodies_found": 0,
     "usage": {
-      "wait": 1446,
-      "run": 174,
+      "wait": 2059,
+      "run": 204,
       "camouflage": 0,
       "decoy": 0,
       "dephase": 0,
       "autodoors": 0,
       "confusion": 0,
       "takedown": 0,
-      "drag": 0
+      "drag": 0,
+      "pierce_wall": 0,
+      "lockdown": 0
     },
     "usage_share": {
-      "wait": 0.1272,
-      "run": 0.0153,
+      "wait": 0.1825,
+      "run": 0.0181,
       "camouflage": 0.0,
       "decoy": 0.0,
       "dephase": 0.0,
       "autodoors": 0.0,
       "confusion": 0.0,
       "takedown": 0.0,
-      "drag": 0.0
+      "drag": 0.0,
+      "pierce_wall": 0.0,
+      "lockdown": 0.0
     },
-    "diversity": 0.6447,
+    "diversity": 0.6249,
     "alert_peak": null
   }
 }

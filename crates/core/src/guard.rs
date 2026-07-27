@@ -227,12 +227,19 @@ pub(crate) const CERTAIN_RANGE: u32 = 5;
 pub(crate) const GLIMPSE_RANGE: u32 = GUARD_SIGHT_RANGE;
 
 /// How many turns a guard **searches** a lost lead before releasing to patrol
-/// (§7.6 fix 2, **[START] = 8**). When a reactive guard reaches its last-known cell
+/// (§7.6 fix 2, **[START] = 12**). When a reactive guard reaches its last-known cell
 /// and finds nothing it does not snap back to patrol (the old instant give-up);
 /// it sweeps the area for this many turns first — the Lost → Hunted phase, "the good
 /// part" where the hidden player watches cones pass. Bounded, so a guard never
 /// searches forever; long enough that holding still in a cupboard is a real wait.
-pub(crate) const SEARCH_DURATION: u32 = 8;
+///
+/// Tuned up from 8, where a sweep barely crossed the [`SEARCH_RADIUS`] disc once
+/// before releasing: at 12 the guard re-crosses the area, which is what makes waiting
+/// it out a real wait. A `--bot` sweep of 8/12/16/20 over 300 seeds put the knee here
+/// — 12 lengthens the hunt (detections +26%, ~56% more turns spent holding still, bot
+/// win rate 0.41 → 0.34) where 16 and 20 bought little more hunt for a steeper win-rate
+/// drop and runs that ran to the input cap.
+pub(crate) const SEARCH_DURATION: u32 = 12;
 
 /// How far around the last-known cell a searching guard pokes (§7.6, **[START] = 4**):
 /// the radius of the disc its search sweep paces across.
@@ -1828,7 +1835,7 @@ mod tests {
     /// released-watch window, are named constants a later tune must move deliberately.
     #[test]
     fn the_search_constants_are_pinned() {
-        assert_eq!(SEARCH_DURATION, 8, "the [START] search duration");
+        assert_eq!(SEARCH_DURATION, 12, "the [START] search duration");
         assert_eq!(SEARCH_RADIUS, 4, "the [START] search radius");
         assert_eq!(WATCH_DURATION, 20, "the [START] released-watch window");
         assert_eq!(WATCH_RADIUS, 8, "the [START] watch radius");
