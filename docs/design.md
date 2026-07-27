@@ -1167,7 +1167,7 @@ plumbing.
    - **Pillars must come before hideouts** — a pillar is a ready-made ≥2-thick block,
      so a pillar face is valid backing for a recessed cupboard (step 6).
 
-   **Step 5a — Thicken walls.** Thicken roughly **a third** of the interior walls to
+   **Step 5a — Thicken walls.** Thicken roughly **half** of the interior walls to
    two cells (a single **[START]** knob), always growing **into a room, never into a
    corridor** — a corridor is 2–4 wide and eating a lane could single-file it, whereas
    a room is ≥6 and only loses an edge strip (never past the 6×6 minimum). Each eaten
@@ -1178,10 +1178,17 @@ plumbing.
    a throat) and before hideouts.
 6. **Hideouts.** Furnish the hiding-game board with **cupboards recessed into the
    walls**: a wall-line cell with **exactly one floor neighbour (the mouth) and three
-   solid wall neighbours** becomes a hideout — flush with the wall, backed and
-   flanked, so it can be neither walked nor seen *through* to the far side (no cupboard
-   traversal, no peephole). That geometry is what step 5a's two-thick walls and the
-   pillar faces manufacture. Recessing is a **wall → hideout** rewrite, so unlike a
+   solid wall neighbours**, and **solid back diagonals** too, becomes a hideout —
+   flush with the wall and **fully backed**, so it can be neither walked nor seen
+   *through* to the far side (no cupboard traversal, no peephole). That geometry is
+   what step 5a's two-thick walls and the pillar faces manufacture. *Fully backed
+   means the recess sits in a 2×3 block of solid structure: cardinal sides alone leave
+   the two back diagonals unchecked, and where the backing course is only locally thick
+   one of them is floor of the space behind — which §6.1's always-seen touching ring
+   (unqualified for the player, **[SETTLED]**) then hands over the moment they duck in.
+   The rule is enforced where the site is chosen, never by trimming the ring: a
+   placement that should not have been offered is not a reason to special-case a
+   settled guarantee (#361).* Recessing is a **wall → hideout** rewrite, so unlike a
    floor-cell cupboard it cannot pinch a patrol route (a wall and a hideout both block
    pathing); the recessed cell joins the region it opens onto so "which room am I in"
    still answers for a hidden player. Place them **along the corridor network and near
@@ -1190,11 +1197,13 @@ plumbing.
    **[START]** knob) so the facility still reads as a building; the spacing also keeps
    a cupboard's own backing intact, since the two faces of a thickened wall sit one
    cell apart. *(The §10.1a corridor repair recesses **extra** cupboards mid-run —
-   and carves alcoves into one-thick walls — wherever a corridor sightline demands
+   and carves alcoves into one-thick walls whose diagonals already back them —
+   wherever a corridor sightline demands
    one; for those, spacing is a preference, not a gate: breaking the run outranks
-   it, and the three-solid-sides geometry alone keeps every backing intact.)* *(The original rule — "a wall cell with exactly 3 wall neighbours and 1
+   it, and the fully-backed geometry alone keeps every backing intact.)* *(The original rule — "a wall cell with exactly 3 wall neighbours and 1
    empty neighbour, one attempt per room" — harvested only the rare natural pockets,
-   which is what left the old game with no board. Same three-solid-sides geometry now,
+   which is what left the old game with no board. Same recess geometry now, tightened to
+   the full backing above,
    but the backing is **manufactured** by step 5a and the cupboard placed deliberately
    rather than harvested.)*
 7. **Entry/exit and player** go in the **largest room**, at random empty cells.

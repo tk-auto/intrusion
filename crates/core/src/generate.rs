@@ -151,10 +151,19 @@ const HIDEOUT_MIN_SPACING_ROOM: u32 = 10;
 /// Roughly one interior wall run in this many is thickened to two cells before the
 /// cover and hideout passes (§10.1.5, the [`thicken_walls`] pass) **[START]**. A
 /// two-thick wall is the backing a **recessed** cupboard needs (§10.1.6) and reads
-/// as a pilaster/buttress rather than a bare partition. Not every wall — "a third of
-/// them" keeps the facility from turning fortress-thick; the value is the single
-/// named knob. `1` here would thicken every eligible run, higher numbers fewer.
-const WALL_THICKEN_ONE_IN: u32 = 3;
+/// as a pilaster/buttress rather than a bare partition. Not every wall — thickening
+/// them all turns the facility fortress-thick; the value is the single named knob.
+/// `1` here would thicken every eligible run, higher numbers fewer.
+///
+/// Raised from a third to a half with #361, which made cupboards demand **fully**
+/// backed sites (diagonals included, [`recess_site`]) and so retired a whole class of
+/// harvested ones: the T-junction of two one-thick walls, whose back diagonals are the
+/// rooms either side — the peephole itself. Manufactured backing is what replaces
+/// them (§10.1.6: "the backing is **manufactured** by step 5a"), so the knob has to
+/// carry more of the board. Measured over 200 seeds of the 40×40 config: cupboards per
+/// level 18.1 → 21.7, and large corridors carrying one 81% → 88% (29.6 and 98% before
+/// the fix, on sites that leaked).
+const WALL_THICKEN_ONE_IN: u32 = 2;
 
 /// The shortest wall run [`thicken_walls`] will thicken. Below this a thickened
 /// stretch has no flush interior cell (one whose lateral neighbours along the wall
@@ -854,6 +863,7 @@ mod tests {
     use super::*;
     use crate::region::RegionKind;
     use crate::test_support::{open_room, seed_sweep};
+    use crate::vision::{field_of_view_with_peek, FULL_SIGHT_ARC, PLAYER_SIGHT_RANGE};
     use std::collections::HashSet;
 
     /// The bounding box `(width, height)` of a set of cells.
@@ -1852,6 +1862,166 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The cupboard's **mouth**, and the two **back diagonals** behind it — the pair
+    /// of cells the cardinal neighbour scan never examines (#361).
+    fn cupboard_mouth_and_back_diagonals(f: &Facility, c: Cell) -> (Cell, [Cell; 2]) {
+        let mouth = f
+            .neighbours(c)
+            .find(|&n| f.terrain(n) == Some(Terrain::Floor))
+            .expect("a cupboard has exactly one floor mouth");
+        let back = Direction::between(c, mouth)
+            .expect("the mouth is a cardinal neighbour")
+            .opposite();
+        let behind = c.step(back).expect("an interior recess has a backing cell");
+        let [left, right] = back.perpendicular();
+        (
+            mouth,
+            [
+                behind.step(left).expect("an interior backing has flanks"),
+                behind.step(right).expect("an interior backing has flanks"),
+            ],
+        )
+    }
+
+    /// A cupboard is **fully backed — diagonals included** (§10.1.6, #361): it sits in
+    /// a 2×3 block of solid wall, its own cell excepted. Three solid *cardinal* sides
+    /// (pinned by [`every_hideout_is_a_flush_recess`]) leave the two back diagonals
+    /// unexamined, and where the backing course is only locally thick one of them is
+    /// floor of the space behind — which the always-seen touching ring (§6.1
+    /// **[SETTLED]**) then hands to the player as a peephole into a room the run had
+    /// not earned (§11.5a).
+    #[test]
+    fn a_cupboard_is_backed_on_its_diagonals_too() {
+        for seed in seed_sweep(200) {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let f = layout.facility();
+            for c in hideout_cells(&layout) {
+                let (_, diagonals) = cupboard_mouth_and_back_diagonals(f, c);
+                for d in diagonals {
+                    assert_eq!(
+                        f.terrain(d),
+                        Some(Terrain::Wall),
+                        "seed {seed}: cupboard {c:?} has a hollow back diagonal at {d:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Ducked into a cupboard, the player sees nothing their **mouth** cannot already
+    /// see, bar solid wall faces — layout, which §11.5a lets them have. The recess is
+    /// no window of its own: what it shows is the view from the cell they stepped in
+    /// from, narrowed by the mouth.
+    ///
+    /// Cast at **every** facing with the widest arc (the 360° of a waiting turn, §8.3)
+    /// and through [`field_of_view_with_peek`], so this covers the auto-peek as well as
+    /// the ring — including the facings where the lean origin would fall *inside* the
+    /// backing or flank wall. It is the assertion, not the argument, that settles those
+    /// (#361).
+    #[test]
+    fn a_cupboard_shows_no_more_than_its_mouth_does() {
+        for seed in seed_sweep(200) {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let f = layout.facility();
+            for c in hideout_cells(&layout) {
+                let (mouth, _) = cupboard_mouth_and_back_diagonals(f, c);
+                let from_mouth: HashSet<Cell> = Direction::ALL
+                    .into_iter()
+                    .flat_map(|facing| {
+                        field_of_view_with_peek(
+                            f,
+                            mouth,
+                            facing,
+                            FULL_SIGHT_ARC,
+                            PLAYER_SIGHT_RANGE,
+                        )
+                        .cells()
+                        .collect::<Vec<_>>()
+                    })
+                    .collect();
+                for facing in Direction::ALL {
+                    let fov =
+                        field_of_view_with_peek(f, c, facing, FULL_SIGHT_ARC, PLAYER_SIGHT_RANGE);
+                    for seen in fov.cells() {
+                        let solid = f.terrain(seen).is_some_and(|t| t.blocks_sight());
+                        assert!(
+                            solid || from_mouth.contains(&seen),
+                            "seed {seed}: cupboard {c:?} facing {facing:?} sees {seen:?}, \
+                             which its mouth {mouth:?} cannot"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// [`recess_site`] reads the **back diagonals**, not just the cardinal sides
+    /// (#361). The fixture is the exact geometry that leaked: a two-course wall whose
+    /// second course is one cell short at each end, so a candidate mid-course is fully
+    /// backed while the one over the short end has a room cell on a back diagonal —
+    /// same three solid sides, one peephole.
+    ///
+    /// ```text
+    ///   . . . . . . .      row 3 — corridor floor (the mouths)
+    ///   # # # # # # #      row 4 — the wall line the cupboards recess into
+    ///   . # # # # # .      row 5 — the backing course, one short at each end
+    ///   . . . . . . .      row 6 — room floor beyond
+    /// ```
+    #[test]
+    fn a_recess_site_needs_its_back_diagonals_too() {
+        let mut f = Facility::walled_box(9, 9);
+        for x in 1..8 {
+            f.set_terrain(x, 4, Terrain::Wall);
+        }
+        for x in 2..7 {
+            f.set_terrain(x, 5, Terrain::Wall);
+        }
+        // Mid-course: three solid sides and both back diagonals solid.
+        assert_eq!(recess_site(&f, Cell::new(4, 4)), Some(Cell::new(4, 3)));
+        // Over the short end: still three solid sides, but the back diagonal (1,5) is
+        // room floor — the leak. Rejected now, accepted before #361.
+        assert_eq!(f.terrain(Cell::new(1, 5)), Some(Terrain::Floor));
+        assert_eq!(recess_site(&f, Cell::new(2, 4)), None);
+        // Extend the backing course under it and the same cell qualifies.
+        f.set_terrain(1, 5, Terrain::Wall);
+        assert_eq!(recess_site(&f, Cell::new(2, 4)), Some(Cell::new(2, 3)));
+    }
+
+    /// The flight path is where cover is needed (§10.1a/§7.6), so a **large** corridor
+    /// — one long enough for a chase to play out in — nearly always carries a cupboard.
+    /// Pinned as a budget over the sweep rather than per seed: the sightline rule is
+    /// what *guarantees* counterplay on a long run (a table or an obstruction also
+    /// count), and this is the stronger hiding-game property riding above it.
+    ///
+    /// Measured 88% when #361 tightened the site test and [`WALL_THICKEN_ONE_IN`] rose
+    /// to compensate (81% at the old thickening rate, 98% before the fix — on sites
+    /// that were peepholes). Budgeted at 80%, so an erosion of the board shows up here
+    /// rather than in play.
+    #[test]
+    fn large_corridors_nearly_always_carry_a_cupboard() {
+        let (mut large, mut served) = (0u32, 0u32);
+        for seed in seed_sweep(200) {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let (f, regions) = (layout.facility(), layout.regions());
+            for (_, region) in regions.regions() {
+                if region.kind() != RegionKind::Corridor || region.cells().len() < 24 {
+                    continue;
+                }
+                large += 1;
+                served += u32::from(
+                    region
+                        .cells()
+                        .iter()
+                        .any(|&c| f.terrain(c) == Some(Terrain::Hideout)),
+                );
+            }
+        }
+        assert!(
+            served * 10 >= large * 8,
+            "only {served}/{large} large corridors carry a cupboard — the flight paths are going bare"
+        );
     }
 
     /// A corridor-facing cupboard is proof the thicken pass (§10.1.5) did structural

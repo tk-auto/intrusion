@@ -220,6 +220,12 @@ pub(super) fn place_pillar(
 /// minimum; a **corridor** back is a single-cell dent in the space behind — a
 /// §10.1a squeeze, not the lane-eating thicken §10.1.5 forbids, and the
 /// sever/split guards keep it a dent. Returns `back`.
+///
+/// Walling `back` makes the recess solid *behind*, not on its **back diagonals**, and
+/// those must be solid too or the finished cupboard is a peephole into the space
+/// behind (#361, [`recess_site`]). They are therefore required to be wall already: an
+/// alcove eats one cell of the space behind and no more, so a pocket that would need
+/// its diagonals carved as well is left to the pillar and buttress fallbacks instead.
 pub(super) fn alcove_site(
     facility: &Facility,
     regions: &RegionGraph,
@@ -245,6 +251,12 @@ pub(super) fn alcove_site(
     }
     let back = back?;
     if walls != 2 {
+        return None;
+    }
+    if !back_diagonals(wall, mouth)?
+        .into_iter()
+        .all(|d| facility.terrain(d) == Some(Terrain::Wall))
+    {
         return None;
     }
     // The walled-up cell must also not be another cupboard's mouth (walling it
