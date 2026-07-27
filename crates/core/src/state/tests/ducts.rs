@@ -21,6 +21,12 @@ use crate::test_support::open_room;
 ///   ...
 /// ```
 pub(super) fn duct_world() -> State {
+    duct_world_with(Vec::new())
+}
+
+/// [`duct_world`] with `guards` posted in the room below — the fixture the tests that
+/// need something for the crawler to perceive (or fail to) build on.
+pub(super) fn duct_world_with(guards: Vec<crate::Guard>) -> State {
     let mut f = Facility::walled_box(9, 9);
     for x in 1..=7 {
         f.set_terrain(x, 1, Terrain::Wall); // the wall band the duct hides in
@@ -38,7 +44,7 @@ pub(super) fn duct_world() -> State {
         layout,
         Cell::new(2, 2),
         Direction::North,
-        Vec::new(),
+        guards,
         Vec::new(),
         Cell::new(7, 7),
     )

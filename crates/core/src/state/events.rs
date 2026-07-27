@@ -218,6 +218,25 @@ pub enum Event {
     /// it* — walk to a wall, step off the corner, find a thinner one — and a player
     /// who is only ever told "no" learns the rule slowly and by accident.
     BoreRefused { reason: BoreRefusal },
+    /// Confusion fired (§8.3/#325): `blast` went off, and the `caught` guards standing
+    /// inside it are dazed for [`CONFUSION_DAZE_TURNS`](crate::CONFUSION_DAZE_TURNS)
+    /// from now. A turn-costing action (§4.4), pushed alongside the activation.
+    ///
+    /// It carries the count because a 45-turn lockout is the game's most expensive
+    /// press and the player has to know what it bought — the frozen guards may all be
+    /// behind walls, and a blast the board cannot show is one the near line must
+    /// (§11.7). It carries the `blast` itself, rather than a recipe for redrawing one,
+    /// so the footprint the flash paints is the very object the daze was computed
+    /// from (#308/#324).
+    ConfusionFired { blast: EffectArea, caught: u32 },
+    /// A Confusion activation was **refused** because the blast would have caught
+    /// nobody (§8.3/#325) — free and nothing changed, like a wall bump, and spending
+    /// neither the turn nor the cooldown.
+    ///
+    /// Fair rather than fiddly because the blast is clamped inside the guard sense:
+    /// every guard it could have caught is one the player was already shown, so this
+    /// refuses only a press that was going to buy nothing.
+    ConfusionMissed,
 }
 
 impl Event {
@@ -250,6 +269,8 @@ impl Event {
             | Event::RematerializeRefused
             | Event::WallBored { .. }
             | Event::BoreRefused { .. }
+            | Event::ConfusionFired { .. }
+            | Event::ConfusionMissed
             | Event::DecoyDied { .. } => Category::Owned,
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it
