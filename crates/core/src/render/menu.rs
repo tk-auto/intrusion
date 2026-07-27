@@ -133,13 +133,13 @@ const SEED_FOOTER: &str = "Esc or [back] returns to the menu";
 /// The heading and the two instruction lines of the seed prompt
 /// (§13.1/#110/#245/#333). The second line says what a token *looks* like, so a
 /// player who has one in hand can tell at a glance whether they have the whole thing
-/// — it is a fixed twelve letters, and a truncated paste is the likely mistake. It
+/// — it is a fixed 18 letters, and a truncated paste is the likely mistake. It
 /// replaces the bare-seed promise that used to stand here: a number named a preset
 /// rather than a run, and no longer decodes at all (#333).
 const SEED_HEADING: &str = "SEED PLAY";
 const SEED_LINES: [&str; 2] = [
     "type or paste a level-seed token",
-    "twelve letters, like bcwdrhliqsmm",
+    "18 letters, like prbjdokbxcqgjnrnco",
 ];
 
 /// The tag drawn after an entry that is not built yet (§14 v2/v3) — short, so the

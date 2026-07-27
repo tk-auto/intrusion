@@ -1,6 +1,6 @@
 //! Level sharing (§13.1 / §12.4 / #110 / #244 / #245): **where a level comes from and
 //! where its token goes**, so a specific interesting level can be handed around and
-//! replayed exactly. "Try `bcwdrhliqsmm`, it's brutal" becomes a real handoff — the
+//! replayed exactly. "Try `prbjdokbxcqgjnrnco`, it's brutal" becomes a real handoff — the
 //! player types the token into the menu's seed prompt (or opens a `…#seed=<token>`
 //! link) and gets the **same** run the token names, because the shell and the headless
 //! sim boot the identical path ([`start_level`], §13.2).

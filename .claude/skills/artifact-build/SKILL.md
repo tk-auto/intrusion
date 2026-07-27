@@ -143,7 +143,7 @@ so a given level reproduces the **same run the bot played** — how a playtest s
 (`sim --bot` numbers a batch `S, S+1, …`; `/playtest` flags suspicious ones) becomes
 a level the user can play by hand. A "level" is the whole reproducible config, not
 just a seed: `(seed, modifiers, abilities)` compose to one **level-seed token**
-(`LevelSeed::encode`, #245/#333) — twelve lowercase letters, one form for every
+(`LevelSeed::encode`, #245/#333) — 18 lowercase letters, one form for every
 config, carrying the modifier set and the ability loadout along with the seed. There
 are two channels, split by where the build runs.
 
@@ -158,7 +158,7 @@ then boots that exact level with no URL and no typing:
 # Twelve letters, straight from `LevelSeed::encode` (#333).
 python3 .claude/skills/artifact-build/assemble.py \
   --dist "$SCRATCH/dist" --index web/index.html \
-  --out "$SCRATCH/intrusion-8371.html" --seed bcwdrhliqsmm
+  --out "$SCRATCH/intrusion-8371.html" --seed prbjdokbxcqgjnrnco
 ```
 
 A bare number is **not** accepted (#333): it named the build's quick-play preset
@@ -176,7 +176,7 @@ token and all.
 
 **The Pages deploy → a `?seed=<token>` / `#seed=<token>` URL.** The canonical
 `ci`/`pages` build has no baked level, and there the URL is the real document URL, so
-`https://tk-auto.github.io/intrusion/#seed=bcwdrhliqsmm` boots that level. The token
+`https://tk-auto.github.io/intrusion/#seed=prbjdokbxcqgjnrnco` boots that level. The token
 is the only accepted form (#333) — a bare `?seed=8371` no longer decodes and falls to
 the menu. Hand this form over only for the live Pages URL, never for an artifact.
 
@@ -193,7 +193,7 @@ A build can be baked with **debug switches** — playtest-only changes to what i
 ```
 python3 .claude/skills/artifact-build/assemble.py \
   --dist "$SCRATCH/dist" --index web/index.html \
-  --out "$SCRATCH/intrusion-8371-reveal.html" --seed bcwdrhliqsmm \
+  --out "$SCRATCH/intrusion-8371-reveal.html" --seed prbjdokbxcqgjnrnco \
   --debug reveal --title intrusion-244-8371-reveal-1
 ```
 

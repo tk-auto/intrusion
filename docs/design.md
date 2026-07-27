@@ -2206,37 +2206,45 @@ config: same seed + **same modifiers** + same inputs → identical run. It is pl
 `Copy` data threaded through the boot alongside the seed, so — with the ability
 **loadout** (§8.3/#244), the third piece — a run's identity is now
 `(seed, modifiers, abilities, inputs)`. These three pieces compose to one
-**level-seed token** (`LevelSeed`, #245/#333): **twelve lowercase letters**, e.g.
-`bcwdrhliqsmm`, extending the #110/#197 carrier rather than inventing a second
+**level-seed token** (`LevelSeed`, #245/#333): **eighteen lowercase letters**, e.g.
+`prbjdokbxcqgjnrnco`, extending the #110/#197 carrier rather than inventing a second
 scheme. Fixed width, so a wrong length is rejected before anything is parsed;
 all-alphabetic, so there is no `0`/`O` to misread; and one form, so the panel that
 displays a run and the link that shares it cannot disagree about what it is. A token
 that does not decode falls back to a fresh run, never a bricked page. One boot path
-(`start_level`) turns a `LevelSeed` into a running state for the web shell, the
-replay viewer, and the headless sim alike, and the one token format is what saves
-(§12.5) and the replay Artifact build (#197 slice C) share so they cannot diverge.
+(`start_level`) turns a `LevelSeed` into a running state for the web shell, the replay
+viewer, and the headless sim alike, and the one token format is what saves (§12.5) and
+the replay Artifact build (#197 slice C) share so they cannot diverge.
 
-**A number is not a token** (#333, superseding #328). A bare `?seed=8371` named
-*this build's quick-play preset applied to 8371* — not a run — so every shared link
-silently re-resolved whenever the preset moved. It did move: when the Vision passive
-joined the tech pool (#286) the seeded draw re-ran over a changed pool, and every
-link shared before it began booting a different loadout with nothing saying so. So
-the token carries the config explicitly, and a **magic** folded into its checksum —
-the format version, the roster sizes, *and* the caps — makes a roster change fail
-loudly instead. The bare form is gone as an **input** too, which is the cost worth
-stating: "try seed 8371" no longer works, and pre-#333 links stop decoding. They were
-already booting the wrong run; failing loudly is the better of the two.
+> **The format is specified in [`docs/level-seed-token.md`](level-seed-token.md)** —
+> field layout, the permanent-slot discipline, the integrity argument, and the sizing
+> trade-offs. It is a spec rather than design notes: read it before changing anything
+> that a token's meaning depends on. What follows here is only what the *design* turns
+> on.
 
-Inside, the token is a mixed-radix chain — the seed (32 bits, so every run the game
-rolls must be narrowed into that field), the innate abilities as a bitset, the intel
-gate, then the modifiers and the held tech each as a **count plus a combination
-index** over their catalogue, then the check. Held sets are combination indexes
-rather than bitsets so the token's length tracks the **cap** (§8.3's
-`MAX_TECH_HELD`) rather than the size of the catalogue: today the two cost the same
-twelve characters, but at a hundred abilities it is seventeen characters against
-ninety-four. That makes the caps part of the format — which is why they are in the
-magic. **[START]** on the widths: twelve characters, a 32-bit seed and a 12-bit check
-are a chosen balance, not a law — a character buys about five check bits.
+**A number is not a token** (#333, superseding #328). A bare `?seed=8371` named *this
+build's quick-play preset applied to 8371* — not a run — so every shared link silently
+re-resolved whenever the preset moved. It did move: when the Vision passive joined the
+tech pool (#286) the seeded draw re-ran over a changed pool, and every link shared
+before it began booting a different loadout with nothing saying so. The bare form is
+gone as an **input** too, which is the cost worth stating: "try seed 8371" no longer
+works, and pre-#333 links stop decoding. They were already booting the wrong run;
+failing loudly is the better of the two. Numeric seeds remain a *programmatic*
+concept — `LevelSeed::sim(n)` and §13.2's sweeps never touch the string.
+
+**The format is sized for the roster it does not have yet.** Abilities and modifiers
+are carried as combination indexes over **256 permanent slots**, not over the entries
+that exist today, and the caps (§8.3's three tech, five modifiers) are what the token's
+length tracks rather than the size of the catalogue. So the roster can grow to a
+hundred entries without a single shared link breaking — adding one fills the next slot
+and changes no radix. That is the property the previous carrier lacked, and #286 is
+what its absence cost. It buys a discipline in exchange: **slot numbers are permanent**,
+a retired entry leaves a tombstone, and nothing may ever be renumbered.
+
+**[START]** on the sizing: eighteen characters, a 17-bit seed (131,072 facilities), and
+the ~1-in-3,000 rejection that the leftover space provides. The two trade one-for-one —
+every bit spent on the seed is a bit taken from integrity — and a character is worth
+26× of whichever you want more of.
 
 **Debug modifiers are not level modifiers.** A separate `DebugModifiers` value
 carries playtest-only switches over **what the player perceives** — today one: *"see

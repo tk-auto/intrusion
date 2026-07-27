@@ -67,7 +67,7 @@ not quick play's stricter one — and not just the geometry:
 
 ```
 $ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
-{"seed":"fiymfhjzyytr","inputs":"NNE+rN..SS-r…"}
+{"seed":"nfdxttsytrdorexcqn","inputs":"NNE+rN..SS-r…"}
 seed 42: win in 214 turns, 187 inputs          # (human summary, on stderr)
 ```
 
@@ -79,7 +79,7 @@ The `inputs` string is the script notation above, so it feeds straight back:
 `--script "$(…)" --seed 42 --runs 1` reproduces the run byte-for-byte, and the
 same pair is what the web replay-viewer plays and what an Artifact bakes in
 (#197/#245). The `seed` field is a level-seed token the core decodes
-(`LevelSeed::decode`) — one twelve-letter form carrying the captured preset, so a
+(`LevelSeed::decode`) — one 18-letter form carrying the captured preset, so a
 replay is never played back against a config that drifted underneath it. stdout carries only the machine-readable pair (the summary goes to
 stderr), so it pipes cleanly into a consumer. The round-trip is asserted
 natively in `src/replay.rs` — capturing a bot run and replaying the emitted

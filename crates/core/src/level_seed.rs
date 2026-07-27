@@ -22,50 +22,43 @@
 //!
 //! # The token (#333)
 //!
-//! Twelve characters, `a`–`z`, nothing else: `xtrzghtfqmvd`. Fixed width, so a
-//! wrong length is rejected before anything is parsed; all-alphabetic, so there is
-//! no `0`/`O` or `1`/`l` to misread; unreserved throughout, so it drops straight
-//! into the #110 seed surface and the #197 replay carrier with no escaping.
+//! Eighteen characters, `a`–`z`, nothing else: `prbjdokbxcqgjnrnco`. Fixed width, so
+//! a wrong length is rejected before anything is parsed; all-alphabetic, so there is
+//! no `0`/`O` or `1`/`l` to misread; unreserved throughout, so it drops straight into
+//! the #110 seed surface and the #197 replay carrier with no escaping.
+//!
+//! **The format is specified in [`docs/level-seed-token.md`]** — the field layout,
+//! the slot discipline, the integrity argument and the sizing trade-offs live there,
+//! referenced from §12.6. What follows is only what a reader of *this module* needs.
 //!
 //! The token is a **mixed-radix chain**: each field is pushed as a digit
-//! (`value = value * radix + digit`), the whole value is scrambled, and the result
-//! is written in base 26. Digits pop off in reverse, which is why a field whose
-//! radix depends on another is pushed *first* — the count digits are read before
-//! the combination indexes they size. In push order:
+//! (`value = value * radix + digit`), the whole value is scrambled ([`SCRAMBLE`]),
+//! and the result is written in base 26. Four fields, every radix a constant:
 //!
-//! | Field | Radix |
-//! |---|---|
-//! | seed | `2^`[`SEED_BITS`] |
-//! | innate abilities | `2^`[`AbilityId::INNATE`]`.len()` — a bitset; the innate set is not capped |
-//! | intel gate | [`GATE_VARIANTS`] |
-//! | modifier combination | `C(`[`MODIFIER_TOGGLES`]`, count)` |
-//! | modifier count | [`MODIFIER_CAP`]` + 1` |
-//! | tech combination | `C(`[`AbilityId::TECH`]`.len(), count)` |
-//! | tech count | [`AbilityId::MAX_TECH_HELD`]` + 1` |
-//! | check | `2^`[`CHECK_BITS`] |
+//! | Field | Radix | Bits |
+//! |---|---|---|
+//! | seed | `2^`[`SEED_BITS`] | 17.00 |
+//! | intel gate | [`GATE_VARIANTS`] | 1.58 |
+//! | modifiers active | [`MODIFIER_SPACE`] — any ≤[`MODIFIER_CAP`] of [`SLOT_CAPACITY`] slots | 33.07 |
+//! | tech held | [`TECH_SPACE`] — any ≤[`AbilityId::MAX_TECH_HELD`] of [`SLOT_CAPACITY`] slots | 21.42 |
 //!
-//! **Held sets are combination indexes, not bitsets.** A bitset costs one bit per
-//! catalogue entry whether set or not, so its length tracks the *roster*; a
-//! combination index costs `log2(C(n, k))`, so its length tracks the *cap* and grows
-//! only logarithmically in the roster. At today's sizes the two are the same twelve
-//! characters — the seed dominates, and the config is under twelve bits either way —
-//! so this buys nothing yet. It is here because retrofitting it later is a format
-//! break, and because the cap is the thing that is actually settled (§8.3).
+//! The innate set is **not carried**: §8.3 makes it always held, so it is restored on
+//! decode rather than spelled out.
 //!
-//! **The counts are stored, and cost nothing.** Because a combination digit's radix
-//! is `C(n, count)`, the chain's total is exactly `Σₖ C(n, k)` — identical to leaving
-//! the count implicit. So the count is spelled out in the token and asserted on the
-//! way back in, for free.
+//! Three properties carry the design, and each has a test named for it:
 //!
-//! **The magic is what makes a roster change loud.** [`MAGIC`] folds the format major
-//! version, the roster sizes, *and the caps* into the check field. The caps have to
-//! be in there: under a combination encoding they are radices, so moving
-//! [`AbilityId::MAX_TECH_HELD`] would otherwise reinterpret every token ever shared.
-//! This is not hypothetical — it already happened once. When the Vision passive
-//! joined the tech pool (#286, six tech becoming seven entries in `ALL`), every
-//! previously shared `#seed=8371` link began booting a *different* loadout, because
-//! the seeded draw re-ran over a pool that had changed underneath it and the carrier
-//! had no way to notice. A token from the wrong roster now fails to decode instead.
+//! - **Slots are permanent, and there are more of them than entries.** A held set is
+//!   a combination index over [`SLOT_CAPACITY`] reserved positions, not over today's
+//!   roster, so adding the seventh tech fills slot 6 and *every token ever shared
+//!   keeps working*. That is the fix for the #286 break, in which the loadout was
+//!   re-derived over a pool that had changed size and every link silently began
+//!   booting something else.
+//! - **The held-set encoding is dense** ([`SlotSet::ordinal`]). Its cost tracks the
+//!   *cap* rather than the roster: `log2(C(n, k))` instead of a bit per entry, which
+//!   is what makes 256 slots affordable at all — a bitset would need 51 characters.
+//! - **There is no checksum field.** Integrity comes from the unused range
+//!   ([`rejection_rate`]) plus the scramble, which is audited to catch every
+//!   single-character slip and every transposition *with certainty*.
 //!
 //! **There is no bare-seed form, in or out.** A decimal number named *this build's
 //! quick-play preset applied to that number*, not a run — which is how the #286 break
@@ -77,6 +70,8 @@
 //!
 //! A token that does not decode is `None`, which the seed surface and the replay
 //! carrier turn into a fresh run — never a bricked page (#110/#197).
+//!
+//! [`docs/level-seed-token.md`]: https://github.com/tk-auto/intrusion/blob/main/docs/level-seed-token.md
 //!
 //! # One boot path
 //!
@@ -114,90 +109,185 @@ const LOADOUT_STREAM_SALT: u64 = 0x_10AD_0000_10AD_0000;
 /// The token's fixed width in characters. Fixed rather than variable so a wrong
 /// length is rejected before a single digit is parsed, and so a shared link is the
 /// same shape whatever run it names.
-pub const TOKEN_LEN: usize = 12;
+///
+/// **One length per format version**, and that is an invariant rather than a
+/// coincidence (see [`FORMAT_MAJOR`]). The length is what tells versions apart, so a
+/// future version that reserved more slots must also grow — the tempting move of
+/// narrowing the seed to keep the length would make old tokens decodable under the
+/// new rules, which is precisely the silent re-resolution this format exists to stop.
+pub const TOKEN_LEN: usize = 18;
 
 /// The token's alphabet size — `a`–`z`, the "uncased alpha" the format is built on.
 const ALPHABET: u128 = 26;
 
 /// Every string the format can spell: `26^`[`TOKEN_LEN`]. The scramble is a
 /// bijection over exactly this range, so every token maps back to *some* value —
-/// validity is then decided by the check field and the residue, not by the encoding.
+/// validity is then decided by the range and structure checks, not by the encoding.
 const TOKEN_SPACE: u128 = ALPHABET.pow(TOKEN_LEN as u32);
 
-/// The format's major version, folded into [`MAGIC`]. Bump it for any change to the
-/// field list or their order; the roster sizes and caps below are folded in
-/// separately, so *those* need no manual bump.
-const FORMAT_MAJOR: u64 = 2;
+/// The format's major version. It is **not carried in the token**: it is folded into
+/// [`SCRAMBLE`], so a token written under another version unscrambles to noise and
+/// fails the range check. That costs no bits at all, and it is why there is no
+/// checksum field here — see [`rejection_rate`].
+///
+/// It also *implies* [`SLOT_CAPACITY`], which is the one number a decoder would need
+/// to read a foreign token. A future version wanting to keep old links working keeps
+/// this version's constants in a table and tries each in turn, newest first;
+/// [`TOKEN_LEN`] tells them apart before any arithmetic runs.
+const FORMAT_MAJOR: u64 = 1;
+
+/// How many **slots** the format reserves for abilities and for modifiers — the
+/// number the token is sized against, not the number that exist today (six tech and
+/// four modifier toggles, as of writing).
+///
+/// This is the whole reason the format can outlive its own roster. Every ability and
+/// every modifier owns a **permanent slot number**, and a held set is a combination
+/// index over these 256 positions. Adding the seventh tech fills slot 6: no radix
+/// moves, no token changes meaning, and **every link ever shared keeps working**.
+/// That is what the previous format could not do — when the Vision passive joined the
+/// pool (#286) every shared link silently began booting a different loadout.
+///
+/// The discipline it buys is the discipline it costs: **slot numbers are permanent**.
+/// A retired ability leaves a tombstone slot rather than freeing it, and nothing may
+/// ever be renumbered. Reserving 256 up front is what makes that affordable — a
+/// target of ~100 live entries leaves room for the churn.
+const SLOT_CAPACITY: usize = 256;
+
+/// The most modifier toggles active at once. Unlike the ability cap this is a
+/// *format* promise rather than a rule §12.6 enforces today, so it is the one number
+/// here that the game must be held to: [`modifier_slots`] refuses to encode a config
+/// that exceeds it. Five leaves one for each of §12.6's three composing sources with
+/// room over for a mode that bundles.
+const MODIFIER_CAP: usize = 5;
 
 /// The seed field's width. Every run the game can create must fit here — see
 /// [`LevelSeed::narrow_seed`], which is how an entropy source is brought into range.
-/// Four billion facilities is far past what a player can exhaust, and the width is
-/// what keeps the token to twelve characters rather than nineteen.
-pub const SEED_BITS: u32 = 32;
+///
+/// **[START]** at 17 bits — 131,072 facilities. It is a balance, not a law: every bit
+/// spent here is a bit taken from [`rejection_rate`], and the two trade one-for-one.
+/// At 17 the first repeated facility is expected past ~450 runs, and rejection sits
+/// near 1 in 3,000; a bit either way halves one to double the other.
+pub const SEED_BITS: u32 = 17;
 
 /// The seed field's radix.
 const SEED_SPACE: u64 = 1 << SEED_BITS;
 
-/// The check field's width. Twelve bits reject ~99.98% of tokens from a stale roster
-/// or a slipped keystroke. A character buys about five check bits, and twelve is the
-/// point where one mistyped letter goes from 1-in-128 slipping through to 1-in-4096.
-///
-/// It is sized for **typos and stale formats**, not for tampering. Tamper resistance
-/// is not available here at any width: the key would live in the wasm and can be read
-/// out, so a longer field buys obfuscation, not security. Nor is it needed — forging
-/// a token yields a run with abilities the player could have drawn anyway, in a game
-/// with permadeath and no meta-progression (§2). If a daily challenge ever wants
-/// verification, it belongs server-side against a submitted replay (§12.4), not here.
-const CHECK_BITS: u32 = 12;
-
-/// The check field's radix.
-const CHECK_SPACE: u64 = 1 << CHECK_BITS;
-
 /// How many [`IntelGate`] variants there are — an exact radix, not a bitfield padded
-/// to two bits, so the unused fourth code that used to need rejecting cannot exist.
+/// to two bits, so there is no unused code to reject.
 const GATE_VARIANTS: u64 = 3;
 
-/// How many boolean modifier toggles the token carries — every [`LevelModifiers`]
-/// field except the gate.
-const MODIFIER_TOGGLES: usize = 4;
+/// The largest held set the token carries, over both kinds — the width of a
+/// [`SlotSet`]'s backing array.
+const MAX_HELD_SLOTS: usize = if MODIFIER_CAP > AbilityId::MAX_TECH_HELD {
+    MODIFIER_CAP
+} else {
+    AbilityId::MAX_TECH_HELD
+};
 
-/// The most toggles that can be active at once. Today that is *all* of them: §12.6's
-/// three modifier sources compose harder-ward and nothing bounds the result, so the
-/// token must be able to say "everything on". It is named anyway because it is a
-/// radix: if a cap ever lands, tightening this shrinks the token, and [`MAGIC`]
-/// makes every token written under the old cap fail rather than mis-read.
-const MODIFIER_CAP: usize = MODIFIER_TOGGLES;
+/// How many distinct held sets of at most [`AbilityId::MAX_TECH_HELD`] slots exist —
+/// the radix of the tech field.
+const TECH_SPACE: u64 = sets_up_to(AbilityId::MAX_TECH_HELD);
+
+/// How many distinct held sets of at most [`MODIFIER_CAP`] slots exist — the radix of
+/// the modifier field, and the token's largest single field by some way.
+const MODIFIER_SPACE: u64 = sets_up_to(MODIFIER_CAP);
+
+/// Everything the token can say: the product of every field's radix. A decoded value
+/// at or above this is one the format cannot have produced, and that range check is
+/// the whole integrity mechanism — see [`rejection_rate`].
+const PAYLOAD_SPACE: u128 =
+    SEED_SPACE as u128 * GATE_VARIANTS as u128 * MODIFIER_SPACE as u128 * TECH_SPACE as u128;
+
+// The format's own invariants, checked at build time rather than in a test — a token
+// that did not fit its characters, or a roster that had outgrown its reserved slots,
+// is not a failure worth discovering from a red suite.
+const _: () = {
+    assert!(
+        PAYLOAD_SPACE < TOKEN_SPACE,
+        "the payload does not fit TOKEN_LEN characters — the token needs another one",
+    );
+    assert!(
+        rejection_rate() >= 1000,
+        "too little of the token space is left over to reject a bad token with",
+    );
+    assert!(
+        AbilityId::TECH.len() < SLOT_CAPACITY && MODIFIER_FIELDS < SLOT_CAPACITY,
+        "the roster has outgrown its reserved slots — that is a new format version, \
+         never a quiet bump of SLOT_CAPACITY, which would rewrite every token shared",
+    );
+    assert!(
+        AbilityId::MAX_TECH_HELD <= MAX_HELD_SLOTS && MODIFIER_CAP <= MAX_HELD_SLOTS,
+        "a cap exceeds the SlotSet it is carried in",
+    );
+};
+
+/// One in how many arbitrary tokens decodes to *something* — the format's integrity,
+/// and a plain consequence of how much of [`TOKEN_SPACE`] the payload leaves unused.
+///
+/// **There is no checksum field, deliberately.** A check field and unused range are
+/// interchangeable: the scramble is a bijection, so an arbitrary token lands on a
+/// uniform value, and exactly [`PAYLOAD_SPACE`] of [`TOKEN_SPACE`] values are valid
+/// whatever fraction of the space a check field occupies. Spending bits on one would
+/// buy nothing that spending them on length does not.
+///
+/// This figure covers **arbitrary** corruption — a random string, or a token from
+/// another format version. The errors a human actually makes are covered far better:
+/// a wrong length is rejected outright, and every single-character slip and every
+/// transposition is rejected *with certainty*, by construction of [`SCRAMBLE`].
+const fn rejection_rate() -> u128 {
+    TOKEN_SPACE / PAYLOAD_SPACE
+}
+
+/// A nudge folded into [`SCRAMBLE`]'s derivation, to steer it onto a constant that
+/// passes the corruption audit.
+///
+/// Five is not arbitrary and is not cosmetic: the first five derivations each leave
+/// some single-character slip or transposition undetectable. See [`SCRAMBLE`] — and
+/// if a change here ever fails `the_scramble_catches_every_realistic_slip`, bump this
+/// number until it passes rather than weakening the test.
+const SCRAMBLE_NONCE: u64 = 5;
 
 /// A fixed multiplier applied to the packed value before it is written in base 26,
 /// and undone by [`UNSCRAMBLE`] on the way back. Coprime to [`TOKEN_SPACE`]
-/// (`2^12 · 13^12`), so it is a bijection over the whole range.
+/// (`2^18 · 13^18`), so it is a bijection over the whole range.
 ///
-/// Without it the seed sits in the high digits and consecutive seeds share their last
-/// five characters — the token would look enumerable, and read as broken.
-const SCRAMBLE: u128 = 44_668_976_583_019_541;
+/// It does **three** jobs, and only the first is obvious.
+///
+/// 1. It stops consecutive seeds sharing a visible prefix. Without it the seed sits
+///    in the high digits and neighbouring runs differ only in their last characters,
+///    which reads as broken even though it decodes.
+/// 2. It carries [`MAGIC`], and so the format version. A token from another version
+///    unscrambles under a different constant, lands somewhere pseudo-random, and
+///    fails the range check — no version field, no checksum, no bits.
+/// 3. **It is what detects typos**, which is the part worth stating loudly. A
+///    corrupted token decodes to `value + δ`, where δ is fixed by which characters
+///    changed; the corruption is caught exactly when δ carries the value out of
+///    [`PAYLOAD_SPACE`]. For a badly chosen multiplier hundreds of single-character
+///    slips leave δ small enough to stay in range and slip through silently. This one
+///    is audited: all 8,516 distinct single-character and transposition deltas are
+///    carried out of range, so those corruptions are caught **with certainty** rather
+///    than at [`rejection_rate`].
+const SCRAMBLE: u128 = scramble_from(MAGIC, SCRAMBLE_NONCE);
 
 /// The modular inverse of [`SCRAMBLE`] over [`TOKEN_SPACE`]. Pinned rather than
-/// computed, and asserted in the tests.
-const UNSCRAMBLE: u128 = 45_103_698_764_276_541;
+/// computed, and asserted in the tests — a wrong inverse would corrupt every token in
+/// a way no round-trip test could show, since encode and decode would agree with each
+/// other while agreeing with nothing already shared.
+const UNSCRAMBLE: u128 = 12_520_201_768_539_098_941_729_755;
 
-/// The format fingerprint folded into every check field: the major version, the
-/// roster sizes, and the **caps**. Any of them moving invalidates every token written
-/// under the old shape — which is the point (see the module docs on #286).
-///
-/// It is computed off the catalogue rather than written down, so adding an ability or
-/// a modifier changes it without anyone remembering to.
+/// The format fingerprint: the major version, the slot capacity, the caps, and the
+/// field widths. Everything whose movement would change what a token *means* — and
+/// deliberately **not** the live roster sizes, which are free to grow into the
+/// reserved slots without invalidating anything.
 const MAGIC: u64 = {
     let parts = [
         FORMAT_MAJOR,
-        AbilityId::ALL.len() as u64,
-        AbilityId::TECH.len() as u64,
-        AbilityId::INNATE.len() as u64,
+        SLOT_CAPACITY as u64,
         AbilityId::MAX_TECH_HELD as u64,
-        MODIFIER_TOGGLES as u64,
         MODIFIER_CAP as u64,
         GATE_VARIANTS,
         SEED_BITS as u64,
-        CHECK_BITS as u64,
+        TOKEN_LEN as u64,
     ];
     let mut hash = FNV_OFFSET;
     let mut i = 0;
@@ -215,8 +305,9 @@ const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 /// Fold one 64-bit value into an FNV-1a hash, byte by byte. Not cryptographic and not
-/// trying to be ([`CHECK_BITS`] says why) — it needs to scatter a one-digit change
-/// across the check field, and it does.
+/// trying to be — nothing here resists an attacker, and nothing needs to (forging a
+/// token yields a run whose abilities were available anyway, in a game with permadeath
+/// and no meta-progression, §2). It needs to scatter, and it does.
 const fn fnv_mix(mut hash: u64, value: u64) -> u64 {
     let bytes = value.to_le_bytes();
     let mut i = 0;
@@ -226,6 +317,21 @@ const fn fnv_mix(mut hash: u64, value: u64) -> u64 {
         i += 1;
     }
     hash
+}
+
+/// Derive the scramble multiplier from the format fingerprint, forced coprime to
+/// [`TOKEN_SPACE`] (odd, and not a multiple of 13) so it stays a bijection.
+const fn scramble_from(magic: u64, nonce: u64) -> u128 {
+    let high = fnv_mix(fnv_mix(FNV_OFFSET, magic), nonce);
+    let low = fnv_mix(fnv_mix(FNV_OFFSET, high), magic);
+    let mut k = (((high as u128) << 64) | low as u128) % TOKEN_SPACE;
+    if k.is_multiple_of(2) {
+        k += 1;
+    }
+    while k.is_multiple_of(13) {
+        k += 2;
+    }
+    k
 }
 
 /// A run's whole reproducible starting config (§12.4/#245): the three pieces that
@@ -292,77 +398,392 @@ impl LevelSeed {
         raw & (SEED_SPACE - 1)
     }
 
-    /// Encode to the [level-seed token](self) — twelve lowercase letters.
+    /// Encode to the [level-seed token](self) — [`TOKEN_LEN`] lowercase letters.
     ///
     /// `None` when the config is not one a run can hold, which is the honest answer
-    /// rather than a token that would decode to something else: a seed wider than
-    /// [`SEED_BITS`] (see [`narrow_seed`](Self::narrow_seed)), or a loadout holding
-    /// more than [`AbilityId::MAX_TECH_HELD`] tech (§8.3 — [`Loadout::full`] is the
-    /// obvious example, and is documented as not a loadout a run can hold). Every
-    /// surface that shows or shares a token already has a "there is no token for
-    /// this" branch, because a hand-built state has never had one.
+    /// rather than a token that would decode to something else. Four ways that
+    /// happens, all of them meaning "this is not a run this game can produce": a seed
+    /// wider than [`SEED_BITS`] (see [`narrow_seed`](Self::narrow_seed)); a loadout
+    /// over the §8.3 tech cap ([`Loadout::full`] documents itself as exactly that);
+    /// a loadout missing an innate ability, which the token does not carry because
+    /// §8.3 says a run always holds the innate set; and more than [`MODIFIER_CAP`]
+    /// modifiers at once.
+    ///
+    /// Every surface that shows or shares a token already has a "there is no token
+    /// for this" branch, because a hand-built state has never had one.
     pub fn encode(&self) -> Option<String> {
-        let (toggles, gate) = modifier_fields(self.modifiers);
+        let (modifiers, gate) = modifier_slots(self.modifiers)?;
         let mut chain = Chain::default();
-        chain.push(self.seed, SEED_SPACE)?;
-        chain.push(innate_bits(self.abilities), 1 << AbilityId::INNATE.len())?;
-        chain.push(gate_code(gate), GATE_VARIANTS)?;
-        chain.push_choice(&toggles, MODIFIER_CAP)?;
-        chain.push_choice(&tech_held(self.abilities), AbilityId::MAX_TECH_HELD)?;
-        chain.push(check_of(chain.0), CHECK_SPACE)?;
-        Some(to_letters(scramble(u128::from(chain.0))))
+        chain.push(u128::from(self.seed), u128::from(SEED_SPACE))?;
+        chain.push(u128::from(gate_code(gate)), u128::from(GATE_VARIANTS))?;
+        chain.push(
+            u128::from(modifiers.ordinal(MODIFIER_CAP)?),
+            u128::from(MODIFIER_SPACE),
+        )?;
+        chain.push(
+            u128::from(tech_slots(self.abilities)?.ordinal(AbilityId::MAX_TECH_HELD)?),
+            u128::from(TECH_SPACE),
+        )?;
+        Some(to_letters(scramble(chain.0)))
     }
 
     /// Decode a [level-seed token](self), or `None` if it is not one.
     ///
-    /// Rejects, in order: a wrong length or a non-alphabetic character; a check field
-    /// that disagrees with [`MAGIC`] — a token from a build whose roster or caps
-    /// differ, or one letter mistyped; a count past its cap; and a non-zero residue
-    /// once every field has been read, which is what catches a value the format
-    /// cannot have produced. `None` is a graceful fall to a fresh run, never a
-    /// bricked page (#110/#197).
+    /// Rejects, in order: a wrong length or a non-alphabetic character; a value
+    /// outside [`PAYLOAD_SPACE`] once unscrambled — which is what catches a token
+    /// from another format version, a mistyped one, and a random string alike (see
+    /// [`rejection_rate`]); and a slot number this build has no ability or modifier
+    /// for, which is a token from a build with a *bigger roster* and is rejected
+    /// exactly rather than probabilistically.
     ///
+    /// `None` is a graceful fall to a fresh run, never a bricked page (#110/#197).
     /// Case-insensitive, because a token read aloud or through a form that
     /// capitalises should still boot its run; [`encode`](Self::encode) always emits
     /// lowercase.
     pub fn decode(raw: &str) -> Option<Self> {
-        let mut chain = Chain(unscramble(from_letters(raw.trim())?).try_into().ok()?);
-
-        // The check is popped first because it was pushed last, and it is verified
-        // against what remains — the payload it was computed over.
-        let check = chain.pop(CHECK_SPACE);
-        if check != check_of(chain.0) {
-            return None;
-        }
-
-        // Each held set pops its count before the combination index that count sizes
-        // — the ordering the push order exists to produce.
-        let tech: [bool; AbilityId::TECH.len()] = chain.pop_choice(AbilityId::MAX_TECH_HELD)?;
-        let toggles: [bool; MODIFIER_TOGGLES] = chain.pop_choice(MODIFIER_CAP)?;
-        let gate = gate_from_code(chain.pop(GATE_VARIANTS))?;
-        let innate = chain.pop(1 << AbilityId::INNATE.len());
-        let seed = chain.pop(SEED_SPACE);
+        let mut chain = Chain(unscramble(from_letters(raw.trim())?));
+        let tech = SlotSet::from_ordinal(
+            u64::try_from(chain.pop(u128::from(TECH_SPACE))).ok()?,
+            AbilityId::MAX_TECH_HELD,
+        )?;
+        let modifiers = SlotSet::from_ordinal(
+            u64::try_from(chain.pop(u128::from(MODIFIER_SPACE))).ok()?,
+            MODIFIER_CAP,
+        )?;
+        let gate = gate_from_code(chain.pop(u128::from(GATE_VARIANTS)) as u64)?;
+        let seed = chain.pop(u128::from(SEED_SPACE)) as u64;
         if chain.0 != 0 {
             return None; // a value the chain cannot have produced
         }
 
-        let mut abilities = Loadout::empty();
-        for (slot, id) in AbilityId::INNATE.into_iter().enumerate() {
-            if innate >> slot & 1 == 1 {
-                abilities = abilities.with(id);
-            }
-        }
-        for (id, held) in AbilityId::TECH.into_iter().zip(tech) {
-            if held {
-                abilities = abilities.with(id);
-            }
+        // The innate set is not carried: §8.3 makes it always held, so it is restored
+        // rather than read, and a token can never describe a run without it.
+        let mut abilities = Loadout::innate();
+        for slot in tech.iter() {
+            abilities = abilities.with(*AbilityId::TECH.get(slot)?);
         }
         Some(Self {
             seed,
-            modifiers: modifiers_from_fields(&toggles, gate),
+            modifiers: modifiers_from_slots(&modifiers, gate)?,
             abilities,
         })
     }
+}
+
+/// The token's packed value, built up one field at a time.
+///
+/// `push` appends a digit at the least-significant end (`value * radix + digit`), so
+/// `pop` returns fields in the reverse of the order they were pushed. Every radix is
+/// a constant — the dense [`SlotSet::ordinal`] is what makes that true — so the
+/// packed space is exactly [`PAYLOAD_SPACE`] and the residue check after the last
+/// field is an exact range test.
+#[derive(Default)]
+struct Chain(u128);
+
+impl Chain {
+    /// Append `digit` in `radix`, or `None` if it does not belong in that radix.
+    fn push(&mut self, digit: u128, radix: u128) -> Option<()> {
+        if digit >= radix {
+            return None;
+        }
+        self.0 = self.0.checked_mul(radix)?.checked_add(digit)?;
+        Some(())
+    }
+
+    /// Read off the least-significant digit in `radix`.
+    fn pop(&mut self, radix: u128) -> u128 {
+        let digit = self.0 % radix;
+        self.0 /= radix;
+        digit
+    }
+}
+
+/// A held set, as up to [`MAX_HELD_SLOTS`] **slot numbers** in ascending order — the
+/// tech a run holds, or the modifiers active on it.
+///
+/// Slots are permanent positions in a [`SLOT_CAPACITY`]-wide reserved space, not
+/// indices into today's roster, which is what lets the roster grow without changing
+/// what any token means (see [`SLOT_CAPACITY`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+struct SlotSet {
+    held: [usize; MAX_HELD_SLOTS],
+    len: usize,
+}
+
+impl SlotSet {
+    /// Add a slot. Slots must be added in ascending order — every caller walks a
+    /// fixed catalogue order, so they are. `None` past [`MAX_HELD_SLOTS`], which is a
+    /// held set larger than any cap allows.
+    fn push(&mut self, slot: usize) -> Option<()> {
+        *self.held.get_mut(self.len)? = slot;
+        self.len += 1;
+        Some(())
+    }
+
+    /// The slots held, ascending.
+    fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        self.held[..self.len].iter().copied()
+    }
+
+    /// The **dense ordinal** of this set among every set of at most `cap` slots:
+    /// sets ordered by size first, then lexicographically.
+    ///
+    /// Dense is the whole point. The obvious alternative — a count digit beside an
+    /// index digit whose radix is `C(n, count)` — spends the same information but
+    /// leaves the packed space *sparse*, bounded by the largest radix on any path
+    /// rather than by the sum over paths. That overflows the token for the same field
+    /// widths, silently, for configs on an expensive path. Here the count is implied
+    /// by which size-block the ordinal falls in, recovered exactly on the way back,
+    /// and the field's radix is the constant [`sets_up_to`].
+    fn ordinal(&self, cap: usize) -> Option<u64> {
+        if self.len > cap {
+            return None;
+        }
+        // Skip past every smaller set, then rank lexicographically within this size.
+        let mut ordinal = 0;
+        let mut size = 0;
+        while size < self.len {
+            ordinal += binomial(SLOT_CAPACITY, size);
+            size += 1;
+        }
+        let mut next = 0;
+        for (position, slot) in self.iter().enumerate() {
+            if slot >= SLOT_CAPACITY || slot < next {
+                return None; // out of the reserved space, or not ascending
+            }
+            let remaining = self.len - position - 1;
+            for skipped in next..slot {
+                ordinal += binomial(SLOT_CAPACITY - skipped - 1, remaining);
+            }
+            next = slot + 1;
+        }
+        Some(ordinal)
+    }
+
+    /// The set with dense `ordinal` among the sets of at most `cap` slots — the
+    /// inverse of [`ordinal`](Self::ordinal). `None` past the last such set.
+    fn from_ordinal(mut ordinal: u64, cap: usize) -> Option<Self> {
+        // Which size-block the ordinal lands in *is* the count.
+        let mut len = 0;
+        loop {
+            if len > cap {
+                return None;
+            }
+            let block = binomial(SLOT_CAPACITY, len);
+            if ordinal < block {
+                break;
+            }
+            ordinal -= block;
+            len += 1;
+        }
+        let mut set = Self::default();
+        let mut slot = 0;
+        for position in 0..len {
+            let remaining = len - position - 1;
+            loop {
+                if slot >= SLOT_CAPACITY {
+                    return None;
+                }
+                let skipped = binomial(SLOT_CAPACITY - slot - 1, remaining);
+                if ordinal < skipped {
+                    break;
+                }
+                ordinal -= skipped;
+                slot += 1;
+            }
+            set.push(slot)?;
+            slot += 1;
+        }
+        (ordinal == 0).then_some(set)
+    }
+}
+
+/// `C(n, k)` — how many ways `k` slots are held out of `n`. Saturates to zero past
+/// `n`, which is the honest count.
+const fn binomial(n: usize, k: usize) -> u64 {
+    if k > n {
+        return 0;
+    }
+    // The multiplicative form, dividing as it goes so the running value stays small:
+    // C(n, i) is always an integer, so the division is exact at every step.
+    let mut value: u64 = 1;
+    let mut i = 0;
+    while i < k {
+        value = value * (n - i) as u64 / (i as u64 + 1);
+        i += 1;
+    }
+    value
+}
+
+/// `Σ C(SLOT_CAPACITY, k)` for `k ≤ cap` — how many distinct held sets fit under a
+/// cap, and so the radix of a held-set field.
+const fn sets_up_to(cap: usize) -> u64 {
+    let mut total = 0;
+    let mut k = 0;
+    while k <= cap {
+        total += binomial(SLOT_CAPACITY, k);
+        k += 1;
+    }
+    total
+}
+
+/// Split a [`LevelModifiers`] into the token's fields: the active toggles as slot
+/// numbers, and the gate. A struct destructure names every field, so a new modifier
+/// will not compile until it is given a **permanent slot** here — and that slot is
+/// then load-bearing forever (see [`SLOT_CAPACITY`]): appending is free, renumbering
+/// silently rewrites every token ever shared.
+///
+/// `None` when more than [`MODIFIER_CAP`] are active. That cap is a format promise
+/// §12.6 does not enforce — its three sources compose harder-ward without a bound —
+/// so this is where the promise is actually kept.
+fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
+    let LevelModifiers {
+        guards_always_search_hideouts,
+        sighting_lost_calls_a_guard,
+        body_found_calls_two_guards,
+        always_show_vision_cones,
+        intel_to_exit,
+    } = m;
+    let mut slots = SlotSet::default();
+    for (slot, active) in [
+        guards_always_search_hideouts,
+        sighting_lost_calls_a_guard,
+        body_found_calls_two_guards,
+        always_show_vision_cones,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if active {
+            slots.push(slot)?;
+        }
+    }
+    Some((slots, intel_to_exit))
+}
+
+/// Rebuild a [`LevelModifiers`] from the token's fields — the inverse of
+/// [`modifier_slots`], over the same permanent slots. `None` for a slot this build
+/// has no modifier for: a token from a build with more modifiers than this one, which
+/// is rejected exactly rather than guessed at.
+fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifiers> {
+    let mut active = [false; MODIFIER_FIELDS];
+    for slot in slots.iter() {
+        *active.get_mut(slot)? = true;
+    }
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones] =
+        active;
+    Some(LevelModifiers {
+        guards_always_search_hideouts,
+        sighting_lost_calls_a_guard,
+        body_found_calls_two_guards,
+        always_show_vision_cones,
+        intel_to_exit: gate,
+    })
+}
+
+/// How many modifier toggles this build actually has — the live count, against which
+/// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
+/// the format.
+const MODIFIER_FIELDS: usize = 4;
+
+/// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
+/// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
+/// missing an innate ability the token does not carry and cannot describe the absence
+/// of.
+fn tech_slots(abilities: Loadout) -> Option<SlotSet> {
+    if !AbilityId::INNATE
+        .into_iter()
+        .all(|id| abilities.contains(id))
+    {
+        return None;
+    }
+    let mut slots = SlotSet::default();
+    for (slot, id) in AbilityId::TECH.into_iter().enumerate() {
+        if abilities.contains(id) {
+            slots.push(slot)?;
+        }
+    }
+    Some(slots)
+}
+
+/// The intel gate's digit.
+fn gate_code(gate: IntelGate) -> u64 {
+    match gate {
+        IntelGate::None => 0,
+        IntelGate::AtLeastOne => 1,
+        IntelGate::All => 2,
+    }
+}
+
+/// The intel gate for a digit. Total over the radix — there is no unused code to
+/// reject, which is the point of an exact radix rather than a padded bitfield.
+fn gate_from_code(code: u64) -> Option<IntelGate> {
+    match code {
+        0 => Some(IntelGate::None),
+        1 => Some(IntelGate::AtLeastOne),
+        2 => Some(IntelGate::All),
+        _ => None,
+    }
+}
+
+/// Spread the packed value over the token's digits — see [`SCRAMBLE`] for the three
+/// jobs this does, only one of which is cosmetic.
+fn scramble(value: u128) -> u128 {
+    mul_mod(value, SCRAMBLE, TOKEN_SPACE)
+}
+
+/// Undo [`scramble`].
+fn unscramble(value: u128) -> u128 {
+    mul_mod(value, UNSCRAMBLE, TOKEN_SPACE)
+}
+
+/// `a · b mod m`, by double-and-add rather than by multiplying.
+///
+/// The direct form overflows: both factors run to nearly [`TOKEN_SPACE`] (~2^85), and
+/// their product needs 170 bits. Doubling instead keeps every intermediate under
+/// `2 · m`, so nothing here can exceed 2^86. Eighty-odd iterations, on a path that
+/// runs twice per token.
+const fn mul_mod(mut a: u128, mut b: u128, m: u128) -> u128 {
+    let mut product = 0;
+    a %= m;
+    while b > 0 {
+        if b & 1 == 1 {
+            product = (product + a) % m;
+        }
+        a = (a << 1) % m;
+        b >>= 1;
+    }
+    product
+}
+
+/// Write a value as exactly [`TOKEN_LEN`] lowercase letters, most significant first
+/// and zero-padded with `a`. Total over [`TOKEN_SPACE`], which is what the scramble
+/// maps onto.
+fn to_letters(mut value: u128) -> String {
+    let mut letters = [b'a'; TOKEN_LEN];
+    for slot in letters.iter_mut().rev() {
+        *slot = b'a' + (value % ALPHABET) as u8;
+        value /= ALPHABET;
+    }
+    String::from_utf8(letters.to_vec()).expect("the alphabet is ASCII")
+}
+
+/// Read [`TOKEN_LEN`] letters back to a value, or `None` on a wrong length or any
+/// character outside `a`–`z`. Case-insensitive; the byte-length check is safe against
+/// multi-byte input because a non-ASCII token is rejected on the same pass.
+fn from_letters(token: &str) -> Option<u128> {
+    if token.len() != TOKEN_LEN {
+        return None;
+    }
+    let mut value: u128 = 0;
+    for byte in token.bytes() {
+        let letter = byte.to_ascii_lowercase();
+        if !letter.is_ascii_lowercase() {
+            return None;
+        }
+        value = value * ALPHABET + u128::from(letter - b'a');
+    }
+    Some(value)
 }
 
 /// Draw quick play's ability loadout from `seed` (#244): the innate set plus
@@ -431,240 +852,6 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
     .with_level(*level))
 }
 
-/// The token's packed value, built up one field at a time.
-///
-/// `push` appends a digit at the least-significant end (`value * radix + digit`), so
-/// `pop` returns fields in the reverse of the order they were pushed. That reversal
-/// is load-bearing: a field whose radix depends on another — a combination index
-/// sized by its count — is pushed *before* it, so the count is already in hand by the
-/// time the index needs reading.
-#[derive(Default)]
-struct Chain(u64);
-
-impl Chain {
-    /// Append `digit` in `radix`, or `None` if it does not belong in that radix or
-    /// the chain would overflow — both meaning the config is not one the format can
-    /// carry.
-    fn push(&mut self, digit: u64, radix: u64) -> Option<()> {
-        if digit >= radix {
-            return None;
-        }
-        self.0 = self.0.checked_mul(radix)?.checked_add(digit)?;
-        Some(())
-    }
-
-    /// Read off the least-significant digit in `radix`.
-    fn pop(&mut self, radix: u64) -> u64 {
-        let digit = self.0 % radix;
-        self.0 /= radix;
-        digit
-    }
-
-    /// Append a held set as a **count** and a **combination index** — the encoding
-    /// whose width tracks `cap` rather than `N` (see the module docs).
-    ///
-    /// The count goes on last so it pops first, since it is the index's radix.
-    /// `None` when more than `cap` entries are held: not a set a run can hold, and
-    /// so not one the token will pretend to carry.
-    fn push_choice<const N: usize>(&mut self, held: &[bool; N], cap: usize) -> Option<()> {
-        let count = held.iter().filter(|&&held| held).count();
-        if count > cap {
-            return None;
-        }
-        self.push(combination_rank(held), binomial(N, count))?;
-        self.push(count as u64, cap as u64 + 1)
-    }
-
-    /// Read back a held set pushed by [`push_choice`](Self::push_choice). `None` when
-    /// the count exceeds `cap` — a token from a format with a wider cap, or a
-    /// corrupted one.
-    fn pop_choice<const N: usize>(&mut self, cap: usize) -> Option<[bool; N]> {
-        let count = self.pop(cap as u64 + 1) as usize;
-        if count > cap {
-            return None;
-        }
-        combination_unrank(self.pop(binomial(N, count)), count)
-    }
-}
-
-/// `C(n, k)` — how many ways `k` entries are held out of `n`, and so the radix of a
-/// combination index. Saturates to zero past `n`, which is the honest count.
-const fn binomial(n: usize, k: usize) -> u64 {
-    if k > n {
-        return 0;
-    }
-    // The multiplicative form, dividing as it goes so the running value stays small:
-    // C(n, i) is always an integer, so the division is exact at every step.
-    let mut value: u64 = 1;
-    let mut i = 0;
-    while i < k {
-        value = value * (n - i) as u64 / (i as u64 + 1);
-        i += 1;
-    }
-    value
-}
-
-/// The lexicographic rank of a held set among all sets of its size — the combination
-/// index the token carries.
-fn combination_rank<const N: usize>(held: &[bool; N]) -> u64 {
-    let count = held.iter().filter(|&&held| held).count();
-    let mut rank = 0;
-    let mut remaining = count;
-    for (position, &held) in held.iter().enumerate() {
-        if held {
-            remaining -= 1;
-        } else if remaining > 0 {
-            // Every set that takes this position instead sorts earlier: count them
-            // and step past.
-            rank += binomial(N - position - 1, remaining - 1);
-        }
-    }
-    rank
-}
-
-/// The held set with lexicographic `rank` among the sets of size `count` — the
-/// inverse of [`combination_rank`]. `None` when the rank is past the last such set.
-fn combination_unrank<const N: usize>(mut rank: u64, count: usize) -> Option<[bool; N]> {
-    let mut held = [false; N];
-    let mut remaining = count;
-    for (position, slot) in held.iter_mut().enumerate() {
-        if remaining == 0 {
-            break;
-        }
-        let skipped = binomial(N - position - 1, remaining - 1);
-        if rank < skipped {
-            *slot = true;
-            remaining -= 1;
-        } else {
-            rank -= skipped;
-        }
-    }
-    (remaining == 0 && rank == 0).then_some(held)
-}
-
-/// Split a [`LevelModifiers`] into the token's fields: the toggles in a fixed order,
-/// and the gate. A struct destructure names every field, so a new modifier will not
-/// compile until it is given a position here (§12.2 — the compiler enumerates the
-/// encode sites), and adding one changes [`MAGIC`], so tokens written before it stop
-/// decoding instead of quietly losing it.
-fn modifier_fields(m: LevelModifiers) -> ([bool; MODIFIER_TOGGLES], IntelGate) {
-    let LevelModifiers {
-        guards_always_search_hideouts,
-        sighting_lost_calls_a_guard,
-        body_found_calls_two_guards,
-        always_show_vision_cones,
-        intel_to_exit,
-    } = m;
-    (
-        [
-            guards_always_search_hideouts,
-            sighting_lost_calls_a_guard,
-            body_found_calls_two_guards,
-            always_show_vision_cones,
-        ],
-        intel_to_exit,
-    )
-}
-
-/// Rebuild a [`LevelModifiers`] from the token's fields — the inverse of
-/// [`modifier_fields`], in the same order.
-fn modifiers_from_fields(toggles: &[bool; MODIFIER_TOGGLES], gate: IntelGate) -> LevelModifiers {
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones] =
-        *toggles;
-    LevelModifiers {
-        guards_always_search_hideouts,
-        sighting_lost_calls_a_guard,
-        body_found_calls_two_guards,
-        always_show_vision_cones,
-        intel_to_exit: gate,
-    }
-}
-
-/// The intel gate's digit.
-fn gate_code(gate: IntelGate) -> u64 {
-    match gate {
-        IntelGate::None => 0,
-        IntelGate::AtLeastOne => 1,
-        IntelGate::All => 2,
-    }
-}
-
-/// The intel gate for a digit. Total over the radix — there is no unused code to
-/// reject, which is the point of an exact radix rather than a padded bitfield.
-fn gate_from_code(code: u64) -> Option<IntelGate> {
-    match code {
-        0 => Some(IntelGate::None),
-        1 => Some(IntelGate::AtLeastOne),
-        2 => Some(IntelGate::All),
-        _ => None,
-    }
-}
-
-/// The innate half of a loadout, as a bitset over [`AbilityId::INNATE`]. Innate
-/// abilities are not drawn and not capped (§8.3), so they cost a bit each — there is
-/// no cap for a combination index to track.
-fn innate_bits(abilities: Loadout) -> u64 {
-    AbilityId::INNATE
-        .into_iter()
-        .enumerate()
-        .filter(|&(_, id)| abilities.contains(id))
-        .map(|(slot, _)| 1 << slot)
-        .sum()
-}
-
-/// The tech half of a loadout, as membership over [`AbilityId::TECH`]'s fixed order.
-fn tech_held(abilities: Loadout) -> [bool; AbilityId::TECH.len()] {
-    AbilityId::TECH.map(|id| abilities.contains(id))
-}
-
-/// The check field for a payload: [`CHECK_BITS`] off an FNV-1a fold of the payload
-/// and [`MAGIC`]. Taken from the top of the hash, where the avalanche is best.
-fn check_of(payload: u64) -> u64 {
-    let hash = fnv_mix(fnv_mix(FNV_OFFSET, payload), MAGIC);
-    hash >> (u64::BITS - CHECK_BITS) & (CHECK_SPACE - 1)
-}
-
-/// Spread the packed value over the token's digits, so consecutive seeds do not share
-/// a visible prefix. A bijection over [`TOKEN_SPACE`] — see [`SCRAMBLE`].
-fn scramble(value: u128) -> u128 {
-    value * SCRAMBLE % TOKEN_SPACE
-}
-
-/// Undo [`scramble`].
-fn unscramble(value: u128) -> u128 {
-    value * UNSCRAMBLE % TOKEN_SPACE
-}
-
-/// Write a value as exactly [`TOKEN_LEN`] lowercase letters, most significant first
-/// and zero-padded with `a`. Total over [`TOKEN_SPACE`], which is what the scramble
-/// maps onto.
-fn to_letters(mut value: u128) -> String {
-    let mut letters = [b'a'; TOKEN_LEN];
-    for slot in letters.iter_mut().rev() {
-        *slot = b'a' + (value % ALPHABET) as u8;
-        value /= ALPHABET;
-    }
-    String::from_utf8(letters.to_vec()).expect("the alphabet is ASCII")
-}
-
-/// Read [`TOKEN_LEN`] letters back to a value, or `None` on a wrong length or any
-/// character outside `a`–`z`. Case-insensitive; the byte-length check is safe against
-/// multi-byte input because a non-ASCII token is rejected on the same pass.
-fn from_letters(token: &str) -> Option<u128> {
-    if token.len() != TOKEN_LEN {
-        return None;
-    }
-    let mut value: u128 = 0;
-    for byte in token.bytes() {
-        let letter = byte.to_ascii_lowercase();
-        if !letter.is_ascii_lowercase() {
-            return None;
-        }
-        value = value * ALPHABET + u128::from(letter - b'a');
-    }
-    Some(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,7 +874,7 @@ mod tests {
             LevelSeed::quick_play(8371),
             LevelSeed::sim(8371),
             LevelSeed::quick_play(0),
-            LevelSeed::quick_play(u64::from(u32::MAX)),
+            LevelSeed::quick_play(SEED_SPACE - 1),
         ] {
             let token = token(level);
             assert_eq!(token.len(), TOKEN_LEN, "fixed width: {token}");
@@ -805,10 +992,9 @@ mod tests {
     fn every_config_round_trips() {
         let gates = [IntelGate::None, IntelGate::AtLeastOne, IntelGate::All];
         let loadouts = [
-            Loadout::empty(),
             Loadout::innate(),
             Loadout::innate().with(AbilityId::Camouflage),
-            Loadout::empty()
+            Loadout::innate()
                 .with(AbilityId::Decoy)
                 .with(AbilityId::Dephase),
             // The cap itself: the widest loadout a run can hold (§8.3).
@@ -909,7 +1095,7 @@ mod tests {
     /// that into a loud failure rather than the silent re-resolution of #286.
     #[test]
     fn a_frozen_token_still_names_the_run_it_always_did() {
-        const FROZEN: &str = "bcwdrhliqsmm";
+        const FROZEN: &str = "prbjdokbxcqgjnrnco";
         let expected = LevelSeed {
             seed: 8371,
             modifiers: LevelModifiers {
@@ -924,43 +1110,200 @@ mod tests {
                 .with(AbilityId::Autodoors)
                 .with(AbilityId::Vision),
         };
+        assert_eq!(token(expected), FROZEN, "the frozen token changed spelling");
         assert_eq!(
             LevelSeed::decode(FROZEN),
             Some(expected),
             "the frozen token no longer names its run",
         );
-        assert_eq!(token(expected), FROZEN, "…and it is still spelled this way");
     }
 
-    /// **The #286 break, caught.** A token written against a different roster or a
-    /// different cap fails the check rather than decoding into a plausible-looking
-    /// different run. Simulated by perturbing the magic the check is folded over,
-    /// which is exactly what adding an ability or moving a cap does.
+    /// **A token from another format version is rejected.** Simulated by re-spelling
+    /// a valid payload under a perturbed [`SCRAMBLE`] — exactly what a different
+    /// [`FORMAT_MAJOR`], slot capacity or cap produces, since all of them feed
+    /// [`MAGIC`] and so the multiplier.
     ///
-    /// Not every wrong-magic token is caught — [`CHECK_BITS`] bounds that at about
-    /// 99.98% — so this asserts the rate over the whole seed space rather than a
-    /// single lucky rejection.
+    /// Rejection here is probabilistic — [`rejection_rate`] bounds it — so this
+    /// asserts the *rate* over many seeds rather than one lucky refusal. Contrast
+    /// `the_scramble_catches_every_realistic_slip`, where the guarantee is absolute.
     #[test]
-    fn a_token_from_another_roster_is_rejected() {
+    fn a_token_from_another_version_is_rejected() {
+        let foreign = scramble_from(MAGIC.wrapping_add(1), SCRAMBLE_NONCE);
         let survivors = (0..20_000u64)
             .filter(|&seed| {
-                let level = LevelSeed::sim(seed);
-                // Re-spell the token as a build with one more ability would: same
-                // payload, a check folded over a different magic.
-                let packed = unscramble(from_letters(&token(level)).expect("its own token"));
-                let payload = packed as u64 / CHECK_SPACE;
-                let foreign = fnv_mix(fnv_mix(FNV_OFFSET, payload), MAGIC.wrapping_add(1))
-                    >> (u64::BITS - CHECK_BITS)
-                    & (CHECK_SPACE - 1);
-                let reworded = to_letters(scramble(u128::from(payload * CHECK_SPACE + foreign)));
-                LevelSeed::decode(&reworded).is_some()
+                let packed = unscramble(from_letters(&token(LevelSeed::sim(seed))).expect("own"));
+                LevelSeed::decode(&to_letters(mul_mod(packed, foreign, TOKEN_SPACE))).is_some()
             })
             .count();
-        // 1-in-4096 slip through by collision; anything near 20,000 means the magic
-        // is not reaching the check at all.
+        // ~1 in `rejection_rate()` slip through by collision; anything near 20,000
+        // would mean the version is not reaching the encoding at all.
+        let expected = 20_000 / rejection_rate() as usize;
         assert!(
-            survivors < 40,
-            "{survivors} of 20000 foreign tokens decoded — the magic is not biting",
+            survivors <= expected * 4 + 10,
+            "{survivors} of 20000 foreign tokens decoded (expected about {expected})",
+        );
+    }
+
+    /// **Every realistic slip is caught with certainty** — not at
+    /// [`rejection_rate`], but always.
+    ///
+    /// A corruption shifts the packed value by a delta fixed by which characters
+    /// changed; it is caught exactly when that delta carries the value clear of
+    /// [`PAYLOAD_SPACE`]. This asserts it over **every distinct delta** a
+    /// single-character slip or a transposition can produce — so it is an
+    /// enumeration, not a sample, and it holds for every token rather than for the
+    /// ones a test happened to try.
+    ///
+    /// This is what [`SCRAMBLE_NONCE`] exists to satisfy, and the property is
+    /// entirely a gift of the multiplier: `the_scramble_constant_is_load_bearing`
+    /// shows what a careless one costs. If a format change fails this, bump the
+    /// nonce until it passes — do not relax the test.
+    #[test]
+    fn the_scramble_catches_every_realistic_slip() {
+        for (delta, what) in corruption_deltas() {
+            let shifted = mul_mod(delta, UNSCRAMBLE, TOKEN_SPACE);
+            let distance = shifted.min(TOKEN_SPACE - shifted);
+            assert!(
+                distance >= PAYLOAD_SPACE,
+                "{what} can go undetected: delta lands {distance} from a valid value",
+            );
+        }
+    }
+
+    /// The multiplier is **load-bearing for error detection**, not decoration: a
+    /// careless one leaves hundreds of single-character slips silently decoding to a
+    /// different run. Recorded as a test so nobody "simplifies" [`SCRAMBLE`] to
+    /// something tidy without seeing the cost.
+    #[test]
+    fn the_scramble_constant_is_load_bearing() {
+        let blind = |multiplier: u128| {
+            corruption_deltas()
+                .filter(|&(delta, _)| {
+                    let shifted = mul_mod(delta, multiplier, TOKEN_SPACE);
+                    shifted.min(TOKEN_SPACE - shifted) < PAYLOAD_SPACE
+                })
+                .count()
+        };
+        assert_eq!(blind(UNSCRAMBLE), 0, "the chosen constant is clean");
+        assert!(
+            blind(1) > 100,
+            "an unscrambled token should be full of blind spots — if this fails the \
+             test no longer demonstrates anything",
+        );
+    }
+
+    /// Every distinct value a single-character slip or a transposition can add to the
+    /// packed value. Signs are symmetric under the distance test, so only the
+    /// positive of each pair is enumerated.
+    fn corruption_deltas() -> impl Iterator<Item = (u128, String)> {
+        let power = |i: usize| ALPHABET.pow(i as u32);
+        let singles = (0..TOKEN_LEN).flat_map(move |i| {
+            (1..ALPHABET).map(move |d| (d * power(i), format!("a slip of {d} at position {i}")))
+        });
+        let transpositions = (0..TOKEN_LEN).flat_map(move |i| {
+            ((i + 1)..TOKEN_LEN).flat_map(move |j| {
+                (1..ALPHABET).map(move |d| {
+                    (
+                        d * (power(j) - power(i)),
+                        format!("a transposition of {i} and {j} differing by {d}"),
+                    )
+                })
+            })
+        });
+        singles.chain(transpositions)
+    }
+
+    /// **The worst case actually round-trips.** The maximum seed crossed with the
+    /// fullest held sets is the corner the packing is tightest in, and the corner a
+    /// test that only tries small seeds and simple configs never reaches — which is
+    /// exactly how the previous format shipped an overflow.
+    #[test]
+    fn every_extreme_config_round_trips() {
+        let widest_tech = Loadout::innate()
+            .with(AbilityId::TECH[AbilityId::TECH.len() - 3])
+            .with(AbilityId::TECH[AbilityId::TECH.len() - 2])
+            .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
+        let all_modifiers = LevelModifiers {
+            guards_always_search_hideouts: true,
+            sighting_lost_calls_a_guard: true,
+            body_found_calls_two_guards: true,
+            always_show_vision_cones: true,
+            intel_to_exit: IntelGate::All,
+        };
+        for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {
+            for modifiers in [LevelModifiers::default(), all_modifiers] {
+                for abilities in [Loadout::innate(), widest_tech] {
+                    let level = LevelSeed {
+                        seed,
+                        modifiers,
+                        abilities,
+                    };
+                    assert_eq!(
+                        LevelSeed::decode(&token(level)),
+                        Some(level),
+                        "the extreme corner does not round-trip: {level:?}",
+                    );
+                }
+            }
+        }
+    }
+
+    /// The held-set ordinal is a **bijection** onto the sets it claims to enumerate:
+    /// every ordinal below the field's radix unranks to a set that ranks back, and
+    /// the radix itself is one past the last.
+    ///
+    /// Dense is the property under test. A sparse encoding would leave holes here,
+    /// and holes are what overflowed the last format.
+    #[test]
+    fn the_slot_ordinal_is_a_dense_bijection() {
+        for (cap, space) in [
+            (AbilityId::MAX_TECH_HELD, TECH_SPACE),
+            (MODIFIER_CAP, MODIFIER_SPACE),
+        ] {
+            // Walk the whole space where it is small, and its edges where it is not.
+            let sampled = (0..space.min(20_000)).chain(space.saturating_sub(64)..space);
+            for ordinal in sampled {
+                let set = SlotSet::from_ordinal(ordinal, cap).expect("in range");
+                assert!(set.len <= cap);
+                assert_eq!(set.ordinal(cap), Some(ordinal), "cap {cap}");
+            }
+            assert_eq!(SlotSet::from_ordinal(space, cap), None, "one past the last");
+        }
+    }
+
+    /// A token naming a slot **this build has no entry for** is rejected exactly —
+    /// the "token from a newer build" case, and the reason growth is safe: slots
+    /// below the live roster keep working while slots above it are refused rather
+    /// than guessed at.
+    #[test]
+    fn a_token_naming_an_unknown_slot_is_rejected() {
+        // A modifier slot past the live roster, packed by hand.
+        let mut unknown = SlotSet::default();
+        unknown.push(MODIFIER_FIELDS).expect("one slot fits");
+        assert_eq!(
+            modifiers_from_slots(&unknown, IntelGate::All),
+            None,
+            "a modifier this build does not have",
+        );
+        // And the same for tech, through the public surface.
+        let mut chain = Chain::default();
+        chain.push(0, u128::from(SEED_SPACE)).expect("seed");
+        chain.push(0, u128::from(GATE_VARIANTS)).expect("gate");
+        chain
+            .push(0, u128::from(MODIFIER_SPACE))
+            .expect("no modifiers");
+        let mut beyond = SlotSet::default();
+        beyond.push(AbilityId::TECH.len()).expect("one slot fits");
+        let ordinal = beyond
+            .ordinal(AbilityId::MAX_TECH_HELD)
+            .expect("within the cap");
+        chain
+            .push(u128::from(ordinal), u128::from(TECH_SPACE))
+            .expect("tech");
+        assert_eq!(
+            LevelSeed::decode(&to_letters(scramble(chain.0))),
+            None,
+            "a tech slot this build does not have",
         );
     }
 
@@ -1021,56 +1364,9 @@ mod tests {
     /// nothing already shared.
     #[test]
     fn the_scramble_inverts_exactly() {
-        assert_eq!(SCRAMBLE * UNSCRAMBLE % TOKEN_SPACE, 1);
+        assert_eq!(mul_mod(SCRAMBLE, UNSCRAMBLE, TOKEN_SPACE), 1);
         for value in [0, 1, 2, 4095, TOKEN_SPACE - 1, TOKEN_SPACE / 3] {
             assert_eq!(unscramble(scramble(value)), value);
-        }
-    }
-
-    /// The whole packed space fits the twelve characters it is written in, with room
-    /// left. If a field ever widens past this, the token gets longer — which is a
-    /// deliberate format change, not something to discover from a panic in
-    /// [`to_letters`].
-    #[test]
-    fn the_packed_space_fits_the_token() {
-        let widest = u128::from(SEED_SPACE)
-            * (1 << AbilityId::INNATE.len())
-            * u128::from(GATE_VARIANTS)
-            * u128::from(combinations_up_to(MODIFIER_TOGGLES, MODIFIER_CAP))
-            * u128::from(combinations_up_to(
-                AbilityId::TECH.len(),
-                AbilityId::MAX_TECH_HELD,
-            ))
-            * u128::from(CHECK_SPACE);
-        assert!(
-            widest <= TOKEN_SPACE,
-            "{widest} does not fit {TOKEN_SPACE} — the token needs another character",
-        );
-    }
-
-    /// `Σ C(n, k)` for `k ≤ cap` — the size of a combination field, for the capacity
-    /// assertion above.
-    fn combinations_up_to(n: usize, cap: usize) -> u64 {
-        (0..=cap).map(|k| binomial(n, k)).sum()
-    }
-
-    /// The combination index is a bijection onto the sets of each size: every rank
-    /// unranks to a set that ranks back, and nothing outside the range decodes.
-    #[test]
-    fn the_combination_index_is_a_bijection() {
-        for count in 0..=AbilityId::MAX_TECH_HELD {
-            let total = binomial(AbilityId::TECH.len(), count);
-            for rank in 0..total {
-                let held: [bool; AbilityId::TECH.len()] =
-                    combination_unrank(rank, count).expect("in range");
-                assert_eq!(held.iter().filter(|&&h| h).count(), count);
-                assert_eq!(combination_rank(&held), rank);
-            }
-            // One past the last set of this size is not a set of this size.
-            assert_eq!(
-                combination_unrank::<{ AbilityId::TECH.len() }>(total, count),
-                None,
-            );
         }
     }
 

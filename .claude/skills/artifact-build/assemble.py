@@ -35,7 +35,7 @@ DEBUG_FLAGS = ("reveal",)
 
 
 # The level-seed token's width (crates/core/src/level_seed.rs, TOKEN_LEN).
-TOKEN_LEN = 12
+TOKEN_LEN = 18
 
 
 def valid_level_seed(token: str) -> bool:
@@ -67,7 +67,7 @@ def main() -> None:
                          "(#110). The value is a level-seed token (#245/#333): "
                          f"exactly {TOKEN_LEN} letters, carrying the seed, the "
                          "modifier set and the ability loadout together (e.g. "
-                         "`bcwdrhliqsmm`), as printed by LevelSeed::encode and shown "
+                         "`prbjdokbxcqgjnrnco`), as printed by LevelSeed::encode and shown "
                          "on the help panel's Level info tab. "
                          "Omit for the normal random-seed build. For a *replay* "
                          "build (boots the scrub viewer) use --replay-json instead.")
