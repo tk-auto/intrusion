@@ -155,7 +155,9 @@ impl State {
     ///   did not move the player; the turn they move, this clause lapses and
     ///   they are revealed for that turn. It resumes the next still turn. Like
     ///   every concealment it blocks *detection* only — never contact (§4.5):
-    ///   invisible is not safe.
+    ///   invisible is not safe. Stated once, in
+    ///   [`camouflage_holding`](Self::camouflage_holding), so the effect mark that
+    ///   reports it (#341) reads the rule rather than a copy of it.
     /// - **Crouched behind a run of tables** ([`crouched`](Self::crouched)):
     ///   directional — from viewers whose line of sight to the player crosses
     ///   **any table of the run the player ducked behind** (the whole §10.1a
@@ -175,7 +177,7 @@ impl State {
             // anywhere detects the player through solid wall (§10.3/§10.7).
             return true;
         }
-        if self.abilities.effect_active(Effect::ConcealWhileStill) && !self.moved_this_turn {
+        if self.camouflage_holding() {
             return true;
         }
         let Some(anchor) = self.crouched_behind else {
