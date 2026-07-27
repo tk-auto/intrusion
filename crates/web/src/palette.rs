@@ -631,35 +631,32 @@ mod tests {
         }
     }
 
-    /// §11.6/#360: the **mnemonic highlight** on the ability bar is a
-    /// [`Category::System`] ground behind one letter of an entry, and it is the only
-    /// announcement that letter's binding ever gets — so it has to be seen. It must
-    /// stand off the page in both themes (or the marked cell would look unmarked), and
-    /// it must stay clear of the two grounds that carry *meaning* on the board, Danger
-    /// and Sensed, so nobody reads a highlighted key as something happening to the
-    /// ability.
+    /// §11.6/#360: the **mnemonic mark** on the ability bar is one letter of an entry
+    /// lifted to [`Category::Neutral`], and it is the only announcement that letter's
+    /// binding ever gets — so it has to read as *lifted out of* the word around it. It
+    /// stands off the page in both themes, and it is clear of every colour a bar entry
+    /// can otherwise be drawn in ([`bar_category`](intrusion_core::render) — Owned
+    /// ready or active, System cooling), or the marked cell would look like just
+    /// another letter of the name.
     ///
-    /// The glyph on top keeps the entry's own state colour, which for an
-    /// [`AbilityState::Unusable`](intrusion_core::AbilityState) entry is the receding
-    /// Ground — deliberately faint, since the mark is carried by the ground beneath it
-    /// and the ability is not usable anyway.
+    /// Ground is deliberately **not** in that list: an entry that recedes keeps its
+    /// letter dim rather than being marked at all, so the two never meet on one cell.
     #[test]
-    fn the_mnemonic_highlight_reads_and_is_not_a_board_layer() {
+    fn the_mnemonic_mark_lifts_out_of_every_entry_colour() {
         for theme in THEMES {
-            let mark = bg_color(theme, Category::System, Visibility::Live);
+            let mark = swatch(theme, Category::Neutral).fg;
             let d = dist2(rgb(mark), rgb(page(theme)));
             assert!(
-                d >= MIN_BG_DIST2,
-                "{theme:?}: the mnemonic highlight {mark} vanishes into the page \
-                 (dist^2 {d}) — the key would have no mark at all"
+                d >= MIN_DIST2,
+                "{theme:?}: the mnemonic mark {mark} vanishes into the page (dist^2 {d})"
             );
-            for layer in [Category::Danger, Category::Sensed, Category::Effect] {
-                let other = bg_color(theme, layer, Visibility::Live);
+            for entry in [Category::Owned, Category::System] {
+                let other = swatch(theme, entry).fg;
                 let d = dist2(rgb(mark), rgb(other));
                 assert!(
-                    d >= MIN_BG_DIST2,
-                    "{theme:?}: the highlight {mark} reads as the {layer:?} ground \
-                     {other} (dist^2 {d})"
+                    d >= MIN_DIST2,
+                    "{theme:?}: a marked letter {mark} reads the same as the {entry:?} \
+                     name around it {other} (dist^2 {d})"
                 );
             }
         }

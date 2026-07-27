@@ -18,7 +18,8 @@
 //!   Since #359 the key is the entry's **bar slot** (`1 / Camo`), which is why this
 //!   tab draws in the bar's own order and counts as it goes: the digit an entry
 //!   shows is the digit that entry answers to, both derived from the one loadout
-//!   order the bar draws across.
+//!   order the bar draws across. #360 adds the entry's mnemonic letter against the
+//!   digit (`1·c / Camo`) — the same letter the bar picks out of the entry.
 //! - The **economy line**, derived from the [`Ability`](crate::ability::Ability)
 //!   definition — turn cost, duration, cooldown, uses per level (§8.2).
 //! - The **blurb**, [`AbilityId::blurb`] — behaviour only, never numbers, so a

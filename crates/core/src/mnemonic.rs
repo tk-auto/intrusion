@@ -17,9 +17,10 @@
 //! 1. **The claim set is the run's four, not the whole catalogue.** A letter can only
 //!    be taken by something you are also holding and also looking at, and a loadout is
 //!    fixed for the run (§8.3), so nothing shifts under a player mid-run.
-//! 2. **It is not silent.** The bar draws the claimed letter highlighted, on the
-//!    entry it fires (§11.4) — the key is a fact you read off the screen, exactly as
-//!    the entry's state and name are. The old scheme's failure was invisibility.
+//! 2. **It is not silent.** The bar draws the claimed letter in the ink colour, out
+//!    of the name it sits in, on the entry it fires (§11.4) — the key is a fact you
+//!    read off the screen, exactly as the entry's state and name are. The old
+//!    scheme's failure was invisibility.
 //! 3. **The digit is always underneath.** A player who never learns a letter loses
 //!    nothing, which is the safety net the old scheme did not have.
 //!
