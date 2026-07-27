@@ -298,9 +298,36 @@ impl Game {
             &self.metrics,
             self.ui.theme,
         );
+        reflect_theme(self.ui.theme);
         // In replay mode, keep the `K / total` HUD in step with the board every
         // frame; a no-op in live play (§12.4/#197).
         self.update_replay_hud();
+    }
+}
+
+/// Mirror the live theme onto `<body data-theme>` so the **page around the board**
+/// follows it too (§11.2/#189), the same way `data-screen` publishes which surface
+/// is up ([`menu`]).
+///
+/// The canvas is fitted to the viewport with the aspect preserved, so there is
+/// always a letterbox beside or beneath it — and the page's own backdrop is CSS, not
+/// something [`paint`] can reach. Without this the light board sat in a black frame:
+/// the one part of the screen where the theme was still the old one. The shell says
+/// only *which* theme; the two page colours live in the stylesheet with the rest of
+/// the page chrome.
+///
+/// Best-effort, like `data-screen`: a page without a body simply keeps the default
+/// dark chrome, which is the safe direction.
+fn reflect_theme(theme: Theme) {
+    let name = match theme {
+        Theme::Dark => "dark",
+        Theme::Light => "light",
+    };
+    if let Some(body) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.body())
+    {
+        let _ = body.set_attribute("data-theme", name);
     }
 }
 
