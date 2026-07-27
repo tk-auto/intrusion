@@ -42,15 +42,26 @@
 //! It uses abilities only where they earn their place (Run to flee, a takedown to
 //! clear a guard blocking the route), never a rehearsed optimal line — so the
 //! histogram has something real to measure without one verb drowning the rest.
+//!
+//! # Which key it presses, and why (§13.2/#346)
+//!
+//! The bot does not decide that per ability. It names the plan it has settled on
+//! ([`Intent`]) and puts the moment to **every held ability's cue** ([`crate::cue`]),
+//! which answers for itself whether this is a moment it is *for* and how badly.
+//! One call site here ([`StealthBot::cue`]); one exhaustively-matched arm per
+//! ability there. That exhaustiveness is the point: an ability added to the §8.1
+//! catalog fails to compile until somebody says what it is for, so no new verb can
+//! land as a silent zero in the usage histogram — and a false zero is
+//! indistinguishable from a dead ability.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use intrusion_core::{
-    AbilityId, AbilityState, Cell, Direction, Facility, GuardPerception, GuardState, Input, State,
-    Terrain,
+    Cell, Direction, Facility, GuardPerception, GuardState, Input, State, Terrain,
 };
 
+use crate::cue::{Bid, Intent, Moment};
 use crate::policy::PlayerPolicy;
 use crate::profile::{Descent, Profile};
 
@@ -103,6 +114,10 @@ pub struct StealthBot {
     /// budget to a timeout without progress. The cooldown forces a stretch of actual
     /// pursuit between hides, so the loop advances instead of spinning.
     cover_cooldown: u32,
+    /// The last ability [`Bid`] that won a moment, if any — kept so a flagged seed
+    /// can be traced back to the cue's own stated reason (§13.3), rather than to a
+    /// bare "it pressed the key". Pure bookkeeping: no decision reads it.
+    last_bid: Option<Bid>,
 }
 
 impl StealthBot {
@@ -125,6 +140,13 @@ impl StealthBot {
     /// so a batch's output is attributable to the profile that produced it.
     pub fn profile(&self) -> Profile {
         self.profile
+    }
+
+    /// The last ability cue that won a moment (§13.2/#346), reason and all — the
+    /// handle a §13.3 investigation reaches for when a histogram slot moves and the
+    /// question is *why* the bot pressed that key. `None` until one has.
+    pub fn last_bid(&self) -> Option<Bid> {
+        self.last_bid
     }
 }
 
@@ -171,22 +193,11 @@ impl StealthBot {
     /// hunt out from inside a hideout — the one place a guard's contact cannot reach
     /// (§4.5). Getting *to safety* is the whole job here, so it drives straight for
     /// the nearest refuge rather than keeping its polite distance from the chaser.
-    fn flee(&self, state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Cell>) -> Input {
+    fn flee(&mut self, state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Cell>) -> Input {
         // Already hidden: the safest cell on the board. Hold still and let the
         // hunt cool (§7.6) — moving would only reveal the cupboard.
         if state.hidden() {
             return Input::Wait;
-        }
-
-        // Open a gap with Run (§8.3) — but only with room to spend the turn on it:
-        // activating costs a turn standing still, which a guard already on top of
-        // you turns into a capture, so run only when the nearest one is a step away.
-        if matches!(
-            state.ability_state(AbilityId::Run),
-            AbilityState::Ready | AbilityState::Limited { .. }
-        ) && nearest_perceived_guard(state).is_none_or(|d| d > 1)
-        {
-            return Input::Activate(AbilityId::Run);
         }
 
         // Aim for the nearest known hideout to disappear into — the one place a
@@ -195,38 +206,31 @@ impl StealthBot {
         // back out, §15 Q5), nor one within reach of a body: a guard that finds the body
         // searches the cupboards beside it and flushes you the same way (§15 Q5). Break
         // sight first, and hide away from your own handiwork, and the cupboard is safe.
+        //
+        // Worked out *before* the cues, not after: an ability that stands in for a
+        // cupboard (§8.3, Camouflage) has to know whether there is a real one to
+        // reach, and the routing is a pure function of the state, so asking early
+        // costs nothing but the Dijkstra.
         let witnessed = witnessed_cone_cells(state);
         let bodies = findable_bodies(state);
         let boltholes: Vec<Cell> = known_hideouts(state)
             .into_iter()
             .filter(|h| !witnessed.contains(h) && !near_findable_body(&bodies, *h))
             .collect();
-        if let Some(dir) = self.descend(state, &boltholes, danger, blocked, self.profile.flee) {
-            return Input::Step(dir);
-        }
+        let refuge = self.descend(state, &boltholes, danger, blocked, self.profile.flee);
 
-        // No cupboard within reach: cloak instead. Camouflage is a hideout you carry
-        // (§8.3) — a *still* cloaked player is undetectable — so activate it and then
-        // hold, letting the hunt pass over an intruder it cannot see. The exit is
-        // deliberately *not* a fallback refuge here: you cannot disappear into your own
-        // tunnel, and with objectives still in the facility you cannot even step onto
-        // it (§4.5), so routing there only bumps a door that never opens — a free
-        // action that spends no turn and so never lets the hunt cool, stalling the run
-        // out to the input cap instead of breaking contact.
-        match state.ability_state(AbilityId::Camouflage) {
-            AbilityState::Ready | AbilityState::Limited { .. } => {
-                return Input::Activate(AbilityId::Camouflage)
-            }
-            AbilityState::Active { .. } => return Input::Wait,
-            // Camouflage is activated and unbudgeted, so a passive state and an
-            // exhausted one are both unreachable for it — matched so the arms stay
-            // exhaustive (#264/#302), and grouped with the states that mean "not
-            // this turn" so a budgeted ability arriving here would fall back to the
-            // retreat rather than press a key the deck refuses.
-            AbilityState::Cooling { .. }
-            | AbilityState::Exhausted
-            | AbilityState::Unusable
-            | AbilityState::Passive => {}
+        // Ask every held ability whether this is a moment it is *for* (§13.2/#346).
+        // The exit is deliberately not among the answers, nor a fallback refuge
+        // below: you cannot disappear into your own tunnel, and with objectives
+        // still in the facility you cannot even step onto it (§4.5), so routing
+        // there only bumps a door that never opens — a free action that spends no
+        // turn and so never lets the hunt cool, stalling the run out to the input
+        // cap instead of breaking contact.
+        if let Some(input) = self.cue(state, Intent::Flee, refuge) {
+            return input;
+        }
+        if let Some(dir) = refuge {
+            return Input::Step(dir);
         }
 
         // Nowhere to run to and nothing to cloak with: back away from the nearest
@@ -291,31 +295,23 @@ impl StealthBot {
                     && !near_findable_body(&bodies, *h)
             })
             .collect();
-        if let Some(dir) = self.descend(state, &hideouts, danger, blocked, self.profile.flee) {
-            return Some(Input::Step(dir));
-        }
+        let refuge = self.descend(state, &hideouts, danger, blocked, self.profile.flee);
 
-        // No cupboard within reach: cloak instead. Camouflage makes a *still* player
-        // undetectable (§8.3) — a hideout you carry — so activate it and then hold,
-        // letting the patrol pass over an intruder it cannot see. A stationary
-        // cloaked player is concealed from every viewer, so `being_hunted` will not
-        // fire and this keeps holding until the coast clears.
-        match state.ability_state(AbilityId::Camouflage) {
-            AbilityState::Ready | AbilityState::Limited { .. } => {
-                Some(Input::Activate(AbilityId::Camouflage))
-            }
-            AbilityState::Active { .. } => Some(Input::Wait),
-            AbilityState::Cooling { .. }
-            | AbilityState::Exhausted
-            | AbilityState::Unusable
-            | AbilityState::Passive => None,
+        // With the cupboard on offer known, ask the abilities. One of them may be a
+        // cupboard you carry (§8.3, Camouflage) — a *still* cloaked player is
+        // concealed from every viewer, so `being_hunted` will not fire and the hold
+        // keeps going until the coast clears. A real cupboard still wins: the cue
+        // only speaks when `refuge` is `None`.
+        if let Some(input) = self.cue(state, Intent::TakeCover, refuge) {
+            return Some(input);
         }
+        refuge.map(Input::Step)
     }
 
     /// Pursue the objective — nearest known untaken console, then the exit — or, when
     /// no intel is known yet, explore toward the nearest frontier.
     fn pursue(&mut self, state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Cell>) -> Input {
-        let goals = if !state.exit_ready() {
+        let (intent, goals) = if !state.exit_ready() {
             // No intel in hand yet: head for the nearest known console, since a single
             // objective now opens the exit (§10.2 experiment). Every profile grabs the
             // first intel it can reach and leaves — the shortest honest run. Pressing
@@ -325,14 +321,24 @@ impl StealthBot {
             let known = self.known_intel(state);
             // Nothing seen to head for: sweep the facility until the consoles show.
             if known.is_empty() {
-                frontier_cells(state)
+                (Intent::Explore, frontier_cells(state))
             } else {
-                known
+                (Intent::Pursue, known)
             }
         } else {
             // At least one intel in hand: leave the way we came in (§4.5).
-            exit_cell(state).into_iter().collect()
+            (Intent::Pursue, exit_cell(state).into_iter().collect())
         };
+
+        // Pushing on is a moment too, and one most of the salvaged tech is *for*
+        // (§8.3: bore a shortcut, seal the doors ahead, draw a patrol off the route).
+        // No cue answers it yet — those land one at a time, each with its own metric
+        // delta (#347) — but the plan is named and the seam is asked, so the first
+        // one to arrive needs no new call site. There is no cover on offer here, so
+        // no refuge to weigh against.
+        if let Some(input) = self.cue(state, intent, None) {
+            return input;
+        }
 
         let Some(dir) = self.descend(state, &goals, danger, blocked, self.profile.pursue) else {
             // No safe progress. Standing still next to a patrol is how you get
@@ -357,6 +363,32 @@ impl StealthBot {
             }
         }
         Input::Step(dir)
+    }
+
+    /// Put this moment to every held ability's cue (§13.2/#346) and return the
+    /// winning bid's input, or `None` to spend the turn stepping or waiting as
+    /// usual.
+    ///
+    /// This is the *only* place the bot decides to press an ability key. What each
+    /// ability is for lives in [`crate::cue`], one exhaustively-matched arm apiece,
+    /// so a new row in the §8.1 catalog cannot arrive dead by omission — it fails to
+    /// compile until somebody says.
+    ///
+    /// The comparison it does not make: §4.4 says the real question is "is this turn
+    /// better spent activating than stepping?", and a step's worth is a cost-field
+    /// delta rather than an urge. Weighing the two against each other is fuzzy, and
+    /// deliberately left fuzzy — a common currency between them is a much larger
+    /// change and probably a worse one.
+    fn cue(&mut self, state: &State, intent: Intent, refuge: Option<Direction>) -> Option<Input> {
+        let bid = Moment {
+            state,
+            intent,
+            refuge,
+            nearest_guard: nearest_perceived_guard(state),
+        }
+        .best(&self.profile)?;
+        self.last_bid = Some(bid);
+        Some(bid.input)
     }
 
     /// The intel consoles the bot may head for: seen (in [`State::memory`]) and not
@@ -761,8 +793,9 @@ fn console_cells(facility: &Facility) -> impl Iterator<Item = Cell> + '_ {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::boot;
     use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
-    use intrusion_core::{generate_level, Direction, LevelConfig, Outcome, Rng, State};
+    use intrusion_core::{AbilityId, Outcome};
 
     /// #276: the bot routes by **the core's rule**, never a table of its own.
     ///
@@ -855,24 +888,6 @@ mod tests {
         );
     }
 
-    /// Boot a real V1 level exactly as the harness does (§13.2), returning the state
-    /// and the placement so a test can compare against the ground truth the bot must
-    /// *not* peek at.
-    fn boot(seed: u64) -> (State, intrusion_core::Placement) {
-        let (layout, placement) =
-            generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("V1 generates");
-        let guards = placement.guards(&layout);
-        let state = State::new(
-            layout,
-            placement.player(),
-            Direction::North,
-            guards,
-            placement.intel().iter().copied(),
-            placement.exit(),
-        );
-        (state, placement)
-    }
-
     /// §12.4: the same `(seed, profile)` under the bot produces byte-identical
     /// rows, twice. The bot carries its own state (taken consoles, cover timers),
     /// so this pins that none of it leaks non-determinism into the run — and it
@@ -922,6 +937,116 @@ mod tests {
                 "seed {seed}: the baseline profile must reproduce today's bot",
             );
         }
+    }
+
+    /// **#346's behaviour-preservation clause, pinned rather than eyeballed.**
+    ///
+    /// Lifting Run and Camouflage out of hard-coded `match` arms and into cues
+    /// ([`crate::cue`]) is worth nothing if it moved the bot: the whole reason the
+    /// seam lands behaviour-preserving is so that the *interesting* diffs — the
+    /// verbs the bot has never pressed (#347) — arrive one at a time with their own
+    /// measurable delta. A seam that quietly retuned the two cues it replaced would
+    /// make every one of those deltas unattributable.
+    ///
+    /// So this pins the runs themselves, per profile: the ending, its turn count,
+    /// and the **exact sequence of ability activations** the bot issued, spelled in
+    /// the replay script's letters (§12.4). Nothing else in the suite covers this —
+    /// the batch under the sim's bare loadout never presses Camouflage at all (it is
+    /// not held), so the cloak cue's rewrite would have gone unmeasured. The loadout
+    /// here grants it, and grants **Decoy** alongside it: an ability with no cue yet
+    /// must be inert, not merely unused, and holding one is how that is asserted.
+    ///
+    /// The numbers are `[START]` in the sense that any deliberate change to the bot
+    /// moves them — that is what makes them useful. Update them *with* the change
+    /// and say what moved, never to make a red test green.
+    #[test]
+    fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
+        const PINNED: [&str; 36] = [
+            "baseline 0 lost 153 rrcrrc",
+            "baseline 1 lost 230 rrr",
+            "baseline 2 lost 66 r",
+            "baseline 3 won 233 rrrr",
+            "baseline 4 lost 31 ",
+            "baseline 5 lost 7 rc",
+            "baseline 6 won 124 r",
+            "baseline 7 lost 207 rrr",
+            "baseline 8 won 331 rrrr",
+            "baseline 9 lost 21 r",
+            "baseline 10 won 262 ",
+            "baseline 11 lost 99 rr",
+            "cautious 0 won 500 rrrrrrrr",
+            "cautious 1 won 290 rrrr",
+            "cautious 2 won 88 ",
+            "cautious 3 lost 62 rr",
+            "cautious 4 lost 95 rr",
+            "cautious 5 won 58 c",
+            "cautious 6 won 192 rrrr",
+            "cautious 7 lost 203 rrr",
+            "cautious 8 lost 28 r",
+            "cautious 9 lost 125 r",
+            "cautious 10 lost 394 crrrr",
+            "cautious 11 lost 222 rrr",
+            "aggressive 0 lost 246 rrrrrrr",
+            "aggressive 1 lost 136 rrr",
+            "aggressive 2 lost 40 r",
+            "aggressive 3 won 221 rrrrrr",
+            "aggressive 4 lost 25 r",
+            "aggressive 5 lost 7 rc",
+            "aggressive 6 won 235 rrrrrrrrr",
+            "aggressive 7 won 153 rrr",
+            "aggressive 8 lost 12 r",
+            "aggressive 9 won 236 rrr",
+            "aggressive 10 lost 135 rr",
+            "aggressive 11 lost 129 rcrrr",
+        ];
+
+        let mut played = Vec::new();
+        for profile in Profile::ALL {
+            for seed in 0..12 {
+                let (state, _) = boot(seed);
+                let mut state = state.with_loadout(
+                    intrusion_core::Loadout::innate()
+                        .with(AbilityId::Camouflage)
+                        .with(AbilityId::Decoy),
+                );
+                let mut bot = StealthBot::with_profile(profile);
+                let mut pressed = String::new();
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let input = bot.decide(&state);
+                    if let Input::Activate(id) = input {
+                        pressed.push(id.script_letter());
+                    }
+                    state.step(input);
+                }
+                let ending = match state.outcome() {
+                    Outcome::Playing => "playing",
+                    Outcome::Won => "won",
+                    Outcome::Lost => "lost",
+                };
+                played.push(format!(
+                    "{} {seed} {ending} {} {pressed}",
+                    profile.name,
+                    state.turn(),
+                ));
+            }
+        }
+        assert_eq!(
+            played, PINNED,
+            "the cue seam changed how the bot plays — see this test's doc comment",
+        );
+
+        // The pin only means something if the cloak cue is actually exercised by it:
+        // a batch that never presses Camouflage would pin the Run cue alone and call
+        // the rewrite proven.
+        let cloaked = played.iter().filter(|row| row.contains('c')).count();
+        assert!(
+            cloaked >= 5,
+            "only {cloaked} pinned runs press the cloak — this batch would not \
+             catch a change to its cue",
+        );
     }
 
     /// The profiles are **distinguishable** over a batch — a shape assertion, never
@@ -1151,12 +1276,12 @@ mod tests {
     /// cap. This grants it and plays a batch through the ordinary loop: the outcome
     /// profile stays mixed, so nothing livelocks.
     ///
-    /// What it does **not** yet show is the ability being *used*: the bot's policy
-    /// knows only its innate escape and its cloak, so it never presses this key at
-    /// all, and the histogram slot honestly reads zero. Teaching it to bore is
-    /// blocked on #256 (the run config as a sim input) and belongs there — a bot
-    /// that pressed it at random would make the histogram measure the bot rather
-    /// than the game (§13.3), which is the one thing the sim exists to avoid.
+    /// What it does **not** yet show is the ability being *used*: since #346 the
+    /// bot asks every held ability's cue, but Pierce Wall's is the one that still
+    /// declines every moment, so it never presses this key and the histogram slot
+    /// honestly reads zero. Writing that cue is #347's job — a bot that pressed it
+    /// at random would make the histogram measure the bot rather than the game
+    /// (§13.3), which is the one thing the sim exists to avoid.
     #[test]
     fn the_bot_plays_identically_while_holding_pierce_wall() {
         /// Play `state` to a decision and report the inputs issued and how it ended.

@@ -31,6 +31,10 @@
 //! Every value here is **[START]** (§13.4): free to move, pinned only by the
 //! shape assertions in `bot.rs`, never by a leaderboard.
 
+use intrusion_core::AbilityId;
+
+use crate::cue::{self, URGE_PLAIN};
+
 /// How the bot weighs its options when stepping down the routing field — the
 /// difference between picking a careful route to an objective and bolting for
 /// cover. Two flags per descent, and each profile sets both for both descents,
@@ -106,6 +110,22 @@ pub struct Profile {
     pub pursue: Descent,
     /// How the bot routes when bolting for a refuge.
     pub flee: Descent,
+    /// The **urge floor** each ability's cue must clear before the bot will press
+    /// it (§13.2/#346), indexed by [`cue::slot`] — the ability's permanent position
+    /// in [`AbilityId::ALL`].
+    ///
+    /// One floor **per ability**, deliberately: a single shared threshold would
+    /// make every cue's keenness the same dial, and there would be nothing to turn
+    /// for one verb without turning it for all of them. Sweeping one ability's
+    /// floor from 0 to past [`URGE_DECISIVE`](crate::cue::URGE_DECISIVE) and reading
+    /// the curve is what separates "weak ability" from "shy cue" — the ambiguity
+    /// the cue seam introduces and the only thing that resolves it. Build a swept
+    /// profile with [`with_cue_floor`](Profile::with_cue_floor).
+    ///
+    /// [START] like everything else here: the default is
+    /// [`URGE_PLAIN`](crate::cue::URGE_PLAIN), so a *plain fit* is the weakest thing
+    /// that presses a key.
+    pub cue_floors: [u8; AbilityId::ALL.len()],
 }
 
 impl Profile {
@@ -130,6 +150,10 @@ impl Profile {
             keep_clear: false,
             hold_watched: false,
         },
+        // Every cue starts at the same plain-fit floor. The floors are a per-ability
+        // dial precisely so a *sweep* can move one of them; a profile that shipped
+        // with them already scattered would make its own metrics harder to read.
+        cue_floors: [URGE_PLAIN; AbilityId::ALL.len()],
     };
 
     /// **Gives patrols a wide berth, ducks into cover early and waits long.**
@@ -190,6 +214,24 @@ impl Profile {
     /// about what produced them).
     pub fn by_name(name: &str) -> Option<Profile> {
         Profile::ALL.into_iter().find(|p| p.name == name)
+    }
+
+    /// The urge an `id` cue must reach before this temperament will press it
+    /// (§13.2/#346) — the per-ability half of [`cue_floors`](Profile::cue_floors).
+    pub fn cue_floor(&self, id: AbilityId) -> u8 {
+        self.cue_floors[cue::slot(id)]
+    }
+
+    /// This profile with **one** ability's cue floor moved — the handle a threshold
+    /// sweep turns, one verb at a time, to read the curve that says whether a
+    /// near-zero histogram slot is a weak ability or a shy cue.
+    ///
+    /// It keeps the profile's name, because it is still that temperament: what
+    /// moved is how keen one cue has to be, not how the bot routes or hides. A
+    /// sweep that wants its rows attributable records the floor alongside the name.
+    pub fn with_cue_floor(mut self, id: AbilityId, floor: u8) -> Self {
+        self.cue_floors[cue::slot(id)] = floor;
+        self
     }
 
     /// The shipped profile names, comma-separated — the one place an error

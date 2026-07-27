@@ -111,6 +111,64 @@ so its win rate is not a difficulty verdict (§13.4). **Flag, never judge:** a
 histogram spike or a win-rate cliff under `--bot` is a seed to go *play*, not a
 ruling. The bot is deliberately crude; sharper policies are follow-up work.
 
+### Ability cues — when the bot presses a key (§13.2/§8.1)
+
+The bot does not carry a list of abilities it knows. It names the plan it has
+settled on — an **intent**, one of `Flee` / `TakeCover` / `Pursue` / `Explore` —
+and puts the moment to **every held ability's cue** ([`cue.rs`](src/cue.rs)),
+which answers for itself whether this is a moment it is *for*.
+
+The cue table is an **exhaustive match on `AbilityId`**, so adding a row to the
+§8.1 catalog fails to *compile* until somebody says what the ability is for. That
+compile-time obligation is the whole point of the seam: before it, each new
+ability landed as a silent zero in the usage histogram — and **a false zero is
+indistinguishable from a dead ability**, which is exactly the signal §13.2 built
+the histogram to catch.
+
+A cue returns a **bid**, not a bare number: the concrete `Input` to issue, a
+*reason* in the cue's own words (§13.3 — a flagged seed has to be traceable back
+to *why*), the turns of follow-through it is committing to (`then_hold`; some
+abilities are a plan, not a press — Camouflage only pays out while you hold
+still), and an **urge**.
+
+#### The urge scale, and what every value on it means
+
+Urge runs `0..=100`, with an anchor written down for each rung. The anchors are
+what stop the scale becoming a handful of independently curve-fitted functions —
+a cue author picks a number *against these words*, not against what makes the bot
+win:
+
+| Urge | Anchor — what a bid at this level is claiming |
+|---:|---|
+| `100` | **The moment the ability exists for.** Not pressing it now loses something the run does not get back. At most one cue should claim this for a given moment |
+| `75` | **A strong fit.** Squarely the situation the ability's §8.3 row describes, and the turn is better spent activating than stepping |
+| `50` | **A plain fit.** It would help, and there is nothing better to hand. This is the default floor, so a plain fit is the weakest thing that presses a key |
+| `25` | **A faint fit.** It might help; a step is probably worth more, and by default the bot takes the step |
+| `0` | **No fit.** Never pressed, whatever the floor is turned to — declining to bid and bidding zero are the same thing |
+
+Values in between are fair; the anchors say what their neighbourhood *means*.
+
+Arbitration is deterministic (§12.4) and has **no RNG anywhere**: every held
+ability is cued in `AbilityId::ALL` order, a bid below its floor is dropped, and
+the keenest bid wins with ties going to the earlier slot. What it deliberately
+does *not* do is weigh an urge against the value of the step it displaces — §4.4
+makes that the real question ("is this turn better spent activating than
+stepping?"), but a step's worth is a cost-field delta and a common currency
+between the two is a much larger change, and probably a worse one.
+
+#### The per-ability floor, and the ambiguity it exists to resolve
+
+Each profile carries **one urge floor per ability** (`cue_floors`, reachable as
+`Profile::cue_floor` and turned one verb at a time with
+`Profile::with_cue_floor`) — not one shared threshold, because there would then
+be nothing to turn for one ability without turning it for all of them.
+
+That dial matters because the seam introduces a real ambiguity: once cues exist,
+a near-zero histogram slot means *"weak ability **or** shy cue"*. Sweeping one
+ability's floor from `0` to past `100` and reading the curve is what separates
+the two — **a flat curve exonerates the cue.** Read a low number as directional
+and go play the seed (§13.3); never tune a cue until the number looks reasonable.
+
 ### Playstyle profiles (`--profile`, §13.2)
 
 The bot's behaviour is governed by a handful of thresholds — how wide a berth it
