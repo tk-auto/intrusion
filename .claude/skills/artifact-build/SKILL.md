@@ -98,11 +98,12 @@ build. Key the artifact to *your* ticket, not to the game.
 hyphen-separated) so the list is greppable and a build is self-identifying:
 
 - `<ticket>` — the issue number, no `#` (e.g. `110`).
-- `<seed>` — the baked seed for a seed-locked build (e.g. `8371`), or `rand` for
-  the ordinary random-seed preview. For a build locked to a full level-seed *token*
-  (modifiers/loadout, #245), keep the seed here and add a short slug for the preset
-  (e.g. `intrusion-244-8371-cones-x` for `L1-8371-a-x`), so the name stays a valid
-  filename and reads at a glance.
+- `<seed>` — the baked level for a seed-locked build, or `rand` for the ordinary
+  random-seed preview. A token is twelve opaque letters and says nothing at a
+  glance, so name the build after the *run* rather than pasting the token: the seed
+  it carries plus a short slug for anything non-default (e.g.
+  `intrusion-244-8371-cones-x`). Put the token itself in the handoff text, where it
+  can be copied.
 - `<iteration>` — a 1-based build counter for that ticket+seed; bump it each time
   you publish a *new* build of the same pair. Find the current highest with the
   Artifact tool's `action: "list"` (the names share the `intrusion-<ticket>-`
@@ -141,29 +142,27 @@ The shell and the headless sim (§13.2) boot the **identical** path (`start_leve
 so a given level reproduces the **same run the bot played** — how a playtest seed
 (`sim --bot` numbers a batch `S, S+1, …`; `/playtest` flags suspicious ones) becomes
 a level the user can play by hand. A "level" is the whole reproducible config, not
-just a seed: `(seed, modifiers, abilities)` compose to one **level-seed string**
-(`LevelSeed::encode`, #245) — a bare `u64` for the default quick-play preset, or a
-versioned `L1-<seed>-<mods>-<abils>` token when it carries a chosen modifier set or
-ability loadout. There are two channels, split by where the build runs.
+just a seed: `(seed, modifiers, abilities)` compose to one **level-seed token**
+(`LevelSeed::encode`, #245/#333) — twelve lowercase letters, one form for every
+config, carrying the modifier set and the ability loadout along with the seed. There
+are two channels, split by where the build runs.
 
 **A Claude Artifact → bake the level into the build.** The Artifact host strips a
 `…#seed=<token>` hash before the framed page ever sees it, so a shared *link* cannot
-seed an artifact. Instead pass the level-seed string to `assemble.py`, which stamps a
+seed an artifact. Instead pass the level-seed token to `assemble.py`, which stamps a
 `window.__intrusionSeed` global the shell reads ahead of the URL and clock — the page
 then boots that exact level with no URL and no typing:
 
 ```
-# A bare seed → quick play (the default preset):
+# A level-seed token → that exact run: seed, modifiers and loadout together.
+# Twelve letters, straight from `LevelSeed::encode` (#333).
 python3 .claude/skills/artifact-build/assemble.py \
   --dist "$SCRATCH/dist" --index web/index.html \
-  --out "$SCRATCH/intrusion-8371.html" --seed 8371
-
-# A full token → a chosen preset. `L1-8371-a-x` = seed 8371, "show vision
-# cones" on, ability loadout Dephase-only (from `LevelSeed::encode`):
-python3 .claude/skills/artifact-build/assemble.py \
-  --dist "$SCRATCH/dist" --index web/index.html \
-  --out "$SCRATCH/intrusion-8371-cones-x.html" --seed L1-8371-a-x
+  --out "$SCRATCH/intrusion-8371.html" --seed bcwdrhliqsmm
 ```
+
+A bare number is **not** accepted (#333): it named the build's quick-play preset
+rather than a run, so an artifact baked from one drifted every time it was rebuilt.
 
 To get the token for a config you want, encode a `LevelSeed` in a throwaway test or
 read it off the seed bar / `#seed=` URL of a running build — `assemble.py` bakes it
@@ -177,14 +176,14 @@ token and all.
 
 **The Pages deploy → a `?seed=<token>` / `#seed=<token>` URL.** The canonical
 `ci`/`pages` build has no baked level, and there the URL is the real document URL, so
-`https://tk-auto.github.io/intrusion/?seed=8371` (or `#seed=L1-8371-a-x`) boots that
-level. A bare seed still works (backward compatible, #110). Hand this form over only
-for the live Pages URL, never for an artifact.
+`https://tk-auto.github.io/intrusion/#seed=bcwdrhliqsmm` boots that level. The token
+is the only accepted form (#333) — a bare `?seed=8371` no longer decodes and falls to
+the menu. Hand this form over only for the live Pages URL, never for an artifact.
 
 > **The on-page seed box is hidden for now** (it sat over the board's top-left). The
 > wiring is intact behind one CSS rule in `web/index.html`, so levels currently come
 > from the build (`--seed`) or the URL, not a box. If you re-enable it, the box loads
-> any level-seed string live and this section's "type it in" path returns.
+> any level-seed token live and this section's "type it in" path returns.
 
 ## 6b. Lift the fog for a playtest (`--debug reveal`, §12.6)
 
@@ -194,7 +193,7 @@ A build can be baked with **debug switches** — playtest-only changes to what i
 ```
 python3 .claude/skills/artifact-build/assemble.py \
   --dist "$SCRATCH/dist" --index web/index.html \
-  --out "$SCRATCH/intrusion-8371-reveal.html" --seed 8371 \
+  --out "$SCRATCH/intrusion-8371-reveal.html" --seed bcwdrhliqsmm \
   --debug reveal --title intrusion-244-8371-reveal-1
 ```
 
@@ -211,7 +210,7 @@ what they would have detected, and walk the same beats, so the run plays identic
 that is what makes watching it worth anything. Seeing everything is not being
 everywhere: you can still be spotted, and contact still catches you.
 
-**It is not part of the level.** A debug switch never travels in a level-seed string
+**It is not part of the level.** A debug switch never travels in a level-seed token
 and has no `?debug=` URL form (`crates/web/src/debug.rs`) — a build is the only way to
 set one, so a level you hand to someone else can never arrive with the fog lifted.
 Flag names are validated at build time against the set the shell knows, so a typo

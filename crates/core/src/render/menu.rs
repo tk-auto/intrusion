@@ -5,7 +5,7 @@
 //! warning is about exactly this kind of screen: *"everything outside the loop was
 //! scaffolding around an unanswered question. Don't do that again."* So the menu
 //! offers the two things that actually start a run today — **Quick play** (a fresh
-//! seeded facility off the clock) and **Seed play** (the level-seed string re-entry
+//! seeded facility off the clock) and **Seed play** (the level-seed token re-entry
 //! that used to be the always-on seed bar, §13.1/#110/#245) — and lists **Options**
 //! (§14 v2) and **Story mode** (§14 v3) as visibly *later*, inert entries. They are
 //! there so the menu has room to grow, and they do nothing at all: the moment one of
@@ -33,7 +33,7 @@ pub enum MenuEntry {
     /// selection, so the common case is one keypress (or one tap) from a load.
     #[default]
     QuickPlay,
-    /// Enter a level-seed string and play the run it names (§13.1/#110/#245) —
+    /// Enter a level-seed token and play the run it names (§13.1/#110/#245) —
     /// what the always-on seed bar used to do, now behind a menu entry.
     SeedPlay,
     /// Settings (§14 v2 "options"; #189 light mode, #237 difficulty). **Later.**
@@ -109,7 +109,7 @@ pub struct MenuUi {
     pub selected: MenuEntry,
     /// Whether the **seed prompt** is showing instead of the entry list — the
     /// sub-screen [`MenuEntry::SeedPlay`] opens, where the DOM text box takes a
-    /// level-seed string. Escape (or the box's own *back* button) clears it.
+    /// level-seed token. Escape (or the box's own *back* button) clears it.
     pub seed_entry: bool,
 }
 
@@ -130,13 +130,16 @@ const MENU_FOOTER: &str = "↑↓ choose · Enter or tap plays";
 /// own *back* button, so the sub-screen is never a dead end (§11.6's no-trap rule).
 const SEED_FOOTER: &str = "Esc or [back] returns to the menu";
 
-/// The heading and the two instruction lines of the seed prompt (§13.1/#110/#245).
-/// The second line is the backward-compatibility promise, said out loud: a bare
-/// decimal seed is still a valid token and still names the run it always did.
+/// The heading and the two instruction lines of the seed prompt
+/// (§13.1/#110/#245/#333). The second line says what a token *looks* like, so a
+/// player who has one in hand can tell at a glance whether they have the whole thing
+/// — it is a fixed twelve letters, and a truncated paste is the likely mistake. It
+/// replaces the bare-seed promise that used to stand here: a number named a preset
+/// rather than a run, and no longer decodes at all (#333).
 const SEED_HEADING: &str = "SEED PLAY";
 const SEED_LINES: [&str; 2] = [
-    "type or paste a level-seed string",
-    "a bare seed like 8371 works too",
+    "type or paste a level-seed token",
+    "twelve letters, like bcwdrhliqsmm",
 ];
 
 /// The tag drawn after an entry that is not built yet (§14 v2/v3) — short, so the
@@ -249,7 +252,7 @@ pub fn menu_hit(height: u32, ui: MenuUi, y: u32) -> Option<MenuEntry> {
 /// - the **entry list** — the title block centred, the four entries with the
 ///   selection marker, and the footer that names both ways to choose;
 /// - the **seed prompt** — the same title, moved up the screen, over the
-///   instructions for a level-seed string, with **the middle band left deliberately
+///   instructions for a level-seed token, with **the middle band left deliberately
 ///   blank**. That band is where the shell's DOM text box floats (a canvas cannot
 ///   raise a phone's keyboard, so the box has to be real markup); leaving the space
 ///   empty rather than aligning glyphs to it means the two never fight over a row,
@@ -461,10 +464,28 @@ mod tests {
         assert_eq!(menu_hit(H, ui, 0), None, "the title row is not a target");
     }
 
-    /// The seed prompt (§13.1/#110/#245) says what to type, promises the bare seed
-    /// still works, and — critically — leaves the **middle band blank** for the DOM
-    /// text box that floats there. A glyph drawn into that band would sit under the
-    /// box.
+    /// The token the prompt shows as an example is **a real one** — it decodes. A
+    /// sample that had drifted out of the format would be worse than no sample: it is
+    /// the one token a new player is certain to try, and the shape they will measure
+    /// their own paste against. This fails the moment the format moves, which is the
+    /// prompt asking to be rewritten (#333).
+    #[test]
+    fn the_example_token_in_the_prompt_actually_decodes() {
+        let example = SEED_LINES[1]
+            .rsplit(' ')
+            .next()
+            .expect("the line ends in the example");
+        assert_eq!(example.len(), crate::level_seed::TOKEN_LEN);
+        assert!(
+            crate::LevelSeed::decode(example).is_some(),
+            "the prompt's example token no longer decodes: {example}",
+        );
+    }
+
+    /// The seed prompt (§13.1/#110/#245/#333) says what to type, shows the shape of a
+    /// token so a truncated paste is obvious, and — critically — leaves the **middle
+    /// band blank** for the DOM text box that floats there. A glyph drawn into that
+    /// band would sit under the box.
     ///
     /// Each row is matched **whole**, not by `contains`: the first cut of this screen
     /// centred its title exactly where the heading went, and the two drew over each

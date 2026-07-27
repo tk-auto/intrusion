@@ -1,4 +1,4 @@
-//! The **level-seed string** (§12.4 / §13.1 / #244 / #245): a run's whole
+//! The **level-seed token** (§12.4 / §13.1 / #244 / #245): a run's whole
 //! reproducible starting config — the seed, the active modifiers, and the ability
 //! loadout — as one compact, shareable token.
 //!
@@ -20,12 +20,63 @@
 //! - the active **[`LevelModifiers`]** (#225) — the rules bending this run;
 //! - the ability **[`Loadout`]** (#244) — the economy abilities the run holds.
 //!
-//! The string is versioned (`L1-…`) so it can grow — campaign state (§14 v3) is a
-//! later field — and **old links degrade predictably** rather than mis-parsing. It
-//! is deliberately compact and URL-safe (unreserved characters only), so it drops
-//! straight into the #110 seed surface and the #197 replay carrier without a second
-//! scheme, and it is **backward compatible**: a bare decimal seed still decodes, as
-//! the default preset — quick play (#244).
+//! # The token (#333)
+//!
+//! Twelve characters, `a`–`z`, nothing else: `xtrzghtfqmvd`. Fixed width, so a
+//! wrong length is rejected before anything is parsed; all-alphabetic, so there is
+//! no `0`/`O` or `1`/`l` to misread; unreserved throughout, so it drops straight
+//! into the #110 seed surface and the #197 replay carrier with no escaping.
+//!
+//! The token is a **mixed-radix chain**: each field is pushed as a digit
+//! (`value = value * radix + digit`), the whole value is scrambled, and the result
+//! is written in base 26. Digits pop off in reverse, which is why a field whose
+//! radix depends on another is pushed *first* — the count digits are read before
+//! the combination indexes they size. In push order:
+//!
+//! | Field | Radix |
+//! |---|---|
+//! | seed | `2^`[`SEED_BITS`] |
+//! | innate abilities | `2^`[`AbilityId::INNATE`]`.len()` — a bitset; the innate set is not capped |
+//! | intel gate | [`GATE_VARIANTS`] |
+//! | modifier combination | `C(`[`MODIFIER_TOGGLES`]`, count)` |
+//! | modifier count | [`MODIFIER_CAP`]` + 1` |
+//! | tech combination | `C(`[`AbilityId::TECH`]`.len(), count)` |
+//! | tech count | [`AbilityId::MAX_TECH_HELD`]` + 1` |
+//! | check | `2^`[`CHECK_BITS`] |
+//!
+//! **Held sets are combination indexes, not bitsets.** A bitset costs one bit per
+//! catalogue entry whether set or not, so its length tracks the *roster*; a
+//! combination index costs `log2(C(n, k))`, so its length tracks the *cap* and grows
+//! only logarithmically in the roster. At today's sizes the two are the same twelve
+//! characters — the seed dominates, and the config is under twelve bits either way —
+//! so this buys nothing yet. It is here because retrofitting it later is a format
+//! break, and because the cap is the thing that is actually settled (§8.3).
+//!
+//! **The counts are stored, and cost nothing.** Because a combination digit's radix
+//! is `C(n, count)`, the chain's total is exactly `Σₖ C(n, k)` — identical to leaving
+//! the count implicit. So the count is spelled out in the token and asserted on the
+//! way back in, for free.
+//!
+//! **The magic is what makes a roster change loud.** [`MAGIC`] folds the format major
+//! version, the roster sizes, *and the caps* into the check field. The caps have to
+//! be in there: under a combination encoding they are radices, so moving
+//! [`AbilityId::MAX_TECH_HELD`] would otherwise reinterpret every token ever shared.
+//! This is not hypothetical — it already happened once. When the Vision passive
+//! joined the tech pool (#286, six tech becoming seven entries in `ALL`), every
+//! previously shared `#seed=8371` link began booting a *different* loadout, because
+//! the seeded draw re-ran over a pool that had changed underneath it and the carrier
+//! had no way to notice. A token from the wrong roster now fails to decode instead.
+//!
+//! **There is no bare-seed form, in or out.** A decimal number named *this build's
+//! quick-play preset applied to that number*, not a run — which is how the #286 break
+//! travelled. It is gone as an input as well as an output (#333 supersedes #328), so
+//! there is exactly one thing a shared string can mean. The cost is real and worth
+//! stating: "try seed 8371" no longer works, and every link shared before this stops
+//! decoding. Those links were *already* booting the wrong run; failing loudly is the
+//! better of the two.
+//!
+//! A token that does not decode is `None`, which the seed surface and the replay
+//! carrier turn into a fresh run — never a bricked page (#110/#197).
 //!
 //! # One boot path
 //!
@@ -43,8 +94,8 @@ use crate::rng::Rng;
 use crate::state::State;
 
 /// The number of salvaged-tech abilities quick play grants at start (#244) — the
-/// `starting_abilities` count knob. With [`AbilityId::TECH`] now holding five, a
-/// grant of three is a **seeded draw of three of the five** (§8.3): the pool has
+/// `starting_abilities` count knob. With [`AbilityId::TECH`] holding six, a grant of
+/// three is a **seeded draw of three of the six** (§8.3): the pool has
 /// outgrown the grant, so the draw finally bites — a run holds a subset of the tech,
 /// not all of it.
 ///
@@ -60,13 +111,125 @@ const QUICK_PLAY_TECH_GRANT: usize = AbilityId::MAX_TECH_HELD;
 /// whole run still derives from the one seed (§12.4 rule 1).
 const LOADOUT_STREAM_SALT: u64 = 0x_10AD_0000_10AD_0000;
 
-/// The current level-seed string format version. Bumped when the token's fields
-/// change; an older or unknown tag decodes to `None` (a graceful fall to a fresh
-/// run, #110/#197) rather than mis-reading new fields as old.
-const FORMAT_TAG: &str = "L1";
+/// The token's fixed width in characters. Fixed rather than variable so a wrong
+/// length is rejected before a single digit is parsed, and so a shared link is the
+/// same shape whatever run it names.
+pub const TOKEN_LEN: usize = 12;
+
+/// The token's alphabet size — `a`–`z`, the "uncased alpha" the format is built on.
+const ALPHABET: u128 = 26;
+
+/// Every string the format can spell: `26^`[`TOKEN_LEN`]. The scramble is a
+/// bijection over exactly this range, so every token maps back to *some* value —
+/// validity is then decided by the check field and the residue, not by the encoding.
+const TOKEN_SPACE: u128 = ALPHABET.pow(TOKEN_LEN as u32);
+
+/// The format's major version, folded into [`MAGIC`]. Bump it for any change to the
+/// field list or their order; the roster sizes and caps below are folded in
+/// separately, so *those* need no manual bump.
+const FORMAT_MAJOR: u64 = 2;
+
+/// The seed field's width. Every run the game can create must fit here — see
+/// [`LevelSeed::narrow_seed`], which is how an entropy source is brought into range.
+/// Four billion facilities is far past what a player can exhaust, and the width is
+/// what keeps the token to twelve characters rather than nineteen.
+pub const SEED_BITS: u32 = 32;
+
+/// The seed field's radix.
+const SEED_SPACE: u64 = 1 << SEED_BITS;
+
+/// The check field's width. Twelve bits reject ~99.98% of tokens from a stale roster
+/// or a slipped keystroke. A character buys about five check bits, and twelve is the
+/// point where one mistyped letter goes from 1-in-128 slipping through to 1-in-4096.
+///
+/// It is sized for **typos and stale formats**, not for tampering. Tamper resistance
+/// is not available here at any width: the key would live in the wasm and can be read
+/// out, so a longer field buys obfuscation, not security. Nor is it needed — forging
+/// a token yields a run with abilities the player could have drawn anyway, in a game
+/// with permadeath and no meta-progression (§2). If a daily challenge ever wants
+/// verification, it belongs server-side against a submitted replay (§12.4), not here.
+const CHECK_BITS: u32 = 12;
+
+/// The check field's radix.
+const CHECK_SPACE: u64 = 1 << CHECK_BITS;
+
+/// How many [`IntelGate`] variants there are — an exact radix, not a bitfield padded
+/// to two bits, so the unused fourth code that used to need rejecting cannot exist.
+const GATE_VARIANTS: u64 = 3;
+
+/// How many boolean modifier toggles the token carries — every [`LevelModifiers`]
+/// field except the gate.
+const MODIFIER_TOGGLES: usize = 4;
+
+/// The most toggles that can be active at once. Today that is *all* of them: §12.6's
+/// three modifier sources compose harder-ward and nothing bounds the result, so the
+/// token must be able to say "everything on". It is named anyway because it is a
+/// radix: if a cap ever lands, tightening this shrinks the token, and [`MAGIC`]
+/// makes every token written under the old cap fail rather than mis-read.
+const MODIFIER_CAP: usize = MODIFIER_TOGGLES;
+
+/// A fixed multiplier applied to the packed value before it is written in base 26,
+/// and undone by [`UNSCRAMBLE`] on the way back. Coprime to [`TOKEN_SPACE`]
+/// (`2^12 · 13^12`), so it is a bijection over the whole range.
+///
+/// Without it the seed sits in the high digits and consecutive seeds share their last
+/// five characters — the token would look enumerable, and read as broken.
+const SCRAMBLE: u128 = 44_668_976_583_019_541;
+
+/// The modular inverse of [`SCRAMBLE`] over [`TOKEN_SPACE`]. Pinned rather than
+/// computed, and asserted in the tests.
+const UNSCRAMBLE: u128 = 45_103_698_764_276_541;
+
+/// The format fingerprint folded into every check field: the major version, the
+/// roster sizes, and the **caps**. Any of them moving invalidates every token written
+/// under the old shape — which is the point (see the module docs on #286).
+///
+/// It is computed off the catalogue rather than written down, so adding an ability or
+/// a modifier changes it without anyone remembering to.
+const MAGIC: u64 = {
+    let parts = [
+        FORMAT_MAJOR,
+        AbilityId::ALL.len() as u64,
+        AbilityId::TECH.len() as u64,
+        AbilityId::INNATE.len() as u64,
+        AbilityId::MAX_TECH_HELD as u64,
+        MODIFIER_TOGGLES as u64,
+        MODIFIER_CAP as u64,
+        GATE_VARIANTS,
+        SEED_BITS as u64,
+        CHECK_BITS as u64,
+    ];
+    let mut hash = FNV_OFFSET;
+    let mut i = 0;
+    while i < parts.len() {
+        hash = fnv_mix(hash, parts[i]);
+        i += 1;
+    }
+    hash
+};
+
+/// FNV-1a's 64-bit offset basis.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a's 64-bit prime.
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// Fold one 64-bit value into an FNV-1a hash, byte by byte. Not cryptographic and not
+/// trying to be ([`CHECK_BITS`] says why) — it needs to scatter a one-digit change
+/// across the check field, and it does.
+const fn fnv_mix(mut hash: u64, value: u64) -> u64 {
+    let bytes = value.to_le_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+        i += 1;
+    }
+    hash
+}
 
 /// A run's whole reproducible starting config (§12.4/#245): the three pieces that
-/// compose to a shareable [level-seed string](self) — the seed, the active
+/// compose to a shareable [level-seed token](self) — the seed, the active
 /// modifiers, and the ability loadout.
 ///
 /// Everything random in a run derives from `seed` (§12.4); `modifiers` and
@@ -118,63 +281,85 @@ impl LevelSeed {
         }
     }
 
-    /// Encode to the compact, URL-safe [level-seed string](self).
+    /// Narrow an arbitrary entropy source to the [`SEED_BITS`] the token carries.
     ///
-    /// A config that is *exactly* what [`quick_play`](Self::quick_play) resolves for
-    /// its seed emits the **bare decimal seed** — the maximally compact form, and the
-    /// one existing `?seed=N` links and the seed box already use (a bare seed decodes
-    /// straight back to the same quick-play run, so nothing is lost). Any other
-    /// config emits the versioned `L1-<seed>-<mods>-<abils>` form.
-    pub fn encode(&self) -> String {
-        if *self == Self::quick_play(self.seed) {
-            return self.seed.to_string();
-        }
-        self.encode_full()
+    /// The shell rolls a fresh run off the wall clock, which is far wider than the
+    /// seed field; without this the token could not express the very runs the game
+    /// creates. Applied at the *source*, never inside a constructor: a
+    /// [`LevelSeed`] built from a given number keeps that number, so nothing
+    /// silently boots a run other than the one asked for.
+    pub const fn narrow_seed(raw: u64) -> u64 {
+        raw & (SEED_SPACE - 1)
     }
 
-    /// Encode to the **versioned** `L1-<seed>-<mods>-<abils>` form, always — the
-    /// same token as [`encode`](Self::encode) except that a default-preset run
-    /// spells its config out instead of collapsing to the bare seed.
+    /// Encode to the [level-seed token](self) — twelve lowercase letters.
     ///
-    /// This is for a surface that must *show what the run is*, not just carry it:
-    /// the help panel's Level info tab (#272) reads a token the player can compare
-    /// against the run in front of them, and a bare `8371` says nothing about the
-    /// modifiers or loadout it implies. Links keep using [`encode`](Self::encode)
-    /// — a bare seed is shorter and decodes to exactly the same run — so this
-    /// changes what is *displayed*, never what is carried. Both forms decode
-    /// (§12.4), and to the same [`LevelSeed`].
-    pub fn encode_full(&self) -> String {
-        let mods = to_base36(modifier_bits(self.modifiers));
-        let abils: String = self.abilities.iter().map(|id| id.hotkey()).collect();
-        format!("{FORMAT_TAG}-{}-{mods}-{abils}", self.seed)
+    /// `None` when the config is not one a run can hold, which is the honest answer
+    /// rather than a token that would decode to something else: a seed wider than
+    /// [`SEED_BITS`] (see [`narrow_seed`](Self::narrow_seed)), or a loadout holding
+    /// more than [`AbilityId::MAX_TECH_HELD`] tech (§8.3 — [`Loadout::full`] is the
+    /// obvious example, and is documented as not a loadout a run can hold). Every
+    /// surface that shows or shares a token already has a "there is no token for
+    /// this" branch, because a hand-built state has never had one.
+    pub fn encode(&self) -> Option<String> {
+        let (toggles, gate) = modifier_fields(self.modifiers);
+        let mut chain = Chain::default();
+        chain.push(self.seed, SEED_SPACE)?;
+        chain.push(innate_bits(self.abilities), 1 << AbilityId::INNATE.len())?;
+        chain.push(gate_code(gate), GATE_VARIANTS)?;
+        chain.push_choice(&toggles, MODIFIER_CAP)?;
+        chain.push_choice(&tech_held(self.abilities), AbilityId::MAX_TECH_HELD)?;
+        chain.push(check_of(chain.0), CHECK_SPACE)?;
+        Some(to_letters(scramble(u128::from(chain.0))))
     }
 
-    /// Decode a [level-seed string](self), or `None` if it is not one.
+    /// Decode a [level-seed token](self), or `None` if it is not one.
     ///
-    /// Two shapes, matching [`encode`](Self::encode): a **bare decimal seed** →
-    /// the quick-play preset (#244), the backward-compatible path every existing
-    /// `?seed=N` link and typed seed takes; or the versioned `L1-…` form → its exact
-    /// `(seed, modifiers, abilities)`. Anything else — an unknown version tag, a
-    /// malformed field — is `None`, which the seed surface and the replay carrier
-    /// turn into a graceful fall to live play, never a bricked page (#110/#197).
+    /// Rejects, in order: a wrong length or a non-alphabetic character; a check field
+    /// that disagrees with [`MAGIC`] — a token from a build whose roster or caps
+    /// differ, or one letter mistyped; a count past its cap; and a non-zero residue
+    /// once every field has been read, which is what catches a value the format
+    /// cannot have produced. `None` is a graceful fall to a fresh run, never a
+    /// bricked page (#110/#197).
+    ///
+    /// Case-insensitive, because a token read aloud or through a form that
+    /// capitalises should still boot its run; [`encode`](Self::encode) always emits
+    /// lowercase.
     pub fn decode(raw: &str) -> Option<Self> {
-        let raw = raw.trim();
-        if let Ok(seed) = raw.parse::<u64>() {
-            return Some(Self::quick_play(seed));
+        let mut chain = Chain(unscramble(from_letters(raw.trim())?).try_into().ok()?);
+
+        // The check is popped first because it was pushed last, and it is verified
+        // against what remains — the payload it was computed over.
+        let check = chain.pop(CHECK_SPACE);
+        if check != check_of(chain.0) {
+            return None;
         }
-        let mut fields = raw.split('-');
-        if fields.next()? != FORMAT_TAG {
-            return None; // an unknown or older version tag degrades to None
+
+        // Each held set pops its count before the combination index that count sizes
+        // — the ordering the push order exists to produce.
+        let tech: [bool; AbilityId::TECH.len()] = chain.pop_choice(AbilityId::MAX_TECH_HELD)?;
+        let toggles: [bool; MODIFIER_TOGGLES] = chain.pop_choice(MODIFIER_CAP)?;
+        let gate = gate_from_code(chain.pop(GATE_VARIANTS))?;
+        let innate = chain.pop(1 << AbilityId::INNATE.len());
+        let seed = chain.pop(SEED_SPACE);
+        if chain.0 != 0 {
+            return None; // a value the chain cannot have produced
         }
-        let seed = fields.next()?.parse::<u64>().ok()?;
-        let modifiers = modifiers_from_bits(from_base36(fields.next()?)?)?;
-        let abilities = loadout_from_codes(fields.next()?)?;
-        if fields.next().is_some() {
-            return None; // trailing junk: a malformed token, not a valid one
+
+        let mut abilities = Loadout::empty();
+        for (slot, id) in AbilityId::INNATE.into_iter().enumerate() {
+            if innate >> slot & 1 == 1 {
+                abilities = abilities.with(id);
+            }
+        }
+        for (id, held) in AbilityId::TECH.into_iter().zip(tech) {
+            if held {
+                abilities = abilities.with(id);
+            }
         }
         Some(Self {
             seed,
-            modifiers,
+            modifiers: modifiers_from_fields(&toggles, gate),
             abilities,
         })
     }
@@ -215,7 +400,7 @@ fn quick_play_loadout(seed: u64) -> Loadout {
 /// stream continues into the turn loop (§12.4/#146), exactly as before loadouts —
 /// the loadout draw takes its own sub-stream, so a seed's facility is byte-identical
 /// whatever the loadout. The web shell, the replay viewer, and the sim all call
-/// this, so a level-seed string reproduces the *same* run everywhere.
+/// this, so a level-seed token reproduces the *same* run everywhere.
 pub fn start_level(level: &LevelSeed) -> Result<State, GenError> {
     start_level_with(&LevelConfig::V1, level)
 }
@@ -246,10 +431,123 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
     .with_level(*level))
 }
 
-/// Pack a [`LevelModifiers`] into a small bitfield for the token. A struct
-/// destructure names every field, so a new modifier will not compile until it is
-/// given a bit here (§12.2 — the compiler enumerates the encode sites).
-fn modifier_bits(m: LevelModifiers) -> u32 {
+/// The token's packed value, built up one field at a time.
+///
+/// `push` appends a digit at the least-significant end (`value * radix + digit`), so
+/// `pop` returns fields in the reverse of the order they were pushed. That reversal
+/// is load-bearing: a field whose radix depends on another — a combination index
+/// sized by its count — is pushed *before* it, so the count is already in hand by the
+/// time the index needs reading.
+#[derive(Default)]
+struct Chain(u64);
+
+impl Chain {
+    /// Append `digit` in `radix`, or `None` if it does not belong in that radix or
+    /// the chain would overflow — both meaning the config is not one the format can
+    /// carry.
+    fn push(&mut self, digit: u64, radix: u64) -> Option<()> {
+        if digit >= radix {
+            return None;
+        }
+        self.0 = self.0.checked_mul(radix)?.checked_add(digit)?;
+        Some(())
+    }
+
+    /// Read off the least-significant digit in `radix`.
+    fn pop(&mut self, radix: u64) -> u64 {
+        let digit = self.0 % radix;
+        self.0 /= radix;
+        digit
+    }
+
+    /// Append a held set as a **count** and a **combination index** — the encoding
+    /// whose width tracks `cap` rather than `N` (see the module docs).
+    ///
+    /// The count goes on last so it pops first, since it is the index's radix.
+    /// `None` when more than `cap` entries are held: not a set a run can hold, and
+    /// so not one the token will pretend to carry.
+    fn push_choice<const N: usize>(&mut self, held: &[bool; N], cap: usize) -> Option<()> {
+        let count = held.iter().filter(|&&held| held).count();
+        if count > cap {
+            return None;
+        }
+        self.push(combination_rank(held), binomial(N, count))?;
+        self.push(count as u64, cap as u64 + 1)
+    }
+
+    /// Read back a held set pushed by [`push_choice`](Self::push_choice). `None` when
+    /// the count exceeds `cap` — a token from a format with a wider cap, or a
+    /// corrupted one.
+    fn pop_choice<const N: usize>(&mut self, cap: usize) -> Option<[bool; N]> {
+        let count = self.pop(cap as u64 + 1) as usize;
+        if count > cap {
+            return None;
+        }
+        combination_unrank(self.pop(binomial(N, count)), count)
+    }
+}
+
+/// `C(n, k)` — how many ways `k` entries are held out of `n`, and so the radix of a
+/// combination index. Saturates to zero past `n`, which is the honest count.
+const fn binomial(n: usize, k: usize) -> u64 {
+    if k > n {
+        return 0;
+    }
+    // The multiplicative form, dividing as it goes so the running value stays small:
+    // C(n, i) is always an integer, so the division is exact at every step.
+    let mut value: u64 = 1;
+    let mut i = 0;
+    while i < k {
+        value = value * (n - i) as u64 / (i as u64 + 1);
+        i += 1;
+    }
+    value
+}
+
+/// The lexicographic rank of a held set among all sets of its size — the combination
+/// index the token carries.
+fn combination_rank<const N: usize>(held: &[bool; N]) -> u64 {
+    let count = held.iter().filter(|&&held| held).count();
+    let mut rank = 0;
+    let mut remaining = count;
+    for (position, &held) in held.iter().enumerate() {
+        if held {
+            remaining -= 1;
+        } else if remaining > 0 {
+            // Every set that takes this position instead sorts earlier: count them
+            // and step past.
+            rank += binomial(N - position - 1, remaining - 1);
+        }
+    }
+    rank
+}
+
+/// The held set with lexicographic `rank` among the sets of size `count` — the
+/// inverse of [`combination_rank`]. `None` when the rank is past the last such set.
+fn combination_unrank<const N: usize>(mut rank: u64, count: usize) -> Option<[bool; N]> {
+    let mut held = [false; N];
+    let mut remaining = count;
+    for (position, slot) in held.iter_mut().enumerate() {
+        if remaining == 0 {
+            break;
+        }
+        let skipped = binomial(N - position - 1, remaining - 1);
+        if rank < skipped {
+            *slot = true;
+            remaining -= 1;
+        } else {
+            rank -= skipped;
+        }
+    }
+    (remaining == 0 && rank == 0).then_some(held)
+}
+
+/// Split a [`LevelModifiers`] into the token's fields: the toggles in a fixed order,
+/// and the gate. A struct destructure names every field, so a new modifier will not
+/// compile until it is given a position here (§12.2 — the compiler enumerates the
+/// encode sites), and adding one changes [`MAGIC`], so tokens written before it stop
+/// decoding instead of quietly losing it.
+fn modifier_fields(m: LevelModifiers) -> ([bool; MODIFIER_TOGGLES], IntelGate) {
     let LevelModifiers {
         guards_always_search_hideouts,
         sighting_lost_calls_a_guard,
@@ -257,27 +555,33 @@ fn modifier_bits(m: LevelModifiers) -> u32 {
         always_show_vision_cones,
         intel_to_exit,
     } = m;
-    u32::from(guards_always_search_hideouts)
-        | u32::from(always_show_vision_cones) << 1
-        | gate_bits(intel_to_exit) << 2
-        | u32::from(sighting_lost_calls_a_guard) << 4
-        | u32::from(body_found_calls_two_guards) << 5
+    (
+        [
+            guards_always_search_hideouts,
+            sighting_lost_calls_a_guard,
+            body_found_calls_two_guards,
+            always_show_vision_cones,
+        ],
+        intel_to_exit,
+    )
 }
 
-/// Unpack a bitfield back into a [`LevelModifiers`], or `None` if a field holds a
-/// value this version has no meaning for (a token from a newer format).
-fn modifiers_from_bits(bits: u32) -> Option<LevelModifiers> {
-    Some(LevelModifiers {
-        guards_always_search_hideouts: bits & 0b1 != 0,
-        always_show_vision_cones: bits & 0b10 != 0,
-        intel_to_exit: gate_from_bits((bits >> 2) & 0b11)?,
-        sighting_lost_calls_a_guard: bits & 0b1_0000 != 0,
-        body_found_calls_two_guards: bits & 0b10_0000 != 0,
-    })
+/// Rebuild a [`LevelModifiers`] from the token's fields — the inverse of
+/// [`modifier_fields`], in the same order.
+fn modifiers_from_fields(toggles: &[bool; MODIFIER_TOGGLES], gate: IntelGate) -> LevelModifiers {
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones] =
+        *toggles;
+    LevelModifiers {
+        guards_always_search_hideouts,
+        sighting_lost_calls_a_guard,
+        body_found_calls_two_guards,
+        always_show_vision_cones,
+        intel_to_exit: gate,
+    }
 }
 
-/// The two-bit encoding of the intel gate.
-fn gate_bits(gate: IntelGate) -> u32 {
+/// The intel gate's digit.
+fn gate_code(gate: IntelGate) -> u64 {
     match gate {
         IntelGate::None => 0,
         IntelGate::AtLeastOne => 1,
@@ -285,9 +589,10 @@ fn gate_bits(gate: IntelGate) -> u32 {
     }
 }
 
-/// The intel gate for a two-bit code, or `None` for an unused code (`3`).
-fn gate_from_bits(bits: u32) -> Option<IntelGate> {
-    match bits {
+/// The intel gate for a digit. Total over the radix — there is no unused code to
+/// reject, which is the point of an exact radix rather than a padded bitfield.
+fn gate_from_code(code: u64) -> Option<IntelGate> {
+    match code {
         0 => Some(IntelGate::None),
         1 => Some(IntelGate::AtLeastOne),
         2 => Some(IntelGate::All),
@@ -295,49 +600,69 @@ fn gate_from_bits(bits: u32) -> Option<IntelGate> {
     }
 }
 
-/// A loadout from its ability-code string — the [`AbilityId::hotkey`] letters of the
-/// held abilities, in any order. Built up from the empty loadout, so the round-trip
-/// carries exactly the codes named. `None` if a letter is not an ability key or is
-/// repeated, so a malformed field never silently drops or doubles an ability.
-fn loadout_from_codes(codes: &str) -> Option<Loadout> {
-    let mut loadout = Loadout::empty();
-    for ch in codes.chars() {
-        let id = AbilityId::ALL.into_iter().find(|id| id.hotkey() == ch)?;
-        if loadout.contains(id) {
-            return None; // a repeated ability code is malformed
-        }
-        loadout = loadout.with(id);
-    }
-    Some(loadout)
+/// The innate half of a loadout, as a bitset over [`AbilityId::INNATE`]. Innate
+/// abilities are not drawn and not capped (§8.3), so they cost a bit each — there is
+/// no cap for a combination index to track.
+fn innate_bits(abilities: Loadout) -> u64 {
+    AbilityId::INNATE
+        .into_iter()
+        .enumerate()
+        .filter(|&(_, id)| abilities.contains(id))
+        .map(|(slot, _)| 1 << slot)
+        .sum()
 }
 
-/// Base-36 of a small integer — compact and URL-safe (lowercase digits + letters).
-fn to_base36(mut n: u32) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    let mut out = Vec::new();
-    while n > 0 {
-        out.push(DIGITS[(n % 36) as usize]);
-        n /= 36;
-    }
-    out.reverse();
-    String::from_utf8(out).expect("base-36 digits are ASCII")
+/// The tech half of a loadout, as membership over [`AbilityId::TECH`]'s fixed order.
+fn tech_held(abilities: Loadout) -> [bool; AbilityId::TECH.len()] {
+    AbilityId::TECH.map(|id| abilities.contains(id))
 }
 
-/// Parse a base-36 field back to an integer, or `None` if it is empty or holds a
-/// non-base-36 character (a malformed token).
-fn from_base36(s: &str) -> Option<u32> {
-    if s.is_empty() {
+/// The check field for a payload: [`CHECK_BITS`] off an FNV-1a fold of the payload
+/// and [`MAGIC`]. Taken from the top of the hash, where the avalanche is best.
+fn check_of(payload: u64) -> u64 {
+    let hash = fnv_mix(fnv_mix(FNV_OFFSET, payload), MAGIC);
+    hash >> (u64::BITS - CHECK_BITS) & (CHECK_SPACE - 1)
+}
+
+/// Spread the packed value over the token's digits, so consecutive seeds do not share
+/// a visible prefix. A bijection over [`TOKEN_SPACE`] — see [`SCRAMBLE`].
+fn scramble(value: u128) -> u128 {
+    value * SCRAMBLE % TOKEN_SPACE
+}
+
+/// Undo [`scramble`].
+fn unscramble(value: u128) -> u128 {
+    value * UNSCRAMBLE % TOKEN_SPACE
+}
+
+/// Write a value as exactly [`TOKEN_LEN`] lowercase letters, most significant first
+/// and zero-padded with `a`. Total over [`TOKEN_SPACE`], which is what the scramble
+/// maps onto.
+fn to_letters(mut value: u128) -> String {
+    let mut letters = [b'a'; TOKEN_LEN];
+    for slot in letters.iter_mut().rev() {
+        *slot = b'a' + (value % ALPHABET) as u8;
+        value /= ALPHABET;
+    }
+    String::from_utf8(letters.to_vec()).expect("the alphabet is ASCII")
+}
+
+/// Read [`TOKEN_LEN`] letters back to a value, or `None` on a wrong length or any
+/// character outside `a`–`z`. Case-insensitive; the byte-length check is safe against
+/// multi-byte input because a non-ASCII token is rejected on the same pass.
+fn from_letters(token: &str) -> Option<u128> {
+    if token.len() != TOKEN_LEN {
         return None;
     }
-    let mut n: u32 = 0;
-    for ch in s.chars() {
-        let digit = ch.to_digit(36)?;
-        n = n.checked_mul(36)?.checked_add(digit)?;
+    let mut value: u128 = 0;
+    for byte in token.bytes() {
+        let letter = byte.to_ascii_lowercase();
+        if !letter.is_ascii_lowercase() {
+            return None;
+        }
+        value = value * ALPHABET + u128::from(letter - b'a');
     }
-    Some(n)
+    Some(value)
 }
 
 #[cfg(test)]
@@ -345,35 +670,48 @@ mod tests {
     use super::*;
     use crate::Outcome;
 
-    /// The two encodings are two views of one config (#272): [`encode`] is the
-    /// **link** form — bare for the default preset, so `?seed=8371` stays short —
-    /// and [`encode_full`] is the **display** form, always versioned, so a surface
-    /// that shows what the run *is* spells its modifiers and loadout out. Both
-    /// decode back to the same [`LevelSeed`], which is what makes the choice purely
-    /// cosmetic.
-    ///
-    /// [`encode`]: LevelSeed::encode
-    /// [`encode_full`]: LevelSeed::encode_full
-    #[test]
-    fn the_link_form_is_compact_and_the_display_form_is_always_full() {
-        let quick = LevelSeed::quick_play(8371);
-        assert_eq!(quick.encode(), "8371", "the link form collapses");
-        assert!(
-            quick.encode_full().starts_with("L1-8371-"),
-            "the display form spells the preset out: {}",
-            quick.encode_full()
-        );
-        assert_ne!(quick.encode(), quick.encode_full());
-        // Both decode to the same run — the display form loses nothing and adds no
-        // way to boot something else.
-        assert_eq!(LevelSeed::decode(&quick.encode()), Some(quick));
-        assert_eq!(LevelSeed::decode(&quick.encode_full()), Some(quick));
+    /// Encoding a config a run can hold, for the tests that only care about the
+    /// string.
+    fn token(level: LevelSeed) -> String {
+        level.encode().expect("a config a run can hold")
+    }
 
-        // A non-default config already emitted the full form, and still does — the
-        // two agree wherever the preset is not the default.
-        let custom = LevelSeed::sim(8371);
-        assert_eq!(custom.encode(), custom.encode_full());
-        assert_eq!(LevelSeed::decode(&custom.encode_full()), Some(custom));
+    /// **One form, one width** (#333): every token is [`TOKEN_LEN`] lowercase
+    /// letters, whatever the config it carries. There is no compact form and no
+    /// display form to pick between — the preset a config happens to match changes
+    /// nothing about how it is written down, which is precisely what stopped being
+    /// true when a bare seed meant "this build's quick play, applied to a number".
+    #[test]
+    fn every_config_encodes_to_one_fixed_width_alphabetic_token() {
+        for level in [
+            LevelSeed::quick_play(8371),
+            LevelSeed::sim(8371),
+            LevelSeed::quick_play(0),
+            LevelSeed::quick_play(u64::from(u32::MAX)),
+        ] {
+            let token = token(level);
+            assert_eq!(token.len(), TOKEN_LEN, "fixed width: {token}");
+            assert!(
+                token.bytes().all(|b| b.is_ascii_lowercase()),
+                "lowercase alphabetic only: {token}",
+            );
+            assert_eq!(
+                LevelSeed::decode(&token),
+                Some(level),
+                "{token} round-trips"
+            );
+        }
+    }
+
+    /// A token is read case-insensitively — it survives being read aloud, or a form
+    /// that capitalises — but is always **emitted** lowercase, so one config has one
+    /// spelling.
+    #[test]
+    fn a_token_decodes_whatever_its_case() {
+        let level = LevelSeed::sim(8371);
+        let token = token(level);
+        assert_eq!(LevelSeed::decode(&token.to_uppercase()), Some(level));
+        assert_eq!(token, token.to_lowercase(), "emitted lowercase");
     }
 
     /// The booted run **carries the config that booted it** (#245/#272): `start_level`
@@ -401,7 +739,7 @@ mod tests {
             assert_eq!(state.loadout(), level.abilities, "…both halves of it");
             // What the panel would show boots this run again.
             assert_eq!(
-                LevelSeed::decode(&state.level().expect("a booted run").encode()),
+                LevelSeed::decode(&token(state.level().expect("a booted run"))),
                 Some(level),
             );
         }
@@ -424,10 +762,7 @@ mod tests {
             .into_iter()
             .filter(|&id| level.abilities.contains(id))
             .count();
-        assert_eq!(
-            tech_held, QUICK_PLAY_TECH_GRANT,
-            "a three-of-five tech draw"
-        );
+        assert_eq!(tech_held, QUICK_PLAY_TECH_GRANT, "a three-of-six tech draw");
         // The pool now outgrows the grant, so the loadout is a strict subset.
         assert_ne!(level.abilities, Loadout::full(), "not every tech is held");
     }
@@ -447,81 +782,64 @@ mod tests {
         assert_eq!(level.modifiers, LevelModifiers::default());
     }
 
-    /// A **bare decimal seed** decodes to the quick-play preset — the backward-
-    /// compatible path every existing `?seed=N` link and typed seed takes (#245).
+    /// **A bare decimal seed is not a token** (#333, superseding #328). It named
+    /// this build's quick-play preset applied to a number, not a run, so a link
+    /// carrying one silently re-resolved into a different run whenever the preset
+    /// moved underneath it. It is gone as an *input* too — one thing a shared string
+    /// can mean — and this test is where that decision is recorded, in place of the
+    /// `quick_play(8371).encode() == "8371"` pin it replaces.
     #[test]
-    fn a_bare_seed_decodes_to_quick_play() {
-        assert_eq!(LevelSeed::decode("8371"), Some(LevelSeed::quick_play(8371)));
-        assert_eq!(LevelSeed::decode("  42 "), Some(LevelSeed::quick_play(42)));
-        assert_eq!(LevelSeed::decode("0"), Some(LevelSeed::quick_play(0)));
+    fn a_bare_seed_is_no_longer_a_token() {
+        assert_eq!(LevelSeed::decode("8371"), None);
+        assert_eq!(LevelSeed::decode("0"), None);
+        assert_eq!(LevelSeed::decode("  42 "), None);
+        // Nor is the old structured form it shared the surface with.
+        assert_eq!(LevelSeed::decode("L1-8371-4-cdz"), None);
+        assert_eq!(LevelSeed::decode("L1-42-4-r"), None);
     }
 
-    /// Quick play encodes to the bare seed — the maximally compact form, since a
-    /// bare seed decodes straight back to the same quick-play run.
-    #[test]
-    fn quick_play_encodes_to_the_bare_seed() {
-        assert_eq!(LevelSeed::quick_play(8371).encode(), "8371");
-        // And that bare form round-trips.
-        let level = LevelSeed::quick_play(8371);
-        assert_eq!(LevelSeed::decode(&level.encode()), Some(level));
-    }
-
-    /// A config that is *not* quick play encodes to the versioned `L1-…` form and
-    /// round-trips through it exactly — seed, every modifier, and the loadout.
-    #[test]
-    fn a_non_default_config_round_trips_through_the_structured_form() {
-        let level = LevelSeed {
-            seed: 999,
-            modifiers: LevelModifiers {
-                guards_always_search_hideouts: true,
-                sighting_lost_calls_a_guard: true,
-                body_found_calls_two_guards: true,
-                always_show_vision_cones: true,
-                intel_to_exit: IntelGate::None,
-            },
-            abilities: Loadout::innate().with(AbilityId::Dephase),
-        };
-        let token = level.encode();
-        assert!(token.starts_with("L1-"), "structured form: {token}");
-        assert_eq!(LevelSeed::decode(&token), Some(level));
-    }
-
-    /// Every combination of the modifier fields and a spread of loadouts survives
-    /// the round-trip — the encode/decode is total over the config space, so no
-    /// shared level can silently mutate in transit (#245).
+    /// Every combination of the modifier fields and a spread of holdable loadouts
+    /// survives the round-trip — the codec is total over the space of configs a run
+    /// can hold, so no shared level can silently mutate in transit (#245).
     #[test]
     fn every_config_round_trips() {
         let gates = [IntelGate::None, IntelGate::AtLeastOne, IntelGate::All];
         let loadouts = [
             Loadout::empty(),
             Loadout::innate(),
-            Loadout::full(),
             Loadout::innate().with(AbilityId::Camouflage),
             Loadout::empty()
                 .with(AbilityId::Decoy)
                 .with(AbilityId::Dephase),
+            // The cap itself: the widest loadout a run can hold (§8.3).
+            Loadout::innate()
+                .with(AbilityId::Decoy)
+                .with(AbilityId::Confusion)
+                .with(AbilityId::Vision),
         ];
         for search in [false, true] {
             for cones in [false, true] {
-                for called in [false, true] {
-                    for gate in gates {
-                        for abilities in loadouts {
-                            let level = LevelSeed {
-                                seed: 12345,
-                                modifiers: LevelModifiers {
-                                    guards_always_search_hideouts: search,
-                                    sighting_lost_calls_a_guard: called,
-                                    body_found_calls_two_guards: called,
-                                    always_show_vision_cones: cones,
-                                    intel_to_exit: gate,
-                                },
-                                abilities,
-                            };
-                            assert_eq!(
-                                LevelSeed::decode(&level.encode()),
-                                Some(level),
-                                "round-trip failed for {level:?}",
-                            );
+                for sighting in [false, true] {
+                    for body in [false, true] {
+                        for gate in gates {
+                            for abilities in loadouts {
+                                let level = LevelSeed {
+                                    seed: 12345,
+                                    modifiers: LevelModifiers {
+                                        guards_always_search_hideouts: search,
+                                        sighting_lost_calls_a_guard: sighting,
+                                        body_found_calls_two_guards: body,
+                                        always_show_vision_cones: cones,
+                                        intel_to_exit: gate,
+                                    },
+                                    abilities,
+                                };
+                                assert_eq!(
+                                    LevelSeed::decode(&token(level)),
+                                    Some(level),
+                                    "round-trip failed for {level:?}",
+                                );
+                            }
                         }
                     }
                 }
@@ -529,69 +847,241 @@ mod tests {
         }
     }
 
-    /// A malformed or unknown token decodes to `None` — the graceful fall to a fresh
-    /// run the seed surface and the replay carrier depend on (#110/#197): a bad token
-    /// must never brick the page, and an older/newer version must degrade, not
-    /// mis-parse.
+    /// Every tech subset up to the cap round-trips through its combination index —
+    /// the encoding that costs `log2(C(n, k))` rather than a bit per catalogue entry.
     #[test]
-    fn a_malformed_token_decodes_to_none() {
-        assert_eq!(LevelSeed::decode(""), None);
-        assert_eq!(
-            LevelSeed::decode("L2-1-3-rcdx"),
-            None,
-            "unknown version tag"
-        );
-        assert_eq!(LevelSeed::decode("L1-1-3"), None, "too few fields");
-        assert_eq!(
-            LevelSeed::decode("L1-1-3-rcdx-extra"),
-            None,
-            "trailing junk"
-        );
-        assert_eq!(LevelSeed::decode("L1-notaseed-3-r"), None, "bad seed");
-        assert_eq!(LevelSeed::decode("L1-1--r"), None, "empty modifier field");
-        assert_eq!(LevelSeed::decode("L1-1-3-rr"), None, "a repeated ability");
-        assert_eq!(LevelSeed::decode("L1-1-3-rq"), None, "q is no ability key");
-        assert_eq!(LevelSeed::decode("-1.5-"), None, "not a token at all");
+    fn every_holdable_tech_subset_round_trips() {
+        let pool = AbilityId::TECH;
+        let mut seen = 0;
+        // Every subset of the pool, filtered to those a run can hold.
+        for mask in 0..(1u32 << pool.len()) {
+            if mask.count_ones() as usize > AbilityId::MAX_TECH_HELD {
+                continue;
+            }
+            let mut abilities = Loadout::innate();
+            for (slot, id) in pool.into_iter().enumerate() {
+                if mask >> slot & 1 == 1 {
+                    abilities = abilities.with(id);
+                }
+            }
+            let level = LevelSeed {
+                abilities,
+                ..LevelSeed::sim(7)
+            };
+            assert_eq!(
+                LevelSeed::decode(&token(level)),
+                Some(level),
+                "mask {mask:b}"
+            );
+            seen += 1;
+        }
+        // Σ C(6, k) for k ≤ 3 — the whole holdable space, not a sample of it.
+        assert_eq!(seen, 1 + 6 + 15 + 20);
     }
 
-    /// The token is compact and URL-safe: only unreserved characters (digits,
-    /// lowercase letters, and the `-` separator), so it drops into a `?seed=` field
-    /// or a `#seed=` hash with no escaping.
+    /// A config the format cannot carry encodes to `None` rather than to a token that
+    /// would decode as something else. Two ways that happens, both meaning "not a run
+    /// this game can hold": a seed wider than [`SEED_BITS`], and a loadout over the
+    /// §8.3 tech cap ([`Loadout::full`] documents itself as exactly that).
     #[test]
-    fn the_token_is_url_safe_and_short() {
-        let token = LevelSeed {
-            seed: u64::MAX,
+    fn a_config_a_run_cannot_hold_has_no_token() {
+        let wide = LevelSeed::quick_play(1 << SEED_BITS);
+        assert_eq!(wide.encode(), None, "a seed past the field's width");
+        // …and narrowing it is how an entropy source is brought into range.
+        let narrowed = LevelSeed::quick_play(LevelSeed::narrow_seed(1 << SEED_BITS));
+        assert_eq!(narrowed.seed, 0);
+        assert!(narrowed.encode().is_some());
+
+        let over_cap = LevelSeed {
+            abilities: Loadout::full(),
+            ..LevelSeed::sim(1)
+        };
+        assert_eq!(over_cap.encode(), None, "six tech is over the cap of three");
+    }
+
+    /// **The frozen token** (#333): a literal that must keep decoding to this exact
+    /// config, forever, or the format has changed under every link ever shared.
+    ///
+    /// If this fails, something moved that the token's shape depends on — the roster,
+    /// a cap, a field order, [`FORMAT_MAJOR`]. That is not necessarily wrong, but it
+    /// is never *incidental*: decide it deliberately, bump the version, and expect
+    /// every token in the wild to stop decoding. The [`MAGIC`] fold is what turns
+    /// that into a loud failure rather than the silent re-resolution of #286.
+    #[test]
+    fn a_frozen_token_still_names_the_run_it_always_did() {
+        const FROZEN: &str = "bcwdrhliqsmm";
+        let expected = LevelSeed {
+            seed: 8371,
             modifiers: LevelModifiers {
                 guards_always_search_hideouts: true,
-                sighting_lost_calls_a_guard: true,
+                sighting_lost_calls_a_guard: false,
                 body_found_calls_two_guards: true,
-                always_show_vision_cones: true,
+                always_show_vision_cones: false,
                 intel_to_exit: IntelGate::All,
             },
-            abilities: Loadout::full(),
-        }
-        .encode();
-        assert!(
-            token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
-            "url-safe: {token}",
+            abilities: Loadout::innate()
+                .with(AbilityId::Camouflage)
+                .with(AbilityId::Autodoors)
+                .with(AbilityId::Vision),
+        };
+        assert_eq!(
+            LevelSeed::decode(FROZEN),
+            Some(expected),
+            "the frozen token no longer names its run",
         );
-        // Even the widest config stays well under a tweet's worth of characters.
+        assert_eq!(token(expected), FROZEN, "…and it is still spelled this way");
+    }
+
+    /// **The #286 break, caught.** A token written against a different roster or a
+    /// different cap fails the check rather than decoding into a plausible-looking
+    /// different run. Simulated by perturbing the magic the check is folded over,
+    /// which is exactly what adding an ability or moving a cap does.
+    ///
+    /// Not every wrong-magic token is caught — [`CHECK_BITS`] bounds that at about
+    /// 99.98% — so this asserts the rate over the whole seed space rather than a
+    /// single lucky rejection.
+    #[test]
+    fn a_token_from_another_roster_is_rejected() {
+        let survivors = (0..20_000u64)
+            .filter(|&seed| {
+                let level = LevelSeed::sim(seed);
+                // Re-spell the token as a build with one more ability would: same
+                // payload, a check folded over a different magic.
+                let packed = unscramble(from_letters(&token(level)).expect("its own token"));
+                let payload = packed as u64 / CHECK_SPACE;
+                let foreign = fnv_mix(fnv_mix(FNV_OFFSET, payload), MAGIC.wrapping_add(1))
+                    >> (u64::BITS - CHECK_BITS)
+                    & (CHECK_SPACE - 1);
+                let reworded = to_letters(scramble(u128::from(payload * CHECK_SPACE + foreign)));
+                LevelSeed::decode(&reworded).is_some()
+            })
+            .count();
+        // 1-in-4096 slip through by collision; anything near 20,000 means the magic
+        // is not reaching the check at all.
         assert!(
-            token.len() < 40,
-            "compact: {token} is {} chars",
-            token.len()
+            survivors < 40,
+            "{survivors} of 20000 foreign tokens decoded — the magic is not biting",
         );
     }
 
-    /// Determinism (§12.4): a level-seed string reproduces the **exact** run — the
+    /// A malformed token decodes to `None` — the graceful fall to a fresh run the
+    /// seed surface and the replay carrier depend on (#110/#197): a bad token must
+    /// never brick the page.
+    #[test]
+    fn a_malformed_token_decodes_to_none() {
+        let valid = token(LevelSeed::sim(42));
+        assert_eq!(LevelSeed::decode(""), None, "empty");
+        assert_eq!(
+            LevelSeed::decode(&valid[..TOKEN_LEN - 1]),
+            None,
+            "too short"
+        );
+        assert_eq!(LevelSeed::decode(&format!("{valid}a")), None, "too long");
+        assert_eq!(LevelSeed::decode("abcdefghijk1"), None, "a digit");
+        assert_eq!(LevelSeed::decode("abcdef ghijk"), None, "a space");
+        assert_eq!(LevelSeed::decode("abcdefghijk-"), None, "punctuation");
+        assert_eq!(LevelSeed::decode("ébcdefghijkl"), None, "not even ASCII");
+
+        // A single mistyped letter is caught ~99.98% of the time; over every
+        // one-letter slip in one token, none should survive.
+        for at in 0..TOKEN_LEN {
+            for letter in b'a'..=b'z' {
+                let mut typo = valid.clone().into_bytes();
+                if typo[at] == letter {
+                    continue;
+                }
+                typo[at] = letter;
+                let typo = String::from_utf8(typo).expect("ASCII");
+                assert_eq!(LevelSeed::decode(&typo), None, "a typo decoded: {typo}");
+            }
+        }
+    }
+
+    /// The token is URL-safe by construction — letters only, so it drops into a
+    /// `?seed=` field or a `#seed=` hash with no escaping — and **consecutive seeds
+    /// do not look consecutive**. Without the scramble the seed sits in the high
+    /// digits and neighbouring runs would share every trailing character, which reads
+    /// as a broken token even though it decodes fine.
+    #[test]
+    fn neighbouring_seeds_do_not_share_a_visible_pattern() {
+        let a = token(LevelSeed::quick_play(8371));
+        let b = token(LevelSeed::quick_play(8372));
+        assert!(a.chars().all(|c| c.is_ascii_lowercase()));
+        let shared = a.bytes().zip(b.bytes()).filter(|(x, y)| x == y).count();
+        assert!(
+            shared <= 3,
+            "neighbouring seeds share {shared} of {TOKEN_LEN} positions: {a} / {b}",
+        );
+    }
+
+    /// The scramble is a bijection over the whole token space — [`UNSCRAMBLE`] is
+    /// pinned rather than computed, so it is asserted rather than assumed. A wrong
+    /// inverse would corrupt every token in a way no round-trip test would show,
+    /// since encode and decode would agree with each other while agreeing with
+    /// nothing already shared.
+    #[test]
+    fn the_scramble_inverts_exactly() {
+        assert_eq!(SCRAMBLE * UNSCRAMBLE % TOKEN_SPACE, 1);
+        for value in [0, 1, 2, 4095, TOKEN_SPACE - 1, TOKEN_SPACE / 3] {
+            assert_eq!(unscramble(scramble(value)), value);
+        }
+    }
+
+    /// The whole packed space fits the twelve characters it is written in, with room
+    /// left. If a field ever widens past this, the token gets longer — which is a
+    /// deliberate format change, not something to discover from a panic in
+    /// [`to_letters`].
+    #[test]
+    fn the_packed_space_fits_the_token() {
+        let widest = u128::from(SEED_SPACE)
+            * (1 << AbilityId::INNATE.len())
+            * u128::from(GATE_VARIANTS)
+            * u128::from(combinations_up_to(MODIFIER_TOGGLES, MODIFIER_CAP))
+            * u128::from(combinations_up_to(
+                AbilityId::TECH.len(),
+                AbilityId::MAX_TECH_HELD,
+            ))
+            * u128::from(CHECK_SPACE);
+        assert!(
+            widest <= TOKEN_SPACE,
+            "{widest} does not fit {TOKEN_SPACE} — the token needs another character",
+        );
+    }
+
+    /// `Σ C(n, k)` for `k ≤ cap` — the size of a combination field, for the capacity
+    /// assertion above.
+    fn combinations_up_to(n: usize, cap: usize) -> u64 {
+        (0..=cap).map(|k| binomial(n, k)).sum()
+    }
+
+    /// The combination index is a bijection onto the sets of each size: every rank
+    /// unranks to a set that ranks back, and nothing outside the range decodes.
+    #[test]
+    fn the_combination_index_is_a_bijection() {
+        for count in 0..=AbilityId::MAX_TECH_HELD {
+            let total = binomial(AbilityId::TECH.len(), count);
+            for rank in 0..total {
+                let held: [bool; AbilityId::TECH.len()] =
+                    combination_unrank(rank, count).expect("in range");
+                assert_eq!(held.iter().filter(|&&h| h).count(), count);
+                assert_eq!(combination_rank(&held), rank);
+            }
+            // One past the last set of this size is not a set of this size.
+            assert_eq!(
+                combination_unrank::<{ AbilityId::TECH.len() }>(total, count),
+                None,
+            );
+        }
+    }
+
+    /// Determinism (§12.4): a level-seed token reproduces the **exact** run — the
     /// same facility, modifiers, and loadout — every boot. A golden pin: decode a
     /// token, boot twice, and assert the rendered frames are byte-identical, and
     /// that booting from the decoded config matches booting from the config directly.
     #[test]
     fn a_token_reproduces_the_exact_run() {
         let level = LevelSeed::quick_play(2026);
-        let token = level.encode();
-        let decoded = LevelSeed::decode(&token).expect("its own token decodes");
+        let decoded = LevelSeed::decode(&token(level)).expect("its own token decodes");
         assert_eq!(decoded, level);
 
         let a = start_level(&decoded).expect("the v1 config boots");

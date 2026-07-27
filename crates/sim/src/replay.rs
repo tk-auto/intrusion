@@ -34,15 +34,20 @@ impl Replay {
 
     /// The replay as a single JSON line — the §12.4 pair and nothing else, the
     /// shareable form `--emit-replay` prints and slice C bakes into an Artifact. The
-    /// `seed` field is the **level-seed string** ([`LevelSeed::encode`]) — a bare
-    /// number for quick play, a `L1-…` token when the preset carries non-default
-    /// modifiers or a loadout — so the baked run reproduces its config, not just its
-    /// geometry (#245). `inputs` is the script string; feed it back on the level to
-    /// reproduce the run.
+    /// `seed` field is the **level-seed token** ([`LevelSeed::encode`], #333), so the
+    /// baked run reproduces its whole config and not just its geometry (#245) —
+    /// inputs replayed against a config that drifted underneath them are meaningless
+    /// (§12.4). `inputs` is the script string; feed it back on the level to reproduce
+    /// the run.
+    ///
+    /// A config with no token (one no run can hold — see [`LevelSeed::encode`]) emits
+    /// an empty `seed`, which decodes to nothing and so falls to a fresh run rather
+    /// than to a plausible wrong one (#110). No sim preset is such a config: the sim
+    /// boots the innate-only baseline (§13.3), well inside the §8.3 cap.
     pub fn to_json_line(&self) -> String {
         format!(
             "{{\"seed\":\"{}\",\"inputs\":\"{}\"}}",
-            self.level.encode(),
+            self.level.encode().unwrap_or_default(),
             self.script()
         )
     }
@@ -55,11 +60,12 @@ mod tests {
     use intrusion_core::{parse_script, AbilityId, Direction};
 
     /// The emit schema is pinned byte-for-byte (slice C reads it): the `(seed,
-    /// inputs)` pair, the `seed` field now the **level-seed string** carrying the
-    /// captured preset (#245), the inputs in the script notation, nothing else. The
-    /// sim preset for seed 42 is a non-default config (the `AtLeastOne` gate, the
-    /// innate-only loadout — the bare, no-tech baseline), so its token is the
-    /// structured `L1-…` form with just Run's `r` in the ability field.
+    /// inputs)` pair, the `seed` field the **level-seed token** carrying the captured
+    /// preset (#245/#333), the inputs in the script notation, nothing else.
+    ///
+    /// The token is pinned as a literal rather than recomputed, so a change to the
+    /// format shows up here as a failing schema — a baked replay is read back by a
+    /// build that may be newer than the one that wrote it.
     #[test]
     fn the_emit_schema_is_pinned() {
         let replay = Replay {
@@ -72,10 +78,10 @@ mod tests {
         };
         assert_eq!(
             replay.to_json_line(),
-            "{\"seed\":\"L1-42-4-r\",\"inputs\":\"N+r.\"}"
+            "{\"seed\":\"fiymfhjzyytr\",\"inputs\":\"N+r.\"}"
         );
         // The baked token decodes straight back to the captured preset.
-        assert_eq!(LevelSeed::decode("L1-42-4-r"), Some(LevelSeed::sim(42)));
+        assert_eq!(LevelSeed::decode("fiymfhjzyytr"), Some(LevelSeed::sim(42)));
     }
 
     /// The §12.4 property, asserted end to end (slice A acceptance): capture a bot

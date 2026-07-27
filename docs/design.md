@@ -270,7 +270,7 @@ If you are adding an ability and about to make it free, re-read §2.3.
 
   Pressing on for more than the gate demands is what an aggressive style trades extra
   exposure for. The gate is part of the run's reproducible config, carried in the
-  shareable level-seed string (§12.4/#245).
+  shareable level-seed token (§12.4/#245/#333).
 
 > **Consequence to preserve:** because capture is *contact*, not *detection*,
 > being invisible does not make you safe. A guard patrolling into the cell you
@@ -894,7 +894,7 @@ Notes carried forward, because they are good and non-obvious:
   outgrown the grant and it finally bites, #241); a campaign accumulates its set
   instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
   tech — it competes for the same slot, which is exactly what it pays with. The
-  resolved loadout is one of the three pieces of the shareable level-seed string
+  resolved loadout is one of the three pieces of the shareable level-seed token
   (§12.4/#245).
 - **Three tech is a cap, not just this preset's number** **[SETTLED]**. Whatever
   hands a run its abilities — the quick-play draw, a campaign's accumulation — it
@@ -1851,7 +1851,7 @@ slots across a 40-wide board is still tight, and the arithmetic is exact:
 That is the whole board width, with nothing spare — which is why each ability
 carries a short **bar name** (`Run`, `Camo`, `Decoy`, `Phase`, `Doors`, `Daze`,
 `Sight`) distinct from the full §8.3 name the help panel, the messages and the
-level-seed string use, and why the notation is tucked hard against it. **The
+level-seed token use, and why the notation is tucked hard against it. **The
 budget is checked at compile time.** Every input is derived — the held cap from
 the innate set plus the tech grant, the notation width from the catalog's own
 durations and cooldowns — so renaming an ability, pushing a cooldown past 99, or
@@ -2133,7 +2133,7 @@ and vision, the type system should say so out loud.
 - **A replay is `(seed, [inputs])`.** Nothing else — until level modifiers and a
   seeded ability loadout made the *config* part of the reproducible unit too, so the
   identity widened to `(seed, modifiers, abilities, [inputs])`, all but the inputs
-  carried in one compact **level-seed string** (§12.6/#245). The principle is
+  carried in one compact **level-seed token** (§12.6/#245/#333). The principle is
   unchanged: a small, serialisable token reproduces the run exactly.
 
 What this single property buys:
@@ -2206,14 +2206,37 @@ config: same seed + **same modifiers** + same inputs → identical run. It is pl
 `Copy` data threaded through the boot alongside the seed, so — with the ability
 **loadout** (§8.3/#244), the third piece — a run's identity is now
 `(seed, modifiers, abilities, inputs)`. These three pieces compose to one
-**level-seed string** (`LevelSeed`, #245): a compact, URL-safe, versioned token
-(`L1-<seed>-<mods>-<abilities>`, or just the bare seed when the config is the default
-quick-play preset) that extends the #110/#197 carrier rather than inventing a second
-scheme. A bare `?seed=N` still decodes — to quick play — and a malformed token falls
-back to a fresh run, never a bricked page. One boot path (`start_level`) turns a
-`LevelSeed` into a running state for the web shell, the replay viewer, and the
-headless sim alike, and the one token format is what saves (§12.5) and the replay
-Artifact build (#197 slice C) share so they cannot diverge.
+**level-seed token** (`LevelSeed`, #245/#333): **twelve lowercase letters**, e.g.
+`bcwdrhliqsmm`, extending the #110/#197 carrier rather than inventing a second
+scheme. Fixed width, so a wrong length is rejected before anything is parsed;
+all-alphabetic, so there is no `0`/`O` to misread; and one form, so the panel that
+displays a run and the link that shares it cannot disagree about what it is. A token
+that does not decode falls back to a fresh run, never a bricked page. One boot path
+(`start_level`) turns a `LevelSeed` into a running state for the web shell, the
+replay viewer, and the headless sim alike, and the one token format is what saves
+(§12.5) and the replay Artifact build (#197 slice C) share so they cannot diverge.
+
+**A number is not a token** (#333, superseding #328). A bare `?seed=8371` named
+*this build's quick-play preset applied to 8371* — not a run — so every shared link
+silently re-resolved whenever the preset moved. It did move: when the Vision passive
+joined the tech pool (#286) the seeded draw re-ran over a changed pool, and every
+link shared before it began booting a different loadout with nothing saying so. So
+the token carries the config explicitly, and a **magic** folded into its checksum —
+the format version, the roster sizes, *and* the caps — makes a roster change fail
+loudly instead. The bare form is gone as an **input** too, which is the cost worth
+stating: "try seed 8371" no longer works, and pre-#333 links stop decoding. They were
+already booting the wrong run; failing loudly is the better of the two.
+
+Inside, the token is a mixed-radix chain — the seed (32 bits, so every run the game
+rolls must be narrowed into that field), the innate abilities as a bitset, the intel
+gate, then the modifiers and the held tech each as a **count plus a combination
+index** over their catalogue, then the check. Held sets are combination indexes
+rather than bitsets so the token's length tracks the **cap** (§8.3's
+`MAX_TECH_HELD`) rather than the size of the catalogue: today the two cost the same
+twelve characters, but at a hundred abilities it is seventeen characters against
+ninety-four. That makes the caps part of the format — which is why they are in the
+magic. **[START]** on the widths: twelve characters, a 32-bit seed and a 12-bit check
+are a chosen balance, not a law — a character buys about five check bits.
 
 **Debug modifiers are not level modifiers.** A separate `DebugModifiers` value
 carries playtest-only switches over **what the player perceives** — today one: *"see
