@@ -21,7 +21,7 @@
 //! their categories come from [`Terrain::glyph`]/[`Terrain::category`], the entity
 //! glyphs from the [`super`] render constants the world draws with, the colour
 //! meanings from an exhaustive match over [`Category`], the ability entries from
-//! the run's own [`Loadout`] and [`AbilityId`]'s settled §11.6 hotkeys, and the
+//! the run's own [`Loadout`] and the §11.6 keys its bar slots answer to, and the
 //! modifier rows from [`LevelModifiers::active`] — so a newly added modifier
 //! appears here on its own. The tests assert each derivation.
 //!
@@ -59,7 +59,7 @@ use crate::modifiers::{LevelModifiers, ModifierDirection, CAPTIONS, CAPTION_SEPA
 use crate::place::LevelConfig;
 
 /// The key that toggles the help panel (§11.6). A free letter — not a movement
-/// key, an ability hotkey, or another UI control — and the conventional roguelike
+/// key, an ability key, or another UI control — and the conventional roguelike
 /// help key. Shown in the controls list and matched in
 /// [`ui_command_for_key`](crate::input::ui_command_for_key) (to open) and
 /// [`help_nav_for_key`](crate::help_nav_for_key) (to close).
@@ -607,8 +607,8 @@ const fn category_meaning(category: Category) -> &'static str {
 }
 
 /// The **standing** controls (§11.6/#296), each `(keys, action)` — the shortcuts that
-/// are true of every run: move, wait, the message log, this panel, and the colour
-/// theme (#189).
+/// are true of every run: move, wait, the ability bar's four digits, the message log,
+/// this panel, and the colour theme (#189).
 ///
 /// It used to list the abilities too, one row per [`AbilityId::ALL`] entry. That was
 /// wrong twice over: it named all eight when a run holds at most four (§8.3), so half
@@ -619,8 +619,18 @@ const fn category_meaning(category: Category) -> &'static str {
 /// a key on its own never answered.
 fn control_rows() -> Vec<(String, String)> {
     vec![
-        ("arrows / hjkl / 8246".to_string(), "move".to_string()),
-        ("w / 5 / .".to_string(), "wait & sense".to_string()),
+        // "num" rather than the bare `8246` the row used to print: the digit path is
+        // the **numpad**'s now (#359), bound by physical code so it steps on any
+        // layout, while the top row's digits went to the abilities below. The keys
+        // column has 22 cells, which is why the digits themselves are left to §11.6
+        // and to the numpad's own printing.
+        ("arrows / hjkl / num".to_string(), "move".to_string()),
+        ("w / num 5 / .".to_string(), "wait & sense".to_string()),
+        // The abilities are a standing control after all (#359): *which* ability a
+        // digit fires is the run's business — the Abilities tab pairs each with its
+        // slot — but that `1`–`4` fire the bar, left to right, is true of every run,
+        // which is precisely what belongs on a legend.
+        ("1234".to_string(), "abilities".to_string()),
         ("m".to_string(), "messages".to_string()),
         (HELP_KEY.to_string(), "this help".to_string()),
         // The theme toggle (#189) is a standing shortcut like the rest: it is true of
@@ -630,7 +640,7 @@ fn control_rows() -> Vec<(String, String)> {
 }
 
 /// Where the Abilities tab's key column starts (§11.4/#343): the full §8.3 name runs
-/// from [`CONTENT_INDENT`] up to here, and the `hotkey / bar name` pairing from here
+/// from [`CONTENT_INDENT`] up to here, and the `key / bar name` pairing from here
 /// to the right margin.
 ///
 /// It lives on this module rather than the tab's, beside [`CONTROL_ACTION_X`], because
@@ -772,14 +782,18 @@ mod tests {
         }
     }
 
-    /// The controls card keeps only the **standing** shortcuts (#296): the five rows
-    /// that are true of every run, and no ability. It documents its own keys, too.
+    /// The controls card keeps only the **standing** shortcuts (#296): the six rows
+    /// that are true of every run, and no *named* ability. The ability row earns its
+    /// place by naming the keys rather than what they fire (#359) — the pairing is the
+    /// Abilities tab's job, since it changes with the loadout. It documents its own
+    /// keys, too.
     #[test]
     fn the_control_rows_are_the_standing_shortcuts_only() {
         let rows = control_rows();
         for action in [
             "move",
             "wait & sense",
+            "abilities",
             "messages",
             "this help",
             "colour theme",
@@ -789,7 +803,7 @@ mod tests {
                 "the controls list {action:?}",
             );
         }
-        assert_eq!(rows.len(), 5, "and nothing else — no ability rows");
+        assert_eq!(rows.len(), 6, "and nothing else — no per-ability rows");
         // The panel's own two keys document themselves.
         assert!(rows.iter().any(|(k, _)| *k == HELP_KEY.to_string()));
         assert!(rows.iter().any(|(k, _)| *k == THEME_KEY.to_string()));
@@ -809,11 +823,13 @@ mod tests {
                     "{} is on the Abilities tab, not the Legend",
                     id.name(),
                 );
-                assert!(
-                    !text.contains(&format!("{} / {}", id.hotkey(), id.bar_name())),
-                    "{}'s key pairing is on the Abilities tab, not the Legend",
-                    id.name(),
-                );
+                for slot in 0..AbilityId::MAX_HELD {
+                    assert!(
+                        !text.contains(&format!("{} / {}", slot + 1, id.bar_name())),
+                        "{}'s key pairing is on the Abilities tab, not the Legend",
+                        id.name(),
+                    );
+                }
             }
         }
     }
@@ -846,7 +862,7 @@ mod tests {
         for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
             assert!(text.contains(glyph), "the legend shows {glyph:?}");
         }
-        for keys in ["arrows / hjkl / 8246", "w / 5 / ."] {
+        for keys in ["arrows / hjkl / num", "w / num 5 / .", "1234"] {
             assert!(text.contains(keys), "the controls show {keys:?}");
         }
         // The Legend tab is not the Level-info tab: its modifier section is elsewhere.
@@ -1222,9 +1238,13 @@ mod tests {
             "the modal panel forwards its own option's key",
         );
         assert!(theme_control().ends_with(&format!("[{key}]")));
-        // It shadows nothing: not a movement key, not an ability hotkey.
+        // It shadows nothing: not a movement key, and not an ability key — those are
+        // the bar's four digits now (§11.6/#359), so a letter cannot collide with one.
         assert_eq!(crate::input_for_key(&key), None);
-        assert_eq!(crate::ability_for_key(&key), None);
+        assert_eq!(
+            crate::ability_slot_for_code(&format!("Key{}", key.to_uppercase())),
+            None
+        );
     }
 
     /// The tabs cycle, wrapping at both ends (§14 v2/#248) — the Tab / arrow motion.

@@ -8,13 +8,17 @@
 //! watch what happened. This is where that is read instead — while the game is
 //! paused, which is what the modal panel is for.
 //!
-//! Each entry completes the chain the bar starts: **bar name → hotkey → full name →
+//! Each entry completes the chain the bar starts: **bar name → key → full name →
 //! behaviour → price**.
 //!
 //! - The **full name** (§8.3) — the one the near line's messages speak.
-//! - The `hotkey / bar name` pairing — the two things a player is actually holding
+//! - The `key / bar name` pairing — the two things a player is actually holding
 //!   in their head ("the `Camo` down there, what fires it?"). This moved here from
 //!   the Legend's controls card (#296), which now keeps only the standing keys.
+//!   Since #359 the key is the entry's **bar slot** (`1 / Camo`), which is why this
+//!   tab draws in the bar's own order and counts as it goes: the digit an entry
+//!   shows is the digit that entry answers to, both derived from the one loadout
+//!   order the bar draws across.
 //! - The **economy line**, derived from the [`Ability`](crate::ability::Ability)
 //!   definition — turn cost, duration, cooldown, uses per level (§8.2).
 //! - The **blurb**, [`AbilityId::blurb`] — behaviour only, never numbers, so a
@@ -63,9 +67,12 @@ pub(super) fn draw_abilities(grid: &mut Grid, mut y: u32, loadout: Loadout) {
     y += 2;
 
     let mut any = false;
-    for id in loadout.iter() {
+    // Enumerated, because the key an entry shows *is* its position: the loadout
+    // iterates in ability-bar slot order (§11.4), so the nth entry here is the nth
+    // entry on the bar and answers to the nth digit (§11.6/#359).
+    for (slot, id) in loadout.iter().enumerate() {
         any = true;
-        y = draw_entry(grid, y, id);
+        y = draw_entry(grid, y, slot, id);
     }
     if !any {
         // No run boots this — a loadout always carries its innate set (§8.3) — but a
@@ -78,7 +85,7 @@ pub(super) fn draw_abilities(grid: &mut Grid, mut y: u32, loadout: Loadout) {
 /// One ability's entry, returning the row the next one starts on: the name and its
 /// key pairing on one row, the economy line under it, then the blurb, then a blank
 /// row of air.
-fn draw_entry(grid: &mut Grid, mut y: u32, id: AbilityId) -> u32 {
+fn draw_entry(grid: &mut Grid, mut y: u32, slot: usize, id: AbilityId) -> u32 {
     // Owned — "you and your things" (§11.2). An ability *is* one of your things, and
     // drawing the name in the player's own colour is what separates the four headings
     // from the prose hanging under them at a glance.
@@ -89,7 +96,7 @@ fn draw_entry(grid: &mut Grid, mut y: u32, id: AbilityId) -> u32 {
         grid,
         ability_keys_column_start(),
         y,
-        &ability_row_keys(id),
+        &ability_row_keys(slot, id),
         Category::System,
     );
     y += 1;
@@ -155,29 +162,48 @@ fn turns(n: u32) -> String {
 /// A **passive** has no key, so it shows its bar entry as the bar draws it —
 /// `Sight (on)` — which is the thing on screen the row is there to explain.
 ///
-/// A **per-level use budget** (§8.2/#302) is stated here too — `b / Bore (3/level)` —
+/// The key is the entry's **bar slot** (§11.6/#359), so this is the panel's answer to
+/// "which digit is the `Camo` down there?" — `3 / Camo` for the third entry along.
+/// It is a fact about *this* run rather than about the ability, which is exactly the
+/// trade #359 made: the digit is on screen in the bar at all times, and a loadout is
+/// fixed for the whole run (§8.3), so it never moves while it is being learned.
+///
+/// A **per-level use budget** (§8.2/#302) is stated here too — `4 / Bore (3/level)` —
 /// because it is the other half of "what does this key do", and it is the half a
 /// player cannot work out from the bar: the bar shows what is *left*, and only this
 /// panel says what a level ever grants. The two numbers differ the moment the first
 /// use is spent and that is not a contradiction — one is the supply, the other the
 /// remainder.
-pub(super) fn ability_row_keys(id: AbilityId) -> String {
+pub(super) fn ability_row_keys(slot: usize, id: AbilityId) -> String {
     if id.is_passive() {
         return format!("{} {}", id.bar_name(), crate::ability::PASSIVE_MARKER);
     }
     activated_row_keys(
-        id.hotkey(),
+        slot_key(slot),
         id.bar_name(),
         id.def().economy().and_then(|e| e.uses_per_level()),
     )
+}
+
+/// The digit that fires bar slot `slot` — the printed half of
+/// [`ability_slot_for_code`](crate::ability_slot_for_code), counting from `1` where
+/// the slots count from `0`.
+///
+/// A slot past the four a run can hold (§8.3) has no digit and prints `-`: no key
+/// fires it, and inventing a `5` the keyboard does not answer to would be worse than
+/// saying so. No shipping loadout reaches it — only a hand-built one can.
+fn slot_key(slot: usize) -> char {
+    char::from_digit(slot as u32 + 1, 10)
+        .filter(|_| slot < AbilityId::MAX_HELD)
+        .unwrap_or('-')
 }
 
 /// The activated half of [`ability_row_keys`], as a pure function of the three things
 /// it prints — so the widest entry a legal catalogue can produce can be measured
 /// against the column even while no shipping ability declares both a long name and a
 /// budget.
-fn activated_row_keys(hotkey: char, bar_name: &str, uses_per_level: Option<u32>) -> String {
-    let keys = format!("{hotkey} / {bar_name}");
+fn activated_row_keys(key: char, bar_name: &str, uses_per_level: Option<u32>) -> String {
+    let keys = format!("{key} / {bar_name}");
     match uses_per_level {
         Some(uses) => format!("{keys} ({uses}/level)"),
         None => keys,
@@ -228,6 +254,8 @@ mod tests {
     /// twice [`AbilityId::MAX_HELD`] and does not fit the screen (`full` is explicitly
     /// not a loadout a run can hold), so a sweep over `ALL` on one grid would be
     /// asserting against a tab the game never draws.
+    ///
+    /// A one-ability loadout puts that ability in slot `0`, so its key is `1`.
     fn tab_holding(id: AbilityId) -> String {
         text_of(&render_tab(HelpTab::Abilities, Loadout::empty().with(id)))
     }
@@ -240,12 +268,15 @@ mod tests {
         let loadout = held([AbilityId::Run, AbilityId::Decoy, AbilityId::Vision]);
         let text = text_of(&render_tab(HelpTab::Abilities, loadout));
 
-        for id in [AbilityId::Run, AbilityId::Decoy, AbilityId::Vision] {
+        for (slot, id) in [AbilityId::Run, AbilityId::Decoy, AbilityId::Vision]
+            .into_iter()
+            .enumerate()
+        {
             assert!(text.contains(id.name()), "the tab names {}", id.name());
             assert!(
-                text.contains(&ability_row_keys(id)),
+                text.contains(&ability_row_keys(slot, id)),
                 "…under {:?}",
-                ability_row_keys(id),
+                ability_row_keys(slot, id),
             );
         }
         for id in [
@@ -350,7 +381,12 @@ mod tests {
     /// not have. Its price is the loadout slot, and the line says so.
     #[test]
     fn a_passive_states_its_slot_price_and_no_clock() {
-        assert_eq!(ability_row_keys(AbilityId::Vision), "Sight (on)");
+        // Whatever slot it sits in: a passive answers to no digit, so it shows none
+        // (§11.6 — its key was already the free no-op, and now there is not even a
+        // key to be a no-op).
+        for slot in 0..AbilityId::MAX_HELD {
+            assert_eq!(ability_row_keys(slot, AbilityId::Vision), "Sight (on)");
+        }
         let line = economy_line(AbilityId::Vision);
         assert!(line.contains("always on") && line.contains("slot"));
         for clock in ["turn", "active", "cooling", "a level"] {
@@ -364,12 +400,12 @@ mod tests {
     /// controls card, which no longer carries ability rows (#296).
     #[test]
     fn the_entries_explain_the_bar_names() {
-        assert_eq!(ability_row_keys(AbilityId::Camouflage), "c / Camo");
-        assert_eq!(ability_row_keys(AbilityId::Run), "r / Run");
+        assert_eq!(ability_row_keys(0, AbilityId::Camouflage), "1 / Camo");
+        assert_eq!(ability_row_keys(0, AbilityId::Run), "1 / Run");
         for (id, keys, name) in [
-            (AbilityId::Camouflage, "c / Camo", "Camouflage"),
+            (AbilityId::Camouflage, "1 / Camo", "Camouflage"),
             (AbilityId::Vision, "Sight (on)", "Vision"),
-            (AbilityId::Autodoors, "a / Doors", "Autodoors"),
+            (AbilityId::Autodoors, "1 / Doors", "Autodoors"),
         ] {
             let text = tab_holding(id);
             assert!(text.contains(keys), "the tab shows {keys:?}");
@@ -377,25 +413,54 @@ mod tests {
         }
     }
 
-    /// The entries carry each **activated** ability's settled §11.6 hotkey, straight
-    /// from [`AbilityId`] — so the key shown is the key that activates it, and cannot
-    /// drift. Moved here from the Legend (#296), which is no longer where hotkeys for
-    /// abilities are read off.
+    /// The entries carry each **activated** ability's real key — its bar slot's digit
+    /// (§11.6/#359) — so the digit shown is the digit that fires it. Every entry is
+    /// listed, whatever slot the loadout puts it in.
     #[test]
-    fn the_entries_carry_the_real_ability_hotkeys() {
+    fn the_entries_carry_the_bar_slot_digit() {
         for id in AbilityId::ALL {
-            let keys = ability_row_keys(id);
+            let keys = ability_row_keys(0, id);
             assert!(
                 tab_holding(id).contains(&keys),
                 "the tab must list {} under {keys:?}",
                 id.name(),
             );
             if !id.is_passive() {
-                assert!(
-                    keys.starts_with(id.hotkey()),
-                    "{keys:?} leads with the real hotkey",
-                );
+                assert!(keys.starts_with('1'), "{keys:?} leads with the slot digit");
             }
+        }
+    }
+
+    /// The digit an entry shows counts **its own position**, so a run's four entries
+    /// read `1`, `2`, `3`, `4` down the tab in the order the bar draws across — and a
+    /// slot past the held cap (§8.3), which only a hand-built loadout can reach, says
+    /// `-` rather than inventing a key nothing answers to.
+    #[test]
+    fn each_entry_shows_the_digit_of_its_own_slot() {
+        for slot in 0..AbilityId::MAX_HELD {
+            assert_eq!(
+                slot_key(slot),
+                char::from_digit(slot as u32 + 1, 10).expect("a digit per slot"),
+            );
+        }
+        assert_eq!(
+            slot_key(AbilityId::MAX_HELD),
+            '-',
+            "no key fires a 5th slot"
+        );
+
+        let loadout = held([AbilityId::Run, AbilityId::Camouflage, AbilityId::Decoy]);
+        let text = text_of(&render_tab(HelpTab::Abilities, loadout));
+        for (digit, id) in [
+            ('1', AbilityId::Run),
+            ('2', AbilityId::Camouflage),
+            ('3', AbilityId::Decoy),
+        ] {
+            assert!(
+                text.contains(&format!("{digit} / {}", id.bar_name())),
+                "{} is the run's {digit} key",
+                id.name(),
+            );
         }
     }
 
@@ -404,10 +469,10 @@ mod tests {
     #[test]
     fn a_use_budget_is_stated_on_the_key_and_the_economy() {
         assert_eq!(
-            activated_row_keys('b', "Bore", Some(3)),
-            "b / Bore (3/level)"
+            activated_row_keys('4', "Bore", Some(3)),
+            "4 / Bore (3/level)"
         );
-        assert_eq!(activated_row_keys('b', "Bore", None), "b / Bore");
+        assert_eq!(activated_row_keys('4', "Bore", None), "4 / Bore");
         for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
             let declared = id
                 .def()
@@ -415,7 +480,7 @@ mod tests {
                 .and_then(|e| e.uses_per_level())
                 .is_some();
             assert_eq!(
-                ability_row_keys(id).contains("/level"),
+                ability_row_keys(0, id).contains("/level"),
                 declared,
                 "{} states its budget exactly when it has one",
                 id.name(),
@@ -446,7 +511,7 @@ mod tests {
             .map(|id| id.bar_name().chars().count())
             .max()
             .expect("the catalogue is not empty");
-        let widest = activated_row_keys('x', &"W".repeat(longest_bar_name), Some(9));
+        let widest = activated_row_keys('4', &"W".repeat(longest_bar_name), Some(9));
         let right_margin = LevelConfig::V1.width - 1;
         assert!(
             ability_keys_column_start() + widest.chars().count() as u32 <= right_margin,

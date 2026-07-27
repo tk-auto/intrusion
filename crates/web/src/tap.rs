@@ -221,7 +221,7 @@ impl Game {
     }
 
     /// Fire a [`Control`]. The view toggles change no [`State`](intrusion_core::State)
-    /// and cost no turn (§4.4); an ability entry drives the same input its hotkey does
+    /// and cost no turn (§4.4); an ability entry drives the same input its digit does
     /// (§11.4/§11.6) — the core resolves the toggle from the ability's live state, so
     /// tapping `Run[3]` switches the sprint off (#304) exactly as pressing `r` again
     /// would, and a cooling entry refuses for free in the economy (§4.4).
