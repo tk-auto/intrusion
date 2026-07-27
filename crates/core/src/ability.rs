@@ -463,6 +463,57 @@ impl AbilityId {
         }
     }
 
+    /// What the ability actually **does**, in a sentence or three — the prose the
+    /// help panel's Abilities tab reads out (§11.4/#343).
+    ///
+    /// A run is handed three tech it has never seen (§8.3), and until this existed
+    /// the only way to learn Dephase from Confusion was to spend a turn firing one
+    /// and watch. It lives here, beside [`name`](Self::name) and
+    /// [`bar_name`](Self::bar_name), for the §11.3 reason every other help row
+    /// derives from its source: an exhaustive match means a new ability cannot be
+    /// added without one, and there is no help-side table to drift from.
+    ///
+    /// **It states behaviour, never numbers.** The turn cost, duration, cooldown and
+    /// use budget are drawn from the [`Economy`] beside it, so retuning a `[START]`
+    /// value updates the panel for free and can never leave the prose lying (§8.2's
+    /// standing rule: each surface reports the number the player actually gets).
+    pub const fn blurb(self) -> &'static str {
+        match self {
+            AbilityId::Run => {
+                "Two cells a turn instead of one — the one reliable way to outrun a \
+                 guard that has already seen you."
+            }
+            AbilityId::Camouflage => {
+                "Undetectable on any turn you do not move. Moving shows you again, \
+                 and it never stops a guard's touch."
+            }
+            AbilityId::Decoy => {
+                "A fake intruder in the cell you face. It draws a guard that has lost \
+                 you; one that can see you ignores it."
+            }
+            AbilityId::Dephase => {
+                "Walk through walls, doors and guards. Hides nothing; you cannot bump, \
+                 so no intel. Ending inside a solid throws you out, stunned."
+            }
+            AbilityId::Autodoors => {
+                "Doors open as you step into them and shut behind you — a shut door \
+                 breaks the sightline and costs a chaser a turn."
+            }
+            AbilityId::Confusion => {
+                "Fires once. Every guard you can sense in the blast is blinded and \
+                 frozen for a few turns, walls no object."
+            }
+            AbilityId::Vision => {
+                "Your sight is the full 360° and reaches further, for as long as you \
+                 hold it. The guard sense is unchanged."
+            }
+            AbilityId::PierceWall => {
+                "Bores through your one adjacent wall for good. Needs exactly one wall \
+                 neighbour — a corridor or a corner will not do."
+            }
+        }
+    }
+
     /// Whether this ability is **passive** (#264) — always on while held, with no
     /// activation path and no clock ([`Ability::is_passive`]).
     pub fn is_passive(self) -> bool {
