@@ -552,12 +552,19 @@ struct Fogged {
 /// and nothing else.
 ///
 /// The line the schematic draws is architectural rather than mechanical: `≈` is
-/// the building's **fabric** — a wall, and the recesses and openings cut into a
-/// wall run — and `~` is the **floor space** between it, whatever happens to be
-/// standing in it. So a hideout alcove and a duct mouth are recessed into the
-/// wall line and read `≈`; a table and a console stand in a room and read `~`.
-/// Neither reading follows passability, and deliberately so — the plan shows the
-/// building's bones, not its furniture.
+/// the building's **load-bearing fabric** — a wall run, and the recesses cut back
+/// into it — and `~` is everything that is not holding the building up. So a
+/// hideout alcove and a duct mouth are backed by structure and read `≈`; a table
+/// and a console stand in a room and read `~`. Neither reading follows
+/// passability, and deliberately so — the plan shows the building's bones, not
+/// what has been put in it.
+///
+/// A **doorway** is the case that makes the rule concrete: it bears no load, so it
+/// reads `~` and shows on the plans as a **gap in the wall line**, exactly as an
+/// architectural plan draws one. Its *frame* is still structure and stays `≈`, so
+/// an unexplored wing reads `≈≈≈~≈≈≈` and the ways between its rooms can be
+/// planned before setting foot in them — which is §11.5a's *"you can plan your
+/// escape route before you're spotted"* surviving the schematic intact.
 ///
 /// **Everything unexplored must collapse to exactly two appearances**, or the
 /// schematic leaks what it is meant to withhold: a lone real glyph among the
@@ -586,21 +593,20 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         return real(terrain);
     }
     if !explored && !layout_known {
-        // The schematic (§11.5a/#307). Fabric — a wall run, and the recesses and
-        // openings cut into it: a doorway, a hideout alcove, a duct mouth. Floor
-        // space — the room's own area, and the furniture and equipment standing in
-        // it, none of which is on the plans. The crawl *path* between a duct's two
-        // entries is not classified here at all: its interior cells keep their own
-        // terrain and are never in memory (§11.5a/§10.7), so they read as whatever
-        // the building around them reads as, giving the shortcut away to nobody.
+        // The schematic (§11.5a/#307). Fabric — what holds the building up: a wall
+        // run, a door's *frame*, and the recesses cut back into a run (a hideout
+        // alcove, a duct mouth), which are backed by structure and read as part of
+        // it. Everything else is floor space: the room's own area, the furniture and
+        // equipment standing in it, and a **doorway**, which bears no load and so
+        // draws as the gap in the wall line that a plan would show.
+        //
+        // The crawl *path* between a duct's two entries is not classified here at
+        // all: its interior cells keep their own terrain and are never in memory
+        // (§11.5a/§10.7), so they read as whatever the building around them reads
+        // as, giving the shortcut away to nobody.
         let fabric = matches!(
             terrain,
-            Terrain::Wall
-                | Terrain::DoorHinge
-                | Terrain::DoorPanelClosed
-                | Terrain::DoorPanelOpen
-                | Terrain::DuctEntry
-                | Terrain::Hideout
+            Terrain::Wall | Terrain::DoorHinge | Terrain::DuctEntry | Terrain::Hideout
         );
         return Fogged {
             shown: if fabric {
@@ -1431,10 +1437,10 @@ mod tests {
 
         // And spot-check the maskings individually, so a failure says which leaked.
         for (cell, mark) in [
-            (Cell::new(8, 15), SCHEMATIC_WALL),    // hideout alcove
-            (Cell::new(9, 15), SCHEMATIC_WALL),    // duct mouth
-            (Cell::new(10, 15), SCHEMATIC_WALL),   // doorway
-            (Cell::new(11, 15), SCHEMATIC_WALL),   // door frame
+            (Cell::new(8, 15), SCHEMATIC_WALL), // hideout alcove — backed by structure
+            (Cell::new(9, 15), SCHEMATIC_WALL), // duct mouth — likewise
+            (Cell::new(10, 15), SCHEMATIC_GROUND), // doorway — an opening, bears no load
+            (Cell::new(11, 15), SCHEMATIC_WALL), // door frame — structure
             (Cell::new(12, 16), SCHEMATIC_GROUND), // table
             (Cell::new(13, 16), SCHEMATIC_GROUND), // comms console
             (Cell::new(14, 16), SCHEMATIC_GROUND), // intel console
@@ -1452,6 +1458,45 @@ mod tests {
             (exit.glyph, exit.fg, exit.vis),
             ('E', Category::Interest, Visibility::Unexplored),
             "the tunnel you came in by is never hidden (§4.5/§7.6)",
+        );
+    }
+
+    /// A doorway in an unscouted wall run reads as a **gap** (#307): the run draws
+    /// `≈`, the opening `~`, so the ways between rooms you have never entered are
+    /// still plannable. This is §11.5a's *"you can plan your escape route before
+    /// you're spotted"* holding under the schematic, and the reason the fabric line
+    /// is load-bearing structure rather than "anything solid" — a door bears no
+    /// load, and a plan draws it as a break in the wall.
+    #[test]
+    fn an_unscouted_doorway_reads_as_a_gap_in_the_wall_line() {
+        // A wall run across the room, well behind the north-facing player, with a
+        // framed doorway in the middle of it.
+        let mut layout = open_room(20, 20);
+        for x in 6..=12 {
+            layout.place(Cell::new(x, 15), Terrain::Wall);
+        }
+        layout.place(Cell::new(8, 15), Terrain::DoorHinge);
+        layout.place(Cell::new(9, 15), Terrain::DoorPanelClosed);
+        layout.place(Cell::new(10, 15), Terrain::DoorHinge);
+        let s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        );
+        let g = render(&s);
+
+        let run: String = (6..=12).map(|x| g.get(x, 15).glyph).collect();
+        let expected = format!(
+            "{w}{w}{w}{g}{w}{w}{w}",
+            w = SCHEMATIC_WALL,
+            g = SCHEMATIC_GROUND,
+        );
+        assert_eq!(
+            run, expected,
+            "the wall run should show its doorway as a gap, frame included",
         );
     }
 
@@ -1489,7 +1534,11 @@ mod tests {
 
         // Baseline: the schematic, as everywhere else in this module.
         let g = render(&build(false));
-        assert_eq!(g.get(8, 15).glyph, SCHEMATIC_WALL, "doorway hidden");
+        assert_eq!(
+            g.get(8, 15).glyph,
+            SCHEMATIC_GROUND,
+            "the doorway shows only as a gap — the panel's pose is unknown",
+        );
         assert_eq!(g.get(9, 15).glyph, SCHEMATIC_WALL, "duct mouth hidden");
         assert_eq!(g.get(12, 16).glyph, SCHEMATIC_GROUND, "table hidden");
 
@@ -1782,9 +1831,10 @@ mod tests {
     /// canonically closed, *even after the player has seen it open*. Memory holds
     /// contents, never state.
     ///
-    /// Before it is explored the doorway is not distinguishable at all (#307): a
-    /// door is an opening cut in a wall run, so it reads as schematic wall with the
-    /// run it belongs to, and finding the ways between rooms is part of scouting.
+    /// Before it is explored the panel's *pose* is unknown but its **position is
+    /// not** (#307): a doorway bears no load, so the schematic draws it as the gap
+    /// in the wall line a plan would show, and the ways between unscouted rooms stay
+    /// plannable (§11.5a).
     #[test]
     fn a_doors_pose_is_live_state_never_remembered() {
         let mut layout = open_room(20, 20);
@@ -1798,12 +1848,12 @@ mod tests {
             Cell::new(18, 18),
         );
 
-        // Never explored: the doorway is fabric, indistinguishable from the wall.
+        // Never explored: the opening shows, the pose does not.
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
-            (SCHEMATIC_WALL, Category::Neutral, Visibility::Unexplored),
-            "an unscouted doorway reads as the wall run it is cut into"
+            (SCHEMATIC_GROUND, Category::Ground, Visibility::Unexplored),
+            "an unscouted doorway reads as a gap in the wall line"
         );
 
         // In the FOV: the true, live pose — open, blank.

@@ -91,9 +91,10 @@ Owned). Shape is *what it is*; colour is *what it means to you now*.
 
 You always have the building's **plans** (§11.5a **[SETTLED]**: geometry is never
 fogged, from turn one), but plans are not the same as having been there. The
-schematic is what the plans give you: the **fabric** — wall runs, and the recesses
-and openings cut into them — and the **floor space** between it. Walk in and it
-resolves into what is really there, permanently (tile memory is monotonic).
+schematic is what the plans give you: the **load-bearing fabric** — wall runs and
+the recesses cut back into them — and everything that is **not** holding the
+building up. Walk in and it resolves into what is really there, permanently (tile
+memory is monotonic).
 
 `≈` is the mathematical *approximately*, which is exactly the claim a plan makes
 about a stretch of building nobody has walked.
@@ -104,15 +105,22 @@ one — it does not follow passability:
 | Reads as `≈` fabric | Reads as `~` floor space |
 |---|---|
 | Wall | Floor |
-| Doorway and door frame | Table |
-| Cupboard alcove | Intel console |
-| Duct mouth | Comms console |
+| Door **frame** | Door**way** |
+| Cupboard alcove | Table |
+| Duct mouth | Intel and comms consoles |
 
-A doorway is an opening cut in a wall run, so it belongs to the run. A table stands
-*in* a room, so it belongs to the room's area — and a table blocks movement, which
-means the schematic can be optimistic about a route. That is deliberate: what you
-can plan is the building, and what a room turns out to contain is what exploring is
-for.
+The test is *does it hold the building up*. A cupboard alcove and a duct mouth are
+recesses cut back into a run, still backed by structure, so they belong to the run.
+A **doorway** bears no load, so it draws as the **gap in the wall line** an
+architectural plan would show — its frame stays `≈`, so an unexplored wing reads
+`≈≈≈~≈≈≈` and the ways between its rooms can be planned before you set foot in
+them. What the doorway does *not* tell you is the panel's pose: a door's
+open/closed state is live state and is never remembered.
+
+A table stands *in* a room rather than holding it up, so it reads `~` — and a table
+blocks movement, which means the schematic can be optimistic about a route through
+an unscouted room. That is deliberate: what you can plan is the building, and what
+a room turns out to contain is what exploring is for.
 
 **Everything unexplored collapses to exactly two glyphs in exactly two colours.**
 This is load-bearing, not tidiness: a cupboard drawn as the one System-tan mark in
@@ -145,12 +153,19 @@ keeping:
 - **It costs no colour.** The threat channels (Danger red, Sensed orange) keep the
   background entirely to themselves, and a knowledge readout can never compete with
   them.
-- **It degrades safely.** Even where `≈` and `~` blur together at a small font,
-  wall and floor keep their existing, distinct colour rows — so the layout stays
-  exactly as readable as it is today. A brightness ladder could not make that
-  promise.
-- **A second palette gets it for free.** Light mode needs no extra values for a
-  shape channel.
+- **A second palette gets it for free.** Light mode (#189) needs no extra values
+  for a shape channel.
+
+> **The cost, measured rather than assumed.** The first build of this was drawn
+> `≈` against `~`, and on a real 40×40 board the unexplored region read closer to
+> uniform texture than to a floor plan. The reason is worth recording, because it
+> is easy to get wrong twice: in the explored picture, wall-versus-floor is carried
+> by **ink density** — `#` is a dense glyph, `·` is one dot — far more than by the
+> colour gap between the Neutral and Ground dims. Two marks of *similar* density
+> throw that away and leave the colour gap working alone, which is not enough. So
+> the fabric mark has to be visibly heavier than the floor mark, not merely a
+> different shape. Any future change here should be judged on a screenshot of a
+> full board, never on a unit test — the text frame looks correct in both cases.
 
 ---
 

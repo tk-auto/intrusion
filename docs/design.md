@@ -1973,8 +1973,8 @@ Two problems from the old version to fix:
 
 | Layer | Visibility |
 |---|---|
-| **Geometry** — the building's fabric: wall runs and the floor space between them | **Always visible, from turn one.** Never fogged. Drawn as the **schematic** until explored (below). |
-| **Contents** — intel, hideouts, ducts, doors, furniture, equipment, lore | **Hidden until seen.** Once seen, remembered. |
+| **Geometry** — the building's load-bearing fabric, the openings in it, and the floor space between | **Always visible, from turn one.** Never fogged. Drawn as the **schematic** until explored (below). |
+| **Contents** — intel, hideouts, ducts, furniture, equipment, lore, and a door's *pose* | **Hidden until seen.** Once seen, remembered. |
 | **Live state** — guards, bodies, door open/closed, danger cones | **Only what you can see right now.** Never remembered. **One exception: a guard's *position* is also known through walls within the guard-sense range (§9)** — but only its position, never its cone, and never remembered once out of range. |
 | **What you placed** — your live decoy (§8.3) | **Always drawn, wherever it is.** In the FOV or out of it, for as long as it exists. |
 | **The exit** — the tunnel you dug and came in by (§4.5) | **Always drawn as itself**, from turn one, never schematic. Yours. |
@@ -1988,18 +1988,23 @@ Two problems from the old version to fix:
 > to read is fog by another name, which this section settles against. See
 > [`docs/render-reference.md`](render-reference.md) §2.3.
 >
-> **A stated change, not drift.** This section used to name doors in the
-> always-visible row, and §10.7 promised a duct entry visible from turn one "like a
-> door"; furniture was geometry too, on the grounds that being surprised by a table
-> mid-flight is as bad as being surprised by a wall. All three now have to be
-> **found**. The line moved to *bearing structure only*: what the plans of a
-> building carry is its bones, and a doorway, a cupboard alcove, a duct mouth and a
-> table are things you learn by going there. This deliberately buys exploration
-> reward at the cost of some turn-one route detail — cupboards were already hidden
-> on exactly this reasoning (*"the flight paths you scouted are worth more than the
-> ones you didn't"*), and ducts and doorways now join them rather than sitting on
-> the other side of an inconsistent line. Room shapes and wall runs still read from
-> turn one, so you are still never lost and never mapping.
+> **The line is load-bearing structure.** `≈` is what holds the building up — a
+> wall run, a door's frame, and the recesses cut back into a run. `~` is everything
+> that is not: a room's floor, the furniture and equipment standing in it, and a
+> **doorway**, which bears no load and so draws as the **gap in the wall line** a
+> plan would show. An unexplored wing reads `≈≈≈~≈≈≈`, so the ways between its
+> rooms are still plannable and the *"you can plan your escape route before you're
+> spotted"* promise above survives intact.
+>
+> **A stated change, not drift.** §10.7 promised a duct entry visible from turn one
+> "like a door", and furniture was geometry too, on the grounds that being surprised
+> by a table mid-flight is as bad as being surprised by a wall. Both now have to be
+> **found** — a duct mouth is a recess backed by structure, and a table is something
+> put in a room, not part of it. Cupboards were already hidden on exactly this
+> reasoning (*"the flight paths you scouted are worth more than the ones you
+> didn't"*), so ducts join them rather than sitting on the other side of an
+> inconsistent line. Room shapes, wall runs and the openings between them still read
+> from turn one, so you are still never lost and never mapping.
 >
 > **The cost is meant to be payable.** §12.6's `full_layout_known` modifier hands
 > the whole layout over as an *easier*-direction modifier — so under the directed
