@@ -1656,9 +1656,13 @@ without peeking is the risk you chose. *(The presentation of all this — the me
 view, the live peek window, the sensed dots through the reduced radius — is the
 companion render ticket #134; §10.7 owns the model.)*
 
-**Fog (§11.5a).** An **entry** (`=`) is **geometry**: visible from turn one like a
-door, so you can plan a shortcut around it. The **interior path** is **not on the base
-map at all** — it carries no tell, so it can cross a room's floor without giving the
+**Fog (§11.5a).** An **entry** (`=`) is **contents**: a mouth recessed into a wall
+run, so it reads as plain schematic fabric until you have seen it, and then it is
+remembered. *(This drops the earlier "visible from turn one like a door" rule —
+another stated change, and the same one doors themselves took: the plans carry the
+building's bones, and a crawlspace mouth is something you find. A duct you scouted
+is worth more than one you didn't, exactly as with a cupboard.)* The **interior
+path** is **not on the base map at all** — it carries no tell, so it can cross a room's floor without giving the
 shortcut away — and lives in **its own layer, shown only while you are crawling it**.
 It is **not remembered**: climb out and the path is hidden again. *(This drops the
 earlier "the interior reads as plain wall, remembered once crawled" rule — a stated
@@ -1751,7 +1755,9 @@ glyph to recolour. The mark only ever recolours a guard the player is already sh
 it can never reveal one the fog is hiding.
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
-foreground and as a darkened background variant.
+foreground and as a darkened background variant. The concrete rows, the constraints
+the tests hold them to, and why each exception exists are in
+[`docs/render-reference.md`](render-reference.md) §4.
 
 > The old palette pushed every colour through a gamma curve that compressed
 > everything into 0.1–0.9, so **there was no true black and no true white** and
@@ -1779,9 +1785,19 @@ foreground and as a darkened background variant.
 | `π` | Partial cover, concealing you | **Owned** — the same convention as the occupied cupboard: while you are crouched behind it, the covering run recolours to Owned, every table of it, so the blue `@`-`π` pair reads as one hidden unit as long as the furniture (§10.3) |
 | `$` | Intel | Interest |
 | `E` | Exit | Interest |
+| `≈` | Building fabric not yet seen — the §11.5a schematic | Neutral |
+| `~` | Floor space not yet seen — the §11.5a schematic | Ground |
 
 **Overlapping glyphs need a priority order.** The old version was
 last-writer-wins, so a guard in a doorway rendered arbitrarily. Define the order.
+
+> **The complete table, with the reasoning behind each mark and each colour, is
+> [`docs/render-reference.md`](render-reference.md).** This section and §11.2 own
+> the *rules*; the reference records what they resolve to, in one place, so a
+> question like *"what does `≈` mean?"* has one answer rather than four. The values
+> themselves live in code (`Terrain::glyph`, the shell's one palette table) and the
+> in-game Legend derives from those same sources, so neither can drift from the
+> board.
 
 ### 11.4 Layout
 
@@ -1957,10 +1973,37 @@ Two problems from the old version to fix:
 
 | Layer | Visibility |
 |---|---|
-| **Geometry** — walls, corridors, doors, room shapes | **Always visible, from turn one.** Never fogged. |
-| **Contents** — intel, hideouts, equipment, lore | **Hidden until seen.** Once seen, remembered. |
+| **Geometry** — the building's fabric: wall runs and the floor space between them | **Always visible, from turn one.** Never fogged. Drawn as the **schematic** until explored (below). |
+| **Contents** — intel, hideouts, ducts, doors, furniture, equipment, lore | **Hidden until seen.** Once seen, remembered. |
 | **Live state** — guards, bodies, door open/closed, danger cones | **Only what you can see right now.** Never remembered. **One exception: a guard's *position* is also known through walls within the guard-sense range (§9)** — but only its position, never its cone, and never remembered once out of range. |
 | **What you placed** — your live decoy (§8.3) | **Always drawn, wherever it is.** In the FOV or out of it, for as long as it exists. |
+| **The exit** — the tunnel you dug and came in by (§4.5) | **Always drawn as itself**, from turn one, never schematic. Yours. |
+
+> **The schematic (#307).** Geometry you have never had eyes on draws as the
+> building's *plans*, not as it has been seen: the **fabric** (`≈`) — wall runs and
+> the recesses and openings cut into them — and the **floor space** (`~`) between
+> it. Walking somewhere resolves it into the real thing, permanently. It is a
+> **shape** distinction, not a darker shade: a fourth rung on the §11.5 dimming
+> ladder has nowhere to go below Ground's already-quiet dim, and geometry too dark
+> to read is fog by another name, which this section settles against. See
+> [`docs/render-reference.md`](render-reference.md) §2.3.
+>
+> **A stated change, not drift.** This section used to name doors in the
+> always-visible row, and §10.7 promised a duct entry visible from turn one "like a
+> door"; furniture was geometry too, on the grounds that being surprised by a table
+> mid-flight is as bad as being surprised by a wall. All three now have to be
+> **found**. The line moved to *bearing structure only*: what the plans of a
+> building carry is its bones, and a doorway, a cupboard alcove, a duct mouth and a
+> table are things you learn by going there. This deliberately buys exploration
+> reward at the cost of some turn-one route detail — cupboards were already hidden
+> on exactly this reasoning (*"the flight paths you scouted are worth more than the
+> ones you didn't"*), and ducts and doorways now join them rather than sitting on
+> the other side of an inconsistent line. Room shapes and wall runs still read from
+> turn one, so you are still never lost and never mapping.
+>
+> **The cost is meant to be payable.** §12.6's `full_layout_known` modifier hands
+> the whole layout over as an *easier*-direction modifier — so under the directed
+> difficulty draw it is bought with pressure taken on elsewhere, never given away.
 
 This resolves the tension between two pillars that pull against each other:
 
@@ -2210,8 +2253,11 @@ A **level modifier** is a named toggle or bounded knob that shifts a facility's
 flips a rule an existing system already owns rather than adding a parallel one:
 *"guards always search hideouts"* forces the §7.6 search to check occupied
 cupboards unconditionally (harder); *"always show vision cones"* paints the §11.5
-danger overlay in full (easier); the two **cooperation call-ins** (§7.7) decide
-whether a lost sighting and a found body summon anyone (harder). This is the
+danger overlay in full (easier); *"full layout known"* draws the building's real
+architecture where the §11.5a schematic would otherwise stand, so doorways, duct
+mouths and furniture are all on the map from turn one (easier); the two
+**cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
+summon anyone (harder). This is the
 **mechanism** difficulty and mode rules flow through — the shared seam #210 (alert
 scaling), #244 (quick play), and the v3 catalogue (#232–#236) all plug into
 instead of each inventing its own knobs.
@@ -2274,7 +2320,15 @@ artifact-build skill's `assemble.py --debug reveal`). The line is worth keeping 
 of it** — anything that bends a rule is a level modifier and belongs in the token with
 the rest of the run's identity.
 
-**Constraints.** The *"always show vision cones"* modifier may only ever **widen**
+**Constraints.** The *"full layout known"* modifier reveals the **architecture and
+nothing else**: contents stay fogged (§11.5a), so it never shortcuts the scouting
+that finds the objectives, and the knowledge state on the render seam keeps telling
+the truth — a cell handed over by the modifier still reports itself *unexplored*,
+because the player has not been there. Being an **easier**-direction modifier is
+what makes it *paid for* rather than given: under the directed difficulty draw its
+budget has to be found by taking a harder rule elsewhere.
+
+The *"always show vision cones"* modifier may only ever **widen**
 the §11.5 overlay — it reveals unseen guards' cones on top of the seen ones, and
 must never narrow or hide the red detection set (§11.5 is **[SETTLED]**). Modifiers
 resolved before generation (guard count #232, safe zones #235, locked doors #236)

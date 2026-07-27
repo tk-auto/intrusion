@@ -19,6 +19,11 @@ starting value, not a law. Read it before changing behaviour; cite its sections
 (don't relitigate without a reason), **[START]** (a tuned starting value,
 expected to move), **[OPEN]** (genuinely undecided, listed in §15).
 
+**Reference: [`docs/render-reference.md`](docs/render-reference.md)** — every glyph
+and every palette choice in one table, with the reasoning. A companion to §11.2/
+§11.3, not a second source of truth: the design doc owns the rules and the code owns
+the values.
+
 ## Skills
 
 Project skills live in `.claude/skills/` (see its
