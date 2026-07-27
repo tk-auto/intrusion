@@ -1529,12 +1529,11 @@ fn detection_is_deterministic() {
     assert_eq!(run(), run());
 }
 
-/// The core of #240: a guard inside the bubble is **frozen in its tracks** while
-/// Confusion is active — a chaser bearing down on the player stops advancing the
-/// moment it is suppressed, and takes no step for the whole window. When the window
-/// ends it **resumes cleanly**, stepping toward the player again on the very next
-/// turn. (The level-start world phase, §4.2, already sent this patroller one step
-/// into a chase, so it enters the window at (10, 8).)
+/// The core of #240: a guard the blast catches is **frozen in its tracks** — a chaser
+/// bearing down on the player stops advancing the moment it is dazed, and takes no step
+/// for the whole count. When the count runs out it **resumes cleanly**, stepping toward
+/// the player again on the very next turn. (The level-start world phase, §4.2, already
+/// sent this patroller one step into a chase, so it is caught at (10, 8).)
 #[test]
 fn confusion_freezes_a_hunting_guard_then_it_resumes() {
     let mut s = State::new(
@@ -1547,19 +1546,19 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
     )
     .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     // The startup chase has closed the gap by one: the guard is two cells north and
-    // already Chasing — a live threat, well inside the bubble.
+    // already Chasing — a live threat, well inside the blast.
     assert_eq!(s.guards()[0].pos(), Cell::new(10, 8));
     assert_eq!(s.guards()[0].state(), GuardState::Chasing);
 
-    // Activation turn: frozen this very turn (§8.2 covers the activation turn). Then
-    // five more Waits, all inside the 6-turn window — the guard never advances.
+    // Firing turn: frozen this very turn (§8.2 covers the activation turn). Then five
+    // more Waits, all inside the 6-turn daze — the guard never advances.
     let events = s.step(Input::Activate(AbilityId::Confusion));
     assert!(
-        events.contains(&Event::AbilityActivated {
-            ability: AbilityId::Confusion,
-            uses_left: None,
+        events.contains(&Event::ConfusionFired {
+            blast: s.confusion_blast(),
+            caught: 1,
         }),
-        "the ability switched on: {events:?}",
+        "the blast fired and caught it: {events:?}",
     );
     for turn in 1..=6 {
         assert_eq!(s.outcome(), Outcome::Playing, "turn {turn}: still playing");
@@ -1573,13 +1572,13 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
         }
     }
 
-    // The window has ticked out. The guard resumes at once — stepping toward the
-    // player it was held off, its chase intact (no lost state, §8.2).
+    // The daze has ticked out. The guard resumes at once — stepping toward the player
+    // it was held off, its chase intact (no lost state, §8.2).
     s.step(Input::Wait);
     assert_eq!(
         s.guards()[0].pos(),
         Cell::new(10, 9),
-        "the guard resumes its advance the moment the window ends",
+        "the guard resumes its advance the moment the daze ends",
     );
     assert_eq!(
         s.guards()[0].state(),
@@ -1589,9 +1588,9 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
 }
 
 /// The §4.5 capture edge (#240): a **frozen adjacent** guard cannot step into the
-/// player, so it cannot capture while suppressed — but Confusion is a stay of
-/// execution, not a reprieve. The moment it lapses, capture-is-contact resumes and
-/// the adjacent guard takes the player.
+/// player, so it cannot capture while dazed — but Confusion is a stay of execution,
+/// not a reprieve. The moment the count lapses, capture-is-contact resumes and the
+/// adjacent guard takes the player.
 #[test]
 fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
     // The startup chase (§4.2) walks this patroller from (10, 8) to (10, 9): adjacent
@@ -1628,7 +1627,7 @@ fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
         }
     }
 
-    // Confusion lapses: the adjacent guard is contact, and contact is capture (§4.5).
+    // The daze lapses: the adjacent guard is contact, and contact is capture (§4.5).
     let events = s.step(Input::Wait);
     assert_eq!(s.outcome(), Outcome::Lost, "the reprieve is over");
     assert!(
@@ -1639,7 +1638,7 @@ fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
     );
 }
 
-/// The bubble is a **box through walls** (§9), exactly like the guard sense, and it
+/// The blast is a **box through walls** (§9), exactly like the guard sense, and it
 /// stops at [`CONFUSION_RADIUS`]: a guard one cell past the edge is untouched, and a
 /// wall between the player and a guard inside the edge does not spare it. Read off
 /// the one [`guard_confused`](State::guard_confused) query both the phase and the
@@ -1650,7 +1649,7 @@ fn confusion_reaches_through_walls_and_stops_at_its_radius() {
     assert_eq!(CONFUSION_RADIUS, 6);
 
     let mut layout = open_room(24, 20);
-    // A wall between the player (6,6) and the near guard (12,6), to prove the bubble
+    // A wall between the player (6,6) and the near guard (12,6), to prove the blast
     // ignores line of sight.
     layout.place(Cell::new(9, 6), Terrain::Wall);
     let mut s = State::new(
@@ -1666,7 +1665,7 @@ fn confusion_reaches_through_walls_and_stops_at_its_radius() {
     )
     .with_loadout(Loadout::innate().with(AbilityId::Confusion));
 
-    // Before activation nothing is confused.
+    // Before the firing nothing is dazed.
     assert!(!s.guard_confused(&s.guards()[0]));
     assert!(!s.guard_confused(&s.guards()[1]));
 
@@ -1677,11 +1676,11 @@ fn confusion_reaches_through_walls_and_stops_at_its_radius() {
     );
     assert!(
         !s.guard_confused(&s.guards()[1]),
-        "a guard one cell past the edge is untouched — the bubble still has an edge",
+        "a guard one cell past the edge is untouched — the blast still has an edge",
     );
 }
 
-/// The "cone off (§11.5)" half of the acceptance: a confused guard the player can
+/// The "cone off (§11.5)" half of the acceptance: a dazed guard the player can
 /// see stops painting the danger overlay. Its cone is dropped from
 /// [`visible_cone_cells`](State::visible_cone_cells) the moment it is frozen, so the
 /// overlay reads honestly — a blinded guard detects nothing, and nothing red follows.
@@ -1713,21 +1712,21 @@ fn a_confused_guards_cone_leaves_the_danger_overlay() {
     s.step(Input::Activate(AbilityId::Confusion));
     assert!(
         s.guard_confused(&s.guards()[0]),
-        "the guard is inside the bubble",
+        "the guard was inside the blast",
     );
     assert_eq!(
         s.visible_cone_cells().count(),
         0,
-        "a confused guard's cone is off — no danger overlay from a blinded guard",
+        "a dazed guard's cone is off — no danger overlay from a blinded guard",
     );
 }
 
 /// **One reading governs every pass** (§4.2/§8.3, #275). Phase 3 resolves whether
-/// each guard is confused *once*, before any guard is touched, and all five passes
-/// read that same snapshot. Here a single suppressed guard is denied three of them in
-/// the same turn — it does not find the body dropped in its cone (§7.2), does not
-/// check the cupboard beside it (§15 Q5), and does not move (§7.5) — and then wins
-/// all three back together the turn the window lapses.
+/// each guard is dazed *once*, before any guard is touched, and all five passes read
+/// that same snapshot. Here a single suppressed guard is denied three of them in the
+/// same turn — it does not find the body dropped in its cone (§7.2), does not check
+/// the cupboard beside it (§15 Q5), and does not move (§7.5) — and then wins all
+/// three back together the turn its count lapses.
 ///
 /// This is the invariant that used to be argued for in a comment: the movement pass
 /// re-asked [`State::guard_confused`] live rather than reading the snapshot the other
@@ -1735,7 +1734,7 @@ fn a_confused_guards_cone_leaves_the_danger_overlay() {
 /// #199/#200, so the agreement is pinned here instead of asserted in prose.
 #[test]
 fn one_confusion_reading_governs_every_pass_of_the_phase() {
-    // The §7.2 found-body scenario, run inside a Confusion bubble. A one-wide corridor
+    // The §7.2 found-body scenario, run inside a Confusion blast. A one-wide corridor
     // along x=5 keeps the finder's cone straight down the column.
     let mut layout = open_room(11, 11);
     for y in 1..10 {
@@ -1756,11 +1755,11 @@ fn one_confusion_reading_governs_every_pass_of_the_phase() {
     )
     .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     // The startup turn (§4.2) walks the finder one step down the corridor, to well
-    // inside the bubble — this whole test hangs on it being suppressed.
+    // inside the blast — this whole test hangs on it being caught.
     let finder_start = s.guards()[1].pos();
     assert!(
         Cell::new(5, 7).sight_distance(finder_start) <= CONFUSION_RADIUS,
-        "the finder starts inside the bubble at {finder_start:?}",
+        "the finder starts inside the blast at {finder_start:?}",
     );
 
     s.step(Input::Activate(AbilityId::Confusion));
@@ -1776,7 +1775,7 @@ fn one_confusion_reading_governs_every_pass_of_the_phase() {
     // The victim is gone, so the finder is now the only guard left.
     assert_eq!(s.guards().len(), 1);
 
-    // Three passes denied, all from the one reading, for the whole window.
+    // Three passes denied, all from the one reading, for the whole count.
     for turn in 0..3 {
         assert!(!s.bodies()[0].found(), "turn {turn}: pass 2 still skipped");
         assert_eq!(
@@ -1815,24 +1814,29 @@ fn one_confusion_reading_governs_every_pass_of_the_phase() {
     );
 }
 
-/// The snapshot is taken **before any guard moves**, and a guard is judged by where
-/// it stood as the phase opened — not by where its own step leaves it (§8.3/#240).
+/// The set is decided **once**, when the blast fires (§8.3/#240/#325): a guard that
+/// walks into the cells it covered afterwards was not in it, and acts normally — this
+/// turn and every turn after.
 ///
-/// A hunter one cell outside the bubble therefore still takes its step this turn,
-/// even though that step carries it *inside*; it is frozen from the next turn on.
-/// Re-deriving suppression after the step would freeze it a turn early, which is the
-/// concrete way a second reading of the same fact would show up.
+/// This is the half of the fired model that stops Confusion being a field the player
+/// carries. The old bubble re-measured distance every turn, so a hunter closing on the
+/// player froze the moment it crossed the radius; now closing costs it nothing, and the
+/// player who spent the ability early has spent it.
 #[test]
-fn a_guard_is_judged_where_the_phase_found_it_not_where_its_step_lands() {
+fn a_guard_that_walks_in_after_the_blast_is_untouched() {
     // The startup world phase (§4.2) walks this patroller one step toward the player,
-    // to (10, 3) — a sight_distance of 7, one clear of the bubble. At that range it is
-    // a §7.6 *glimpse*, so the guard Investigates rather than Chases; either way it
-    // closes, which is all this test needs.
+    // to (10, 3) — a sight_distance of 7, one clear of the blast. At that range it is a
+    // §7.6 *glimpse*, so the guard Investigates rather than Chases; either way it
+    // closes, which is all this test needs. The fixture at (14, 10) is what the blast
+    // does catch, so the firing is not refused for want of a target.
     let mut s = State::new(
         open_room(20, 20),
         Cell::new(10, 10),
         Direction::North,
-        vec![Guard::patrolling(Cell::new(10, 2))],
+        vec![
+            Guard::patrolling(Cell::new(10, 2)),
+            Guard::stationary(Cell::new(14, 10)),
+        ],
         Vec::new(),
         Cell::new(18, 18),
     )
@@ -1841,28 +1845,287 @@ fn a_guard_is_judged_where_the_phase_found_it_not_where_its_step_lands() {
     assert_ne!(s.guards()[0].state(), GuardState::Calm, "a live lead");
     assert!(
         !s.guard_confused(&s.guards()[0]),
-        "one cell outside the bubble as the turn opens",
+        "one cell outside the blast as the turn opens",
     );
 
-    // Activation turn: the phase found it outside, so it acts — and its step lands it
-    // inside. Both halves matter: it moved, and it is now suppressed.
+    // The firing turn: the hunter was outside, so it is not caught — and it keeps
+    // walking, straight into the box the blast covered.
     s.step(Input::Activate(AbilityId::Confusion));
+    assert!(s.guard_confused(&s.guards()[1]), "the fixture was inside");
     assert_eq!(
         s.guards()[0].pos(),
         Cell::new(10, 4),
-        "judged where the phase found it, so its step still happens",
+        "outside the blast, so it acts and steps",
     );
     assert!(
-        s.guard_confused(&s.guards()[0]),
-        "and that step carried it into the bubble",
+        s.player().sight_distance(s.guards()[0].pos()) <= CONFUSION_RADIUS,
+        "precondition: that step carried it inside the box",
+    );
+    assert!(
+        !s.guard_confused(&s.guards()[0]),
+        "…which is not the blast, and dazes nobody",
     );
 
-    // From here the snapshot reads it as suppressed, so it is frozen.
+    // And it keeps coming, turn after turn: there is no field left to walk into.
     s.step(Input::Wait);
     assert_eq!(
         s.guards()[0].pos(),
-        Cell::new(10, 4),
-        "frozen from the next phase on",
+        Cell::new(10, 5),
+        "still acting, still closing",
+    );
+    assert!(!s.guard_confused(&s.guards()[0]));
+}
+
+/// The other half of the fired model (§8.3/#325): a guard the blast **did** catch
+/// stays dazed for its full count wherever the player goes — carried right out of the
+/// box the blast covered, and beyond the guard sense entirely. The countdown is the
+/// guard's, so nothing the player does after the flash shortens it.
+///
+/// This is the half that is *not* a nerf: the old bubble thawed a guard the moment you
+/// broke contact with it, which is exactly the moment you most wanted it frozen.
+#[test]
+fn a_dazed_guard_carried_out_of_the_blast_stays_dazed() {
+    // A 40-wide corridor so the player can put real distance between them, and a
+    // stationary guard at the blast's very edge — six cells west.
+    let guard = Cell::new(2, 3);
+    let mut s = State::new(
+        open_room(40, 7),
+        Cell::new(8, 3),
+        Direction::East,
+        vec![Guard::stationary(guard)],
+        Vec::new(),
+        Cell::new(38, 5),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
+
+    // Turn 1, the flash. The count is the guard's from here.
+    s.step(Input::Activate(AbilityId::Confusion));
+
+    // Turns 2..N: run east, one cell a turn. Each step widens the gap and none of them
+    // shortens the count — by the last, the guard is out of the sense entirely.
+    for turn in 2..=CONFUSION_DAZE_TURNS {
+        assert!(
+            s.guard_confused(&s.guards()[0]),
+            "turn {turn} opens with it still dazed, {} cells away",
+            s.player().sight_distance(guard),
+        );
+        s.step(Input::Step(Direction::East));
+    }
+    assert!(
+        s.player().sight_distance(guard) > PLAYER_SENSE_RANGE,
+        "precondition: carried clean out of the sense, let alone the blast",
+    );
+
+    // N turns of freeze, then it wakes — on its own clock, not on a distance (§8.2).
+    assert!(
+        !s.guard_confused(&s.guards()[0]),
+        "N means N: the daze ran exactly its count",
+    );
+}
+
+/// **The clamp** (§8.3/§9.1/§10.7/#240/#325 **[SETTLED]**): the blast never reaches
+/// past the guard sense. On open floor that is inert — `min(6, 10)` is 6, so the
+/// ability plays exactly as its row says — but **inside a duct** the sense is
+/// [`DUCT_SENSE_RANGE`] = 5, and the blast shrinks with it.
+///
+/// It closes the one hole where a crawling player could daze a guard they cannot
+/// perceive at all. The nerf is the point (§10.7): degraded information is the
+/// crawlspace's whole cost, and an ability that reached past what you can sense would
+/// be the one place that cost was refunded.
+#[test]
+fn the_blast_is_clamped_to_the_guard_sense_inside_a_duct() {
+    // Two stationary guards straight down the column from the duct's interior cell
+    // (3, 1): one at 5 — the duct sense exactly — and one at 6, which is the blast's
+    // own radius but a cell past what a crawler can feel.
+    let (inside, past) = (Cell::new(3, 6), Cell::new(3, 7));
+    let mut s =
+        super::ducts::duct_world_with(vec![Guard::stationary(inside), Guard::stationary(past)])
+            .with_loadout(Loadout::innate().with(AbilityId::Confusion));
+
+    // On the floor first: the clamp is inert, and the guard at 6 is caught.
+    assert_eq!(
+        s.sense_range(),
+        PLAYER_SENSE_RANGE,
+        "precondition: on floor"
+    );
+    assert_eq!(
+        s.confusion_blast().radius(),
+        CONFUSION_RADIUS,
+        "min(6, 10) is 6: open floor fires the full row",
+    );
+
+    // Into the duct and along to (3, 1), from where both guards sit on the column.
+    s.step(Input::Step(Direction::North)); // enter at (2, 1)
+    s.step(Input::Step(Direction::East)); // crawl to (3, 1)
+    assert!(s.in_duct());
+    assert_eq!(s.sense_range(), DUCT_SENSE_RANGE);
+    assert_eq!(s.player().sight_distance(inside), DUCT_SENSE_RANGE);
+    assert_eq!(s.player().sight_distance(past), CONFUSION_RADIUS);
+    assert_eq!(
+        s.confusion_blast().radius(),
+        DUCT_SENSE_RANGE,
+        "the crawlspace shrinks the blast with the sense it shrinks",
+    );
+
+    s.step(Input::Activate(AbilityId::Confusion));
+    assert!(
+        s.guard_confused(&s.guards()[0]),
+        "the guard at the duct sense's own edge is caught",
+    );
+    assert!(
+        !s.guard_confused(&s.guards()[1]),
+        "…and the one at 6 is not: the blast never reaches past what you can sense",
+    );
+}
+
+/// The **read moment** is pinned (§9.1/#325): a Wait on turn T widens the sense to
+/// [`PLAYER_SENSE_RANGE_WAITING`], and firing on turn T+1 still produces a
+/// [`CONFUSION_RADIUS`] blast — the widened box is not what the clamp measures against.
+///
+/// The cap absorbs it either way today (`min(6, 20)` is 6), so what this really pins is
+/// *when* the reach is read: [`State::confusion_blast`] asserts the `waited` flag is
+/// already down, so a firing that read it a moment too early fails here rather than
+/// quietly widening a blast the day the cap moves.
+#[test]
+fn a_wait_does_not_widen_the_next_turns_blast() {
+    let guard = Cell::new(14, 3);
+    let mut s = State::new(
+        open_room(40, 7),
+        Cell::new(4, 3),
+        Direction::East,
+        vec![Guard::stationary(Cell::new(2, 3)), Guard::stationary(guard)],
+        Vec::new(),
+        Cell::new(38, 5),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
+
+    s.step(Input::Wait);
+    assert_eq!(
+        s.sense_range(),
+        PLAYER_SENSE_RANGE_WAITING,
+        "precondition: the Wait widened the sense to 20",
+    );
+    assert_eq!(
+        s.player().sight_distance(guard),
+        10,
+        "precondition: inside the widened sense, far outside the blast",
+    );
+
+    let events = s.step(Input::Activate(AbilityId::Confusion));
+    let blast = events
+        .iter()
+        .find_map(|e| match e {
+            Event::ConfusionFired { blast, .. } => Some(*blast),
+            _ => None,
+        })
+        .expect("the blast went off");
+    assert_eq!(
+        blast.radius(),
+        CONFUSION_RADIUS,
+        "the Wait's 20-cell box is not what the blast measures itself against",
+    );
+    assert!(
+        !s.guard_confused(&s.guards()[1]),
+        "so the far guard is awake"
+    );
+}
+
+/// Firing with nothing in range is a **free no-op** (§4.4/§8.4/#325): the same shape as
+/// an ability refused for want of a legal target. Neither the turn nor the 45-turn
+/// cooldown is spent, and the near line says why — a press that silently changed
+/// nothing reads as a dropped key (§11.7).
+///
+/// It is fair rather than fiddly precisely because of the clamp: every guard the blast
+/// could have caught is one the player was already shown, so this refuses only a press
+/// that was going to buy nothing.
+#[test]
+fn a_blast_with_nothing_in_range_is_refused_for_free() {
+    let mut s = State::new(
+        open_room(40, 7),
+        Cell::new(4, 3),
+        Direction::East,
+        vec![Guard::stationary(Cell::new(14, 3))], // 10 away: sensed, far out of reach
+        Vec::new(),
+        Cell::new(38, 5),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
+    let turn = s.turn();
+
+    let events = s.step(Input::Activate(AbilityId::Confusion));
+    assert_eq!(events, vec![Event::ConfusionMissed], "it says why");
+    assert_eq!(s.turn(), turn, "free: the turn is not spent (§4.4)");
+    assert_eq!(
+        s.ability_state(AbilityId::Confusion),
+        AbilityState::Ready,
+        "…and the cooldown is untouched, so nothing was bought or lost",
+    );
+
+    // With a guard in reach the very same press fires, spends the turn and locks out.
+    let mut s = State::new(
+        open_room(40, 7),
+        Cell::new(4, 3),
+        Direction::East,
+        vec![Guard::stationary(Cell::new(8, 3))], // 4 away: inside
+        Vec::new(),
+        Cell::new(38, 5),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
+    let turn = s.turn();
+    let events = s.step(Input::Activate(AbilityId::Confusion));
+    assert!(
+        events.contains(&Event::ConfusionFired {
+            blast: s.confusion_blast(),
+            caught: 1,
+        }),
+        "the blast fired and reported its one catch: {events:?}",
+    );
+    assert_eq!(s.turn(), turn + 1, "a real firing spends the turn (§4.4)");
+    assert!(
+        matches!(
+            s.ability_state(AbilityId::Confusion),
+            AbilityState::Cooling { .. }
+        ),
+        "instant: straight to the cooldown, with no window in between (§8.2)",
+    );
+}
+
+/// The firing reports **what it bought** (§11.7/#325): the count rides the event, so a
+/// blast that froze three guards behind a wall — invisible on the board — is still a
+/// thing the player is told about. A 45-turn lockout is the most expensive press in the
+/// game and it must never resolve silently.
+#[test]
+fn the_blast_reports_how_many_it_caught() {
+    let mut s = State::new(
+        open_room(40, 7),
+        Cell::new(20, 3),
+        Direction::East,
+        vec![
+            Guard::stationary(Cell::new(18, 3)),
+            Guard::stationary(Cell::new(23, 3)),
+            Guard::stationary(Cell::new(30, 3)), // 10 away: outside
+        ],
+        Vec::new(),
+        Cell::new(38, 5),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
+
+    let events = s.step(Input::Activate(AbilityId::Confusion));
+    let caught = events
+        .iter()
+        .find_map(|e| match e {
+            Event::ConfusionFired { caught, .. } => Some(*caught),
+            _ => None,
+        })
+        .expect("the blast went off");
+    assert_eq!(caught, 2, "the two inside, not the one beyond");
+    assert_eq!(
+        crate::message_for(Event::ConfusionFired {
+            blast: s.confusion_blast(),
+            caught,
+        })
+        .expect("the firing speaks")
+        .text,
+        "the blast dazes 2 guards",
     );
 }
 

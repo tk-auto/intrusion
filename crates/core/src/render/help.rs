@@ -9,19 +9,32 @@
 //!
 //! - **Level info** ([`HelpTab::LevelInfo`]) — what's bending the rules *this run*:
 //!   the active [`LevelModifiers`], by name and direction (§12.6).
-//! - **Legend** ([`HelpTab::Legend`]) — the glyph legend, the colour key, and the
-//!   controls, the original reference card (#139).
-//! - *Options* land as a third tab (§14 v2 "options"; #189 light mode, #237
+//! - **Abilities** ([`HelpTab::Abilities`]) — what each of the run's abilities
+//!   actually *does*, and what it costs (§8.2/§8.3; #343, and see [`abilities`]).
+//! - **Help** ([`HelpTab::Help`]) — the glyph legend, the colour key, and the
+//!   **standing** controls, the original reference card (#139/#296).
+//! - *Options* land as a fourth tab (§14 v2 "options"; #189 light mode, #237
 //!   difficulty).
 //!
 //! **Every row derives from the real source**, never a hand-copied table that
 //! could drift from the game it documents (§11.2/§11.3/§11.6): terrain glyphs and
 //! their categories come from [`Terrain::glyph`]/[`Terrain::category`], the entity
 //! glyphs from the [`super`] render constants the world draws with, the colour
-//! meanings from an exhaustive match over [`Category`], the ability keys from
-//! [`AbilityId`]'s settled §11.6 hotkeys, and the modifier rows from
-//! [`LevelModifiers::active`] — so a newly added modifier appears here on its own.
-//! The tests assert each derivation.
+//! meanings from an exhaustive match over [`Category`], the ability entries from
+//! the run's own [`Loadout`] and [`AbilityId`]'s settled §11.6 hotkeys, and the
+//! modifier rows from [`LevelModifiers::active`] — so a newly added modifier
+//! appears here on its own. The tests assert each derivation.
+//!
+//! **What varies with the run, and what does not.** The Level info and Abilities
+//! tabs are drawn *per run*; **Help** is the same card for every run. That split is
+//! why the ability rows left its controls block (#296): it listed all eight of the
+//! catalogue when a run holds at most four (§8.3), so half its rows named a key that
+//! did nothing this run.
+//!
+//! It was called *Legend* until the abilities left it. The name fitted a card that
+//! was only the glyph key, but the tab now answers "how do I play this?" — glyphs,
+//! colours and the standing keys — while the glyph *legend* is one section inside
+//! it. The tab is what it is for, not what its first section is.
 //!
 //! Opening and closing the panel is a pure **view** action owned by the shell
 //! ([`ScreenUi::help_open`](super::ScreenUi)): it changes no world and costs no
@@ -32,11 +45,13 @@
 //! the game never steps underneath. It stays escapable (§11.6's no-trap rule): `?`
 //! or `Escape` closes it, and the tab bar carries a touchable `[x]`.
 
+mod abilities;
+
 use super::{
     blank_grid, draw, Grid, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH, SCHEMATIC_GROUND,
     SCHEMATIC_WALL,
 };
-use crate::ability::{AbilityId, PASSIVE_MARKER};
+use crate::ability::Loadout;
 use crate::category::Category;
 use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
@@ -55,27 +70,34 @@ pub(crate) const HELP_KEY: char = '?';
 /// current tab on [`ScreenUi`](super::ScreenUi) and hands it to [`render_help`].
 ///
 /// Ordered as the player reads them left to right — *this run* first, the standing
-/// reference second — and cycled by [`next`](Self::next)/[`prev`](Self::prev) so
-/// the tab bar wraps at either end. A third *Options* tab slots in here.
+/// reference last — and cycled by [`next`](Self::next)/[`prev`](Self::prev) so
+/// the tab bar wraps at either end. A fourth *Options* tab slots in here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum HelpTab {
     /// This run's active level modifiers (§12.6/#248) — what is bending the rules.
     #[default]
     LevelInfo,
-    /// The glyph legend, colour key, and controls (#139) — the reference card.
-    Legend,
+    /// What each of the run's held abilities does, and what it costs (§8.2/#343).
+    Abilities,
+    /// The glyph legend, colour key, and standing controls (#139) — the reference
+    /// card, the same one for every run (#296).
+    Help,
 }
 
 impl HelpTab {
     /// Every tab, in reading (left-to-right) order — the tab bar's layout and the
     /// cycle order. A new tab is one entry here.
-    pub const ALL: [HelpTab; 2] = [HelpTab::LevelInfo, HelpTab::Legend];
+    ///
+    /// Ordered outward from *this run*: the run's rules, then the run's abilities,
+    /// then the standing reference that never changes.
+    pub const ALL: [HelpTab; 3] = [HelpTab::LevelInfo, HelpTab::Abilities, HelpTab::Help];
 
     /// The label shown on the tab bar and used to size its hit region.
     fn label(self) -> &'static str {
         match self {
             HelpTab::LevelInfo => "Level info",
-            HelpTab::Legend => "Legend",
+            HelpTab::Abilities => "Abilities",
+            HelpTab::Help => "Help",
         }
     }
 
@@ -198,13 +220,16 @@ pub fn help_hit(width: u32, x: u32, y: u32) -> Option<HelpHit> {
 /// It writes no state, so closing restores the exact frame beneath. Bounds are
 /// clamped, never asserted: on a board too small for a row (only hand-built test
 /// states get that small — the v1 board is 40×40, §10.2) that row shows what fits
-/// and stops.
+/// and stops. The Abilities tab wraps its prose to the v1 width rather than relying
+/// on that clamp, because a clipped sentence is a wrong sentence (see
+/// [`abilities`]).
 pub(super) fn render_help(
     width: u32,
     height: u32,
     tab: HelpTab,
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
+    loadout: Loadout,
 ) -> Grid {
     let mut grid = blank_grid(width, height);
 
@@ -212,7 +237,8 @@ pub(super) fn render_help(
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
     match tab {
         HelpTab::LevelInfo => draw_level_info(&mut grid, 2, level, modifiers),
-        HelpTab::Legend => draw_legend(&mut grid, 2),
+        HelpTab::Abilities => abilities::draw_abilities(&mut grid, 2, loadout),
+        HelpTab::Help => draw_help_card(&mut grid, 2),
     }
     draw_footer(&mut grid);
     grid
@@ -316,36 +342,22 @@ fn direction_category(direction: ModifierDirection) -> Category {
     }
 }
 
-/// The **Legend** tab (#139): the glyph legend, the colour key, and the controls —
-/// the original reference card, now one tab of the panel.
+/// The **Help** tab (#139/#296): the glyph legend, the colour key, and the
+/// **standing** controls — the original reference card, now one tab of the panel.
 ///
-/// **The card is drawn as one column and the board is only so tall**, so its three
-/// sections are competing for a fixed number of rows — and the controls section grows
-/// every time an ability is added (#242 was the row that made this bite). It ran off
-/// the bottom silently, losing whatever was last in the list; two section spacers and
-/// the `?` row — which only repeated what the footer already says — were given up to
-/// bring the whole card back inside the panel. [`legend_rows`] measures the height it
-/// needs and a test holds it against the panel, so the next overflow is a failing
-/// build rather than a row nobody notices is gone (§11.4's row-fits rule, applied to
-/// the panel). The lasting answer is to stop listing the abilities here at all
-/// (#296/#343); until then, this is where the budget is spent.
-fn draw_legend(grid: &mut Grid, mut y: u32) {
-    // The overflow that started this was silent because [`draw`] clips: rows painted
-    // past the bottom simply vanish. Say so here, where the drawing happens, so a
-    // debug run trips on it even outside the test that pins it.
-    debug_assert!(
-        y + legend_rows() <= grid.height.saturating_sub(1),
-        "the Legend card needs {} rows and the panel has {}, footer excluded",
-        legend_rows(),
-        grid.height.saturating_sub(1 + y),
-    );
+/// Nothing here varies with the run: it takes no loadout, no modifiers and no seed,
+/// so the card a player learns is the same card every run. The abilities that used
+/// to sit in `CONTROLS` moved to their own tab (#343), where they can say what they
+/// do rather than only which key they answer to.
+fn draw_help_card(grid: &mut Grid, mut y: u32) {
     draw(grid, 2, y, "GLYPHS", Category::System);
     y += 1;
     for (glyph, category, meaning) in glyph_rows() {
         draw(grid, 3, y, &glyph.to_string(), category);
-        draw(grid, 6, y, meaning, Category::Neutral);
+        draw(grid, GLYPH_MEANING_X, y, meaning, Category::Neutral);
         y += 1;
     }
+    y += 1;
 
     draw(grid, 2, y, "COLOURS", Category::System);
     y += 1;
@@ -353,9 +365,16 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
         // The name is drawn *in its own colour*, so the player reads the colour and
         // its meaning on one line.
         draw(grid, 3, y, category_name(category), category);
-        draw(grid, 14, y, category_meaning(category), Category::Neutral);
+        draw(
+            grid,
+            COLOUR_MEANING_X,
+            y,
+            category_meaning(category),
+            Category::Neutral,
+        );
         y += 1;
     }
+    y += 1;
 
     draw(grid, 2, y, "CONTROLS", Category::System);
     y += 1;
@@ -366,14 +385,6 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
     }
 }
 
-/// How many rows the Legend card needs: a header and its rows for each of the three
-/// sections. Derived from the very lists [`draw_legend`] walks, so it cannot fall
-/// behind them — which is the whole point, since the growing list is the ability
-/// roster and the growth is what overflows the panel.
-fn legend_rows() -> u32 {
-    (3 + glyph_rows().len() + CATEGORIES.len() + control_rows().len()) as u32
-}
-
 /// Where the controls card's two columns start: the keys on the left, the action
 /// they perform on the right. Named because the gap between them is the keys
 /// column's whole width budget — an entry that grows past it runs into the action
@@ -382,6 +393,53 @@ fn legend_rows() -> u32 {
 const CONTROL_KEYS_X: u32 = 3;
 const CONTROL_ACTION_X: u32 = 26;
 
+/// Where the glyph legend's meaning column starts — three cells in from the glyph,
+/// which is one cell wide.
+const GLYPH_MEANING_X: u32 = 6;
+
+/// Where the colour key's meaning column starts, clear of the widest
+/// [`category_name`].
+const COLOUR_MEANING_X: u32 = 14;
+
+/// **The right margin every card column is measured against** (#248's `CAPTION_MAX`,
+/// generalised). The panel fills the board, so the narrowest screen a real run
+/// renders on is the v1 board (40 wide — §10.2), and every text column leaves the
+/// same one cell of right margin the `[x]` control keeps.
+///
+/// This is the bound the colour key was missing. `Sensed` and `Effect` had meanings
+/// of 33 and 38 cells in a 25-cell column, so the card shipped reading
+/// `guard or door, felt throug` and `what your gadget did, and ` — [`draw`] clips in
+/// silence, exactly as it did for the modifier caption that reached a screenshot as
+/// `…one guard conver`. A truncated explanation is worse than a short one: it looks
+/// like the whole sentence.
+const fn column_width(start: u32) -> usize {
+    (LevelConfig::V1.width - start - 1) as usize
+}
+
+// The bound bites at **compile time**, over every fixed column of the card, so a
+// meaning that would not fit fails the build instead of the eye (§2.3 — a check that
+// cannot be bypassed, because both lists are exhaustive matches over their enums).
+//
+// Measured in **bytes**, which is conservative rather than exact: a UTF-8 string is
+// never fewer bytes than cells, so passing this guarantees the row fits. A meaning
+// written with an em-dash therefore has to be a little shorter than one without —
+// a fair price for a check that runs at build time.
+const _: () = {
+    let mut i = 0;
+    while i < CATEGORIES.len() {
+        assert!(
+            category_name(CATEGORIES[i]).len() <= column_width(3) - column_width(COLOUR_MEANING_X),
+            "a colour-key name runs into the meaning beside it (see COLOUR_MEANING_X)",
+        );
+        assert!(
+            category_meaning(CATEGORIES[i]).len() <= column_width(COLOUR_MEANING_X),
+            "a colour-key meaning is too long for the Help card — shorten it \
+             (see column_width in render::help)",
+        );
+        i += 1;
+    }
+};
+
 /// Draw the footer hint on the last row: how to switch tabs and close, so a player
 /// who opened the modal panel always sees the way out (§11.6's no-trap rule, made
 /// explicit now the header `[?]` is covered).
@@ -389,14 +447,11 @@ fn draw_footer(grid: &mut Grid) {
     if grid.height == 0 {
         return;
     }
-    // The close key comes from [`HELP_KEY`] rather than being spelled again: this
-    // footer is now the *only* place it is written down (the controls card gave the
-    // duplicate row up), so it had better be the real one.
     draw(
         grid,
         2,
         grid.height - 1,
-        &format!("Tab switches   Esc or [{HELP_KEY}] closes"),
+        "Tab switches   Esc or [?] closes",
         Category::Ground,
     );
 }
@@ -455,7 +510,7 @@ const CATEGORIES: [Category; 10] = [
 /// What each colour category *means* (§11.2), as one line for the legend. An
 /// exhaustive match, so adding a [`Category`] will not compile until it is given a
 /// meaning here — the card can never silently omit a colour.
-fn category_meaning(category: Category) -> &'static str {
+const fn category_meaning(category: Category) -> &'static str {
     match category {
         Category::Neutral => "inert scenery",
         Category::Ground => "floor you can cross",
@@ -465,78 +520,50 @@ fn category_meaning(category: Category) -> &'static str {
         Category::Danger => "you're in its cone",
         Category::Interest => "a goal or reward",
         Category::System => "door / cupboard / duct",
-        Category::Sensed => "guard or door, felt through a wall",
-        Category::Effect => "your gadget's reach, and what it holds",
+        // Both of these used to run off the board and clip mid-word. Shortened to
+        // the fact each colour actually carries — that it was *not seen* (§9.2), and
+        // that it is *your* gadget's mark (§11.5/#344) — because the neighbouring
+        // GLYPHS section already says what the things themselves are.
+        Category::Sensed => "guard or door, unseen",
+        Category::Effect => "what your gadget did",
     }
 }
 
-/// The controls (§11.6), each `(keys, action)`. Movement and wait are the fixed
-/// rows; the **ability** rows derive their keys from [`AbilityId`]'s settled hotkeys,
-/// so an ability's key on this card is exactly the key that activates it; the UI keys
-/// close the card and drive the panels.
-/// **This card is now the only place hotkeys are written down** (#287): the ability
-/// bar spends its width on names instead of letters, so a player who wants to know
-/// which key fires what comes here. Which makes it also where the bar's short names
-/// are explained — an ability's left column is `<key> / <bar name>`, exactly the two
-/// things a player is holding in their head ("the `Camo` down there, what fires it?"),
-/// and the right column is the full §8.3 name the near line's messages speak.
+/// The **standing** controls (§11.6/#296), each `(keys, action)` — the shortcuts that
+/// are true of every run: move, wait, the message log, and this panel.
 ///
-/// A **passive** (#264) shows its bar entry and no key: it has nothing to press, and
-/// advertising its identity letter would promise an action that does nothing — but
-/// it *is* an entry on the bar, so a card that omitted it would leave the one entry
-/// a player cannot act on as the one entry nothing explains.
+/// It used to list the abilities too, one row per [`AbilityId::ALL`] entry. That was
+/// wrong twice over: it named all eight when a run holds at most four (§8.3), so half
+/// the rows advertised a key that did nothing this run and nothing distinguished them
+/// from the half that worked; and a card that changes with the loadout is not a
+/// legend. The abilities now have a tab of their own ([`abilities`], #343), keyed off
+/// the run's real loadout and able to say what each one *does* — which is the question
+/// a key on its own never answered.
 fn control_rows() -> Vec<(String, String)> {
-    let mut rows: Vec<(String, String)> = vec![
+    vec![
         ("arrows / hjkl / 8246".to_string(), "move".to_string()),
         ("w / 5 / .".to_string(), "wait & sense".to_string()),
-    ];
-    for id in AbilityId::ALL {
-        rows.push((ability_row_keys(id), id.name().to_string()));
-    }
-    rows.push(("m".to_string(), "messages".to_string()));
-    // No `?` row: the panel's own footer already says "Esc or [?] closes" on every
-    // tab, and a card this tight cannot afford to say a thing twice — the row it
-    // duplicated is a row an ability now has.
-    rows
+        ("m".to_string(), "messages".to_string()),
+        (HELP_KEY.to_string(), "this help".to_string()),
+    ]
 }
 
-/// An ability's left column on the controls card (#287): the key that fires it and
-/// the [bar name](AbilityId::bar_name) it appears under, so the two are read as one
-/// fact. A **passive** has no key, so it shows its bar entry as the bar draws it —
-/// `Sight (on)` — which is the thing on screen the row is there to explain.
+/// Where the Abilities tab's key column starts (§11.4/#343): the full §8.3 name runs
+/// from [`CONTENT_INDENT`] up to here, and the `hotkey / bar name` pairing from here
+/// to the right margin.
 ///
-/// A **per-level use budget** (§8.2/#302) is stated here too — `b / Bore (3/level)` —
-/// because it is the other half of "what does this key do", and it is the half a
-/// player cannot work out from the bar: the bar shows what is *left*, and only this
-/// card says what a level ever grants. The two numbers differ the moment the first
-/// use is spent and that is not a contradiction — one is the supply, the other the
-/// remainder — but nothing else in the UI would ever have said the supply.
-fn ability_row_keys(id: AbilityId) -> String {
-    if id.is_passive() {
-        return format!("{} {PASSIVE_MARKER}", id.bar_name());
-    }
-    activated_row_keys(
-        id.hotkey(),
-        id.bar_name(),
-        id.def().economy().and_then(|e| e.uses_per_level()),
-    )
-}
-
-/// The activated half of [`ability_row_keys`], as a pure function of the three
-/// things it prints — so the widest row a legal catalog can produce can be measured
-/// against the column even while no shipping row declares a budget (#302 lands the
-/// axis; #303 is the ability that spends it).
-fn activated_row_keys(hotkey: char, bar_name: &str, uses_per_level: Option<u32>) -> String {
-    let keys = format!("{hotkey} / {bar_name}");
-    match uses_per_level {
-        Some(uses) => format!("{keys} ({uses}/level)"),
-        None => keys,
-    }
+/// It lives on this module rather than the tab's, beside [`CONTROL_ACTION_X`], because
+/// the two are the same decision — the panel's one two-column measure — and a reader
+/// checking whether the layout holds should find both bounds in one place. The
+/// widest entry a legal catalogue can produce is measured against it by
+/// `the_widest_entry_heading_fits_the_board`.
+const fn ability_keys_column_start() -> u32 {
+    16
 }
 
 /// The category's display name for the colour key — its own identifier, so the key
 /// names exactly the [`Category`] the renderer tags cells with.
-fn category_name(category: Category) -> &'static str {
+const fn category_name(category: Category) -> &'static str {
     match category {
         Category::Neutral => "Neutral",
         Category::Ground => "Ground",
@@ -554,16 +581,23 @@ fn category_name(category: Category) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ability::Loadout;
+    use crate::ability::AbilityId;
     use crate::modifiers::{ActiveModifier, IntelGate};
 
     /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
     /// that no row truncates, so a test can read the panel's content whole.
-    const W: u32 = 40;
-    const H: u32 = 43; // TOP_ROWS + 40 + BOTTOM_ROWS
+    pub(super) const W: u32 = 40;
+    pub(super) const H: u32 = 43; // TOP_ROWS + 40 + BOTTOM_ROWS
 
-    fn text_of(grid: &Grid) -> String {
+    pub(super) fn text_of(grid: &Grid) -> String {
         grid.to_text().join("\n")
+    }
+
+    /// One tab of a baseline run's panel, at the v1 screen size — the shape most
+    /// tests want, including the [`abilities`] tab's, which is why it is
+    /// `pub(super)` rather than local.
+    pub(super) fn render_tab(tab: HelpTab, loadout: Loadout) -> Grid {
+        render_help(W, H, tab, None, LevelModifiers::default(), loadout)
     }
 
     /// The glyph legend is **derived**, not hand-copied (§11.3): every terrain row's
@@ -602,6 +636,50 @@ mod tests {
         }
     }
 
+    /// **No row of the card clips.** Every column of the Help tab is measured in
+    /// *cells* against the v1 board's right margin — the glyph meanings, the colour
+    /// names and meanings, and both control columns.
+    ///
+    /// The `const` guard above covers the colour key in bytes, which is conservative
+    /// but blind to the em-dashes the glyph rows carry ("cupboard — bump to hide"),
+    /// so this is the exact check over everything the card draws. It is the guard
+    /// `Sensed` and `Effect` did not have: they shipped clipped mid-word as
+    /// `guard or door, felt throug` and `what your gadget did, and `, and nothing
+    /// failed — [`draw`] truncates in silence, which is why a bound has to exist
+    /// somewhere that does not.
+    #[test]
+    fn no_row_of_the_help_card_is_clipped() {
+        let fits = |text: &str, start: u32, what: &str| {
+            let room = (LevelConfig::V1.width - start - 1) as usize;
+            assert!(
+                text.chars().count() <= room,
+                "{what} {text:?} is {} cells and its column has {room}",
+                text.chars().count(),
+            );
+        };
+        for (_, _, meaning) in glyph_rows() {
+            fits(meaning, GLYPH_MEANING_X, "glyph meaning");
+        }
+        for category in CATEGORIES {
+            fits(
+                category_meaning(category),
+                COLOUR_MEANING_X,
+                "colour meaning",
+            );
+            // A name has to clear the meaning column beside it, not just the margin.
+            fits(category_name(category), COLOUR_MEANING_X, "colour name");
+            let name_end = CONTENT_INDENT + category_name(category).chars().count() as u32;
+            assert!(
+                name_end < COLOUR_MEANING_X,
+                "{category:?}'s name runs into the meaning beside it",
+            );
+        }
+        for (keys, action) in control_rows() {
+            fits(&keys, CONTROL_KEYS_X, "control keys");
+            fits(&action, CONTROL_ACTION_X, "control action");
+        }
+    }
+
     /// Every colour category has a meaning *and* a name in the key — an exhaustive
     /// match guarantees the meaning, and the name list must stay complete too.
     #[test]
@@ -613,162 +691,75 @@ mod tests {
         }
     }
 
-    /// The ability control rows carry each **activated** ability's settled §11.6
-    /// hotkey, straight from [`AbilityId`] — so the card's keys are the keys that
-    /// actually activate them, and cannot drift. Since the bar stopped showing
-    /// letters (#287) this card is the whole key reference, so *every* ability is
-    /// listed: an activated one under its key, a **passive** under its always-on
-    /// marker, because it has no key to press but is still an entry on the bar.
+    /// The controls card keeps only the **standing** shortcuts (#296): the four rows
+    /// that are true of every run, and no ability. It documents its own key, too.
     #[test]
-    fn the_control_rows_carry_the_real_ability_hotkeys() {
+    fn the_control_rows_are_the_standing_shortcuts_only() {
         let rows = control_rows();
-        for id in AbilityId::ALL {
-            let keys = ability_row_keys(id);
+        for action in ["move", "wait & sense", "messages", "this help"] {
             assert!(
-                rows.iter().any(|(k, a)| *k == keys && a == id.name()),
-                "the controls must list {} under {keys:?}",
-                id.name(),
+                rows.iter().any(|(_, a)| a == action),
+                "the controls list {action:?}",
             );
         }
-        // The help key is documented by the footer instead, which every tab carries.
-        assert!(text_of(&render_help(
-            W,
-            H,
-            HelpTab::Legend,
-            None,
-            LevelModifiers::default()
-        ))
-        .contains(&format!("[{HELP_KEY}] closes")),);
+        assert_eq!(rows.len(), 4, "and nothing else — no ability rows");
+        // The help key documents itself.
+        assert!(rows.iter().any(|(k, _)| *k == HELP_KEY.to_string()));
     }
 
-    /// **The whole Legend card is actually drawn** (#242). It is one column on a board
-    /// of fixed height, and it had been overflowing in silence: the last rows of the
-    /// controls list were painted past the bottom of the panel and simply lost, which
-    /// is how the `m / messages` row went missing without anyone noticing. Adding an
-    /// ability makes the card one row taller, so this is the check that has to exist —
-    /// the growth is real and it is going to happen again.
-    ///
-    /// Asserted against the card's own measurement rather than a copied number, and
-    /// against the footer row it must not reach, so the failure names the actual
-    /// constraint. The lasting fix is to move the abilities off this tab (#296/#343).
+    /// **Nothing on the Legend varies with the run** (#296) — no ability name, no bar
+    /// name, no ability key pairing anywhere on the tab, whatever the loadout. That is
+    /// what makes it a legend rather than a per-run card, and it is what keeps the
+    /// Abilities tab (#343) the single place a loadout-derived ability list is drawn.
     #[test]
-    fn the_legend_card_fits_the_panel() {
-        // Content starts two rows down (the tab bar and its rule) and the footer owns
-        // the last row, so the card has everything between.
-        let available = H - 2 - 1;
-        assert!(
-            legend_rows() <= available,
-            "the Legend card wants {} rows and has {available}: a section must give \
-             one up, or the abilities must move off this tab (#296/#343)",
-            legend_rows(),
-        );
-
-        // …and the drawing agrees with the measurement: every row of every section is
-        // on the grid, none of it painted past the bottom.
-        let text = text_of(&render_help(
-            W,
-            H,
-            HelpTab::Legend,
-            None,
-            LevelModifiers::default(),
-        ));
-        for (keys, action) in control_rows() {
-            assert!(
-                text.contains(&keys) && text.contains(&action),
-                "the control row {keys:?} / {action:?} was drawn off the card",
-            );
-        }
-        for (_, _, meaning) in glyph_rows() {
-            assert!(text.contains(meaning), "the glyph row {meaning:?} was lost");
-        }
-    }
-
-    /// The card joins the bar's short name to the key that fires it and to the full
-    /// name the messages speak (#287) — the whole reason it is safe for the bar to
-    /// show neither the letter nor the long name. A passive shows its bar entry and
-    /// no key, because there is none.
-    #[test]
-    fn the_control_rows_explain_the_bar_names() {
-        assert_eq!(ability_row_keys(AbilityId::Camouflage), "c / Camo");
-        assert_eq!(ability_row_keys(AbilityId::Run), "r / Run");
-        assert_eq!(ability_row_keys(AbilityId::Vision), "Sight (on)");
-        let text = text_of(&render_help(
-            W,
-            H,
-            HelpTab::Legend,
-            None,
-            LevelModifiers::default(),
-        ));
-        for (keys, name) in [
-            ("c / Camo", "Camouflage"),
-            ("Sight (on)", "Vision"),
-            ("a / Doors", "Autodoors"),
-        ] {
-            assert!(text.contains(keys), "the card shows {keys:?}");
-            assert!(text.contains(name), "…against {name:?}");
-        }
-    }
-
-    /// A **per-level use budget** is stated on the card (§8.2/#302) — the number the
-    /// bar can never show, because the bar shows what is left and this shows what a
-    /// level grants. An ability without one is printed exactly as before, which is
-    /// every ability shipping today.
-    #[test]
-    fn the_control_rows_state_a_per_level_use_budget() {
-        assert_eq!(
-            activated_row_keys('b', "Bore", Some(3)),
-            "b / Bore (3/level)"
-        );
-        assert_eq!(activated_row_keys('b', "Bore", None), "b / Bore");
-        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
-            assert_eq!(
-                ability_row_keys(id).contains("/level"),
-                id.def()
-                    .economy()
-                    .and_then(|e| e.uses_per_level())
-                    .is_some(),
-                "{} states its budget exactly when it has one",
-                id.name(),
-            );
+    fn no_ability_reaches_the_help_tab() {
+        for loadout in [Loadout::full(), Loadout::innate(), Loadout::empty()] {
+            let text = text_of(&render_tab(HelpTab::Help, loadout));
+            for id in AbilityId::ALL {
+                assert!(
+                    !text.contains(id.name()),
+                    "{} is on the Abilities tab, not the Legend",
+                    id.name(),
+                );
+                assert!(
+                    !text.contains(&format!("{} / {}", id.hotkey(), id.bar_name())),
+                    "{}'s key pairing is on the Abilities tab, not the Legend",
+                    id.name(),
+                );
+            }
         }
     }
 
     /// The keys column has a width budget like everything else on a 40-wide board
-    /// (§11.4): it runs until the action column starts, and the widest row a legal
-    /// catalog can produce — the longest bar name plus the widest single-digit budget
-    /// (§8.2's fence) — has to leave a gutter rather than run into the name beside it.
+    /// (§11.4): it runs until the action column starts, and every row the card draws
+    /// has to leave a gutter rather than run into the action beside it.
     #[test]
     fn the_widest_control_row_clears_the_action_column() {
-        let longest_bar_name = AbilityId::ALL
-            .into_iter()
-            .map(|id| id.bar_name().len())
-            .max()
-            .expect("the catalog is not empty");
-        let widest = activated_row_keys('x', &"W".repeat(longest_bar_name), Some(9));
         let column = (CONTROL_ACTION_X - CONTROL_KEYS_X) as usize;
-        assert!(
-            widest.chars().count() < column,
-            "{widest:?} is {} cells and the keys column has {column}, gutter included",
-            widest.chars().count(),
-        );
+        for (keys, action) in control_rows() {
+            assert!(
+                keys.chars().count() < column,
+                "{keys:?} is {} cells and the keys column has {column}, gutter included",
+                keys.chars().count(),
+            );
+            assert!(
+                CONTROL_ACTION_X as usize + action.chars().count() < LevelConfig::V1.width as usize,
+                "{action:?} runs past the board's right margin",
+            );
+        }
     }
 
     /// The **Legend** tab still carries the whole reference card — the three
     /// sections and a glyph derived from the real terrain table (the duct `=`, §10.7).
     #[test]
-    fn the_legend_tab_carries_the_glyphs_colours_and_controls() {
-        let g = render_help(W, H, HelpTab::Legend, None, LevelModifiers::default());
-        let text = text_of(&g);
+    fn the_help_tab_carries_the_glyphs_colours_and_controls() {
+        let text = text_of(&render_tab(HelpTab::Help, Loadout::innate()));
         assert!(text.contains("GLYPHS") && text.contains("COLOURS") && text.contains("CONTROLS"));
         for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
             assert!(text.contains(glyph), "the legend shows {glyph:?}");
         }
-        for id in AbilityId::ALL {
-            assert!(
-                text.contains(&ability_row_keys(id)),
-                "the controls show {}",
-                id.name()
-            );
+        for keys in ["arrows / hjkl / 8246", "w / 5 / ."] {
+            assert!(text.contains(keys), "the controls show {keys:?}");
         }
         // The Legend tab is not the Level-info tab: its modifier section is elsewhere.
         assert!(
@@ -783,7 +774,14 @@ mod tests {
     #[test]
     fn the_level_info_tab_lists_active_modifiers_or_none() {
         // Baseline: "none active", not blank.
-        let baseline = render_help(W, H, HelpTab::LevelInfo, None, LevelModifiers::default());
+        let baseline = render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            None,
+            LevelModifiers::default(),
+            Loadout::innate(),
+        );
         let text = text_of(&baseline);
         assert!(text.contains("THIS RUN") && text.contains("MODIFIERS"));
         assert!(
@@ -798,7 +796,7 @@ mod tests {
             intel_to_exit: IntelGate::All,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, None, modified);
+        let g = render_help(W, H, HelpTab::LevelInfo, None, modified, Loadout::innate());
         let text = text_of(&g);
         assert!(
             !text.contains("none active"),
@@ -831,7 +829,7 @@ mod tests {
                 full_layout_known: true,
                 intel_to_exit: gate,
             };
-            let g = render_help(W, H, HelpTab::LevelInfo, None, all_on);
+            let g = render_help(W, H, HelpTab::LevelInfo, None, all_on, Loadout::innate());
             let text = text_of(&g);
             for m in all_on.active() {
                 let caption = match m.detail {
@@ -876,7 +874,14 @@ mod tests {
                 abilities: Loadout::innate(),
             },
         ] {
-            let g = render_help(W, H, HelpTab::LevelInfo, Some(level), level.modifiers);
+            let g = render_help(
+                W,
+                H,
+                HelpTab::LevelInfo,
+                Some(level),
+                level.modifiers,
+                Loadout::innate(),
+            );
             let text = text_of(&g);
             let token = level.encode().expect("a config a run can hold");
             assert!(text.contains("LEVEL SEED"), "the section is labelled");
@@ -901,7 +906,14 @@ mod tests {
             crate::level_seed::TOKEN_LEN,
             "one fixed-width form"
         );
-        let g = render_help(W, H, HelpTab::LevelInfo, Some(quick), quick.modifiers);
+        let g = render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            Some(quick),
+            quick.modifiers,
+            Loadout::innate(),
+        );
         assert!(
             text_of(&g).contains(&token),
             "quick play shows the same token it shares",
@@ -909,7 +921,14 @@ mod tests {
 
         // A hand-built state has no reproducible token, so the section is absent
         // rather than showing a string that boots something else.
-        let none = render_help(W, H, HelpTab::LevelInfo, None, LevelModifiers::default());
+        let none = render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            None,
+            LevelModifiers::default(),
+            Loadout::innate(),
+        );
         assert!(!text_of(&none).contains("LEVEL SEED"));
     }
 
@@ -926,7 +945,14 @@ mod tests {
             },
             abilities: Loadout::innate(),
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, Some(level), level.modifiers);
+        let g = render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            Some(level),
+            level.modifiers,
+            Loadout::innate(),
+        );
         let text = text_of(&g);
         assert!(text.contains("Guards search hideouts"));
         assert!(!text.contains("none active"));
@@ -956,7 +982,7 @@ mod tests {
             guards_always_search_hideouts: true,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, None, harder);
+        let g = render_help(W, H, HelpTab::LevelInfo, None, harder, Loadout::innate());
         // The MODIFIERS heading is at row 4 (THIS RUN@2, blank, heading@4), the first
         // modifier row at row 5; its caption starts at column 3.
         assert_eq!(g.get(3, 5).glyph, 'G');
@@ -971,7 +997,7 @@ mod tests {
             always_show_vision_cones: true,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, None, easier);
+        let g = render_help(W, H, HelpTab::LevelInfo, None, easier, Loadout::innate());
         assert_eq!(g.get(3, 5).glyph, 'A');
         assert_eq!(
             g.get(3, 5).fg,
@@ -987,7 +1013,14 @@ mod tests {
     fn the_tab_bar_highlights_the_active_tab() {
         let layout = tab_layout();
         for &active in &HelpTab::ALL {
-            let g = render_help(W, H, active, None, LevelModifiers::default());
+            let g = render_help(
+                W,
+                H,
+                active,
+                None,
+                LevelModifiers::default(),
+                Loadout::innate(),
+            );
             for &(tab, start, _len) in &layout {
                 let expected = if tab == active {
                     Category::Interest
@@ -1028,12 +1061,16 @@ mod tests {
     }
 
     /// The tabs cycle, wrapping at both ends (§14 v2/#248) — the Tab / arrow motion.
+    /// Written over [`HelpTab::ALL`] rather than naming pairs, so adding a tab (as
+    /// #343 did) extends the cycle instead of breaking the test.
     #[test]
     fn the_tabs_cycle_both_ways() {
-        assert_eq!(HelpTab::LevelInfo.next(), HelpTab::Legend);
-        assert_eq!(HelpTab::Legend.next(), HelpTab::LevelInfo, "next wraps");
-        assert_eq!(HelpTab::LevelInfo.prev(), HelpTab::Legend, "prev wraps");
-        assert_eq!(HelpTab::Legend.prev(), HelpTab::LevelInfo);
+        assert_eq!(HelpTab::LevelInfo.next(), HelpTab::Abilities);
+        for (i, tab) in HelpTab::ALL.into_iter().enumerate() {
+            let after = HelpTab::ALL[(i + 1) % HelpTab::ALL.len()];
+            assert_eq!(tab.next(), after, "{tab:?} advances, wrapping at the end");
+            assert_eq!(after.prev(), tab, "…and steps back the same way");
+        }
     }
 
     /// `ActiveModifier` is re-exported for shells and tests to read the descriptor

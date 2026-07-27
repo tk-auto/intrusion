@@ -397,28 +397,26 @@ impl State {
         }
     }
 
-    /// Whether `guard` is currently **confused** — blinded and frozen by an active
-    /// Confusion (§8.3/#240): the ability is active ([`Effect::Confuse`]) and the
-    /// guard is within [`CONFUSION_RADIUS`] of the player, measured by the §6.1 box
-    /// metric ([`sight_distance`](Cell::sight_distance)) **through walls**, exactly
-    /// like the guard sense (§9). The one query both the guard phase and the renderer
-    /// read: a confused guard neither senses nor moves this turn ([`guard_phase`]),
+    /// Whether `guard` is currently **dazed** — blinded and frozen by a Confusion blast
+    /// it was caught in (§8.3/#240/#325). The one query both the guard phase and the
+    /// renderer read: a dazed guard neither senses nor moves this turn ([`guard_phase`]),
     /// and its cone is dropped from the danger overlay ([`visible_cone_cells`]) — the
     /// "cone off" §11.5 requires. The freeze is a **pause**, not a reset: skipping the
-    /// guard's sense leaves its state and lead untouched, so it resumes cleanly when
-    /// the window ends (§8.2).
+    /// guard's sense leaves its state and lead untouched, so it resumes cleanly when the
+    /// count runs out (§8.2).
     ///
-    /// Both halves come from the **area** itself ([`effect_area`](Self::effect_area),
-    /// #308) rather than being restated here, so the freeze, the mark the renderer
-    /// paints on a frozen guard and the footprint it washes over the board are three
-    /// readings of one object — the picture cannot disagree with the rule (§11.5).
+    /// It asks the **guard**, and nothing else. Since #325 the blast decides its set
+    /// once, at the moment it fires, and each guard carries its own countdown from
+    /// there — so this says nothing about where the player is standing now, and neither
+    /// running away from a dazed guard nor walking toward an undazed one changes the
+    /// answer. Where the blast *landed* is a separate fact with a separate life — its
+    /// own momentary mark on the §11.5 effect layer
+    /// ([`effect_cell_marks`](Self::effect_cell_marks)).
     ///
-    /// [`Effect::Confuse`]: crate::Effect::Confuse
     /// [`guard_phase`]: Self::guard_phase
     /// [`visible_cone_cells`]: Self::visible_cone_cells
     pub fn guard_confused(&self, guard: &Guard) -> bool {
-        self.effect_area(Effect::Confuse)
-            .is_some_and(|area| area.contains(guard.pos()))
+        guard.is_dazed()
     }
 
     /// How many objectives are still out. The run can be won only at zero (§10.2).

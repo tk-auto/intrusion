@@ -71,13 +71,19 @@ impl State {
     /// you are standing next to, and sealing "most of a door" is not a thing a door
     /// can be.
     pub fn lockdown_doors(&self) -> Vec<DoorId> {
+        // The reach comes off the effect table, like Confusion's blast does
+        // ([`confusion_blast`](Self::confusion_blast)) — one place says how far an area
+        // effect reaches, so the row is load-bearing rather than documentation. No
+        // clamp: the seal is a fact about doors and not about what the player can
+        // perceive, so nothing narrows it the way the guard sense narrows a blast.
+        let reach = self.seal_reach();
         let centre = self.player;
         self.layout
             .regions()
             .doors()
             .filter(|(_, door)| {
                 door.cells()
-                    .any(|cell| centre.sight_distance(cell) <= LOCKDOWN_RADIUS)
+                    .any(|cell| centre.sight_distance(cell) <= reach)
             })
             .map(|(id, _)| id)
             .collect()
@@ -87,9 +93,7 @@ impl State {
     /// activation makes, applied after the turn loop has checked the set is non-empty.
     ///
     /// The shut goes through §10.4's crush-safe close, so a door with someone standing
-    /// in its throat stays open and is merely locked; the lock always lands. Records
-    /// where the ability fired, which is what makes the footprint a snapshot rather than
-    /// a bubble that follows the player ([`effect_area`](Self::effect_area)).
+    /// in its throat stays open and is merely locked; the lock always lands.
     ///
     /// The closes are **not** reported as [`DoorClosed`](Event::DoorClosed) events, one
     /// per door: they are not a door swinging shut, they are one act of the player's
@@ -98,7 +102,6 @@ impl State {
     /// [`WallBored`](Event::WallBored) quiet, §11.7). What is reported is the act —
     /// [`DoorsSealed`](Event::DoorsSealed), carrying how many.
     pub(super) fn seal_doors(&mut self, doors: &[DoorId], events: &mut Vec<Event>) {
-        self.lockdown_centre = Some(self.player);
         for &id in doors {
             let player = self.player;
             let guards = &self.guards;
@@ -120,7 +123,6 @@ impl State {
     /// pose it was left in is the pose it keeps. The wall was time, and the time is up.
     pub(super) fn release_lockdown(&mut self) {
         self.layout.release_sealed_doors();
-        self.lockdown_centre = None;
     }
 
     /// Whether the door at `cell` is locked (§10.4/#242) — the question the guard's

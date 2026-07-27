@@ -836,8 +836,8 @@ rejects:
   want of a use is the free mis-input it already was, costing neither turn nor use.
 - **The player is told both numbers, and they are different numbers.** The bar
   shows what is *left* (`Bore(2)` — a count in parentheses, the shape a passive's
-  `(on)` uses, because neither is a timer); the help panel's Legend shows what a
-  level *grants* (`3/level`). Spent reads as unusable, never as ready and never as
+  `(on)` uses, because neither is a timer); the help panel's **Abilities** tab
+  shows what a level *grants* (`3/level`, #343). Spent reads as unusable, never as ready and never as
   `/0/`. The timing trap above applies to both: each surface reports the number the
   player actually gets.
 
@@ -867,7 +867,7 @@ whole reason the architecture looks the way it does.
 | **Decoy** | 1 turn | 20 | 30 | A fake intruder in the cell you face. Draws Investigating, not Chasing. Dies when anything steps on it. |
 | **Dephase** | 1 turn | 3 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** |
 | **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
-| **Confusion** | 1 turn | 6 | 45 | While active, every guard within `CONFUSION_RADIUS` of you (through walls like the guard sense, §9) is **blinded and frozen** — it neither sees nor moves. A costed panic-buy of time, not a kill: a frozen chaser **pauses** (keeps its lead), it does not reset; the guard resumes cleanly when the window ends. Capture-is-contact still holds (§4.5) — a frozen adjacent guard cannot step into you, but the freeze is no shield to walk into a guard *outside* the bubble, and a frozen guard's cell stays solid. The bubble stays inside the guard-sense range so it never freezes what you cannot sense, and the long cooldown is what keeps it rare (#240). |
+| **Confusion** | 1 turn | — (instant) | 45 | **Fired once**, from the cell you press it in (#325). Every guard standing within the blast at that moment — `CONFUSION_RADIUS`, through walls like the guard sense (§9) — is **blinded and frozen** for `CONFUSION_DAZE_TURNS` (**6** **[START]**), a countdown each guard carries itself. A costed panic-buy of time, not a kill: a dazed chaser **pauses** (keeps its lead), it does not reset, and resumes cleanly when its own count runs out. **After the flash, distance stops mattering** — a guard you run away from stays dazed, and one that walks into the cells the blast covered was never in it and is untouched. That is what keeps the ability from being a no-guard-may-act field you carry: it has no window, nothing to toggle off, and no `[6]` on the bar. Capture-is-contact still holds (§4.5) — a dazed adjacent guard cannot step into you, but the daze is no shield to walk into a guard the blast never caught, and a frozen guard's cell stays solid. **The clamp [SETTLED]:** the reach fired is `min(CONFUSION_RADIUS, sense_range())`, read off the live guard sense, so the blast can never freeze what you cannot sense — inert on open floor (`min(6, 10)`), and shrunk to **5** inside a duct (§10.7), where degraded information is the crawlspace's whole cost. It can only ever shrink the blast, never widen it. A firing with nothing in reach is a **free no-op** with a near-line message (§4.4/§8.4) — fair, because the clamp means anything it could have caught you were already shown — and a real firing says how many it caught (§11.7). The long cooldown is what keeps it rare (#240). |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket** off the room rather than a route, and that is a use of the tool, not a waste of it: a dead-end alcove out of the through-routes is somewhere to sit a sweep out. It conceals nothing (it is not a cupboard, §10.3), so whether it is shelter or a trap is the player's judgement — and three walls around you means you can dig a hole to hide in, never a tunnel. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. |
 | **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot work the handle, so its route goes the long way round (§7.6/§10.4). A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it, or the wall you raised behind you would dissolve exactly as you fled down it. **You** are never refused — it is your lock, so a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in. That costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake, and unmaking it is paid in the very turns the ability was bought to save. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4), like a wall bump. |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
@@ -1737,7 +1737,7 @@ one-table edit.
 | **Sensed** | Orange (background) | **Sensed through a wall** (§9) — a guard, or a door that just changed away from you (§9.4); an eye-catching highlight, position only |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
-| **Effect** | Cyan | An **area effect of your own making** (§8.3) — how far it reaches, and which guards it holds; advisory, so it yields to both Danger and Sensed |
+| **Effect** | Cyan (background only) | An **ability effect of your own making** (§8.3) — where it acted, and what it holds; advisory, so it yields to Danger, and its wash yields to Sensed too |
 
 **A guard the player can *see* is re-categorised every turn from its own state**,
 so the player reads the AI state machine directly off the colour of `g`: yellow →
@@ -1755,15 +1755,30 @@ background, so a sensed guard and a sensed door change read as one channel. The 
 **Effect** layer now claims that cyan, and it is the one hue on the board that is
 never a threat level.)*
 
-**An area effect speaks in both channels**, because it has two things to say and they
-land on different cells (#308). Its **footprint** is a background — the §6.1 box it
-reaches, painted through walls like the reach itself — flashed on the turn the ability
-fires (see §11.5) rather than held for the whole window. Every guard it **holds** is
-marked for as long as it holds them: a *seen* guard's `g` leaves the yellow → orange →
-red ladder for cyan, because a mind switched off is not a rung on it, and a guard felt
-only through a wall takes the mark on its Sensed highlight instead, since it has no
-glyph to recolour. The mark only ever recolours a guard the player is already shown, so
-it can never reveal one the fog is hiding.
+**An ability effect always colourises the background** (#338) **[SETTLED]**. The glyph
+keeps its own meaning — a guard stays on the yellow → orange → red ladder, a thing of
+yours stays Owned — and the effect is the wash underneath it. One channel for every
+effect the game grows; what varies is not *where it is said* but **where the mark lands**
+and **how long it lives**:
+
+- **Place.** Over an explicit **cell set**, fixed when the mark is lit — Confusion's
+  §6.1 box, the cell Pierce Wall opened, an eject's landing — or over the **thing** in a
+  cell, which carries the mark wherever it goes (a guard a blast froze).
+- **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
+  the firing frame and nothing after it, see §11.5), or **standing** where the effect is
+  a state (a guard still held, a live decoy, concealment in force).
+
+The two places also sit differently in the §11.5 precedence, because they make different
+claims. A **cell** mark is a wash and the weakest background there is: a door cue, a
+sensed guard and a danger cone all paint over it. A mark on a **thing** is a *recolour of
+a cue that thing already draws* rather than a competing claim — on a guard felt through a
+wall, cyan replaces the Sensed orange to say "exactly here, **and** it cannot move" — so
+it outranks Sensed and still yields to Danger. Net: **Danger > a mark on a thing > Sensed
+> the wash.** A mark on a thing only ever recolours something the player is already
+shown, so it can never reveal what the fog is hiding.
+
+If an effect background ever reads badly under the glyph standing on it, **shift the
+Effect colour** — the channel is not negotiable, the hue is.
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a darkened background variant. The concrete rows, the constraints
@@ -1807,8 +1822,8 @@ last-writer-wins, so a guard in a doorway rendered arbitrarily. Define the order
 > the *rules*; the reference records what they resolve to, in one place, so a
 > question like *"what does `≈` mean?"* has one answer rather than four. The values
 > themselves live in code (`Terrain::glyph`, the shell's one palette table) and the
-> in-game Legend derives from those same sources, so neither can drift from the
-> board.
+> in-game glyph legend (the help panel's **Help** tab) derives from those same
+> sources, so neither can drift from the board.
 
 ### 11.4 Layout
 
@@ -1890,9 +1905,13 @@ tucked against it and its state in colour. No hotkey letters on the bar, no
 deploy button, no panel: the whole set is simply always readable, and the board
 is never covered. A tap on any entry activates exactly what its hotkey would. The
 bar is a **projection** of the §11.6 keys, never their source — the keys are
-unchanged and unconditional, and the help panel's Legend card is where a player
-reads them off, each one paired with the bar name it fires (`c / Camo` →
-*Camouflage*).
+unchanged and unconditional, and the help panel's **Abilities** tab is where a
+player reads them off, each one paired with the bar name it fires (`c / Camo` →
+*Camouflage*) and with what the ability actually does (#343). The **Help** tab —
+called *Legend* until the abilities left it — keeps only the **standing** controls:
+move, wait, messages, help. It listed the whole eight-ability catalogue when a run
+holds at most four, and a reference card that changes with the loadout is not a
+reference card (#296).
 
 **Fixed slots: the names never move.** Each ability owns a **10-cell slot** — 9
 of entry, 1 of air — and its entry is drawn **left-aligned inside it**, whatever
@@ -1957,21 +1976,29 @@ can see will detect you. **The lose condition, painted.** It makes stealth
 plannable rather than guessy, which is the whole "enough information to strategise"
 pillar. **[SETTLED]** — keep it.
 
-**The effect layer is advisory and never outranks red** (§8.3/#308). An area effect
-of the player's own making — Confusion's bubble, Lockdown's radius — washes its
-footprint in cyan for **`EFFECT_FLASH_TURNS`** turns after it fires — **one**, the
-activation frame **[START]**: enough to answer *how far* at the moment the player asks
-it, without leaving a 13×13 field of background over the board while the danger overlay
-is the thing that matters. What carries the state for every turn after that is the
-per-guard mark, and Lockdown's mark on each sealed door (§11.2/#242), which cost no
-ink. The precedence is fixed —
-**Danger > Sensed > the effect footprint** — so an advisory layer can never masquerade
-as the detection set, nor hide it. The footprint is measured from the same query the
-mechanic reads, so the picture cannot disagree with the rule — which means it travels
-with the player where the effect does (Confusion's bubble, which thaws a guard you
-step away from) and stays put where the effect does (Lockdown's seal, which does not
-unseal because you walked off; a wall you raised behind you must not appear to move
-with you).
+**The effect layer is advisory and never outranks red** (§8.3/#308/#325/#338). An
+ability effect of the player's own making marks the board in cyan, always as a
+background (§11.2), over a fixed cell set or over the thing in a cell.
+
+A **momentary** mark — Confusion's blast box, the cell Pierce Wall opened — shows for
+**`EFFECT_FLASH_TURNS`** turns after the effect acts: **one**, the acting frame
+**[START]**. Enough to answer *what just happened, and where* at the moment the player
+asks it, without leaving a 13×13 field of background over the board while the danger
+overlay is the thing that matters. What carries a state for every turn after that is a
+**standing** mark instead — a guard still held, the doorways a Lockdown has sealed
+(§8.3/#242), a live decoy, concealment in force — which costs no ink beyond the place it
+rides. Lockdown is the standing case over *cells* rather than over a thing, and it is
+why the mark goes on the doors rather than on the radius it took them from: the box
+would say *this far*, for a frame, and the doors say *these ones*, for as long as the
+guards cannot work them — which is the fact the player is playing off.
+
+The precedence is fixed — **Danger > a mark on a thing > Sensed > the wash** — so an
+advisory layer can never masquerade as the detection set, nor hide it; the wash yields
+to the sense channel, while a mark on a thing merely refines the cue that thing already
+draws. Every mark carries the geometry the mechanic resolved against, by value, so the
+picture cannot disagree with the rule — and it stays where it happened rather than
+following the player, because that is what the effect did. A **refusal** marks nothing:
+a press that changed nothing is a message (§11.7), not an effect.
 
 Two problems from the old version to fix:
 
@@ -2603,5 +2630,5 @@ default.
    its state colour, and nothing to deploy. What unlocked it was capping the held set at four (§8.3) —
    the names fit, so the compression was pure cost. Both constraints hold: every
    state stays discoverable on the bar, and hotkeys (§11.6) are untouched by it —
-   the bar no longer even shows them, and the help panel's Legend card pairs each
-   key with the bar name it fires (#287).
+   the bar no longer even shows them, and the help panel's Abilities tab pairs
+   each key with the bar name it fires (#287/#343).

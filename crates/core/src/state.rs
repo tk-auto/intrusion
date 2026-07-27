@@ -83,7 +83,7 @@ pub use bore::BoreRefusal;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
 
-use effects::EffectFlash;
+use effects::EffectMark;
 
 /// The player and every guard are solid and exclusive — fill 1.0 (§4.3). A cell
 /// already holding one admits no other actor.
@@ -144,17 +144,22 @@ const _: () = assert!(DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE);
 /// test.
 pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
 
-/// The **Confusion** blast radius (§8.3/§9/#240 **[START]**): while the Confusion
-/// ability is active ([`Effect::Confuse`](crate::Effect)), every guard within this
-/// Chebyshev box of the player is blinded and frozen — measured the same way as the
-/// guard sense (§6.1 box metric) and, like it, reaching **through walls** (§9).
+/// The **Confusion** blast radius (§8.3/§9/#240/#325 **[START]**): the ability fires
+/// once, and every guard standing within this Chebyshev box of the player *at that
+/// moment* is dazed — measured the same way as the guard sense (§6.1 box metric) and,
+/// like it, reaching **through walls** (§9).
 ///
-/// It stays **smaller** than [`PLAYER_SENSE_RANGE`] (asserted below) so the bubble can
-/// never reach a guard the player cannot already sense — but it now covers a guard's
-/// whole *certain* zone (`CERTAIN_RANGE` = 5, §7.6), so the guards actually bearing
-/// down on you are the ones it catches. Raised from the first pass's 4, where the
-/// bubble was tight enough that a chaser could sit just outside it. Pinned by a test
-/// so a later change is a visible edit.
+/// It stays **smaller** than [`PLAYER_SENSE_RANGE`] (asserted below) so the blast can
+/// never reach a guard the player cannot already sense — but it covers a guard's whole
+/// *certain* zone (`CERTAIN_RANGE` = 5, §7.6), so the guards actually bearing down on
+/// you are the ones it catches. Raised from the first pass's 4, where the blast was
+/// tight enough that a chaser could sit just outside it. Pinned by a test so a later
+/// change is a visible edit.
+///
+/// This is the **cap**, not the answer: the reach actually fired is
+/// [`confusion_blast`](State::confusion_blast), which clamps it down to the live
+/// [`sense_range`](State::sense_range) so the blast can never outreach what the player
+/// perceives — inside a duct, that is [`DUCT_SENSE_RANGE`].
 pub const CONFUSION_RADIUS: u32 = 6;
 
 /// The **Lockdown** seal radius (§8.3/§10.4/#242 **[START]**): activating Lockdown
@@ -175,25 +180,49 @@ pub const LOCKDOWN_RADIUS: u32 = 4;
 /// wall they had no way to read. Pinned at compile time.
 const _: () = assert!(LOCKDOWN_RADIUS <= PLAYER_SENSE_RANGE);
 
-/// How many turns a fired area effect's **footprint flash** stays painted (§8.3/§11.5
-/// **[START]**, #308): the cyan box that teaches how far Confusion — or any later
-/// radius tech — actually reaches. **One turn** — a true flash, the activation frame
-/// and nothing after it. The wash exists to answer *how far* once, at the moment the
-/// player asks it, and a 13×13 field of background is a great deal of ink to leave on
-/// the board while the danger overlay is the thing that matters (§11.5 [SETTLED]).
-/// What carries the state for the rest of the window is the per-guard mark
-/// ([`guard_under_effect`](State::guard_under_effect)), which costs no ink at all.
+/// How long a guard caught by a Confusion blast stays **dazed** (§8.3/#325
+/// **[START]**): blinded and frozen for this many turns, counted down on the guard's
+/// own clock ([`Guard::shake_off_daze`](crate::Guard)) rather than on the player's.
 ///
-/// Lit at full life the turn the ability fires and decremented once per spent turn,
-/// so the footprint shows for this many renders and is gone on the next — the same
+/// Six, on §8.2's convention — the firing turn is the first of them, every phase of
+/// which already saw the guard frozen, so N means N. It is deliberately the same
+/// number as the six-turn *window* the fired model replaced: what changed is when the
+/// set of guards is decided and where the timer lives, not how much time the panic-buy
+/// buys, so the retune (if the sim wants one, §13.2) stays a separate, visible edit.
+/// Pinned by a test.
+pub const CONFUSION_DAZE_TURNS: u32 = 6;
+
+/// How many turns a **momentary** effect mark stays painted (§11.5 **[START]**,
+/// #308/#338): the cyan wash that reports an effect which *is* a moment — Confusion's
+/// box, the cell a bore opened, and every later fixed-cell effect. **One turn** — a
+/// true flash, the acting frame and nothing after it. It exists to answer *what just
+/// happened, and where* once, at the moment the player asks it, and a 13×13 field of
+/// background is a great deal of ink to leave on the board while the danger overlay is
+/// the thing that matters (§11.5 [SETTLED]).
+///
+/// What carries a *state* for longer is a **standing** mark instead (a guard still
+/// frozen, later a live decoy or concealment in force), which costs no ink beyond the
+/// cell it rides. That division is why one turn is the right life here: a momentary
+/// mark reports **an event** — where it landed and how far it went — while *what is
+/// still held* is a standing fact the other lifetime says better, and says truthfully
+/// for a guard that has since walked out of the box (§8.3/#325).
+///
+/// Lit at full life the turn the effect acts and decremented once per spent turn, so
+/// the mark shows for this many renders and is gone on the next — the same
 /// persist-and-fade shape as [`DOOR_CUE_DECAY_TURNS`], which is why raising it is a
 /// one-number change if playtest wants the boundary visible for longer. Pinned by a
 /// test.
 pub const EFFECT_FLASH_TURNS: u32 = 1;
 
-/// Confusion's bubble stays **within the guard sense** (§9/#240): a guard is never
+/// Confusion's blast stays **within the guard sense** (§9/#240): a guard is never
 /// frozen before the player can even sense its dot, so the effect is always legible
 /// on the map. Pinned at compile time so the two ranges can never silently invert.
+///
+/// This is the **open-floor** half of the promise, and only that. Where the sense
+/// itself shrinks below the cap — inside a duct, §10.7 — what keeps the promise is the
+/// clamp in [`confusion_blast`](State::confusion_blast). The two are deliberately not
+/// interchangeable: this one states a fact about the catalog's numbers at compile time,
+/// the clamp states the rule at every firing, and neither stands in for the other.
 const _: () = assert!(CONFUSION_RADIUS <= PLAYER_SENSE_RANGE);
 
 /// The flat part of the **stun** the safety eject costs (§8.3 **[START]**, #329) —
@@ -535,17 +564,16 @@ pub struct State {
     /// handful of doors change in any few-turn window — so a plain `Vec` scan is
     /// cheaper than a map.
     door_cues: Vec<DoorCue>,
-    /// The area effects whose **footprint** is still being painted (§8.3/§11.5, #308):
-    /// one entry per fired area effect, each lasting [`EFFECT_FLASH_TURNS`] spent
-    /// turns. Lit in [`light_effect_flash`](Self::light_effect_flash) when the ability
-    /// switches on, dropped in [`clear_effect_flash`](Self::clear_effect_flash) the
-    /// moment its window ends either way (§8.2 expiry, §4.4 toggle-off), and decayed
-    /// with the duration clock in [`decay_effect_flashes`](Self::decay_effect_flashes).
-    /// It carries no geometry — the reach itself is a live query
-    /// ([`effect_area`](Self::effect_area)) so the bubble can travel with the player —
-    /// only *whether it is drawn*. At most one entry per area effect, so a plain `Vec`
-    /// scan beats a map.
-    effect_flashes: Vec<EffectFlash>,
+    /// The §11.5 **effect layer**: every ability effect currently made visible as a
+    /// background mark, one entry per (ability, placement) (#308/#338). Lit from the
+    /// turn's events in [`record_effect_marks`](Self::record_effect_marks) with the very
+    /// geometry the effect resolved against, aged on the one schedule in
+    /// [`decay_effect_marks`](Self::decay_effect_marks) — momentary marks count down,
+    /// standing ones end with the state they report — and dropped in
+    /// [`clear_effect_marks`](Self::clear_effect_marks) the moment an effect *with* a
+    /// window ends either way (§8.2 expiry, §4.4 toggle-off). A handful of entries at
+    /// most, so a plain `Vec` scan beats a map.
+    effect_marks: Vec<EffectMark>,
     /// Doors the **Autodoors** ability (§8.3/§7.6) opened in the player's path and
     /// still owes a close-behind, as [`DoorId`]s. A door is armed here the turn the
     /// player steps through it ([`BumpKind::AutoDoor`]) and swings shut — via the
@@ -557,18 +585,6 @@ pub struct State {
     /// promptly too. A small set — a player passes through one door at a time — so a
     /// plain `Vec` scan beats a map.
     autodoors_pending: Vec<DoorId>,
-    /// Where the live **Lockdown** window fired, if one is running (§8.3/#242) — the
-    /// cell its [`LOCKDOWN_RADIUS`] box was measured from.
-    ///
-    /// Which doors are sealed is not stored here: that lives on the doors themselves
-    /// ([`DoorLock`](crate::DoorLock)), the one representation every lock source shares.
-    /// This is only the **snapshot's origin**, kept so the footprint the renderer paints
-    /// stays where the ability fired instead of following the player the way Confusion's
-    /// travelling bubble does (§8.3) — a wall you raised behind you must not appear to
-    /// move with you. Set by [`seal_doors`](Self::seal_doors) and cleared by
-    /// [`release_lockdown`](Self::release_lockdown), so it lives exactly as long as the
-    /// window does.
-    lockdown_centre: Option<Cell>,
     /// The guards that **freshly** detected the player on the last spent turn — the
     /// transition [`Event::Detected`] reports (§7.6) — as indices into
     /// [`guards`](Self::guards), for the momentary **spot flash** (§11.5/§9.2, #222).
@@ -703,9 +719,8 @@ impl State {
             outcome: Outcome::Playing,
             last_events: Vec::new(),
             door_cues: Vec::new(),
-            effect_flashes: Vec::new(),
+            effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
-            lockdown_centre: None,
             spotters: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
@@ -898,11 +913,11 @@ impl State {
             self.moved_this_turn = self.player != from;
             // Phases 2 and 3 only happen because the player spent the turn (§4.2/§4.4).
             events.extend(self.run_world_phases());
-            // Latch the footprint of any area effect fired in phase 1 (§8.3/#308),
+            // Latch the marks of any effect that acted in phase 1 (§11.5/#308/#338),
             // *after* the fade at the head of the world phases — exactly the door
             // cues' shape (§9.4) — so a flash lit this turn keeps its full life
             // instead of losing a turn to the very tick that placed it.
-            self.record_effect_flashes(&events);
+            self.record_effect_marks(&events);
             // Ability durations tick HERE — at end of turn, after all three phases —
             // so a freshly activated N-turn ability yields N protected turns and the
             // activation turn itself is covered (§8.2's N-yields-N−1 trap): the
@@ -912,6 +927,13 @@ impl State {
             // *spent* turn reaches this, so a free action never advances the clock.
             let mut expired = Vec::new();
             self.abilities.tick(&mut expired);
+            // The guards' daze counters run on the same convention, in the same beat
+            // (§8.2/#325): a guard caught by this turn's blast gets its full N turns,
+            // the firing turn — every phase of which already saw it frozen — being the
+            // first, and only now does its own count drop. The clock lives on the
+            // guard rather than on the player, which is what makes distance stop
+            // mattering once the flash has gone off.
+            self.tick_guard_daze();
             let phase_ended = expired.iter().any(|&id| declares(id, Effect::Phase));
             for &ability in &expired {
                 // The decoy's lifetime is its ability's active window (§8.3):
@@ -925,9 +947,9 @@ impl State {
                 if declares(ability, Effect::SealDoors) {
                     self.release_lockdown();
                 }
-                // An area effect's footprint is its window's too (#308): whatever
-                // life the flash had left dies with the effect, never after it.
-                self.clear_effect_flash(ability);
+                // An effect's marks live exactly as long as its window (#308/#338):
+                // whatever life a mark had left dies with the effect, never after it.
+                self.clear_effect_marks(ability);
             }
             events.extend(
                 expired
@@ -1062,6 +1084,37 @@ impl State {
                 } else {
                     None
                 };
+                // Confusion fires once, from where you stand (§8.3/#325): its blast is
+                // measured here — *before* the deck is touched — so a flash that would
+                // catch nobody is refused as the same free no-op a missing decoy cell
+                // and a missing wall already are (§4.4/§8.4), and a 45-turn lockout is
+                // never spent on nothing. The refusal is fair rather than fiddly
+                // because the blast is clamped inside the guard sense: anything it
+                // could have caught is a guard the player was already shown.
+                let blast = if declares(id, Effect::Confuse) {
+                    // The reach is read with the previous turn's Wait already spent:
+                    // §9.1's widened sense belongs to that Wait, and this action is not
+                    // it. The flag goes down for the read and back up again, because a
+                    // *refused* activation is free and must change nothing (§4.4) —
+                    // the real clearing happens below, when the turn is actually spent.
+                    let waited = std::mem::replace(&mut self.waited, false);
+                    let blast = self.confusion_blast();
+                    self.waited = waited;
+                    let caught = self
+                        .guards
+                        .iter()
+                        .filter(|g| blast.contains(g.pos()))
+                        .count();
+                    if caught == 0 {
+                        if self.abilities.loadout().contains(id) {
+                            events.push(Event::ConfusionMissed);
+                        }
+                        return false;
+                    }
+                    Some(blast)
+                } else {
+                    None
+                };
                 if self.abilities.activate(id) {
                     if spawn.is_some() {
                         self.decoy = spawn;
@@ -1077,6 +1130,9 @@ impl State {
                     }
                     if let Some(doors) = seal {
                         self.seal_doors(&doors, events);
+                    }
+                    if let Some(blast) = blast {
+                        self.fire_confusion(blast, events);
                     }
                     self.waited = false;
                     self.crouched_behind = None;
@@ -1115,9 +1171,9 @@ impl State {
                     if declares(id, Effect::SealDoors) {
                         self.release_lockdown();
                     }
-                    // The bubble is gone, so its footprint goes with it (#308) — an
+                    // The effect is gone, so its marks go with it (#308/#338) — an
                     // early toggle-off leaves no residue to fade over nothing.
-                    self.clear_effect_flash(id);
+                    self.clear_effect_marks(id);
                     events.push(Event::AbilityDeactivated { ability: id });
                 }
                 false
@@ -1632,10 +1688,10 @@ impl State {
         // them (§9.4/§10.4), so a cue placed this turn keeps its full life and a
         // re-change refreshes rather than double-decrements.
         self.decay_door_cues();
-        // The effect flashes fade on the same schedule and for the same reason
-        // (§8.3/#308): one turn of life spent before this turn's activation can light
-        // a fresh one ([`record_effect_flashes`](Self::record_effect_flashes)).
-        self.decay_effect_flashes();
+        // The effect marks age on the same schedule and for the same reason
+        // (§11.5/#308/#338): one turn of life spent before this turn's activation can
+        // light a fresh one ([`record_effect_marks`](Self::record_effect_marks)).
+        self.decay_effect_marks();
         self.recompute_sight();
         self.radio_phase(&mut events);
         self.guard_phase(&mut events);

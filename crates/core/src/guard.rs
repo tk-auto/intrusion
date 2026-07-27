@@ -176,6 +176,24 @@ pub struct Guard {
     /// sight of you (§10.3). Cleared whenever the search ends or a fresher lead
     /// supersedes it.
     body_search: bool,
+    /// Turns of **daze** left (§8.3/#325): how much longer this guard is blinded and
+    /// frozen by a Confusion blast it was standing inside when the flash went off.
+    ///
+    /// The counter lives *here*, on the guard, not on the player — which is the whole
+    /// shape of the fired model. The blast decides its set once, at the moment it is
+    /// pressed ([`State::guard_confused`](crate::State::guard_confused)); after that,
+    /// distance stops mattering. A dazed guard the player runs away from stays dazed
+    /// for its full count, and a guard that walks into the cells the blast passed
+    /// through was never in it and is untouched.
+    ///
+    /// While it runs the guard takes no part in phase 3 at all — it does not sense,
+    /// does not witness a dive, finds no body, checks no cupboard, is not drawn by a
+    /// decoy and does not move. The freeze is a **pause, not a reset** (§8.2/§8.3):
+    /// nothing here touches state, lead or destination, so the guard resumes exactly
+    /// where it was when the count runs out. Counted down once per spent turn by
+    /// [`shake_off_daze`](Self::shake_off_daze) — *outside* [`sense`](Self::sense),
+    /// which a dazed guard never reaches.
+    dazed: u32,
 }
 
 /// Patrol radius (§7.5, **[START] = 15**): how far the *fallback* territory
@@ -316,6 +334,7 @@ impl Guard {
             radio: RadioClock::DEFAULT,
             witnessed_hideout: None,
             body_search: false,
+            dazed: 0,
         }
     }
 
@@ -428,6 +447,42 @@ impl Guard {
     /// [`Detected`]: crate::Event::Detected
     pub fn detected_player(&self) -> bool {
         self.detected
+    }
+
+    /// Whether this guard is **dazed** right now (§8.3/#325): caught by a Confusion
+    /// blast and still counting it down. The one fact the freeze is read from — by the
+    /// guard phase, which skips a dazed guard entirely, and by the renderer, which
+    /// drops its cone and marks it held. Public through
+    /// [`State::guard_confused`](crate::State::guard_confused), which is where every
+    /// caller asks.
+    pub(crate) fn is_dazed(&self) -> bool {
+        self.dazed > 0
+    }
+
+    /// Catch this guard in a Confusion blast (§8.3/#325): daze it for `turns`, blind
+    /// and frozen, from now.
+    ///
+    /// A fresh blast **replaces** the count rather than adding to it — a second flash
+    /// over a guard that is already dazed buys the same N turns from the moment it
+    /// fires, never a stacked 2N. (With a 45-turn cooldown that overlap cannot happen
+    /// today with one Confusion in the loadout; it is stated here so it stays a rule
+    /// and not an accident of the numbers.) Nothing else is touched: state, lead,
+    /// destination and focus all survive, which is what makes the freeze a pause
+    /// (§8.2).
+    pub(crate) fn daze(&mut self, turns: u32) {
+        self.dazed = turns;
+    }
+
+    /// Count off one turn of daze (§8.3/#325), on §8.2's convention: run once per
+    /// **spent** turn, at end of turn with the ability clocks, so a guard dazed for N
+    /// is frozen for N turns *including* the one the blast went off in — every phase
+    /// of which already saw it frozen.
+    ///
+    /// Deliberately **not** folded into [`sense`](Self::sense) with the other cooling
+    /// timers: a dazed guard never reaches the sense pass, so a count that ticked there
+    /// would never tick at all.
+    pub(crate) fn shake_off_daze(&mut self) {
+        self.dazed = self.dazed.saturating_sub(1);
     }
 
     /// Whether this guard is holding a §7.5 patrol dwell this turn (§153) — Calm,

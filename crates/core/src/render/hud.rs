@@ -242,7 +242,8 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // takes the *whole* screen — not an overlay on the map — and the shell captures
     // input against it, so nothing of the game frame shows and the other overlays
     // are moot. It writes no state, so closing restores the exact frame. The panel
-    // draws itself from the run's active modifiers (§12.6) and the chosen tab.
+    // draws itself from the run's active modifiers (§12.6), its ability loadout
+    // (§8.3/#343) and the chosen tab.
     if ui.help_open {
         return super::help::render_help(
             width,
@@ -250,6 +251,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
             ui.help_tab,
             state.level(),
             state.modifiers(),
+            state.loadout(),
         );
     }
 
@@ -1591,7 +1593,7 @@ mod tests {
             row0.contains("[Level info]"),
             "the tab bar heads the panel: {row0:?}"
         );
-        assert!(row0.contains("[Legend]"));
+        assert!(row0.contains("[Abilities]") && row0.contains("[Help]"));
         assert!(row0.contains("[x]"), "a touchable close control");
         assert!(
             !row0.contains("intel remaining"),

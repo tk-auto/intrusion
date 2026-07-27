@@ -1,43 +1,86 @@
-//! Area effects: the abilities whose reach is a **region**, and how the player reads
-//! it (§8.3/§11.5, #308).
+//! The **effect layer**: how an ability's effect is shown on the board (§8.3/§11.5,
+//! #308/#324/#338).
 //!
-//! An area effect is an active ability that acts on everything within a radius of the
-//! player, measured by the §6.1 **box** metric and reaching **through walls** like the
-//! guard sense (§9). Confusion is the first ([`Effect::Confuse`], §8.3); Lockdown
-//! (#242) and any later radius tech join by adding a row to [`area_radius`] — the one
-//! table this module, the mechanics and the renderer all read, so a new effect arrives
-//! with its footprint already drawn.
+//! # One vocabulary
 //!
-//! Two halves, mirroring the door cues (§9.4) they are modelled on:
+//! **An ability effect always colourises the background.** The glyph keeps its own
+//! meaning — a guard's §11.2 threat ladder, `Owned` for a thing of yours — and the
+//! effect is the wash underneath it. That is the standing rule this module owns, so
+//! that every effect the game grows has one place to go instead of inventing a channel
+//! apiece.
 //!
-//! - **The area itself.** [`State::effect_area`] answers "where does this effect reach
-//!   *right now*" as an [`EffectArea`] centred on the player's current cell. It is
-//!   re-measured every frame because the bubble travels with the player (§8.3): step
-//!   away and a guard thaws. Both the mechanics
-//!   ([`guard_confused`](State::guard_confused)) and the painted footprint go through
-//!   this one query, so the picture cannot disagree with the rule (§11.5: never a
-//!   guess).
-//! - **The flash.** The footprint is *shown* only for the first
-//!   [`EFFECT_FLASH_TURNS`] turns of the window — one, the activation frame — latched
-//!   when the ability fires ([`record_effect_flashes`](State::record_effect_flashes))
-//!   and fading turn by turn ([`decay_effect_flashes`](State::decay_effect_flashes)):
-//!   enough to answer *how far* at the moment the player asks it, without leaving a
-//!   13×13 field of background over the board while the danger overlay is the thing
-//!   that matters. What holds the state for the rest of the window is the per-guard
-//!   mark ([`guard_under_effect`](State::guard_under_effect)), which costs no ink at
-//!   all. The decay machinery is kept general even at a life of one, so raising it is
-//!   a one-number change and Lockdown (#242) may want a longer one.
+//! What varies is not the channel but two things:
+//!
+//! - **Where the mark lands** ([`MarkPlace`]) — a fixed **cell set**, decided when the
+//!   mark is lit and never re-derived (a blast's footprint, a bored cell, an eject's
+//!   landing), or the **thing** in a cell, which carries the mark wherever it goes (a
+//!   guard a blast froze).
+//! - **How long it lives** ([`MarkLife`]) — **momentary** where the effect *is* a
+//!   moment ([`EFFECT_FLASH_TURNS`], a bore, a blast's reach), or **standing** where
+//!   the effect is a state (a guard still frozen, and later a live decoy or
+//!   concealment in force). One decay schedule serves both
+//!   ([`decay_effect_marks`](State::decay_effect_marks)); there is no second timer.
+//!
+//! A mark is keyed by the **ability** it came from, not by which [`Effect`] is running:
+//! Pierce Wall is the one `Behaviour::Coded` ability (§8.1), so it declares no `Effect`
+//! at all and a channel keyed on that enum could never reach it. Marks are likewise
+//! **latched from the turn's events** ([`record_effect_marks`](State::record_effect_marks))
+//! rather than from "is this effect active" — the same reason, and the reason a new
+//! effect joins the layer by adding one arm there.
+//!
+//! # The two readings, and why they sit in different places
+//!
+//! The renderer reads the layer through two queries, one per placement, because the
+//! two make different claims and the §11.5 precedence treats them differently:
+//!
+//! - [`effect_cell_marks`](State::effect_cell_marks) — the **wash**. The weakest
+//!   background there is: a door cue, a sensed guard and a danger cone all paint over
+//!   it, because an advisory layer must never hide the detection set §11.5
+//!   **[SETTLED]** calls the board's one non-negotiable claim.
+//! - [`effect_thing_marks`](State::effect_thing_marks) — a **recolour of a cue the
+//!   thing already draws**, never a new mark. It refines the sense channel rather than
+//!   competing with it ("a guard is exactly here, *and* it is frozen"), so it sits
+//!   above `Sensed` and still below `Danger`.
+//!
+//! Net precedence, unchanged from #324: **Danger > a mark on a thing > Sensed / door
+//! cues > the wash.**
+//!
+//! # Fog (§11.5a)
+//!
+//! A mark on a **thing** is gated on perceiving that thing
+//! ([`guard_under_effect`](State::guard_under_effect)), so it can only ever recolour
+//! something the player is already shown and can never draw one the fog is hiding. A
+//! mark on **cells** needs no such gate and takes none: how far your own gadget reached
+//! is your own knowledge, through walls and over ground you have never seen, and it
+//! says nothing about the facility's contents.
+//!
+//! # Fired, not carried (#325)
+//!
+//! Confusion is **instant**: the blast is decided **once**, at the moment it is
+//! pressed, from the cell the player is standing in
+//! ([`confusion_blast`](State::confusion_blast)), and what it caught is carried from
+//! there by the guards themselves — each one counting its own daze down (§8.3). There
+//! is no ongoing area to travel with the player and no window to switch off; distance
+//! stops mattering the instant the flash goes off. That is what makes the ability a
+//! panic-buy of time rather than a mobile no-guard-may-act field, which is much closer
+//! to the "no shield" the design argues for.
+//!
+//! So Confusion is exactly one firing wearing **both** placements: a momentary cell
+//! mark over the box it went off in — the very [`EffectArea`] the daze was computed
+//! from, so the picture cannot disagree with the rule — and a standing thing mark that
+//! rides each guard it froze, reading off that guard's own counter and so staying
+//! truthful for one that has since walked out of the box.
 
 use super::*;
 
-/// The live footprint of one area effect (§8.3): the §6.1 **box** of its radius around
-/// the cell it is centred on. A box, not a disc — [`Cell::sight_distance`] is the metric
-/// the effects themselves are measured in, so a round footprint would be a picture that
-/// disagreed with the rule.
+/// The footprint one area effect **fired** with (§8.3/#325): the §6.1 **box** of its
+/// radius around the cell it went off in. A box, not a disc — [`Cell::sight_distance`]
+/// is the metric the effects themselves are measured in, so a round footprint would be
+/// a picture that disagreed with the rule.
 ///
-/// Produced by [`State::effect_area`] and centred on the player's cell *at the moment
-/// it is asked for*: the area is not a placed object, it is a query, which is exactly
-/// how a bubble that travels with the player is kept honest.
+/// Decided once, at the firing seam ([`State::confusion_blast`]), and then fixed: the
+/// player walking away narrows nothing and widens nothing, because the set of guards
+/// it caught was settled the moment it went off.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct EffectArea {
     centre: Cell,
@@ -50,7 +93,7 @@ impl EffectArea {
         self.centre.sight_distance(cell) <= self.radius
     }
 
-    /// The cell the area is measured from (the player, while it is live).
+    /// The cell the blast was measured from — where the player stood when it fired.
     pub fn centre(&self) -> Cell {
         self.centre
     }
@@ -59,16 +102,32 @@ impl EffectArea {
     pub fn radius(&self) -> u32 {
         self.radius
     }
+
+    /// The in-bounds cells of the box, as the explicit set a [`MarkPlace::Cells`] mark
+    /// is lit with (#338). Clipped to `facility` here, once, at the moment the mark is
+    /// placed — the layer itself never re-derives geometry.
+    pub fn cells(&self, facility: &Facility) -> Vec<Cell> {
+        let (cx, cy) = (self.centre.x, self.centre.y);
+        let r = self.radius;
+        let ys = cy.saturating_sub(r)..=(cy + r).min(facility.height().saturating_sub(1));
+        let xs = cx.saturating_sub(r)..=(cx + r).min(facility.width().saturating_sub(1));
+        ys.flat_map(|y| xs.clone().map(move |x| Cell::new(x, y)))
+            .collect()
+    }
 }
 
 /// The radius of `effect` when it acts on an **area** around the player, or `None` when
 /// it does not — the one table that says which effects have a footprint at all (§8.3).
 ///
-/// Every consumer reads it: the freeze itself
-/// ([`guard_confused`](State::guard_confused)), the painted footprint
-/// ([`effect_footprint`](State::effect_footprint)), and the mark on what the effect
-/// holds ([`guard_under_effect`](State::guard_under_effect)). Adding Lockdown's radius
-/// (#242) here is all that ticket owes the render layer.
+/// A **cap**, read at the firing seam and clamped there by whatever that effect's own
+/// rule says (Confusion's is the guard sense, [`confusion_blast`](State::confusion_blast)).
+/// Adding Lockdown's radius (#242) here is all that ticket owes the render layer; its
+/// own clamp, if it wants one, is its own — the door sense is not the guard sense, and
+/// nothing in this table presumes otherwise.
+///
+/// This is the effect's **own reach**, not the layer's geometry: since #338 the drawing
+/// side reads an explicit cell set and never this table, so a mark that is not a box at
+/// all (a bored cell, an eject's landing) needs no row here.
 fn area_radius(effect: Effect) -> Option<u32> {
     match effect {
         Effect::Confuse => Some(CONFUSION_RADIUS),
@@ -83,159 +142,330 @@ fn area_radius(effect: Effect) -> Option<u32> {
     }
 }
 
-/// The area effects that hold **guards** — the ones a guard inside the footprint is
-/// marked for (§11.2's [`Category::Effect`]). Confusion freezes; Lockdown (#242) will
-/// seal doors instead and belongs in its own list, not this one, because what an effect
-/// paints its mark on is what it *acts on*.
-const GUARD_HOLDING: [Effect; 1] = [Effect::Confuse];
-
-/// A live **effect flash** (§8.3/§11.5, #308): the footprint of a just-fired area
-/// effect, and how many more turns it shows. The area itself is a live query
-/// ([`State::effect_area`]) — this only carries *whether it is being drawn*, so a
-/// flash that has burned out silences the picture without touching the mechanic.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct EffectFlash {
-    /// The effect whose footprint is lit.
-    pub(super) effect: Effect,
-    /// Turns of life left; decremented once per spent turn and dropped at zero.
-    pub(super) ttl: u32,
+/// Where an effect mark lands (§11.5/#338) — one of the two shapes the layer speaks.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(super) enum MarkPlace {
+    /// An explicit set of cells, fixed when the mark was lit: a blast's footprint, the
+    /// cell a bore opened, the pair an eject threw you between. Nothing about it is a
+    /// live query, so it stays where it happened rather than following the player.
+    Cells(Vec<Cell>),
+    /// The guards an effect currently **holds** — the mark rides each one wherever it
+    /// walks, for as long as it is held, and is gated on perception (§11.5a).
+    HeldGuards,
 }
 
+/// How long an effect mark lives (§11.5/#338). Both arms run on the one decay schedule
+/// ([`State::decay_effect_marks`]); neither carries a clock of its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum MarkLife {
+    /// A **moment**: this many more spent turns, then gone. The effect *is* an event —
+    /// a blast's reach, a bore — and the mark is the one frame that reports it.
+    Momentary(u32),
+    /// A **state**: shown for exactly as long as the effect holds, with no countdown.
+    /// It ends when the thing it marks stops being held, or when the ability's window
+    /// ends ([`State::clear_effect_marks`]).
+    Standing,
+}
+
+/// A live **effect mark** (§8.3/§11.5, #308/#324/#338): one ability effect, made
+/// visible as a background over a place, for a stated lifetime.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(super) struct EffectMark {
+    /// The ability the mark came from — an [`AbilityId`] rather than an [`Effect`], so
+    /// the key reaches a `Behaviour::Coded` ability (Pierce Wall, §8.1) as easily as a
+    /// data-driven one, and so a window that ends can clear exactly its own marks.
+    pub(super) source: AbilityId,
+    pub(super) place: MarkPlace,
+    pub(super) life: MarkLife,
+}
+
+/// The empty cell slice a non-cell mark contributes to the wash — a `const` so the
+/// borrow outlives the match arm.
+const NO_CELLS: &[Cell] = &[];
+
 impl State {
-    /// Where `effect` reaches **right now**, or `None` when it is not running as an
-    /// area effect (§8.3): the §6.1 box of its [`area_radius`] centred on the player's
-    /// current cell.
+    /// The blast **Confusion fires from where the player stands** (§8.3/§9/#240/#325):
+    /// the §6.1 box of [`CONFUSION_RADIUS`], clamped down to the player's live
+    /// [`sense_range`](Self::sense_range).
     ///
-    /// The single definition of an effect's reach. The mechanics ask it whether a guard
-    /// is held ([`guard_confused`](Self::guard_confused)) and the renderer asks it which
-    /// cells to paint ([`effect_footprint`](Self::effect_footprint)), so the footprint
-    /// on screen is the rule itself rather than a drawing of it (§11.5).
-    pub fn effect_area(&self, effect: Effect) -> Option<EffectArea> {
-        let radius = area_radius(effect)?;
-        if !self.abilities.effect_active(effect) {
-            return None;
+    /// ```text
+    /// effective radius = min(CONFUSION_RADIUS, sense_range())
+    /// ```
+    ///
+    /// The clamp can only ever **shrink** the blast, never widen it: [`CONFUSION_RADIUS`]
+    /// stays the catalog's **[START]** cap, so no change to the sense — a Wait's widened
+    /// 20, a future modifier, salvaged tech — can make Confusion reach further than its
+    /// own row says. What it does do is keep #240's promise as a *rule* rather than as a
+    /// coincidence of two constants: the blast never freezes what the player cannot
+    /// sense. On open floor it is inert (`min(6, 10)` = 6); inside a duct
+    /// ([`DUCT_SENSE_RANGE`] = 5, §10.7) it closes the hole where a crawling player
+    /// would otherwise daze a guard at 6 they cannot perceive at all. That nerf is the
+    /// point: degraded information is the crawlspace's whole cost.
+    ///
+    /// It reads [`sense_range`](Self::sense_range) *itself*, never a duct check or any
+    /// other re-derivation, so whatever changes the sense later is picked up here for
+    /// free and there is no second place to keep in step.
+    pub fn confusion_blast(&self) -> EffectArea {
+        // Pinned read moment (#325): §9.1's widened sense belongs to the Wait that
+        // bought it, and firing is not that Wait, so the flag is already down by the
+        // time this is asked (see `Input::Activate`). The cap absorbs a stale one
+        // today — `min(6, 20)` is 6 — but the order is what stops a later change to
+        // the cap quietly resurrecting a blast widened by last turn's Wait.
+        debug_assert!(
+            !self.waited,
+            "the blast's reach is read after the Wait that widened the sense is spent"
+        );
+        EffectArea {
+            centre: self.player,
+            radius: area_radius(Effect::Confuse)
+                .expect("Confusion is an area effect")
+                .min(self.sense_range()),
         }
-        Some(EffectArea {
-            centre: self.area_centre(effect)?,
-            radius,
-        })
     }
 
-    /// Where a live area effect is measured **from** (§8.3): the player's current cell
-    /// for the effects that travel with them, and the recorded firing cell for the ones
-    /// that snapshot.
+    /// How far a Lockdown seals (§8.3/#242) — [`LOCKDOWN_RADIUS`], read from the one
+    /// [`area_radius`] table so the ability's reach and the table cannot drift apart.
     ///
-    /// The split is not cosmetic — it is what each effect *is*. Confusion holds the
-    /// guards near you, so stepping away thaws them and the box must follow you.
-    /// Lockdown seals doors, and a sealed door stays sealed wherever you go, so its box
-    /// must stay where it fired: a footprint that trailed after the player would draw
-    /// the wall they raised behind them as though it were moving with them, which is
-    /// precisely the lie §11.5 forbids. A snapshot effect with no recorded origin is not
-    /// running, whatever the deck says.
-    fn area_centre(&self, effect: Effect) -> Option<Cell> {
-        match effect {
-            Effect::SealDoors => self.lockdown_centre,
-            _ => Some(self.player),
-        }
+    /// Unclamped, unlike [`confusion_blast`](Self::confusion_blast): a blast is narrowed
+    /// to what the player can *perceive* because freezing a guard you cannot sense is
+    /// unreadable, but a seal is a fact about doors, and a door you sealed out of sense
+    /// range is still sealed and still marked when you walk back to it. The door sense
+    /// is not the guard sense, and nothing here presumes otherwise.
+    pub(super) fn seal_reach(&self) -> u32 {
+        area_radius(Effect::SealDoors).expect("Lockdown is an area effect")
     }
 
-    /// The cells the §11.5 **effect layer** paints as a background: the in-bounds
-    /// footprint of every area effect whose flash is still lit (#308).
+    /// The cells the §11.5 effect layer washes as its **weakest background** (#338):
+    /// every [`MarkPlace::Cells`] mark still alive, in the order they were lit.
     ///
-    /// Only the flash's turn, not the whole window — see the module note. The set
-    /// is derived from [`effect_area`](Self::effect_area), so a footprint can never
-    /// disagree with what the effect actually holds, and it follows the player while it
-    /// lasts, which is how the travelling boundary gets taught at all.
-    pub fn effect_footprint(&self) -> impl Iterator<Item = Cell> + '_ {
-        let facility = self.layout.facility();
-        self.effect_flashes
+    /// Each set is an explicit one, fixed when the mark was placed — for Confusion, the
+    /// very [`EffectArea`] the daze was computed from, so a footprint can never disagree
+    /// with what the blast actually caught, and it stays where it went off rather than
+    /// following the player who fired it. Painted through walls and fog on purpose: the
+    /// reach of your own gadget is not something the fog can keep from you, and it
+    /// reveals nothing about the facility (§11.5a).
+    pub fn effect_cell_marks(&self) -> impl Iterator<Item = Cell> + '_ {
+        self.effect_marks
             .iter()
-            .filter_map(|flash| self.effect_area(flash.effect))
-            .flat_map(move |area| {
-                let (cx, cy) = (area.centre().x, area.centre().y);
-                let r = area.radius();
-                let ys = cy.saturating_sub(r)..=(cy + r).min(facility.height().saturating_sub(1));
-                let xs = cx.saturating_sub(r)..=(cx + r).min(facility.width().saturating_sub(1));
-                ys.flat_map(move |y| xs.clone().map(move |x| Cell::new(x, y)))
+            .flat_map(|mark| match &mark.place {
+                MarkPlace::Cells(cells) => cells.as_slice(),
+                MarkPlace::HeldGuards => NO_CELLS,
             })
+            .copied()
+    }
+
+    /// The cells where a mark rides a **thing** (#338): the position of every guard an
+    /// effect currently holds and the player can perceive.
+    ///
+    /// A *recolour* of a cue the thing already draws, never a new mark, which is why it
+    /// outranks the `Sensed` channel it refines and can give nothing away to the fog —
+    /// [`guard_under_effect`](Self::guard_under_effect) carries the perception gate.
+    /// It reads the guards' own counters rather than the box a blast once covered, so
+    /// it stays truthful for the guard the player fired at and then ran away from.
+    pub fn effect_thing_marks(&self) -> impl Iterator<Item = Cell> + '_ {
+        let held = self
+            .effect_marks
+            .iter()
+            .any(|mark| mark.place == MarkPlace::HeldGuards);
+        self.guards
+            .iter()
+            .filter(move |guard| held && self.guard_under_effect(guard))
+            .map(|guard| guard.pos())
     }
 
     /// Whether `guard` is currently held by an area effect the player can read — the
-    /// renderer's **mark** (§11.2's [`Category::Effect`], #308), keyed by the effect
-    /// table rather than by any one ability, so Confusion's freeze and whatever radius
-    /// tech lands next are one mark with one meaning.
+    /// predicate behind its [`effect_thing_marks`](Self::effect_thing_marks) mark
+    /// (§11.2's [`Category::Effect`], #308).
+    ///
+    /// It reads the guard's own daze ([`guard_confused`](Self::guard_confused)), not the
+    /// box a blast once covered, which is what makes it *truthful* for the guard the
+    /// player fired at and then ran away from: still frozen, still marked, wherever
+    /// either of them now stands (#325).
     ///
     /// Gated on the guard being **perceived** ([`perceive_guard`](Self::perceive_guard)):
     /// the mark only ever recolours a guard the player is already shown — the seen `g`
-    /// or the sensed dot — so it can never draw a guard the fog is hiding (§11.5a). That
-    /// is normally no restriction at all, since [`CONFUSION_RADIUS`] is pinned inside
-    /// [`PLAYER_SENSE_RANGE`] at compile time; it bites only where the *sense* shrinks
-    /// below the bubble — inside a duct (§10.7) — and there the honest answer is
-    /// silence, not a free reveal.
+    /// or the sensed dot — so it can never draw a guard the fog is hiding (§11.5a). A
+    /// guard is always perceivable at the moment it is caught, since the blast is
+    /// clamped inside the sense; a dazed guard that later drifts out of the sense simply
+    /// stops being drawn at all, and silence is the honest answer there.
     pub fn guard_under_effect(&self, guard: &Guard) -> bool {
-        self.perceive_guard(guard).is_some()
-            && GUARD_HOLDING
-                .iter()
-                .filter_map(|&effect| self.effect_area(effect))
-                .any(|area| area.contains(guard.pos()))
+        self.perceive_guard(guard).is_some() && self.guard_confused(guard)
     }
 
-    /// Light the footprint flash of every area effect the player just switched on,
-    /// read off this turn's events (§8.3/#308) — the one-off "here is how far this
-    /// reaches" the start-of-window message cannot say. Called after
-    /// [`decay_effect_flashes`](Self::decay_effect_flashes) has already spent the older
-    /// flashes' turn, exactly as [`record_door_cues`](Self::record_door_cues) is, so a
-    /// flash placed this turn keeps its full life.
-    pub(super) fn record_effect_flashes(&mut self, events: &[Event]) {
+    /// Fire the Confusion blast `area` (§8.3/#325): daze every guard standing inside it
+    /// **right now**, for [`CONFUSION_DAZE_TURNS`] each, and report what it caught.
+    ///
+    /// This is the whole mechanic, and it is over in one call. The set is taken here
+    /// and nowhere else: a guard that wanders into these cells next turn was not in the
+    /// blast and is untouched, and a dazed guard carried out of them keeps its count.
+    /// Nothing but the daze is written — state, lead, destination and focus are left
+    /// exactly as they were, which is the "pause, not reset" §8.3 asks for.
+    ///
+    /// Called from the activation seam once the deck has actually switched the ability
+    /// on, so a refused press fires nothing.
+    pub(super) fn fire_confusion(&mut self, area: EffectArea, events: &mut Vec<Event>) {
+        let mut caught = 0;
+        for guard in &mut self.guards {
+            if area.contains(guard.pos()) {
+                guard.daze(CONFUSION_DAZE_TURNS);
+                caught += 1;
+            }
+        }
+        events.push(Event::ConfusionFired {
+            blast: area,
+            caught,
+        });
+    }
+
+    /// Count one turn off every dazed guard (§8.3/#325). Run once per **spent** turn,
+    /// at end of turn beside the ability clocks, on §8.2's convention: a guard dazed
+    /// for N is frozen for N turns *including* the one the blast went off in, every
+    /// phase of which already saw it frozen.
+    ///
+    /// It ticks every guard, not only the ones phase 3 let act — a dazed guard is
+    /// precisely the one phase 3 skips, so a count that ran inside the guard phase
+    /// would never run at all.
+    pub(super) fn tick_guard_daze(&mut self) {
+        for guard in &mut self.guards {
+            guard.shake_off_daze();
+        }
+    }
+
+    /// Light the marks of every ability effect that acted this turn, read off the
+    /// turn's events (§11.5/#308/#325/#338). Called after
+    /// [`decay_effect_marks`](Self::decay_effect_marks) has already spent the older
+    /// marks' turn, exactly as [`record_door_cues`](Self::record_door_cues) is, so a
+    /// mark placed this turn keeps its full life.
+    ///
+    /// **This is the whole extension point.** A new effect becomes visible by adding an
+    /// arm here that names its place and its lifetime — nothing else in the layer, and
+    /// nothing at all in the renderer, has to change. Keying on *what happened* rather
+    /// than on which effect is running is what lets a `Behaviour::Coded` ability (Pierce
+    /// Wall, §8.1) into a channel it declares no [`Effect`] for.
+    ///
+    /// Geometry comes off the event rather than being measured again from the player,
+    /// who by now may have taken an extra step (§8.3's Run) since the blast went off:
+    /// what is drawn is the object the mechanic resolved against, carried through by
+    /// value.
+    ///
+    /// A refusal lights nothing. `Event::BoreRefused` has no arm on purpose (§11.7): a
+    /// press that changed nothing is a *message*, and painting the wall it declined to
+    /// open would claim an effect that never happened.
+    pub(super) fn record_effect_marks(&mut self, events: &[Event]) {
         for event in events {
-            if let Event::AbilityActivated { ability, .. } = *event {
-                self.light_effect_flash(ability);
+            match *event {
+                // Confusion is one firing in both placements (§8.3/#325): a momentary
+                // wash over the box it reached, and a standing mark on what it froze.
+                Event::ConfusionFired { blast, .. } => {
+                    let cells = blast.cells(self.layout.facility());
+                    self.light_mark(
+                        AbilityId::Confusion,
+                        MarkPlace::Cells(cells),
+                        MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                    );
+                    self.light_mark(
+                        AbilityId::Confusion,
+                        MarkPlace::HeldGuards,
+                        MarkLife::Standing,
+                    );
+                }
+                // Pierce Wall has no window and no clock to hang a mark on (§8.2/#302):
+                // the moment of firing is the only thing there is to draw, so the cell
+                // it opened is washed for exactly the turn it opened in. One glyph
+                // flipping `#` → floor on a 40×40 board is otherwise the whole of a
+                // bore's feedback.
+                // Lockdown is the layer's first **standing cell** mark (§8.3/#242): the
+                // doorways it sealed, held for exactly as long as the window that sealed
+                // them and dropped by `clear_effect_marks` when it ends. A *standing*
+                // mark rather than a momentary wash because the seal is a state, not a
+                // moment — which doors the guards can no longer work is the fact the
+                // player plays off for eight turns, and it is worth more than a
+                // one-frame answer to "how far did that reach".
+                //
+                // Placed over the doors rather than over the LOCKDOWN_RADIUS box for the
+                // same reason: the box would say *this far*, and the doors say *these
+                // ones*. Only one `Cells` mark per ability is possible by design (see
+                // `light_mark`), so this is the one worth spending.
+                Event::DoorsSealed { .. } => {
+                    let cells = self.sealed_door_cells().collect();
+                    self.light_mark(
+                        AbilityId::Lockdown,
+                        MarkPlace::Cells(cells),
+                        MarkLife::Standing,
+                    )
+                }
+                Event::WallBored { at } => self.light_mark(
+                    AbilityId::PierceWall,
+                    MarkPlace::Cells(vec![at]),
+                    MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                ),
+                _ => {}
             }
         }
     }
 
-    /// Light (or relight, at full life) the flash of every area effect `id` carries.
-    /// An ability with no area effect lights nothing.
-    fn light_effect_flash(&mut self, id: AbilityId) {
-        for effect in AREA_EFFECTS
-            .into_iter()
-            .filter(|&effect| declares(id, effect))
-        {
-            if let Some(flash) = self.effect_flashes.iter_mut().find(|f| f.effect == effect) {
-                flash.ttl = EFFECT_FLASH_TURNS;
-            } else {
-                self.effect_flashes.push(EffectFlash {
-                    effect,
-                    ttl: EFFECT_FLASH_TURNS,
-                });
-            }
+    /// Light (or relight, at full life) `source`'s mark over `place` (§11.5/#338).
+    ///
+    /// At most one mark per (ability, placement): refiring replaces the geometry and
+    /// resets the life rather than stacking a second wash over the same board. Called
+    /// with the very geometry the effect resolved against, and after
+    /// [`decay_effect_marks`](Self::decay_effect_marks) has already spent the older
+    /// marks' turn — exactly as [`record_door_cues`](Self::record_door_cues) is — so a
+    /// mark placed this turn keeps its full life.
+    fn light_mark(&mut self, source: AbilityId, place: MarkPlace, life: MarkLife) {
+        let same = |mark: &EffectMark| {
+            mark.source == source
+                && std::mem::discriminant(&mark.place) == std::mem::discriminant(&place)
+        };
+        if let Some(mark) = self.effect_marks.iter_mut().find(|mark| same(mark)) {
+            mark.place = place;
+            mark.life = life;
+        } else {
+            self.effect_marks.push(EffectMark {
+                source,
+                place,
+                life,
+            });
         }
     }
 
-    /// Drop the flash of every area effect `id` carries — the window is over (§8.2),
-    /// whether by expiry or by an early toggle-off (§4.4), and the layer clears with it
-    /// rather than fading over a bubble that no longer exists.
-    pub(super) fn clear_effect_flash(&mut self, id: AbilityId) {
-        self.effect_flashes
-            .retain(|flash| !declares(id, flash.effect));
+    /// Drop every mark `id` placed — its window is over (§8.2), whether by expiry or by
+    /// an early toggle-off (§4.4), and the layer clears with it rather than fading over
+    /// an effect that no longer exists.
+    ///
+    /// Inert for Confusion, which has no window to end (#325): its wash burns out on
+    /// its own [`EFFECT_FLASH_TURNS`] clock and its standing mark ends with the last
+    /// daze. It stays because an effect *with* a duration — Lockdown (#242), a live
+    /// decoy (#340), concealment in force (#341) — is exactly what a standing mark is
+    /// for, and a mark outliving its effect is the bug this closes.
+    pub(super) fn clear_effect_marks(&mut self, id: AbilityId) {
+        self.effect_marks.retain(|mark| mark.source != id);
     }
 
-    /// Fade the effect flashes by one turn, dropping any that have burned out. Runs
-    /// once per **spent** turn, at the head of the world phases beside the door cues
-    /// (§9.4) and before this turn's activation can light a fresh one — so a free
-    /// action never burns a turn of a flash the player has not yet had a chance to read.
-    pub(super) fn decay_effect_flashes(&mut self) {
-        self.effect_flashes.retain_mut(|flash| {
-            flash.ttl -= 1;
-            flash.ttl > 0
+    /// Age the effect marks by one turn on the **one** decay schedule (#338). Runs once
+    /// per **spent** turn, at the head of the world phases beside the door cues (§9.4)
+    /// and before this turn's activation can light a fresh one — so a free action never
+    /// burns a turn of a mark the player has not yet had a chance to read.
+    ///
+    /// A **momentary** mark counts down and is dropped at zero. A **standing** mark
+    /// never counts: it is dropped when what it marks stops being held, which for
+    /// [`MarkPlace::HeldGuards`] is the turn the last daze runs out. A standing mark
+    /// over a fixed cell set outlives every clock here and ends only with its ability's
+    /// window ([`clear_effect_marks`](Self::clear_effect_marks)).
+    pub(super) fn decay_effect_marks(&mut self) {
+        let any_held = self.guards.iter().any(|guard| guard.is_dazed());
+        self.effect_marks.retain_mut(|mark| match &mut mark.life {
+            MarkLife::Momentary(ttl) => {
+                *ttl -= 1;
+                *ttl > 0
+            }
+            MarkLife::Standing => match mark.place {
+                MarkPlace::HeldGuards => any_held,
+                MarkPlace::Cells(_) => true,
+            },
         });
     }
 }
-
-/// Every effect with a footprint, for the activation hook to scan. Kept beside
-/// [`area_radius`] — its rows are exactly the `Some` arms — so one edit adds an effect
-/// to the table and to the flash together.
-const AREA_EFFECTS: [Effect; 2] = [Effect::Confuse, Effect::SealDoors];
 
 #[cfg(test)]
 mod tests {
@@ -260,72 +490,94 @@ mod tests {
         .with_loadout(Loadout::innate().with(AbilityId::Confusion))
     }
 
-    /// Switch Confusion on, spending the turn (§4.4).
-    fn activate(state: &mut State) {
-        state.step(Input::Activate(AbilityId::Confusion));
+    /// The same world with one guard inside the blast — the firing tests all need one,
+    /// since a blast that would catch nobody is refused (§8.3/#325).
+    fn level_with_a_target() -> State {
+        level_with(vec![Guard::stationary(Cell::new(22, 20))])
+    }
+
+    /// Fire Confusion, spending the turn (§4.4).
+    fn fire(state: &mut State) {
+        let events = state.step(Input::Activate(AbilityId::Confusion));
         assert!(
-            state.effect_area(Effect::Confuse).is_some(),
-            "Confusion is running"
+            events
+                .iter()
+                .any(|e| matches!(e, Event::ConfusionFired { .. })),
+            "the blast went off"
         );
     }
 
-    /// Every effect [`AREA_EFFECTS`] lists has a radius, and every effect with a radius
-    /// is listed: the flash hook scans the array while the mechanics read the table, so
-    /// a new area effect that updated only one of them would light no footprint (or
-    /// light one it cannot measure).
+    /// The blast fired by the last `step`, straight off the event — the object the daze
+    /// was computed from, which is what the mark is asserted against.
+    fn last_blast(state: &State) -> EffectArea {
+        state
+            .last_events()
+            .iter()
+            .find_map(|e| match e {
+                Event::ConfusionFired { blast, .. } => Some(*blast),
+                _ => None,
+            })
+            .expect("the blast went off")
+    }
+
+    /// [`area_radius`] holds each effect's **own reach** and nothing else's (§8.3): the
+    /// two that act on a region around the player, and no row for the rest. The layer's
+    /// geometry no longer reads the table at all — it is read at each firing seam
+    /// ([`confusion_blast`](State::confusion_blast),
+    /// [`lockdown_doors`](State::lockdown_doors)) — so this is pinned to keep a new
+    /// radius tech a visible edit here rather than a silent one at the seam.
     #[test]
-    fn the_area_effect_table_and_list_agree() {
-        for effect in AREA_EFFECTS {
-            assert!(
+    fn only_the_area_effects_declare_a_radius() {
+        for effect in [
+            Effect::Confuse,
+            Effect::SealDoors,
+            Effect::ExtraStep,
+            Effect::ConcealWhileStill,
+            Effect::SpawnDecoy,
+            Effect::Phase,
+            Effect::AutoDoors,
+            Effect::EnhancedSight,
+        ] {
+            assert_eq!(
                 area_radius(effect).is_some(),
-                "{effect:?} is listed as an area effect but has no radius"
-            );
-        }
-        for effect in GUARD_HOLDING {
-            assert!(
-                AREA_EFFECTS.contains(&effect),
-                "{effect:?} holds guards but is not an area effect"
+                matches!(effect, Effect::Confuse | Effect::SealDoors),
+                "{effect:?}: only an effect that acts on a region has a radius",
             );
         }
     }
 
-    /// The bubble's own numbers, pinned so a later change is a visible edit (§8.3
-    /// **[START]**): the radius the footprint draws and the window the marks outlast
-    /// the flash by.
+    /// The blast's own numbers, pinned so a later change is a visible edit (§8.3
+    /// **[START]**): the reach it fires with and how long what it catches stays frozen.
+    /// The ability itself is **instant** — the time it buys lives on the guards, so
+    /// there is no player-side window at all.
     #[test]
     fn the_confusion_numbers_are_pinned() {
         assert_eq!(CONFUSION_RADIUS, 6);
-        assert_eq!(confusion_duration(), 6);
+        assert_eq!(CONFUSION_DAZE_TURNS, 6);
+        assert_eq!(
+            AbilityId::Confusion
+                .def()
+                .economy()
+                .expect("Confusion is an activated ability")
+                .duration(),
+            0,
+            "instant: fired, not carried"
+        );
     }
 
-    /// Confusion's window, read off its own definition rather than restated here.
-    fn confusion_duration() -> u32 {
-        AbilityId::Confusion
-            .def()
-            .economy()
-            .expect("Confusion is an activated ability")
-            .duration()
-    }
-
-    /// The footprint is the §6.1 **box** of [`CONFUSION_RADIUS`] around the player —
-    /// asserted against the rule, not against a hand-drawn shape: every painted cell is
-    /// one [`EffectArea::contains`] accepts, and every in-bounds cell it accepts is
-    /// painted. This is the criterion that stops the picture and the mechanic drifting.
+    /// The wash is the §6.1 **box** of [`CONFUSION_RADIUS`] around the cell it fired
+    /// from — asserted against the rule, not against a hand-drawn shape: every painted
+    /// cell is one [`EffectArea::contains`] accepts, and every in-bounds cell it accepts
+    /// is painted. This is the criterion that stops the picture and the mechanic
+    /// drifting.
     #[test]
-    fn the_footprint_is_exactly_the_rule_s_box() {
-        let mut s = level_with(Vec::new());
-        activate(&mut s);
-        let area = s
-            .effect_area(Effect::Confuse)
-            .expect("Confusion is running");
-        let painted: Vec<Cell> = s.effect_footprint().collect();
+    fn the_cell_mark_is_exactly_the_rule_s_box() {
+        let mut s = level_with_a_target();
+        let fired_from = s.player();
+        fire(&mut s);
+        let area = last_blast(&s);
+        let painted: Vec<Cell> = s.effect_cell_marks().collect();
 
-        for &cell in &painted {
-            assert!(
-                area.contains(cell),
-                "{cell:?} is painted but outside the rule's box"
-            );
-        }
         let facility = s.layout().facility();
         for y in 0..facility.height() {
             for x in 0..facility.width() {
@@ -339,106 +591,213 @@ mod tests {
         }
         // …and it is a box, not a disc: the corner of the square is in.
         let corner = Cell::new(
-            s.player().x + CONFUSION_RADIUS,
-            s.player().y + CONFUSION_RADIUS,
+            fired_from.x + CONFUSION_RADIUS,
+            fired_from.y + CONFUSION_RADIUS,
         );
         assert!(painted.contains(&corner), "the diagonal corner is inside");
     }
 
-    /// The footprint travels with the player and is re-measured every turn (§8.3): a
-    /// step west drags the whole box west, so the picture never promises reach the
-    /// bubble has already left behind.
+    /// The wash the renderer paints **is** the object the daze was computed from
+    /// (#308/#324): the fired area rides the event and is turned into the mark's cell
+    /// set there and then, so the picture and the rule are one value rather than two
+    /// derivations that happen to agree.
     #[test]
-    fn the_footprint_follows_the_player() {
-        let mut s = level_with(Vec::new());
-        activate(&mut s);
-        let before = s.player();
-        let west_edge = before.x - CONFUSION_RADIUS;
-        assert!(s
-            .effect_footprint()
-            .any(|c| c.x == west_edge && c.y == before.y));
-
-        s.step(Input::Step(Direction::West));
-        assert_eq!(s.player().x, before.x - 1, "the step landed");
-        assert!(
-            s.effect_footprint().all(|c| c.x >= west_edge - 1),
-            "the box moved with the player"
-        );
-        assert!(
-            !s.effect_footprint()
-                .any(|c| c.x == before.x + CONFUSION_RADIUS),
-            "the cell the bubble left is no longer painted"
+    fn the_painted_cells_are_the_fired_blast() {
+        let mut s = level_with_a_target();
+        fire(&mut s);
+        let painted: Vec<Cell> = s.effect_cell_marks().collect();
+        assert_eq!(
+            painted,
+            last_blast(&s).cells(s.layout().facility()),
+            "the lit cells are the blast that fired"
         );
     }
 
-    /// The flash is a *flash*, not the window (§11.5): it shows for
-    /// [`EFFECT_FLASH_TURNS`] renders — one, the activation frame — and is gone on the
-    /// next, while the ability is still very much running. The marks carry the rest.
+    /// The wash stays where it fired (§8.3/#325): a step west leaves the box behind,
+    /// because the blast is a thing that happened at a place, not a bubble the player
+    /// carries.
     #[test]
-    fn the_flash_fades_long_before_the_window_ends() {
+    fn the_cell_mark_does_not_follow_the_player() {
+        let mut s = level_with_a_target();
+        let fired_from = s.player();
+        fire(&mut s);
+        let painted: Vec<Cell> = s.effect_cell_marks().collect();
+        assert!(painted.contains(&Cell::new(fired_from.x + CONFUSION_RADIUS, fired_from.y)));
+
+        // The wash outlives the step only if `EFFECT_FLASH_TURNS` is raised; what is
+        // asserted here is that while it *is* lit, it does not move. At the [START]
+        // life of one turn the step burns it out, which is itself the check that the
+        // box never reappears somewhere new.
+        s.step(Input::Step(Direction::West));
+        assert_eq!(s.player().x, fired_from.x - 1, "the step landed");
+        assert!(
+            s.effect_cell_marks()
+                .all(|c| c.x <= fired_from.x + CONFUSION_RADIUS),
+            "nothing is painted east of where the blast reached"
+        );
+    }
+
+    /// A **momentary** mark is a flash (§11.5): it shows for [`EFFECT_FLASH_TURNS`]
+    /// renders — one, the firing frame — and is gone on the next, while the **standing**
+    /// mark on the guards it caught is still very much lit. The two lifetimes, on one
+    /// firing, doing exactly the different jobs they are for.
+    #[test]
+    fn the_momentary_mark_fades_while_the_standing_one_holds() {
         assert_eq!(EFFECT_FLASH_TURNS, 1, "the [START] flash life is pinned");
-        let mut s = level_with(Vec::new());
-        activate(&mut s);
-        // The activation frame counts: it is the first render the player reads, and
-        // the fade runs at the head of the *next* turn, so the footprint shows for
-        // exactly `EFFECT_FLASH_TURNS` renders.
+        let mut s = level_with_a_target();
+        fire(&mut s);
+        // The firing frame counts: it is the first render the player reads, and the
+        // fade runs at the head of the *next* turn, so the wash shows for exactly
+        // `EFFECT_FLASH_TURNS` renders.
         for turn in 0..EFFECT_FLASH_TURNS {
             assert!(
-                s.effect_footprint().next().is_some(),
-                "the flash is still lit on render {turn}"
+                s.effect_cell_marks().next().is_some(),
+                "the wash is still lit on render {turn}"
             );
             s.step(Input::Wait);
         }
         assert!(
-            s.effect_footprint().next().is_none(),
-            "the flash has burned out"
+            s.effect_cell_marks().next().is_none(),
+            "the wash has burned out"
         );
         assert!(
-            s.effect_area(Effect::Confuse).is_some(),
-            "…while the window itself is still open"
+            s.effect_thing_marks().next().is_some(),
+            "…while the daze it dealt out is still marked"
         );
     }
 
-    /// An early toggle-off (§4.4) clears the layer on the spot — no footprint fading
-    /// over a bubble that has already gone.
+    /// A **standing** mark ends with the state it reports and leaves no residue: the
+    /// turn the last daze runs out, the mark is gone from the layer — not merely
+    /// yielding nothing, but dropped, so a mark can never outlive its effect.
     #[test]
-    fn a_toggle_off_clears_the_flash_at_once() {
-        let mut s = level_with(Vec::new());
-        activate(&mut s);
-        assert!(s.effect_footprint().next().is_some());
-
-        s.step(Input::Deactivate(AbilityId::Confusion));
-        assert!(s.effect_footprint().next().is_none(), "layer cleared");
-        assert!(s.effect_area(Effect::Confuse).is_none(), "window closed");
-    }
-
-    /// The window's own expiry leaves no residue either — belt and braces, since the
-    /// flash is much shorter than the duration, but a longer-lived flash (or a shorter
-    /// ability) must not outlive its effect.
-    #[test]
-    fn expiry_leaves_no_residue() {
-        let mut s = level_with(Vec::new());
-        activate(&mut s);
-        for _ in 0..confusion_duration() + 1 {
+    fn the_standing_mark_ends_with_the_daze() {
+        let mut s = level_with_a_target();
+        fire(&mut s);
+        for _ in 0..CONFUSION_DAZE_TURNS {
             s.step(Input::Wait);
         }
-        assert!(s.effect_area(Effect::Confuse).is_none(), "window over");
-        assert!(s.effect_footprint().next().is_none(), "and nothing painted");
+        assert!(
+            s.guards().iter().all(|g| !s.guard_confused(g)),
+            "precondition: the daze has run out"
+        );
+        assert!(
+            s.effect_thing_marks().next().is_none(),
+            "the mark went with it"
+        );
+        assert!(s.effect_marks.is_empty(), "…and left nothing behind");
     }
 
-    /// The mark is exactly the freeze, for a guard the player can see *and* for one
-    /// felt only through a wall (§9.2) — the common case, since the bubble reaches
-    /// through walls.
+    /// The thing mark is exactly the daze, for a guard the player can see *and* for one
+    /// felt only through a wall (§9.2) — the common case, since the blast reaches
+    /// through walls — and never for one the fog is hiding (§11.5a).
     #[test]
-    fn every_frozen_guard_the_player_perceives_is_marked() {
-        let mut s = level_with(Vec::new());
-        activate(&mut s);
+    fn every_dazed_guard_the_player_perceives_is_marked() {
+        let mut s = level_with_a_target();
+        fire(&mut s);
+        let marked: Vec<Cell> = s.effect_thing_marks().collect();
         for guard in s.guards() {
             assert_eq!(
-                s.guard_under_effect(guard),
+                marked.contains(&guard.pos()),
                 s.guard_confused(guard) && s.perceive_guard(guard).is_some(),
-                "the mark is the freeze, on a guard that is already drawn"
+                "the mark is the daze, on a guard that is already drawn"
             );
         }
+    }
+
+    /// Pierce Wall is the first fixed-cell reader (#303/#338): boring a wall lights a
+    /// **momentary** mark on the cell it opened, and nothing else on the board.
+    #[test]
+    fn a_bore_marks_the_cell_it_opened() {
+        let mut layout = open_room(20, 20);
+        let wall = Cell::new(10, 9);
+        layout.place(wall, Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::PierceWall));
+
+        let events = s.step(Input::Activate(AbilityId::PierceWall));
+        assert!(
+            events.contains(&Event::WallBored { at: wall }),
+            "precondition: the bore went through: {events:?}",
+        );
+        assert_eq!(
+            s.effect_cell_marks().collect::<Vec<_>>(),
+            vec![wall],
+            "the opened cell, and only it",
+        );
+        assert!(
+            s.effect_thing_marks().next().is_none(),
+            "a bore holds nothing",
+        );
+        // Momentary: gone on the very next turn, like the blast's wash.
+        s.step(Input::Wait);
+        assert!(
+            s.effect_cell_marks().next().is_none(),
+            "the bore mark is a moment, not a monument",
+        );
+    }
+
+    /// A **refusal** lights nothing (§11.7/#338): it is a message, not an effect, so
+    /// the wall Pierce Wall declined to open is never washed as though it had been.
+    #[test]
+    fn a_refused_bore_marks_nothing() {
+        // Standing in the open with no adjacent wall: `BoreRefusal::NothingToBore`.
+        let mut s = State::new(
+            open_room(20, 20),
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(18, 18),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::PierceWall));
+
+        let events = s.step(Input::Activate(AbilityId::PierceWall));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::BoreRefused { .. })),
+            "precondition: the bore was refused: {events:?}",
+        );
+        assert!(
+            s.effect_cell_marks().next().is_none(),
+            "a refusal paints nothing",
+        );
+    }
+
+    /// Refiring replaces a mark rather than stacking one: the layer holds at most one
+    /// mark per (ability, placement), so a second blast cannot leave the first box on
+    /// the board beside its own.
+    #[test]
+    fn refiring_replaces_the_mark_it_relights() {
+        let mut s = level_with(vec![
+            Guard::stationary(Cell::new(22, 20)),
+            Guard::stationary(Cell::new(18, 20)),
+        ]);
+        fire(&mut s);
+        let first: Vec<Cell> = s.effect_cell_marks().collect();
+        assert_eq!(s.effect_marks.len(), 2, "one wash, one standing mark");
+
+        // Walk clear of the first box and fire again — the ability's own cooldown is
+        // waived by relighting the mark directly, which is what this test is about.
+        let blast = EffectArea {
+            centre: Cell::new(30, 30),
+            radius: 2,
+        };
+        let cells = blast.cells(s.layout().facility());
+        s.light_mark(
+            AbilityId::Confusion,
+            MarkPlace::Cells(cells.clone()),
+            MarkLife::Momentary(EFFECT_FLASH_TURNS),
+        );
+        assert_eq!(s.effect_marks.len(), 2, "still one wash, not two");
+        assert_eq!(s.effect_cell_marks().collect::<Vec<_>>(), cells);
+        assert_ne!(first, cells, "precondition: a genuinely different box");
     }
 }

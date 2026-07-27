@@ -39,6 +39,18 @@ pub struct Message {
 /// the line in noise, and the move is already visible — the `@` moved. Category
 /// comes from [`Event::category`], the single place meaning is declared, so a
 /// red near line and a red `g` reinforce (§11.2).
+/// Whether `ability` is **instant** (§8.2): it resolves the turn it is pressed and has
+/// no active window at all — Pierce Wall's bore, Confusion's blast (#303/#325). Read
+/// off the catalog rather than listed here, so a later ability that ships instant is
+/// covered without an edit. A passive has no clock and is never activated, so it is not
+/// instant either.
+fn is_instant(ability: crate::AbilityId) -> bool {
+    ability
+        .def()
+        .economy()
+        .is_some_and(|economy| economy.duration() == 0)
+}
+
 pub fn message_for(event: Event) -> Option<Message> {
     let (text, priority) = match event {
         Event::Moved { .. } => return None,
@@ -167,6 +179,12 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::AbilityActivated {
             uses_left: Some(_), ..
         } => return None,
+        // An **instant** ability's activation is silent for the other half of the same
+        // reason (§8.2/#325): there is no active window, so "… active" would be a claim
+        // about a state that was over before the message was drawn. What an instant
+        // ability *did* is reported by its own event — the bore, the blast — which is
+        // the fact worth the row.
+        Event::AbilityActivated { ability, .. } if is_instant(ability) => return None,
         Event::AbilityActivated {
             ability,
             uses_left: None,
@@ -199,6 +217,19 @@ pub fn message_for(event: Event) -> Option<Message> {
         // bore and the refused rematerialization beside it — has to say why, or a press
         // that did nothing reads as a dropped key.
         Event::LockdownRefused => ("no door in reach to seal".to_string(), 0),
+        // The blast, reported (§8.3/§11.7/#325). Confusion is the most expensive press
+        // in the game — a 45-turn lockout — and most of what it catches is behind a
+        // wall, felt as a dot rather than seen, so *what it bought* is exactly the kind
+        // of fact the board cannot show and the near line must. It says the count, not
+        // the reach: how far it went is what the flash paints, this turn, over the very
+        // box it fired with.
+        Event::ConfusionFired { caught: 1, .. } => ("the blast dazes a guard".to_string(), 0),
+        Event::ConfusionFired { caught, .. } => (format!("the blast dazes {caught} guards"), 0),
+        // The refusal (§8.3/#325): free, changed nothing, and — like the refused bore
+        // beside it — has to say why, because a press that silently did nothing reads
+        // as a dropped key. It names the rule the player is learning: the blast only
+        // reaches what you can already sense.
+        Event::ConfusionMissed => ("nothing near enough to daze".to_string(), 0),
     };
     Some(Message {
         text,

@@ -176,12 +176,13 @@ fn swatch(category: Category) -> Swatch {
         // so the two never collide on screen. The door-change cue (§9.4) reuses this
         // same category, so a sensed guard and a sensed door change share the orange.
         Category::Sensed => ORANGE,
-        // An area effect of the player's own making (§8.3/#308): cyan, a hue nothing
-        // else on the board uses, so the one layer that is *advisory* can never be
-        // mistaken for red detection or orange attention — the risk §11.5 names. Its
-        // background is a quiet teal wash (the flash covers a 13×13 box, so it must
-        // recede) while its foreground is the bright row: a frozen guard's `g` is the
-        // loud half, and rightly so — that is the fact the player acts on.
+        // An ability effect of the player's own making (§8.3/#308/#338): cyan, a hue
+        // nothing else on the board uses, so the one layer that is *advisory* can never
+        // be mistaken for red detection or orange attention — the risk §11.5 names.
+        // On the board it is a **background only** — a quiet teal wash, since a blast's
+        // mark covers a 13×13 box and must recede under the glyphs that keep their own
+        // meaning. The bright row is spent on the help card's colour key, which names
+        // the category in the colour it paints.
         Category::Effect => CYAN,
     }
 }
@@ -586,8 +587,9 @@ mod tests {
             Category::Danger,
             Category::Interest,
             Category::System,
-            // The effect layer's bright half — a frozen guard's `g` (§8.3/#308) — is a
-            // real foreground and must be tellable from every other glyph on the board.
+            // Since #338 the effect layer paints no glyph on the board, but the help
+            // card's colour key names it in this colour beside every other category, so
+            // it still has to be tellable from all of them.
             Category::Effect,
         ];
         // ~70 in RGB distance: the old tan/yellow clash measured ~61 and must fail.
@@ -620,12 +622,17 @@ mod tests {
         );
     }
 
-    /// §8.3/§11.5 (#308): the **effect layer** must be tellable at a glance from both
-    /// of the meanings it sits beside — red detection and orange attention — or the
-    /// board degrades into "some coloured backgrounds", which is the one risk the
+    /// §8.3/§11.5 (#308/#338): the **effect layer** must be tellable at a glance from
+    /// both of the meanings it sits beside — red detection and orange attention — or
+    /// the board degrades into "some coloured backgrounds", which is the one risk the
     /// ticket names. Its wash is deliberately quiet (it covers a 13×13 box) but must
     /// still read against the page, and like `Sensed` it paints at full strength in and
     /// out of the FOV: how far your own gadget reaches is certain knowledge.
+    ///
+    /// Since #338 it is a **background only**, so the check that matters most is the
+    /// last one: every glyph that can stand on an effect mark keeps its own colour, and
+    /// all of them must stay legible over the wash. If one ever failed, §11.2's rule is
+    /// to shift *this* colour — the channel is not negotiable, the hue is.
     #[test]
     fn the_effect_layer_is_distinct_from_danger_and_sensed() {
         const MIN_BG_DIST2: i32 = 40 * 40;
@@ -660,15 +667,24 @@ mod tests {
                 "the effect wash blurs into {other} (dist^2 {d})"
             );
         }
-        // The mark's foreground keeps its cyan out of the FOV as well: a frozen guard
-        // felt through a wall is exactly the case the mark exists for, so its row's dim
-        // shade must not collapse to the standard gray (as `Interest` keeps its tint).
-        let dim = swatch(Category::Effect).dim;
-        let (r, g, b) = rgb(dim);
-        assert!(
-            g > r + 20 && b > r + 20,
-            "the dimmed effect colour must keep its cyan tint, not fade to gray"
-        );
+        // Every glyph the board can draw **over** an effect mark (#338) must still read
+        // against it: the threat ladder, because a held guard keeps its ladder colour,
+        // and `Owned`, because the player and their decoy are the marks still to come
+        // (#340/#341). Floor dots are exempt — `Ground` recedes by design, and a wash
+        // it disappeared into would be the wash doing its job.
+        for over in [
+            Category::Caution,
+            Category::Warning,
+            Category::Danger,
+            Category::Owned,
+        ] {
+            let d = dist2(rgb(swatch(over).fg), rgb(effect));
+            assert!(
+                d >= MIN_BG_DIST2,
+                "{over:?} is unreadable over the effect wash (dist^2 {d}) — shift the \
+                 effect colour, never the channel (§11.2)"
+            );
+        }
     }
 
     /// §11.5 fix #1, at the colour table: both danger-overlay shades must read
