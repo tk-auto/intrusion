@@ -111,6 +111,12 @@ so its win rate is not a difficulty verdict (§13.4). **Flag, never judge:** a
 histogram spike or a win-rate cliff under `--bot` is a seed to go *play*, not a
 ruling. The bot is deliberately crude; sharper policies are follow-up work.
 
+> **The whole of the bot's decision handling is
+> [`docs/bot-behaviour.md`](../../docs/bot-behaviour.md)** — the channels it may
+> read, the plan it names each turn, the routing refusals, the cue seam, and the
+> checklist for adding a cue. This README owns the operator's half (flags, output
+> schema); that doc owns the policy.
+
 ### Ability cues — when the bot presses a key (§13.2/§8.1)
 
 The bot does not carry a list of abilities it knows. It names the plan it has
