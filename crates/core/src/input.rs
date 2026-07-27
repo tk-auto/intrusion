@@ -167,6 +167,7 @@ pub fn ability_hotkey(ability: &str) -> Option<char> {
         "Autodoors" => 'a',
         "Confusion" => 'z',
         "Vision" => 'v',
+        "Pierce Wall" => 'b',
         _ => return None,
     })
 }

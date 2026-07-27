@@ -207,8 +207,10 @@ impl StealthBot {
         // Open a gap with Run (§8.3) — but only with room to spend the turn on it:
         // activating costs a turn standing still, which a guard already on top of
         // you turns into a capture, so run only when the nearest one is a step away.
-        if state.ability_state(AbilityId::Run) == AbilityState::Ready
-            && nearest_perceived_guard(state).is_none_or(|d| d > 1)
+        if matches!(
+            state.ability_state(AbilityId::Run),
+            AbilityState::Ready | AbilityState::Limited { .. }
+        ) && nearest_perceived_guard(state).is_none_or(|d| d > 1)
         {
             return Input::Activate(AbilityId::Run);
         }
@@ -238,11 +240,19 @@ impl StealthBot {
         // action that spends no turn and so never lets the hunt cool, stalling the run
         // out to the input cap instead of breaking contact.
         match state.ability_state(AbilityId::Camouflage) {
-            AbilityState::Ready => return Input::Activate(AbilityId::Camouflage),
+            AbilityState::Ready | AbilityState::Limited { .. } => {
+                return Input::Activate(AbilityId::Camouflage)
+            }
             AbilityState::Active { .. } => return Input::Wait,
-            // A passive is never one of these (Camouflage is activated) — it is
-            // matched only so the arm stays exhaustive (#264).
-            AbilityState::Cooling { .. } | AbilityState::Unusable | AbilityState::Passive => {}
+            // Camouflage is activated and unbudgeted, so a passive state and an
+            // exhausted one are both unreachable for it — matched so the arms stay
+            // exhaustive (#264/#302), and grouped with the states that mean "not
+            // this turn" so a budgeted ability arriving here would fall back to the
+            // retreat rather than press a key the deck refuses.
+            AbilityState::Cooling { .. }
+            | AbilityState::Exhausted
+            | AbilityState::Unusable
+            | AbilityState::Passive => {}
         }
 
         // Nowhere to run to and nothing to cloak with: back away from the nearest
@@ -317,9 +327,14 @@ impl StealthBot {
         // cloaked player is concealed from every viewer, so `being_hunted` will not
         // fire and this keeps holding until the coast clears.
         match state.ability_state(AbilityId::Camouflage) {
-            AbilityState::Ready => Some(Input::Activate(AbilityId::Camouflage)),
+            AbilityState::Ready | AbilityState::Limited { .. } => {
+                Some(Input::Activate(AbilityId::Camouflage))
+            }
             AbilityState::Active { .. } => Some(Input::Wait),
-            AbilityState::Cooling { .. } | AbilityState::Unusable | AbilityState::Passive => None,
+            AbilityState::Cooling { .. }
+            | AbilityState::Exhausted
+            | AbilityState::Unusable
+            | AbilityState::Passive => None,
         }
     }
 
@@ -801,7 +816,7 @@ fn console_cells(facility: &Facility) -> impl Iterator<Item = Cell> + '_ {
 mod tests {
     use super::*;
     use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
-    use intrusion_core::{generate_level, Direction, LevelConfig, Rng, State};
+    use intrusion_core::{generate_level, Direction, LevelConfig, Outcome, Rng, State};
 
     /// #276: the bot routes by **the core's rule**, never a table of its own.
     ///
@@ -1050,7 +1065,68 @@ mod tests {
             .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage));
         assert!(
             usage.count(Verb::Run) > 0,
-            "expected the bot to use Run at least once across the batch"
+            "the bot never used its one innate escape — the histogram is measuring \
+             a bot that does not play",
+        );
+    }
+
+    /// **The bot still plays the game while holding Pierce Wall** (§13.2/#303).
+    ///
+    /// The ability is unusable from most cells by design — its precondition is
+    /// *exactly one adjacent wall* — which is precisely the shape that could make a
+    /// naive policy hammer a key that never fires and stall the run out to the input
+    /// cap. This grants it and plays a batch through the ordinary loop: the outcome
+    /// profile stays mixed, so nothing livelocks.
+    ///
+    /// What it does **not** yet show is the ability being *used*: the bot's policy
+    /// knows only its innate escape and its cloak, so it never presses this key at
+    /// all, and the histogram slot honestly reads zero. Teaching it to bore is
+    /// blocked on #256 (the run config as a sim input) and belongs there — a bot
+    /// that pressed it at random would make the histogram measure the bot rather
+    /// than the game (§13.3), which is the one thing the sim exists to avoid.
+    #[test]
+    fn the_bot_plays_identically_while_holding_pierce_wall() {
+        /// Play `state` to a decision and report the inputs issued and how it ended.
+        fn play(mut state: State) -> (Vec<Input>, Outcome, u32) {
+            let mut bot = StealthBot::new();
+            let mut issued = Vec::new();
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                issued.push(input);
+                state.step(input);
+            }
+            (issued, state.outcome(), state.turn())
+        }
+
+        let mut decided = 0;
+        for seed in 30..50 {
+            let (bare, _) = boot(seed);
+            let (armed, _) = boot(seed);
+            let armed =
+                armed.with_loadout(intrusion_core::Loadout::innate().with(AbilityId::PierceWall));
+            assert!(
+                matches!(
+                    armed.ability_state(AbilityId::PierceWall),
+                    AbilityState::Limited { .. }
+                ),
+                "seed {seed}: the run holds the ability, with its budget full",
+            );
+
+            let bare = play(bare);
+            let armed = play(armed);
+            assert_eq!(
+                bare, armed,
+                "seed {seed}: holding the ability changed the run"
+            );
+            decided += u32::from(armed.1 != Outcome::Playing);
+        }
+        assert!(
+            decided >= 15,
+            "only {decided}/20 runs reached a decision — the baseline is stalling, \
+             so this test would prove nothing",
         );
     }
 }

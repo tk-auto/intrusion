@@ -339,11 +339,19 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
     draw(grid, 2, y, "CONTROLS", Category::System);
     y += 1;
     for (keys, action) in control_rows() {
-        draw(grid, 3, y, &keys, Category::System);
-        draw(grid, 26, y, &action, Category::Neutral);
+        draw(grid, CONTROL_KEYS_X, y, &keys, Category::System);
+        draw(grid, CONTROL_ACTION_X, y, &action, Category::Neutral);
         y += 1;
     }
 }
+
+/// Where the controls card's two columns start: the keys on the left, the action
+/// they perform on the right. Named because the gap between them is the keys
+/// column's whole width budget — an entry that grows past it runs into the action
+/// beside it — and a test pins the widest entry against that (§11.4's row-fits rule,
+/// applied to the panel rather than the bar).
+const CONTROL_KEYS_X: u32 = 3;
+const CONTROL_ACTION_X: u32 = 26;
 
 /// Draw the footer hint on the last row: how to switch tabs and close, so a player
 /// who opened the modal panel always sees the way out (§11.6's no-trap rule, made
@@ -457,11 +465,33 @@ fn control_rows() -> Vec<(String, String)> {
 /// the [bar name](AbilityId::bar_name) it appears under, so the two are read as one
 /// fact. A **passive** has no key, so it shows its bar entry as the bar draws it —
 /// `Sight (on)` — which is the thing on screen the row is there to explain.
+///
+/// A **per-level use budget** (§8.2/#302) is stated here too — `b / Bore (3/level)` —
+/// because it is the other half of "what does this key do", and it is the half a
+/// player cannot work out from the bar: the bar shows what is *left*, and only this
+/// card says what a level ever grants. The two numbers differ the moment the first
+/// use is spent and that is not a contradiction — one is the supply, the other the
+/// remainder — but nothing else in the UI would ever have said the supply.
 fn ability_row_keys(id: AbilityId) -> String {
     if id.is_passive() {
-        format!("{} {PASSIVE_MARKER}", id.bar_name())
-    } else {
-        format!("{} / {}", id.hotkey(), id.bar_name())
+        return format!("{} {PASSIVE_MARKER}", id.bar_name());
+    }
+    activated_row_keys(
+        id.hotkey(),
+        id.bar_name(),
+        id.def().economy().and_then(|e| e.uses_per_level()),
+    )
+}
+
+/// The activated half of [`ability_row_keys`], as a pure function of the three
+/// things it prints — so the widest row a legal catalog can produce can be measured
+/// against the column even while no shipping row declares a budget (#302 lands the
+/// axis; #303 is the ability that spends it).
+fn activated_row_keys(hotkey: char, bar_name: &str, uses_per_level: Option<u32>) -> String {
+    let keys = format!("{hotkey} / {bar_name}");
+    match uses_per_level {
+        Some(uses) => format!("{keys} ({uses}/level)"),
+        None => keys,
     }
 }
 
@@ -589,6 +619,50 @@ mod tests {
             assert!(text.contains(keys), "the card shows {keys:?}");
             assert!(text.contains(name), "…against {name:?}");
         }
+    }
+
+    /// A **per-level use budget** is stated on the card (§8.2/#302) — the number the
+    /// bar can never show, because the bar shows what is left and this shows what a
+    /// level grants. An ability without one is printed exactly as before, which is
+    /// every ability shipping today.
+    #[test]
+    fn the_control_rows_state_a_per_level_use_budget() {
+        assert_eq!(
+            activated_row_keys('b', "Bore", Some(3)),
+            "b / Bore (3/level)"
+        );
+        assert_eq!(activated_row_keys('b', "Bore", None), "b / Bore");
+        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
+            assert_eq!(
+                ability_row_keys(id).contains("/level"),
+                id.def()
+                    .economy()
+                    .and_then(|e| e.uses_per_level())
+                    .is_some(),
+                "{} states its budget exactly when it has one",
+                id.name(),
+            );
+        }
+    }
+
+    /// The keys column has a width budget like everything else on a 40-wide board
+    /// (§11.4): it runs until the action column starts, and the widest row a legal
+    /// catalog can produce — the longest bar name plus the widest single-digit budget
+    /// (§8.2's fence) — has to leave a gutter rather than run into the name beside it.
+    #[test]
+    fn the_widest_control_row_clears_the_action_column() {
+        let longest_bar_name = AbilityId::ALL
+            .into_iter()
+            .map(|id| id.bar_name().len())
+            .max()
+            .expect("the catalog is not empty");
+        let widest = activated_row_keys('x', &"W".repeat(longest_bar_name), Some(9));
+        let column = (CONTROL_ACTION_X - CONTROL_KEYS_X) as usize;
+        assert!(
+            widest.chars().count() < column,
+            "{widest:?} is {} cells and the keys column has {column}, gutter included",
+            widest.chars().count(),
+        );
     }
 
     /// The **Legend** tab still carries the whole reference card — the three

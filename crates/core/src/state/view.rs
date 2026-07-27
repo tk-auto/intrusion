@@ -551,7 +551,9 @@ impl State {
     /// activation that refuses for free, exactly as it did before, and a **passive**
     /// (§8.2/#264) resolves to `Activate` too — it can never be switched off, and
     /// its activation is the free no-op it has always been, so the `(on)` marker
-    /// never becomes a toggle.
+    /// never becomes a toggle. A budgeted ability (§8.2/#302) is the same shape: with
+    /// uses left it activates, and [`Exhausted`](AbilityState::Exhausted) it resolves
+    /// to the activation that refuses for free, exactly as `Unusable` does.
     ///
     /// Both input paths call this — the hotkey after
     /// [`ability_for_key`](crate::ability_for_key), a tap after
@@ -564,6 +566,8 @@ impl State {
             AbilityState::Active { .. } => Input::Deactivate(id),
             AbilityState::Ready
             | AbilityState::Cooling { .. }
+            | AbilityState::Limited { .. }
+            | AbilityState::Exhausted
             | AbilityState::Passive
             | AbilityState::Unusable => Input::Activate(id),
         }

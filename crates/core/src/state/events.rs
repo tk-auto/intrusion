@@ -192,12 +192,32 @@ pub enum Event {
     /// never to a mis-pressed key (§4.4: cancelling is never a trap).
     RematerializeRefused,
     /// The player activated an ability (§8.2) — a turn-costing action (§4.4).
-    AbilityActivated { ability: AbilityId },
+    ///
+    /// `uses_left` is what the ability's **per-level budget** has left *after* this
+    /// use (§8.2/#302), or `None` for the abilities the clocks alone govern. It rides
+    /// on the event rather than being looked up when the message is built, so the
+    /// number the near line speaks is the number the deck actually decremented — the
+    /// same one the bar draws — and the two cannot drift (§8.2's timing rule).
+    AbilityActivated {
+        ability: AbilityId,
+        uses_left: Option<u32>,
+    },
     /// The player toggled an ability off early (§4.4) — free; its cooldown still
     /// runs (§8.2).
     AbilityDeactivated { ability: AbilityId },
     /// An ability's duration ran out at end of turn and it switched off (§8.2).
     AbilityExpired { ability: AbilityId },
+    /// Pierce Wall bored the wall at `at` into floor, permanently (§8.3/#303) — a
+    /// turn-costing action (§4.4) that changes the level's geometry for everyone: the
+    /// route it opens is a route the guards get too.
+    WallBored { at: Cell },
+    /// A Pierce Wall activation was **refused** by its precondition (§8.4/#303) —
+    /// free and nothing changed, like a wall bump, and costing no use (§8.2/#302).
+    ///
+    /// It carries the reason because the reasons are different *things to do about
+    /// it* — walk to a wall, step off the corner, find a thinner one — and a player
+    /// who is only ever told "no" learns the rule slowly and by accident.
+    BoreRefused { reason: BoreRefusal },
 }
 
 impl Event {
@@ -221,10 +241,15 @@ impl Event {
             // Your abilities are your tools — switching one on or off, or its fading,
             // is something you did or hold (§8), so it reads in the Owned band. The
             // decoy is a thing you made (§11.3): its death reads there too.
+            // A bored wall is the most emphatically "something you did" of the lot
+            // (§8.3/#303) — a permanent mark on the facility — and its refusal is the
+            // same quiet band as the tool it belongs to.
             Event::AbilityActivated { .. }
             | Event::AbilityDeactivated { .. }
             | Event::AbilityExpired { .. }
             | Event::RematerializeRefused
+            | Event::WallBored { .. }
+            | Event::BoreRefused { .. }
             | Event::DecoyDied { .. } => Category::Owned,
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it

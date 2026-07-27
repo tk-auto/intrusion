@@ -96,7 +96,8 @@ fn activating_an_ability_spends_the_turn() {
     assert_eq!(
         events,
         vec![Event::AbilityActivated {
-            ability: AbilityId::Run
+            ability: AbilityId::Run,
+            uses_left: None,
         }]
     );
     assert_eq!(s.turn(), 1, "activation spends the turn");

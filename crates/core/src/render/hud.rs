@@ -435,15 +435,22 @@ pub fn ability_at(state: &State, x: u32, y: u32) -> Option<AbilityId> {
 /// — ready, active, or a passive in effect — is **Owned** (blue, "yours, in hand");
 /// a cooling one is **System** (the muted furniture tan, "unavailable, will
 /// return"); an unusable one is **Ground** (dim gray, receding) — discoverable but
-/// plainly not an option now. The `[N]` / `/N/` / `(on)` notation carries the rest,
-/// so those three share a colour without ambiguity.
+/// plainly not an option now. The `[N]` / `/N/` / `(N)` / `(on)` notation carries the
+/// rest, so those states share a colour without ambiguity.
+///
+/// The two #302 states take the colour of what they *are*, not of the axis they come
+/// from: an ability with uses left is available, so it is Owned like any ready one;
+/// an [`Exhausted`](AbilityState::Exhausted) one is not merely waiting — it is done
+/// for this facility — so it recedes to Ground beside the other things you cannot do,
+/// rather than to the System tan that promises a return.
 fn bar_category(state: AbilityState) -> Category {
     match state {
-        AbilityState::Ready | AbilityState::Active { .. } | AbilityState::Passive => {
-            Category::Owned
-        }
+        AbilityState::Ready
+        | AbilityState::Active { .. }
+        | AbilityState::Limited { .. }
+        | AbilityState::Passive => Category::Owned,
         AbilityState::Cooling { .. } => Category::System,
-        AbilityState::Unusable => Category::Ground,
+        AbilityState::Exhausted | AbilityState::Unusable => Category::Ground,
     }
 }
 
@@ -604,7 +611,7 @@ mod tests {
     use crate::cell::{Cell, Direction};
     use crate::guard::Guard;
     use crate::modifiers::LevelModifiers;
-    use crate::state::{Event, Input, State};
+    use crate::state::{BoreRefusal, Event, Input, State};
     use crate::test_support::open_room;
 
     /// A **legal** run loadout (§8.3/#244): innate Run plus a three-tech grant — the
@@ -736,7 +743,19 @@ mod tests {
             },
             Event::Entombed { at },
             Event::RematerializeRefused,
+            Event::WallBored { at },
         ];
+        // Every bore refusal is a near-line message of its own (§8.4/#303), so each
+        // wording is measured rather than just one representative.
+        let events = events.into_iter().chain(
+            [
+                BoreRefusal::NothingToBore,
+                BoreRefusal::TooManyWalls,
+                BoreRefusal::TheOuterShell,
+                BoreRefusal::NoUsesLeft,
+            ]
+            .map(|reason| Event::BoreRefused { reason }),
+        );
         let max = near_line_text_max();
         for event in events {
             let Some(m) = crate::status::message_for(event) else {
@@ -756,14 +775,31 @@ mod tests {
         }
 
         // Every ability's activation line too — those are `format!`-built from a
-        // name, so the longest name is what decides whether they fit.
+        // name, so the longest name is what decides whether they fit. The budgeted
+        // activation (§8.2/#302) is the longest of them, so both of its wordings —
+        // the count and the spent-it-all one — are measured here as well.
         for ability in AbilityId::ALL {
             for event in [
-                Event::AbilityActivated { ability },
+                Event::AbilityActivated {
+                    ability,
+                    uses_left: None,
+                },
+                Event::AbilityActivated {
+                    ability,
+                    uses_left: Some(9),
+                },
+                Event::AbilityActivated {
+                    ability,
+                    uses_left: Some(0),
+                },
                 Event::AbilityDeactivated { ability },
                 Event::AbilityExpired { ability },
             ] {
-                let m = crate::status::message_for(event).expect("an ability speaks");
+                // A budgeted activation is deliberately silent (§8.2/#302) — nothing
+                // to measure, so nothing to fit.
+                let Some(m) = crate::status::message_for(event) else {
+                    continue;
+                };
                 assert!(
                     m.text.chars().count() <= max,
                     "{:?} does not fit the near line",

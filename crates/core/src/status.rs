@@ -159,7 +159,18 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::DecoyDied { .. } => ("the decoy is trampled".to_string(), 0),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
-        Event::AbilityActivated { ability } => (format!("{} active", ability.name()), 0),
+        // A **budgeted** ability's activation is silent (§8.2/#302). The count it
+        // would have narrated is already on the bar, live and permanent
+        // (`Bore(2)`), so saying it again buys a duplicate and costs the row — and
+        // a budgeted ability is typically instant, so there is no "active" window to
+        // announce either. The near line is a status line, not a receipt.
+        Event::AbilityActivated {
+            uses_left: Some(_), ..
+        } => return None,
+        Event::AbilityActivated {
+            ability,
+            uses_left: None,
+        } => (format!("{} active", ability.name()), 0),
         Event::AbilityDeactivated { ability } => (format!("{} off", ability.name()), 0),
         Event::AbilityExpired { ability } => (format!("{} fades", ability.name()), 0),
         // A refused toggle-off (§8.3/#304): the same quiet band as the tools it
@@ -167,6 +178,17 @@ pub fn message_for(event: Event) -> Option<Message> {
         // like a bump. It still has to be said: the player asked to solidify and is
         // still phased, and silence would read as a dropped key.
         Event::RematerializeRefused => ("no room to rematerialize".to_string(), 0),
+        // Silent, like [`Event::Moved`] and for the same reason (§11.7): the wall is
+        // *gone from the screen* the moment it is bored, so narrating it tells the
+        // player something they have already seen and spends the one row the near
+        // line has. That the hole serves the guards too is real and load-bearing
+        // (§2.3) — but it is taught by a guard walking through it, which is a lesson
+        // the near line cannot deliver as well as the board can.
+        Event::WallBored { .. } => return None,
+        // A refused bore (§8.4/#303): free, changed nothing, and — like the refused
+        // rematerialization beside it — has to say why. The reason *is* the message:
+        // each one names a different thing to do about it.
+        Event::BoreRefused { reason } => (reason.message().to_string(), 0),
     };
     Some(Message {
         text,
@@ -289,6 +311,7 @@ fn ambient(state: &State) -> Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ability::AbilityId;
     use crate::cell::{Cell, Direction};
     use crate::facility::Terrain;
     use crate::guard::Guard;
@@ -883,6 +906,29 @@ mod tests {
         s.step(Input::Step(Direction::South));
         assert_eq!(s.turn(), 0, "a refused exit is free (§4.5)");
         assert_eq!(s.player(), Cell::new(5, 5), "and moves nobody");
+    }
+
+    /// A **budgeted** ability's activation is **silent** (§8.2/#302). The count it
+    /// could narrate is already on the bar, live and permanent, so a message would be
+    /// a duplicate paid for with the near line's one row — and a budgeted ability is
+    /// typically instant, so there is no "active" window to announce either. An
+    /// unbudgeted ability keeps the wording it has always had, which is every other
+    /// ability in the catalog.
+    #[test]
+    fn a_budgeted_activation_says_nothing_and_leaves_the_others_alone() {
+        let spoken = |uses_left| {
+            message_for(Event::AbilityActivated {
+                ability: AbilityId::Dephase,
+                uses_left,
+            })
+        };
+        for left in [0, 1, 2, 9] {
+            assert_eq!(spoken(Some(left)), None, "the bar already says {left}");
+        }
+        let unbudgeted = spoken(None).expect("an ordinary activation still speaks");
+        assert_eq!(unbudgeted.text, "Dephase active");
+        assert_eq!(unbudgeted.category, Category::Owned, "your own tool");
+        assert_eq!(unbudgeted.priority, 0, "quiet self-narration, like a bump");
     }
 
     /// A quiet action raises no message: [`live_messages`] is empty and the near
