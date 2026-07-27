@@ -2580,6 +2580,15 @@ That last one is the most important and the least obvious. **Win rate tells you 
 the game is hard. Strategy diversity tells you if it's interesting.** They are not
 the same, and only the second one was ever the problem.
 
+> **How the bot itself decides is [`docs/bot-behaviour.md`](bot-behaviour.md)** —
+> the channels it is allowed to read, the plan it names each turn, the per-ability
+> **cue** seam that decides which key it presses, and the per-ability threshold that
+> separates *"weak ability"* from *"shy cue"*. This section and §13.4 own what the
+> numbers are **for**; that doc records how they are produced, so a reading of the
+> ability histogram can be checked against the policy that made it. The values
+> themselves live in code (`crates/sim`), and the operator-facing half — flags and
+> output schema — is `crates/sim/README.md`.
+
 ### 13.3 Later: bot metrics guide, you decide
 
 Bots narrow what's worth playing. They never rule on fun. The loop:

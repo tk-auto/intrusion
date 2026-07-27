@@ -24,6 +24,12 @@ and every palette choice in one table, with the reasoning. A companion to §11.2
 §11.3, not a second source of truth: the design doc owns the rules and the code owns
 the values.
 
+**Reference: [`docs/bot-behaviour.md`](docs/bot-behaviour.md)** — how the §13.2 sim
+bot decides: what it may know, the plan it names each turn, the per-ability **cue**
+seam behind every key it presses, and how to add a cue without making the histogram
+measure the bot. Same footing as the render reference — a companion to §13.2–§13.4,
+with the values in `crates/sim`.
+
 ## Skills
 
 Project skills live in `.claude/skills/` (see its
