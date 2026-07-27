@@ -80,10 +80,15 @@ fn activating_shuts_and_seals_every_door_in_reach() {
     assert_eq!(s.turn(), turn + 1, "activation spends the turn (§4.4)");
     assert!(
         events.contains(&Event::DoorsSealed {
+            reach: s.lockdown_area(),
             count: 2,
-            at: fired_at,
         }),
         "one act, reported once, with what it actually took: {events:?}",
+    );
+    assert_eq!(
+        s.lockdown_area().centre(),
+        fired_at,
+        "and measured from where it fired",
     );
 
     // Columns 4 and 7 are within LOCKDOWN_RADIUS of (5,2); column 11 is not.
@@ -361,28 +366,94 @@ fn an_early_toggle_off_releases_every_seal() {
 // What the player is shown
 // ---------------------------------------------------------------------------
 
-/// The mark is a **standing** one on the doors, not a wash that follows you
-/// (§8.3/§11.5/#242/#338): it stays on exactly the doorways the seal took, wherever the
-/// player walks. A wall you raised behind you must not appear to move with you.
-///
-/// Lockdown spends its one `Cells` mark on the doors rather than on the
-/// [`LOCKDOWN_RADIUS`] box deliberately: the box would say *this far* for a frame, and
-/// the doors say *these ones* for as long as the guards cannot work them.
+/// Lockdown marks the board **twice**, exactly as Confusion does (§8.3/§11.5/#242/#338)
+/// — a momentary wash over the box it fired with, answering *this far*, and a standing
+/// mark on the doorways it holds, answering *these ones*. Neither substitutes for the
+/// other, so the firing frame carries both.
+#[test]
+fn the_firing_frame_washes_the_box_and_marks_the_doors() {
+    let mut s = locksmith(Cell::new(5, 2), Vec::new());
+    let reach = s.lockdown_area();
+    s.step(Input::Activate(AbilityId::Lockdown));
+
+    let marked: Vec<Cell> = s.effect_cell_marks().collect();
+    let doors: Vec<Cell> = s.sealed_door_cells().collect();
+    assert!(!doors.is_empty(), "the seal took doors");
+
+    // The wash is the whole in-bounds box the doors were picked out of…
+    for cell in reach.cells(s.layout().facility()) {
+        assert!(
+            marked.contains(&cell),
+            "{cell:?} is inside the reach and should be washed",
+        );
+    }
+    // …and every sealed doorway is marked on top of it.
+    for cell in &doors {
+        assert!(marked.contains(cell), "{cell:?} is a sealed door");
+    }
+    // Nothing outside the box is touched.
+    for cell in &marked {
+        assert!(
+            reach.contains(*cell),
+            "{cell:?} is painted but outside the reach",
+        );
+    }
+}
+
+/// The two marks have **different lifetimes**, which is the whole reason they are two
+/// (#338): the wash is a moment and burns out on [`EFFECT_FLASH_TURNS`], while the
+/// doorways stay marked for as long as the window holds them. A layer that kept only
+/// one mark per ability would have silently dropped one of these.
+#[test]
+fn the_wash_burns_out_and_the_doors_stay_marked() {
+    let mut s = locksmith(Cell::new(5, 2), Vec::new());
+    let reach = s.lockdown_area();
+    s.step(Input::Activate(AbilityId::Lockdown));
+    let washed = reach.cells(s.layout().facility());
+    let doors: Vec<Cell> = s.sealed_door_cells().collect();
+    assert!(
+        washed.len() > doors.len(),
+        "precondition: the box is bigger than the doorways in it",
+    );
+
+    for _ in 0..EFFECT_FLASH_TURNS {
+        s.step(Input::Wait);
+    }
+    let marked: Vec<Cell> = s.effect_cell_marks().collect();
+    assert_eq!(marked, doors, "the wash is gone; the doorways remain");
+
+    // …and they remain for the rest of the window, then go with it.
+    for _ in 0..lockdown_duration() - EFFECT_FLASH_TURNS - 2 {
+        s.step(Input::Wait);
+        assert_eq!(s.effect_cell_marks().count(), doors.len(), "still held");
+    }
+    s.step(Input::Wait);
+    assert_eq!(
+        s.effect_cell_marks().count(),
+        0,
+        "and the mark goes with the window that placed it",
+    );
+    assert_eq!(s.sealed_door_cells().count(), 0, "…as does the seal itself");
+}
+
+/// The standing mark stays on the doors the seal **took**, wherever the player walks: a
+/// wall you raised behind you must not appear to move with you (§11.5).
 #[test]
 fn the_mark_stays_on_the_doors_the_seal_took() {
     let mut s = locksmith(Cell::new(5, 2), Vec::new());
     s.step(Input::Activate(AbilityId::Lockdown));
+    for _ in 0..EFFECT_FLASH_TURNS {
+        s.step(Input::Wait); // let the wash go, leaving the doorways alone
+    }
     let marked: Vec<Cell> = s.effect_cell_marks().collect();
-    assert!(!marked.is_empty(), "the seal is marked");
+    assert!(!marked.is_empty(), "the doorways are marked");
 
-    // Every marked cell is a cell of a sealed door — never a cell of the box it was
-    // measured from.
     for cell in &marked {
         let door = s
             .layout()
             .regions()
             .door_at(*cell)
-            .expect("a mark lands on a doorway");
+            .expect("a standing mark lands on a doorway");
         assert!(
             s.layout().regions().door(door).is_locked(),
             "{cell:?} is marked, so its door is sealed",
@@ -395,45 +466,6 @@ fn the_mark_stays_on_the_doors_the_seal_took() {
         marked,
         "walking away moves nothing: the doors are where they were sealed",
     );
-}
-
-/// The mark carries the state for the **whole window** — a [`MarkLife::Standing`] mark,
-/// so it outlives every momentary flash and ends with the ability's own window, not one
-/// turn before or after (#338).
-#[test]
-fn the_sealed_doors_are_marked_for_the_whole_window() {
-    let mut s = locksmith(Cell::new(2, 2), Vec::new());
-    assert_eq!(s.sealed_door_cells().count(), 0, "nothing marked yet");
-
-    s.step(Input::Activate(AbilityId::Lockdown));
-    let door = door_in_column(&s, 4);
-    let expected: Vec<Cell> = s.layout().regions().door(door).cells().collect();
-    assert_eq!(
-        s.effect_cell_marks().collect::<Vec<_>>(),
-        expected,
-        "the whole footprint of the sealed door, and only it",
-    );
-
-    // Still marked long after a *momentary* mark would have burned out — that is what
-    // makes it a state rather than a moment.
-    for _ in 0..EFFECT_FLASH_TURNS + 1 {
-        s.step(Input::Wait);
-    }
-    assert_eq!(
-        s.effect_cell_marks().count(),
-        expected.len(),
-        "a standing mark does not count down",
-    );
-
-    for _ in 0..lockdown_duration() {
-        s.step(Input::Wait);
-    }
-    assert_eq!(
-        s.effect_cell_marks().count(),
-        0,
-        "and it goes with the window that placed it",
-    );
-    assert_eq!(s.sealed_door_cells().count(), 0, "…as does the seal itself");
 }
 
 /// The §8.3 **[START]** numbers, pinned so a retune is a visible decision — the radius

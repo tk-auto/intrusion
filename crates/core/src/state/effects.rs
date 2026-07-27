@@ -223,16 +223,24 @@ impl State {
         }
     }
 
-    /// How far a Lockdown seals (§8.3/#242) — [`LOCKDOWN_RADIUS`], read from the one
-    /// [`area_radius`] table so the ability's reach and the table cannot drift apart.
+    /// The area **a Lockdown fired from where the player stands would seal** (§8.3/#242):
+    /// the §6.1 box of [`LOCKDOWN_RADIUS`], read from the one [`area_radius`] table so
+    /// the ability's reach and the table cannot drift apart.
     ///
-    /// Unclamped, unlike [`confusion_blast`](Self::confusion_blast): a blast is narrowed
-    /// to what the player can *perceive* because freezing a guard you cannot sense is
-    /// unreadable, but a seal is a fact about doors, and a door you sealed out of sense
-    /// range is still sealed and still marked when you walk back to it. The door sense
-    /// is not the guard sense, and nothing here presumes otherwise.
-    pub(super) fn seal_reach(&self) -> u32 {
-        area_radius(Effect::SealDoors).expect("Lockdown is an area effect")
+    /// The firing seam, in [`confusion_blast`](Self::confusion_blast)'s shape and for the
+    /// same reason: one object carries the geometry to the rule that picks the doors
+    /// ([`lockdown_doors`](Self::lockdown_doors)), to the event, and to the mark the
+    /// player reads — so what is painted is what was measured, never a redrawing of it.
+    ///
+    /// **Unclamped**, unlike the blast. Confusion is narrowed to what the player can
+    /// *perceive*, because freezing a guard you cannot sense is unreadable; a seal is a
+    /// fact about doors, and a door sealed out of sense range is still sealed and still
+    /// marked when you walk back to it. The door sense is not the guard sense.
+    pub fn lockdown_area(&self) -> EffectArea {
+        EffectArea {
+            centre: self.player,
+            radius: area_radius(Effect::SealDoors).expect("Lockdown is an area effect"),
+        }
     }
 
     /// The cells the §11.5 effect layer washes as its **weakest background** (#338):
@@ -374,25 +382,29 @@ impl State {
                 // it opened is washed for exactly the turn it opened in. One glyph
                 // flipping `#` → floor on a 40×40 board is otherwise the whole of a
                 // bore's feedback.
-                // Lockdown is the layer's first **standing cell** mark (§8.3/#242): the
-                // doorways it sealed, held for exactly as long as the window that sealed
-                // them and dropped by `clear_effect_marks` when it ends. A *standing*
-                // mark rather than a momentary wash because the seal is a state, not a
-                // moment — which doors the guards can no longer work is the fact the
-                // player plays off for eight turns, and it is worth more than a
-                // one-frame answer to "how far did that reach".
-                //
-                // Placed over the doors rather than over the LOCKDOWN_RADIUS box for the
-                // same reason: the box would say *this far*, and the doors say *these
-                // ones*. Only one `Cells` mark per ability is possible by design (see
-                // `light_mark`), so this is the one worth spending.
-                Event::DoorsSealed { .. } => {
-                    let cells = self.sealed_door_cells().collect();
+                // Lockdown wears **both** lifetimes over cells (§8.3/#242), which is
+                // Confusion's shape with the placements swapped: a momentary wash over
+                // the box it fired with, and a standing mark on the doorways it holds.
+                // The two answer different questions and neither substitutes for the
+                // other — *this far*, once, and *these ones*, throughout.
+                Event::DoorsSealed { reach, .. } => {
+                    // The **wash**: how far the seal reached, for the firing frame only
+                    // — the one thing the doors themselves cannot say, and the same
+                    // question Confusion's box answers.
                     self.light_mark(
                         AbilityId::Lockdown,
-                        MarkPlace::Cells(cells),
+                        MarkPlace::Cells(reach.cells(self.layout.facility())),
+                        MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                    );
+                    // The **state**: which doorways are actually held, for as long as
+                    // the window holds them. This is the layer's first *standing cell*
+                    // mark — the case #338 left open — and it is what the player plays
+                    // off once the wash has gone: a route the guards cannot work.
+                    self.light_mark(
+                        AbilityId::Lockdown,
+                        MarkPlace::Cells(self.sealed_door_cells().collect()),
                         MarkLife::Standing,
-                    )
+                    );
                 }
                 Event::WallBored { at } => self.light_mark(
                     AbilityId::PierceWall,
@@ -406,8 +418,17 @@ impl State {
 
     /// Light (or relight, at full life) `source`'s mark over `place` (§11.5/#338).
     ///
-    /// At most one mark per (ability, placement): refiring replaces the geometry and
-    /// resets the life rather than stacking a second wash over the same board. Called
+    /// At most one mark per (ability, placement, **lifetime**): refiring replaces the
+    /// geometry and resets the life rather than stacking a second wash over the same
+    /// board. The lifetime joins the key because one firing may legitimately want both
+    /// kinds over the same placement — Lockdown says *this far* for a frame and *these
+    /// doors* for its whole window, and both are cell marks (#242). Confusion's pair
+    /// wants the same thing and merely got it for free, its two marks landing on
+    /// different placements. Without the lifetime in the key the second call would
+    /// silently overwrite the first, which is the bug this shape now cannot have.
+    ///
+    /// It still cannot stack without bound: the key is finite and small — an ability,
+    /// two placements, two lifetimes. Called
     /// with the very geometry the effect resolved against, and after
     /// [`decay_effect_marks`](Self::decay_effect_marks) has already spent the older
     /// marks' turn — exactly as [`record_door_cues`](Self::record_door_cues) is — so a
@@ -416,6 +437,7 @@ impl State {
         let same = |mark: &EffectMark| {
             mark.source == source
                 && std::mem::discriminant(&mark.place) == std::mem::discriminant(&place)
+                && std::mem::discriminant(&mark.life) == std::mem::discriminant(&life)
         };
         if let Some(mark) = self.effect_marks.iter_mut().find(|mark| same(mark)) {
             mark.place = place;

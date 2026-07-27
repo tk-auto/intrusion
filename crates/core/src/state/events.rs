@@ -225,8 +225,10 @@ pub enum Event {
     /// already drawn (§11.7).
     ///
     /// `count` is what the seal actually took, so a test and the record agree with the
-    /// world rather than with the radius.
-    DoorsSealed { count: usize, at: Cell },
+    /// world rather than with the radius; `reach` is the very box the doors were picked
+    /// out of, carried by value rather than as a recipe for redrawing one, so the wash
+    /// the layer paints is the geometry the rule actually used (#338).
+    DoorsSealed { reach: EffectArea, count: usize },
     /// A Lockdown activation was **refused** because no door is in reach (§8.3/#242) —
     /// free, and nothing changed, like a wall bump. Carries no reason, because there is
     /// only ever the one: the ability seals doors, and there were none to seal.

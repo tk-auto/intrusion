@@ -1987,10 +1987,14 @@ asks it, without leaving a 13×13 field of background over the board while the d
 overlay is the thing that matters. What carries a state for every turn after that is a
 **standing** mark instead — a guard still held, the doorways a Lockdown has sealed
 (§8.3/#242), a live decoy, concealment in force — which costs no ink beyond the place it
-rides. Lockdown is the standing case over *cells* rather than over a thing, and it is
-why the mark goes on the doors rather than on the radius it took them from: the box
-would say *this far*, for a frame, and the doors say *these ones*, for as long as the
-guards cannot work them — which is the fact the player is playing off.
+rides.
+
+**One firing may wear both**, and the two answer different questions. Confusion washes
+the box it went off in and then rides the guards it froze; Lockdown washes the box it
+sealed from and then holds the doorways themselves — *this far*, once, and *these ones*,
+throughout. Neither substitutes for the other, which is why a mark is keyed by its
+lifetime as well as its place: an ability may hold a momentary and a standing mark at
+the same time, over the same kind of place, without one quietly replacing the other.
 
 The precedence is fixed — **Danger > a mark on a thing > Sensed > the wash** — so an
 advisory layer can never masquerade as the detection set, nor hide it; the wash yields

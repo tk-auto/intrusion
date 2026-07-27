@@ -71,20 +71,15 @@ impl State {
     /// you are standing next to, and sealing "most of a door" is not a thing a door
     /// can be.
     pub fn lockdown_doors(&self) -> Vec<DoorId> {
-        // The reach comes off the effect table, like Confusion's blast does
-        // ([`confusion_blast`](Self::confusion_blast)) — one place says how far an area
-        // effect reaches, so the row is load-bearing rather than documentation. No
-        // clamp: the seal is a fact about doors and not about what the player can
-        // perceive, so nothing narrows it the way the guard sense narrows a blast.
-        let reach = self.seal_reach();
-        let centre = self.player;
+        // The geometry comes from the one firing seam
+        // ([`lockdown_area`](Self::lockdown_area)), so the box the doors are picked out
+        // of is the very box the player is shown — the rule and the picture are one
+        // object rather than two that agree.
+        let reach = self.lockdown_area();
         self.layout
             .regions()
             .doors()
-            .filter(|(_, door)| {
-                door.cells()
-                    .any(|cell| centre.sight_distance(cell) <= reach)
-            })
+            .filter(|(_, door)| door.cells().any(|cell| reach.contains(cell)))
             .map(|(id, _)| id)
             .collect()
     }
@@ -110,8 +105,8 @@ impl State {
                 .seal_door(id, |c| actor_occupies(player, guards, bodies, c));
         }
         events.push(Event::DoorsSealed {
+            reach: self.lockdown_area(),
             count: doors.len(),
-            at: self.player,
         });
     }
 

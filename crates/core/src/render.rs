@@ -2907,10 +2907,12 @@ mod tests {
         }
     }
 
-    /// §8.3/§11.5 (#242/#338): a **sealed door** wears the effect mark over its whole
-    /// footprint, and — being a *standing* mark rather than a momentary wash — keeps it
-    /// for as long as the window holds the seal rather than for one frame. That mark is
-    /// what tells the player which doors the guards can no longer work.
+    /// §8.3/§11.5 (#242/#338): Lockdown paints **both** marks, exactly as Confusion
+    /// does — a momentary wash over the box it fired with, gone after
+    /// [`EFFECT_FLASH_TURNS`](crate::EFFECT_FLASH_TURNS), and a standing mark over each
+    /// sealed doorway that keeps for as long as the window holds the seal. The wash
+    /// answers *this far*; the doorways answer *these ones*, which is what tells the
+    /// player which doors the guards can no longer work.
     #[test]
     fn a_sealed_door_is_marked_for_the_whole_window() {
         use crate::AbilityId;
@@ -2928,13 +2930,31 @@ mod tests {
             render(&s).get(4, 2).bg != Some(Category::Effect),
             "precondition: nothing sealed yet",
         );
+        // The firing frame washes the whole reach — the box says *this far*, once.
         s.step(Input::Activate(AbilityId::Lockdown));
-        // Several turns on — long past any momentary mark's life — the seal is still
-        // drawn, because the mark is the state and not the moment.
+        let g = render(&s);
+        // A cell at the box's east edge: inside the reach, in bounds, and no doorway —
+        // so it is washed on this frame and bare once the wash goes.
+        let reach = s.lockdown_area();
+        let edge = Cell::new(reach.centre().x + reach.radius(), reach.centre().y);
+        assert!(s.layout().regions().door_at(edge).is_none(), "plain floor");
+        assert_eq!(
+            g.get(edge.x, edge.y).bg,
+            Some(Category::Effect),
+            "the wash covers the box on the firing frame",
+        );
+
+        // Several turns on — past the wash's life — only the doorways are still drawn,
+        // because that mark is the state and not the moment.
         for _ in 0..crate::EFFECT_FLASH_TURNS + 2 {
             s.step(Input::Wait);
         }
         let g = render(&s);
+        assert_ne!(
+            g.get(edge.x, edge.y).bg,
+            Some(Category::Effect),
+            "the wash has burned out",
+        );
         for y in 1..4 {
             assert_eq!(
                 g.get(4, y).bg,

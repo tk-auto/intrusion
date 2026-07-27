@@ -299,7 +299,7 @@ Backgrounds are the threat channel, and there is a fixed precedence:
 | **Danger** (red) | This cell is watched by a guard **you can see** |
 | **Effect** on a thing (cyan) | The guard here is held by one of your effects |
 | **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
-| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, a sealed doorway |
+| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
 
 The effect layer appears twice on purpose (#338). Its **wash** is advisory geometry and
 the weakest cue on the board. Its mark on a **thing** is not a competing claim about the
