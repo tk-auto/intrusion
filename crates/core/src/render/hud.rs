@@ -611,7 +611,7 @@ mod tests {
     use crate::cell::{Cell, Direction};
     use crate::guard::Guard;
     use crate::modifiers::LevelModifiers;
-    use crate::state::{Event, Input, State};
+    use crate::state::{BoreRefusal, Event, Input, State};
     use crate::test_support::open_room;
 
     /// A **legal** run loadout (§8.3/#244): innate Run plus a three-tech grant — the
@@ -737,9 +737,25 @@ mod tests {
             Event::BodyReleased { at },
             Event::BodyStored { at },
             Event::DecoyDied { at },
+            Event::Ejected {
+                to: at,
+                stunned: crate::phase_eject_stun(1),
+            },
             Event::Entombed { at },
             Event::RematerializeRefused,
+            Event::WallBored { at },
         ];
+        // Every bore refusal is a near-line message of its own (§8.4/#303), so each
+        // wording is measured rather than just one representative.
+        let events = events.into_iter().chain(
+            [
+                BoreRefusal::NothingToBore,
+                BoreRefusal::TooManyWalls,
+                BoreRefusal::TheOuterShell,
+                BoreRefusal::NoUsesLeft,
+            ]
+            .map(|reason| Event::BoreRefused { reason }),
+        );
         let max = near_line_text_max();
         for event in events {
             let Some(m) = crate::status::message_for(event) else {
@@ -779,7 +795,11 @@ mod tests {
                 Event::AbilityDeactivated { ability },
                 Event::AbilityExpired { ability },
             ] {
-                let m = crate::status::message_for(event).expect("an ability speaks");
+                // A budgeted activation is deliberately silent (§8.2/#302) — nothing
+                // to measure, so nothing to fit.
+                let Some(m) = crate::status::message_for(event) else {
+                    continue;
+                };
                 assert!(
                     m.text.chars().count() <= max,
                     "{:?} does not fit the near line",

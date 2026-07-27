@@ -89,10 +89,11 @@ use crate::rng::Rng;
 use crate::state::State;
 
 /// The number of salvaged-tech abilities quick play grants at start (#244) — the
-/// `starting_abilities` count knob. With [`AbilityId::TECH`] holding six, a grant of
-/// three is a **seeded draw of three of the six** (§8.3): the pool has
-/// outgrown the grant, so the draw finally bites — a run holds a subset of the tech,
-/// not all of it.
+/// `starting_abilities` count knob. [`AbilityId::TECH`] has outgrown the grant, so
+/// it is a **seeded draw of three of the pool** (§8.3) — a run holds a subset of the
+/// tech, not all of it. The pool's size is deliberately not written down here: it
+/// grows every time a tech ships, and a number in this comment would be wrong within
+/// a ticket of being written (it already was, twice).
 ///
 /// It *is* [`AbilityId::MAX_TECH_HELD`] rather than a second three: the cap is what
 /// the ability bar is sized against (§11.4), so a grant that outgrew it would have
@@ -790,8 +791,8 @@ fn from_letters(token: &str) -> Option<u128> {
 /// [`QUICK_PLAY_TECH_GRANT`] tech chosen from [`AbilityId::TECH`]. Seeded off a
 /// sub-stream independent of generation ([`LOADOUT_STREAM_SALT`]), so the draw is
 /// deterministic yet never perturbs the facility. When the grant meets or exceeds
-/// the pool every tech is granted and no randomness is drawn at all; with five tech
-/// shipped and a grant of three, the partial draw below runs and picks a subset.
+/// the pool every tech is granted and no randomness is drawn at all; while the pool
+/// outgrows the grant, the partial draw below runs and picks a subset.
 fn quick_play_loadout(seed: u64) -> Loadout {
     let mut pool = AbilityId::TECH;
     let grant = QUICK_PLAY_TECH_GRANT.min(pool.len());
@@ -933,9 +934,9 @@ mod tests {
     }
 
     /// Quick play (#244): the intel gate at [`IntelGate::All`], the innate set, and a
-    /// seeded draw of [`QUICK_PLAY_TECH_GRANT`] tech. With five tech shipped and a
-    /// grant of three the draw bites (§8.3): the run holds every innate ability plus
-    /// exactly three of the five tech — a strict subset of the full loadout.
+    /// seeded draw of [`QUICK_PLAY_TECH_GRANT`] tech. The pool outgrows the grant, so
+    /// the draw bites (§8.3): the run holds every innate ability plus exactly
+    /// [`QUICK_PLAY_TECH_GRANT`] of the tech — a strict subset of the full loadout.
     #[test]
     fn quick_play_is_all_intel_and_the_tech_grant() {
         let level = LevelSeed::quick_play(8371);
@@ -949,7 +950,10 @@ mod tests {
             .into_iter()
             .filter(|&id| level.abilities.contains(id))
             .count();
-        assert_eq!(tech_held, QUICK_PLAY_TECH_GRANT, "a three-of-six tech draw");
+        assert_eq!(
+            tech_held, QUICK_PLAY_TECH_GRANT,
+            "the grant is a strict subset of the pool"
+        );
         // The pool now outgrows the grant, so the loadout is a strict subset.
         assert_ne!(level.abilities, Loadout::full(), "not every tech is held");
     }
@@ -1035,6 +1039,19 @@ mod tests {
 
     /// Every tech subset up to the cap round-trips through its combination index —
     /// the encoding that costs `log2(C(n, k))` rather than a bit per catalogue entry.
+    /// How many tech subsets a run can hold: `Σ C(pool, k)` for `k ≤ MAX_TECH_HELD`.
+    /// Note this is *not* [`TECH_SPACE`], which counts over the 256 reserved slots —
+    /// the gap between them is the room the roster still has to grow into.
+    const TECH_HOLDABLE_SETS: u64 = {
+        let mut total = 0;
+        let mut k = 0;
+        while k <= AbilityId::MAX_TECH_HELD {
+            total += binomial(AbilityId::TECH.len(), k);
+            k += 1;
+        }
+        total
+    };
+
     #[test]
     fn every_holdable_tech_subset_round_trips() {
         let pool = AbilityId::TECH;
@@ -1061,8 +1078,10 @@ mod tests {
             );
             seen += 1;
         }
-        // Σ C(6, k) for k ≤ 3 — the whole holdable space, not a sample of it.
-        assert_eq!(seen, 1 + 6 + 15 + 20);
+        // The whole holdable space, not a sample of it. Counted off the catalogue
+        // rather than written down: the pool grows every time a tech ships, and a
+        // number here would be wrong within a ticket (see QUICK_PLAY_TECH_GRANT).
+        assert_eq!(seen, TECH_HOLDABLE_SETS);
     }
 
     /// A config the format cannot carry encodes to `None` rather than to a token that
@@ -1388,7 +1407,7 @@ mod tests {
             "the token boots the same frame as the config",
         );
         // The resolved config is threaded into the running state — the loadout the
-        // token carries (a three-of-five tech draw now, no longer the full set).
+        // token carries (a partial tech draw now, no longer the full set).
         assert_eq!(a.modifiers().intel_to_exit, IntelGate::All);
         assert_eq!(a.loadout(), level.abilities);
         assert_eq!(a.outcome(), Outcome::Playing);

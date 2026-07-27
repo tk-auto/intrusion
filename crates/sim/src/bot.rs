@@ -816,7 +816,7 @@ fn console_cells(facility: &Facility) -> impl Iterator<Item = Cell> + '_ {
 mod tests {
     use super::*;
     use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
-    use intrusion_core::{generate_level, Direction, LevelConfig, Rng, State};
+    use intrusion_core::{generate_level, Direction, LevelConfig, Outcome, Rng, State};
 
     /// #276: the bot routes by **the core's rule**, never a table of its own.
     ///
@@ -1065,7 +1065,68 @@ mod tests {
             .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage));
         assert!(
             usage.count(Verb::Run) > 0,
-            "expected the bot to use Run at least once across the batch"
+            "the bot never used its one innate escape — the histogram is measuring \
+             a bot that does not play",
+        );
+    }
+
+    /// **The bot still plays the game while holding Pierce Wall** (§13.2/#303).
+    ///
+    /// The ability is unusable from most cells by design — its precondition is
+    /// *exactly one adjacent wall* — which is precisely the shape that could make a
+    /// naive policy hammer a key that never fires and stall the run out to the input
+    /// cap. This grants it and plays a batch through the ordinary loop: the outcome
+    /// profile stays mixed, so nothing livelocks.
+    ///
+    /// What it does **not** yet show is the ability being *used*: the bot's policy
+    /// knows only its innate escape and its cloak, so it never presses this key at
+    /// all, and the histogram slot honestly reads zero. Teaching it to bore is
+    /// blocked on #256 (the run config as a sim input) and belongs there — a bot
+    /// that pressed it at random would make the histogram measure the bot rather
+    /// than the game (§13.3), which is the one thing the sim exists to avoid.
+    #[test]
+    fn the_bot_plays_identically_while_holding_pierce_wall() {
+        /// Play `state` to a decision and report the inputs issued and how it ended.
+        fn play(mut state: State) -> (Vec<Input>, Outcome, u32) {
+            let mut bot = StealthBot::new();
+            let mut issued = Vec::new();
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                issued.push(input);
+                state.step(input);
+            }
+            (issued, state.outcome(), state.turn())
+        }
+
+        let mut decided = 0;
+        for seed in 30..50 {
+            let (bare, _) = boot(seed);
+            let (armed, _) = boot(seed);
+            let armed =
+                armed.with_loadout(intrusion_core::Loadout::innate().with(AbilityId::PierceWall));
+            assert!(
+                matches!(
+                    armed.ability_state(AbilityId::PierceWall),
+                    AbilityState::Limited { .. }
+                ),
+                "seed {seed}: the run holds the ability, with its budget full",
+            );
+
+            let bare = play(bare);
+            let armed = play(armed);
+            assert_eq!(
+                bare, armed,
+                "seed {seed}: holding the ability changed the run"
+            );
+            decided += u32::from(armed.1 != Outcome::Playing);
+        }
+        assert!(
+            decided >= 15,
+            "only {decided}/20 runs reached a decision — the baseline is stalling, \
+             so this test would prove nothing",
         );
     }
 }

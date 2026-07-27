@@ -103,8 +103,22 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::CommsSilenced { .. } => ("the radio net goes dead".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
-        // The other death (§8.3): rematerializing inside something solid. The
-        // top of the threat ladder, like the capture — it ends the run.
+        // The phase safety firing (§8.3/#329). Ranked at the top of the threat ladder
+        // short of the run ending: the player has been moved somewhere they did not
+        // choose and cannot act for the next turns, and no guard event on the same
+        // turn may bury either fact. How *long* the stun lasts is not repeated here —
+        // the ambient floor carries the countdown for every turn it runs (§11.4),
+        // which is where a standing state belongs and what keeps this line inside the
+        // row's budget.
+        //
+        // It names the **tech**, not the terrain, because the terrain varies: a phase
+        // can end inside a wall, a shut door, a table, a cupboard or a console, and a
+        // line that said "the wall" would be plainly untrue for most of them. The
+        // salvaged tech throwing you clear is also the fiction for why this is
+        // survivable at all.
+        Event::Ejected { .. } => ("safety eject — stunned".to_string(), 6),
+        // The degenerate case (§8.3): nowhere in the facility to be thrown clear to.
+        // The top of the ladder, like the capture — it ends the run.
         Event::Entombed { .. } => ("the wall takes you".to_string(), 10),
         // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
         // the loud half is what happens if the body is ever seen.
@@ -145,19 +159,14 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::DecoyDied { .. } => ("the decoy is trampled".to_string(), 0),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
-        // A budgeted ability (§8.2/#302) narrates what the level has left instead of
-        // that it is on: the count is the fact the next decision turns on, and for an
-        // instant one there is no "on" to report anyway. The number is the event's
-        // own — the one the deck just decremented — so this line, the bar and the
-        // legend can never disagree about it (§8.2's timing rule).
+        // A **budgeted** ability's activation is silent (§8.2/#302). The count it
+        // would have narrated is already on the bar, live and permanent
+        // (`Bore(2)`), so saying it again buys a duplicate and costs the row — and
+        // a budgeted ability is typically instant, so there is no "active" window to
+        // announce either. The near line is a status line, not a receipt.
         Event::AbilityActivated {
-            ability,
-            uses_left: Some(0),
-        } => (format!("{} — none left", ability.name()), 0),
-        Event::AbilityActivated {
-            ability,
-            uses_left: Some(left),
-        } => (format!("{} — {left} left", ability.name()), 0),
+            uses_left: Some(_), ..
+        } => return None,
         Event::AbilityActivated {
             ability,
             uses_left: None,
@@ -169,6 +178,17 @@ pub fn message_for(event: Event) -> Option<Message> {
         // like a bump. It still has to be said: the player asked to solidify and is
         // still phased, and silence would read as a dropped key.
         Event::RematerializeRefused => ("no room to rematerialize".to_string(), 0),
+        // Silent, like [`Event::Moved`] and for the same reason (§11.7): the wall is
+        // *gone from the screen* the moment it is bored, so narrating it tells the
+        // player something they have already seen and spends the one row the near
+        // line has. That the hole serves the guards too is real and load-bearing
+        // (§2.3) — but it is taught by a guard walking through it, which is a lesson
+        // the near line cannot deliver as well as the board can.
+        Event::WallBored { .. } => return None,
+        // A refused bore (§8.4/#303): free, changed nothing, and — like the refused
+        // rematerialization beside it — has to say why. The reason *is* the message:
+        // each one names a different thing to do about it.
+        Event::BoreRefused { reason } => (reason.message().to_string(), 0),
     };
     Some(Message {
         text,
@@ -221,7 +241,20 @@ pub fn near_line(state: &State) -> Message {
 /// what the run's intel gate still wants, or — once it is met — the exit (§4.5/#310).
 /// Never a bare tally of consoles: what is still *out* is not what is still *needed*.
 fn ambient(state: &State) -> Message {
-    let (text, category) = if state.hidden() {
+    let (text, category) = if state.stunned() > 0 {
+        // Stunned (§8.3/#329) outranks every other ambient fact, because it is the
+        // only one that removes the decision entirely: there is nothing to weigh
+        // until the count reaches zero. Derived straight off the counter, so the line
+        // and the rule cannot disagree and there is nothing to clear (§11.4).
+        let turns = state.stunned();
+        (
+            format!(
+                "stunned — {turns} more {}",
+                if turns == 1 { "turn" } else { "turns" }
+            ),
+            Category::Warning,
+        )
+    } else if state.hidden() {
         (
             "hidden — the cupboard conceals you".to_string(),
             Category::Owned,
@@ -546,6 +579,78 @@ mod tests {
         );
     }
 
+    /// §8.3/#329: the safety eject is a Warning-band message ranked above every
+    /// guard event short of the capture — the player has been moved somewhere they
+    /// did not choose and cannot act, and neither fact may be buried by a detection
+    /// landing the same turn. It names the **tech**, never the terrain: the same
+    /// eject fires out of a table or a shut door, so "the wall" would be a lie in
+    /// most of the cases it covers.
+    #[test]
+    fn the_eject_outranks_every_guard_event_but_the_capture() {
+        let msg = message_for(Event::Ejected {
+            to: Cell::new(3, 3),
+            stunned: crate::phase_eject_stun(1),
+        })
+        .expect("the safety eject is never silent");
+        assert_eq!(msg.text, "safety eject — stunned");
+        assert_eq!(msg.category, Category::Warning);
+
+        let alert = message_for(Event::AlertRaised { level: 3 }).expect("an alert speaks");
+        let caught = message_for(Event::Captured {
+            by: Cell::new(3, 3),
+        })
+        .expect("the capture speaks");
+        assert!(
+            msg.priority > alert.priority,
+            "being thrown clear outranks the facility alert ({} vs {})",
+            msg.priority,
+            alert.priority,
+        );
+        assert!(
+            msg.priority < caught.priority,
+            "…and never outranks the run ending",
+        );
+    }
+
+    /// §8.3/§11.4: the stun is a *standing state*, so it lives on the ambient floor
+    /// and counts down there — derived straight off the counter, above every other
+    /// ambient fact because it is the one that removes the decision entirely.
+    #[test]
+    fn ambient_counts_the_stun_down() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        )
+        .with_loadout(crate::Loadout::innate().with(crate::AbilityId::Dephase));
+        s.step(Input::Activate(crate::AbilityId::Dephase));
+        s.step(Input::Step(Direction::East)); // into the wall
+        s.step(Input::Wait); // the duration ends: thrown clear and stunned
+
+        // The eject's own turn speaks the message; the floor carries the rest.
+        assert_eq!(near_line(&s).text, "safety eject — stunned");
+        assert_eq!(s.stunned(), 2);
+
+        s.step(Input::Wait); // swallowed, and nothing else is live
+        let line = near_line(&s);
+        assert_eq!(line.text, "stunned — 1 more turn");
+        assert_eq!(line.category, Category::Warning);
+        assert_eq!(line.priority, i32::MIN, "the floor, not a message");
+
+        s.step(Input::Wait); // the last owed turn
+        assert_eq!(s.stunned(), 0);
+        assert_ne!(
+            near_line(&s).text,
+            "stunned — 0 more turns",
+            "the floor stops reporting a stun that is paid off",
+        );
+    }
+
     /// Once the run ends the loop is inert (§4.5) and the final message stays —
     /// `caught` on a capture, in Danger, at the top of the threat ladder.
     #[test]
@@ -803,34 +908,27 @@ mod tests {
         assert_eq!(s.player(), Cell::new(5, 5), "and moves nobody");
     }
 
-    /// A **budgeted** ability narrates what the level has left, not that it is on
-    /// (§8.2/#302) — the count is the fact the next decision turns on, and for an
-    /// instant ability there is no "on" to report. The number comes off the event, so
-    /// it is the one the deck decremented and the one the bar draws. An unbudgeted
-    /// ability keeps the wording it has always had, which is every ability shipping
-    /// today; and the whole family stays quiet self-narration in the Owned band.
+    /// A **budgeted** ability's activation is **silent** (§8.2/#302). The count it
+    /// could narrate is already on the bar, live and permanent, so a message would be
+    /// a duplicate paid for with the near line's one row — and a budgeted ability is
+    /// typically instant, so there is no "active" window to announce either. An
+    /// unbudgeted ability keeps the wording it has always had, which is every other
+    /// ability in the catalog.
     #[test]
-    fn a_budgeted_activation_speaks_what_is_left() {
+    fn a_budgeted_activation_says_nothing_and_leaves_the_others_alone() {
         let spoken = |uses_left| {
             message_for(Event::AbilityActivated {
                 ability: AbilityId::Dephase,
                 uses_left,
             })
-            .expect("an activation speaks")
         };
-        assert_eq!(spoken(None).text, "Dephase active");
-        assert_eq!(spoken(Some(2)).text, "Dephase — 2 left");
-        assert_eq!(spoken(Some(1)).text, "Dephase — 1 left");
-        assert_eq!(
-            spoken(Some(0)).text,
-            "Dephase — none left",
-            "spent says so in words, as the bar says it in a dash",
-        );
-        for uses_left in [None, Some(0), Some(3)] {
-            let m = spoken(uses_left);
-            assert_eq!(m.category, Category::Owned, "your own tool");
-            assert_eq!(m.priority, 0, "quiet self-narration, like a bump");
+        for left in [0, 1, 2, 9] {
+            assert_eq!(spoken(Some(left)), None, "the bar already says {left}");
         }
+        let unbudgeted = spoken(None).expect("an ordinary activation still speaks");
+        assert_eq!(unbudgeted.text, "Dephase active");
+        assert_eq!(unbudgeted.category, Category::Owned, "your own tool");
+        assert_eq!(unbudgeted.priority, 0, "quiet self-narration, like a bump");
     }
 
     /// A quiet action raises no message: [`live_messages`] is empty and the near

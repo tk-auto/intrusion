@@ -31,8 +31,12 @@ pub enum RunOutcome {
     Win,
     /// A guard walked into the player ([`Event::Captured`]).
     Capture,
-    /// Dephase expired somewhere solid ([`Event::Entombed`]) — a loss, but a
-    /// different fact from a capture, kept distinct like the game-over reason.
+    /// Dephase expired somewhere solid with **nowhere in the facility** to throw the
+    /// player clear to ([`Event::Entombed`]) — a loss, but a different fact from a
+    /// capture, kept distinct like the game-over reason. Since #329 the ordinary
+    /// in-a-wall expiry ejects and stuns instead, so this should read `0` on every
+    /// generated batch (§10.6 guarantees somewhere to stand); a non-zero count means
+    /// a facility that was never playable, not a bold player.
     Entombed,
     /// The input cap ran out with the run still live.
     Timeout,

@@ -61,13 +61,18 @@ pub enum Verb {
     /// The grab is the decision the histogram counts; the half-speed steps that
     /// follow are Moves.
     Drag,
+    /// Bored through a wall with Pierce Wall (§8.3/#303). Counted like any other
+    /// activation, and worth watching closely: three per level is a small enough
+    /// budget that the histogram says directly whether the ability is being used at
+    /// all, or is unreachable from where the bot ever stands.
+    PierceWall,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 9] = [
+    pub const ALL: [Verb; 10] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -77,6 +82,7 @@ impl Verb {
         Verb::Confusion,
         Verb::Takedown,
         Verb::Drag,
+        Verb::PierceWall,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -95,6 +101,7 @@ impl Verb {
             AbilityId::Dephase => Verb::Dephase,
             AbilityId::Autodoors => Verb::Autodoors,
             AbilityId::Confusion => Verb::Confusion,
+            AbilityId::PierceWall => Verb::PierceWall,
             AbilityId::Vision => return None,
         })
     }
@@ -111,6 +118,7 @@ impl Verb {
             Verb::Confusion => "confusion",
             Verb::Takedown => "takedown",
             Verb::Drag => "drag",
+            Verb::PierceWall => "pierce_wall",
         }
     }
 
@@ -228,7 +236,8 @@ mod tests {
                 "autodoors",
                 "confusion",
                 "takedown",
-                "drag"
+                "drag",
+                "pierce_wall"
             ]
         );
         // Each ability activation lands in its own slot.
@@ -246,6 +255,10 @@ mod tests {
         assert_eq!(
             Verb::of_ability(AbilityId::Confusion),
             Some(Verb::Confusion)
+        );
+        assert_eq!(
+            Verb::of_ability(AbilityId::PierceWall),
+            Some(Verb::PierceWall)
         );
         // A passive has no activation to count (#264) — and so no slot. Every
         // activated ability does have one, so the histogram stays exhaustive over
