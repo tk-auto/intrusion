@@ -3,7 +3,8 @@
 //! One module per subsystem, mirroring the split of the code they exercise:
 //! [`turn`] for the loop itself, [`guards`] for phase 3, [`doors`] for
 //! [`super::doors`], [`view`] for [`super::view`]'s read surface, [`abilities`] for
-//! [`super::abilities`], [`bore`] for [`super::bore`], [`lockdown`] for
+//! [`super::abilities`], [`activation`] for [`super::activation`]'s precondition
+//! ladder, [`bore`] for [`super::bore`], [`lockdown`] for
 //! [`super::lockdown`], [`traversal`] for
 //! [`super::traversal`], [`ducts`] for
 //! the §10.7 crawlspace, and [`comms`] for the §7.7 comms console that kills the
@@ -11,6 +12,7 @@
 //! harness here, so each file stands alone.
 
 mod abilities;
+mod activation;
 mod bore;
 mod comms;
 mod doors;

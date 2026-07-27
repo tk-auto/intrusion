@@ -149,8 +149,14 @@ impl State {
             return Err(BoreRefusal::TheOuterShell);
         }
 
+        // The **economy** state, read from the deck rather than through
+        // [`ability_state`](Self::ability_state): that surface now layers this very
+        // verdict over the economy to produce the bar's contextual `Unusable`
+        // (§11.4/#345), so asking it here would ask this function about itself. The
+        // deck is the half this check actually wants — is there a use left? — and the
+        // contextual half is precisely what is being decided.
         if !matches!(
-            self.ability_state(AbilityId::PierceWall),
+            self.abilities.state(AbilityId::PierceWall),
             AbilityState::Ready | AbilityState::Limited { .. }
         ) {
             return Err(BoreRefusal::NoUsesLeft);

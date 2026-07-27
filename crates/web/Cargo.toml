@@ -44,4 +44,8 @@ features = [
     "Node",
     "HtmlElement",
     "CssStyleDeclaration",
+    # The usable line's move/wait hint (§11.6/#323) opens in the device's own input
+    # modality, seeded from the `pointer: coarse` media query before the player has
+    # touched anything.
+    "MediaQueryList",
 ]

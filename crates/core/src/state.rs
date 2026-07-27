@@ -70,6 +70,7 @@ use crate::vision::{
 use crate::DoorAction;
 
 mod abilities;
+mod activation;
 mod bore;
 mod doors;
 mod effects;
@@ -83,6 +84,7 @@ pub use bore::BoreRefusal;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
 
+use activation::Aimed;
 use effects::EffectMark;
 
 /// The player and every guard are solid and exclusive — fill 1.0 (§4.3). A cell
@@ -1039,94 +1041,36 @@ impl State {
             }
             // Activating an ability spends the turn (§4.4) — but only if it actually
             // switched on; activating an unavailable ability is a mis-input and, like
-            // a wall bump, is free and changes nothing. An ability that spawns into
-            // the world (the decoy's faced cell, §8.4 Direction targeting) must also
-            // have a valid target — a faced cell that could not hold an intruder
-            // refuses the activation as the same free mis-input (§11.4's contextual
-            // Unusable). An ability whose per-level budget is spent (§8.2/#302) is
-            // that same free no-op, refused inside the deck — the turn cost is
-            // untouched by the budget in either direction (§4.4 stands). A real
-            // activation is a spent action other than Wait, so it stands the player
-            // up and narrows the arc.
+            // a wall bump, is free and changes nothing. An ability whose per-level
+            // budget is spent (§8.2/#302) is that same free no-op, refused inside the
+            // deck — the turn cost is untouched by the budget in either direction
+            // (§4.4 stands). A real activation is a spent action other than Wait, so
+            // it stands the player up and narrows the arc.
+            //
+            // Everything *beyond* the economy — a decoy's faced cell, Pierce Wall's
+            // one wall, a lockdown's doors, a blast with somebody in it — is settled
+            // up front by the one precondition ladder ([`State::aim`], §8.4/#345),
+            // before the deck is touched, so a refusal spends neither the turn nor a
+            // use and the resolved target is carried straight to the effect that
+            // consumes it. The bar reads that same ladder to grey the entry (§11.4's
+            // contextual `Unusable`), which is what stops it advertising a press that
+            // cannot fire.
             Input::Activate(id) => {
-                let spawn = if declares(id, Effect::SpawnDecoy) {
-                    match self.decoy_spawn_cell() {
-                        Some(cell) => Some(cell),
-                        None => return false,
-                    }
-                } else {
-                    None
-                };
-                // Pierce Wall's target is unique by precondition rather than aimed
-                // (§8.4/#303), so the geometry is checked here — *before* the deck
-                // spends a use — and a refusal is the free no-op the decoy's missing
-                // cell already was. It speaks, because the rule is the thing the
-                // player is learning and silence teaches nothing (§11.7).
-                let bore = if id == AbilityId::PierceWall {
-                    match self.bore_target() {
-                        Ok(wall) => Some(wall),
-                        Err(reason) => {
-                            if self.abilities.loadout().contains(id) {
-                                events.push(Event::BoreRefused { reason });
-                            }
-                            return false;
-                        }
-                    }
-                } else {
-                    None
-                };
-                // Lockdown's target is the set of doors in reach (§8.3/#242), and a
-                // lockdown with no door to seal would spend the turn and the whole
-                // lockout on nothing. So the set is resolved here — before the deck
-                // commits — and an empty one refuses exactly as the decoy's missing
-                // cell does: free, nothing changed (§4.4). It speaks, because a press
-                // that did nothing must say why (§11.7).
-                let seal = if declares(id, Effect::SealDoors) {
-                    let doors = self.lockdown_doors();
-                    if doors.is_empty() {
+                let aimed = match self.aim(id) {
+                    Ok(aimed) => aimed,
+                    Err(refused) => {
+                        // A run that does not hold the ability presses the key in
+                        // silence (§4.4/#244): there is no rule to teach about a tool
+                        // that was never theirs.
                         if self.abilities.loadout().contains(id) {
-                            events.push(Event::LockdownRefused);
+                            events.extend(refused.event());
                         }
                         return false;
                     }
-                    Some(doors)
-                } else {
-                    None
-                };
-                // Confusion fires once, from where you stand (§8.3/#325): its blast is
-                // measured here — *before* the deck is touched — so a flash that would
-                // catch nobody is refused as the same free no-op a missing decoy cell
-                // and a missing wall already are (§4.4/§8.4), and a 45-turn lockout is
-                // never spent on nothing. The refusal is fair rather than fiddly
-                // because the blast is clamped inside the guard sense: anything it
-                // could have caught is a guard the player was already shown.
-                let blast = if declares(id, Effect::Confuse) {
-                    // The reach is read with the previous turn's Wait already spent:
-                    // §9.1's widened sense belongs to that Wait, and this action is not
-                    // it. The flag goes down for the read and back up again, because a
-                    // *refused* activation is free and must change nothing (§4.4) —
-                    // the real clearing happens below, when the turn is actually spent.
-                    let waited = std::mem::replace(&mut self.waited, false);
-                    let blast = self.confusion_blast();
-                    self.waited = waited;
-                    let caught = self
-                        .guards
-                        .iter()
-                        .filter(|g| blast.contains(g.pos()))
-                        .count();
-                    if caught == 0 {
-                        if self.abilities.loadout().contains(id) {
-                            events.push(Event::ConfusionMissed);
-                        }
-                        return false;
-                    }
-                    Some(blast)
-                } else {
-                    None
                 };
                 if self.abilities.activate(id) {
-                    if spawn.is_some() {
-                        self.decoy = spawn;
+                    if let Aimed::Decoy(cell) = aimed {
+                        self.decoy = Some(cell);
                     }
                     // The budget's remaining count is read *after* the deck spent
                     // it (§8.2/#302), so the message speaks what is actually left.
@@ -1134,14 +1078,11 @@ impl State {
                         ability: id,
                         uses_left: self.abilities.uses_left(id),
                     });
-                    if let Some(wall) = bore {
-                        self.bore_wall(wall, events);
-                    }
-                    if let Some(doors) = seal {
-                        self.seal_doors(&doors, events);
-                    }
-                    if let Some(blast) = blast {
-                        self.fire_confusion(blast, events);
+                    match aimed {
+                        Aimed::Bore(wall) => self.bore_wall(wall, events),
+                        Aimed::Seal(doors) => self.seal_doors(&doors, events),
+                        Aimed::Blast(blast) => self.fire_confusion(blast, events),
+                        Aimed::Nothing | Aimed::Decoy(_) => {}
                     }
                     self.waited = false;
                     self.crouched_behind = None;

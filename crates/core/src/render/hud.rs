@@ -48,7 +48,8 @@ pub const BOTTOM_ROWS: u32 = 1;
 const NEAR_ROW: u32 = 0;
 
 /// The usable line's row (§11.4): directly under the near line, still above the
-/// map.
+/// map. Never blank — with nothing adjacent to offer it teaches the innate verbs
+/// instead ([`usable_hint`], #323).
 const USABLE_ROW: u32 = 1;
 
 /// The screen row the ability bar occupies, on a map `map_h` tall: the last row
@@ -133,12 +134,35 @@ pub struct ScreenUi {
     /// *flag* and never the colours: it says which of presentation's two columns is
     /// live, and the shell owns both. Like every other field here it is a pure view
     /// choice — no world change, no turn (§4.4) — flipped by
-    /// [`UiCommand::ToggleTheme`](crate::UiCommand::ToggleTheme), and from inside the
-    /// help panel, which is the option's home until v2's options screen lands.
+    /// [`UiCommand::ToggleTheme`](crate::UiCommand::ToggleTheme), and from the title
+    /// screen or the help panel, the option's home until v2's options screen lands.
     ///
     /// In-session only for now: nothing persists it, so a reload comes back on the
     /// [`Default`] dark theme.
     pub theme: Theme,
+    /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
+    /// wording of the usable line's floor ([`usable_hint`]), and nothing else.
+    /// The shell answers only *is this a touch session?*; the core keeps the words
+    /// and the layout, so the hint stays inside the golden tests (§11.2/§12.1).
+    pub modality: InputModality,
+}
+
+/// The input vocabulary the player is actually using (§11.6/#323) — the one thing
+/// a shell knows about the player's hands that the core cannot derive from state.
+/// It decides how the usable line's floor words the two innate verbs
+/// ([`usable_hint`]) and nothing else: keys and gestures are both live at all
+/// times, whatever this says.
+///
+/// [`Keys`](Self::Keys) is the [`Default`], so a shell that never sets it — the
+/// sim, a test, a native harness — teaches the keyboard, which is the modality
+/// every one of them drives.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum InputModality {
+    /// A keyboard session: arrows to move, `5` / `w` to wait (§11.6).
+    #[default]
+    Keys,
+    /// A touch session: swipe to move, tap to wait (§11.6's touch model).
+    Touch,
 }
 
 /// The help toggle on the near line (§14 v2/#139/#267): a `[?]` at the top-right
@@ -214,7 +238,8 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 ///   toggle ([`is_help_button`]) and, when more than one message is live, the
 ///   message-log counter beside it.
 /// - **Usable line** (row `1`): the adjacent bump affordances
-///   ([`State::affordances`]), each in its own category, no band.
+///   ([`State::affordances`]), each in its own category, no band — or, when there
+///   are none, the move/wait floor ([`usable_hint`], §11.6/#323).
 /// - **Ability bar** (row `height-1`): the always-on named readout — every held
 ///   ability's bar name coloured by state, its active/cooling number tucked against
 ///   it ([`AbilityStatus::bar_entry`]) — **right-aligned** into the bottom-right
@@ -315,6 +340,15 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         .into_iter()
         .map(|(dir, a)| (format!("{} {}", arrow(dir), a.label()), a.category()))
         .collect();
+    // Nothing to act on: the row teaches the two innate verbs instead of sitting
+    // empty (§11.4/#323), in the modality the shell says the player is using. A
+    // floor, never a competitor — one adjacent usable and the affordances have the
+    // row back.
+    let usable = if usable.is_empty() {
+        usable_hint(ui.modality)
+    } else {
+        usable
+    };
     debug_assert_eq!(
         cells.len() as u32,
         USABLE_ROW * width,
@@ -464,6 +498,81 @@ fn bar_category(state: AbilityState) -> Category {
         AbilityState::Cooling { .. } => Category::System,
         AbilityState::Exhausted | AbilityState::Unusable => Category::Ground,
     }
+}
+
+/// The usable line's floor, on touch (§11.4/§11.6/#323): the two innate verbs in
+/// the gesture vocabulary. The third gesture — a press held in place, which
+/// repeats Wait — is deliberately unnamed: the hint is a floor, not a manual, and
+/// the help panel's Help card is where the full set is read.
+const TOUCH_HINT: [&str; 2] = ["swipe: move", "tap: wait"];
+
+/// The usable line's floor, on keys (§11.4/§11.6/#323): the same two verbs off
+/// §11.6's own table — the arrows the row already draws, and `5` / `w` to wait.
+const KEYS_HINT: [&str; 2] = ["↑↓←→: move", "5/w: wait"];
+
+/// How many **cells** a hint segment occupies: its `char` count, since every glyph
+/// the hints use is one grid cell wide. Counts the UTF-8 lead bytes rather than
+/// calling `chars`, so the budget below can be spent at compile time.
+const fn hint_cells(text: &str) -> u32 {
+    let bytes = text.as_bytes();
+    let (mut i, mut cells) = (0, 0);
+    while i < bytes.len() {
+        // Every byte that is not a continuation byte (`10xxxxxx`) starts a char.
+        if bytes[i] & 0xC0 != 0x80 {
+            cells += 1;
+        }
+        i += 1;
+    }
+    cells
+}
+
+/// The width a two-segment hint draws to, in cells: [`status_row`]'s one-cell left
+/// margin, the two segments, and the two spaces between them.
+const fn hint_width(hint: [&str; 2]) -> u32 {
+    1 + hint_cells(hint[0]) + 2 + hint_cells(hint[1])
+}
+
+/// **Both hints must fit the board they are drawn on**, the way the ability bar's
+/// worst case does (#287): a hint clipped mid-word teaches nothing, and discovering
+/// that in a screenshot is discovering it too late. Rewording either variant past
+/// the v1 width (§10.2) fails the *build*, not the frame.
+const _: () = assert!(
+    hint_width(TOUCH_HINT) <= LevelConfig::V1.width
+        && hint_width(KEYS_HINT) <= LevelConfig::V1.width,
+    "the usable line's move/wait hint must fit the v1 board (§10.2): shorten a segment",
+);
+
+/// The usable line's **floor** (§11.4/#323): how to move and how to wait, in the
+/// vocabulary the player's hands are using, drawn whenever there is no affordance
+/// to offer instead.
+///
+/// The row is the one piece of permanent screen the HUD would otherwise give away
+/// for nothing, and it sits directly above a board on which the player has to work
+/// out unaided that **waiting is an action at all** — the only 360° look (§9.1),
+/// the way a crouch is held (§10.3) and the way a cone is let past (§7.6). Wait has
+/// no ability-bar entry by design (the bar is the ability *economy*, §8.3), so
+/// without this the two innate verbs live on a row that never mentions them.
+///
+/// It is the same move the near line already makes one row up — ambient status
+/// instead of an empty line (§11.4) — and it is a **floor, never a competitor**:
+/// the moment anything is adjacent, the affordances take the row back whole.
+///
+/// The words draw in [`Owned`](Category::Owned) — *you, and the things you made*
+/// (§11.2). [`Ground`](Category::Ground) was the first answer and it was the wrong
+/// one on the screen: Ground's meaning is **absence**, drawn to recede so that
+/// everything else pops against it, which is precisely the wrong instruction for a
+/// row whose whole job is to be read. Owned says what these two verbs actually are
+/// — not scenery, not something to bump, but *yours*, the pair you always hold —
+/// and it puts them in the same blue as the ability bar's ready entries, so the
+/// two surfaces that answer "what can I do right now" answer in one colour.
+fn usable_hint(modality: InputModality) -> Vec<(String, Category)> {
+    let hint = match modality {
+        InputModality::Keys => KEYS_HINT,
+        InputModality::Touch => TOUCH_HINT,
+    };
+    hint.iter()
+        .map(|text| ((*text).to_string(), Category::Owned))
+        .collect()
 }
 
 /// The usable line's direction glyph (§11.4): which way to bump for the
@@ -1041,6 +1150,89 @@ mod tests {
         );
     }
 
+    /// §11.4/#323: with nothing adjacent to act on, the usable line teaches the two
+    /// innate verbs instead of sitting blank — in the vocabulary the player's hands
+    /// are using ([`ScreenUi::modality`]). The words draw in Owned — *yours*, the
+    /// pair you always hold (§11.2), the ability bar's own ready colour — and carry
+    /// no band, so the row still reads as status rather than as a message.
+    #[test]
+    fn the_empty_usable_line_teaches_move_and_wait() {
+        // Mid-corridor, nothing adjacent: the common case the blank row used to be.
+        let s = State::new(
+            open_room(40, 6),
+            Cell::new(20, 3),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(2, 2)],
+            Cell::new(38, 4),
+        );
+        assert!(s.affordances().is_empty(), "nothing to act on");
+
+        let row = |ui: ScreenUi| {
+            let g = render_screen(&s, ui);
+            (0..g.width())
+                .map(|x| g.get(x, USABLE_ROW).glyph)
+                .collect::<String>()
+        };
+        assert_eq!(
+            row(ScreenUi::default()),
+            " ↑↓←→: move  5/w: wait                  ",
+            "keys: §11.6's own table, in the row's `input: action` rhythm"
+        );
+        assert_eq!(
+            row(ScreenUi {
+                modality: InputModality::Touch,
+                ..ScreenUi::default()
+            }),
+            " swipe: move  tap: wait                 ",
+            "touch: the gesture model, the held press deliberately unnamed"
+        );
+
+        // Owned, and no band: the verbs are yours, and the row is still not a message.
+        let g = render_screen(&s, ScreenUi::default());
+        for x in 0..g.width() {
+            let cell = g.get(x, USABLE_ROW);
+            assert_eq!(cell.bg, None, "the usable line still has no band");
+            if cell.glyph != ' ' {
+                assert_eq!(
+                    cell.fg,
+                    Category::Owned,
+                    "the innate verbs are yours (§11.2), in the bar's ready colour"
+                );
+            }
+        }
+    }
+
+    /// The hint is a **floor, never a competitor** (§11.4/#323): one adjacent usable
+    /// and the affordances have the whole row back, in both modalities — the player
+    /// never has to read past a control legend to find what they can bump.
+    #[test]
+    fn a_real_affordance_takes_the_whole_row_back() {
+        let s = State::new(
+            open_room(40, 6),
+            Cell::new(2, 2),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(3, 2)], // a console east of the player
+            Cell::new(38, 4),
+        );
+        for modality in [InputModality::Keys, InputModality::Touch] {
+            let g = render_screen(
+                &s,
+                ScreenUi {
+                    modality,
+                    ..ScreenUi::default()
+                },
+            );
+            let row: String = (0..g.width()).map(|x| g.get(x, USABLE_ROW).glyph).collect();
+            assert_eq!(
+                row.trim_end(),
+                " → console: take intel",
+                "{modality:?}: {row:?}"
+            );
+        }
+    }
+
     /// The screen is the map plus the header and status rows, same width — and the
     /// two status rows carry their §11.4 styling: the near line is a full-width
     /// band in the message's category with Neutral words on top; the usable line
@@ -1141,6 +1333,64 @@ mod tests {
         assert!(!row.contains("Drag"), "Drag is not an economy ability");
         // Nor does an ability the run was not granted (#244).
         assert!(!row.contains("Doors"), "Autodoors was not in the loadout");
+    }
+
+    /// **The bar greys a press that cannot fire** (§11.4/#345): the contextual
+    /// `Unusable` the catalog always documented and nothing ever produced. Pierce
+    /// Wall is the clearest case, because its precondition is *exactly one adjacent
+    /// wall* (§8.3/#303) and the same three cells of board decide it.
+    ///
+    /// Three stands, one grid each:
+    ///
+    /// - **in a room** — no wall touches the player, so there is nothing to bore;
+    /// - **in a corridor** — two side walls, and the target would be ambiguous, which
+    ///   this ability never resolves (§8.4 [SETTLED]);
+    /// - **against one wall** — the one geometry it works in.
+    ///
+    /// The first two draw `Bore—` receding into [`Category::Ground`] beside the other
+    /// things you cannot do; the third draws `Bore(3)` in Owned, its budget intact
+    /// throughout. Same run, same supply, three cells apart: what changed is the
+    /// board, which is exactly what the bar could not say before.
+    #[test]
+    fn the_bar_greys_an_ability_with_no_target() {
+        let borer = |layout| {
+            State::new(
+                layout,
+                Cell::new(15, 5),
+                Direction::North,
+                Vec::new(),
+                Vec::new(),
+                Cell::new(38, 8),
+            )
+            .with_loadout(Loadout::innate().with(AbilityId::PierceWall))
+        };
+        let bar = ability_row(10);
+        let row = |s: &State| -> String {
+            let g = render_screen(s, ScreenUi::default());
+            (0..g.width()).map(|x| g.get(x, bar).glyph).collect()
+        };
+        let colour = |s: &State| render_screen(s, ScreenUi::default()).get(30, bar).fg;
+
+        // In the middle of the room: nothing to bore.
+        let s = borer(open_room(40, 10));
+        assert_eq!(row(&s), "                    Run       Bore—     ");
+        assert_eq!(colour(&s), Category::Ground, "greyed, not promised");
+
+        // In a corridor: two side walls, so the target is ambiguous and refused.
+        let mut layout = open_room(40, 10);
+        layout.place(Cell::new(14, 5), Terrain::Wall);
+        layout.place(Cell::new(16, 5), Terrain::Wall);
+        let s = borer(layout);
+        assert_eq!(row(&s), "                    Run       Bore—     ");
+        assert_eq!(colour(&s), Category::Ground, "two walls is no target");
+
+        // Square against one wall face: the one geometry it works in, and the budget
+        // it had all along finally shows.
+        let mut layout = open_room(40, 10);
+        layout.place(Cell::new(16, 5), Terrain::Wall);
+        let s = borer(layout);
+        assert_eq!(row(&s), "                    Run       Bore(3)   ");
+        assert_eq!(colour(&s), Category::Owned, "available, and says how often");
     }
 
     /// The bar's live states (§11.4): an **active** ability tucks its `[n]` against

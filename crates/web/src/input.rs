@@ -26,7 +26,7 @@ use std::rc::Rc;
 
 use intrusion_core::{
     ability_for_key, help_nav_for_key, input_for_key, menu_nav_for_key, ui_command_for_key, Cell,
-    Direction, HelpHit, HelpNav, Input, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    Direction, HelpHit, HelpNav, Input, InputModality, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -135,6 +135,24 @@ impl Game {
         repeat_suppressed(player, input, |cell| self.state.in_visible_danger(cell))
     }
 
+    /// Note that the player just used `modality`, and repaint if that is news
+    /// (§11.6/#323). The only thing it changes is how the usable line's floor words
+    /// move and wait — so the hint follows what the player's hands are *doing*, not
+    /// what the device could theoretically do: a laptop with a touchscreen is a
+    /// keyboard session until a finger lands on it, and a tablet with a keyboard
+    /// attached is the reverse.
+    ///
+    /// The redraw is the point — the row is only ever read between turns, so a
+    /// modality that changed without one would otherwise keep teaching the wrong
+    /// vocabulary until the next step. It costs a paint on the rare frame the answer
+    /// actually flips, and nothing at all on every other input.
+    pub(crate) fn note_modality(&mut self, modality: InputModality) {
+        if self.ui.modality != modality {
+            self.ui.modality = modality;
+            self.draw();
+        }
+    }
+
     /// Apply a shell-level [`UiCommand`] (§11.4) — a view toggle, never a game
     /// action, so it changes no [`State`](intrusion_core::State).
     pub(crate) fn apply_ui_command(&mut self, command: UiCommand) {
@@ -212,17 +230,54 @@ impl Game {
 pub(crate) fn install_input(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
     let game = game.clone();
     let cb = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
+        let mut game = game.borrow_mut();
+        // A key — whatever it turns out to mean — says the player is on a keyboard
+        // (§11.6/#323), including one they just picked up mid-session.
+        game.note_modality(InputModality::Keys);
         // `e.repeat()` is the browser's own held-key auto-repeat flag (§11.6): the
         // first keydown is fresh, every held-down repeat after it carries `repeat ==
         // true`. The shell forwards it so the core rule (#223) can treat a held
         // repeat differently from a deliberate press without the pump interpreting.
-        if game.borrow_mut().handle_key(&e.key(), e.repeat()) {
+        if game.handle_key(&e.key(), e.repeat()) {
             e.prevent_default();
         }
     });
     document.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref())?;
     cb.forget();
     Ok(())
+}
+
+/// What a press of this `PointerEvent.pointerType` says about the player's hands
+/// (§11.6/#323), or `None` when it says nothing: a **finger or a pen** is a touch
+/// session outright, and a **mouse** is left alone deliberately — a click is
+/// neither of the gestures the touch hint teaches, and a desktop player who reaches
+/// for the ability bar with the pointer has not stopped being a keyboard player.
+/// An unknown `pointerType` is treated like the mouse: no claim.
+///
+/// Pure, so the rule is pinned natively below like [`gesture_input`].
+fn modality_of_pointer(pointer_type: &str) -> Option<InputModality> {
+    match pointer_type {
+        "touch" | "pen" => Some(InputModality::Touch),
+        _ => None,
+    }
+}
+
+/// The modality a fresh load opens on (§11.6/#323), from the `pointer: coarse`
+/// media query: what the *device*'s primary pointer is, before the player has
+/// touched anything. It is only a seed — the first key or finger corrects it
+/// ([`Game::note_modality`]) — which is what makes the query's known weakness
+/// harmless here: it answers for the device, and a hybrid device's answer is a
+/// guess either way. A browser without `matchMedia` gets [`InputModality::Keys`],
+/// the same default the core has.
+pub(crate) fn boot_modality() -> InputModality {
+    let coarse = web_sys::window()
+        .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|q| q.matches());
+    if coarse {
+        InputModality::Touch
+    } else {
+        InputModality::Keys
+    }
 }
 
 /// How far a drag must travel from its press point — CSS pixels, on either axis —
@@ -442,6 +497,12 @@ impl GesturePump {
     fn on_down(&self, e: &PointerEvent) {
         if e.button() != 0 {
             return; // secondary mouse buttons keep their browser meaning
+        }
+        // A finger on the glass says the player is on touch (§11.6/#323) — noted
+        // before the press resolves, so the hint is already in the gesture
+        // vocabulary on the frame this press draws.
+        if let Some(modality) = modality_of_pointer(&e.pointer_type()) {
+            self.game.borrow_mut().note_modality(modality);
         }
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
         let tap = self.game.borrow().tap_at(x, y);
@@ -848,6 +909,31 @@ mod tests {
             assert!(
                 !armed_fires(armed, tap),
                 "lifting at {tap:?} abandons the press"
+            );
+        }
+    }
+
+    /// §11.6/#323: a press only claims the touch modality when it is a **finger or a
+    /// pen**. A mouse — and anything the browser will not name — leaves the hint's
+    /// vocabulary alone, because a click is neither of the two gestures the touch
+    /// hint teaches and a desktop player clicking the bar is still on the keyboard.
+    #[test]
+    fn only_a_finger_or_a_pen_claims_the_touch_modality() {
+        assert_eq!(
+            modality_of_pointer("touch"),
+            Some(InputModality::Touch),
+            "a finger is touch"
+        );
+        assert_eq!(
+            modality_of_pointer("pen"),
+            Some(InputModality::Touch),
+            "so is a stylus"
+        );
+        for kind in ["mouse", "", "trackpad"] {
+            assert_eq!(
+                modality_of_pointer(kind),
+                None,
+                "a {kind:?} press claims nothing"
             );
         }
     }

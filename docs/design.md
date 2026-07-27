@@ -1764,7 +1764,8 @@ and **how long it lives**:
 - **Place.** Over an explicit **cell set**, fixed when the mark is lit — Confusion's
   §6.1 box, the cell Pierce Wall opened, the pair a safety eject threw you between — or
   over the **thing** in a cell, which carries the mark wherever it goes and for exactly
-  as long as it exists (a guard a blast froze, a decoy still standing).
+  as long as it exists (a guard a blast froze, a decoy still standing, the player while
+  concealment holds).
 - **Lifetime.** **Momentary** where the effect *is* a moment (a bore, a blast's reach:
   the firing frame and nothing after it, see §11.5), or **standing** where the effect is
   a state (a guard still held, a live decoy, concealment in force). A momentary mark may
@@ -1894,11 +1895,50 @@ is the case this serves.
   player right now, each **with an arrow giving the bump's direction** (`→ door:
   open`, `↑ console: take intel`, `← table: crouch`, `↓ cupboard: hide`). Not a
   message — a **pure derived function of state**, recomputed every frame, no
-  plumbing. Empty when nothing is adjacent. The arrow makes each bump an aimed
+  plumbing. When nothing is adjacent it falls back to the **innate-verb floor**
+  below rather than sitting empty (#323). The arrow makes each bump an aimed
   "press this way, get that", so even the rare cell beside two usables stays
   unambiguous — one row lists each with its own direction. The generator
   *prefers* one usable per floor cell (§10.6, best-effort) to keep the common
   case to a single line, but does not guarantee it.
+
+**Neither status row is ever blank.** The near line falls back to ambient status;
+the usable line falls back to **how to move and how to wait** (#323), in the input
+vocabulary the player is actually using — `swipe: move  tap: wait` on touch,
+`↑↓←→: move  5/w: wait` on keys (§11.6's own table). One rule, two rows: permanent
+screen real estate is never given away for nothing.
+
+That row is where the innate verbs have to live. **Wait is the least discoverable
+thing in the game and one of the most important** — the only 360° look (§9.1), the
+way a crouch is held (§10.3), the way a cone is let past (§7.6) — and it
+deliberately has no ability-bar entry, because the bar is the ability *economy*
+(§8.3). Without this, the two verbs every run is built out of appear nowhere.
+
+The fence that keeps it a hint rather than a control legend:
+
+- **A floor, never a competitor.** The instant anything is adjacent, the
+  affordances take the whole row back. No fade-out after N turns and no
+  first-run-only flag either: the row is still a pure derived function of state,
+  and it costs nothing either way.
+- **Exactly the two verbs with no other home.** Takedown and Drag already appear
+  here as real affordances (§7.2/§8.3) and the tech abilities have the bar; the
+  full control set is the help panel's job.
+- **Read-only, like the rows around it.** Nothing here is tappable — a hint that
+  could be pressed would be a second, undiscoverable control surface at the top of
+  the screen (§11.6's touch rule).
+- **Owned** (§11.2, *you and the things you made*) — the same blue the ability
+  bar's ready entries use, so the two surfaces answering *what can I do right now*
+  answer in one colour. Ground was tried first and lost on screen: its meaning is
+  **absence**, drawn to recede so everything else pops against it, which is exactly
+  the wrong instruction for a row whose whole job is to be read.
+- **The modality is the shell's only say.** It answers *is this a touch session?*
+  — seeded from `pointer: coarse` at boot, then corrected to whichever modality was
+  **last actually used**, so a laptop with a touchscreen and a tablet with a
+  keyboard each get the hint that matches what the player's hands are doing. The
+  words and the layout stay in the core, inside the golden tests (§11.2/§12.1).
+- **Both wordings are budget-checked at compile time**, like the ability bar's
+  worst case (#287): a reworded hint that would clip on the 40-wide board fails the
+  build, not the frame.
 
 **No ability column.** The old fixed 14-column list spent a seventh of the
 screen on information consulted once a minute. Ability state (ready / active
@@ -1999,6 +2039,16 @@ overlay is the thing that matters. What carries a state for every turn after tha
 **standing** mark instead — a guard still held, the doorways a Lockdown has sealed
 (§8.3/#242), a live decoy, concealment in force — which costs no ink beyond the place it
 rides.
+
+**A mark earns its place by saying what the bar cannot** (§11.4/#341). The ability bar
+is a projection of state and already reports *the window is open*; a mark that lit
+whenever an entry read `(on)` would carry nothing. So the player's own cell is marked for
+**Camouflage** and for no other effect on them: its concealment holds only on the turns
+they do not move, so the mark and the bar entry can **disagree** — `Camo[7]` while you
+walk across a lit corridor in plain sight — and that disagreement *is* the mechanic.
+Marking a Run, an Autodoors or a running Dephase would just restate the bar. A later
+ability joins this rule when its effect is likewise **conditional**, not because it is an
+ability.
 
 **One firing may wear both**, and the two answer different questions. Confusion washes
 the box it went off in and then rides the guards it froze; Lockdown washes the box it

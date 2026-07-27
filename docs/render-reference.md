@@ -344,7 +344,7 @@ Backgrounds are the threat channel, and there is a fixed precedence:
 | Background | Means |
 |---|---|
 | **Danger** (red) | This cell is watched by a guard **you can see** |
-| **Effect** on a thing (cyan) | The guard here is held by one of your effects, or the `@` here is a live decoy rather than you |
+| **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; or the `@` here is you, hidden by Camouflage *this turn* |
 | **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
 | **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
 
@@ -352,8 +352,13 @@ The effect layer appears twice on purpose (#338). Its **wash** is advisory geome
 the weakest cue on the board. Its mark on a **thing** is not a competing claim about the
 cell but a *refinement of the cue that thing already draws* — "exactly here" becomes
 "exactly here, and it cannot move"; a second Owned `@` becomes "and that one is the
-ability running" — so it sits above the orange it refines and still below the red that
-outranks everything.
+ability running"; your own `@` becomes "and right now they cannot see you" — so it sits
+above the orange it refines and still below the red that outranks everything.
+
+The mark on the player is the one that **blinks while its ability runs** (#341):
+Camouflage conceals only on the turns you stand still, so the wash goes dark the turn you
+move and returns the next still turn, while the bar reads `Camo[n]` throughout. That is
+deliberate — a mark is worth its ink only when it can disagree with the bar.
 
 **The danger overlay is the best idea in the old game, and it is [SETTLED].** It
 paints the *literal* detection set — the same sight data the guard AI queries, not a

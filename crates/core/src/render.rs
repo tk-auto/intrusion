@@ -486,20 +486,29 @@ pub fn render(state: &State) -> Grid {
         }
     }
 
-    // The effect layer's marks on **things** (§11.5, #308/#338/#340): every actor an
-    // ability effect currently holds — every guard a blast froze and the player can
-    // perceive, and the live decoy, whose `@` is otherwise the player's own ink told
-    // apart by position alone. Painted *after* the sense channel and *before* the danger
+    // The effect layer's marks on **things** (§11.5, #308/#338/#340/#341): every actor
+    // an ability effect currently holds — every guard a blast froze and the player can
+    // perceive, the live decoy, whose `@` is otherwise the player's own ink told apart
+    // by position alone, and the player themselves on the turns a **conditional** effect
+    // is actually in force on them (Camouflage's concealment, which lapses the turn they
+    // move). Painted *after* the sense channel and *before* the danger
     // overlay, because it is not a competing claim about the cell but a **refinement of
     // the cue the thing already draws**: a sensed guard's filled cell still says "a
     // guard is exactly here", and cyan adds "and it cannot move"; the decoy's `@` still
     // says "something of yours stands here", and cyan adds "and it is the ability
-    // running". Losing that to the orange it refines would throw away the whole point of
-    // a layer that reaches through walls — the blast freezes what you cannot see, so
-    // this is the common case, not the corner one. It is only ever a recolour of a thing
-    // already drawn ([`State::effect_thing_marks`] carries each thing's own visibility
-    // rule — perception for a guard, always for the decoy), never a new mark, so the fog
-    // gives nothing away.
+    // running"; the player's own `@` still says "you are here", and cyan adds "and right
+    // now they cannot see you". Losing that to the orange it refines would throw away the
+    // whole point of a layer that reaches through walls — the blast freezes what you
+    // cannot see, so this is the common case, not the corner one. It is only ever a
+    // recolour of a thing already drawn ([`State::effect_thing_marks`] carries each
+    // thing's own visibility rule — perception for a guard, always for the decoy and the
+    // player), never a new mark, so the fog gives nothing away.
+    //
+    // The danger overlay still paints last and still wins, and the two cannot contradict
+    // each other: a player concealed from a guard is dropped from that guard's cone
+    // upstream (`visible_cone_cells`), so a red cell under a cyan-marked player would
+    // have to come from a guard the camo is *not* hiding them from — which is the truth
+    // worth shouting.
     for cell in state.effect_thing_marks() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
     }
@@ -696,8 +705,8 @@ mod hud;
 mod menu;
 pub use help::{help_hit, HelpHit, HelpTab};
 pub use hud::{
-    ability_at, is_help_button, is_message_button, message_log_rows, render_screen, ScreenUi,
-    BOTTOM_ROWS, TOP_ROWS,
+    ability_at, is_help_button, is_message_button, message_log_rows, render_screen, InputModality,
+    ScreenUi, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use menu::{menu_hit, MenuEntry, MenuHit, MenuUi};
 
@@ -931,6 +940,43 @@ mod tests {
         assert_eq!(g.get(4, 6).vis, Visibility::Live, "in view: drawn live");
     }
 
+    /// §8.3/§11.5 (#338/#341): Camouflage's mark is the half of the ability the §11.4
+    /// bar cannot say. The board carries "you are hidden **right now**" — lit on a still
+    /// turn, dark on the turn you moved, back on the next still one — while the `@`
+    /// stays Owned throughout and only the background moves.
+    #[test]
+    fn the_camouflaged_player_is_marked_on_the_turns_the_concealment_holds() {
+        use crate::AbilityId;
+        let mut s = state_holding(10, 10, Cell::new(4, 4), Vec::new(), AbilityId::Camouflage);
+        s.step(Input::Activate(AbilityId::Camouflage));
+
+        let still = render(&s).get(4, 4);
+        assert_eq!(still.glyph, '@', "the glyph is untouched");
+        assert_eq!(still.fg, Category::Owned, "…and so is its ink");
+        assert_eq!(
+            still.bg,
+            Some(Category::Effect),
+            "standing still: the concealment is in force and says so",
+        );
+
+        s.step(Input::Step(Direction::South));
+        let moved = render(&s).get(4, 5);
+        assert_eq!(moved.glyph, '@', "still the player, still Owned");
+        assert_eq!(moved.fg, Category::Owned);
+        assert_ne!(
+            moved.bg,
+            Some(Category::Effect),
+            "a turn they moved is a turn they are visible, whatever the bar reads",
+        );
+
+        s.step(Input::Wait);
+        assert_eq!(
+            render(&s).get(4, 5).bg,
+            Some(Category::Effect),
+            "and the mark resumes with the concealment",
+        );
+    }
+
     /// §8.3/§11.5 (#338/#340): a live decoy is a **running ability**, not merely a
     /// thing of yours, so its cell carries the standing effect mark. The `@` above it
     /// stays Owned and the glyph priority is untouched — the effect speaks in the
@@ -1116,6 +1162,12 @@ mod tests {
     /// cone shows no red on their own cell; before cloaking, the same cell is
     /// red. The cone itself stays painted — the guard watches the ground, it
     /// just cannot see what stands cloaked on it.
+    ///
+    /// Since #341 the spared cell is not *blank* but **cyan**: the same fact stated
+    /// positively, by the effect mark, where it used to be readable only as an absence.
+    /// The promise being asserted is unchanged — it was always "not red", never
+    /// "nothing" — so it is written as the promise rather than as whatever happens to
+    /// occupy the cell instead.
     #[test]
     fn the_danger_overlay_spares_a_cloaked_still_player() {
         use crate::AbilityId;
@@ -1138,7 +1190,16 @@ mod tests {
 
         s.step(Input::Activate(AbilityId::Camouflage));
         let g = render(&s);
-        assert_eq!(g.get(5, 6).bg, None, "cloaked and still: no red under you");
+        assert_ne!(
+            g.get(5, 6).bg,
+            Some(Category::Danger),
+            "cloaked and still: no red under you",
+        );
+        assert_eq!(
+            g.get(5, 6).bg,
+            Some(Category::Effect),
+            "…and the cue that replaced the red says why (#341)",
+        );
         assert_eq!(
             g.get(5, 5).bg,
             Some(Category::Danger),

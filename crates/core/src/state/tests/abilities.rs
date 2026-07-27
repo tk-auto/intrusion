@@ -764,10 +764,19 @@ fn a_decoy_spawns_in_the_faced_cell_or_refuses() {
     let events = s.step(Input::Activate(AbilityId::Decoy));
     assert!(events.is_empty(), "a faced wall refuses: a free mis-input");
     assert_eq!(s.turn(), 1, "only the step spent a turn");
-    assert_eq!(s.ability_state(AbilityId::Decoy), AbilityState::Ready);
+    assert_eq!(
+        s.ability_state(AbilityId::Decoy),
+        AbilityState::Unusable,
+        "and the bar says so before the press, not after it (§11.4/#345)",
+    );
     assert_eq!(s.decoy(), None);
 
     s.step(Input::Step(Direction::West)); // (7,4), facing open floor
+    assert_eq!(
+        s.ability_state(AbilityId::Decoy),
+        AbilityState::Ready,
+        "one step back and it is ready again: the refusal cost nothing (§4.4)",
+    );
     let events = s.step(Input::Activate(AbilityId::Decoy));
     assert_eq!(
         events,
