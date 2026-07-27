@@ -1983,9 +1983,10 @@ fn the_blast_is_clamped_to_the_guard_sense_inside_a_duct() {
 /// [`CONFUSION_RADIUS`] blast — the widened box is not what the clamp measures against.
 ///
 /// The cap absorbs it either way today (`min(6, 20)` is 6), so what this really pins is
-/// *when* the reach is read: [`State::confusion_blast`] asserts the `waited` flag is
-/// already down, so a firing that read it a moment too early fails here rather than
-/// quietly widening a blast the day the cap moves.
+/// *when* the reach is read: [`State::confusion_blast`] clamps against the **acting**
+/// sense (§9.1/#345), the one an action taken now sees, so a firing cannot inherit the
+/// widening of a Wait already spent — and a change that let it would fail here rather
+/// than quietly widen a blast the day the cap moves.
 #[test]
 fn a_wait_does_not_widen_the_next_turns_blast() {
     let guard = Cell::new(14, 3);
@@ -2056,8 +2057,12 @@ fn a_blast_with_nothing_in_range_is_refused_for_free() {
     assert_eq!(s.turn(), turn, "free: the turn is not spent (§4.4)");
     assert_eq!(
         s.ability_state(AbilityId::Confusion),
-        AbilityState::Ready,
-        "…and the cooldown is untouched, so nothing was bought or lost",
+        AbilityState::Unusable,
+        "…and the bar was already greyed, from this same verdict (§11.4/#345)",
+    );
+    assert!(
+        matches!(s.abilities.state(AbilityId::Confusion), AbilityState::Ready),
+        "the cooldown is untouched underneath, so nothing was bought or lost",
     );
 
     // With a guard in reach the very same press fires, spends the turn and locks out.

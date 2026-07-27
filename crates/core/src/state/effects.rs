@@ -230,24 +230,25 @@ impl State {
     /// would otherwise daze a guard at 6 they cannot perceive at all. That nerf is the
     /// point: degraded information is the crawlspace's whole cost.
     ///
-    /// It reads [`sense_range`](Self::sense_range) *itself*, never a duct check or any
-    /// other re-derivation, so whatever changes the sense later is picked up here for
-    /// free and there is no second place to keep in step.
+    /// It reads the sense ladder *itself*, never a duct check or any other
+    /// re-derivation, so whatever changes the sense later is picked up here for free
+    /// and there is no second place to keep in step.
+    ///
+    /// **The read moment is pinned in the reading** (#325/#345): the clamp is
+    /// [`acting_sense_range`](Self::acting_sense_range), the sense as an action taken
+    /// now sees it, so §9.1's widened Wait can never reach into a blast fired the turn
+    /// after it. The cap absorbs a stale one today — `min(6, 20)` is 6 — but pinning it
+    /// here is what stops a later change to the cap quietly resurrecting a blast
+    /// widened by last turn's Wait. It also makes this a **pure** function of the
+    /// board: the ability bar asks it every frame to decide whether the press would
+    /// catch anybody (§11.4/#345), and must get the answer the press itself would,
+    /// even on the frame straight after a Wait.
     pub fn confusion_blast(&self) -> EffectArea {
-        // Pinned read moment (#325): §9.1's widened sense belongs to the Wait that
-        // bought it, and firing is not that Wait, so the flag is already down by the
-        // time this is asked (see `Input::Activate`). The cap absorbs a stale one
-        // today — `min(6, 20)` is 6 — but the order is what stops a later change to
-        // the cap quietly resurrecting a blast widened by last turn's Wait.
-        debug_assert!(
-            !self.waited,
-            "the blast's reach is read after the Wait that widened the sense is spent"
-        );
         EffectArea {
             centre: self.player,
             radius: area_radius(Effect::Confuse)
                 .expect("Confusion is an area effect")
-                .min(self.sense_range()),
+                .min(self.acting_sense_range()),
         }
     }
 

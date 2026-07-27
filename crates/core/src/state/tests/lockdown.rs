@@ -146,8 +146,12 @@ fn a_lockdown_with_no_door_in_reach_is_free_and_says_so() {
     assert_eq!(s.turn(), turn, "a refusal is free (§4.4)");
     assert_eq!(
         s.ability_state(AbilityId::Lockdown),
-        AbilityState::Ready,
-        "and costs no cooldown: the ability never switched on",
+        AbilityState::Unusable,
+        "and the bar was already greyed, from this same verdict (§11.4/#345)",
+    );
+    assert!(
+        matches!(s.abilities.state(AbilityId::Lockdown), AbilityState::Ready),
+        "and it costs no cooldown underneath: the ability never switched on",
     );
     assert!(
         s.layout().regions().doors().all(|(_, d)| !d.is_locked()),
