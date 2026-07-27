@@ -257,12 +257,16 @@ pub fn start() -> Result<(), JsValue> {
         .dyn_into::<CanvasRenderingContext2d>()?;
 
     // A load nobody aimed at a particular run opens on the title screen; one that was
-    // aimed — a shared link, a baked seed, a replay — goes straight in (#268).
+    // aimed — a shared link, a baked seed, a replay — goes straight in (#268). Either
+    // way the view state opens on the device's own input modality (§11.6/#323), which
+    // the first key or finger then corrects.
+    let modality = input::boot_modality();
     let ui = if chosen.is_none() && replay.is_none() {
         menu::opening_ui()
     } else {
         ScreenUi::default()
     };
+    let ui = ScreenUi { modality, ..ui };
 
     let game = Rc::new(RefCell::new(Game {
         state,
@@ -399,7 +403,13 @@ impl Game {
     fn reseed(&mut self, level: LevelSeed) -> Result<(), JsValue> {
         self.state = new_run(&level)?;
         self.level = level;
-        self.ui = ScreenUi::default();
+        // A clean view state, except for what the *player* is — the modality the
+        // hint speaks (§11.6/#323) is a fact about their hands, not about the run,
+        // so a fresh facility must not send a touch player back to reading keys.
+        self.ui = ScreenUi {
+            modality: self.ui.modality,
+            ..ScreenUi::default()
+        };
         self.fit_and_draw();
         Ok(())
     }

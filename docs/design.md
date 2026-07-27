@@ -1891,11 +1891,47 @@ is the case this serves.
   player right now, each **with an arrow giving the bump's direction** (`→ door:
   open`, `↑ console: take intel`, `← table: crouch`, `↓ cupboard: hide`). Not a
   message — a **pure derived function of state**, recomputed every frame, no
-  plumbing. Empty when nothing is adjacent. The arrow makes each bump an aimed
+  plumbing. When nothing is adjacent it falls back to the **innate-verb floor**
+  below rather than sitting empty (#323). The arrow makes each bump an aimed
   "press this way, get that", so even the rare cell beside two usables stays
   unambiguous — one row lists each with its own direction. The generator
   *prefers* one usable per floor cell (§10.6, best-effort) to keep the common
   case to a single line, but does not guarantee it.
+
+**Neither status row is ever blank.** The near line falls back to ambient status;
+the usable line falls back to **how to move and how to wait** (#323), in the input
+vocabulary the player is actually using — `swipe: move  tap: wait` on touch,
+`↑↓←→: move  5/w: wait` on keys (§11.6's own table). One rule, two rows: permanent
+screen real estate is never given away for nothing.
+
+That row is where the innate verbs have to live. **Wait is the least discoverable
+thing in the game and one of the most important** — the only 360° look (§9.1), the
+way a crouch is held (§10.3), the way a cone is let past (§7.6) — and it
+deliberately has no ability-bar entry, because the bar is the ability *economy*
+(§8.3). Without this, the two verbs every run is built out of appear nowhere.
+
+The fence that keeps it a hint rather than a control legend:
+
+- **A floor, never a competitor.** The instant anything is adjacent, the
+  affordances take the whole row back. No fade-out after N turns and no
+  first-run-only flag either: the row is still a pure derived function of state,
+  and it costs nothing either way.
+- **Exactly the two verbs with no other home.** Takedown and Drag already appear
+  here as real affordances (§7.2/§8.3) and the tech abilities have the bar; the
+  full control set is the help panel's job.
+- **Read-only, like the rows around it.** Nothing here is tappable — a hint that
+  could be pressed would be a second, undiscoverable control surface at the top of
+  the screen (§11.6's touch rule).
+- **Ground, never Interest** (§11.2, *ground recedes*): legible without ever
+  reading as something you can bump.
+- **The modality is the shell's only say.** It answers *is this a touch session?*
+  — seeded from `pointer: coarse` at boot, then corrected to whichever modality was
+  **last actually used**, so a laptop with a touchscreen and a tablet with a
+  keyboard each get the hint that matches what the player's hands are doing. The
+  words and the layout stay in the core, inside the golden tests (§11.2/§12.1).
+- **Both wordings are budget-checked at compile time**, like the ability bar's
+  worst case (#287): a reworded hint that would clip on the 40-wide board fails the
+  build, not the frame.
 
 **No ability column.** The old fixed 14-column list spent a seventh of the
 screen on information consulted once a minute. Ability state (ready / active
