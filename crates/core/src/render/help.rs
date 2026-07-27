@@ -148,18 +148,27 @@ pub enum HelpHit {
 const CLOSE_BUTTON: &str = "[x]";
 const CLOSE_BUTTON_LEN: u32 = 3;
 
-/// The theme button on the panel's **footer** row (#189) — `[n]`, three cells like
-/// every other button on the screen, and labelled with the key it answers to so the
-/// button and the shortcut teach each other.
+/// The theme control on the panel's **footer** row (#189): the word it does,
+/// followed by the key it answers to — `theme [n]`.
+///
+/// **The label is part of the control, not prose beside it.** A bare `[n]` is only a
+/// target if you already know what `n` means, and the word is the larger and more
+/// obvious thing to reach for — so the whole `theme [n]` run is drawn in the button
+/// colour and the whole run hit-tests ([`help_hit`]). The bracketed key still teaches
+/// the shortcut, the way `[?]` and `[x]` do.
 ///
 /// It sits on the footer rather than the tab bar because the tab bar is full at the
 /// v1 width (§10.2) and a fourth tab is already planned for it; the footer is the
 /// row that already teaches the panel's controls, and it is drawn on every tab, so
 /// [`help_hit`] needs no notion of which tab is showing.
-const THEME_BUTTON_LEN: u32 = 3;
+const THEME_LABEL: &str = "theme";
 
-fn theme_button() -> String {
-    format!("[{THEME_KEY}]")
+fn theme_control() -> String {
+    format!("{THEME_LABEL} [{THEME_KEY}]")
+}
+
+fn theme_control_len() -> u32 {
+    theme_control().chars().count() as u32
 }
 
 /// The column every Level info row is drawn from — one in from the section
@@ -201,12 +210,12 @@ fn close_button_start(width: u32) -> u32 {
     width.saturating_sub(1 + CLOSE_BUTTON_LEN)
 }
 
-/// The column the footer's theme button starts at — right-aligned with the same
-/// one-cell margin the `[x]` keeps, so the two buttons stack in a column at the
-/// screen's right edge. Shared by [`draw_footer`] and [`help_hit`] so a tap lands on
-/// exactly the `[n]` drawn.
-fn theme_button_start(width: u32) -> u32 {
-    width.saturating_sub(1 + THEME_BUTTON_LEN)
+/// The column the footer's theme control starts at — right-aligned with the same
+/// one-cell margin the `[x]` keeps, so the two controls line up at the screen's right
+/// edge. Shared by [`draw_footer`] and [`help_hit`] so a tap lands on exactly the
+/// `theme [n]` drawn, label included.
+fn theme_control_start(width: u32) -> u32 {
+    width.saturating_sub(1 + theme_control_len())
 }
 
 /// Lay the tab bar out: each tab as `(tab, start col, width)`, drawn `[Label]`
@@ -228,8 +237,9 @@ fn tab_layout() -> Vec<(HelpTab, u32, u32)> {
 /// The pointer→control hit-test for the open panel (§11.6/#248): which [`HelpHit`]
 /// screen cell `(x, y)` lands on, or `None` for the body (a press the modal panel
 /// swallows without acting). Two rows carry controls — the tab bar (row 0) and the
-/// footer's `[n]` theme button on the last row (#189) — and on the tab bar the close
-/// `[x]` is tested first so it wins even if a layout ever abutted it.
+/// footer's `theme [n]` control on the last row (#189), label and key alike — and on
+/// the tab bar the close `[x]` is tested first so it wins even if a layout ever
+/// abutted it.
 ///
 /// It takes the panel's `height` for the footer row's sake: the footer is drawn from
 /// the bottom up, so the hit-test has to measure from the same edge the drawing does
@@ -237,8 +247,8 @@ fn tab_layout() -> Vec<(HelpTab, u32, u32)> {
 #[must_use]
 pub fn help_hit(width: u32, height: u32, x: u32, y: u32) -> Option<HelpHit> {
     if height > 0 && y == height - 1 {
-        let theme = theme_button_start(width);
-        if x >= theme && x < theme + THEME_BUTTON_LEN {
+        let theme = theme_control_start(width);
+        if x >= theme && x < theme + theme_control_len() {
             return Some(HelpHit::ToggleTheme);
         }
         return None;
@@ -497,24 +507,25 @@ fn draw_footer(grid: &mut Grid) {
     }
     let row = grid.height - 1;
     draw(grid, 2, row, FOOTER_HINT, Category::Ground);
-    // The theme button, right-aligned on the same row and drawn in System — the
-    // HUD-control colour the `[x]` and the near line's `[?]` share, so it reads as a
-    // button rather than as more footer prose (#189). `FOOTER_HINT` ends with the
-    // word this labels, and a test pins that the two never overlap.
+    // The theme control, right-aligned on the same row. **Label and key together** in
+    // System — the HUD-control colour the `[x]` and the near line's `[?]` share — so
+    // the word reads as part of the button rather than as more footer prose, which is
+    // what makes it obvious the word is the thing to press (#189).
     draw(
         grid,
-        theme_button_start(grid.width),
+        theme_control_start(grid.width),
         row,
-        &theme_button(),
+        &theme_control(),
         Category::System,
     );
 }
 
-/// The footer hint, ending on the word the `[n]` button beside it labels. Named so
-/// the layout test can measure it against [`theme_button_start`] rather than
-/// trusting that a longer sentence would have been noticed — [`draw`] clips in
-/// silence, and here it would clip the button, not the prose.
-const FOOTER_HINT: &str = "Tab switches   Esc closes   theme";
+/// The footer hint — the keys the panel answers that have no on-screen control of
+/// their own. Named so the layout test can measure it against
+/// [`theme_control_start`] rather than trusting that a longer sentence would have
+/// been noticed: [`draw`] clips in silence, and here it would clip the control, not
+/// the prose.
+const FOOTER_HINT: &str = "Tab switches   Esc closes";
 
 /// The glyph legend (§11.3): each `(glyph, category, meaning)`, glyph and category
 /// pulled from the real source — [`Terrain`] for the terrain rows, the [`super`]
@@ -1136,20 +1147,34 @@ mod tests {
     }
 
     /// §11.6/#189: the theme is reachable **by touch**, not just by key — the
-    /// footer's `[n]` hit-tests to [`HelpHit::ToggleTheme`] over exactly the cells it
-    /// is drawn on, and the rest of the footer row is inert like the body. A phone
-    /// has no `n` key, so without this the light theme would be a desktop-only
+    /// footer's `theme [n]` hit-tests to [`HelpHit::ToggleTheme`] over exactly the
+    /// cells it is drawn on, and the rest of the footer row is inert like the body. A
+    /// phone has no `n` key, so without this the light theme would be a desktop-only
     /// option on a game that fits its whole board to a phone screen.
+    ///
+    /// **The word is a target too, not only the bracketed key.** `theme` is the
+    /// larger and more obvious thing to reach for, and a bare `[n]` is only a target
+    /// if you already know what `n` means — so every cell of the label presses the
+    /// control, which is what this walks.
     #[test]
-    fn the_theme_button_is_reachable_by_touch() {
-        let start = theme_button_start(W);
-        for x in start..start + THEME_BUTTON_LEN {
+    fn the_theme_control_is_reachable_by_touch() {
+        let start = theme_control_start(W);
+        for x in start..start + theme_control_len() {
             assert_eq!(
                 help_hit(W, H, x, H - 1),
                 Some(HelpHit::ToggleTheme),
                 "footer cell {x}"
             );
         }
+        // The label's own first cell — the regression this guards is a control that
+        // only answered on its last three cells.
+        let label_end = start + THEME_LABEL.chars().count() as u32;
+        assert_eq!(help_hit(W, H, start, H - 1), Some(HelpHit::ToggleTheme));
+        assert_eq!(
+            help_hit(W, H, label_end - 1, H - 1),
+            Some(HelpHit::ToggleTheme)
+        );
+
         assert_eq!(help_hit(W, H, start - 1, H - 1), None, "the hint is inert");
         assert_eq!(help_hit(W, H, start, H - 2), None, "only the footer row");
         // Measured from the *bottom* edge, so a shorter screen moves it with the
@@ -1158,20 +1183,20 @@ mod tests {
         assert_eq!(help_hit(W, 20, start, H - 1), None);
     }
 
-    /// The footer's hint and its `[n]` button share one row, so the prose must stop
-    /// before the button starts — [`draw`] would clip the button in silence, and a
-    /// half-drawn button is a control the player cannot see they can press.
+    /// The footer's hint and its theme control share one row, so the prose must stop
+    /// before the control starts — [`draw`] would clip the control in silence, and a
+    /// half-drawn control is one the player cannot see they can press.
     #[test]
-    fn the_footer_hint_stops_short_of_the_theme_button() {
+    fn the_footer_hint_stops_short_of_the_theme_control() {
         let end = 2 + FOOTER_HINT.chars().count() as u32;
         assert!(
-            end < theme_button_start(W),
-            "the footer hint runs into the theme button ({end} vs {})",
-            theme_button_start(W),
+            end < theme_control_start(W),
+            "the footer hint runs into the theme control ({end} vs {})",
+            theme_control_start(W),
         );
-        // And the button itself clears the board's right margin.
-        assert_eq!(theme_button().chars().count() as u32, THEME_BUTTON_LEN);
-        assert!(theme_button_start(W) + THEME_BUTTON_LEN <= W);
+        // And the control itself clears the board's right margin.
+        assert_eq!(theme_control(), format!("{THEME_LABEL} [{THEME_KEY}]"));
+        assert!(theme_control_start(W) + theme_control_len() <= W);
     }
 
     /// The card and the key tables cannot drift (#189): the controls row, the footer
@@ -1190,7 +1215,7 @@ mod tests {
             Some(crate::input::HelpNav::ToggleTheme),
             "the modal panel forwards its own option's key",
         );
-        assert_eq!(theme_button(), format!("[{key}]"));
+        assert!(theme_control().ends_with(&format!("[{key}]")));
         // It shadows nothing: not a movement key, not an ability hotkey.
         assert_eq!(crate::input_for_key(&key), None);
         assert_eq!(crate::ability_for_key(&key), None);
