@@ -103,8 +103,16 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::CommsSilenced { .. } => ("the radio net goes dead".to_string(), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
-        // The other death (§8.3): rematerializing inside something solid. The
-        // top of the threat ladder, like the capture — it ends the run.
+        // The wall letting go (§8.3/#329). Ranked at the top of the threat ladder
+        // short of the run ending: the player has been moved somewhere they did not
+        // choose and cannot act for the next turns, and no guard event on the same
+        // turn may bury either fact. How *long* the stun lasts is not repeated here —
+        // the ambient floor carries the countdown for every turn it runs (§11.4),
+        // which is where a standing state belongs and what keeps this line inside the
+        // row's budget.
+        Event::Ejected { .. } => ("the wall spits you out".to_string(), 6),
+        // The degenerate case (§8.3): nowhere in the facility to be thrown clear to.
+        // The top of the ladder, like the capture — it ends the run.
         Event::Entombed { .. } => ("the wall takes you".to_string(), 10),
         // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
         // the loud half is what happens if the body is ever seen.
@@ -205,7 +213,20 @@ pub fn near_line(state: &State) -> Message {
 /// what the run's intel gate still wants, or — once it is met — the exit (§4.5/#310).
 /// Never a bare tally of consoles: what is still *out* is not what is still *needed*.
 fn ambient(state: &State) -> Message {
-    let (text, category) = if state.hidden() {
+    let (text, category) = if state.stunned() > 0 {
+        // Stunned (§8.3/#329) outranks every other ambient fact, because it is the
+        // only one that removes the decision entirely: there is nothing to weigh
+        // until the count reaches zero. Derived straight off the counter, so the line
+        // and the rule cannot disagree and there is nothing to clear (§11.4).
+        let turns = state.stunned();
+        (
+            format!(
+                "stunned — {turns} more {}",
+                if turns == 1 { "turn" } else { "turns" }
+            ),
+            Category::Warning,
+        )
+    } else if state.hidden() {
         (
             "hidden — the cupboard conceals you".to_string(),
             Category::Owned,
@@ -526,6 +547,76 @@ mod tests {
             line.priority,
             i32::MIN,
             "it is the ambient floor, not a message"
+        );
+    }
+
+    /// §8.3/#329: the wall letting go is a Warning-band message ranked above every
+    /// guard event short of the capture — the player has been moved somewhere they
+    /// did not choose and cannot act, and neither fact may be buried by a detection
+    /// landing the same turn.
+    #[test]
+    fn the_eject_outranks_every_guard_event_but_the_capture() {
+        let msg = message_for(Event::Ejected {
+            to: Cell::new(3, 3),
+            stunned: crate::PHASE_EJECT_STUN_TURNS,
+        })
+        .expect("the wall letting go is never silent");
+        assert_eq!(msg.text, "the wall spits you out");
+        assert_eq!(msg.category, Category::Warning);
+
+        let alert = message_for(Event::AlertRaised { level: 3 }).expect("an alert speaks");
+        let caught = message_for(Event::Captured {
+            by: Cell::new(3, 3),
+        })
+        .expect("the capture speaks");
+        assert!(
+            msg.priority > alert.priority,
+            "being thrown clear outranks the facility alert ({} vs {})",
+            msg.priority,
+            alert.priority,
+        );
+        assert!(
+            msg.priority < caught.priority,
+            "…and never outranks the run ending",
+        );
+    }
+
+    /// §8.3/§11.4: the stun is a *standing state*, so it lives on the ambient floor
+    /// and counts down there — derived straight off the counter, above every other
+    /// ambient fact because it is the one that removes the decision entirely.
+    #[test]
+    fn ambient_counts_the_stun_down() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 4),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(10, 10),
+        )
+        .with_loadout(crate::Loadout::innate().with(crate::AbilityId::Dephase));
+        s.step(Input::Activate(crate::AbilityId::Dephase));
+        s.step(Input::Step(Direction::East)); // into the wall
+        s.step(Input::Wait); // the duration ends: thrown clear and stunned
+
+        // The eject's own turn speaks the message; the floor carries the rest.
+        assert_eq!(near_line(&s).text, "the wall spits you out");
+        assert_eq!(s.stunned(), 2);
+
+        s.step(Input::Wait); // swallowed, and nothing else is live
+        let line = near_line(&s);
+        assert_eq!(line.text, "stunned — 1 more turn");
+        assert_eq!(line.category, Category::Warning);
+        assert_eq!(line.priority, i32::MIN, "the floor, not a message");
+
+        s.step(Input::Wait); // the last owed turn
+        assert_eq!(s.stunned(), 0);
+        assert_ne!(
+            near_line(&s).text,
+            "stunned — 0 more turns",
+            "the floor stops reporting a stun that is paid off",
         );
     }
 

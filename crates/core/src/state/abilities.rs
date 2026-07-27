@@ -2,7 +2,8 @@
 //!
 //! A second `impl State` holding the per-ability helpers the turn loop calls —
 //! decoy spawn/stomp, Run's extra step, Drag's haul, Dephase's rematerialisation
-//! check, and the door bump's mutation half — kept out of `state.rs` so that file
+//! check and the eject-and-stun it costs, and the door bump's mutation half — kept
+//! out of `state.rs` so that file
 //! reads as the phase machinery alone. These are `pub(super)`: visible to the
 //! parent turn loop, no wider.
 
@@ -11,10 +12,11 @@ use super::*;
 impl State {
     /// Whether the player's current cell can admit them as a **solid** body
     /// again (§8.3): terrain that accepts an actor's fill, and no guard on it.
-    /// This is Dephase's rematerialization question — `false` at expiry is lethal
-    /// ([`Event::Entombed`]), and `false` refuses an early toggle-off (there is
-    /// nowhere to solidify). A body is non-solid (§7.2), so a cell holding one is
-    /// still a legal place to stand — you rematerialise on top of it, no entomb.
+    /// This is Dephase's rematerialization question — `false` at expiry throws the
+    /// player clear and stuns them ([`eject_from_solid`](Self::eject_from_solid)),
+    /// and `false` refuses an early toggle-off (there is nowhere to solidify). A body
+    /// is non-solid (§7.2), so a cell holding one is still a legal place to stand —
+    /// you rematerialise on top of it, and nothing throws you anywhere.
     pub(super) fn can_rematerialize(&self) -> bool {
         // A duct cell is a legal place to be (§10.7): the player already stands there
         // as a solid body, so Dephase expiring inside a duct is *not* the lethal
@@ -23,6 +25,103 @@ impl State {
         // admitted here explicitly.
         (self.layout.facility().can_enter(self.player, ACTOR_FILL) || self.in_duct())
             && self.guard_at(self.player).is_none()
+    }
+
+    /// Throw the player clear of the solid they were about to rematerialize inside,
+    /// and leave them stunned (§8.3/#329) — what Dephase's duration now costs instead
+    /// of the run.
+    ///
+    /// The landing cell is drawn **at random from the nearest legal ones**: the
+    /// smallest §6.1 box radius around the player that holds any cell a solid body can
+    /// stand on, then a uniform pick among the ties from the run's threaded [`Rng`]
+    /// (§12.4, so a seed reproduces the landing). Random rather than deterministic on
+    /// purpose — a predictable eject would make phasing into a wall a reliable way
+    /// *through* it, which is precisely the consequence-free version §8.3 warns about.
+    /// You may well be spat back out the side you came from.
+    ///
+    /// A dragged body does not come along (§8.3): it is released where it lies, since
+    /// hauling it through the wall with you would be a free teleport for the one thing
+    /// the drag makes expensive.
+    ///
+    /// [`Event::Entombed`] survives as the degenerate fallback only — a facility with
+    /// no standable cell at all, which no generated level can be (§10.6 guarantees the
+    /// player started on one). It is kept so that impossible case is a truthful loss
+    /// rather than a silently impossible state.
+    pub(super) fn eject_from_solid(&mut self, events: &mut Vec<Event>) {
+        let Some(to) = self.eject_target() else {
+            self.outcome = Outcome::Lost;
+            events.push(Event::Entombed { at: self.player });
+            return;
+        };
+        // Teleported, not walked: the pose cannot survive a cell it is not adjacent to
+        // (§10.3), and the body in your hands stays where it lies.
+        self.crouched_behind = None;
+        if let Some(i) = self.dragging.take() {
+            events.push(Event::BodyReleased {
+                at: self.bodies[i].cell(),
+            });
+        }
+        self.player = to;
+        self.stunned = PHASE_EJECT_STUN_TURNS;
+        events.push(Event::Ejected {
+            to,
+            stunned: PHASE_EJECT_STUN_TURNS,
+        });
+        // Anything arriving on the decoy tramples it (§8.3) — arriving by wall
+        // included.
+        self.stomp_decoy(to, events);
+        // The eject lands after this turn's sight phase, so the player's FOV is still
+        // cast from inside the wall. Recast it from where they actually are, or the
+        // frame would show the `@` in one place and its sight in another (§11.5).
+        self.recompute_sight();
+    }
+
+    /// The cell [`eject_from_solid`](Self::eject_from_solid) throws the player onto:
+    /// a uniform random pick among the cells at the smallest §6.1 box radius that
+    /// holds any which can admit a solid body. `None` only when the facility holds no
+    /// such cell anywhere.
+    ///
+    /// The predicate is deliberately *narrower* than
+    /// [`can_rematerialize`](Self::can_rematerialize): a duct cell is a legal place to
+    /// *be* (§10.7) but never a legal place to be **thrown** — you are spat into a
+    /// room, not into a crawlspace you never climbed into. A loose body is non-solid
+    /// (§7.2), so its cell is a fine place to land.
+    fn eject_target(&mut self) -> Option<Cell> {
+        let (width, height) = {
+            let facility = self.layout.facility();
+            (facility.width(), facility.height())
+        };
+        // Every in-bounds cell is inside one of these rings, so the search either
+        // returns on the first ring holding a candidate or runs out having proved
+        // there is none.
+        for radius in 1..=width.max(height) {
+            let candidates: Vec<Cell> = self
+                .ring(radius, width, height)
+                .filter(|&cell| {
+                    self.layout.facility().can_enter(cell, ACTOR_FILL)
+                        && self.guard_at(cell).is_none()
+                })
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+            // The draw happens only on the ring that decides the landing, so the
+            // stream advances exactly once per eject (§12.4).
+            return Some(candidates[self.rng.below(candidates.len() as u32) as usize]);
+        }
+        None
+    }
+
+    /// The in-bounds cells exactly `radius` away from the player under the §6.1 box
+    /// metric — one square ring, walked in a fixed order so the draw off it is
+    /// reproducible (§12.4).
+    fn ring(&self, radius: u32, width: u32, height: u32) -> impl Iterator<Item = Cell> + '_ {
+        let centre = self.player;
+        let ys =
+            centre.y.saturating_sub(radius)..=(centre.y + radius).min(height.saturating_sub(1));
+        let xs = centre.x.saturating_sub(radius)..=(centre.x + radius).min(width.saturating_sub(1));
+        ys.flat_map(move |y| xs.clone().map(move |x| Cell::new(x, y)))
+            .filter(move |&cell| centre.sight_distance(cell) == radius)
     }
 
     /// Where a decoy activated right now would spawn (§8.3): the faced cell —

@@ -170,10 +170,19 @@ pub enum Event {
     /// (§8.3). Its ability drops into the full cooldown, as an early toggle-off
     /// would. Expiry by duration is [`Event::AbilityExpired`], not this.
     DecoyDied { at: Cell },
-    /// Dephase ran out while the player stood somewhere that cannot admit a
-    /// solid body — inside a wall, a door, furniture, or another actor — and
-    /// rematerializing there is lethal (§8.3): the run ends. A distinct loss
-    /// from [`Event::Captured`], so the game-over reason stays truthful.
+    /// Dephase ran out while the player stood somewhere that cannot admit a solid
+    /// body — inside a wall, a door, or furniture — and the wall threw them clear
+    /// (§8.3/#329): they now stand on `to`, a cell drawn at random from the nearest
+    /// ones that can hold them, **stunned** for `stunned` turns. The run continues;
+    /// what phasing costs is those turns and the position, not the run itself
+    /// (§4.5 **[SETTLED]**: contact is the only loss).
+    Ejected { to: Cell, stunned: u32 },
+    /// Dephase ran out somewhere solid and there was **nowhere in the facility** to
+    /// throw the player clear to (§8.3): the run ends. The degenerate case only — no
+    /// generated level can be without a standable cell (§10.6) — kept so the
+    /// impossible board is a truthful loss rather than a silently impossible state.
+    /// A distinct loss from [`Event::Captured`], so the game-over reason stays
+    /// truthful.
     Entombed { at: Cell },
     /// A toggle-off of Dephase was **refused** because the player stands where no
     /// solid body can (§8.3/#304): there is nowhere to rematerialize, so the phase
@@ -230,7 +239,14 @@ impl Event {
             // A call-in (§7.7) is the same aroused-but-not-on-you band: the guard
             // that had you has *lost* you, and the one converging has never seen
             // you. The threat is spreading, not closing.
-            Event::BodyFound { .. }
+            //
+            // Being thrown clear of a wall and left helpless (§8.3/#329) reads in the
+            // same band for the mirror-image reason: nothing has you — no guard need
+            // even know — but the next two turns are not yours, and that is a bad
+            // fact about now rather than self-narration. Not Danger: the Danger band
+            // belongs to a threat that is on you (§11.2), and the wall has just let go.
+            Event::Ejected { .. }
+            | Event::BodyFound { .. }
             | Event::RadioSilence { .. }
             | Event::CalledIn { .. }
             | Event::BodyCalledIn { .. }

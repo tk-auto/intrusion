@@ -849,8 +849,25 @@ Notes carried forward, because they are good and non-obvious:
 - **Dephase does not conceal.** It's a movement tool. And while dephased you
   cannot *bump*, so you cannot open doors, use consoles, or win — you pass
   straight through everything you came for. That constraint is excellent; keep it.
-- **Dephasing should be lethal if the duration expires while you're inside a
-  wall.** It never was, which made it consequence-free. **[START]**
+- **A duration that expires while you're inside a wall throws you clear and leaves
+  you stunned.** The wall spits you onto a cell drawn at random from the nearest
+  ones that can hold a solid body, and for **2 turns** afterwards you cannot act at
+  all: every key is swallowed, the turn is spent, and the guards keep moving
+  (§4.4's turn cost applied *to* you rather than by you). **[START]** — the 2 is the
+  number to tune; the shape is not.
+  This is the third answer to a question that has now been asked twice. It was
+  free, which made phasing consequence-free; then it was **lethal**, which made it
+  the one death §2.2 forbids — the timer is on screen but the *lethal half* never
+  is (`can_rematerialize` is invisible, and while phased you cannot bump, so you
+  cannot even probe the cell you stand in), and §4.5 is **[SETTLED]** that a guard's
+  touch is the only loss condition. So the cost stays and the death goes: two turns
+  helpless on a cell you did not choose, in a facility where contact captures, is a
+  price a player can see coming and choose to pay. The **randomness is
+  load-bearing** — a predictable eject would make phasing into a wall a reliable way
+  *through* one, and you may well be spat back out the side you came from.
+  Deliberately **not** extended to the early toggle-off (§4.4): pressing the key
+  inside a wall is still refused, because a free press that teleported you clear
+  would be exactly the escape tool this is designed not to be (#304/#329).
 - **Decoy draws Investigating, never Chasing** — a guard that can see *you*
   ignores it. Decoys work on guards that have lost you, not on guards that have
   you.

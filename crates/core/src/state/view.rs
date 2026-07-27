@@ -123,6 +123,15 @@ impl State {
         self.crouched_behind.is_some()
     }
 
+    /// How many more turns the player is **stunned** for (§8.3/#329) — zero when
+    /// they are free to act. While it is non-zero every input is swallowed as a
+    /// spent turn ([`step`](Self::step)), so this is the one query that answers
+    /// "is the next key press mine?": the ambient status reads it for the near
+    /// line's countdown, and the usable line goes quiet on it.
+    pub fn stunned(&self) -> u32 {
+        self.stunned
+    }
+
     /// The table the player ducked behind (§10.3), if any — the *anchor* naming
     /// the crouched-behind run. It stays the originally bumped cell while a
     /// crouch-walk moves the player along the bench, so it may no longer be the
@@ -605,6 +614,13 @@ impl State {
     /// also be in the player's FOV — which the touching ring always is (§6.2) —
     /// so the line can never leak what the fog still hides (§11.5a).
     pub fn affordances(&self) -> Vec<(Direction, Affordance)> {
+        // A stunned player bumps nothing (§8.3/#329): every input is swallowed, so
+        // offering an interaction here would promise exactly what the next press will
+        // not deliver (§2.3). The same silence a phased player already gets, for the
+        // same reason.
+        if self.stunned > 0 {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         for dir in Direction::ALL {
             let Some(target) = self.player.step(dir) else {

@@ -730,6 +730,10 @@ mod tests {
             Event::BodyReleased { at },
             Event::BodyStored { at },
             Event::DecoyDied { at },
+            Event::Ejected {
+                to: at,
+                stunned: crate::PHASE_EJECT_STUN_TURNS,
+            },
             Event::Entombed { at },
             Event::RematerializeRefused,
         ];

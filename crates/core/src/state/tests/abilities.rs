@@ -1,8 +1,8 @@
 //! Ability effects through the turn loop (§8.3).
 //!
-//! Each starting ability as the loop resolves it — Dephase's pass-through and its
-//! lethal rematerialisation, the decoy's lifetime and the precedence that makes it
-//! work only on guards that have lost you, Camouflage's move-reveals rule, Run's
+//! Each starting ability as the loop resolves it — Dephase's pass-through and the
+//! eject-and-stun its rematerialisation costs, the decoy's lifetime and the
+//! precedence that makes it work only on guards that have lost you, Camouflage's move-reveals rule, Run's
 //! double step, and the drag half-speed with the stow that locks a cupboard. The
 //! economy itself (duration, cooldown, the lockout) is pinned in
 //! [`crate::ability`]; what is pinned here is the effect on the world.
@@ -110,11 +110,162 @@ fn a_dephased_player_passes_through_a_guard_without_a_takedown() {
     assert_eq!(s.outcome(), Outcome::Playing);
 }
 
-/// §8.3: the cost that keeps Dephase from being free — the duration running
-/// out while the player stands inside a wall is **lethal**, a distinct loss
-/// ([`Event::Entombed`], not the capture), with no auto-eject to safety.
+/// A 12×12 room with a wall at `(5,4)`, the player one cell west of it holding
+/// Dephase, `guards` posted, and the run's stream seeded with `seed` (§12.4). The
+/// scene every eject test phases into.
+fn wall_to_phase_into(guards: Vec<Guard>, seed: u64) -> State {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 4), Terrain::Wall);
+    State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        guards,
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+    .with_rng(crate::Rng::new(seed))
+}
+
+/// Phase east into the wall of [`wall_to_phase_into`] and let the duration run out
+/// in there, returning the expiry turn's events.
+fn phase_into_the_wall(s: &mut State) -> Vec<Event> {
+    s.step(Input::Activate(AbilityId::Dephase)); // active turn 1
+    s.step(Input::Step(Direction::East)); // turn 2: into the wall
+    assert_eq!(s.player(), Cell::new(5, 4), "standing inside the wall");
+    s.step(Input::Wait) // turn 3: the duration ends in there
+}
+
+/// §8.3/#329: the cost that keeps Dephase from being free — the duration running out
+/// inside a wall throws the player clear and leaves them **stunned**, rather than
+/// ending the run. §4.5 is `[SETTLED]` that a guard's touch is the only loss
+/// condition, and the lethal version was a second one the player could not see
+/// coming (§2.2).
 #[test]
-fn dephase_expiring_inside_a_wall_is_lethal() {
+fn dephase_expiring_inside_a_wall_throws_you_clear_and_stuns() {
+    let mut s = wall_to_phase_into(Vec::new(), 7);
+    let events = phase_into_the_wall(&mut s);
+
+    let to = match events.as_slice() {
+        [Event::AbilityExpired {
+            ability: AbilityId::Dephase,
+        }, Event::Ejected { to, stunned }] => {
+            assert_eq!(*stunned, PHASE_EJECT_STUN_TURNS);
+            *to
+        }
+        other => panic!("expected the expiry and the eject, got {other:?}"),
+    };
+    assert_eq!(s.outcome(), Outcome::Playing, "the run survives the wall");
+    assert_eq!(s.player(), to, "…standing where the eject put them");
+    assert_ne!(to, Cell::new(5, 4), "…and no longer inside the wall");
+    assert!(
+        s.layout().facility().can_enter(to, ACTOR_FILL),
+        "{to:?} must admit a solid body",
+    );
+    assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS);
+}
+
+/// §8.3: the landing is the **nearest** legal cell — the wall in this room is one
+/// step from open floor on every side, so the eject can only ever be a §6.1 radius
+/// of one. Asserted against the predicate rather than a hand-picked cell, over a
+/// spread of seeds so the random tie-break cannot smuggle a far landing past.
+#[test]
+fn the_eject_lands_on_a_nearest_legal_cell() {
+    for seed in 0..24 {
+        let mut s = wall_to_phase_into(Vec::new(), seed);
+        phase_into_the_wall(&mut s);
+        let landed = s.player();
+        assert_eq!(
+            Cell::new(5, 4).sight_distance(landed),
+            1,
+            "seed {seed}: open floor touches the wall, so the eject is one cell",
+        );
+        assert!(s.layout().facility().can_enter(landed, ACTOR_FILL));
+    }
+}
+
+/// §12.4: the draw comes off the run's threaded stream, so a seed reproduces the
+/// landing exactly — and §8.3's randomness is real: across seeds the wall spits the
+/// player out on more than one side, which is what stops "phase into a wall" being a
+/// reliable way *through* one.
+#[test]
+fn the_eject_is_random_but_reproducible() {
+    let landing = |seed| {
+        let mut s = wall_to_phase_into(Vec::new(), seed);
+        phase_into_the_wall(&mut s);
+        s.player()
+    };
+    for seed in 0..8 {
+        assert_eq!(landing(seed), landing(seed), "seed {seed} reproduces");
+    }
+    let spread: std::collections::HashSet<Cell> = (0..40).map(landing).collect();
+    assert!(
+        spread.len() > 1,
+        "the eject is a draw, not a fixed side: {spread:?}",
+    );
+    // The cell the player phased in from is among the landings, so the wall can hand
+    // them straight back the way they came — no free passage.
+    assert!(
+        spread.contains(&Cell::new(4, 4)),
+        "the way back is on the table: {spread:?}",
+    );
+}
+
+/// §8.3/#329: the stun is exactly [`PHASE_EJECT_STUN_TURNS`] turns of agency — that
+/// many inputs are swallowed as spent turns, and the next one is the player's again.
+#[test]
+fn the_stun_swallows_exactly_its_turns() {
+    let mut s = wall_to_phase_into(Vec::new(), 3);
+    phase_into_the_wall(&mut s);
+    let landed = s.player();
+
+    for owed in (1..=PHASE_EJECT_STUN_TURNS).rev() {
+        assert_eq!(s.stunned(), owed);
+        let turn = s.turn();
+        let events = s.step(Input::Step(Direction::West));
+        assert!(events.is_empty(), "a stunned turn does nothing: {events:?}");
+        assert_eq!(s.player(), landed, "…and moves nobody");
+        assert_eq!(s.turn(), turn + 1, "…but the turn is spent, so guards act");
+    }
+
+    assert_eq!(s.stunned(), 0, "the stun is paid off");
+    s.step(Input::Step(Direction::West));
+    assert_eq!(s.player().x, landed.x - 1, "the next input is the player's");
+}
+
+/// §8.3/#329: *every* input is swallowed while stunned — the two free actions (§4.4)
+/// included. "You cannot act" is one rule with no exceptions, so a helpless player
+/// gets no free poke at the world.
+#[test]
+fn every_input_kind_is_swallowed_while_stunned() {
+    for input in [
+        Input::Wait,
+        Input::Step(Direction::North),
+        Input::Activate(AbilityId::Run),
+        Input::Deactivate(AbilityId::Dephase),
+    ] {
+        let mut s = wall_to_phase_into(Vec::new(), 11);
+        phase_into_the_wall(&mut s);
+        let (landed, turn) = (s.player(), s.turn());
+
+        let events = s.step(input);
+        assert!(events.is_empty(), "{input:?} said something: {events:?}");
+        assert_eq!(s.player(), landed, "{input:?} moved the player");
+        assert_eq!(s.turn(), turn + 1, "{input:?} did not spend the turn");
+        assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS - 1, "{input:?}");
+        assert!(
+            matches!(s.ability_state(AbilityId::Run), AbilityState::Ready),
+            "{input:?} switched Run on while stunned",
+        );
+    }
+}
+
+/// §2.3/§11.4: the usable line must never offer what the next press will not
+/// deliver — and while stunned no press delivers anything, so it goes quiet.
+#[test]
+fn the_usable_line_is_empty_while_stunned() {
+    // A console beside the player, so there is a real affordance to suppress.
     let mut layout = open_room(12, 12);
     layout.place(Cell::new(5, 4), Terrain::Wall);
     let mut s = State::new(
@@ -122,30 +273,216 @@ fn dephase_expiring_inside_a_wall_is_lethal() {
         Cell::new(4, 4),
         Direction::North,
         Vec::new(),
+        [Cell::new(4, 3)],
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+    .with_rng(crate::Rng::new(5));
+    assert!(
+        !s.affordances().is_empty(),
+        "the console is on offer before the phase",
+    );
+
+    phase_into_the_wall(&mut s);
+    assert!(s.stunned() > 0);
+    assert!(
+        s.affordances().is_empty(),
+        "a stunned player bumps nothing: {:?}",
+        s.affordances(),
+    );
+}
+
+/// §4.5 **[SETTLED]**: contact is still the loss. The stun is a real price precisely
+/// because a guard can walk into you while you stand there unable to move — the
+/// death did not go away, it moved to a threat the player can see coming.
+#[test]
+fn a_stunned_player_can_still_be_captured() {
+    // A pocket: a wall block at (10,4) whose whole ring is solid but for (9,4), so
+    // the eject has exactly one cell to pick and the scene does not hang on the draw.
+    // A guard walks row 4 east into it, four cells behind the player.
+    let mut layout = open_room(20, 12);
+    for cell in [
+        Cell::new(9, 3),
+        Cell::new(10, 3),
+        Cell::new(11, 3),
+        Cell::new(10, 4),
+        Cell::new(11, 4),
+        Cell::new(9, 5),
+        Cell::new(10, 5),
+        Cell::new(11, 5),
+    ] {
+        layout.place(cell, Terrain::Wall);
+    }
+    let mut s = State::new(
+        layout,
+        Cell::new(9, 4),
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(4, 4), Cell::new(9, 4))],
+        Vec::new(),
+        Cell::new(2, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
+    s.set_guard_dwell_chance(0); // one cell per turn, so the scene is not a race
+
+    s.step(Input::Activate(AbilityId::Dephase)); // guard → (5,4)
+    s.step(Input::Step(Direction::East)); // into the wall; guard → (6,4)
+    let events = s.step(Input::Wait); // the duration ends in there; guard → (7,4)
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Ejected { .. })),
+        "the wall let go: {events:?}",
+    );
+    assert_eq!(s.player(), Cell::new(9, 4), "the pocket's one legal cell");
+    assert_eq!(s.stunned(), PHASE_EJECT_STUN_TURNS);
+
+    s.step(Input::Wait); // swallowed; the guard closes to (8,4), now adjacent
+    assert_eq!(s.stunned(), 1, "still owed a turn, still unable to move");
+
+    // The guard steps in while the player is helpless. The loss is the ordinary one
+    // — §4.5's only loss condition, once more the only one.
+    let events = s.step(Input::Wait);
+    assert!(
+        events.contains(&Event::Captured {
+            by: Cell::new(9, 4)
+        }),
+        "a helpless player is captured by contact: {events:?}",
+    );
+    assert_eq!(s.outcome(), Outcome::Lost);
+}
+
+/// §8.3: a body cannot be hauled through a wall — the eject drops it where it lies,
+/// and the player lands with their hands free.
+#[test]
+fn the_eject_drops_a_dragged_body() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 4), Terrain::Wall);
+    layout.place(Cell::new(4, 4), Terrain::Hideout); // conceal the takedown
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(4, 3))],
         Vec::new(),
         Cell::new(10, 10),
     )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+    .with_rng(crate::Rng::new(9));
+    s.step(Input::Step(Direction::North)); // take the guard down: a body at (4,3)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    s.step(Input::Step(Direction::East)); // step off it: take hold
+    assert!(s.dragging().is_some(), "dragging the body");
+
+    // Phase south into the wall, hauling. Half speed means a step can be spent
+    // standing still, so run until the duration expires.
+    s.step(Input::Activate(AbilityId::Dephase));
+    let mut events = Vec::new();
+    for _ in 0..4 {
+        events = s.step(Input::Step(Direction::South));
+        if events.iter().any(|e| matches!(e, Event::Ejected { .. })) {
+            break;
+        }
+    }
+    let released = events
+        .iter()
+        .find_map(|e| match e {
+            Event::BodyReleased { at } => Some(*at),
+            _ => None,
+        })
+        .expect("the eject lets the body go");
+    assert!(s.dragging().is_none(), "hands free after the eject");
+    assert_eq!(
+        s.bodies()[0].cell(),
+        released,
+        "the body stays where it was let go",
+    );
+    assert_ne!(s.player(), released, "…and the player is elsewhere");
+}
+
+/// §8.3: expiry somewhere a solid body *can* stand is unchanged — no eject, no stun.
+/// Open floor is the ordinary case; a **duct** is the non-obvious one (§10.7 admits
+/// it as a legal place to rematerialize), and a crawling player must never be spat
+/// out of the crawlspace they deliberately climbed into.
+#[test]
+fn a_legal_expiry_neither_ejects_nor_stuns() {
+    // On open floor: phase into the wall and back out before the duration ends.
+    let mut s = wall_to_phase_into(Vec::new(), 1);
+    s.step(Input::Activate(AbilityId::Dephase));
+    s.step(Input::Step(Direction::East)); // into the wall
+    let events = s.step(Input::Step(Direction::East)); // out the far side, then expiry
+    assert_eq!(s.player(), Cell::new(6, 4));
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Ejected { .. })),
+        "an expiry on floor is just the ability fading: {events:?}",
+    );
+    assert_eq!(s.stunned(), 0);
+
+    // Inside a duct (§10.7): the crawl resumes, untouched.
+    let mut s = super::ducts::duct_world()
+        .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+        .with_rng(crate::Rng::new(4));
+    s.step(Input::Step(Direction::North)); // climb into the duct
+    assert!(s.in_duct());
+    s.step(Input::Activate(AbilityId::Dephase));
+    let inside = s.player();
+    for _ in 0..4 {
+        let events = s.step(Input::Wait);
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Ejected { .. })),
+            "a duct is a legal place to solidify (§10.7): {events:?}",
+        );
+    }
+    assert_eq!(s.player(), inside, "still in the crawlspace");
+    assert!(s.in_duct());
+    assert_eq!(s.stunned(), 0);
+    assert_eq!(s.outcome(), Outcome::Playing);
+}
+
+/// §8.3: [`Event::Entombed`] survives as the **degenerate** case only — a facility
+/// with nowhere at all to be thrown clear to. No generated level can be one (§10.6:
+/// the player started somewhere standable), so this is the impossible board, kept
+/// truthful rather than left to become an impossible state.
+#[test]
+fn with_nowhere_to_go_the_wall_still_takes_you() {
+    let mut f = crate::facility::Facility::walled_box(9, 9);
+    for y in 0..9 {
+        for x in 0..9 {
+            f.set_terrain(x, y, Terrain::Wall);
+        }
+    }
+    let mut s = State::new(
+        crate::Layout::from_facility(f),
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(7, 7),
+    )
     .with_loadout(Loadout::innate().with(AbilityId::Dephase));
-    s.step(Input::Activate(AbilityId::Dephase)); // active turn 1
-    s.step(Input::Step(Direction::East)); // turn 2: into the wall
-    let events = s.step(Input::Wait); // turn 3: the duration ends in there
+
+    s.step(Input::Activate(AbilityId::Dephase));
+    let mut events = Vec::new();
+    for _ in 0..4 {
+        events = s.step(Input::Wait);
+        if s.outcome() == Outcome::Lost {
+            break;
+        }
+    }
     assert_eq!(
-        events,
-        vec![
-            Event::AbilityExpired {
-                ability: AbilityId::Dephase
-            },
-            Event::Entombed {
-                at: Cell::new(5, 4)
-            },
-        ]
+        events.last(),
+        Some(&Event::Entombed {
+            at: Cell::new(4, 4)
+        }),
+        "nowhere to be thrown: the run ends, truthfully",
     );
-    assert_eq!(
-        s.outcome(),
-        Outcome::Lost,
-        "rematerializing in a wall kills"
-    );
+    assert_eq!(s.outcome(), Outcome::Lost);
+    assert_eq!(s.stunned(), 0, "no stun to serve — there is no run left");
     assert!(s.step(Input::Wait).is_empty(), "the run is over");
+}
+
+/// §8.3 **[START]**: the stun's own number, pinned so a later change is a visible
+/// edit rather than a silent retune.
+#[test]
+fn the_stun_length_is_pinned() {
+    assert_eq!(PHASE_EJECT_STUN_TURNS, 2);
 }
 
 /// §8.3/§2.2: toggling Dephase off while inside a solid is **refused** — a

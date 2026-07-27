@@ -175,6 +175,20 @@ pub const EFFECT_FLASH_TURNS: u32 = 1;
 /// on the map. Pinned at compile time so the two ranges can never silently invert.
 const _: () = assert!(CONFUSION_RADIUS <= PLAYER_SENSE_RANGE);
 
+/// How many turns the player is **stunned** after Dephase throws them clear of a
+/// solid (§8.3 **[START]**, #329): the cost that replaced the old lethal expiry.
+///
+/// While the counter runs, every [`Input`] resolves as a *stunned pass* — the turn is
+/// spent, the world phases run, and the player changes nothing (see
+/// [`player_phase`](State::player_phase)). It is a real price in a patrolled
+/// facility: capture is contact (§4.5 **[SETTLED]**), so two turns of standing still
+/// on a cell the RNG picked can end the run just as the wall used to — only now by a
+/// guard the player could see coming. Two, not one, because one turn is a single
+/// guard step and would rarely be felt; not five, because a helpless player watching
+/// the game play itself is no longer playing (§2.3 cuts both ways). Pinned by a test
+/// so a later change is a deliberate, visible edit.
+pub const PHASE_EJECT_STUN_TURNS: u32 = 2;
+
 /// What bumping an orthogonally adjacent cell would do (§4.3) — the interaction a
 /// cell offers, in the one priority order shared by execution and prediction. This
 /// is the single source of truth [`State::bump_kind`] produces; `resolve_step`
@@ -383,6 +397,14 @@ pub struct State {
     /// hideout entry, or a stationary interaction (a bump, a grab, a wait) can
     /// never be misclassified. Free actions leave it alone (§4.4).
     moved_this_turn: bool,
+    /// Turns of **stun** left (§8.3/#329): how many more inputs are swallowed as
+    /// stunned passes after Dephase threw the player clear of a solid. Set to
+    /// [`PHASE_EJECT_STUN_TURNS`] by the eject and decremented once per spent turn,
+    /// at the same end-of-turn beat as the ability clocks — so the eject's own turn
+    /// (already spent by the action that ran the duration out) is not one of them and
+    /// the player loses exactly that many turns of agency. Zero is the ordinary
+    /// state: nothing else in the game writes it.
+    stunned: u32,
     /// The table the player is crouched behind (§10.3), set by bumping it and
     /// cleared by any spent action other than a Wait (waiting holds the pose).
     /// Always orthogonally adjacent by construction: the bump that sets it is a
@@ -605,6 +627,7 @@ impl State {
             in_duct: None,
             waited: false,
             moved_this_turn: false,
+            stunned: 0,
             crouched_behind: None,
             entered_hideout: None,
             door_just_opened: None,
@@ -853,14 +876,23 @@ impl State {
                     .into_iter()
                     .map(|ability| Event::AbilityExpired { ability }),
             );
-            // Dephase expiring somewhere a solid body cannot stand is lethal
-            // (§8.3 — the cost that keeps phasing from being free). No rescue,
-            // no auto-eject to a safe cell: that would rebuild the old
-            // consequence-free version. Skipped if the run already ended this
-            // turn (a capture is its own, truthful loss).
+            // Dephase expiring somewhere a solid body cannot stand throws the player
+            // clear and leaves them stunned (§8.3/#329) — the cost that keeps phasing
+            // from being free, paid in turns instead of in the run. It is *not* a
+            // rescue: the landing cell is drawn at random from the nearest legal ones,
+            // so a phase that ends in a wall never doubles as a reliable way through
+            // one, and the stun that follows is spent helpless in a patrolled
+            // facility. Skipped if the run already ended this turn (a capture is its
+            // own, truthful loss).
+            //
+            // The stun's own clock is ticked first, beside the ability clocks: this
+            // spent turn was a stunned pass if anything was owed, and paying it here
+            // — *before* an eject can set a fresh count — keeps the turn the player is
+            // thrown clear (already spent by the action that ran the duration out)
+            // from ever being one of the turns they owe.
+            self.stunned = self.stunned.saturating_sub(1);
             if phase_ended && self.outcome == Outcome::Playing && !self.can_rematerialize() {
-                self.outcome = Outcome::Lost;
-                events.push(Event::Entombed { at: self.player });
+                self.eject_from_solid(&mut events);
             }
         }
 
@@ -873,6 +905,19 @@ impl State {
     /// Phase 1 (§4.2). Returns whether the turn was spent (a world-changing action)
     /// or was free (a mis-input that ends nothing).
     fn player_phase(&mut self, input: Input, events: &mut Vec<Event>) -> bool {
+        // Stunned (§8.3/#329): the player cannot act, so **every** input — step, wait,
+        // activation, toggle-off alike — resolves as the same stunned pass. The turn
+        // is spent (the world moves on around a player who cannot), and nothing else
+        // changes. One rule with no exceptions on purpose: carving out the two free
+        // actions (§4.4) would leave a helpless player a free poke at the world, and
+        // "you cannot act" would stop being true. It is emphatically **not** a Wait:
+        // the flag is cleared, so a stunned turn buys neither the 360° look nor the
+        // widened sense (§8.3/§9.1) — being knocked flat is not taking careful stock
+        // of the room.
+        if self.stunned > 0 {
+            self.waited = false;
+            return true;
+        }
         match input {
             // Waiting is a real action: it spends the turn where you stand (§5) —
             // and buys the 360° look-around the coming sight phase grants (§8.3).
