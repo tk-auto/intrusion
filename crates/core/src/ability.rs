@@ -374,6 +374,27 @@ impl AbilityId {
         AbilityId::Vision,
     ];
 
+    /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
+    /// or found, and the complement of [`TECH`](Self::TECH) over
+    /// [`ALL`](Self::ALL). Derived from [`is_innate`](Self::is_innate) rather than
+    /// written out, so promoting an ability cannot leave the two lists disagreeing.
+    ///
+    /// It is a list rather than a count because the level-seed token (#333) encodes
+    /// the innate set positionally: the innate half of a loadout is a bitset over
+    /// *this* order, and the tech half a combination index over `TECH`'s.
+    pub const INNATE: [AbilityId; innate_count()] = {
+        let mut innate = [AbilityId::Run; innate_count()];
+        let (mut read, mut write) = (0, 0);
+        while read < Self::ALL.len() {
+            if Self::ALL[read].is_innate() {
+                innate[write] = Self::ALL[read];
+                write += 1;
+            }
+            read += 1;
+        }
+        innate
+    };
+
     /// The most **salvaged tech** a run holds at once (§8.3/§10.2/#266) — the
     /// `starting_abilities` grant count (#244), and the cap a campaign accumulation
     /// (§2.2) would have to respect too. Settled at three, and load-bearing beyond
@@ -484,7 +505,7 @@ impl AbilityId {
 /// Which abilities a player holds is no longer fixed: quick play grants the innate
 /// set plus a seeded draw of tech (#244), a campaign accumulates its set across
 /// facilities (§2.2). Both resolve to *this* — a concrete, explicit set carried in
-/// the shareable level-seed string ([`LevelSeed`](crate::LevelSeed)), so a handed-
+/// the shareable level-seed token ([`LevelSeed`](crate::LevelSeed)), so a handed-
 /// around run reproduces the exact loadout, not just the geometry. Held as a
 /// membership mask over [`AbilityId::ALL`] so it stays `Copy` and small.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -561,7 +582,7 @@ impl Loadout {
     }
 
     /// The abilities in the loadout, in the fixed [`AbilityId::ALL`] order — the
-    /// canonical order the level-seed string serialises and the deck iterates.
+    /// canonical order the level-seed token serialises and the deck iterates.
     pub fn iter(self) -> impl Iterator<Item = AbilityId> {
         AbilityId::ALL
             .into_iter()
