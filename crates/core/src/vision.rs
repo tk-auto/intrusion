@@ -142,6 +142,26 @@ impl VisibleSet {
         }
     }
 
+    /// [`absorb`](Self::absorb), holding one cell back — the crawl step of tile
+    /// memory (§11.5a/§10.7). A duct's interior path is never remembered, so the
+    /// interior cell the player currently occupies is the one cell of their view
+    /// that must not accumulate; everything else the crawl view offers (the mouth
+    /// peek out of an entry) is ordinary sight and accumulates as usual.
+    ///
+    /// The exclusion is applied to the *incoming* set, never to the accumulator, so
+    /// memory stays monotonic (§11.5a): a wall cell already remembered from the room
+    /// side stays remembered when a duct is later crawled through it.
+    pub(crate) fn absorb_except(&mut self, other: &VisibleSet, skip: Option<Cell>) {
+        match skip {
+            None => self.absorb(other),
+            Some(cell) => {
+                let mut held_back = other.clone();
+                held_back.unmark(cell);
+                self.absorb(&held_back);
+            }
+        }
+    }
+
     /// Whether the viewer sees `cell`. Anything off the grid is unseen.
     pub fn contains(&self, cell: Cell) -> bool {
         cell.x < self.width

@@ -360,6 +360,135 @@ fn the_usable_line_offers_duct_enter_at_a_mouth() {
     );
 }
 
+/// A duct **buried in a thick wall**: a 3-cell-deep band (rows 3..5) between an
+/// upper and a lower room, with the crawl threaded along its hidden middle row.
+///
+/// Unlike [`duct_world`]'s single-cell band — whose interior is plainly in view from
+/// the room below — every interior cell here sits behind a wall face from both
+/// rooms, so it can only ever enter tile memory by being *crawled*. That is what
+/// makes it the fixture for the §11.5a no-trace rule.
+///
+/// ```text
+///   #########   row 0 (border)
+///   #.......#   rows 1..2: upper room; the player starts at (2,2)
+///   #.......#
+///   ##=######   row 3: wall band — entry at (2,3), mouth (2,2)
+///   ##.....##   row 4: wall band — the interior run, invisible from either room
+///   ######=##   row 5: wall band — entry at (6,5), mouth (6,6)
+///   #.......#   rows 6..7: lower room
+/// ```
+fn buried_duct_world() -> State {
+    let mut f = Facility::walled_box(9, 9);
+    for y in 3..=5 {
+        for x in 1..=7 {
+            f.set_terrain(x, y, Terrain::Wall);
+        }
+    }
+    f.set_terrain(2, 3, Terrain::DuctEntry);
+    f.set_terrain(6, 5, Terrain::DuctEntry);
+    let duct = crate::Duct::new(vec![
+        Cell::new(2, 3),
+        Cell::new(2, 4),
+        Cell::new(3, 4),
+        Cell::new(4, 4),
+        Cell::new(5, 4),
+        Cell::new(6, 4),
+        Cell::new(6, 5),
+    ]);
+    let layout = crate::Layout::from_facility(f).with_ducts(vec![duct]);
+    State::new(
+        layout,
+        Cell::new(2, 2),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(7, 7),
+    )
+}
+
+/// §11.5a/§10.7: a duct's **interior** never enters tile memory, so crawling a
+/// shortcut leaves no trace of its route on the base map. Entries are geometry and
+/// do accumulate — they are the mouths you plan around either way.
+///
+/// This matters because memory is what tells explored geometry from unexplored
+/// (#307): were an interior cell remembered, the crawled path would read as known
+/// wall threading the map, giving away a route the design keeps in its own layer.
+#[test]
+fn crawling_a_duct_never_remembers_its_interior() {
+    let mut s = buried_duct_world();
+    let interior = [
+        Cell::new(2, 4),
+        Cell::new(3, 4),
+        Cell::new(4, 4),
+        Cell::new(5, 4),
+        Cell::new(6, 4),
+    ];
+    let entries = [Cell::new(2, 3), Cell::new(6, 5)];
+    assert!(
+        !interior.iter().any(|&c| s.memory().contains(c)),
+        "the fixture must start with its interior unseen, or it proves nothing",
+    );
+
+    s.step(Input::Step(Direction::South)); // bump the mouth: climb in at (2,3)
+    assert!(s.in_duct());
+    for step in [
+        Direction::South,
+        Direction::East,
+        Direction::East,
+        Direction::East,
+        Direction::East,
+        Direction::South,
+    ] {
+        s.step(Input::Step(step));
+        let leaked: Vec<_> = interior
+            .iter()
+            .filter(|&&c| s.memory().contains(c))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "crawling remembered interior cells {leaked:?} at {:?}",
+            s.player(),
+        );
+    }
+    assert_eq!(s.player(), Cell::new(6, 5), "reached the far entry");
+    s.step(Input::Step(Direction::South)); // climb out into the lower room
+
+    for c in interior {
+        assert!(
+            !s.memory().contains(c),
+            "{c:?} is interior — the crawled path must leave no trace",
+        );
+    }
+    for c in entries {
+        assert!(
+            s.memory().contains(c),
+            "{c:?} is an entry: geometry, remembered like any cell stood on",
+        );
+    }
+}
+
+/// Memory is **monotonic** (§11.5a), and holding a crawled interior cell back must
+/// not dent that: a wall cell already remembered from the room side stays remembered
+/// after a duct is crawled through it. The exclusion applies to the incoming view,
+/// never to the accumulator.
+#[test]
+fn crawling_does_not_erase_a_wall_already_remembered() {
+    let mut s = duct_world();
+    let seen_from_below = Cell::new(3, 1);
+    assert!(
+        s.memory().contains(seen_from_below),
+        "the wall band is in view from the starting mouth",
+    );
+
+    s.step(Input::Step(Direction::North)); // climb in
+    s.step(Input::Step(Direction::East)); // crawl onto (3,1) itself
+    assert_eq!(s.player(), seen_from_below);
+    assert!(
+        s.memory().contains(seen_from_below),
+        "crawling through a wall you had already looked at must not un-remember it",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Auto lateral-shift past an obstacle (#57) — the traversal experiment.
 // ---------------------------------------------------------------------------
