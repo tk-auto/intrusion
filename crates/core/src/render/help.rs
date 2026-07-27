@@ -318,7 +318,27 @@ fn direction_category(direction: ModifierDirection) -> Category {
 
 /// The **Legend** tab (#139): the glyph legend, the colour key, and the controls —
 /// the original reference card, now one tab of the panel.
+///
+/// **The card is drawn as one column and the board is only so tall**, so its three
+/// sections are competing for a fixed number of rows — and the controls section grows
+/// every time an ability is added (#242 was the row that made this bite). It ran off
+/// the bottom silently, losing whatever was last in the list; two section spacers and
+/// the `?` row — which only repeated what the footer already says — were given up to
+/// bring the whole card back inside the panel. [`legend_rows`] measures the height it
+/// needs and a test holds it against the panel, so the next overflow is a failing
+/// build rather than a row nobody notices is gone (§11.4's row-fits rule, applied to
+/// the panel). The lasting answer is to stop listing the abilities here at all
+/// (#296/#343); until then, this is where the budget is spent.
 fn draw_legend(grid: &mut Grid, mut y: u32) {
+    // The overflow that started this was silent because [`draw`] clips: rows painted
+    // past the bottom simply vanish. Say so here, where the drawing happens, so a
+    // debug run trips on it even outside the test that pins it.
+    debug_assert!(
+        y + legend_rows() <= grid.height.saturating_sub(1),
+        "the Legend card needs {} rows and the panel has {}, footer excluded",
+        legend_rows(),
+        grid.height.saturating_sub(1 + y),
+    );
     draw(grid, 2, y, "GLYPHS", Category::System);
     y += 1;
     for (glyph, category, meaning) in glyph_rows() {
@@ -326,7 +346,6 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
         draw(grid, 6, y, meaning, Category::Neutral);
         y += 1;
     }
-    y += 1;
 
     draw(grid, 2, y, "COLOURS", Category::System);
     y += 1;
@@ -337,7 +356,6 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
         draw(grid, 14, y, category_meaning(category), Category::Neutral);
         y += 1;
     }
-    y += 1;
 
     draw(grid, 2, y, "CONTROLS", Category::System);
     y += 1;
@@ -346,6 +364,14 @@ fn draw_legend(grid: &mut Grid, mut y: u32) {
         draw(grid, CONTROL_ACTION_X, y, &action, Category::Neutral);
         y += 1;
     }
+}
+
+/// How many rows the Legend card needs: a header and its rows for each of the three
+/// sections. Derived from the very lists [`draw_legend`] walks, so it cannot fall
+/// behind them — which is the whole point, since the growing list is the ability
+/// roster and the growth is what overflows the panel.
+fn legend_rows() -> u32 {
+    (3 + glyph_rows().len() + CATEGORIES.len() + control_rows().len()) as u32
 }
 
 /// Where the controls card's two columns start: the keys on the left, the action
@@ -363,11 +389,14 @@ fn draw_footer(grid: &mut Grid) {
     if grid.height == 0 {
         return;
     }
+    // The close key comes from [`HELP_KEY`] rather than being spelled again: this
+    // footer is now the *only* place it is written down (the controls card gave the
+    // duplicate row up), so it had better be the real one.
     draw(
         grid,
         2,
         grid.height - 1,
-        "Tab switches   Esc or [?] closes",
+        &format!("Tab switches   Esc or [{HELP_KEY}] closes"),
         Category::Ground,
     );
 }
@@ -465,7 +494,9 @@ fn control_rows() -> Vec<(String, String)> {
         rows.push((ability_row_keys(id), id.name().to_string()));
     }
     rows.push(("m".to_string(), "messages".to_string()));
-    rows.push((HELP_KEY.to_string(), "this help".to_string()));
+    // No `?` row: the panel's own footer already says "Esc or [?] closes" on every
+    // tab, and a card this tight cannot afford to say a thing twice — the row it
+    // duplicated is a row an ability now has.
     rows
 }
 
@@ -599,8 +630,57 @@ mod tests {
                 id.name(),
             );
         }
-        // The help key documents itself.
-        assert!(rows.iter().any(|(k, _)| *k == HELP_KEY.to_string()));
+        // The help key is documented by the footer instead, which every tab carries.
+        assert!(text_of(&render_help(
+            W,
+            H,
+            HelpTab::Legend,
+            None,
+            LevelModifiers::default()
+        ))
+        .contains(&format!("[{HELP_KEY}] closes")),);
+    }
+
+    /// **The whole Legend card is actually drawn** (#242). It is one column on a board
+    /// of fixed height, and it had been overflowing in silence: the last rows of the
+    /// controls list were painted past the bottom of the panel and simply lost, which
+    /// is how the `m / messages` row went missing without anyone noticing. Adding an
+    /// ability makes the card one row taller, so this is the check that has to exist —
+    /// the growth is real and it is going to happen again.
+    ///
+    /// Asserted against the card's own measurement rather than a copied number, and
+    /// against the footer row it must not reach, so the failure names the actual
+    /// constraint. The lasting fix is to move the abilities off this tab (#296/#343).
+    #[test]
+    fn the_legend_card_fits_the_panel() {
+        // Content starts two rows down (the tab bar and its rule) and the footer owns
+        // the last row, so the card has everything between.
+        let available = H - 2 - 1;
+        assert!(
+            legend_rows() <= available,
+            "the Legend card wants {} rows and has {available}: a section must give \
+             one up, or the abilities must move off this tab (#296/#343)",
+            legend_rows(),
+        );
+
+        // …and the drawing agrees with the measurement: every row of every section is
+        // on the grid, none of it painted past the bottom.
+        let text = text_of(&render_help(
+            W,
+            H,
+            HelpTab::Legend,
+            None,
+            LevelModifiers::default(),
+        ));
+        for (keys, action) in control_rows() {
+            assert!(
+                text.contains(&keys) && text.contains(&action),
+                "the control row {keys:?} / {action:?} was drawn off the card",
+            );
+        }
+        for (_, _, meaning) in glyph_rows() {
+            assert!(text.contains(meaning), "the glyph row {meaning:?} was lost");
+        }
     }
 
     /// The card joins the bar's short name to the key that fires it and to the full
