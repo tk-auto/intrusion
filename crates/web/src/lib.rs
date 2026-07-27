@@ -485,7 +485,15 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics) {
                 Visibility::Live => swatch(cell.fg).fg,
                 // Out-of-FOV geometry: the row's dim shade (§11.5) — the standard
                 // dark gray for most, quieter for Ground, tinted for the exit.
-                Visibility::Explored => swatch(cell.fg).dim,
+                //
+                // Unexplored geometry takes **the same shade** (§11.5a/#307): the
+                // schematic separates itself by shape (`≈`/`~`), so it needs no
+                // colour of its own. That is the point of choosing the glyph
+                // channel — a fourth brightness rung would have had to fit below
+                // Ground's already-quiet dim, where a dark palette has no room,
+                // and it would have owed a second set of values to light mode
+                // (#189). Nothing here changes when the ladder gains a rung.
+                Visibility::Explored | Visibility::Unexplored => swatch(cell.fg).dim,
                 // Remembered contents read as memory, not as the live thing (§11.5a).
                 Visibility::Remembered => MEMORY_COLOR,
             };
@@ -525,7 +533,12 @@ fn bg_color(bg: Category, vis: Visibility) -> &'static str {
     }
     match vis {
         Visibility::Live => swatch.bg,
-        Visibility::Explored | Visibility::Remembered => swatch.bg_dim,
+        // Threat outranks knowledge (§11.5 **[SETTLED]**): a watched cell in a wing
+        // the player has never entered still paints the red overlay, exactly as an
+        // explored one does. The schematic changes what the *glyph* claims, never
+        // what the detection set says — fix #1 (watched must never look safe) holds
+        // over unexplored ground too.
+        Visibility::Explored | Visibility::Unexplored | Visibility::Remembered => swatch.bg_dim,
     }
 }
 

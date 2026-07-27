@@ -256,6 +256,7 @@ fn modifier_bits(m: LevelModifiers) -> u32 {
         sighting_lost_calls_a_guard,
         body_found_calls_two_guards,
         always_show_vision_cones,
+        full_layout_known,
         intel_to_exit,
     } = m;
     u32::from(guards_always_search_hideouts)
@@ -263,6 +264,7 @@ fn modifier_bits(m: LevelModifiers) -> u32 {
         | gate_bits(intel_to_exit) << 2
         | u32::from(sighting_lost_calls_a_guard) << 4
         | u32::from(body_found_calls_two_guards) << 5
+        | u32::from(full_layout_known) << 6
 }
 
 /// Unpack a bitfield back into a [`LevelModifiers`], or `None` if a field holds a
@@ -274,6 +276,7 @@ fn modifiers_from_bits(bits: u32) -> Option<LevelModifiers> {
         intel_to_exit: gate_from_bits((bits >> 2) & 0b11)?,
         sighting_lost_calls_a_guard: bits & 0b1_0000 != 0,
         body_found_calls_two_guards: bits & 0b10_0000 != 0,
+        full_layout_known: bits & 0b100_0000 != 0,
     })
 }
 
@@ -478,6 +481,7 @@ mod tests {
                 sighting_lost_calls_a_guard: true,
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: true,
+                full_layout_known: true,
                 intel_to_exit: IntelGate::None,
             },
             abilities: Loadout::innate().with(AbilityId::Dephase),
@@ -514,6 +518,7 @@ mod tests {
                                     sighting_lost_calls_a_guard: called,
                                     body_found_calls_two_guards: called,
                                     always_show_vision_cones: cones,
+                                    full_layout_known: cones,
                                     intel_to_exit: gate,
                                 },
                                 abilities,
@@ -567,6 +572,7 @@ mod tests {
                 sighting_lost_calls_a_guard: true,
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: true,
+                full_layout_known: true,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::full(),
