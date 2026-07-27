@@ -21,7 +21,7 @@
 //! # The bar names everything, and it provably fits (§11.4, #287)
 //!
 //! A run holds at most [`AbilityId::MAX_HELD`] economy abilities (§8.3), so the bar
-//! can carry each one's **name** outright — no hotkey-only compaction, no deploy
+//! can carry each one's **name** outright — no key-only compaction, no deploy
 //! button, no panel unfolding over the board. Fitting four names and their `[N]` /
 //! `/N/` numbers across a 40-wide board (§10.2) is a tight budget, and
 //! [`MAX_BAR_WIDTH`] spends it under a `const` assertion: a longer bar name, a
@@ -73,7 +73,7 @@ const BAR_GAP: u32 = 1;
 /// A bar whose names slide around as numbers come and go is a bar you have to
 /// *read* every time; one whose names hold still is one you learn the shape of and
 /// then only glance at, which is the whole point of it being always-on (§11.4).
-/// Position is muscle memory, exactly like the hotkeys it projects (§11.6).
+/// Position is muscle memory, and since #359 it *is* the key as well (§11.6).
 const BAR_SLOT: u32 = MAX_BAR_ENTRY as u32 + BAR_GAP;
 
 /// The widest the ability bar can ever be, in cells (§11.4/#287): one [`BAR_SLOT`]
@@ -248,7 +248,7 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 ///
 /// # Named, always, with nothing to deploy (§11.4, §15 Q9, #287)
 ///
-/// The bar used to compress each ability to its bare hotkey and hide the names
+/// The bar used to compress each ability to a bare letter and hide the names
 /// behind a deploy button that unfolded a panel over the board. With the held set
 /// capped at [`AbilityId::MAX_HELD`] (§8.3) the compression bought nothing worth its
 /// cost: the names fit, so they are simply always there and the button and panel are
@@ -258,9 +258,10 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 ///
 /// The bar draws the run's **real** ability state ([`State::ability_statuses`]); a
 /// click on an entry resolves to the ability under it ([`ability_at`]) and activates
-/// it exactly as its hotkey would. The hotkeys themselves are unchanged and
-/// unaffected — the bar is a projection of them, never their source (§11.6) — and
-/// the help panel's Legend card is where a player reads each key off.
+/// it exactly as that slot's digit would. Since #359 the bar is the keys' **source**
+/// rather than their projection — `1`–`4` fire its first through fourth entries
+/// (§11.6) — so the order this row draws in is load-bearing, and the help panel's
+/// Abilities tab is where a player reads each pairing off.
 pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     let facility = state.layout().facility();
     let width = facility.width();
@@ -450,11 +451,33 @@ fn draw_help_button(row: &mut [GlyphCell], width: u32, band: Category) {
     }
 }
 
+/// The ability in bar **slot** `slot`, counting from `0` at the row's leftmost
+/// *drawn* entry, or `None` for a slot this run does not fill (§11.4/§11.6, #359).
+///
+/// **The one place a slot becomes an ability.** The keyboard arrives here with a
+/// digit ([`ability_slot_for_code`](crate::ability_slot_for_code)) and the pointer
+/// with a column ([`ability_at`]), so `1` and the entry under the thumb can never
+/// name different abilities — the divergence §11.4 pins against, now that the keys
+/// *are* the bar's positions rather than a projection of identity.
+///
+/// Counted against what is **drawn**, not against the catalogue: the row is flush
+/// right (#267) and shorter loadouts sit further in, so slot `0` is the leftmost
+/// entry on screen and never a gap where the first catalogue row would have gone. A
+/// slot the row truncated away (an oversized hand-built state — see
+/// [`ability_line_layout`]) is `None` too, so no key fires an entry nobody can see.
+pub fn ability_in_slot(state: &State, slot: usize) -> Option<AbilityId> {
+    let statuses = state.ability_statuses();
+    ability_line_layout(state.layout().facility().width(), &statuses)
+        .get(slot)
+        .map(|&(i, _)| statuses[i].id)
+}
+
 /// The ability entry at screen cell `(x, y)`, or `None` — the **pure**
 /// pointer→identity hit-test for the always-on bar (§11.4). A shell maps a click to
 /// a screen cell and asks this; a hit fires `Input::Activate(id)` on the returned
-/// ability, resolving by **identity**, never by the column it landed on (§11.6) — so
-/// it opens no second activation path (the §8.4 regression) and, on a cooling/active
+/// ability. It resolves the slot the click landed on and hands it to
+/// [`ability_in_slot`], the one seam the keyboard's digits go through too — so it
+/// opens no second activation path (the §8.4 regression) and, on a cooling/active
 /// entry, refuses for free in the economy (§4.4) with no turn spent.
 ///
 /// The geometry mirrors [`render_screen`] exactly, drawing from the same shared
@@ -470,11 +493,10 @@ pub fn ability_at(state: &State, x: u32, y: u32) -> Option<AbilityId> {
     if y != ability_row(facility.height()) {
         return None; // the bar is the frame's last row and nothing else is the bar
     }
-    let statuses = state.ability_statuses();
-    ability_line_layout(facility.width(), &statuses)
+    let slot = ability_line_layout(facility.width(), &state.ability_statuses())
         .into_iter()
-        .find(|(_, start)| x >= *start && x < start + MAX_BAR_ENTRY as u32)
-        .map(|(i, _)| statuses[i].id)
+        .position(|(_, start)| x >= start && x < start + MAX_BAR_ENTRY as u32)?;
+    ability_in_slot(state, slot)
 }
 
 /// The §11.2 category an ability entry reads in, by its state: an available ability
@@ -1488,15 +1510,12 @@ mod tests {
         assert_eq!(columns(&s), first, "and back to ready moved nothing");
     }
 
-    /// The bar is a **projection**, not a rebinding (§11.6/#267/#287): dropping the
-    /// hotkey letter off the bar moved no key — every entry still resolves to the
-    /// ability its settled hotkey fires — and each ability state still reads its own
-    /// colour, ready and active Owned, cooling System, so the states stay
-    /// discoverable without the letter.
+    /// The bar is the keys' **source** (§11.6/#267/#359): every entry the row draws
+    /// is the slot its digit fires, counted from the leftmost drawn entry — and each
+    /// ability state still reads its own colour, ready and active Owned, cooling
+    /// System, so the states stay discoverable without a letter on the row.
     #[test]
-    fn the_bar_still_projects_the_settled_hotkeys_and_states() {
-        use crate::input::ability_for_key;
-
+    fn the_bar_slots_are_the_keys_and_the_states_keep_their_colours() {
         let mut s = State::new(
             open_room(40, 10),
             Cell::new(15, 5),
@@ -1508,19 +1527,23 @@ mod tests {
         .with_loadout(granted());
         let bar = ability_row(10);
 
-        // Every entry the bar draws resolves to the very id its hotkey fires.
-        for (i, start) in ability_line_layout(40, &s.ability_statuses()) {
+        // Every entry the bar draws is the slot its digit fires, and the tap on that
+        // entry resolves to the same ability — the one seam, both ways in.
+        for (slot, (i, start)) in ability_line_layout(40, &s.ability_statuses())
+            .into_iter()
+            .enumerate()
+        {
             let id = s.ability_statuses()[i].id;
-            let key = crate::input::ability_hotkey(id.name()).expect("a settled hotkey");
             assert_eq!(
                 ability_at(&s, start, bar),
                 Some(id),
                 "{id:?} under its own entry"
             );
             assert_eq!(
-                ability_for_key(&key.to_string()),
+                ability_in_slot(&s, slot),
                 Some(id),
-                "{key} still names {id:?}"
+                "the {} key fires {id:?}",
+                slot + 1,
             );
         }
 
@@ -1700,15 +1723,79 @@ mod tests {
         assert_eq!(ability_at(&s, 0, NEAR_ROW), None, "nor is the near line");
     }
 
-    /// The click **is** the hotkey (§11.4/§11.6): the id a bar cell resolves to is
-    /// the very id its §11.6 shortcut names, and both hand that id to the one
-    /// `State::ability_input` toggle (#304) — so a click activates a ready ability
-    /// and, on a cooling one, refuses for free with no turn spent (§4.4), exactly as
-    /// the key.
+    /// #359's binding, against the row it is a binding *on*: a **three**-ability run
+    /// answers `1`, `2` and `3` — each firing the ability whose entry the bar drew at
+    /// that slot — and `4` fires nothing at all, because the run has no fourth entry.
+    ///
+    /// The digits count the row **as drawn**, which is the trap the ticket named: the
+    /// bar is flush right (#267), so a short loadout starts well in from the left edge
+    /// and a slot counted from the catalogue instead would leave `1` dead. The
+    /// assertion below reads the id straight out of the drawn cells to keep the count
+    /// honest.
     #[test]
-    fn a_click_activates_by_the_same_path_as_the_hotkey() {
-        use crate::input::ability_for_key;
+    fn a_three_ability_loadout_answers_one_two_three_and_ignores_four() {
+        let held = [AbilityId::Run, AbilityId::Camouflage, AbilityId::Decoy];
+        let s = State::new(
+            open_room(40, 10),
+            Cell::new(15, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(38, 8),
+        )
+        .with_loadout(held.into_iter().fold(Loadout::empty(), Loadout::with));
+        let grid = render_screen(&s, ScreenUi::default());
+        let bar = ability_row(10);
 
+        // Three entries on a 40-wide row, flush right: the first is drawn at column 10
+        // and nothing at all is drawn at 0 — the cell a catalogue-counted `1` would
+        // have fired.
+        let layout = ability_line_layout(40, &s.ability_statuses());
+        assert_eq!(
+            layout.iter().map(|&(_, x)| x).collect::<Vec<_>>(),
+            vec![10, 20, 30],
+            "a short bar sits away from the left edge",
+        );
+        assert_eq!(grid.get(0, bar).glyph, ' ', "…leaving the left edge blank");
+
+        for (slot, id) in held.into_iter().enumerate() {
+            assert_eq!(
+                ability_in_slot(&s, slot),
+                Some(id),
+                "the {} key fires {id:?}",
+                slot + 1,
+            );
+            // …and that is the entry the row drew there: the slot's first cells spell
+            // its bar name.
+            let start = layout[slot].1;
+            let drawn: String = (0..id.bar_name().chars().count() as u32)
+                .map(|i| grid.get(start + i, bar).glyph)
+                .collect();
+            assert_eq!(
+                drawn,
+                id.bar_name(),
+                "slot {} draws what it fires",
+                slot + 1
+            );
+            // The tap on that same cell agrees, which is the seam both go through.
+            assert_eq!(ability_at(&s, start, bar), Some(id));
+        }
+
+        // `4` is a key this run has no entry for: nothing to fire, so nothing happens.
+        assert_eq!(
+            ability_in_slot(&s, 3),
+            None,
+            "a digit past the held count fires nothing",
+        );
+    }
+
+    /// The click **is** the key (§11.4/§11.6): a bar cell and that entry's digit
+    /// resolve through the one [`ability_in_slot`] seam to the same id, and both hand
+    /// it to the one `State::ability_input` toggle (#304) — so a click activates a
+    /// ready ability and, on a cooling one, refuses for free with no turn spent
+    /// (§4.4), exactly as the key.
+    #[test]
+    fn a_click_activates_by_the_same_path_as_the_digit() {
         let mut s = State::new(
             open_room(40, 10),
             Cell::new(15, 5),
@@ -1720,12 +1807,12 @@ mod tests {
         .with_loadout(granted());
         let bar = ability_row(10);
 
-        // The bar's Run slot resolves to the same id `r` fires — one path, by identity.
+        // The bar's first slot resolves to the same id `1` fires — one path, one seam.
         let clicked = ability_at(&s, 0, bar).expect("Run under the pointer");
         assert_eq!(
-            ability_for_key("r"),
+            ability_in_slot(&s, 0),
             Some(clicked),
-            "the click and the shortcut resolve to the same ability",
+            "the click and the digit resolve to the same ability",
         );
         assert_eq!(
             s.ability_input(clicked),

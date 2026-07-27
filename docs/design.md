@@ -1952,13 +1952,15 @@ tap away.
 
 **[SETTLED]** — a **one-row ability bar, flush to the bottom-right**, always on,
 carrying **every held ability by name** with its `[3]` / `/2/` / `(on)` notation
-tucked against it and its state in colour. No hotkey letters on the bar, no
+tucked against it and its state in colour. No key letters on the bar, no
 deploy button, no panel: the whole set is simply always readable, and the board
-is never covered. A tap on any entry activates exactly what its hotkey would. The
-bar is a **projection** of the §11.6 keys, never their source — the keys are
-unchanged and unconditional, and the help panel's **Abilities** tab is where a
-player reads them off, each one paired with the bar name it fires (`c / Camo` →
-*Camouflage*) and with what the ability actually does (#343). The **Help** tab —
+is never covered. A tap on any entry activates exactly what its key would. The
+bar is the **source** of the §11.6 ability keys, not a projection of them: `1`–`4`
+fire its first through fourth entries as drawn (#359), so the row's order is what
+the keyboard names and a tap and a digit resolve through the one function. The help
+panel's **Abilities** tab is where a player reads the pairing off, each entry given
+the bar name it fires and the digit that fires it (`1 / Camo` → *Camouflage*), with
+what the ability actually does (#343). The **Help** tab —
 called *Legend* until the abilities left it — keeps only the **standing** controls:
 move, wait, messages, help. It listed the whole eight-ability catalogue when a run
 holds at most four, and a reference card that changes with the loadout is not a
@@ -1970,8 +1972,8 @@ state it is in. A cooldown appearing, or ticking from `/10/` to `/9/`, changes
 nothing but its own cells. This matters more than it sounds: a bar whose words
 slide about as numbers come and go is a bar you have to *read* every time you
 look, and the whole case for it being always-on is that you learn its shape and
-then only **glance**. An ability's column is a fact about the run, like its
-hotkey (§11.6) — position is muscle memory too. The slots are laid end to end and
+then only **glance**. An ability's column is a fact about the run, and since
+#359 it *is* its key (§11.6) — position is muscle memory too. The slots are laid end to end and
 the block is flush **right**, so a shorter loadout still keeps the bar under the
 thumb (#267).
 
@@ -2187,27 +2189,56 @@ finally having a mechanism.
 
 | Key | Action |
 |---|---|
-| Arrows / `4` `6` `8` `2` | Move |
-| `5` / `w` | Wait |
+| Arrows / `h` `j` `k` `l` / numpad `4` `6` `8` `2` | Move |
+| `w` / numpad `5` / `.` | Wait |
+| `1` `2` `3` `4` (top row) | Fire ability bar slots 1–4 |
 | `Enter` / `Space` | Confirm |
 | `Escape` | Cancel / menu |
 | `m` / `?` / `n` | Messages, help, colour theme — view toggles, never a turn (§11.2/§11.4) |
-| Letters | Ability hotkeys |
 
-**An ability hotkey is a toggle.** The key switches the ability on and, pressed
+**Digits bind by physical key, not by character.** The top row's `Digit1`–`Digit4`
+and the numpad's `Numpad2` `4` `6` `8` `5` are resolved from `KeyboardEvent.code`,
+so the binding is the key's *position*. An AZERTY top row is `& é " '` and a
+character binding would want Shift to fire an ability in the turn things go wrong.
+It also settles which digits are which: the **numpad** moves and the **top row**
+fires abilities, a split the table above could not state while it said only `4`
+`6` `8` `2`.
+
+**Ability keys are the bar's slots** (#359). `1`–`4` fire the first through fourth
+entries **of the bar as drawn** (§11.4) — the *drawn* row, which is flush right, so
+`1` is the leftmost entry on screen and never a gap. Four keys, forever: a run holds
+at most four abilities (§8.3) while the catalogue keeps growing (salvaged tech —
+§14 v3), so identity-keyed letters meant every new ability needing a free letter it
+could keep for good, with the best mnemonics gone first and the twelfth ability
+getting whatever was left. A digit past the run's held count does nothing: no turn,
+no state change.
+
+**What that trades away, and why it is safe.** A key is no longer a fact about an
+*ability*: `c` was Camouflage in every run ever played, and `1` is not. That is the
+cost, and it is real. What makes it payable is that the slots are **fixed for the
+whole run** and drawn on screen at all times (§11.4), so a digit is never ambiguous
+where it is pressed — and `Run` is innate and always first (§8.3), so the
+most-pressed key in the game keeps its cross-run constancy anyway. This is *not* the
+old regression coming back: that one let a key change **because another ability's
+name changed**, silently, between one run and the next, with nothing on screen to
+say so. A bar slot is visible, stable within the run, and the same thing your thumb
+taps.
+
+**An ability key is a toggle.** The key switches the ability on and, pressed
 again while it is **active**, switches it off — the free action §4.4 grants, which
 otherwise has no key at all. One key with two meanings is safe here because the
 meaning is on screen before it is pressed: the bar draws `Run[3]` while active and
 `Run` while ready (§11.4). A **passive** (§8.2) is not a toggle — holding it is the
 whole of its state, so its key stays the free no-op it always was. The choice is
-made from live state in **one place** for both input paths, so a tap on the bar and
-its hotkey can never diverge (§11.4: the bar is a projection of the keys).
+made from live state in **one place** for both input paths, and the slot→ability
+resolution is one place too, so a tap on the bar and its digit can never diverge
+(§11.4).
 
-**Assign ability hotkeys explicitly.** The old version derived them from the
-label — each ability claimed the first letter not already claimed by one above it
-— which meant `Dephase` became `e` because `Decoy` took `d`, and **an ability's
-key silently changed when the list above it changed.** Muscle memory is not
-optional in a game where a mis-key ends a run.
+**Letters live on in the replay notation.** The identity→letter map (`+r` Run, `-c`
+Camouflage) is what a replay script spells an ability with (§12.4), and *there*
+identity-keyed is exactly right: a stored script has to name the same ability in
+every run, so a letter moving would silently re-point old replays. It is pinned
+letter by letter for that reason. It is no longer a keyboard binding.
 
 **Touch is a real target and was never finished.** The manifest pinned landscape
 and installed standalone, but the options dialog could not be closed by touch and
@@ -2233,8 +2264,8 @@ and its fixed position are settled; a miss is free, not impossible.
 Two rules keep the band from taking anything away. **Swipes are exempt** — a
 directional drag is unambiguous, so it may start anywhere, band included; only the
 ambiguous zero-displacement gesture is gated. And the keyboard is untouched: `w` /
-`5` waits without touching the board at all, so the band never leaves a player
-unable to wait. The band is one number for the touch feel, scaled from the swipe
+numpad `5` waits without touching the board at all, so the band never leaves a
+player unable to wait. The band is one number for the touch feel, scaled from the swipe
 threshold and floored at one full map row so it never shrinks below a cell at a
 small fit. **[START]** — the cost is that a player near the bottom of the map can no
 longer wait by tapping right beside themselves.
@@ -2695,6 +2726,6 @@ default.
    ability** in a fixed 10-cell slot, with its `[3]` / `/2/` / `(on)` notation and
    its state colour, and nothing to deploy. What unlocked it was capping the held set at four (§8.3) —
    the names fit, so the compression was pure cost. Both constraints hold: every
-   state stays discoverable on the bar, and hotkeys (§11.6) are untouched by it —
-   the bar no longer even shows them, and the help panel's Abilities tab pairs
-   each key with the bar name it fires (#287/#343).
+   state stays discoverable on the bar, and the keys are legible off it — the bar
+   draws no key itself, but its slots *are* the §11.6 digits (#359), and the help
+   panel's Abilities tab pairs each with the bar name it fires (#287/#343).

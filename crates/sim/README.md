@@ -34,7 +34,7 @@ One input per token, the exact string `--emit-replay` prints back:
 |---|---|
 | `N` / `E` / `S` / `W` | step north/east/south/west (case-insensitive) |
 | `.` | wait |
-| `+<key>` | activate the ability with §11.6 hotkey `<key>` — `+r` Run, `+c` Camouflage, `+d` Decoy, `+x` Dephase |
+| `+<letter>` | activate the ability with script letter `<letter>` — `+r` Run, `+c` Camouflage, `+d` Decoy, `+x` Dephase |
 | `-<key>` | deactivate that ability |
 
 The takedown-bump and the drag-grab are steps *into* a target (§7.2/§8.3), so

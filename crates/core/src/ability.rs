@@ -3,8 +3,8 @@
 //!
 //! §11.4's settled answer to §15 Q9 is one always-on **named bar**: every ability
 //! the run holds, drawn by its short bar name with its state notation tucked
-//! against it, driven by real per-ability runtime and *actionable* — a click
-//! resolves to the ability under it and activates it exactly as its hotkey would
+//! against it, driven by real per-ability runtime and *actionable* — a tap resolves
+//! to the ability under it and activates it exactly as that slot's digit would
 //! (§11.4, §11.6). This module owns the *display* half: the states an ability reads
 //! as ([`AbilityState`]) and how each formats, the bounded bar names, and one bar
 //! entry ([`AbilityStatus`]). The render composes and hit-tests them
@@ -40,18 +40,19 @@
 //!
 //! Two things are real and load-bearing across the display:
 //!
-//! - **Hotkeys come from [`ability_hotkey`](crate::input::ability_hotkey)**, the
-//!   settled §11.6 identity→letter map — never from the bar's entry order. A key
-//!   is a fixed fact about an ability, so reordering or trimming the list can
-//!   never move one (the §11.6 regression this repo already designed out); and a
-//!   click resolves by that same identity, never by the entry it lands on. The bar
-//!   itself no longer *shows* the letter — it has names to draw instead — so the
-//!   help panel's Legend card is where a player reads the keys off (§15 Q9).
+//! - **Keys come from the bar's own slots** (§11.6/#359): `1`–`4` fire its first
+//!   through fourth entries, so the four keys a run can press stay four however far
+//!   the catalogue grows past them. The order the bar draws is therefore load-bearing
+//!   — it is what the keyboard names — and a tap and a digit both resolve through
+//!   [`ability_in_slot`](crate::ability_in_slot), so they cannot disagree. The bar
+//!   draws no key at all: the help panel's Abilities tab is where a player reads the
+//!   pairing off (§15 Q9, #343). The identity→letter map lives on as the replay
+//!   script's spelling ([`ability_script_letter`](crate::replay::ability_script_letter)).
 //! - **The number shown is the number the player gets** (§8.2 timing): the bar
 //!   formats exactly the value it is handed and advertises nothing else, so it
 //!   cannot re-introduce the old advertised-vs-real discrepancy.
 
-use crate::input::ability_hotkey;
+use crate::replay::ability_script_letter;
 
 /// The runtime state of one ability, as the player reads it (§11.4): the cases the
 /// bar must keep discoverable — ready, active, cooling, passive, unusable.
@@ -138,25 +139,19 @@ pub(crate) const PASSIVE_MARKER: &str = "(on)";
 
 /// One entry on the always-on ability bar (§11.4): a held ability's identity and
 /// the state it is in. Assembled from live runtime by
-/// [`State::ability_statuses`](crate::State::ability_statuses); its hotkey and
-/// name come from the [`AbilityId`], never an entry position, so reordering the
-/// bar can never move a key (§11.6) and a click resolves by identity.
+/// [`State::ability_statuses`](crate::State::ability_statuses), in the fixed order
+/// the bar draws — which is also the order the §11.6 digits fire (#359), so this
+/// list *is* the keyboard's slots as well as the row's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AbilityStatus {
-    /// The ability this entry is for — the identity a click resolves to and
-    /// activates (§11.4), and the source of its hotkey and name.
+    /// The ability this entry is for — the identity a tap or a digit resolves to and
+    /// activates (§11.4), and the source of its name.
     pub id: AbilityId,
     /// What state the ability is in right now (§11.4).
     pub state: AbilityState,
 }
 
 impl AbilityStatus {
-    /// The ability's explicit §11.6 hotkey, by identity ([`AbilityId::hotkey`]) —
-    /// never a row position (the regression [`ability_hotkey`] designs out).
-    pub fn hotkey(&self) -> char {
-        self.id.hotkey()
-    }
-
     /// The ability's full display name (§8.3), by identity ([`AbilityId::name`]).
     pub fn name(&self) -> &'static str {
         self.id.name()
@@ -350,9 +345,10 @@ pub enum AbilityId {
 
 impl AbilityId {
     /// Every economy-governed ability, in the fixed deck-slot order. The order is
-    /// display/iteration order only — hotkeys come from the identity map (§11.6),
-    /// never from a position — but it *is* the order [`index`](Self::index) pins,
-    /// so the two must not drift.
+    /// display/iteration order — it is what [`Loadout::iter`] filters, so it decides
+    /// which bar slot a held ability lands in and therefore which digit fires it
+    /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
+    /// must not drift.
     pub const ALL: [AbilityId; 9] = [
         AbilityId::Run,
         AbilityId::Camouflage,
@@ -426,8 +422,9 @@ impl AbilityId {
         matches!(self, AbilityId::Run)
     }
 
-    /// The ability's display name (§8.3) — the identity the settled §11.6 hotkey
-    /// map ([`ability_hotkey`]) is keyed by, so a name and its key stay one fact.
+    /// The ability's display name (§8.3) — the identity the replay script's letter
+    /// map ([`ability_script_letter`]) is keyed by, so a name and its spelling stay
+    /// one fact.
     /// This is the **full** name: the help panel, the messages and the level-seed
     /// string all speak it. The ability bar has a row to fit and speaks the short
     /// [`bar_name`](Self::bar_name) instead.
@@ -453,7 +450,7 @@ impl AbilityId {
     /// nine cells an entry. Every name here is a plain word a player can say out loud
     /// — `Camo`, `Phase`, `Doors`, `Daze`, `Sight` — not an abbreviation to decode,
     /// and each pairs with the full §8.3 [`name`](Self::name) on the help panel's
-    /// Legend card, which is also where the hotkey is read off. A name that would
+    /// Abilities tab, which is also where the key is read off. A name that would
     /// overflow the row fails the **build**, not the frame (see [`MAX_BAR_ENTRY`] and
     /// the render's bound).
     pub const fn bar_name(self) -> &'static str {
@@ -531,10 +528,12 @@ impl AbilityId {
         self.def().is_passive()
     }
 
-    /// The settled §11.6 hotkey, through the one explicit identity map — never a
-    /// list position (the regression [`ability_hotkey`] designs out).
-    pub fn hotkey(self) -> char {
-        ability_hotkey(self.name()).expect("every economy ability has a settled §11.6 hotkey")
+    /// The ability's **replay script** letter (§12.4), through the one explicit
+    /// identity map ([`ability_script_letter`]) — a fact about the ability, so a
+    /// stored script reads the same in every run. It is no longer a keyboard binding:
+    /// the keys are the bar's slots (§11.6/#359).
+    pub fn script_letter(self) -> char {
+        ability_script_letter(self.name()).expect("every ability has a script letter")
     }
 
     /// This ability's static definition (§8.1): how it is paid for, and its
@@ -1496,18 +1495,16 @@ mod tests {
         );
     }
 
-    /// An entry's hotkey and name are the **explicit** §11.6 identity, taken from
-    /// the [`AbilityId`] — not its position. Were they derived from list order,
-    /// reordering the bar would shuffle the keys (the regression §11.6 rules out).
+    /// An entry's name is its [`AbilityId`]'s, taken by identity — the bar draws what
+    /// the ability *is*, and only the key it answers to comes from its position
+    /// (§11.6/#359).
     #[test]
-    fn an_entry_takes_its_hotkey_and_name_from_its_identity() {
+    fn an_entry_takes_its_name_from_its_identity() {
         for id in AbilityId::ALL {
             let status = AbilityStatus {
                 id,
                 state: AbilityState::Ready,
             };
-            assert_eq!(status.hotkey(), id.hotkey(), "{}'s key", id.name());
-            assert_eq!(status.hotkey(), ability_hotkey(id.name()).unwrap());
             assert_eq!(status.name(), id.name());
         }
     }
@@ -1630,7 +1627,7 @@ mod economy_tests {
             "Bore",
             "§11.4 fits 5 cells"
         );
-        assert_eq!(AbilityId::PierceWall.hotkey(), 'b');
+        assert_eq!(AbilityId::PierceWall.script_letter(), 'b');
     }
 
     /// **Every** activated ability is pinned by one of the catalog tests — the
@@ -1725,15 +1722,17 @@ mod economy_tests {
         }
     }
 
-    /// Name and hotkey come from the identity map (§11.6), reachable from the id.
+    /// The replay script's letter comes from the identity map (§12.4), reachable from
+    /// the id — the one spelling of an ability that is *not* a fact about the run it
+    /// is held in (#359).
     #[test]
-    fn each_id_carries_its_settled_hotkey() {
-        assert_eq!(AbilityId::Run.hotkey(), 'r');
-        assert_eq!(AbilityId::Camouflage.hotkey(), 'c');
-        assert_eq!(AbilityId::Decoy.hotkey(), 'd');
-        assert_eq!(AbilityId::Dephase.hotkey(), 'x');
-        assert_eq!(AbilityId::Autodoors.hotkey(), 'a');
-        assert_eq!(AbilityId::Confusion.hotkey(), 'z');
+    fn each_id_carries_its_script_letter() {
+        assert_eq!(AbilityId::Run.script_letter(), 'r');
+        assert_eq!(AbilityId::Camouflage.script_letter(), 'c');
+        assert_eq!(AbilityId::Decoy.script_letter(), 'd');
+        assert_eq!(AbilityId::Dephase.script_letter(), 'x');
+        assert_eq!(AbilityId::Autodoors.script_letter(), 'a');
+        assert_eq!(AbilityId::Confusion.script_letter(), 'z');
     }
 
     /// A fresh deck is available from the start (§8.3: the v1 set is), in whichever
