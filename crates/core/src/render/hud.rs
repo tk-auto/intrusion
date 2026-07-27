@@ -545,16 +545,23 @@ const _: () = assert!(
 ///
 /// It is the same move the near line already makes one row up — ambient status
 /// instead of an empty line (§11.4) — and it is a **floor, never a competitor**:
-/// the moment anything is adjacent, the affordances take the row back whole. The
-/// words draw in [`Ground`](Category::Ground) (§11.2, *ground recedes*), so they
-/// stay legible without ever reading as something you can bump.
+/// the moment anything is adjacent, the affordances take the row back whole.
+///
+/// The words draw in [`Owned`](Category::Owned) — *you, and the things you made*
+/// (§11.2). [`Ground`](Category::Ground) was the first answer and it was the wrong
+/// one on the screen: Ground's meaning is **absence**, drawn to recede so that
+/// everything else pops against it, which is precisely the wrong instruction for a
+/// row whose whole job is to be read. Owned says what these two verbs actually are
+/// — not scenery, not something to bump, but *yours*, the pair you always hold —
+/// and it puts them in the same blue as the ability bar's ready entries, so the
+/// two surfaces that answer "what can I do right now" answer in one colour.
 fn usable_hint(modality: InputModality) -> Vec<(String, Category)> {
     let hint = match modality {
         InputModality::Keys => KEYS_HINT,
         InputModality::Touch => TOUCH_HINT,
     };
     hint.iter()
-        .map(|text| ((*text).to_string(), Category::Ground))
+        .map(|text| ((*text).to_string(), Category::Owned))
         .collect()
 }
 
@@ -1135,9 +1142,9 @@ mod tests {
 
     /// §11.4/#323: with nothing adjacent to act on, the usable line teaches the two
     /// innate verbs instead of sitting blank — in the vocabulary the player's hands
-    /// are using ([`ScreenUi::modality`]). The words draw in Ground (§11.2, *ground
-    /// recedes*) and carry no band, so the row still reads as status and never as
-    /// something you can bump.
+    /// are using ([`ScreenUi::modality`]). The words draw in Owned — *yours*, the
+    /// pair you always hold (§11.2), the ability bar's own ready colour — and carry
+    /// no band, so the row still reads as status rather than as a message.
     #[test]
     fn the_empty_usable_line_teaches_move_and_wait() {
         // Mid-corridor, nothing adjacent: the common case the blank row used to be.
@@ -1171,13 +1178,17 @@ mod tests {
             "touch: the gesture model, the held press deliberately unnamed"
         );
 
-        // Ground, and no band: legible, receding, plainly not an affordance.
+        // Owned, and no band: the verbs are yours, and the row is still not a message.
         let g = render_screen(&s, ScreenUi::default());
         for x in 0..g.width() {
             let cell = g.get(x, USABLE_ROW);
             assert_eq!(cell.bg, None, "the usable line still has no band");
             if cell.glyph != ' ' {
-                assert_eq!(cell.fg, Category::Ground, "the hint recedes (§11.2)");
+                assert_eq!(
+                    cell.fg,
+                    Category::Owned,
+                    "the innate verbs are yours (§11.2), in the bar's ready colour"
+                );
             }
         }
     }

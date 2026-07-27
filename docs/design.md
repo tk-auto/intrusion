@@ -1922,8 +1922,11 @@ The fence that keeps it a hint rather than a control legend:
 - **Read-only, like the rows around it.** Nothing here is tappable — a hint that
   could be pressed would be a second, undiscoverable control surface at the top of
   the screen (§11.6's touch rule).
-- **Ground, never Interest** (§11.2, *ground recedes*): legible without ever
-  reading as something you can bump.
+- **Owned** (§11.2, *you and the things you made*) — the same blue the ability
+  bar's ready entries use, so the two surfaces answering *what can I do right now*
+  answer in one colour. Ground was tried first and lost on screen: its meaning is
+  **absence**, drawn to recede so everything else pops against it, which is exactly
+  the wrong instruction for a row whose whole job is to be read.
 - **The modality is the shell's only say.** It answers *is this a touch session?*
   — seeded from `pointer: coarse` at boot, then corrected to whichever modality was
   **last actually used**, so a laptop with a touchscreen and a tablet with a
