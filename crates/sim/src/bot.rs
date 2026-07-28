@@ -2198,10 +2198,15 @@ mod tests {
     ///   reporting no takedowns is correct behaviour, not a defect);
     /// - the **striking** ones land some, from the core's own gate and no other —
     ///   the bot never re-implements a precondition, it bumps and the game rules;
-    /// - `aggressive` **grabs** bodies, so the drag half of the chain runs;
+    /// - `aggressive` **grabs** bodies, so the drag half of the chain runs, and
+    ///   **stows** some of them, so §10.3's deposit-and-lock runs too;
     /// - `careless` gets bodies **found**, which is the first exercise §7.3's clock
     ///   has ever had. That is why it exists: a stowed body is beyond every cone, so
     ///   the tidier the temperament the flatter this row reads.
+    ///
+    /// Since **#381** the stow has its own §13.2 slot, so every one of these is read
+    /// straight off the histogram — the hand-rolled `BodyStored` counter this test used
+    /// to carry was the tell that the metric was missing.
     ///
     /// Loose and direction-only (§13.4), like every other shape assertion here: the
     /// counts are free to move, the zero-versus-nonzero split is not.
@@ -2227,9 +2232,10 @@ mod tests {
                     takedowns,
                     found,
                     usage.count(Verb::Takedown),
-                    usage.count(Verb::Drag)
+                    usage.count(Verb::Drag),
+                    usage.count(Verb::Stow)
                 ),
-                (0, 0, 0, 0),
+                (0, 0, 0, 0, 0),
                 "{}: a profile that declines the verb must land none of it",
                 profile.name,
             );
@@ -2250,7 +2256,7 @@ mod tests {
             "aggressive never took hold of a body — §8.3's drag is still unexercised",
         );
 
-        let (strikes, found, _) = batch(Profile::CARELESS);
+        let (strikes, found, careless) = batch(Profile::CARELESS);
         assert!(strikes > 0, "careless landed no takedown over 60 seeds");
         assert!(
             found > 0,
@@ -2262,33 +2268,14 @@ mod tests {
         // not a decision — stepping off a body's cell grabs it whether you meant to or
         // not (§8.3/#187) — so `careless` racks up grabs it immediately undoes, and a
         // `Drag` count says nothing about temperament on its own. Putting a body
-        // *away* is the decision, it locks the cupboard behind it (§10.3), and it has
-        // no verb in the §13.2 histogram, so it is counted from its own event here.
-        let stowed = |profile: Profile| {
-            let mut stowed = 0;
-            for seed in 0..60 {
-                let (mut state, _) = boot(seed);
-                let mut bot = StealthBot::with_profile(profile);
-                for _ in 0..DEFAULT_INPUT_CAP {
-                    if state.outcome() != Outcome::Playing {
-                        break;
-                    }
-                    let input = bot.decide(&state);
-                    stowed += state
-                        .step(input)
-                        .iter()
-                        .filter(|e| matches!(e, intrusion_core::Event::BodyStored { .. }))
-                        .count();
-                }
-            }
-            stowed
-        };
+        // *away* is the decision, and since #381 it has its own §13.2 slot, so the
+        // split is **read off the histogram** rather than replayed and counted by hand.
         assert!(
-            stowed(Profile::AGGRESSIVE) > 0,
+            aggressive.count(Verb::Stow) > 0,
             "aggressive never stowed a body — §10.3's deposit-and-lock is unexercised",
         );
         assert_eq!(
-            stowed(Profile::CARELESS),
+            careless.count(Verb::Stow),
             0,
             "careless stowed a body — a reach of zero must mean it never tidies up, \
              or `bodies_found` loses the source this profile exists to be",

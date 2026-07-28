@@ -1,6 +1,6 @@
 {
   "_note": "Baseline metrics snapshot the playtest skill diffs against (§13.2, #140). It is a snapshot of the --bot batch below on the commit named, one block PER PLAYSTYLE PROFILE (#198): a profile is a temperament, so each has its own numbers and they are never compared against each other as a leaderboard. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself, a profile's numbers), refresh it in the same PR with `./scripts/baseline.py --refresh` — never by hand, so every block moves together. That script also runs as a check on every PR (CI's `simbot baseline` job), re-running each block's own `command` and failing when a summary no longer matches: a stale baseline compared silently is the anti-pattern this file exists to avoid, and it is invisible unless something re-runs it. The per-profile `command` strings are what the check executes, so they are the authoritative description of what was measured; `config` below is the human-readable summary of them.",
-  "captured_at_commit": "1f2eda3+alert-metrics-376",
+  "captured_at_commit": "89eb7f1+stow-verb-381",
   "command": "for p in baseline cautious aggressive careless; do cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 --cap 1000 | tail -1; done",
   "config": {
     "policy": "bot",
@@ -36,7 +36,8 @@
           "drag": 0,
           "pierce_wall": 0,
           "lockdown": 0,
-          "crouch": 9
+          "crouch": 9,
+          "stow": 0
         },
         "usage_share": {
           "wait": 0.2501,
@@ -50,7 +51,8 @@
           "drag": 0.0,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
-          "crouch": 0.0006
+          "crouch": 0.0006,
+          "stow": 0.0
         },
         "diversity": 0.6724,
         "alert_peak_mean": 0.7,
@@ -97,7 +99,8 @@
           "drag": 0,
           "pierce_wall": 0,
           "lockdown": 0,
-          "crouch": 14
+          "crouch": 14,
+          "stow": 0
         },
         "usage_share": {
           "wait": 0.2522,
@@ -111,7 +114,8 @@
           "drag": 0.0,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
-          "crouch": 0.0006
+          "crouch": 0.0006,
+          "stow": 0.0
         },
         "diversity": 0.4869,
         "alert_peak_mean": 0.54,
@@ -158,7 +162,8 @@
           "drag": 17,
           "pierce_wall": 0,
           "lockdown": 0,
-          "crouch": 3
+          "crouch": 3,
+          "stow": 11
         },
         "usage_share": {
           "wait": 0.0148,
@@ -172,9 +177,10 @@
           "drag": 0.0014,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
-          "crouch": 0.0002
+          "crouch": 0.0002,
+          "stow": 0.0009
         },
-        "diversity": 0.6087,
+        "diversity": 0.6079,
         "alert_peak_mean": 0.95,
         "alert_rungs": {
           "0": 38,
@@ -219,7 +225,8 @@
           "drag": 7,
           "pierce_wall": 0,
           "lockdown": 0,
-          "crouch": 0
+          "crouch": 0,
+          "stow": 0
         },
         "usage_share": {
           "wait": 0.0102,
@@ -233,7 +240,8 @@
           "drag": 0.0006,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
-          "crouch": 0.0
+          "crouch": 0.0,
+          "stow": 0.0
         },
         "diversity": 0.5884,
         "alert_peak_mean": 0.91,
