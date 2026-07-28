@@ -9,8 +9,11 @@
 //!
 //! - **Level info** ([`HelpTab::LevelInfo`]) — what's bending the rules *this run*:
 //!   the run's own **level-seed token**, with a `copy [c]` control that puts it on the
-//!   clipboard (§13.1/#353), and the active [`LevelModifiers`] by name and direction
-//!   (§12.6).
+//!   clipboard (§13.1/#353), the active [`LevelModifiers`] by name and direction
+//!   (§12.6), and the **facility alert** — the rung reached and the retaliation it has
+//!   in force (§7.3/#375, drawn by [`super::alert`]). The first two are fixed at boot;
+//!   the third is the one thing on the card that moves while you play, which is why the
+//!   near line alone could not carry it (§11.7: it is overwritten by anything louder).
 //! - **Abilities** ([`HelpTab::Abilities`]) — what each of the run's abilities
 //!   actually *does*, and what it costs (§8.2/§8.3; #343, and see [`abilities`]).
 //! - **Help** ([`HelpTab::Help`]) — the glyph legend, the colour key, and the
@@ -54,6 +57,7 @@ use super::{
     SCHEMATIC_WALL,
 };
 use crate::ability::Loadout;
+use crate::alert::AlertReadout;
 use crate::category::Category;
 use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
@@ -442,6 +446,7 @@ pub(super) fn render_help(
     tab: HelpTab,
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
+    alert: &AlertReadout,
     loadout: Loadout,
     copy: SeedCopy,
 ) -> Grid {
@@ -450,7 +455,9 @@ pub(super) fn render_help(
     draw_tab_bar(&mut grid, tab);
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
     match tab {
-        HelpTab::LevelInfo => draw_level_info(&mut grid, CONTENT_TOP, level, modifiers, copy),
+        HelpTab::LevelInfo => {
+            draw_level_info(&mut grid, CONTENT_TOP, level, modifiers, alert, copy)
+        }
         HelpTab::Abilities => abilities::draw_abilities(&mut grid, CONTENT_TOP, loadout),
         HelpTab::Help => draw_help_card(&mut grid, CONTENT_TOP),
     }
@@ -492,6 +499,7 @@ fn draw_level_info(
     mut y: u32,
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
+    alert: &AlertReadout,
     copy: SeedCopy,
 ) {
     draw(grid, 2, y, "THIS RUN", Category::Interest);
@@ -537,8 +545,14 @@ fn draw_level_info(
     let active = modifiers.active();
     if active.is_empty() {
         // Baseline quick play: legible as "none active", not blank or absent (#248).
-        draw(grid, 3, y, "none active — baseline rules", Category::Ground);
-        return;
+        draw(
+            grid,
+            CONTENT_INDENT,
+            y,
+            "none active — baseline rules",
+            Category::Ground,
+        );
+        y += 1;
     }
     for m in active {
         // The modifier's own name carries the direction as a **colour cue** (§11.2):
@@ -562,6 +576,14 @@ fn draw_level_info(
         );
         y += 1;
     }
+
+    // The facility alert (§7.3/#375), **last**: the modifiers above say what was
+    // bending the rules before the raid started, and this says what the raid itself
+    // has bent since. It goes below them because it is the only section that changes
+    // while the panel is closed, and a growing list is better placed where nothing sits
+    // under it to be pushed around.
+    y += 1;
+    super::alert::draw_alert(grid, y, alert, CONTENT_INDENT);
 }
 
 /// The §11.2 category a direction reads in — the colour cue the caption is drawn
@@ -849,6 +871,7 @@ const fn category_name(category: Category) -> &'static str {
 mod tests {
     use super::*;
     use crate::ability::AbilityId;
+    use crate::alert::{AlertEffect, AlertTrigger, AlertTuning};
     use crate::modifiers::{ActiveModifier, IntelGate};
 
     /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
@@ -858,6 +881,16 @@ mod tests {
 
     pub(super) fn text_of(grid: &Grid) -> String {
         grid.to_text().join("\n")
+    }
+
+    /// A facility that has not noticed you (§7.3) — the readout most of these tests
+    /// want, since every section but the alert one is the same at any rung. The tests
+    /// that *are* about the rung build their own.
+    pub(super) fn quiet_alert() -> AlertReadout {
+        AlertReadout {
+            rung: 0,
+            effects: Vec::new(),
+        }
     }
 
     /// One tab of a baseline run's panel, at the v1 screen size — the shape most
@@ -870,6 +903,7 @@ mod tests {
             tab,
             None,
             LevelModifiers::default(),
+            &quiet_alert(),
             loadout,
             SeedCopy::default(),
         )
@@ -1068,6 +1102,7 @@ mod tests {
             HelpTab::LevelInfo,
             None,
             LevelModifiers::default(),
+            &quiet_alert(),
             Loadout::innate(),
             SeedCopy::default(),
         );
@@ -1091,6 +1126,7 @@ mod tests {
             HelpTab::LevelInfo,
             None,
             modified,
+            &quiet_alert(),
             Loadout::innate(),
             SeedCopy::default(),
         );
@@ -1132,6 +1168,7 @@ mod tests {
                 HelpTab::LevelInfo,
                 None,
                 all_on,
+                &quiet_alert(),
                 Loadout::innate(),
                 SeedCopy::default(),
             );
@@ -1185,6 +1222,7 @@ mod tests {
                 HelpTab::LevelInfo,
                 Some(level),
                 level.modifiers,
+                &quiet_alert(),
                 Loadout::innate(),
                 SeedCopy::default(),
             );
@@ -1218,6 +1256,7 @@ mod tests {
             HelpTab::LevelInfo,
             Some(quick),
             quick.modifiers,
+            &quiet_alert(),
             Loadout::innate(),
             SeedCopy::default(),
         );
@@ -1234,10 +1273,119 @@ mod tests {
             HelpTab::LevelInfo,
             None,
             LevelModifiers::default(),
+            &quiet_alert(),
             Loadout::innate(),
             SeedCopy::default(),
         );
         assert!(!text_of(&none).contains("LEVEL SEED"));
+    }
+
+    /// #375/§2.2: the Level info tab carries the **facility alert** — the rung, and the
+    /// retaliation it has in force. Without it the ladder is perceptible for exactly one
+    /// turn (the near line's step message, overwritten by anything louder, §11.7) and
+    /// inert after that.
+    ///
+    /// The section is drawn at **every** rung, rung 0 included: a heading that appeared
+    /// out of nowhere the turn you were first seen would teach the ladder exists at the
+    /// moment that knowledge stopped being useful, and a row that vanishes reads as a
+    /// bug rather than as a fact.
+    #[test]
+    fn the_level_info_tab_shows_the_alert_rung_and_what_it_is_doing() {
+        let panel = |alert: &AlertReadout| {
+            text_of(&render_help(
+                W,
+                H,
+                HelpTab::LevelInfo,
+                None,
+                LevelModifiers::default(),
+                alert,
+                Loadout::innate(),
+                SeedCopy::default(),
+            ))
+        };
+
+        let quiet = panel(&quiet_alert());
+        assert!(quiet.contains("ALERT"), "the section is always there");
+        assert!(
+            quiet.contains(crate::alert::NO_ALERT),
+            "a quiet facility says so rather than showing a blank: {quiet}",
+        );
+        assert!(
+            !quiet.contains("Condition"),
+            "…and claims no condition it has not reached",
+        );
+
+        // A raised rung names itself and lists the effects the ladder actually runs —
+        // the numbers included, so "never calm" is a rule the player can plan against
+        // rather than a mood.
+        let raised = panel(&AlertReadout {
+            rung: 2,
+            effects: vec![AlertEffect {
+                rung: 1,
+                name: crate::alert::NEVER_CALM,
+                detail: Some("pause 1–3 turns".to_string()),
+            }],
+        });
+        assert!(raised.contains("Condition 2 of 3"), "{raised}");
+        assert!(
+            raised.contains("Guards never calm: pause 1–3 turns"),
+            "{raised}"
+        );
+        assert!(
+            !raised.contains(crate::alert::NO_ALERT),
+            "and never both at once",
+        );
+    }
+
+    /// §11.4's row-fits rule (#248's `CAPTION_MAX`, applied to the alert rows): every
+    /// row the ALERT section can draw fits the v1 board's content column. [`draw`] clips
+    /// in silence, and the effect rows carry **runtime** numbers off the live
+    /// [`AlertTuning`] — so unlike the modifier captions they cannot be bounded at
+    /// compile time, and this walks the real ladder instead of trusting them.
+    ///
+    /// Walked over a **deliberately wide** tuning as well as the shipped one: two-digit
+    /// dwell numbers are legal (`validate` allows them) and are exactly what a §13.2
+    /// sweep would produce, so the row has to fit at the widest the ladder permits, not
+    /// only at its [START].
+    #[test]
+    fn no_row_of_the_alert_section_is_clipped() {
+        let room = column_width(CONTENT_INDENT);
+        assert!(
+            crate::alert::NO_ALERT.chars().count() <= room,
+            "the rung-0 row is too wide for the Level info column",
+        );
+        for tuning in [
+            AlertTuning::default(),
+            AlertTuning {
+                dwell_turns_min: 98,
+                dwell_turns_max: 99,
+                rung_two_reinforcements: 98,
+                rung_three_reinforcements: 99,
+                ..AlertTuning::default()
+            },
+        ] {
+            let mut alert = crate::alert::Alert::new();
+            alert.set_tuning(tuning);
+            for trigger in AlertTrigger::ALL {
+                alert.raise(trigger);
+                let readout = alert.readout();
+                // Read from the drawing's own helper, so the row measured here is the
+                // row the panel draws.
+                let condition = super::super::alert::condition_line(readout.rung);
+                assert!(condition.chars().count() <= room, "{condition:?}");
+                for effect in &readout.effects {
+                    let text = match &effect.detail {
+                        Some(detail) => format!("{}{CAPTION_SEPARATOR}{detail}", effect.name),
+                        None => effect.name.to_string(),
+                    };
+                    assert!(
+                        text.chars().count() <= room,
+                        "the alert row {text:?} is {} cells and its column has {room}",
+                        text.chars().count(),
+                    );
+                }
+            }
+        }
     }
 
     /// The seed section does not disturb the modifier list it heads (#272): with a
@@ -1259,6 +1407,7 @@ mod tests {
             HelpTab::LevelInfo,
             Some(level),
             level.modifiers,
+            &quiet_alert(),
             Loadout::innate(),
             SeedCopy::default(),
         );
@@ -1297,6 +1446,7 @@ mod tests {
             HelpTab::LevelInfo,
             None,
             harder,
+            &quiet_alert(),
             Loadout::innate(),
             SeedCopy::default(),
         );
@@ -1320,6 +1470,7 @@ mod tests {
             HelpTab::LevelInfo,
             None,
             easier,
+            &quiet_alert(),
             Loadout::innate(),
             SeedCopy::default(),
         );
@@ -1344,6 +1495,7 @@ mod tests {
                 active,
                 None,
                 LevelModifiers::default(),
+                &quiet_alert(),
                 Loadout::innate(),
                 SeedCopy::default(),
             );
@@ -1444,6 +1596,7 @@ mod tests {
             HelpTab::LevelInfo,
             level,
             LevelModifiers::default(),
+            &quiet_alert(),
             Loadout::innate(),
             copy,
         )

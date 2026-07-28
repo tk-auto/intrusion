@@ -14,9 +14,11 @@
 //! | **3** | A body found; **or** two missed pings across [`SILENT_POSTS_FOR_THIRD_RUNG`] bodies | **+2 guards** enter the facility (#374) |
 //!
 //! **Effects are cumulative** — a rung applies every effect at or below it — and
-//! **rung 3 is the top**. The reinforcements of rungs 2 and 3 are #374; what ships
-//! here is the ladder itself plus rung 1's teeth, which is a pressure system that
-//! actually runs rather than a facade (§2.3).
+//! **rung 3 is the top**, so a run driven 0 → 3 gets the shortened dwell *and* all
+//! three extra guards. Every rung now bites: rung 1's dwell cut lives here, the
+//! reinforcements live in `state::reinforcements` (#374), and [`effect_at`] is where the
+//! ladder says what each of them does in the player's own words (#375) — a pressure
+//! system that actually runs rather than a facade (§2.3).
 //!
 //! # Two rules this type exists to hold
 //!
@@ -180,6 +182,44 @@ impl AlertTuning {
     }
 }
 
+/// One retaliation the ladder currently has **in force** (§7.3/#375), described for
+/// the help panel's Level info tab — the rung that added it, and what it does in the
+/// player's own words.
+///
+/// Shaped like [`ActiveModifier`](crate::ActiveModifier), and for the same reason: an
+/// escalation the player cannot perceive is inert (§2.2), so the ladder's effects need
+/// a surface to be read off, and that surface must be **derived from the ladder**
+/// rather than hand-written per rung. The `detail` carries the live
+/// [`AlertTuning`] numbers, so a swept or retuned threshold moves the panel with it and
+/// the two can never drift.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AlertEffect {
+    /// The rung that added this effect. Effects are cumulative (§7.3), so a readout at
+    /// rung 3 carries every rung's entry, lowest first.
+    pub rung: u32,
+    /// What the effect is, as the player reads it on the panel.
+    pub name: &'static str,
+    /// The live numbers behind it (`"pause 1–3 turns"`), or `None` for an effect whose name
+    /// says all there is. Drawn as `name: detail`, the modifier rows' shape.
+    pub detail: Option<String>,
+}
+
+/// Everything the panel says about the facility alert (§7.3/#375): the rung reached
+/// and the effects that rung has in force.
+///
+/// One value rather than two accessors because the two are read together and must
+/// agree — a rung drawn beside effects from a different frame would be exactly the
+/// drift §2.2 is trying to close.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AlertReadout {
+    /// The rung, `0..=`[`TOP_RUNG`] — `0` is a facility that has not noticed you.
+    pub rung: u32,
+    /// The effects in force at that rung, lowest rung first. **Empty at rung 0**, and
+    /// empty of any rung whose retaliation is not built yet — the panel reports what
+    /// the ladder actually does, never what the design table promises it will (§2.3).
+    pub effects: Vec<AlertEffect>,
+}
+
 /// **Why** the facility alert stepped (§7.3) — carried by
 /// [`Event::AlertRaised`](crate::Event::AlertRaised) so an escalation is always
 /// explainable, on the near line and in the §13.2 sim's attribution (#376).
@@ -323,6 +363,22 @@ impl Alert {
         }
     }
 
+    /// What the panel says about this ladder (§7.3/#375): the rung, and every effect
+    /// at or below it.
+    ///
+    /// **Generated from the ladder, never a string per rung.** The list is built by
+    /// walking `1..=rung` through [`effect_at`], which reads the live [`AlertTuning`],
+    /// so retuning a threshold moves the panel with it and a rung whose retaliation
+    /// does not exist yet contributes nothing rather than a promise (§2.3).
+    pub(crate) fn readout(&self) -> AlertReadout {
+        AlertReadout {
+            rung: self.rung,
+            effects: (1..=self.rung)
+                .filter_map(|rung| effect_at(rung, &self.tuning))
+                .collect(),
+        }
+    }
+
     /// Step the ladder to `trigger`'s rung (§7.3). Returns the new rung when it
     /// actually **rose** — the escalation an [`Event::AlertRaised`](crate::Event)
     /// reports — and `None` when the facility was already there or higher.
@@ -390,6 +446,72 @@ impl Alert {
         (self.rung >= 1).then_some(AlertTrigger::ConsoleTampered)
     }
 }
+
+/// The retaliation **rung `rung` itself adds**, or `None` when it adds nothing that
+/// the game actually does yet (§7.3/#375).
+///
+/// This function *is* the ladder's third column, the way [`AlertTrigger::rung`] is its
+/// second — total over `1..=`[`TOP_RUNG`], so a rung cannot gain teeth without saying
+/// what they are here, and the panel cannot fall behind the ladder it draws.
+///
+/// A rung whose retaliation is **not built** answers `None`, and the panel then says
+/// nothing about it. That is not a gap to fill with the design table's promise: a row
+/// pledging +1 guard that no guard ever arrives for is §2.3's facade in its most legible
+/// form, because the player would read it, believe it, and plan against it. Rungs 2 and
+/// 3 were exactly that until #374 built them; the arms below are what filling one in
+/// looks like, and the panel grew the rows on its own.
+fn effect_at(rung: u32, tuning: &AlertTuning) -> Option<AlertEffect> {
+    let effect = |name, detail| Some(AlertEffect { rung, name, detail });
+    // A magnitude swept to zero sends nobody, so it earns no row — the alternative is
+    // "Reinforcements: +0 guards", which is a claim about nothing (§13.2 can set this).
+    let guards = |count: usize, more: &str| {
+        (count > 0).then(|| AlertEffect {
+            rung,
+            name: REINFORCEMENTS,
+            detail: Some(format!(
+                "+{count}{more} guard{}",
+                if count == 1 { "" } else { "s" }
+            )),
+        })
+    };
+    match rung {
+        // Rung 1's teeth (§7.5): the Calm pause is cut, never removed. The numbers come
+        // off the live tuning, so a swept dwell is the one the player is shown.
+        1 => effect(
+            NEVER_CALM,
+            Some(format!(
+                "pause {}–{} turns",
+                tuning.dwell_turns_min, tuning.dwell_turns_max
+            )),
+        ),
+        // Rungs 2 and 3 walk guards in (§7.3/#374). The counts are what the *rung itself*
+        // adds, matching the design table's "Retaliation **added** at this rung" — so at
+        // rung 3 the panel lists both rows and the player adds them up, which is the same
+        // arithmetic the ladder does. Rung 3 says "more" because by then rung 2's row is
+        // sitting directly above it.
+        //
+        // The wording is the **rule**, not a headcount: an arrival is refused outright
+        // when no cell is out of the player's sight (#374's never-in-view rule), so
+        // "+1 guard" is what the facility sent and never a promise about who made it.
+        2 => guards(tuning.rung_two_reinforcements, ""),
+        3 => guards(tuning.rung_three_reinforcements, " more"),
+        _ => None,
+    }
+}
+
+/// Rung 1's effect, as the Level info tab names it (§7.3/§7.5). Named rather than
+/// inlined so the panel's width bound has something to measure at compile time.
+pub(crate) const NEVER_CALM: &str = "Guards never calm";
+
+/// What rungs 2 and 3 send (§7.3/#374), as the Level info tab names it. One name for
+/// both rows: they are the same kind of retaliation twice, and the detail (`+1 guard`,
+/// `+2 more guards`) is what tells them apart.
+pub(crate) const REINFORCEMENTS: &str = "Reinforcements";
+
+/// What the panel prints for a facility that has not noticed you (§7.3/#375) — the
+/// rung-0 row, which is drawn rather than omitted: a section that vanishes reads as a
+/// bug, and the player should learn the ladder exists *before* it bites.
+pub(crate) const NO_ALERT: &str = "no alert — you are unnoticed";
 
 #[cfg(test)]
 mod tests {
@@ -578,6 +700,113 @@ mod tests {
         assert_eq!(alert.raise(AlertTrigger::ConsoleTampered), None);
         assert_eq!(alert.raise(AlertTrigger::BodyFound), None, "already there");
         assert_eq!(alert.rung(), 3, "and it never comes back down");
+    }
+
+    /// #375/§2.2: the readout is **derived from the ladder**. A quiet facility reports
+    /// rung 0 and no effects; rung 1 reports its own teeth with the live numbers in
+    /// them; and the effects **stack** at every rung above, because the retaliation is
+    /// cumulative — a run driven 0 → 3 reads the shortened dwell *and* both
+    /// reinforcement rows, which is the same arithmetic §7.3's table does.
+    #[test]
+    fn the_readout_lists_what_the_ladder_actually_does() {
+        let mut alert = Alert::new();
+        let readout = alert.readout();
+        assert_eq!(readout.rung, 0);
+        assert!(
+            readout.effects.is_empty(),
+            "a quiet facility retaliates none"
+        );
+
+        alert.raise(AlertTrigger::Sighting);
+        let readout = alert.readout();
+        assert_eq!(readout.rung, 1);
+        assert_eq!(
+            readout.effects,
+            vec![AlertEffect {
+                rung: 1,
+                name: NEVER_CALM,
+                detail: Some(format!(
+                    "pause {ALERT_DWELL_TURNS_MIN}–{ALERT_DWELL_TURNS_MAX} turns"
+                )),
+            }],
+        );
+
+        // Rung 2 keeps rung 1's row and adds the guards it walks in (#374).
+        alert.raise(AlertTrigger::ConsoleTampered);
+        let readout = alert.readout();
+        assert_eq!(
+            readout
+                .effects
+                .iter()
+                .map(|e| (e.rung, e.name, e.detail.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, NEVER_CALM, Some("pause 1–3 turns")),
+                (2, REINFORCEMENTS, Some("+1 guard")),
+            ],
+        );
+
+        // …and rung 3 keeps both and adds its own, lowest rung first. The counts are
+        // what each rung *adds*, so the player reads +1 then +2 and the run has gained
+        // three — §7.3's "added at this rung" column, drawn.
+        alert.raise(AlertTrigger::BodyFound);
+        let readout = alert.readout();
+        assert_eq!(readout.rung, TOP_RUNG);
+        assert_eq!(
+            readout
+                .effects
+                .iter()
+                .map(|e| (e.rung, e.detail.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, Some("pause 1–3 turns")),
+                (2, Some("+1 guard")),
+                (3, Some("+2 more guards")),
+            ],
+        );
+    }
+
+    /// §2.3/#374: a rung that sends **nobody** earns no row. A magnitude swept to zero
+    /// is a rung with no teeth, and "Reinforcements: +0 guards" would be a claim about
+    /// nothing — the same facade the arms answered `None` for before #374 built them.
+    /// The singular/plural is real too: "+1 guard", never "+1 guards".
+    #[test]
+    fn a_rung_that_sends_nobody_claims_nobody() {
+        let mut alert = Alert::new();
+        alert.set_tuning(AlertTuning {
+            rung_two_reinforcements: 0,
+            rung_three_reinforcements: 4,
+            ..AlertTuning::default()
+        });
+        alert.raise(AlertTrigger::BodyFound);
+        assert_eq!(
+            alert
+                .readout()
+                .effects
+                .iter()
+                .map(|e| (e.rung, e.detail.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![(1, Some("pause 1–3 turns")), (3, Some("+4 more guards")),],
+            "the silent rung is absent, not drawn as zero",
+        );
+    }
+
+    /// #375/#376: the readout reads the **live** tuning, so a swept dwell is the one
+    /// the panel shows. A row quoting the shipped constants while the run played a
+    /// swept ladder would be a legibility surface that lies.
+    #[test]
+    fn the_readout_quotes_the_tuning_the_run_is_playing() {
+        let mut alert = Alert::new();
+        alert.set_tuning(AlertTuning {
+            dwell_turns_min: 2,
+            dwell_turns_max: 5,
+            ..AlertTuning::default()
+        });
+        alert.raise(AlertTrigger::MissedPing);
+        assert_eq!(
+            alert.readout().effects[0].detail.as_deref(),
+            Some("pause 2–5 turns"),
+        );
     }
 
     /// §7.3: the effects are **cumulative** — rung 2 and rung 3 keep rung 1's

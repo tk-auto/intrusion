@@ -584,6 +584,11 @@ Guard *presentation* is unchanged: a never-calm guard still reads as Calm (§7.4
 colour column). The ladder's legibility is the Level info tab and the tinted help
 button (§11.4).
 
+**"Rung" is our word, not the player's.** On screen a rung is a **condition** —
+*"security condition 2 of 3"* — because a rung names the shape of this system and a
+condition names the state of the building. See §11.8 for the rule and the rest of the
+glossary.
+
 ##### What the sim measured (#376)
 
 Every threshold above is a knob the headless sim turns without a rebuild (`--alert`,
@@ -2088,10 +2093,13 @@ is the case this serves.
   collected — drawn as a **solid band in the message's category colour**. Threat
   reads as a colour flash across the top of the screen, legible without reading
   the words; that's a nice piece of design — keep it. When no message is live,
-  the line falls back to quiet **ambient status** (alert level, an active
-  ability's remaining turns) instead of sitting empty. Its right-hand corner
-  carries the two view toggles: the live-message counter and the `[?]` help
-  button.
+  the line falls back to quiet **ambient status** (the alert rung — *"security
+  condition 2 of 3"* on screen, §11.8 — an active ability's remaining turns) instead
+  of sitting empty. Its right-hand corner carries the two view toggles: the
+  live-message counter and the `[?]` help button, the latter **tinted by the alert
+  rung** (§7.3) — the ladder's standing state lives on the help panel's Level info
+  tab, and the tint is what says there is something new to read behind the control
+  (see [`docs/render-reference.md`](render-reference.md) §4.5).
 - **Usable line** — *what you can act on*: the bump affordances adjacent to the
   player right now, each **with an arrow giving the bump's direction** (`↑
   console: take intel`, `← table: crouch`, `↓ cupboard: hide`, `door: open →`).
@@ -2617,6 +2625,54 @@ system — it is derived from adjacency every frame and carries no state.
 Priority ladder **[START]**: routine self-narration ≤ 0; guard threat escalates
 2 → 4 → 10; objective feedback dominates at 20; ambient status sits below
 everything (it is the floor, not a message).
+
+### 11.8 Vocabulary — what the design calls things, what the screen calls them
+
+**[SETTLED]** — **this document and the code name the mechanism; the screen names the
+world.** They are allowed to disagree, and where they do, the pairing is written down
+here.
+
+The two vocabularies exist for different readers. *Rung* is exactly right in §7.3: it
+says the alert is a monotone ladder with a fixed top and no way back down, which is the
+property the code has to hold. It is exactly wrong on screen, because it describes the
+shape of the implementation — a player reading "rung 2" is being asked to reverse-engineer
+a system instead of being told about the building they are standing in. The facility's
+own word for that state is a **condition**.
+
+Two rules for a player-facing word:
+
+- **It must not collide with a name already in play.** The candidate is checked against
+  the §7.4 guard states and the §8.3 ability names. That is what ruled "hunting" and
+  "lockdown" out as names for the top alert state: a guard reads Calm/Searching/Chasing,
+  and *Lockdown* is an ability the player owns.
+- **It must not lose information the design word carried.** "Condition 2 of 3" keeps the
+  scale — how bad it is *and* how much worse it can get — which a bare mood word
+  ("sweeping", "sealed") would throw away.
+
+| Design / code | On screen | Where |
+|---|---|---|
+| alert **rung** (§7.3) | **condition** — *"security condition 2 of 3"*, `Condition 2 of 3` | near line, help panel |
+| patrol **dwell** (§7.5) | **pause** — *"Guards never calm: pause 1–3 turns"* | help panel |
+| `Hideout` (§10.3) | **cupboard** — *"cupboard — bump to hide"* | glyph legend, messages |
+| `PartialCover` (§10.3) | **table** — *"table — bump to crouch"* | glyph legend, usable line |
+| `DuctEntry` (§10.7) | **duct** — *"duct — bump to crawl in"* | glyph legend, usable line |
+| `Console` (§10.3) | **intel** — *"intel — bump to take"* | glyph legend, usable line |
+| `CommsConsole` (§7.3) | **comms** — *"comms — bump to kill the radio"* | glyph legend, usable line |
+| the **schematic** (§11.5a) | *"not yet seen"* — the building and the floor of it | glyph legend |
+
+**No row is the good case.** Where the design word is already the world's word — intel,
+guard, body, door, exit, cupboard-as-terrain, Takedown, the ability names — there is
+nothing to translate and nothing to record. Add a row only when a player-facing string
+needs a noun this document spells differently.
+
+**Meta vocabulary is deliberately untranslated.** *Seed*, *level modifier* and *loadout*
+name the run's **setup**, not anything inside the facility: they belong to the player
+choosing and sharing a run (§13.1), not to the intruder inside one, so `LEVEL SEED` and
+`MODIFIERS` stay as they are on the Level info tab. Trying to make them diegetic would
+be a fiction about the wrong thing.
+
+The individual words in the table are wording and may be retuned; the **split** is the
+settled part.
 
 ---
 

@@ -700,6 +700,7 @@ pub(super) fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Catego
     }
 }
 
+mod alert;
 mod help;
 mod hud;
 mod menu;
