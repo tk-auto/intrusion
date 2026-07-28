@@ -616,12 +616,22 @@ impl Guard {
     }
 
     /// The guard's station (§7.5) — the anchor its Calm beat is grown from. The
-    /// radio net no longer reads it: a dispatch heads for where the guard *fell*
-    /// (§7.3), not the post it was assigned to, so this is the beat's seam for the
-    /// §7.5/§10.5 territory tests alone.
-    #[cfg(test)]
+    /// radio net does not read it: a dispatch heads for where the guard *fell*
+    /// (§7.3), not the post it was assigned to. What does read it is a **reinforcement
+    /// arriving** (§7.3/#374): the newcomer's beat is grown with the incumbents'
+    /// stations seeded first, so it fans out into ground they do not already hold
+    /// (§7.5's cooperative growth) rather than grinding the same wing.
     pub(crate) fn station(&self) -> Cell {
         self.station
+    }
+
+    /// This guard's §7.5 beat — the cells of its territory, empty for a guard built
+    /// without a region graph. The seam for asserting that a guard which arrived
+    /// mid-level (§7.3/#374) got one, so it has somewhere to patrol once its errand
+    /// ends rather than standing where it finished forever.
+    #[cfg(test)]
+    pub(crate) fn beat(&self) -> &[Cell] {
+        &self.beat
     }
 
     /// Recompute this guard's cone from its current position and facing (§6.2/§7.1),
@@ -742,6 +752,23 @@ impl Guard {
         self.alert = ALERT_DURATION;
         self.last_seen = None;
         self.end_search_and_watch();
+    }
+
+    /// Answer a call from **across the facility** (§7.3/#374) — [`respond_to`] with a
+    /// lead long enough to survive the walk.
+    ///
+    /// A radio dispatch picks the *nearest* respondable guard, so [`ALERT_DURATION`]
+    /// always covers its journey and §7.1's cold-lead backstop only ever fires on a
+    /// lead that genuinely went stale. A **reinforcement** starts at the far end of the
+    /// facility by construction (it may not arrive in view), so the same constant would
+    /// have it give up somewhere in the middle of the map and drift into patrol having
+    /// never looked at what it was sent for. Sizing the lead to the trip keeps the
+    /// behaviour identical to a dispatch's — walk, search, stand down — rather than
+    /// changing it; the backstop still applies, just at the far end of the errand
+    /// instead of halfway along it.
+    pub(crate) fn respond_across(&mut self, at: Cell, lead: u32) {
+        self.respond_to(at);
+        self.alert = self.alert.max(lead);
     }
 
     /// React to finding a body (§7.2) — the loudest event in the game. The lead

@@ -210,6 +210,9 @@ fn a_killed_net_calls_nobody_to_a_body() {
     s.silence_radio_for_test();
 
     s.step(Input::Step(Direction::North)); // takedown — a body in the open
+                                           // Who was in the building when the body was made — see the note below on why the
+                                           // guards that walk in afterwards are held apart from the call this test is about.
+    let incumbents = s.guards().len();
     let mut found = false;
     for _ in 0..40 {
         for e in s.step(Input::Wait) {
@@ -224,9 +227,21 @@ fn a_killed_net_calls_nobody_to_a_body() {
     let responding = s
         .guards()
         .iter()
+        .take(incumbents)
         .filter(|g| g.state() == GuardState::Responding)
         .count();
-    assert_eq!(responding, 0, "nobody converged");
+    assert_eq!(responding, 0, "nobody already here was called to it");
+
+    // **Reinforcements are not stopped by a dead net** (§7.3/#374). The comms console's
+    // effects are the enumerated ones — no pings, no dispatch, no §7.7 call-ins — and
+    // the ladder's own rungs are not among them: a found body still takes the facility
+    // to rung 3, and rung 3 still walks guards in from outside. So silencing the radio
+    // buys you the *internal* net, not the escalation, which is why the guards standing
+    // here are called to nothing while three more let themselves in.
+    assert!(
+        s.guards().len() > incumbents,
+        "the ladder still reached the top and still sent its guards",
+    );
 }
 
 /// §7.7, the documented choice: a guard **already on an errand** when the net dies

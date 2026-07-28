@@ -160,6 +160,17 @@ pub enum Event {
     /// rather than inferring it. A rung never falls, so there is no matching
     /// "the facility calmed down" event: there is no way back down (§7.3).
     AlertRaised { rung: u32, trigger: AlertTrigger },
+    /// A **reinforcement** walked into the facility at `at` (§7.3/#374): rung 2 sends
+    /// one, rung 3 sends two more, so a run driven 0 → 3 gains three guards. The cell
+    /// is never inside the player's field of view and never adjacent to them — an
+    /// arrival the player *watches* is a guard materialising out of nothing, which no
+    /// amount of fiction repairs — so this reports where somebody came in, not
+    /// something the player saw happen.
+    ///
+    /// A reinforcement is a guard in every other respect (§7.4/§11.3): no glyph of its
+    /// own, no colour of its own, normal speed (§7.1 **[SETTLED]**), its own radio
+    /// clock, and a body if you take it down.
+    ReinforcementArrived { at: Cell },
     /// The player took hold of a body by stepping off its cell (§8.3): they are
     /// now dragging it, at half speed, until they release it or the run ends.
     BodyGrabbed { at: Cell },
@@ -325,7 +336,8 @@ impl Event {
             | Event::RadioSilence { .. }
             | Event::CalledIn { .. }
             | Event::BodyCalledIn { .. }
-            | Event::AlertRaised { .. } => Category::Warning,
+            | Event::AlertRaised { .. }
+            | Event::ReinforcementArrived { .. } => Category::Warning,
             // A guard that sees you is hunting *you* — the same Danger band as
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
             // reinforce (§11.2).
