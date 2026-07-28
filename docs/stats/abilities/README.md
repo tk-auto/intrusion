@@ -54,6 +54,38 @@ pages follow:
   be dominant, so the share that matters is the one from a full three-tech kit
   (§8.3's cap), recorded on the pages that have it.
 
+## The full-kit sweep
+
+A verb measured alone cannot be dominant, so dominance is read from batches holding a
+real three-tech loadout — the §8.3 cap. Two kits cover every cued activated verb:
+
+```
+cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities camouflage,decoy,confusion --runs 100 --seed 0 --cap 1000
+cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities autodoors,dephase,pierce-wall --runs 100 --seed 0 --cap 1000
+```
+
+At `6cce986+stats-family-347`, over both seed blocks and all four temperaments:
+
+| | kit A — camouflage, decoy, confusion | kit B — autodoors, dephase, pierce-wall |
+|---|---|---|
+| `win_rate` vs innate | **up** in 7 of 8 (+0.00 … +0.15) | flat, ±0.03 but for `cautious` |
+| detections / turn | **down** in 8 of 8, by up to 45% | down in 6 of 8, mildly |
+| `diversity` | **down in 8 of 8** (−0.04 … −0.20) | **up in 6 of 8** (−0.04 … +0.12) |
+| biggest single verb | `confusion`, 0.61%–0.98% of turns | `dephase`, 0.49%–0.71% of turns |
+| all active verbs together | 2.2%–4.4% of turns | 1.9%–3.2% of turns |
+
+**Nothing is dominant.** The largest single active verb anywhere is Confusion at under
+1% of spent turns, every active verb *combined* is under 5%, and `wait` alone is
+17%–27% for the careful temperaments. The ~50% watermark is not remotely in sight.
+
+**The two kits pull the boredom metric in opposite directions**, and that is the
+clearest thing this measurement produced. The hide-and-misdirect kit buys survival and
+makes runs *more alike*; the geometry kit barely moves survival and makes them *less*
+alike. It reproduces across both seed blocks and every temperament, and it matches
+what the individual pages found. It is a finding to hand a human (§13.3), not a
+conclusion: whether "an escape that always works" is a real design problem is exactly
+the judgement the sim is not allowed to make.
+
 ## The pages
 
 | Ability | Cue | Page |

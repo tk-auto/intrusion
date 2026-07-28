@@ -213,14 +213,16 @@ impl Moment<'_> {
             AbilityId::Run => self.run(status),
             AbilityId::Camouflage => self.camouflage(status),
             AbilityId::Decoy => self.decoy(status),
-            // The verbs the bot has never pressed. Each gets its own cue, its own
-            // diff and its own metric delta (#347) — landed one at a time, because
-            // switching five on at once would leave every histogram move
-            // unattributable. Until then the slot honestly reads zero.
             AbilityId::Dephase => self.dephase(status),
             AbilityId::Autodoors => self.autodoors(status),
             AbilityId::Confusion => self.confusion(status),
             AbilityId::PierceWall => self.pierce_wall(status),
+            // **Deferred, not omitted** (#347). Lockdown's whole value is route denial
+            // during a chase (§7.6/§10.4), and the shape of the chase is §15 Q1 — the
+            // design's most important open question. A cue written now would be
+            // measuring an answer that has not been given, so the slot reads an honest
+            // zero until it has. Every other activated verb is cued above; see
+            // `docs/stats/abilities/lockdown.md`.
             AbilityId::Lockdown => None,
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"

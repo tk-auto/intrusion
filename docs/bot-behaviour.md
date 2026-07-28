@@ -193,6 +193,39 @@ bug the types make unrepresentable rather than one review has to catch. A cue th
 re-implements a precondition is the same drift as a private terrain table (§2), and
 it is ruled out the same way.
 
+### 4.4a The cues that exist, and the fact each one reads
+
+Every activated verb but Lockdown is cued (#347). What a cue is *allowed* to key off
+is a fact the surrounding policy has already computed and handed over — the sharing is
+the seam's reason to exist — so the right-hand column is also the list of what the
+`Moment` carries:
+
+| Ability | It is for… | The fact it reads |
+|---|---|---|
+| **Run** | the turn that decides whether a chase is outrunnable at all | intent is `Flee`, and a cell of room to spend the activation turn |
+| **Camouflage** | a hunt you cannot reach a cupboard from | the `refuge` the policy found — silent when there is a real one |
+| **Decoy** | a guard that has **lost** you | nobody's cone live on the player, somebody searching, and the faked cell not on the bot's own route |
+| **Autodoors** | flight through a door that shuts behind you | a door on the step the plan would take |
+| **Confusion** | a panic-buy of six turns; **decisive when cornered** | how many guards core's clamped blast catches |
+| **Dephase** | a short crossing you can see the far side of | the `crossing` the policy found on its own cost field |
+| **Pierce Wall** | a route the facility does not offer | the same crossing, at three times the price — the budget is scarcer |
+| **Lockdown** | — **deferred**: its value is route denial in a chase, and the chase is §15 Q1 | — |
+| **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
+
+Two of these are worth reading twice, because they are the seam's own rules biting:
+
+- **Confusion is the only cue that speaks at a gap of one.** Run and Autodoors both
+  decline there — the activation turn is spent standing still, which a guard at arm's
+  length turns into a capture — so the cornered moment would have no answer at all if
+  Confusion did not claim it. That is what "at most one cue should claim `100` for a
+  given moment" looks like when it works.
+- **Dephase and Pierce Wall share one `crossing`, computed by the policy.** The router
+  cannot plan a path through a wall, so a cue that pressed for a crossing the policy
+  would then decline to walk would be a shy cue *by construction* — the ability fires,
+  the histogram fills, and nothing happens. One function answers both "is there a
+  crossing worth it?" and "which way do I step while phased", which is what makes that
+  impossible rather than merely unlikely.
+
 ### 4.5 Arbitration
 
 Deterministic end to end (§12.4), with **no RNG anywhere**: held abilities are cued
@@ -285,8 +318,12 @@ The checklist, in the order that keeps the metrics attributable:
 4. **Check nothing became dominant.** If one verb's share jumps sharply, say so and
    flag seeds to play, rather than quietly tuning the cue until the number looks
    reasonable.
-5. **Refresh the playtest baseline** in the same change, with the command and commit
-   recorded.
+5. **Measure it with/without, on all four temperaments, and re-run a marginal delta
+   on a disjoint seed block.** The committed baseline pins the *innate* batch, so a
+   cue for a piece of tech does not move it and there is nothing to refresh there; the
+   pair to run is in the playtest skill (§4a). Record the result — commands, commit and
+   table — on the ability's own page in `docs/stats/abilities/`, which is exhaustive
+   over `AbilityId` so "no page" never has to mean two things.
 
 ## 8. Known gaps
 
@@ -305,12 +342,21 @@ Stated so they read as decisions rather than oversights:
 - **Stowing has no verb in the histogram.** Takedown, drag and `bodies_found` are all
   metrics; deposit-and-lock (§10.3) is not, so a batch infers it from the gap between
   takedowns and bodies found rather than reading it directly.
-- **Most tech has no cue yet.** Each is landing one at a time; until one does, its
-  histogram slot honestly reads zero, and that zero means "no policy tried it", not
-  "the ability is dead".
-- **Loadout.** The sim's preset holds the innate set, so a cue for a piece of tech
-  cannot fire in a batch that never grants it. A run that wants to weigh a specific
-  ability grants it back and asserts on that.
+- **Lockdown has no cue** (#347). Deferred rather than omitted: its whole value is
+  route denial during a chase, and the shape of the chase is §15 Q1, so a cue written
+  now would measure an answer that has not been given. Its slot reads an honest zero.
+- **The pocket half of Pierce Wall is uncued.** §8.3 offers a second use — bore a
+  dead-end alcove and sit a sweep out in it — and judging "out of the through-routes"
+  means knowing where guards patrol, which the bot may not know (§2). So the measured
+  numbers bound the borer *as a shortcut*, not the ability.
+- **Decoy never fires in pursuit.** §8.3 supports pulling a patrol off a route ahead
+  of you; the cue only speaks while being hunted, so its numbers bound the fake as an
+  escape tool.
+- **No cue reads the alert level or the radio net** (§7.3/#107), so nothing bids
+  differently as a facility winds up.
+- **Loadout.** A batch holds the innate set unless `--abilities` grants otherwise, so
+  every tech verb reads a structural zero in the committed baseline. That zero is the
+  loadout, not the cue — see `docs/stats/abilities/`.
 
 Every one of these is the same failure class: **a metric reading zero because no
 policy ever tried.** Treat an unexercised metric as *inconclusive*, never as
