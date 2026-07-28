@@ -158,9 +158,11 @@ pub fn message_for(event: Event) -> Option<Message> {
         // `NEAR_LINE_TEXT_MAX`), and *that guards are coming* is what "reported"
         // already means — spelling it out only cost the words that fit.
         Event::BodyCalledIn { .. } => ("a body has been reported".to_string(), 5),
-        // The facility alert stepped (§7.3): the loudest radio event, a
-        // facility-wide escalation — above a found body, below being caught.
-        Event::AlertRaised { level } => (format!("the facility is on alert — level {level}"), 5),
+        // The facility alert climbed a rung (§7.3): the loudest radio event, a
+        // facility-wide escalation — above a found body, below being caught. What the
+        // rung *does* to the player, and why it climbed, is the Level info tab's job
+        // (#375); the near line states the fact.
+        Event::AlertRaised { rung, .. } => (format!("the facility is on alert — level {rung}"), 5),
         // Handling the body (§8.3): quiet self-narration, like the crouch. The
         // held state itself lives on the ambient floor, not in a message.
         Event::BodyGrabbed { .. } => ("you take hold of the body".to_string(), 0),
@@ -310,9 +312,10 @@ fn ambient(state: &State) -> Message {
             Category::Owned,
         )
     } else if state.alert() > 0 {
-        // The alert indicator (§7.3/§11.4): the escalation the radio net wrote,
-        // read here whenever no louder message is live — a Warning-band fact, not
-        // a threat that has you (Danger).
+        // The alert indicator (§7.3/§11.4): the rung the ladder has reached, read
+        // here whenever no louder message is live — a Warning-band fact, not a
+        // threat that has you (Danger). It never falls, so once it is up this is the
+        // standing ambient line of the level.
         (
             format!("facility alert — level {}", state.alert()),
             Category::Warning,
@@ -353,6 +356,7 @@ fn ambient(state: &State) -> Message {
 mod tests {
     use super::*;
     use crate::ability::AbilityId;
+    use crate::alert::AlertTrigger;
     use crate::cell::{Cell, Direction};
     use crate::facility::Terrain;
     use crate::guard::Guard;
@@ -517,7 +521,11 @@ mod tests {
         assert_eq!(silence.category, Category::Warning);
         assert_eq!(silence.priority, 3);
 
-        let alert = message_for(Event::AlertRaised { level: 2 }).expect("an alert step speaks");
+        let alert = message_for(Event::AlertRaised {
+            rung: 2,
+            trigger: AlertTrigger::RepeatSightings,
+        })
+        .expect("an alert step speaks");
         assert_eq!(alert.text, "the facility is on alert — level 2");
         assert_eq!(alert.category, Category::Warning);
         assert_eq!(alert.priority, 5);
@@ -539,7 +547,11 @@ mod tests {
         assert_eq!(msg.priority, 20);
 
         // Louder than the loudest thing the net itself could have said.
-        let alert = message_for(Event::AlertRaised { level: 9 }).expect("an alert step speaks");
+        let alert = message_for(Event::AlertRaised {
+            rung: 3,
+            trigger: AlertTrigger::BodyFound,
+        })
+        .expect("an alert step speaks");
         assert!(
             msg.priority > alert.priority,
             "the answer to \"did that work?\" outranks a guard event on the same turn",
@@ -573,9 +585,12 @@ mod tests {
         );
         assert!(
             body.priority
-                <= message_for(Event::AlertRaised { level: 1 })
-                    .expect("an alert speaks")
-                    .priority,
+                <= message_for(Event::AlertRaised {
+                    rung: 1,
+                    trigger: AlertTrigger::Sighting,
+                })
+                .expect("an alert speaks")
+                .priority,
             "…but never over the facility-wide alert",
         );
     }
@@ -637,7 +652,11 @@ mod tests {
         assert_eq!(msg.text, "safety eject — stunned");
         assert_eq!(msg.category, Category::Warning);
 
-        let alert = message_for(Event::AlertRaised { level: 3 }).expect("an alert speaks");
+        let alert = message_for(Event::AlertRaised {
+            rung: 3,
+            trigger: AlertTrigger::BodyFound,
+        })
+        .expect("an alert speaks");
         let caught = message_for(Event::Captured {
             by: Cell::new(3, 3),
         })
@@ -722,15 +741,17 @@ mod tests {
         assert_eq!(near_line(&s).text, "caught");
     }
 
-    /// §11.7: a single step can raise more than one message — a takedown seen by
-    /// a second guard is `TakenDown` *and* `BodyFound` — and [`live_messages`]
-    /// returns them all, **loudest first**, leading with exactly what
-    /// [`near_line`] speaks so the deployed list and the band never disagree.
+    /// §11.7: a single step can raise more than one message — a takedown seen by a
+    /// second guard is `TakenDown`, `BodyFound` *and* the `AlertRaised` the find sends
+    /// up the §7.3 ladder — and [`live_messages`] returns them all, **loudest first**,
+    /// leading with exactly what [`near_line`] speaks so the deployed list and the
+    /// band never disagree.
     #[test]
     fn live_messages_lists_the_whole_step_loudest_first() {
         // A hidden strike north on an adjacent victim, with a witness two cells up
         // whose cone covers the fresh body: the same turn yields the takedown
-        // (self-narration, priority 0) and the found body (a threat, priority 4).
+        // (self-narration, priority 0), the found body (a threat, priority 4) and the
+        // facility-wide escalation it causes (priority 5).
         let mut layout = open_room(10, 10);
         layout.place(Cell::new(5, 5), Terrain::Hideout);
         let mut s = State::new(
@@ -749,11 +770,12 @@ mod tests {
         let live = live_messages(&s);
         assert_eq!(
             live.iter().map(|m| m.priority).collect::<Vec<_>>(),
-            vec![4, 0],
-            "loudest first: the found body outranks the takedown narration",
+            vec![5, 4, 0],
+            "loudest first: the escalation, then the found body, then the narration",
         );
-        assert_eq!(live[0].text, "a body has been found");
-        assert_eq!(live[1].text, "the guard drops — a body is left");
+        assert_eq!(live[0].text, "the facility is on alert — level 3");
+        assert_eq!(live[1].text, "a body has been found");
+        assert_eq!(live[2].text, "the guard drops — a body is left");
         assert_eq!(
             live.first().cloned(),
             Some(near_line(&s)),

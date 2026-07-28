@@ -577,12 +577,14 @@ impl State {
         self.turn
     }
 
-    /// The facility-wide alert level (§7.3): how many times the radio net has
-    /// escalated this run (a guard going fully silent). Read by the near line's
-    /// ambient status (§11.4) and available to the shell and the sim's alert-peak
-    /// metric (§13.2).
+    /// The facility alert **rung**, 0..=3 (§7.3): how far up the ladder this raid has
+    /// pushed the facility — 1 from a confirmed sighting or a post going quiet, 2 from
+    /// three sightings or a console tampered with while already seen, 3 from a found
+    /// body or a second quiet post. It never falls within a level (no decay), and its
+    /// effects are cumulative. Read by the near line's ambient status (§11.4) and
+    /// available to the shell and the sim's alert-peak metric (§13.2).
     pub fn alert(&self) -> u32 {
-        self.alert
+        self.alert.rung()
     }
 
     /// Whether the run is live, won, or lost (§4.5).

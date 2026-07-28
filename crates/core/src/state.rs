@@ -48,6 +48,7 @@
 use crate::ability::{
     AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout, TargetingMode,
 };
+use crate::alert::{Alert, AlertTrigger};
 use crate::body::Body;
 
 use crate::category::Category;
@@ -56,7 +57,9 @@ use crate::cover;
 use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
-use crate::guard::{Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT};
+use crate::guard::{
+    Dwell, Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT,
+};
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::radio;
@@ -543,14 +546,13 @@ pub struct State {
     radio_silenced: bool,
     exit: Cell,
     turn: u32,
-    /// The facility-wide alert level (§7.3): a count of escalations, each from a
-    /// concrete source — a guard that stopped answering its radio (the second
-    /// missed ping). Starts at zero and steps up in [`radio_phase`](Self::radio_phase);
-    /// it is *written and read* (the near line surfaces it, §11.4), which is the
-    /// whole point after the old "never written to, never read" failure (§2.3).
-    /// It does not decay within a run yet — coupling it back into guard behaviour
-    /// is the cooperation/tuning work (§7.7); here it first gets teeth.
-    alert: u32,
+    /// The facility-wide alert (§7.3): the [`Alert`] ladder's rung and the tallies
+    /// its triggers count against. Every step has a concrete source — a confirmed
+    /// sighting, a post that stopped answering the radio, a tampered console, a found
+    /// body — and every step **does something**, which is the whole point after the
+    /// old "never written to, never read" failure (§2.3). It never decays within a
+    /// level (§7.3): a rung reached is a fact about the run.
+    alert: Alert,
     outcome: Outcome,
     /// The events of the player's most recent action, free or spent — what the
     /// near line reads (§11.7: messages clear on the next action, so holding
@@ -717,7 +719,7 @@ impl State {
             radio_silenced: false,
             exit,
             turn: 0,
-            alert: 0,
+            alert: Alert::new(),
             outcome: Outcome::Playing,
             last_events: Vec::new(),
             door_cues: Vec::new(),
@@ -1259,6 +1261,13 @@ impl State {
                     remaining: self.objectives_remaining(),
                     still_needed: self.intel_needed_to_exit(),
                 });
+                // A console tampered with while the facility already knows you are in
+                // it steps the alert ladder to rung 2 (§7.3): control now knows what
+                // you came for. At rung 0 it triggers nothing at all — that is the
+                // reward for staying unseen, and the reason a clean raid is quiet.
+                if let Some(trigger) = self.alert.console_tampered() {
+                    self.raise_alert(trigger, events);
+                }
                 true
             }
             // The comms console (§7.3/§7.7): one bump kills the radio net for the rest
@@ -1666,11 +1675,15 @@ impl State {
     ///   ([`Body::fell_at`](crate::body::Body::fell_at)) — control's last fix on
     ///   it — switching it to [`Responding`](crate::GuardState::Responding), and it
     ///   **searches** there on arrival (§7.6). If every guard has the live player,
-    ///   nobody is free and the silence goes un-investigated — the second miss
-    ///   still lands.
-    /// - **Second miss** — the facility-wide alert steps (§7.3); control has
-    ///   escalated as far as the design specifies and stops pinging the corpse
-    ///   ([`MAX_MISSED_PINGS`](crate::radio) caps it).
+    ///   nobody is free and the silence goes un-investigated — the rung steps anyway.
+    ///   That first silence is also a **rung-1 trigger** on the facility alert ladder
+    ///   (§7.3) — and the *second post* to fall silent is a rung-3 one: two missed
+    ///   pings across two bodies is an intruder taking the place apart, where one
+    ///   quiet post could be a fault.
+    /// - **Second miss** — control has called this post twice and gives up on it
+    ///   ([`MAX_MISSED_PINGS`](crate::radio) caps the pinging). It escalates nothing
+    ///   on its own: a post that has already gone quiet tells control nothing new, so
+    ///   the ladder counts **bodies**, not pings.
     ///
     /// A **hidden** body still misses its pings (§7.3): hiding a body confuses the
     /// investigation — the responder searches the cell the body was dragged away
@@ -1702,11 +1715,34 @@ impl State {
                     self.guards[g].respond_to(at);
                 }
                 events.push(Event::RadioSilence { at });
-            } else {
-                // Second (final) miss: the escalation gets a concrete source.
-                self.alert += radio::ALERT_STEP;
-                events.push(Event::AlertRaised { level: self.alert });
+                // A post going quiet is the ladder's own trigger (§7.3): the first is
+                // rung 1, the second — a *different* body — is rung 3.
+                let trigger = self.alert.post_fell_silent();
+                self.raise_alert(trigger, events);
             }
+        }
+    }
+
+    /// Step the facility alert ladder (§7.3) and report it if it actually rose.
+    ///
+    /// The one place the rung is written, so the no-decay rule (§7.3) and the
+    /// "one event per escalation" rule are both held in a single line of code. A
+    /// trigger at or below the current rung is silent: the ladder reports
+    /// *escalations*, not occurrences, so a chase that keeps producing rung-1
+    /// triggers at rung 3 says nothing.
+    fn raise_alert(&mut self, trigger: AlertTrigger, events: &mut Vec<Event>) {
+        if let Some(rung) = self.alert.raise(trigger) {
+            events.push(Event::AlertRaised { rung, trigger });
+        }
+    }
+
+    /// The §7.5 dwell rule in force this turn: the playtest chance knob, and the
+    /// length range the facility alert imposes (§7.3 — rung 1's teeth). Read once
+    /// per guard phase, so every guard in the same turn pauses under the same rule.
+    fn dwell_rule(&self) -> Dwell {
+        Dwell {
+            chance: self.dwell_chance,
+            turns: self.alert.dwell_turns(),
         }
     }
 

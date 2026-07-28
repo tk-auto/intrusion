@@ -46,6 +46,7 @@
 #![forbid(unsafe_code)]
 
 mod ability;
+mod alert;
 mod beat;
 mod body;
 mod category;
@@ -78,6 +79,7 @@ pub use ability::{
     Ability, AbilityId, AbilityMode, AbilityState, AbilityStatus, Behaviour, Economy, Effect,
     Loadout, TargetingMode,
 };
+pub use alert::AlertTrigger;
 pub use body::Body;
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};

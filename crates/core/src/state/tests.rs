@@ -4,7 +4,7 @@
 //! [`turn`] for the loop itself, [`guards`] for phase 3, [`doors`] for
 //! [`super::doors`], [`view`] for [`super::view`]'s read surface, [`abilities`] for
 //! [`super::abilities`], [`activation`] for [`super::activation`]'s precondition
-//! ladder, [`bore`] for [`super::bore`], [`lockdown`] for
+//! ladder, [`alert`] for the §7.3 facility alert ladder, [`bore`] for [`super::bore`], [`lockdown`] for
 //! [`super::lockdown`], [`traversal`] for
 //! [`super::traversal`], [`ducts`] for
 //! the §10.7 crawlspace, and [`comms`] for the §7.7 comms console that kills the
@@ -13,6 +13,7 @@
 
 mod abilities;
 mod activation;
+mod alert;
 mod bore;
 mod comms;
 mod doors;

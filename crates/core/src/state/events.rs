@@ -152,10 +152,14 @@ pub enum Event {
     /// [`RadioSilence`](Event::RadioSilence), which is a single *guard* gone quiet and
     /// is bad news; this is the net itself, and it is the player's doing.
     CommsSilenced { at: Cell },
-    /// A second missed radio ping stepped the facility-wide alert to `level`
-    /// (§7.3): the concrete, explainable escalation the alert system was always
-    /// meant to provide (§2.3). Written here, read on the near line (§11.4).
-    AlertRaised { level: u32 },
+    /// The facility alert climbed to `rung`, because of `trigger` (§7.3): the
+    /// concrete, explainable escalation the alert system was always meant to provide
+    /// (§2.3). Fired **once per escalation** — a trigger at or below the rung the
+    /// facility has already reached says nothing — and it carries *why*, so the near
+    /// line (§11.4) and the §13.2 sim's attribution (#376) both read the same fact
+    /// rather than inferring it. A rung never falls, so there is no matching
+    /// "the facility calmed down" event: there is no way back down (§7.3).
+    AlertRaised { rung: u32, trigger: AlertTrigger },
     /// The player took hold of a body by stepping off its cell (§8.3): they are
     /// now dragging it, at half speed, until they release it or the run ends.
     BodyGrabbed { at: Cell },

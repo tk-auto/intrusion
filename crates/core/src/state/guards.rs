@@ -3,10 +3,11 @@
 //! The third and last phase of a spent turn, split out of [`state.rs`](super) so the
 //! turn loop reads as its three phases rather than as one of them. It folds this
 //! turn's sight into every guard's mind ([`Guard::sense`](crate::Guard)), witnesses a
-//! §15 Q5 dive, runs the found-body (§7.2), hideout (§10.3) and decoy (§8.3) scans,
-//! and finally moves each guard — where contact with the player is capture (§4.5).
+//! §15 Q5 dive, counts the facility alert's confirmed sightings (§7.3), runs the
+//! found-body (§7.2), hideout (§10.3) and decoy (§8.3) scans, and finally moves each
+//! guard — where contact with the player is capture (§4.5).
 //!
-//! # One reading, five passes
+//! # One reading, six passes
 //!
 //! Each pass needs answers that are queries over the *whole* state — is the player
 //! concealed from this guard, can the player see it, is it confused — and each takes
@@ -109,12 +110,16 @@ impl GuardSenses {
 impl State {
     /// Phase 3 (§4.2): the guards *sense*, then *act*.
     ///
-    /// Five passes over one [`GuardSenses`] reading, in an order that is part of the
-    /// design (see the module header): sense and witness, find bodies, check hideouts,
-    /// notice the decoy, then move.
+    /// Six passes over one [`GuardSenses`] reading, in an order that is part of the
+    /// design (see the module header): sense and witness, count the sighting, find
+    /// bodies, check hideouts, notice the decoy, then move. The sighting count sits
+    /// directly behind the sense pass because that is where the fact it reads is
+    /// produced — and ahead of the movement pass, so a rung the facility reaches this
+    /// turn is already shortening dwells when the guards step (§7.3/§7.5).
     pub(super) fn guard_phase(&mut self, events: &mut Vec<Event>) {
         let senses = GuardSenses::read(self);
         self.sense_guards(&senses, events);
+        self.watch_sightings(&senses, events);
         self.find_bodies(&senses, events);
         self.check_hideouts(&senses);
         self.check_decoy(&senses);
@@ -172,7 +177,31 @@ impl State {
         self.spotters = spotters;
     }
 
-    /// Pass 2 — the found-body scan (§7.2): a body is *found* the first time any cone
+    /// Pass 2 — the facility alert's sighting window (§7.3/§7.6): a turn in which
+    /// **any** guard has the player in its **certain** zone is one contact turn, and
+    /// [`SIGHTING_CONTACT_TURNS`](crate::alert::SIGHTING_CONTACT_TURNS) of them inside
+    /// the sliding window make one confirmed sighting — the ladder's rung-1 trigger,
+    /// and, on the third, its rung-2 one.
+    ///
+    /// The tally is **facility-wide, not per guard**: three guards catching one turn
+    /// each still counts three, because what the ladder measures is how often the
+    /// facility knew where you were. A **glimpse** counts nothing.
+    ///
+    /// A dazed guard (§8.3/#325) takes no part: it did not look this turn, so its
+    /// contact is last turn's frozen reading and counting it would have a blinded
+    /// guard reporting sightings for as long as the flash held it.
+    fn watch_sightings(&mut self, senses: &GuardSenses, events: &mut Vec<Event>) {
+        let certain = self
+            .guards
+            .iter()
+            .enumerate()
+            .any(|(index, guard)| senses.acts(index) && guard.certain_contact());
+        if let Some(trigger) = self.alert.watch(self.turn, certain) {
+            self.raise_alert(trigger, events);
+        }
+    }
+
+    /// Pass 3 — the found-body scan (§7.2): a body is *found* the first time any cone
     /// covers it. A body does not block sight, so the cones just recomputed decide.
     /// Every guard seeing it reacts ([`Guard::find_body`]: the harder alert, and the
     /// search unless the live player has it busy); the loudest event in the game fires
@@ -207,12 +236,15 @@ impl State {
             if !finders.is_empty() {
                 self.bodies[body_index].mark_found();
                 events.push(Event::BodyFound { at });
+                // The loudest event in the game is also the loudest thing the facility
+                // can learn: straight to the top of the ladder (§7.3).
+                self.raise_alert(AlertTrigger::BodyFound, events);
                 self.call_in_body(at, &finders, events);
             }
         }
     }
 
-    /// Pass 3 — the found-a-body-nearby check (§15 Q5, second half): a found body is
+    /// Pass 4 — the found-a-body-nearby check (§15 Q5, second half): a found body is
     /// loud evidence the intruder is close (§7.2), so a guard searching the area
     /// around one checks the cupboards inside its sweep — an occupied hideout within
     /// `SEARCH_RADIUS` of the body it is searching is flushed, reusing the witness
@@ -244,7 +276,7 @@ impl State {
         }
     }
 
-    /// Pass 4 — the decoy scan (§8.3, #105): a guard whose cone covers the decoy — and
+    /// Pass 5 — the decoy scan (§8.3, #105): a guard whose cone covers the decoy — and
     /// whose look did *not* detect the player this turn — turns to Investigate it. The
     /// precedence is the whole point: a guard that can see you ignores the fake;
     /// decoys work on guards that have lost you.
@@ -359,7 +391,7 @@ impl State {
         !sent.is_empty()
     }
 
-    /// Pass 5 — each guard `decide`s a step (§7.5) and takes it. A guard moving into
+    /// Pass 6 — each guard `decide`s a step (§7.5) and takes it. A guard moving into
     /// the player's cell is a capture and ends the run (§4.5). Otherwise it moves onto
     /// any cell that admits it and holds no other actor; a guard with nowhere to go, or
     /// whose step is blocked, simply holds.
@@ -374,6 +406,10 @@ impl State {
         // rather than per guard. Empty on every turn no lockdown is running, which is
         // nearly all of them.
         let sealed = self.sealed_route_blocks();
+        // The §7.5 dwell rule, read once for the whole pass: the facility alert
+        // shortens the pause from rung 1 up (§7.3), and every guard this turn holds
+        // to the same rule.
+        let dwell = self.dwell_rule();
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
@@ -402,7 +438,7 @@ impl State {
             // zone (§7.6) — an Investigating guard only ever had a glimpse and
             // reports nothing — and `decide` is the one place a chase can run out.
             let was_chasing = self.guards[i].state() == GuardState::Chasing;
-            let step = self.guards[i].decide(facility, &blocked, &mut self.rng, self.dwell_chance);
+            let step = self.guards[i].decide(facility, &blocked, &mut self.rng, dwell);
             if was_chasing {
                 self.call_in_lost_sighting(i, events);
             }

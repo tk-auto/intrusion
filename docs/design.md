@@ -459,8 +459,8 @@ answer.** A guard that is down does not answer.
 | Property | Value |
 |---|---|
 | Ping interval | **every ~20 turns per guard, jittered** **[START]** |
-| Missed ping → | Control dispatches the nearest active guard to the **takedown location** — the cell the guard fell in — where it **searches** (§7.6) rather than merely standing |
-| Second missed ping → | Facility-wide alert step |
+| Missed ping → | Control dispatches the nearest active guard to the **takedown location** — the cell the guard fell in — where it **searches** (§7.6) rather than merely standing, **and** the facility alert steps to rung 1 (the ladder below) |
+| Second missed ping → | Control gives up on the post and stops calling it. It escalates nothing on its own: a post already known to be quiet tells control nothing new, so the ladder counts **bodies**, not pings |
 
 Why this is the right mechanic:
 
@@ -482,6 +482,56 @@ Why this is the right mechanic:
   not the investigation not happening.
 - **It creates the escalation the alert system was always supposed to provide**,
   from a concrete, explainable source rather than a global number.
+
+#### The alert ladder — what an escalation actually does
+
+**[SETTLED]** — three rungs, fixed triggers, cumulative retaliation, **no decay**.
+The old alert was §2.3's worst row: *never written to, never read*. A number that
+announces an escalation which does not exist is worse than the old silence, so the
+rung is defined by what it *does*.
+
+| Rung | Triggers (**any** of) | Retaliation **added** at this rung |
+|---|---|---|
+| **1** | A confirmed sighting; **or** one missed radio ping | Guards are **never calm**: the §7.5 patrol dwell drops from **3–7** to **1–3** turns **[START]** |
+| **2** | **3** confirmed sightings (cumulative) **[START]**; **or** an intel console tampered with while at rung ≥ 1 | **+1 guard** enters the facility |
+| **3** | A body found; **or** two missed pings across **two** bodies | **+2 guards** enter the facility |
+
+**Effects are cumulative.** A rung applies every effect at or below it, so a run
+driven from 0 straight to rung 3 gets the dwell cut **and** +1 **and** +2 = three
+extra guards. Rung 3 is the top; there is no rung 4.
+
+**A confirmed sighting** is **3** turns **[START]** in which *any* guard has the
+player in the **certain** zone (§7.6), inside a sliding **10-turn** window
+**[START]**. The tally is facility-wide, not per guard: three guards catching one
+turn each still counts three. The window must fall back to **0** — ten turns with no
+certain-zone contact — before another sighting can be counted, which is what makes
+"3 sightings" three separate events rather than one long chase. A **glimpse** counts
+nothing.
+
+**"Tampered" consoles** are the **intel consoles** (`$`). The **comms console**
+(`Ψ`) is deliberately **not** a trigger: it is the one answer this section gives the
+player to the net, and charging alert for it would tax the counterplay. **Rung 0 is
+safe** — tampering below rung 1 triggers nothing at all, which is the incentive to
+stay undetected.
+
+**No decay** — decided. The rung is permanent for the level: a step is a fact about
+the run, and nothing un-knows that a guard stopped answering or that you were seen.
+Do **not** add a timer; §7.4's decaying alert is the *per-guard* lead and must not be
+conflated with the facility rung. A console that lowers the rung is a possible later
+addition; it does not exist now.
+
+Two things the ladder may never do:
+
+- **Guards never accelerate** (§7.1 **[SETTLED]**). No rung may make any guard
+  faster. This is the tempting wrong answer, so it carries an assertion.
+- **The dwell is shortened, never removed** (§7.5). Almost every run sits at rung 1
+  after first contact and it never comes down, so a dwell that could reach 0 would
+  take the Takedown (§7.2) off the table for the rest of the level. The floor
+  matters more than the ceiling.
+
+Guard *presentation* is unchanged: a never-calm guard still reads as Calm (§7.4's
+colour column). The ladder's legibility is the Level info tab and the tinted help
+button (§11.4).
 
 #### The comms console — the counterplay to the net
 
@@ -554,7 +604,10 @@ it has not recently looked at.
   and a detection cancels an in-progress dwell the same turn (a hunt never slows,
   the mirror of §7.1's "guards never accelerate"). The dwell length is drawn from
   the run seed (§12.4); the **[START]** knobs are dwell chance (**100%** — every
-  arrival) and dwell length (**3–7** turns). Dwelling lowers patrol coverage on
+  arrival) and dwell length (**3–7** turns). **The facility alert cuts the length**
+  (§7.3): from rung 1 the range is **1–3** turns, which is what "guards are never
+  calm again" means mechanically. It is cut, never removed — the pause is the window
+  a Takedown needs, and the rung never comes back down. Dwelling lowers patrol coverage on
   purpose (§7.6/§7.7) — a sim knob to watch, and more so now it is unconditional.
 
   **Why it is unconditional, and why the window grew.** The dwell was a 50% roll

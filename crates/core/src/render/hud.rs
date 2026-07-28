@@ -894,12 +894,15 @@ mod tests {
     ///
     /// The exit's refusal left this list in #310: naming the gate's real requirement
     /// ("the exit needs 2 more intel") is shorter than the fixed rule it replaced.
+    /// The alert line got one cell shorter in #311 without leaving: the ladder tops
+    /// at three rungs, so the old open-ended "level 99" cannot occur — but the
+    /// wording still overflows, and rewording it is #375's job, not this list's.
     const PRE_EXISTING_OVERFLOW: [&str; 6] = [
         "all the intel — the exit is open",
         "the guard drops — a body is left",
         "you slip away — the run is won",
         "you stow the body — the cupboard is sealed",
-        "the facility is on alert — level 99",
+        "the facility is on alert — level 3",
         "intel in hand — the exit is open (9 more out)",
     ];
 
@@ -959,7 +962,10 @@ mod tests {
             Event::RadioSilence { at },
             Event::CalledIn { at },
             Event::BodyCalledIn { at },
-            Event::AlertRaised { level: 99 },
+            Event::AlertRaised {
+                rung: 3,
+                trigger: crate::AlertTrigger::BodyFound,
+            },
             Event::BodyGrabbed { at },
             Event::BodyReleased { at },
             Event::BodyStored { at },
@@ -1044,8 +1050,9 @@ mod tests {
     /// the messages are not truncated.
     #[test]
     fn the_near_line_counts_extra_messages_and_deploys_the_list() {
-        // The takedown-seen-by-a-witness step: `TakenDown` (priority 0) and
-        // `BodyFound` (priority 4) land the same turn — two live messages.
+        // The takedown-seen-by-a-witness step: `TakenDown` (priority 0), `BodyFound`
+        // (4) and the `AlertRaised` (5) the find sends up the §7.3 ladder all land the
+        // same turn — three live messages.
         let mut layout = open_room(40, 14);
         layout.place(Cell::new(5, 5), Terrain::Hideout);
         let mut s = State::new(
@@ -1069,16 +1076,16 @@ mod tests {
         let g = render_screen(&s, ScreenUi::default());
         let near = row_text(&g, NEAR_ROW);
         assert!(
-            near.contains("a body has been found"),
+            near.contains("the facility is on alert"),
             "the band speaks the loudest message: {near:?}"
         );
         assert!(
-            near.contains("[+1 ▾][?]"),
+            near.contains("[+2 ▾][?]"),
             "a closed counter of the rest, beside the help toggle: {near:?}"
         );
 
         // The hit-test agrees with the drawn counter, and there is no button off it.
-        let label_len = "[+1 ▾]".chars().count() as u32;
+        let label_len = "[+2 ▾]".chars().count() as u32;
         let start = help_button_start(width) - label_len;
         assert!(
             is_message_button(&s, start, NEAR_ROW),
@@ -1101,16 +1108,20 @@ mod tests {
         };
         let g = render_screen(&s, ui);
         assert!(
-            row_text(&g, NEAR_ROW).contains("[+1 ▴]"),
+            row_text(&g, NEAR_ROW).contains("[+2 ▴]"),
             "the deployed counter points up"
         );
         assert!(
-            row_text(&g, TOP_ROWS).contains("a body has been found"),
+            row_text(&g, TOP_ROWS).contains("the facility is on alert"),
             "the loudest sits nearest the band"
         );
         assert!(
-            row_text(&g, TOP_ROWS + 1).contains("the guard drops — a body is left"),
-            "the rest stack below it"
+            row_text(&g, TOP_ROWS + 1).contains("a body has been found"),
+            "the rest stack below it, loudest first"
+        );
+        assert!(
+            row_text(&g, TOP_ROWS + 2).contains("the guard drops — a body is left"),
+            "down to the quietest"
         );
     }
 
@@ -1120,7 +1131,8 @@ mod tests {
     /// the rows a tap must never read as the board underneath.
     #[test]
     fn the_message_log_reports_the_rows_it_covers() {
-        // The same two-message step as above: `TakenDown` plus `BodyFound`.
+        // The same three-message step as above: `TakenDown`, `BodyFound`, and the
+        // alert rung the find steps (§7.3).
         let mut layout = open_room(40, 14);
         layout.place(Cell::new(5, 5), Terrain::Hideout);
         let mut s = State::new(
@@ -1140,10 +1152,10 @@ mod tests {
             message_log_open: true,
             ..ScreenUi::default()
         };
-        assert_eq!(live_messages(&s).len(), 2, "two messages are live");
+        assert_eq!(live_messages(&s).len(), 3, "three messages are live");
         assert_eq!(
             message_log_rows(&s, deployed),
-            2,
+            3,
             "deployed, the list covers one map row per live message"
         );
         assert_eq!(

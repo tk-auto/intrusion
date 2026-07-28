@@ -1685,6 +1685,17 @@ mod tests {
     /// crouch spells no letter either: ducking is a bump (§4.3), like the takedown and
     /// the grab, so it shows in the turn counts and not in the script.
     ///
+    /// **#311 moved seven rows of the forty-eight**, and every one of them is the
+    /// facility alert ladder (§7.3) doing what it was built to do: from rung 1 a Calm
+    /// guard's patrol dwell drops from 3–7 turns to 1–3, so on any seed where the bot
+    /// was seen or left a post silent, the patrols it walks past are on a different
+    /// rhythm from that turn on. The bot's policy is untouched — it does not read the
+    /// rung at all (#198) — so these are the same decisions meeting a facility that
+    /// reacts. Net one win fewer (28 → 27), with the movement in both directions:
+    /// `baseline 11` turns a 648-turn loss into a 253-turn win, while `cautious 11`
+    /// and `aggressive 9` lose runs they used to win. Twelve seeds are a pin, not a
+    /// balance signal (§13.4); the 100-seed batch is what judges the ladder.
+    ///
     /// **#316 moved the striking half and left the rest alone**, which is the whole
     /// point of putting the takedown behind [`Profile::takedown_reach`]. The
     /// `baseline` and `cautious` blocks below are **byte-for-byte what they were
@@ -1699,7 +1710,7 @@ mod tests {
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 48] = [
             "baseline 0 won 63 ",
-            "baseline 1 won 396 rrrrdrrdc",
+            "baseline 1 won 355 rrrrdcr",
             "baseline 2 lost 220 r",
             "baseline 3 won 241 rdr",
             "baseline 4 won 56 ",
@@ -1709,7 +1720,7 @@ mod tests {
             "baseline 8 lost 51 ",
             "baseline 9 lost 61 rdr",
             "baseline 10 lost 40 rc",
-            "baseline 11 lost 648 crrcrdrrrrrrrrrrrrrrrrrrrrdrrrrrr",
+            "baseline 11 won 253 crrcrrrr",
             "cautious 0 won 67 ",
             "cautious 1 lost 165 rdrdr",
             "cautious 2 lost 529 rrrrdrdr",
@@ -1721,7 +1732,7 @@ mod tests {
             "cautious 8 lost 88 r",
             "cautious 9 lost 242 rdrrd",
             "cautious 10 lost 94 rd",
-            "cautious 11 won 417 crdrdrdr",
+            "cautious 11 lost 724 crdrrdrrrrdrdrd",
             "aggressive 0 won 63 c",
             "aggressive 1 won 179 rrdc",
             "aggressive 2 won 224 ",
@@ -1731,21 +1742,21 @@ mod tests {
             "aggressive 6 lost 77 r",
             "aggressive 7 won 100 ",
             "aggressive 8 won 99 ",
-            "aggressive 9 won 296 rdrrrr",
+            "aggressive 9 lost 249 rdrrdrrr",
             "aggressive 10 lost 33 rc",
             "aggressive 11 lost 28 rdc",
             "careless 0 won 66 c",
             "careless 1 won 179 rrdc",
             "careless 2 won 215 c",
-            "careless 3 won 220 rdrcrc",
+            "careless 3 won 222 rdrccr",
             "careless 4 lost 91 crcrd",
-            "careless 5 won 226 rrcrdrrd",
+            "careless 5 won 256 rrcrdrrrcr",
             "careless 6 lost 77 r",
             "careless 7 won 100 ",
             "careless 8 won 99 ",
             "careless 9 won 144 rdcrcrr",
             "careless 10 lost 33 rc",
-            "careless 11 won 247 rcrdcr",
+            "careless 11 won 245 rcrdcr",
         ];
 
         let mut played = Vec::new();
