@@ -141,7 +141,69 @@ pub enum HelpHit {
     /// on a game that is played on phones (§11.6: every control reachable by key
     /// *and* touch).
     ToggleTheme,
+    /// The Level info tab's `copy [c]` control — put this run's level-seed token on
+    /// the system clipboard (§13.1/#353). The **core neither performs nor knows
+    /// about** the write: it owns the geometry and the token, and the shell owns the
+    /// clipboard (§12.1). Only ever produced when a token is actually drawn, so a
+    /// hand-built state offers no control rather than one that copies nothing.
+    CopySeed,
 }
+
+/// Whether the player's last attempt to copy this run's level-seed token reached the
+/// clipboard (§13.1/#353) — the acknowledgement the Level info tab prints under the
+/// token, and the panel's answer to "did that work?".
+///
+/// It lives on [`ScreenUi`](super::ScreenUi), **not** on [`State`](crate::State): the
+/// panel writes no state ([`render_help`]'s standing promise), the copy costs no turn
+/// (§4.4), and whether a browser has a clipboard is a fact about the shell rather than
+/// about the run. The core only says which of the three things to print.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SeedCopy {
+    /// Nothing has been copied since the panel opened: the control offers itself and
+    /// the row under the token stays the blank spacer it always was.
+    #[default]
+    Idle,
+    /// The token reached the system clipboard.
+    Copied,
+    /// The browser had no clipboard to write to, or refused the write — an insecure
+    /// context, or a frame without clipboard permission. **Not silent, and not a
+    /// claim**: the token is still printed one row above, ready to be read off by
+    /// eye as it was before this control existed.
+    Unavailable,
+}
+
+impl SeedCopy {
+    /// What to print under the token, and in which category — `None` while nothing
+    /// has been attempted. Success takes [`Category::System`], the HUD-control colour
+    /// the `[x]` and the control itself already use, because the line belongs to the
+    /// control that produced it; a failure takes Warning, the standing "this is not
+    /// what you wanted" cue (§11.2), rather than any new ad-hoc styling.
+    fn acknowledgement(self) -> Option<(&'static str, Category)> {
+        match self {
+            SeedCopy::Idle => None,
+            SeedCopy::Copied => Some((COPIED_ACK, Category::System)),
+            SeedCopy::Unavailable => Some((UNAVAILABLE_ACK, Category::Warning)),
+        }
+    }
+}
+
+/// The two acknowledgements, worded so neither can be misread as the other: the
+/// failure says what did *not* happen and never names the clipboard as holding
+/// anything.
+const COPIED_ACK: &str = "copied to clipboard";
+const UNAVAILABLE_ACK: &str = "clipboard unavailable";
+
+// They share the Level info tab's content column, and [`draw`] clips in silence — so
+// they are bounded at **compile time** like every other fixed column of the panel
+// (§2.3), rather than being discovered half-drawn on a player's screen.
+const _: () = {
+    assert!(
+        COPIED_ACK.len() <= column_width(CONTENT_INDENT)
+            && UNAVAILABLE_ACK.len() <= column_width(CONTENT_INDENT),
+        "a seed-copy acknowledgement is too long for the Level info tab — shorten it \
+         (see column_width in render::help)",
+    );
+};
 
 /// The `[x]` close control on the tab bar — three cells wide, like the header's
 /// other `[?]`/`[▾]` buttons, so the escape reads as a button.
@@ -171,9 +233,47 @@ pub(super) fn theme_control_len() -> u32 {
     theme_control().chars().count() as u32
 }
 
+/// The key that copies the run's **level-seed token** to the clipboard while the
+/// panel is open (§13.1/#353) — `c`, for *copy*. It is drawn as `copy [c]` beside the
+/// token, the same label-and-key shape [`THEME_LABEL`] uses, and matched in
+/// [`help_nav_for_key`](crate::help_nav_for_key).
+///
+/// Unlike `?` and `n` it is a **panel-only** key: it is absent from
+/// [`ui_command_for_key`](crate::input::ui_command_for_key), because there is nothing
+/// for it to copy on the board — the token is drawn here and nowhere else. That is
+/// also why it is not on the Help tab's standing controls list, which holds only the
+/// shortcuts true of every frame of every run; the drawn `[c]` teaches it where it
+/// works, the way the tab bar's `[x]` teaches itself.
+pub(crate) const COPY_KEY: char = 'c';
+
+/// The copy control's word, drawn with its key as `copy [c]`. The whole run is the
+/// target, label included, for the reason [`THEME_LABEL`] gives: the word is the
+/// larger and more obvious thing to reach for, and a bare `[c]` is only a target if
+/// you already know what `c` means.
+const COPY_LABEL: &str = "copy";
+
+fn copy_control() -> String {
+    format!("{COPY_LABEL} [{COPY_KEY}]")
+}
+
+fn copy_control_len() -> u32 {
+    copy_control().chars().count() as u32
+}
+
 /// The column every Level info row is drawn from — one in from the section
 /// headings, the panel's standing content indent.
 const CONTENT_INDENT: u32 = 3;
+
+/// Where the panel's content starts, below the tab bar and the blank rule under it —
+/// the `y` [`render_help`] hands each tab, named so the Level info rows below can be
+/// derived from it rather than counted by hand.
+const CONTENT_TOP: u32 = 2;
+
+/// The row the level-seed token is drawn on, and so the row its `copy [c]` control
+/// shares with it: `THIS RUN` at [`CONTENT_TOP`], a blank, the `LEVEL SEED` heading,
+/// then the token. Shared by [`draw_level_info`] and [`help_hit`] so a tap lands on
+/// exactly the control drawn.
+const SEED_TOKEN_ROW: u32 = CONTENT_TOP + 3;
 
 /// **The modifier caption width bound** (#248). The panel fills the board, so the
 /// narrowest screen a real run ever renders on is the v1 board
@@ -203,11 +303,21 @@ const _: () = {
     }
 };
 
+/// **The panel's one right-alignment rule**: where a control `len` cells wide starts
+/// on a screen `width` wide, with the one-cell right margin every column of the card
+/// keeps. Every control on the panel is laid out through this — the tab bar's `[x]`,
+/// the footer's `theme [n]`, the token row's `copy [c]` — and each is *drawn* and
+/// *hit-tested* from its own wrapper below, so a tap can only ever land on the cells
+/// the frame actually drew.
+const fn right_aligned_start(width: u32, len: u32) -> u32 {
+    width.saturating_sub(1 + len)
+}
+
 /// The column the close control starts at: right-aligned with a one-cell margin,
 /// like the ability line's deploy button. Shared by the drawing and [`help_hit`]
 /// so a tap lands on exactly the `[x]` drawn.
-fn close_button_start(width: u32) -> u32 {
-    width.saturating_sub(1 + CLOSE_BUTTON_LEN)
+const fn close_button_start(width: u32) -> u32 {
+    right_aligned_start(width, CLOSE_BUTTON_LEN)
 }
 
 /// The column the footer's theme control starts at — right-aligned with the same
@@ -217,7 +327,15 @@ fn close_button_start(width: u32) -> u32 {
 /// which puts the control in the very same corner of its own footer row, so the one
 /// option the game has so far is in one place wherever you meet it.
 pub(super) fn theme_control_start(width: u32) -> u32 {
-    width.saturating_sub(1 + theme_control_len())
+    right_aligned_start(width, theme_control_len())
+}
+
+/// The column the token row's copy control starts at — the same right edge the `[x]`
+/// and the theme control keep, so the panel's three controls stack in one column
+/// rather than each finding its own place. Shared by [`draw_level_info`] and
+/// [`help_hit`].
+fn copy_control_start(width: u32) -> u32 {
+    right_aligned_start(width, copy_control_len())
 }
 
 /// Lay the tab bar out: each tab as `(tab, start col, width)`, drawn `[Label]`
@@ -236,18 +354,45 @@ fn tab_layout() -> Vec<(HelpTab, u32, u32)> {
     out
 }
 
+/// The **level-seed token the Level info tab draws** for `level`, or `None` when
+/// there is none to draw (§13.1/#333): a hand-built state was assembled cell by cell
+/// and no token reproduces it, and a config no run can hold is one
+/// [`LevelSeed::encode`] cannot express. Both answer `None`, and both mean the same
+/// thing — there is nothing here worth taking away.
+///
+/// Shared by [`draw_level_info`] and [`help_hit`], so the copy control exists on
+/// exactly the frames that print something for it to copy: the affordance and the
+/// token can never disagree about whether this run has one.
+fn seed_token(level: Option<LevelSeed>) -> Option<String> {
+    level.and_then(|level| level.encode())
+}
+
 /// The pointer→control hit-test for the open panel (§11.6/#248): which [`HelpHit`]
 /// screen cell `(x, y)` lands on, or `None` for the body (a press the modal panel
-/// swallows without acting). Two rows carry controls — the tab bar (row 0) and the
-/// footer's `theme [n]` control on the last row (#189), label and key alike — and on
-/// the tab bar the close `[x]` is tested first so it wins even if a layout ever
-/// abutted it.
+/// swallows without acting). Three rows can carry controls — the tab bar (row 0), the
+/// footer's `theme [n]` control on the last row (#189), label and key alike, and the
+/// Level info tab's token row with its `copy [c]` (#353) — and on the tab bar the
+/// close `[x]` is tested first so it wins even if a layout ever abutted it.
 ///
 /// It takes the panel's `height` for the footer row's sake: the footer is drawn from
 /// the bottom up, so the hit-test has to measure from the same edge the drawing does
-/// or a tap would land a row off on a shorter screen.
+/// or a tap would land a row off on a shorter screen. The footer is also tested
+/// *first*, which is the order [`render_help`] draws in — on a screen short enough for
+/// the two to collide, the row belongs to whichever control is actually painted there.
+///
+/// It takes `tab` and `level` for the copy control's sake, and reads the token through
+/// the same [`seed_token`] the drawing does: the control is offered on the Level info
+/// tab, on the token's own row, and only when there is a token — never on a run whose
+/// panel shows no seed section at all.
 #[must_use]
-pub fn help_hit(width: u32, height: u32, x: u32, y: u32) -> Option<HelpHit> {
+pub fn help_hit(
+    width: u32,
+    height: u32,
+    tab: HelpTab,
+    level: Option<LevelSeed>,
+    x: u32,
+    y: u32,
+) -> Option<HelpHit> {
     if height > 0 && y == height - 1 {
         let theme = theme_control_start(width);
         if x >= theme && x < theme + theme_control_len() {
@@ -255,16 +400,22 @@ pub fn help_hit(width: u32, height: u32, x: u32, y: u32) -> Option<HelpHit> {
         }
         return None;
     }
-    if y != 0 {
+    if y == 0 {
+        let close = close_button_start(width);
+        if x >= close && x < close + CLOSE_BUTTON_LEN {
+            return Some(HelpHit::Close);
+        }
+        for (tab, start, len) in tab_layout() {
+            if x >= start && x < start + len {
+                return Some(HelpHit::Tab(tab));
+            }
+        }
         return None;
     }
-    let close = close_button_start(width);
-    if x >= close && x < close + CLOSE_BUTTON_LEN {
-        return Some(HelpHit::Close);
-    }
-    for (tab, start, len) in tab_layout() {
-        if x >= start && x < start + len {
-            return Some(HelpHit::Tab(tab));
+    if tab == HelpTab::LevelInfo && y == SEED_TOKEN_ROW && seed_token(level).is_some() {
+        let copy = copy_control_start(width);
+        if x >= copy && x < copy + copy_control_len() {
+            return Some(HelpHit::CopySeed);
         }
     }
     None
@@ -290,15 +441,16 @@ pub(super) fn render_help(
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
     loadout: Loadout,
+    copy: SeedCopy,
 ) -> Grid {
     let mut grid = blank_grid(width, height);
 
     draw_tab_bar(&mut grid, tab);
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
     match tab {
-        HelpTab::LevelInfo => draw_level_info(&mut grid, 2, level, modifiers),
-        HelpTab::Abilities => abilities::draw_abilities(&mut grid, 2, loadout),
-        HelpTab::Help => draw_help_card(&mut grid, 2),
+        HelpTab::LevelInfo => draw_level_info(&mut grid, CONTENT_TOP, level, modifiers, copy),
+        HelpTab::Abilities => abilities::draw_abilities(&mut grid, CONTENT_TOP, loadout),
+        HelpTab::Help => draw_help_card(&mut grid, CONTENT_TOP),
     }
     draw_footer(&mut grid);
     grid
@@ -338,24 +490,43 @@ fn draw_level_info(
     mut y: u32,
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
+    copy: SeedCopy,
 ) {
     draw(grid, 2, y, "THIS RUN", Category::Interest);
     y += 2;
 
     // The level-seed token (§13.1/#245/#333): the handle that hands this run around.
-    // A hand-built state has none — it was assembled cell by cell, and there is no
-    // token that reproduces it — and neither has a config no run can hold
-    // ([`LevelSeed::encode`]). Both answer `None` here, and both mean the same thing,
-    // so the section is simply absent rather than showing an honest-looking string
-    // that boots something else.
-    if let Some(token) = level.and_then(|level| level.encode()) {
+    // Absent for a run with no token at all ([`seed_token`]), so the section — control
+    // and all — is simply not there rather than showing an honest-looking string that
+    // boots something else.
+    if let Some(token) = seed_token(level) {
         draw(grid, 2, y, "LEVEL SEED", Category::System);
         y += 1;
+        debug_assert_eq!(y, SEED_TOKEN_ROW, "the token row and its hit-test agree");
         // Interest, the goal/reward colour: this is the thing worth taking away
         // from the panel. One form — the token spells the whole config out, so what
         // the player copies off this panel is exactly what a link carries (#333).
-        draw(grid, 3, y, &token, Category::Interest);
-        y += 2;
+        draw(grid, CONTENT_INDENT, y, &token, Category::Interest);
+        // …and the control that actually takes it away (#353), right-aligned on the
+        // token's own row in System — the HUD-control colour the `[x]` and the theme
+        // button already wear, so it reads as a button rather than as more of the
+        // token's ink. The token was the one thing on this panel that existed *to be
+        // taken* and the only thing the player could not take.
+        draw(
+            grid,
+            copy_control_start(grid.width),
+            y,
+            &copy_control(),
+            Category::System,
+        );
+        y += 1;
+        // The acknowledgement goes in the blank spacer that already sat under the
+        // token, so saying whether the copy worked shifts nothing below it — the
+        // modifier list stays exactly where it was drawn a frame earlier.
+        if let Some((text, category)) = copy.acknowledgement() {
+            draw(grid, CONTENT_INDENT, y, text, category);
+        }
+        y += 1;
     }
 
     draw(grid, 2, y, "MODIFIERS", Category::System);
@@ -691,7 +862,15 @@ mod tests {
     /// tests want, including the [`abilities`] tab's, which is why it is
     /// `pub(super)` rather than local.
     pub(super) fn render_tab(tab: HelpTab, loadout: Loadout) -> Grid {
-        render_help(W, H, tab, None, LevelModifiers::default(), loadout)
+        render_help(
+            W,
+            H,
+            tab,
+            None,
+            LevelModifiers::default(),
+            loadout,
+            SeedCopy::default(),
+        )
     }
 
     /// The glyph legend is **derived**, not hand-copied (§11.3): every terrain row's
@@ -888,6 +1067,7 @@ mod tests {
             None,
             LevelModifiers::default(),
             Loadout::innate(),
+            SeedCopy::default(),
         );
         let text = text_of(&baseline);
         assert!(text.contains("THIS RUN") && text.contains("MODIFIERS"));
@@ -903,7 +1083,15 @@ mod tests {
             intel_to_exit: IntelGate::All,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, None, modified, Loadout::innate());
+        let g = render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            None,
+            modified,
+            Loadout::innate(),
+            SeedCopy::default(),
+        );
         let text = text_of(&g);
         assert!(
             !text.contains("none active"),
@@ -936,7 +1124,15 @@ mod tests {
                 full_layout_known: true,
                 intel_to_exit: gate,
             };
-            let g = render_help(W, H, HelpTab::LevelInfo, None, all_on, Loadout::innate());
+            let g = render_help(
+                W,
+                H,
+                HelpTab::LevelInfo,
+                None,
+                all_on,
+                Loadout::innate(),
+                SeedCopy::default(),
+            );
             let text = text_of(&g);
             for m in all_on.active() {
                 let caption = match m.detail {
@@ -988,6 +1184,7 @@ mod tests {
                 Some(level),
                 level.modifiers,
                 Loadout::innate(),
+                SeedCopy::default(),
             );
             let text = text_of(&g);
             let token = level.encode().expect("a config a run can hold");
@@ -1020,6 +1217,7 @@ mod tests {
             Some(quick),
             quick.modifiers,
             Loadout::innate(),
+            SeedCopy::default(),
         );
         assert!(
             text_of(&g).contains(&token),
@@ -1035,6 +1233,7 @@ mod tests {
             None,
             LevelModifiers::default(),
             Loadout::innate(),
+            SeedCopy::default(),
         );
         assert!(!text_of(&none).contains("LEVEL SEED"));
     }
@@ -1059,6 +1258,7 @@ mod tests {
             Some(level),
             level.modifiers,
             Loadout::innate(),
+            SeedCopy::default(),
         );
         let text = text_of(&g);
         assert!(text.contains("Guards search hideouts"));
@@ -1089,7 +1289,15 @@ mod tests {
             guards_always_search_hideouts: true,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, None, harder, Loadout::innate());
+        let g = render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            None,
+            harder,
+            Loadout::innate(),
+            SeedCopy::default(),
+        );
         // The MODIFIERS heading is at row 4 (THIS RUN@2, blank, heading@4), the first
         // modifier row at row 5; its caption starts at column 3.
         assert_eq!(g.get(3, 5).glyph, 'G');
@@ -1104,7 +1312,15 @@ mod tests {
             always_show_vision_cones: true,
             ..LevelModifiers::default()
         };
-        let g = render_help(W, H, HelpTab::LevelInfo, None, easier, Loadout::innate());
+        let g = render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            None,
+            easier,
+            Loadout::innate(),
+            SeedCopy::default(),
+        );
         assert_eq!(g.get(3, 5).glyph, 'A');
         assert_eq!(
             g.get(3, 5).fg,
@@ -1127,6 +1343,7 @@ mod tests {
                 None,
                 LevelModifiers::default(),
                 Loadout::innate(),
+                SeedCopy::default(),
             );
             for &(tab, start, _len) in &layout {
                 let expected = if tab == active {
@@ -1145,6 +1362,19 @@ mod tests {
         }
     }
 
+    /// A hit-test on a full-height panel showing the [`Default`] tab of a run with
+    /// no level-seed token — the shape the tab-bar and footer tests want, where the
+    /// only thing that varies is where the finger landed.
+    fn hit(x: u32, y: u32) -> Option<HelpHit> {
+        hit_on(H, x, y)
+    }
+
+    /// The same, on a panel `height` rows tall — for the footer, which is drawn from
+    /// the bottom edge and so must be hit-tested from it too.
+    fn hit_on(height: u32, x: u32, y: u32) -> Option<HelpHit> {
+        help_hit(W, height, HelpTab::default(), None, x, y)
+    }
+
     /// The panel is escapable and switchable **by touch** (§11.6/#248): the `[x]`
     /// close control hit-tests to [`HelpHit::Close`], each tab's cells to
     /// [`HelpHit::Tab`], and the body to nothing (a press the modal panel swallows).
@@ -1152,23 +1382,19 @@ mod tests {
     fn the_panel_is_escapable_and_switchable_by_touch() {
         // The close control at the right edge → Close, and nothing just left of it.
         let close = close_button_start(W);
-        assert_eq!(help_hit(W, H, close, 0), Some(HelpHit::Close));
-        assert_eq!(help_hit(W, H, close + 1, 0), Some(HelpHit::Close));
-        assert_ne!(help_hit(W, H, close - 1, 0), Some(HelpHit::Close));
+        assert_eq!(hit(close, 0), Some(HelpHit::Close));
+        assert_eq!(hit(close + 1, 0), Some(HelpHit::Close));
+        assert_ne!(hit(close - 1, 0), Some(HelpHit::Close));
 
         // Each tab's whole `[Label]` region resolves to that tab, by identity.
         for (tab, start, len) in tab_layout() {
             for x in start..start + len {
-                assert_eq!(
-                    help_hit(W, H, x, 0),
-                    Some(HelpHit::Tab(tab)),
-                    "tab cell {x}"
-                );
+                assert_eq!(hit(x, 0), Some(HelpHit::Tab(tab)), "tab cell {x}");
             }
         }
         // The body (below the tab bar) and the gap left of the first tab are inert.
-        assert_eq!(help_hit(W, H, 5, 3), None, "the body swallows presses");
-        assert_eq!(help_hit(W, H, 0, 0), None, "the left margin is not a tab");
+        assert_eq!(hit(5, 3), None, "the body swallows presses");
+        assert_eq!(hit(0, 0), None, "the left margin is not a tab");
     }
 
     /// §11.6/#189: the theme is reachable **by touch**, not just by key — the
@@ -1185,27 +1411,214 @@ mod tests {
     fn the_theme_control_is_reachable_by_touch() {
         let start = theme_control_start(W);
         for x in start..start + theme_control_len() {
-            assert_eq!(
-                help_hit(W, H, x, H - 1),
-                Some(HelpHit::ToggleTheme),
-                "footer cell {x}"
-            );
+            assert_eq!(hit(x, H - 1), Some(HelpHit::ToggleTheme), "footer cell {x}");
         }
         // The label's own first cell — the regression this guards is a control that
         // only answered on its last three cells.
         let label_end = start + THEME_LABEL.chars().count() as u32;
-        assert_eq!(help_hit(W, H, start, H - 1), Some(HelpHit::ToggleTheme));
-        assert_eq!(
-            help_hit(W, H, label_end - 1, H - 1),
-            Some(HelpHit::ToggleTheme)
-        );
+        assert_eq!(hit(start, H - 1), Some(HelpHit::ToggleTheme));
+        assert_eq!(hit(label_end - 1, H - 1), Some(HelpHit::ToggleTheme));
 
-        assert_eq!(help_hit(W, H, start - 1, H - 1), None, "the hint is inert");
-        assert_eq!(help_hit(W, H, start, H - 2), None, "only the footer row");
+        assert_eq!(hit(start - 1, H - 1), None, "the hint is inert");
+        assert_eq!(hit(start, H - 2), None, "only the footer row");
         // Measured from the *bottom* edge, so a shorter screen moves it with the
         // drawing rather than leaving the hit region a row adrift.
-        assert_eq!(help_hit(W, 20, start, 19), Some(HelpHit::ToggleTheme));
-        assert_eq!(help_hit(W, 20, start, H - 1), None);
+        assert_eq!(hit_on(20, start, 19), Some(HelpHit::ToggleTheme));
+        assert_eq!(hit_on(20, start, H - 1), None);
+    }
+
+    /// A run whose panel really does draw a token — quick play, spelled out in full
+    /// (#333) — for the copy-control tests below.
+    fn run_with_a_token() -> LevelSeed {
+        LevelSeed::quick_play(8371)
+    }
+
+    /// The Level info panel for `level`, with the seed-copy acknowledgement in
+    /// `copy` — the frame the copy control is drawn on.
+    fn level_info(level: Option<LevelSeed>, copy: SeedCopy) -> Grid {
+        render_help(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            level,
+            LevelModifiers::default(),
+            Loadout::innate(),
+            copy,
+        )
+    }
+
+    /// **The token is takeable** (§13.1/#353): the Level info tab draws a `copy [c]`
+    /// control on the token's own row, and every cell of it — the word as much as the
+    /// bracketed key, for the reason `theme [n]` gives — hit-tests to
+    /// [`HelpHit::CopySeed`].
+    ///
+    /// The rows around it stay inert, which is the point of testing the neighbours as
+    /// well as the control: the token row is in the middle of the panel body, where
+    /// every other press is swallowed, so a copy control with a sloppy region would
+    /// start eating presses that used to mean nothing.
+    #[test]
+    fn the_token_row_carries_a_copy_control_and_its_neighbours_do_not() {
+        let level = Some(run_with_a_token());
+        let hit = |x, y| help_hit(W, H, HelpTab::LevelInfo, level, x, y);
+
+        let start = copy_control_start(W);
+        for x in start..start + copy_control_len() {
+            assert_eq!(hit(x, SEED_TOKEN_ROW), Some(HelpHit::CopySeed), "cell {x}");
+        }
+        // The label's own first cell, and the last cell of the word before the key —
+        // the whole `copy` run presses, not just the `[c]`.
+        let label_end = start + COPY_LABEL.chars().count() as u32;
+        assert_eq!(hit(start, SEED_TOKEN_ROW), Some(HelpHit::CopySeed));
+        assert_eq!(hit(label_end - 1, SEED_TOKEN_ROW), Some(HelpHit::CopySeed));
+
+        // Just left of it, and the rows above and below: the heading, the token's own
+        // letters, and the acknowledgement line all stay body.
+        assert_eq!(hit(start - 1, SEED_TOKEN_ROW), None, "the gap is inert");
+        assert_eq!(
+            hit(CONTENT_INDENT, SEED_TOKEN_ROW),
+            None,
+            "the token itself"
+        );
+        assert_eq!(
+            hit(start, SEED_TOKEN_ROW - 1),
+            None,
+            "the LEVEL SEED heading"
+        );
+        assert_eq!(hit(start, SEED_TOKEN_ROW + 1), None, "the row beneath");
+    }
+
+    /// **No token, no control** (#353): a hand-built state has nothing that
+    /// reproduces it, so the panel shows no seed section — and the row where the
+    /// control would have been resolves to nothing at all rather than to a button
+    /// that copies an empty string.
+    #[test]
+    fn a_run_with_no_token_offers_nothing_to_copy() {
+        let start = copy_control_start(W);
+        for x in start..start + copy_control_len() {
+            assert_eq!(
+                help_hit(W, H, HelpTab::LevelInfo, None, x, SEED_TOKEN_ROW),
+                None,
+                "cell {x} of a panel with no token",
+            );
+        }
+        assert!(
+            !text_of(&level_info(None, SeedCopy::Idle)).contains(&copy_control()),
+            "and nothing is drawn there either",
+        );
+    }
+
+    /// The control belongs to the **Level info** tab, because the token does: the very
+    /// same cells on the other tabs are body, whatever run is playing. Otherwise a tap
+    /// meant for a line of the Abilities card would copy a seed.
+    #[test]
+    fn the_copy_control_is_the_level_info_tabs_alone() {
+        let level = Some(run_with_a_token());
+        let start = copy_control_start(W);
+        for tab in HelpTab::ALL {
+            if tab == HelpTab::LevelInfo {
+                continue;
+            }
+            assert_eq!(
+                help_hit(W, H, tab, level, start, SEED_TOKEN_ROW),
+                None,
+                "{tab:?} has no token on it",
+            );
+        }
+    }
+
+    /// The control is drawn where it is hit-tested, in the HUD-control colour the
+    /// `[x]` and the theme button wear (#353) — and it clears the token beside it, a
+    /// thing [`draw`] would otherwise resolve by silently overwriting the end of the
+    /// one string on this panel that has to be read character for character.
+    #[test]
+    fn the_copy_control_is_drawn_clear_of_the_token() {
+        let level = run_with_a_token();
+        let token = level.encode().expect("a config a run can hold");
+        let g = level_info(Some(level), SeedCopy::Idle);
+
+        let start = copy_control_start(W);
+        let drawn: String = (start..start + copy_control_len())
+            .map(|x| g.get(x, SEED_TOKEN_ROW).glyph)
+            .collect();
+        assert_eq!(
+            drawn,
+            copy_control(),
+            "the control is drawn on the token row"
+        );
+        assert_eq!(g.get(start, SEED_TOKEN_ROW).fg, Category::System);
+
+        // The token still reads whole, and the two do not touch.
+        let token_end = CONTENT_INDENT + token.chars().count() as u32;
+        assert!(
+            token_end < start,
+            "the token ({token_end} cells in) runs into the copy control at {start}",
+        );
+        assert_eq!(g.get(token_end - 1, SEED_TOKEN_ROW).fg, Category::Interest);
+    }
+
+    /// The acknowledgement (#353) is **honest and quiet**: nothing before a press,
+    /// a plain "copied" after one, and a failure that says the clipboard did *not*
+    /// take it rather than claiming it did. It lands in the blank spacer the token
+    /// already had beneath it, so saying so shifts no row of the modifier list below.
+    #[test]
+    fn the_copy_acknowledgement_says_only_what_happened() {
+        let level = Some(run_with_a_token());
+        let ack_row = SEED_TOKEN_ROW + 1;
+        let row_text = |g: &Grid, y: u32| -> String { g.to_text()[y as usize].clone() };
+
+        let idle = level_info(level, SeedCopy::Idle);
+        assert!(
+            row_text(&idle, ack_row).trim().is_empty(),
+            "nothing is claimed before anything is pressed",
+        );
+
+        let copied = level_info(level, SeedCopy::Copied);
+        assert!(row_text(&copied, ack_row).contains(COPIED_ACK));
+        assert_eq!(copied.get(CONTENT_INDENT, ack_row).fg, Category::System);
+
+        let failed = level_info(level, SeedCopy::Unavailable);
+        let text = row_text(&failed, ack_row);
+        assert!(text.contains(UNAVAILABLE_ACK));
+        assert!(
+            !text.contains(COPIED_ACK) && !text.contains("copied"),
+            "a failure never reads as a copy: {text:?}",
+        );
+        assert_eq!(failed.get(CONTENT_INDENT, ack_row).fg, Category::Warning);
+
+        // Whatever it says, the token is still printed and the list below it has not
+        // moved — the failure path degrades to exactly the panel that existed before
+        // this control did.
+        let token = run_with_a_token().encode().expect("a token");
+        for copy in [SeedCopy::Idle, SeedCopy::Copied, SeedCopy::Unavailable] {
+            let g = level_info(level, copy);
+            assert!(text_of(&g).contains(&token), "the token stays readable");
+            assert!(row_text(&g, ack_row + 1).contains("MODIFIERS"));
+        }
+    }
+
+    /// The panel's key and its control name the same character (#353), the way `n`
+    /// and `theme [n]` do — so the `[c]` the player reads is the `c` they press. It is
+    /// deliberately **not** a board key: there is no token drawn outside this panel
+    /// for it to copy, which is also what leaves the letter free for an ability
+    /// mnemonic (#360).
+    #[test]
+    fn the_copy_key_is_the_same_on_the_control_and_in_the_table() {
+        let key = COPY_KEY.to_string();
+        assert_eq!(
+            crate::help_nav_for_key(&key),
+            Some(crate::input::HelpNav::CopySeed),
+        );
+        assert!(copy_control().ends_with(&format!("[{key}]")));
+        assert_eq!(
+            crate::input::ui_command_for_key(&key),
+            None,
+            "panel-only: the board has no token to copy",
+        );
+        assert_eq!(
+            crate::input_for_key(&key),
+            None,
+            "and it shadows no movement"
+        );
     }
 
     /// The footer's hint and its theme control share one row, so the prose must stop

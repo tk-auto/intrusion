@@ -45,6 +45,7 @@
 //! actors (§7.5) straight from `Placement::guards`, so the shell never decides what
 //! a placed guard is; it just hands what placement built to the core.
 
+mod clipboard;
 mod debug;
 mod input;
 mod menu;
@@ -54,7 +55,7 @@ mod seed;
 mod tap;
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use intrusion_core::{
     render_screen, start_level, Grid, LevelSeed, ScreenUi, State, Theme, Visibility, BOTTOM_ROWS,
@@ -152,17 +153,23 @@ pub fn start() -> Result<(), JsValue> {
     };
     let ui = ScreenUi { modality, ..ui };
 
-    let game = Rc::new(RefCell::new(Game {
-        state,
-        canvas,
-        ctx,
-        metrics: Metrics::base(),
-        ui,
-        level,
-        replay,
-        replay_hud: None,
-        key_ramp: replay::ScrubRamp::default(),
-    }));
+    // `new_cyclic` because the shell has to be able to reach *itself* from a browser
+    // callback that finishes later — the clipboard write is the one action here whose
+    // answer arrives after the call that started it ([`Game::handle`]).
+    let game = Rc::new_cyclic(|handle: &Weak<RefCell<Game>>| {
+        RefCell::new(Game {
+            state,
+            canvas,
+            ctx,
+            metrics: Metrics::base(),
+            ui,
+            level,
+            replay,
+            replay_hud: None,
+            key_ramp: replay::ScrubRamp::default(),
+            handle: handle.clone(),
+        })
+    });
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
     if game.borrow().replay.is_some() {
         // A replay is a pure view: only the scrub pump is wired, never the live
@@ -230,6 +237,14 @@ struct Game {
     /// only: a held Space/→/← climbs it and a fresh press resets it. Its touch
     /// counterpart lives on each scrub gesture; live play never touches either.
     key_ramp: replay::ScrubRamp,
+    /// A weak handle back to the shell's own cell, closed at construction
+    /// (`Rc::new_cyclic`). Every other input the shell takes is answered inside the
+    /// call that raised it, so nothing else needs this; the clipboard write (§13.1/
+    /// #353) is the exception — the browser replies with a promise, and the reply has
+    /// to find its way back here to record the outcome and repaint. **Weak**, so the
+    /// cycle it closes is not a leak, and an upgrade that fails simply means the page
+    /// is gone and there is nothing left to tell.
+    handle: Weak<RefCell<Game>>,
 }
 
 impl Game {

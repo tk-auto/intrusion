@@ -198,7 +198,15 @@ impl Game {
             return menu_hit(width, self.screen_height(), menu, col, row).map(Control::Menu);
         }
         if self.ui.help_open {
-            return help_hit(width, self.screen_height(), col, row).map(Control::Help);
+            return help_hit(
+                width,
+                self.screen_height(),
+                self.ui.help_tab,
+                self.state.level(),
+                col,
+                row,
+            )
+            .map(Control::Help);
         }
         if is_help_button(width, col, row) {
             return Some(Control::HelpToggle);
@@ -439,6 +447,15 @@ mod tests {
             ))),
             Tap::Control(Control::Help(HelpHit::Close)),
             "the panel's own `[x]` still resolves — the touch path must never trap"
+        );
+        // …and so does a control the panel draws in the middle of its *body* (#353):
+        // the copy control sits on a row every other press is swallowed on, so it has
+        // to beat `Captured` rather than fall into it.
+        assert_eq!(
+            tap_route(g, Some((31, 5)), |_, _| Some(Control::Help(
+                HelpHit::CopySeed
+            ))),
+            Tap::Control(Control::Help(HelpHit::CopySeed)),
         );
         assert_eq!(
             tap_route(g, None, |_, _| None),

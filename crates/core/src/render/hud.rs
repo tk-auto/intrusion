@@ -141,6 +141,12 @@ pub struct ScreenUi {
     /// In-session only for now: nothing persists it, so a reload comes back on the
     /// [`Default`] dark theme.
     pub theme: Theme,
+    /// Whether the last attempt to copy this run's level-seed token reached the
+    /// clipboard (§13.1/#353) — the acknowledgement the Level info tab prints under
+    /// the token. The shell performs the write and records the outcome here; the core
+    /// only decides what that outcome *looks like*, so [`render_help`] keeps writing
+    /// no state and the copy still costs no turn (§4.4).
+    pub seed_copy: SeedCopy,
     /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
     /// wording of the usable line's floor ([`usable_hint`]), and nothing else.
     /// The shell answers only *is this a touch session?*; the core keeps the words
@@ -289,6 +295,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
             state.level(),
             state.modifiers(),
             state.loadout(),
+            ui.seed_copy,
         );
     }
 
@@ -2291,11 +2298,11 @@ mod tests {
         // Open: the panel is escapable by touch — the `[x]` closes, a tab switches.
         let height = closed.height;
         assert!(matches!(
-            help_hit(width, height, width - 2, 0),
+            help_hit(width, height, HelpTab::default(), s.level(), width - 2, 0),
             Some(HelpHit::Close)
         ));
         assert!(matches!(
-            help_hit(width, height, 2, 0),
+            help_hit(width, height, HelpTab::default(), s.level(), 2, 0),
             Some(HelpHit::Tab(_))
         ));
     }

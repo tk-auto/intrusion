@@ -48,4 +48,9 @@ features = [
     # modality, seeded from the `pointer: coarse` media query before the player has
     # touched anything.
     "MediaQueryList",
+    # The help panel's `copy [c]` control (§13.1/#353): the level-seed token goes to
+    # the system clipboard through `navigator.clipboard`. Only `Navigator` is named —
+    # the clipboard itself is reached by property lookup, because whether it is there
+    # at all is the question (see `clipboard`).
+    "Navigator",
 ]
