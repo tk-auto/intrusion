@@ -148,14 +148,37 @@ signal. So:
 
 - After a change expected to move the numbers (a tuning `[START]` knob, guard /
   vision / ability behaviour, generation, the bot policy itself, or a profile's
-  numbers), **refresh the baseline in the same PR**: re-run each profile's exact
-  `command`, replace every `summary` and the `captured_at_commit` in
-  `baseline.json`, and commit it. Refresh **all** the profile blocks together —
-  a file where one temperament is current and the others are months stale is worse
-  than one that is uniformly old. A stale baseline compared silently is exactly the
-  anti-pattern this file guards against.
+  numbers), **refresh the baseline in the same PR**:
+
+  ```
+  ./scripts/baseline.py --refresh      # re-runs every profile, rewrites the file
+  ```
+
+  It re-runs each block's own recorded `command`, replaces every `summary` and the
+  `captured_at_commit`, and prints the deltas it wrote — so read them, then commit
+  the file with the change that moved them. Never hand-edit the JSON: the script
+  refreshes **all** the profile blocks together, and a file where one temperament
+  is current and the others are months stale is worse than one that is uniformly
+  old. A refresh that finds nothing moved writes nothing, so a no-op leaves no
+  diff to review.
+
+  The stamp defaults to the short HEAD sha. Since a refresh usually runs *before*
+  the commit that moved the numbers exists, `--at` writes the file's existing
+  "HEAD plus the pending work" convention — `--at search-duration-12` records
+  `44d5e28+search-duration-12`.
 - If the baseline's config no longer matches how the batch is run, update the
-  `command`/`config` too.
+  `command`/`config` too — those the script reads rather than writes, so they stay
+  the human's to state.
+
+**CI enforces this** (`.github/workflows/ci.yml`, the `simbot baseline` job): every
+PR re-runs the three batches and fails if any summary differs from the committed
+one. That red tick is not "you broke the game" — it is "the numbers moved and the
+snapshot has not caught up". Read the deltas, decide whether they are the change
+you meant to make, and refresh. Run it locally before pushing with:
+
+```
+./scripts/baseline.py                 # exit 1 and a field-by-field diff on drift
+```
 
 ## 5. The report — flag, never judge
 
@@ -280,4 +303,6 @@ problem. Go play the flagged seeds and rule.
   what the smoke detector can see; they do not turn the bot into a judge, and
   ranking them ("aggressive is worse") is a reading the numbers do not support.
 - **Keep the baseline honest** (§4): refresh it in the same PR as any change that
-  moves the numbers, never compare a stale one silently.
+  moves the numbers, never compare a stale one silently. CI's `simbot baseline`
+  job checks this on every PR, so a forgotten refresh is a red tick rather than a
+  quiet comparison against months-old numbers.

@@ -356,3 +356,18 @@ the bot that is per `(seed, profile)`, asserted for **every** shipped profile in
 `src/bot.rs`. That property is what makes the batch a regression instrument: same
 seeds + same script (or same seeds + same profile) producing different rows means
 the game changed.
+
+CI leans on exactly that. `scripts/baseline.py` re-runs the three fixed batches
+recorded in `.claude/skills/playtest/baseline.json` and fails if any summary
+differs from the committed one, so a change that moves the numbers cannot land
+without the snapshot moving with it:
+
+```
+./scripts/baseline.py             # check — exit 1 and a field-by-field diff on drift
+./scripts/baseline.py --refresh   # re-run and rewrite the snapshot in place
+```
+
+The check is **exact**, not tolerant, because determinism makes it able to be: a
+single moved digit is a real behaviour change, and whether that change is *good*
+is the human judgement the playtest skill owns (§13.4). A red run says the
+snapshot is stale, not that the game is broken — refresh it and commit.
