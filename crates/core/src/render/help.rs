@@ -8,7 +8,9 @@
 //! has somewhere to live without the page overflowing the board:
 //!
 //! - **Level info** ([`HelpTab::LevelInfo`]) — what's bending the rules *this run*:
-//!   the active [`LevelModifiers`], by name and direction (§12.6).
+//!   the run's own **level-seed token**, with a `copy [c]` control that puts it on the
+//!   clipboard (§13.1/#353), and the active [`LevelModifiers`] by name and direction
+//!   (§12.6).
 //! - **Abilities** ([`HelpTab::Abilities`]) — what each of the run's abilities
 //!   actually *does*, and what it costs (§8.2/§8.3; #343, and see [`abilities`]).
 //! - **Help** ([`HelpTab::Help`]) — the glyph legend, the colour key, and the
@@ -405,9 +407,9 @@ pub fn help_hit(
         if x >= close && x < close + CLOSE_BUTTON_LEN {
             return Some(HelpHit::Close);
         }
-        for (tab, start, len) in tab_layout() {
+        for (entry, start, len) in tab_layout() {
             if x >= start && x < start + len {
-                return Some(HelpHit::Tab(tab));
+                return Some(HelpHit::Tab(entry));
             }
         }
         return None;
