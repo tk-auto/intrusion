@@ -1,6 +1,6 @@
 {
   "_note": "Baseline metrics snapshot the playtest skill diffs against (§13.2, #140). It is a snapshot of the --bot batch below on the commit named, one block PER PLAYSTYLE PROFILE (#198): a profile is a temperament, so each has its own numbers and they are never compared against each other as a leaderboard. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself, a profile's numbers), refresh it in the same PR with `./scripts/baseline.py --refresh` — never by hand, so every block moves together. That script also runs as a check on every PR (CI's `simbot baseline` job), re-running each block's own `command` and failing when a summary no longer matches: a stale baseline compared silently is the anti-pattern this file exists to avoid, and it is invisible unless something re-runs it. The per-profile `command` strings are what the check executes, so they are the authoritative description of what was measured; `config` below is the human-readable summary of them.",
-  "captured_at_commit": "44d5e28+search-duration-12",
+  "captured_at_commit": "ff85aa1",
   "command": "for p in baseline cautious aggressive; do cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 --cap 1000 | tail -1; done",
   "config": {
     "policy": "bot",
@@ -14,19 +14,19 @@
       "summary": {
         "profile": "baseline",
         "runs": 100,
-        "wins": 32,
-        "captures": 68,
+        "wins": 38,
+        "captures": 59,
         "entombed": 0,
-        "timeouts": 0,
-        "win_rate": 0.32,
-        "turns_to_win_mean": 136.5,
-        "turns_to_win_median": 124.0,
-        "detections": 588,
+        "timeouts": 3,
+        "win_rate": 0.38,
+        "turns_to_win_mean": 151.9,
+        "turns_to_win_median": 117.0,
+        "detections": 864,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 2059,
-          "run": 204,
+          "wait": 4042,
+          "run": 397,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -38,8 +38,8 @@
           "lockdown": 0
         },
         "usage_share": {
-          "wait": 0.1825,
-          "run": 0.0181,
+          "wait": 0.2463,
+          "run": 0.0242,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -50,7 +50,7 @@
           "pierce_wall": 0.0,
           "lockdown": 0.0
         },
-        "diversity": 0.6249,
+        "diversity": 0.6918,
         "alert_peak": null
       }
     },
@@ -59,19 +59,19 @@
       "summary": {
         "profile": "cautious",
         "runs": 100,
-        "wins": 47,
-        "captures": 50,
+        "wins": 60,
+        "captures": 38,
         "entombed": 0,
-        "timeouts": 3,
-        "win_rate": 0.47,
-        "turns_to_win_mean": 262.2,
-        "turns_to_win_median": 192.0,
-        "detections": 821,
+        "timeouts": 2,
+        "win_rate": 0.6,
+        "turns_to_win_mean": 219.0,
+        "turns_to_win_median": 183.5,
+        "detections": 549,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 7187,
-          "run": 299,
+          "wait": 5197,
+          "run": 202,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -83,8 +83,8 @@
           "lockdown": 0
         },
         "usage_share": {
-          "wait": 0.3154,
-          "run": 0.0131,
+          "wait": 0.2331,
+          "run": 0.0091,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -95,7 +95,7 @@
           "pierce_wall": 0.0,
           "lockdown": 0.0
         },
-        "diversity": 0.4349,
+        "diversity": 0.5399,
         "alert_peak": null
       }
     },
@@ -104,19 +104,19 @@
       "summary": {
         "profile": "aggressive",
         "runs": 100,
-        "wins": 31,
-        "captures": 69,
+        "wins": 51,
+        "captures": 49,
         "entombed": 0,
         "timeouts": 0,
-        "win_rate": 0.31,
-        "turns_to_win_mean": 140.7,
-        "turns_to_win_median": 137.0,
-        "detections": 609,
+        "win_rate": 0.51,
+        "turns_to_win_mean": 142.4,
+        "turns_to_win_median": 111.0,
+        "detections": 633,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 597,
-          "run": 203,
+          "wait": 475,
+          "run": 177,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -128,8 +128,8 @@
           "lockdown": 0
         },
         "usage_share": {
-          "wait": 0.0611,
-          "run": 0.0208,
+          "wait": 0.0397,
+          "run": 0.0148,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -140,7 +140,7 @@
           "pierce_wall": 0.0,
           "lockdown": 0.0
         },
-        "diversity": 0.6805,
+        "diversity": 0.6691,
         "alert_peak": null
       }
     }
