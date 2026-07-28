@@ -117,6 +117,10 @@ pub struct AlertTuning {
     pub dwell_turns_min: u32,
     /// The longest Calm dwell from rung 1 up ([`ALERT_DWELL_TURNS_MAX`]).
     pub dwell_turns_max: u32,
+    /// Guards that walk in on reaching rung 2 (§7.3/#374).
+    pub rung_two_reinforcements: usize,
+    /// Guards that walk in on reaching rung 3 (§7.3/#374), on top of rung 2's.
+    pub rung_three_reinforcements: usize,
 }
 
 impl Default for AlertTuning {
@@ -128,6 +132,8 @@ impl Default for AlertTuning {
             silent_posts_for_third_rung: SILENT_POSTS_FOR_THIRD_RUNG,
             dwell_turns_min: ALERT_DWELL_TURNS_MIN,
             dwell_turns_max: ALERT_DWELL_TURNS_MAX,
+            rung_two_reinforcements: crate::state::RUNG_TWO_REINFORCEMENTS,
+            rung_three_reinforcements: crate::state::RUNG_THREE_REINFORCEMENTS,
         }
     }
 }
@@ -281,6 +287,12 @@ impl Alert {
     /// live tuning on the very next turn, so there is no stale reading to inherit.
     pub(crate) fn set_tuning(&mut self, tuning: AlertTuning) {
         self.tuning = tuning;
+    }
+
+    /// The thresholds this ladder is running on — read by the §7.3 reinforcements
+    /// (#374), which need the rung magnitudes the same batch may be sweeping.
+    pub(crate) fn tuning(&self) -> AlertTuning {
+        self.tuning
     }
 
     /// The rung the facility has reached (§7.3) — what

@@ -89,6 +89,12 @@ pub struct RunRecord {
     /// falls out. §13.2's *"whether escalation escalates"* row, in the shape the
     /// ladder has: the *path* up it, not only how high it got.
     pub alert: AlertRecord,
+    /// Guards the ladder walked into the facility this run (§7.3/#374) — rung 2 sends
+    /// one, rung 3 two more. Counted rather than derived from the peak rung, because an
+    /// arrival is **refused** when the facility offers no cell out of the player's
+    /// sight: a run can reach rung 3 and face fewer than three newcomers, and the
+    /// difference is a fact about the level rather than about the ladder.
+    pub reinforcements: u32,
 }
 
 /// Run one seeded game under `policy`, to a win, a loss, or `input_cap` issued
@@ -136,6 +142,7 @@ pub fn run_one_with(
         bodies_found: 0,
         usage: UsageHistogram::new(),
         alert: AlertRecord::default(),
+        reinforcements: 0,
     };
     for _ in 0..input_cap {
         let input = policy.decide(&state);
@@ -163,6 +170,12 @@ pub fn run_one_with(
                 Event::AlertRaised { rung, trigger } => {
                     record.alert.record(state.turn(), rung, trigger);
                 }
+                // Guards the ladder walked in (§7.3/#374), counted so the guard count a
+                // run actually **faced** is visible rather than inferred from the rung:
+                // an arrival can be refused when the facility offers nowhere out of
+                // sight, so "reached rung 3" and "faced three more guards" are not the
+                // same claim.
+                Event::ReinforcementArrived { .. } => record.reinforcements += 1,
                 Event::Won => record.outcome = RunOutcome::Win,
                 Event::Captured { .. } => record.outcome = RunOutcome::Capture,
                 Event::Entombed { .. } => record.outcome = RunOutcome::Entombed,
@@ -279,7 +292,8 @@ mod tests {
             \"turns\":111,\"detections\":0,\"takedowns\":0,\"bodies_found\":0,\
             \"usage\":{\"wait\":0,\"run\":0,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\
             \"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\
-            \"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":0,\"alert_escalations\":[]}";
+            \"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":0,\"alert_escalations\":[],\
+            \"reinforcements\":0}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.

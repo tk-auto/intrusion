@@ -1,6 +1,6 @@
 {
   "_note": "Baseline metrics snapshot the playtest skill diffs against (§13.2, #140). It is a snapshot of the --bot batch below on the commit named, one block PER PLAYSTYLE PROFILE (#198): a profile is a temperament, so each has its own numbers and they are never compared against each other as a leaderboard. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself, a profile's numbers), refresh it in the same PR with `./scripts/baseline.py --refresh` — never by hand, so every block moves together. That script also runs as a check on every PR (CI's `simbot baseline` job), re-running each block's own `command` and failing when a summary no longer matches: a stale baseline compared silently is the anti-pattern this file exists to avoid, and it is invisible unless something re-runs it. The per-profile `command` strings are what the check executes, so they are the authoritative description of what was measured; `config` below is the human-readable summary of them.",
-  "captured_at_commit": "89eb7f1+stow-verb-381",
+  "captured_at_commit": "321ae9a+reinforcements-374",
   "command": "for p in baseline cautious aggressive careless; do cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 --cap 1000 | tail -1; done",
   "config": {
     "policy": "bot",
@@ -14,18 +14,18 @@
       "summary": {
         "profile": "baseline",
         "runs": 100,
-        "wins": 35,
-        "captures": 62,
+        "wins": 36,
+        "captures": 61,
         "entombed": 0,
         "timeouts": 3,
-        "win_rate": 0.35,
-        "turns_to_win_mean": 126.7,
-        "turns_to_win_median": 117.0,
-        "detections": 851,
+        "win_rate": 0.36,
+        "turns_to_win_mean": 129.5,
+        "turns_to_win_median": 117.5,
+        "detections": 847,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 3943,
+          "wait": 3950,
           "run": 387,
           "camouflage": 0,
           "decoy": 0,
@@ -54,7 +54,7 @@
           "crouch": 0.0006,
           "stow": 0.0
         },
-        "diversity": 0.6724,
+        "diversity": 0.6702,
         "alert_peak_mean": 0.7,
         "alert_rungs": {
           "0": 44,
@@ -69,7 +69,8 @@
           "console-tampered": 10,
           "body-found": 0,
           "second-post-silent": 0
-        }
+        },
+        "reinforcements": 14
       }
     },
     "cautious": {
@@ -77,19 +78,19 @@
       "summary": {
         "profile": "cautious",
         "runs": 100,
-        "wins": 61,
-        "captures": 38,
+        "wins": 58,
+        "captures": 41,
         "entombed": 0,
         "timeouts": 1,
-        "win_rate": 0.61,
-        "turns_to_win_mean": 225.1,
-        "turns_to_win_median": 166.0,
-        "detections": 586,
+        "win_rate": 0.58,
+        "turns_to_win_mean": 210.0,
+        "turns_to_win_median": 164.0,
+        "detections": 597,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 5744,
-          "run": 219,
+          "wait": 5379,
+          "run": 226,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -99,12 +100,12 @@
           "drag": 0,
           "pierce_wall": 0,
           "lockdown": 0,
-          "crouch": 14,
+          "crouch": 15,
           "stow": 0
         },
         "usage_share": {
-          "wait": 0.2522,
-          "run": 0.0096,
+          "wait": 0.2389,
+          "run": 0.01,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -114,10 +115,10 @@
           "drag": 0.0,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
-          "crouch": 0.0006,
+          "crouch": 0.0007,
           "stow": 0.0
         },
-        "diversity": 0.4869,
+        "diversity": 0.4925,
         "alert_peak_mean": 0.54,
         "alert_rungs": {
           "0": 58,
@@ -132,7 +133,8 @@
           "console-tampered": 8,
           "body-found": 0,
           "second-post-silent": 0
-        }
+        },
+        "reinforcements": 12
       }
     },
     "aggressive": {
@@ -140,47 +142,47 @@
       "summary": {
         "profile": "aggressive",
         "runs": 100,
-        "wins": 53,
-        "captures": 45,
+        "wins": 51,
+        "captures": 47,
         "entombed": 0,
         "timeouts": 2,
-        "win_rate": 0.53,
-        "turns_to_win_mean": 135.6,
-        "turns_to_win_median": 116.0,
-        "detections": 522,
+        "win_rate": 0.51,
+        "turns_to_win_mean": 132.9,
+        "turns_to_win_median": 111.0,
+        "detections": 525,
         "takedowns": 16,
         "bodies_found": 7,
         "usage": {
-          "wait": 178,
-          "run": 173,
+          "wait": 172,
+          "run": 174,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
           "autodoors": 0,
           "confusion": 0,
           "takedown": 16,
-          "drag": 17,
+          "drag": 15,
           "pierce_wall": 0,
           "lockdown": 0,
-          "crouch": 3,
-          "stow": 11
+          "crouch": 2,
+          "stow": 9
         },
         "usage_share": {
-          "wait": 0.0148,
-          "run": 0.0144,
+          "wait": 0.0144,
+          "run": 0.0145,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
           "autodoors": 0.0,
           "confusion": 0.0,
           "takedown": 0.0013,
-          "drag": 0.0014,
+          "drag": 0.0013,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
           "crouch": 0.0002,
-          "stow": 0.0009
+          "stow": 0.0008
         },
-        "diversity": 0.6079,
+        "diversity": 0.6011,
         "alert_peak_mean": 0.95,
         "alert_rungs": {
           "0": 38,
@@ -195,7 +197,8 @@
           "console-tampered": 15,
           "body-found": 7,
           "second-post-silent": 2
-        }
+        },
+        "reinforcements": 42
       }
     },
     "careless": {
@@ -203,62 +206,63 @@
       "summary": {
         "profile": "careless",
         "runs": 100,
-        "wins": 51,
-        "captures": 48,
+        "wins": 46,
+        "captures": 53,
         "entombed": 0,
         "timeouts": 1,
-        "win_rate": 0.51,
-        "turns_to_win_mean": 127.5,
-        "turns_to_win_median": 119.0,
-        "detections": 952,
-        "takedowns": 12,
-        "bodies_found": 9,
+        "win_rate": 0.46,
+        "turns_to_win_mean": 123.2,
+        "turns_to_win_median": 108.5,
+        "detections": 961,
+        "takedowns": 14,
+        "bodies_found": 11,
         "usage": {
-          "wait": 129,
-          "run": 173,
+          "wait": 134,
+          "run": 177,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
           "autodoors": 0,
           "confusion": 0,
-          "takedown": 12,
-          "drag": 7,
+          "takedown": 14,
+          "drag": 5,
           "pierce_wall": 0,
           "lockdown": 0,
           "crouch": 0,
           "stow": 0
         },
         "usage_share": {
-          "wait": 0.0102,
-          "run": 0.0137,
+          "wait": 0.0106,
+          "run": 0.014,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
           "autodoors": 0.0,
           "confusion": 0.0,
-          "takedown": 0.001,
-          "drag": 0.0006,
+          "takedown": 0.0011,
+          "drag": 0.0004,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
           "crouch": 0.0,
           "stow": 0.0
         },
-        "diversity": 0.5884,
-        "alert_peak_mean": 0.91,
+        "diversity": 0.5915,
+        "alert_peak_mean": 0.93,
         "alert_rungs": {
           "0": 37,
           "1": 43,
-          "2": 12,
-          "3": 8
+          "2": 10,
+          "3": 10
         },
         "alert_triggers": {
           "sighting": 56,
           "missed-ping": 4,
           "repeat-sightings": 1,
           "console-tampered": 13,
-          "body-found": 8,
+          "body-found": 10,
           "second-post-silent": 0
-        }
+        },
+        "reinforcements": 40
       }
     }
   }

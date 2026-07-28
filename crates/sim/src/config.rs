@@ -284,7 +284,7 @@ const MODIFIERS: [(&str, SetModifier); 5] = [
 /// sets. The names are the [`AlertTuning`] field names in kebab case, on the same
 /// one-concept-one-spelling rule the modifiers follow.
 type SetAlert = fn(&mut AlertTuning, u32);
-const ALERT_KNOBS: [(&str, SetAlert); 6] = [
+const ALERT_KNOBS: [(&str, SetAlert); 8] = [
     ("sighting-contact-turns", |a, v| {
         a.sighting_contact_turns = v
     }),
@@ -297,6 +297,12 @@ const ALERT_KNOBS: [(&str, SetAlert); 6] = [
     }),
     ("dwell-turns-min", |a, v| a.dwell_turns_min = v),
     ("dwell-turns-max", |a, v| a.dwell_turns_max = v),
+    ("rung-two-reinforcements", |a, v| {
+        a.rung_two_reinforcements = v as usize
+    }),
+    ("rung-three-reinforcements", |a, v| {
+        a.rung_three_reinforcements = v as usize
+    }),
 ];
 
 /// Every `--alert` knob name, read off the table above so a threshold added to §7.3
@@ -431,6 +437,8 @@ mod tests {
                 silent_posts_for_third_rung,
                 dwell_turns_min,
                 dwell_turns_max,
+                rung_two_reinforcements,
+                rung_three_reinforcements,
             } = config.alert;
             let moved = [
                 sighting_contact_turns,
@@ -439,6 +447,8 @@ mod tests {
                 silent_posts_for_third_rung,
                 dwell_turns_min,
                 dwell_turns_max,
+                rung_two_reinforcements as u32,
+                rung_three_reinforcements as u32,
             ]
             .iter()
             .filter(|&&v| v == 7)

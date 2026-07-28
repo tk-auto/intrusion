@@ -500,6 +500,57 @@ rung is defined by what it *does*.
 driven from 0 straight to rung 3 gets the dwell cut **and** +1 **and** +2 = three
 extra guards. Rung 3 is the top; there is no rung 4.
 
+##### Reinforcements — where they come from, and the rule that makes them fair
+
+**New guards enter mid-level.** This **reverses** an earlier "explicitly out" line
+(*"spawning new guards mid-level — nothing in the design supports it; the guard count
+is a generation knob"*), and the reversal is deliberate: rungs 2 and 3 announced an
+escalation and did nothing, which is §2.3's worst row. The three-rung ceiling is what
+keeps it from spiralling — however loud a run gets, the facility gains **at most
+three**.
+
+**Never in view.** The arrival cell is outside the player's field of view and never
+adjacent to them, diagonals included. *An arrival the player witnesses is a guard
+materialising out of nothing, which no amount of fiction repairs.* So if the facility
+offers no cell that honours it — a small room a waiting player can see all of, since
+waiting buys 360° (§8.3) — **nobody arrives**. Breaking the rule is worse than missing
+the reinforcement.
+
+They come in at the far end (the §10.5 region whose nearest cell is furthest from the
+player), and then they **walk**. Nothing teleports to the trigger.
+
+What the player's **guard sense** (§9.1) shows is deliberately *not* gated: a
+reinforcement arriving inside the sense box reads as a new dot, which is
+position-only information the player earned rather than a witnessed materialisation.
+Gating on it would also be unworkable — a turn spent waiting widens the sense to a
+41×41 box, the whole v1 footprint.
+
+**What they do.** They head for the **trigger cell** — the body that was found, the
+console that was tampered with, the player's last known cell — and **search** it
+(§7.6), exactly as a radio dispatch does; then they patrol from where they finished,
+with a station and a region beat like any guard (§7.5/§10.5). *Reinforcements search,
+they do not hunt.* More guards converging on a stale cell is **the net closing**, which
+is what §7.6 asks for; more guards tracking the player's live position is the un-fun
+chase §7.6 exists to prevent.
+
+Their lead is sized to the **journey**, not to the ordinary §7.4 duration. A dispatch
+picks the *nearest* guard so its lead always covers its walk; a reinforcement starts at
+the far end by construction, and the same constant would strand it halfway across the
+map having looked at nothing. §7.1's cold-lead backstop still applies — just at the end
+of the errand rather than in the middle of it.
+
+**Guards in every other respect** (§7.4/§11.3): no glyph of their own, no colour of
+their own, **normal speed** (§7.1 **[SETTLED]** — a reinforcement never accelerates),
+their own radio clock drawn from the run seed (§12.4), takedown-able, and a body left
+behind that runs its own §7.3 clock — a loop the ceiling above is what caps.
+
+**A silenced radio does not stop them.** The comms console's effects are the
+enumerated ones — no pings, no dispatch, no §7.7 call-ins — and the ladder's rungs are
+not among them: a found body still reaches rung 3, and rung 3 still walks guards in.
+Silencing the net buys you the *internal* net, not the escalation. **[OPEN]** whether
+that is the right reading; it is the literal one, and the alternative (control cannot
+send what it cannot be told about) is a coherent rule somebody may prefer.
+
 **A confirmed sighting** is **3** turns **[START]** in which *any* guard has the
 player in the **certain** zone (§7.6), inside a sliding **10-turn** window
 **[START]**. The tally is facility-wide, not per guard: three guards catching one
@@ -564,6 +615,23 @@ Three findings, and the third is the one that matters:
   while the mean peak rung moved from 0.15 to 0.98. Sweeping the rung-1 dwell cut
   itself, from *no cut at all* (3–7) to the harshest (1–1), moved the win rate by
   about three points, which is inside a 100-seed batch's own wobble.
+
+**What the reinforcements then did** (#374, the same 100-seed batches, one per
+playstyle profile):
+
+| Profile | Win rate before → after | Reinforcements faced (100 runs) |
+|---|---|---|
+| baseline | 0.35 → 0.36 | 14 |
+| cautious | 0.61 → 0.58 | 12 |
+| aggressive | 0.53 → 0.51 | 42 |
+| careless | 0.51 → 0.46 | 40 |
+
+The ladder now has a consequence, and it is **proportional to how loudly you play**.
+The avoidance-first temperaments barely reach rung 2, face about one arrival per seven
+runs, and are unmoved. The two that leave bodies reach rung 3, face four times as many
+guards, and pay 2 and 5 points for it — which is what §10.2's ~8–10 points per guard
+predicts for ~0.4 extra guards a run. That is the flat curve below finally bending, and
+it bends for the runs that earned it.
 
 So **the [START] values above stay where they are.** The curve that would justify
 moving one is the outcome curve, and it is flat: retuning a threshold against a flat
