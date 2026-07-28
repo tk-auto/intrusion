@@ -339,7 +339,11 @@ temperament measured twice.
 Taking hold is worth distinguishing from stowing here, because only one of them is a
 decision: stepping off a body's cell grabs it **automatically** (§8.3/#187), so even
 `careless` racks up grabs — and then immediately drops them. A `drag` count therefore
-says nothing about temperament on its own; putting a body *away* is the choice.
+says nothing about temperament on its own; putting a body *away* is the choice. That
+choice has its own §13.2 slot since #381 — `stow`, counted from `Event::BodyStored` —
+so the split is now **read** off the histogram rather than inferred from the gap
+between `takedowns`, `drag` and `bodies_found`. The release beside it still counts as
+nothing, because it is free (§4.4).
 
 ## 6. The per-ability floor, and the ambiguity it exists to resolve
 

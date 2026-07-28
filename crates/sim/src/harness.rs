@@ -80,7 +80,7 @@ pub struct RunRecord {
     /// Bodies found by guards ([`Event::BodyFound`]) — whether §7.3's clock has teeth.
     pub bodies_found: u32,
     /// The §13.2 ability-usage histogram (#137): a count per verb — the activated
-    /// abilities plus Wait/Takedown/Drag/Crouch — spent this run. Counted from
+    /// abilities plus Wait/Takedown/Drag/Crouch/Stow — spent this run. Counted from
     /// core events (a refused activation emits none, so it never counts, §4.4);
     /// Wait, alone among verbs, has no event and is recorded from its spent turn.
     pub usage: UsageHistogram,
@@ -148,12 +148,17 @@ pub fn run_one_with(
         let input = policy.decide(&state);
         let turns_before = state.turn();
         for event in state.step(input) {
+            // Every verb but Wait is counted from the event it emits (#137, §13.2) and
+            // never from the input that was issued: an activation the economy refused
+            // costs no turn and emits none, so it never counts (§4.4), and a free
+            // action has no slot to reach at all. [`Verb::of_event`] owns that mapping,
+            // including which events are on the free side of the line.
+            if let Some(verb) = Verb::of_event(event) {
+                record.usage.record(verb);
+            }
             match event {
                 Event::Detected { .. } => record.detections += 1,
-                Event::TakenDown { .. } => {
-                    record.takedowns += 1;
-                    record.usage.record(Verb::Takedown);
-                }
+                Event::TakenDown { .. } => record.takedowns += 1,
                 Event::BodyFound { .. } => record.bodies_found += 1,
                 // The ladder stepped (§7.3/#376). The core reports *escalations*, not
                 // occurrences — a trigger at or below the current rung says nothing —
@@ -171,19 +176,6 @@ pub fn run_one_with(
                 // sight, so "reached rung 3" and "faced three more guards" are not the
                 // same claim.
                 Event::ReinforcementArrived { .. } => record.reinforcements += 1,
-                // Ability usage counted from the activation event (#137): a refused
-                // activation emits none, so it never counts (§4.4). The grab starts
-                // the drag; its half-speed steps that follow are Moves.
-                Event::AbilityActivated { ability, .. } => {
-                    if let Some(verb) = Verb::of_ability(ability) {
-                        record.usage.record(verb);
-                    }
-                }
-                Event::BodyGrabbed { .. } => record.usage.record(Verb::Drag),
-                // The duck itself, and only it (§10.3/#379): re-bumping a table of
-                // the run already crouched behind is a free no-op that emits no
-                // event, so a pose held for a dozen turns still counts once.
-                Event::Crouched { .. } => record.usage.record(Verb::Crouch),
                 Event::Won => record.outcome = RunOutcome::Win,
                 Event::Captured { .. } => record.outcome = RunOutcome::Capture,
                 Event::Entombed { .. } => record.outcome = RunOutcome::Entombed,
@@ -300,7 +292,8 @@ mod tests {
             \"turns\":111,\"detections\":0,\"takedowns\":0,\"bodies_found\":0,\
             \"usage\":{\"wait\":0,\"run\":0,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\
             \"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\
-            \"lockdown\":0,\"crouch\":0},\"alert_peak\":0,\"alert_escalations\":[],\"reinforcements\":0}";
+            \"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":0,\"alert_escalations\":[],\
+            \"reinforcements\":0}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.
