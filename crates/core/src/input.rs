@@ -236,6 +236,86 @@ pub fn input_for_key(key: &str) -> Option<Input> {
     })
 }
 
+/// What a finger did, with **no surface's meaning attached** (§11.6/#336) — the
+/// touch counterpart of a `KeyboardEvent.key` name.
+///
+/// The shell owns the arithmetic that produces one of these (the dead band, the
+/// dominant axis, the four-way quantisation) because only the shell holds the live
+/// displacement; what a gesture *means* is a binding, so it lives here beside the
+/// key tables and is pinned by native tests like every other. That split is the
+/// whole point: the pump's thresholds, repeat cadence and lift-stops-everything
+/// guarantee are written once and inherited by every surface, instead of being
+/// re-implemented the next time a screen wants touch.
+///
+/// Which is why there is no `Tap` variant. How long a press lasts changes *when*
+/// it fires — the pump's business — never *what* it means, so a quick tap and a
+/// press held in place are the same [`Press`](Self::Press) to every table below.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Gesture {
+    /// A drag that travelled far enough to declare a heading, quantised to one of
+    /// the four cardinals — movement has no diagonals (§4.1 **[SETTLED]**), and
+    /// neither does any list this walks.
+    Swipe(Direction),
+    /// A press that stayed put: held in place, or lifted before it went anywhere.
+    Press,
+}
+
+/// Map a gesture to the [`Input`] it drives **on the board** (§11.6/#336) — the
+/// touch half of [`input_for_key`], and the only one of the three gesture tables
+/// whose commands cost a turn.
+///
+/// A swipe steps its heading and a press waits, which is the pairing the arrows and
+/// `w` already make on the keyboard. Both are bound: the board is the one surface
+/// where standing still is an action (§9.1's 360° look), so unlike the modal screens
+/// it has something for a held press to do.
+pub fn input_for_gesture(gesture: Gesture) -> Option<Input> {
+    Some(match gesture {
+        Gesture::Swipe(direction) => Input::Step(direction),
+        Gesture::Press => Input::Wait,
+    })
+}
+
+/// Map a gesture to the [`MenuNav`] it drives **while the menu is up** (§14/#268,
+/// #336) — the touch half of [`menu_nav_for_key`], and the reason a title screen
+/// can be walked by finger at all.
+///
+/// The list is vertical, so it takes the vertical swipes and nothing else: up is
+/// [`Prev`](MenuNav::Prev), down is [`Next`](MenuNav::Next), the same spelling the
+/// arrows have one table up. Wrapping and the skipping of disabled entries are the
+/// *menu's* rules, not the gesture's — both commands go through the same handler
+/// the keys do, so the two input paths cannot disagree the first time an entry is
+/// disabled (§14 v2/v3 entries already are).
+///
+/// **A press is deliberately unbound.** Resolving it to
+/// [`Activate`](MenuNav::Activate) would let a stray tap on empty menu space start
+/// a run by accident — precisely the class of bug #306 shipped to close on the
+/// board, and worse here, because starting a run is not undoable in a permadeath
+/// game (§2.1). An entry is fired by pressing *the entry*, on the arm-on-press /
+/// fire-on-lift path, and by nothing else.
+pub fn menu_nav_for_gesture(gesture: Gesture) -> Option<MenuNav> {
+    match gesture {
+        Gesture::Swipe(Direction::North) => Some(MenuNav::Prev),
+        Gesture::Swipe(Direction::South) => Some(MenuNav::Next),
+        _ => None,
+    }
+}
+
+/// Map a gesture to the [`HelpNav`] it drives **while the help panel is open**
+/// (§14 v2/#248, #336) — the touch half of [`help_nav_for_key`].
+///
+/// The tab bar is horizontal, so it takes the horizontal swipes: left is the
+/// previous tab, right is the next, exactly as `←`/`→` read them. Closing is not
+/// bound to a gesture — the panel carries its own `[x]`, which is what keeps the
+/// touch path from ever trapping (§11.6), and a swipe that dismissed a modal by
+/// accident would work against that rather than for it.
+pub fn help_nav_for_gesture(gesture: Gesture) -> Option<HelpNav> {
+    match gesture {
+        Gesture::Swipe(Direction::West) => Some(HelpNav::PrevTab),
+        Gesture::Swipe(Direction::East) => Some(HelpNav::NextTab),
+        _ => None,
+    }
+}
+
 /// The **physical** codes of the ability keys, in bar order: the top row's digits,
 /// one per slot a run can hold ([`AbilityId::MAX_HELD`], §8.3).
 ///
@@ -593,6 +673,60 @@ mod tests {
                 "{key:?} owns a UI command"
             );
             assert!(!MOVEMENT_KEYS.contains(&key), "{key:?} is a movement key");
+        }
+    }
+
+    /// The touch bindings, pinned beside the key ones (§11.6/#336): the whole point
+    /// of the tables living here is that a screen's two input paths can be read —
+    /// and asserted — side by side, so neither drifts from the other.
+    #[test]
+    fn every_surface_binds_the_gesture_vocabulary_like_its_keys() {
+        // The board: a swipe steps its heading, a press waits — the arrows and `w`.
+        for direction in Direction::ALL {
+            assert_eq!(
+                input_for_gesture(Gesture::Swipe(direction)),
+                Some(Input::Step(direction)),
+            );
+        }
+        assert_eq!(input_for_gesture(Gesture::Press), Some(Input::Wait));
+
+        // The menu: a vertical list, walked by the vertical swipes.
+        assert_eq!(
+            menu_nav_for_gesture(Gesture::Swipe(Direction::North)),
+            menu_nav_for_key("ArrowUp"),
+        );
+        assert_eq!(
+            menu_nav_for_gesture(Gesture::Swipe(Direction::South)),
+            menu_nav_for_key("ArrowDown"),
+        );
+
+        // The help panel: a horizontal tab bar, walked by the horizontal swipes.
+        assert_eq!(
+            help_nav_for_gesture(Gesture::Swipe(Direction::West)),
+            help_nav_for_key("ArrowLeft"),
+        );
+        assert_eq!(
+            help_nav_for_gesture(Gesture::Swipe(Direction::East)),
+            help_nav_for_key("ArrowRight"),
+        );
+    }
+
+    /// **A press never activates a menu entry** (§2.1/#306/#336). Starting a run is
+    /// not undoable in a permadeath game, so the one gesture that says nothing about
+    /// what the player meant must not be the one that starts it — an entry fires by
+    /// pressing the entry, and by nothing else. The same restraint on the help
+    /// panel: no gesture dismisses a modal, which is what `[x]` is for.
+    #[test]
+    fn a_press_activates_nothing_on_a_modal_screen() {
+        assert_eq!(menu_nav_for_gesture(Gesture::Press), None);
+        assert_eq!(help_nav_for_gesture(Gesture::Press), None);
+        // And neither list answers the axis it does not run along, so a swipe across
+        // a vertical menu is silence rather than a guess.
+        for direction in [Direction::East, Direction::West] {
+            assert_eq!(menu_nav_for_gesture(Gesture::Swipe(direction)), None);
+        }
+        for direction in [Direction::North, Direction::South] {
+            assert_eq!(help_nav_for_gesture(Gesture::Swipe(direction)), None);
         }
     }
 }

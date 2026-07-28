@@ -2385,10 +2385,39 @@ and installed standalone, but the options dialog could not be closed by touch an
 the pause menu could not be opened by touch — together making it unreachable *and*
 inescapable. Either build touch properly or don't ship the manifest. **[OPEN]**
 
-**The touch model.** A **swipe** steps along the drag's dominant axis and *keeps*
-stepping while the finger stays down, the direction re-read live from the drag; a
-**press held in place** waits, repeatedly; a **quick tap** is a single Wait.
-Lifting the finger stops everything instantly.
+**The touch model.** A **swipe** fires along the drag's dominant axis and *keeps*
+firing while the finger stays down, the direction re-read live from the drag; a
+**press held in place** repeats; a **quick tap** is a single input, resolved at the
+lift. Lifting the finger stops everything instantly.
+
+**A gesture is a binding, like a key** (#336). What a drag *did* is surface-neutral
+— a **swipe** in one of the four cardinals, or a **press** (held or tapped: how long
+it lasts changes *when* it fires, never what it means). What that means is a table
+per surface, and those tables live in the core beside the key ones, so a screen's
+two input paths are read — and pinned — side by side:
+
+| Gesture | Board | Main menu | Help panel |
+|---|---|---|---|
+| Swipe ↑ / ↓ | Step north / south | Previous / next entry | — |
+| Swipe ← / → | Step west / east | — (a vertical list) | Previous / next tab |
+| Press | Wait | **nothing** | nothing |
+
+One pump drives whichever surface is up, in the keyboard's own precedence — menu,
+then help, then the board — so the thresholds, the repeat cadence and the
+lift-stops-everything guarantee are written once and inherited, and the next screen
+that wants touch costs a binding table rather than a pump.
+
+**A press is deliberately unbound on both modal screens.** Resolving it to
+*activate* would let a stray tap on empty menu space start a run by accident — the
+class of bug #306 closed on the board, and worse here, because starting a run is not
+undoable (§2.1). An entry fires by pressing *the entry*, on the arm-on-press /
+fire-on-lift path below, and by nothing else. The consequence worth stating: a
+swipe must **begin where the controls decline**, since a press that lands on an
+entry arms that entry and starts no gesture.
+
+The two board-only rules below — the dead band and the no-auto-walk-into-danger
+gate — do not follow the pump onto a modal screen: both ask questions about a board,
+and a full-screen menu has none.
 
 **Waiting is a tap on the board, well clear of the bars** (#306). A tap produces
 Wait only on a **map** row that no overlay owns *and* at least a **dead band** away
