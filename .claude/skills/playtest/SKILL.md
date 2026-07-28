@@ -115,6 +115,7 @@ metrics and what each catches:
 | `alert_peak_mean` | how loud a batch got — the mean §7.3 rung reached. The single number an `--alert` sweep plots |
 | `alert_rungs` | the rung **distribution**, `{"0":n,…,"3":n}`. This, not the mean, is the finding: "most runs end at rung 1" and "most runs end at rung 3" are opposite verdicts |
 | `alert_triggers` | **attribution** — which trigger caused each escalation. Which *path* a batch takes up the ladder; see the zero-reading rule below |
+| `reinforcements` | guards rungs 2 and 3 walked into the facility (#374) — the count a run actually **faced**. Not derivable from the rung: an arrival is refused when nowhere is out of the player's sight |
 
 Per-run rows carry `alert_peak` (`0`..=`3`, and a `0` is a raid nobody noticed —
 never a `null` any more) plus `alert_escalations`, the run's climb: one
@@ -148,7 +149,8 @@ done
 ```
 
 Knobs: `sighting-contact-turns`, `sighting-window-turns`, `sightings-for-second-rung`,
-`silent-posts-for-third-rung`, `dwell-turns-min`, `dwell-turns-max`
+`silent-posts-for-third-rung`, `dwell-turns-min`, `dwell-turns-max`,
+`rung-two-reinforcements`, `rung-three-reinforcements`
 (`crates/sim/README.md` has the full table). A ladder §7.3/§7.5 forbids — a dwell
 floor of `0`, a window too short to hold a sighting — is refused at the flag, not run.
 

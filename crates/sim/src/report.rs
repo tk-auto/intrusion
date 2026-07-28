@@ -40,7 +40,7 @@ impl RunRecord {
     /// The run's JSONL row. Field order is fixed; see `crates/sim/README.md`.
     pub fn to_json_line(&self) -> String {
         format!(
-            "{{\"seed\":{},\"profile\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":{},\"alert_escalations\":{}}}",
+            "{{\"seed\":{},\"profile\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":{},\"alert_escalations\":{},\"reinforcements\":{}}}",
             self.seed,
             profile_json(self.profile),
             self.outcome.as_str(),
@@ -51,6 +51,7 @@ impl RunRecord {
             usage_counts_json(&self.usage),
             self.alert.peak(),
             self.alert.to_json(),
+            self.reinforcements,
         )
     }
 }
@@ -104,6 +105,10 @@ pub struct Summary {
     /// findings apart: *"most runs end at rung 1"* and *"most runs end at rung 3"* are
     /// opposite balance verdicts and both peak at 3.
     pub alert: AlertTally,
+    /// Guards the ladder walked into the facility across the batch (§7.3/#374) — the
+    /// count a run actually **faced**, which is not the same claim as the rung it
+    /// reached: an arrival is refused when the facility offers nowhere out of sight.
+    pub reinforcements: u64,
 }
 
 impl Summary {
@@ -154,6 +159,7 @@ impl Summary {
             diversity: diversity(&records.iter().map(|r| r.usage).collect::<Vec<_>>()),
             total_turns: records.iter().map(|r| u64::from(r.turns)).sum(),
             alert: AlertTally::of(records.iter().map(|r| &r.alert)),
+            reinforcements: records.iter().map(|r| u64::from(r.reinforcements)).sum(),
         }
     }
 
@@ -186,7 +192,7 @@ impl Summary {
             .map(|(&v, s)| format!("\"{}\":{s:.4}", v.key()))
             .collect();
         format!(
-            "{{\"summary\":{{\"profile\":{},\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak_mean\":{:.4},\"alert_rungs\":{},\"alert_triggers\":{}}}}}",
+            "{{\"summary\":{{\"profile\":{},\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak_mean\":{:.4},\"alert_rungs\":{},\"alert_triggers\":{},\"reinforcements\":{}}}}}",
             profile_json(self.profile),
             self.runs,
             self.wins,
@@ -205,6 +211,7 @@ impl Summary {
             self.alert.peak_mean(self.runs),
             self.alert.rungs_json(),
             self.alert.triggers_json(),
+            self.reinforcements,
         )
     }
 }
@@ -238,6 +245,10 @@ mod tests {
             bodies_found: 0,
             usage,
             alert,
+            // Two of the three rung 3 owes: a fixed sample, so the row pins the field
+            // rather than the ladder — an arrival can be refused, so "reached rung 2"
+            // and "faced two newcomers" are separate facts and the schema shows both.
+            reinforcements: 2,
         }
     }
 
@@ -247,7 +258,7 @@ mod tests {
     fn the_run_row_schema_is_pinned() {
         assert_eq!(
             record(17, RunOutcome::Win, 214).to_json_line(),
-            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}]}"
+            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}],\"reinforcements\":2}"
         );
     }
 
@@ -265,7 +276,7 @@ mod tests {
         let summary = Summary::of(&records);
         assert_eq!(
             summary.to_json_line(),
-            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0}}}"
+            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000,\"stow\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0},\"reinforcements\":8}}"
         );
     }
 

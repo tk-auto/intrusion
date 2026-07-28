@@ -670,8 +670,14 @@ fn a_found_body_is_registered_once_and_flushes_the_cupboard_beside_it() {
 
     let body = Cell::new(5, 6);
     let events = s.step(Input::Step(Direction::North));
+    // The arrivals rung 3 sends in (§7.3/#374) are their own concern and land on
+    // geometry this test says nothing about, so they are counted rather than spelled
+    // out — what is pinned here is the find, and that it happens on the strike turn.
+    let (arrivals, found): (Vec<Event>, Vec<Event>) = events
+        .iter()
+        .partition(|e| matches!(e, Event::ReinforcementArrived { .. }));
     assert_eq!(
-        events,
+        found,
         vec![
             Event::TakenDown { at: body },
             Event::BodyFound { at: body },
@@ -682,6 +688,11 @@ fn a_found_body_is_registered_once_and_flushes_the_cupboard_beside_it() {
             },
         ],
         "the finder's cone covers the fresh body: found the same turn",
+    );
+    assert_eq!(
+        arrivals.len(),
+        3,
+        "…and the top of the ladder sends three in"
     );
     assert_eq!(s.bodies()[0].cell(), body);
     assert!(s.bodies()[0].found());
@@ -2419,6 +2430,12 @@ fn a_found_body_calls_two_guards_that_are_not_the_finder() {
     });
     s.step(Input::Step(Direction::North)); // takedown — a body at (5,4)
     let body = s.bodies()[0].cell();
+    // Who was in the building when the body was made. Finding it takes the ladder to
+    // rung 3, which walks three more guards in (§7.3/#374) — also Responding, also to
+    // this cell — and *the call* is what this test is about, so the newcomers are held
+    // apart. `guards` is only appended to from here (nobody else is taken down), so the
+    // first `incumbents` entries stay the guards that were already here.
+    let incumbents = s.guards().len();
 
     let mut called = None;
     for _ in 0..40 {
@@ -2437,13 +2454,14 @@ fn a_found_body_calls_two_guards_that_are_not_the_finder() {
         .guards()
         .iter()
         .enumerate()
+        .take(incumbents)
         .filter(|(_, g)| g.state() == GuardState::Responding)
         .map(|(i, _)| i)
         .collect();
     assert_eq!(
         responding.len(),
         radio::BODY_CALL_GUARDS,
-        "a body calls exactly two (§7.7)",
+        "a body calls exactly two of the guards already here (§7.7)",
     );
     for i in responding {
         assert_eq!(

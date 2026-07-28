@@ -163,6 +163,17 @@ pub fn message_for(event: Event) -> Option<Message> {
         // rung *does* to the player is the Level info tab's job (#375); the near line
         // states the fact, in the same words the tab does ([`alert_line`]).
         Event::AlertRaised { rung, .. } => (alert_line(rung), 5),
+        // Guards walking in on rung 2 or 3 (§7.3/#374) say **nothing** here, and that
+        // is deliberate. The escalation itself already speaks — the `AlertRaised` above
+        // fires on the same turn — and what a rung *does* to the player is the Level
+        // info tab's job (#375), which owns the ladder's legibility. A line per arrival
+        // would also drown the near line three-deep on the turn a run jumps to rung 3,
+        // pushing whatever else happened out of a one-row surface (§11.7).
+        //
+        // The arrival is not thereby hidden: the rung is stated, and the guards
+        // themselves show up on the §9.1 sense the moment they come within reach of it,
+        // as any guard does.
+        Event::ReinforcementArrived { .. } => return None,
         // Handling the body (§8.3): quiet self-narration, like the crouch. The
         // held state itself lives on the ambient floor, not in a message.
         Event::BodyGrabbed { .. } => ("you take hold of the body".to_string(), 0),

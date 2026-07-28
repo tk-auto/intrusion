@@ -197,7 +197,12 @@ impl State {
             .enumerate()
             .any(|(index, guard)| senses.acts(index) && guard.certain_contact());
         if let Some(trigger) = self.alert.watch(self.turn, certain) {
-            self.raise_alert(trigger, events);
+            // A sighting is about *where the player was seen*, which is where they
+            // stand right now — so that is the cell a reinforcement is sent to search
+            // (#374). By the time one has walked in from the far side of the facility
+            // the player is long gone, which is the point: the net closes on a stale
+            // cell (§7.6), it does not track a live one.
+            self.raise_alert(trigger, senses.player, events);
         }
     }
 
@@ -238,7 +243,7 @@ impl State {
                 events.push(Event::BodyFound { at });
                 // The loudest event in the game is also the loudest thing the facility
                 // can learn: straight to the top of the ladder (§7.3).
-                self.raise_alert(AlertTrigger::BodyFound, events);
+                self.raise_alert(AlertTrigger::BodyFound, at, events);
                 self.call_in_body(at, &finders, events);
             }
         }

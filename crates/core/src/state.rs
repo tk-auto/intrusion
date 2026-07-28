@@ -80,12 +80,14 @@ mod effects;
 mod events;
 mod guards;
 mod lockdown;
+mod reinforcements;
 mod traversal;
 mod view;
 
 pub use bore::BoreRefusal;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
+pub(crate) use reinforcements::{RUNG_THREE_REINFORCEMENTS, RUNG_TWO_REINFORCEMENTS};
 
 use activation::Aimed;
 use effects::EffectMark;
@@ -553,6 +555,17 @@ pub struct State {
     /// old "never written to, never read" failure (§2.3). It never decays within a
     /// level (§7.3): a rung reached is a fact about the run.
     alert: Alert,
+    /// Reinforcements an escalation has called for but the turn has not yet landed
+    /// (§7.3/#374), one entry per guard, each holding the **trigger cell** it will
+    /// walk to and search. Filled by [`raise_alert`](Self::raise_alert) wherever the
+    /// rung rises and emptied by [`land_reinforcements`](Self::land_reinforcements) at
+    /// the end of the same turn's world phases — never carried, so there is no backlog.
+    ///
+    /// The queue exists because phase 3 resolves its per-guard readings once, up front,
+    /// indexed by position in [`guards`](Self::guards): growing that vector mid-phase
+    /// would leave every later pass reading past the end of its own snapshot. See
+    /// [`reinforcements`] for the whole argument.
+    pending_reinforcements: Vec<Cell>,
     outcome: Outcome,
     /// The events of the player's most recent action, free or spent — what the
     /// near line reads (§11.7: messages clear on the next action, so holding
@@ -720,6 +733,7 @@ impl State {
             exit,
             turn: 0,
             alert: Alert::new(),
+            pending_reinforcements: Vec::new(),
             outcome: Outcome::Playing,
             last_events: Vec::new(),
             door_cues: Vec::new(),
@@ -1287,7 +1301,11 @@ impl State {
                 // you came for. At rung 0 it triggers nothing at all — that is the
                 // reward for staying unseen, and the reason a clean raid is quiet.
                 if let Some(trigger) = self.alert.console_tampered() {
-                    self.raise_alert(trigger, events);
+                    // The console is what control learned about, so it is where any
+                    // reinforcement the rung sends is sent to search (#374) — a cell
+                    // the player is standing next to *now* and will have left by the
+                    // time anyone walks in, which is exactly §7.6's stale lead.
+                    self.raise_alert(trigger, target, events);
                 }
                 true
             }
@@ -1675,6 +1693,13 @@ impl State {
         self.recompute_sight();
         self.radio_phase(&mut events);
         self.guard_phase(&mut events);
+        // Rungs 2 and 3 send guards in (§7.3/#374). *After* the guards have acted, and
+        // deliberately so: phase 3 indexes its per-guard readings by position, so a
+        // body found mid-phase must not grow the vector it is reading. The arrival is
+        // the end of the turn it was called for, and a guard that has just walked in
+        // acts from the next one — it has not looked yet, and its cone is recomputed
+        // with everybody else's at the head of it.
+        self.land_reinforcements(&mut events);
         self.door_phase(&mut events);
         // Autodoors shuts the doors the player passed through this run once their
         // throats clear (§8.3/§7.6) — after the guards move, so a pursuer stepping
@@ -1739,21 +1764,37 @@ impl State {
                 // A post going quiet is the ladder's own trigger (§7.3): the first is
                 // rung 1, the second — a *different* body — is rung 3.
                 let trigger = self.alert.post_fell_silent();
-                self.raise_alert(trigger, events);
+                // Control's last fix on the quiet post is where the guard fell (§7.3),
+                // so that is the cell a reinforcement is sent to search (#374) — the
+                // same cell the dispatched responder above is walking to, and the same
+                // one a dragged body is no longer lying on (§8.3).
+                self.raise_alert(trigger, at, events);
             }
         }
     }
 
-    /// Step the facility alert ladder (§7.3) and report it if it actually rose.
+    /// Step the facility alert ladder (§7.3) and report it if it actually rose, `at`
+    /// being the cell the escalation is **about** — the body that was found, the
+    /// console that was tampered with, the post that went quiet, the player's own cell
+    /// for a sighting.
     ///
     /// The one place the rung is written, so the no-decay rule (§7.3) and the
     /// "one event per escalation" rule are both held in a single line of code. A
     /// trigger at or below the current rung is silent: the ladder reports
     /// *escalations*, not occurrences, so a chase that keeps producing rung-1
     /// triggers at rung 3 says nothing.
-    fn raise_alert(&mut self, trigger: AlertTrigger, events: &mut Vec<Event>) {
+    ///
+    /// Being the only writer is also what makes rungs 2 and 3 send their guards
+    /// **once** (#374): the rungs crossed are read here, from a number that only ever
+    /// rises, so nothing has to remember what has already been paid for. `at` is the
+    /// errand each arriving guard is given, which is why the cell is threaded in rather
+    /// than looked up — control sends them to what it just learned about, not to
+    /// wherever the player happens to be by the time they walk in (§7.6).
+    fn raise_alert(&mut self, trigger: AlertTrigger, at: Cell, events: &mut Vec<Event>) {
+        let from = self.alert.rung();
         if let Some(rung) = self.alert.raise(trigger) {
             events.push(Event::AlertRaised { rung, trigger });
+            self.queue_reinforcements(from, rung, at);
         }
     }
 

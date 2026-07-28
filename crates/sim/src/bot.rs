@@ -1706,6 +1706,13 @@ mod tests {
     /// spell *activations* only: a takedown, a grab and a stow are steps (§7.2/§8.3),
     /// so they leave no letter here and are asserted in
     /// [`the_striking_profiles_work_the_body_chain`] instead.
+    ///
+    /// The pin has moved once since, and for a reason worth naming: rungs 2 and 3
+    /// began **walking guards into the facility** (§7.3/#374). This list is the bot's
+    /// play against a fixed game, so a change to the *game* moves it exactly as a
+    /// change to the cue seam would — which is why the refresh belongs in the PR that
+    /// changed the game, with the deltas read rather than waved through. What it must
+    /// never do is move on a refactor that was supposed to change nothing.
     #[test]
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 48] = [
@@ -1720,7 +1727,7 @@ mod tests {
             "baseline 8 lost 51 ",
             "baseline 9 lost 61 rdr",
             "baseline 10 lost 40 rc",
-            "baseline 11 won 253 crrcrrrr",
+            "baseline 11 lost 165 crrcrd",
             "cautious 0 won 67 ",
             "cautious 1 lost 165 rdrdr",
             "cautious 2 lost 529 rrrrdrdr",
@@ -1732,13 +1739,13 @@ mod tests {
             "cautious 8 lost 88 r",
             "cautious 9 lost 242 rdrrd",
             "cautious 10 lost 94 rd",
-            "cautious 11 lost 724 crdrrdrrrrdrdrd",
+            "cautious 11 won 539 crdrrdrdrd",
             "aggressive 0 won 63 c",
             "aggressive 1 won 179 rrdc",
             "aggressive 2 won 224 ",
             "aggressive 3 lost 118 rdr",
             "aggressive 4 won 60 ",
-            "aggressive 5 lost 212 rrcrdrrc",
+            "aggressive 5 won 240 rrcrdrr",
             "aggressive 6 lost 77 r",
             "aggressive 7 won 100 ",
             "aggressive 8 won 99 ",
@@ -1748,15 +1755,15 @@ mod tests {
             "careless 0 won 66 c",
             "careless 1 won 179 rrdc",
             "careless 2 won 215 c",
-            "careless 3 won 222 rdrccr",
+            "careless 3 lost 181 rdrcrcrdrc",
             "careless 4 lost 91 crcrd",
-            "careless 5 won 256 rrcrdrrrcr",
+            "careless 5 won 242 rrcrdrrcr",
             "careless 6 lost 77 r",
             "careless 7 won 100 ",
             "careless 8 won 99 ",
-            "careless 9 won 144 rdcrcrr",
+            "careless 9 lost 88 rdcrcdr",
             "careless 10 lost 33 rc",
-            "careless 11 won 245 rcrdcr",
+            "careless 11 lost 273 rcrdcrrr",
         ];
 
         let mut played = Vec::new();
@@ -2198,10 +2205,15 @@ mod tests {
     ///   reporting no takedowns is correct behaviour, not a defect);
     /// - the **striking** ones land some, from the core's own gate and no other —
     ///   the bot never re-implements a precondition, it bumps and the game rules;
-    /// - `aggressive` **grabs** bodies, so the drag half of the chain runs;
+    /// - `aggressive` **grabs** bodies, so the drag half of the chain runs, and
+    ///   **stows** some of them, so §10.3's deposit-and-lock runs too;
     /// - `careless` gets bodies **found**, which is the first exercise §7.3's clock
     ///   has ever had. That is why it exists: a stowed body is beyond every cone, so
     ///   the tidier the temperament the flatter this row reads.
+    ///
+    /// Since **#381** the stow has its own §13.2 slot, so every one of these is read
+    /// straight off the histogram — the hand-rolled `BodyStored` counter this test used
+    /// to carry was the tell that the metric was missing.
     ///
     /// Loose and direction-only (§13.4), like every other shape assertion here: the
     /// counts are free to move, the zero-versus-nonzero split is not.
@@ -2227,9 +2239,10 @@ mod tests {
                     takedowns,
                     found,
                     usage.count(Verb::Takedown),
-                    usage.count(Verb::Drag)
+                    usage.count(Verb::Drag),
+                    usage.count(Verb::Stow)
                 ),
-                (0, 0, 0, 0),
+                (0, 0, 0, 0, 0),
                 "{}: a profile that declines the verb must land none of it",
                 profile.name,
             );
@@ -2250,7 +2263,7 @@ mod tests {
             "aggressive never took hold of a body — §8.3's drag is still unexercised",
         );
 
-        let (strikes, found, _) = batch(Profile::CARELESS);
+        let (strikes, found, careless) = batch(Profile::CARELESS);
         assert!(strikes > 0, "careless landed no takedown over 60 seeds");
         assert!(
             found > 0,
@@ -2262,33 +2275,14 @@ mod tests {
         // not a decision — stepping off a body's cell grabs it whether you meant to or
         // not (§8.3/#187) — so `careless` racks up grabs it immediately undoes, and a
         // `Drag` count says nothing about temperament on its own. Putting a body
-        // *away* is the decision, it locks the cupboard behind it (§10.3), and it has
-        // no verb in the §13.2 histogram, so it is counted from its own event here.
-        let stowed = |profile: Profile| {
-            let mut stowed = 0;
-            for seed in 0..60 {
-                let (mut state, _) = boot(seed);
-                let mut bot = StealthBot::with_profile(profile);
-                for _ in 0..DEFAULT_INPUT_CAP {
-                    if state.outcome() != Outcome::Playing {
-                        break;
-                    }
-                    let input = bot.decide(&state);
-                    stowed += state
-                        .step(input)
-                        .iter()
-                        .filter(|e| matches!(e, intrusion_core::Event::BodyStored { .. }))
-                        .count();
-                }
-            }
-            stowed
-        };
+        // *away* is the decision, and since #381 it has its own §13.2 slot, so the
+        // split is **read off the histogram** rather than replayed and counted by hand.
         assert!(
-            stowed(Profile::AGGRESSIVE) > 0,
+            aggressive.count(Verb::Stow) > 0,
             "aggressive never stowed a body — §10.3's deposit-and-lock is unexercised",
         );
         assert_eq!(
-            stowed(Profile::CARELESS),
+            careless.count(Verb::Stow),
             0,
             "careless stowed a body — a reach of zero must mean it never tidies up, \
              or `bodies_found` loses the source this profile exists to be",
@@ -2686,12 +2680,19 @@ mod tests {
     /// cap. This grants it and plays a batch through the ordinary loop: the outcome
     /// profile stays mixed, so nothing livelocks.
     ///
-    /// What it does **not** yet show is the ability being *used*: since #346 the
-    /// bot asks every held ability's cue, but Pierce Wall's is the one that still
-    /// declines every moment, so it never presses this key and the histogram slot
-    /// honestly reads zero. Writing that cue is #347's job — a bot that pressed it
-    /// at random would make the histogram measure the bot rather than the game
-    /// (§13.3), which is the one thing the sim exists to avoid.
+    /// Holding it is also very nearly **free**: on almost every seed the armed run is
+    /// input-for-input the run the bare bot played, because the cue declines from
+    /// almost every cell. What used to be true was *stronger* — that it declined from
+    /// **every** cell, so the key was never pressed at all — and it stopped being true
+    /// when rungs 2 and 3 started walking guards in (§7.3/#374). Under that much more
+    /// pressure the bot does occasionally find the one shape Pierce Wall is for and
+    /// takes it.
+    ///
+    /// So the assertion is the one that still means something: holding an ability may
+    /// only change a run **by being used**. A diverging run that never pressed the key
+    /// would be the real defect — a loadout perturbing the policy by its mere presence,
+    /// which would make every with/without comparison (§4a) measure the perturbation
+    /// rather than the ability.
     #[test]
     fn the_bot_plays_identically_while_holding_pierce_wall() {
         /// Play `state` to a decision and report the inputs issued and how it ended.
@@ -2709,7 +2710,7 @@ mod tests {
             (issued, state.outcome(), state.turn())
         }
 
-        let mut decided = 0;
+        let (mut decided, mut diverged) = (0, 0);
         for seed in 30..50 {
             let (bare, _) = boot(seed);
             let (armed, _) = boot(seed);
@@ -2729,12 +2730,21 @@ mod tests {
 
             let bare = play(bare);
             let armed = play(armed);
-            assert_eq!(
-                bare, armed,
-                "seed {seed}: holding the ability changed the run"
-            );
+            if bare != armed {
+                assert!(
+                    armed.0.contains(&Input::Activate(AbilityId::PierceWall)),
+                    "seed {seed}: holding the ability changed the run without using it",
+                );
+                diverged += 1;
+            }
             decided += u32::from(armed.1 != Outcome::Playing);
         }
+        assert!(
+            diverged <= 4,
+            "{diverged}/20 runs diverged — holding one situational ability should be \
+             nearly free, so this many says the policy is being perturbed rather than \
+             finding the shape the ability is for",
+        );
         assert!(
             decided >= 15,
             "only {decided}/20 runs reached a decision — the baseline is stalling, \

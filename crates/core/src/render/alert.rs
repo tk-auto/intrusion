@@ -186,6 +186,15 @@ mod tests {
     fn no_alert_row_speaks_the_design_vocabulary() {
         let mut rows = vec![NO_ALERT.to_string()];
         rows.extend((0..=TOP_RUNG).map(condition_line));
+        // …and every effect row the real ladder can print, walked to the top so the
+        // reinforcement rows (#374) are covered as well as rung 1's.
+        let mut alert = crate::alert::Alert::new();
+        alert.raise(crate::alert::AlertTrigger::BodyFound);
+        rows.extend(alert.readout().effects.iter().map(|e| match &e.detail {
+            Some(detail) => format!("{}{CAPTION_SEPARATOR}{detail}", e.name),
+            None => e.name.to_string(),
+        }));
+        assert!(rows.len() > 5, "the walk reached the ladder's effects");
         for row in rows {
             let lower = row.to_lowercase();
             for word in ["rung", "ladder", "trigger", "tuning"] {

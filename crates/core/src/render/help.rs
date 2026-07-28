@@ -1359,6 +1359,8 @@ mod tests {
             AlertTuning {
                 dwell_turns_min: 98,
                 dwell_turns_max: 99,
+                rung_two_reinforcements: 98,
+                rung_three_reinforcements: 99,
                 ..AlertTuning::default()
             },
         ] {
