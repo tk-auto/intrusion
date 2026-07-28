@@ -34,6 +34,29 @@ use crate::modifiers::CAPTION_SEPARATOR;
 /// out from the content column [`draw_alert`] is handed.
 const HEADING_INDENT: u32 = 2;
 
+/// How the panel names the rung the facility has reached: **`Condition 2 of 3`**.
+///
+/// The player-facing noun is **condition**, not *rung*. A rung is the shape of the
+/// thing in the code — a monotone ladder with a top — and it is the right word for the
+/// types ([`AlertReadout::rung`](crate::AlertReadout)) and for §7.3's prose; it is the
+/// wrong word on screen, because it names the mechanism rather than the world. A
+/// facility's security posture *is* a condition, and a control room says "we are at
+/// condition two", so the panel says what the building would say about itself.
+///
+/// It keeps the **number and the ceiling**, which is the one thing the ladder metaphor
+/// was buying the player: `2 of 3` says both how bad it is and how much worse it can
+/// still get. A bare name ("sweep", "sealed") would lose the scale — and the two most
+/// natural names for the top are already spoken for, by the §7.4 guard states and by the
+/// Lockdown ability (§8.3).
+///
+/// Shared with the near line ([`alert_line`](crate::status::alert_line)), which wears it
+/// as *"security condition 2 of 3"*, so the line that sends the player to this panel
+/// names the same thing they find on it. Read by the drawing **and** by the width test,
+/// so the row the test measures is the row that is drawn.
+pub(super) fn condition_line(rung: u32) -> String {
+    format!("Condition {rung} of {TOP_RUNG}")
+}
+
 /// The §11.2 category a rung reads in — the ladder mapped onto the **standing threat
 /// ladder**, and no new colour vocabulary (§11.2 **[SETTLED]**: a system declares a
 /// meaning, never a colour, and never invents a category).
@@ -69,19 +92,19 @@ pub(super) fn rung_category(rung: u32) -> Category {
 ///
 /// ```text
 /// ALERT
-///   Rung 2 of 3
+///   Condition 2 of 3
 ///   Guards never calm: pause 1–3 turns
 /// ```
 ///
 /// **The section is always drawn**, rung 0 included, where it prints [`NO_ALERT`]
-/// instead of a rung line. A section that appeared only once the facility had noticed
-/// you would teach the ladder exists at the exact moment that knowledge stopped being
-/// useful — and a row that vanishes reads as a bug rather than as a fact.
+/// instead of a condition line. A section that appeared only once the facility had
+/// noticed you would teach the ladder exists at the exact moment that knowledge stopped
+/// being useful — and a row that vanishes reads as a bug rather than as a fact.
 ///
-/// The rung line is tinted by [`rung_category`], the same colour the `[?]` toggle wears
-/// on the board, so the tell and the thing it points at agree. Effect rows are drawn in
-/// Warning, the standing *this is a rule bent against you* cue the harder modifiers
-/// already use — every one of them is retaliation, so none of them needs its own shade.
+/// The condition line is tinted by [`rung_category`], the same colour the `[?]` toggle
+/// wears on the board, so the tell and the thing it points at agree. Effect rows are
+/// drawn in Warning, the standing *this is a rule bent against you* cue the harder
+/// modifiers already use — every one of them is retaliation, so none needs its own shade.
 pub(super) fn draw_alert(grid: &mut Grid, mut y: u32, readout: &AlertReadout, indent: u32) -> u32 {
     draw(grid, HEADING_INDENT, y, "ALERT", Category::System);
     y += 1;
@@ -95,7 +118,7 @@ pub(super) fn draw_alert(grid: &mut Grid, mut y: u32, readout: &AlertReadout, in
         grid,
         indent,
         y,
-        &format!("Rung {} of {TOP_RUNG}", readout.rung),
+        &condition_line(readout.rung),
         rung_category(readout.rung),
     );
     y += 1;
@@ -151,6 +174,34 @@ mod tests {
         }
     }
 
+    /// §11.8: **the screen never says "rung".** A rung is the shape of this system —
+    /// a monotone ladder with a top — which is the right word in §7.3 and in these
+    /// identifiers, and the wrong one on a screen the player reads without the design
+    /// doc beside them. The facility's own word for that state is a *condition*.
+    ///
+    /// Walked over every string the two alert surfaces can print, so a later reword that
+    /// let the mechanism's name back out fails here rather than shipping. The near line's
+    /// half of the same pair is pinned in [`status`](crate::status).
+    #[test]
+    fn no_alert_row_speaks_the_design_vocabulary() {
+        let mut rows = vec![NO_ALERT.to_string()];
+        rows.extend((0..=TOP_RUNG).map(condition_line));
+        for row in rows {
+            let lower = row.to_lowercase();
+            for word in ["rung", "ladder", "trigger", "tuning"] {
+                assert!(
+                    !lower.contains(word),
+                    "{row:?} says {word:?} — that is the design's word, not the \
+                     player's (§11.8)",
+                );
+            }
+        }
+        assert!(
+            condition_line(2).starts_with("Condition 2 of "),
+            "the player's word, with the scale the rung carried",
+        );
+    }
+
     /// #375: **rung 0 still draws a section.** The player should meet the ladder before
     /// it bites, and a heading that appears out of nowhere on the turn you are first
     /// seen is a worse teacher than one that was always there saying "quiet".
@@ -184,13 +235,17 @@ mod tests {
         };
         let next = draw_alert(&mut grid, 0, &readout, 3);
         assert_eq!(row(&grid, 0), "  ALERT");
-        assert_eq!(row(&grid, 1), "   Rung 2 of 3");
+        assert_eq!(row(&grid, 1), "   Condition 2 of 3");
         assert_eq!(row(&grid, 2), "   Guards never calm: pause 1–3 turns");
         assert_eq!(next, 3);
 
         // The rung line wears the rung's own colour, the effect rows the standing
         // "bent against you" Warning the harder modifiers use.
-        assert_eq!(grid.get(3, 1).fg, Category::Warning, "rung 2 is Warning");
+        assert_eq!(
+            grid.get(3, 1).fg,
+            Category::Warning,
+            "condition 2 is Warning"
+        );
         assert_eq!(grid.get(3, 2).fg, Category::Warning);
 
         // An effect with no numbers behind it draws its name alone, no dangling `": "`.
@@ -209,6 +264,6 @@ mod tests {
             3,
         );
         assert_eq!(row(&grid, 2), "   Everyone is looking");
-        assert_eq!(grid.get(3, 1).fg, Category::Danger, "rung 3 is Danger");
+        assert_eq!(grid.get(3, 1).fg, Category::Danger, "condition 3 is Danger");
     }
 }

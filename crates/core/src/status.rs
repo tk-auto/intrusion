@@ -274,20 +274,27 @@ pub fn near_line(state: &State) -> Message {
         .unwrap_or_else(|| ambient(state))
 }
 
-/// How the near line names a facility alert rung (§7.3/§11.4, #375) — **one phrase,
-/// two callers**: the [`Event::AlertRaised`] message that announces a step, and the
-/// [`ambient`] floor that keeps stating it for the rest of the level. They were worded
-/// separately and read as two different facts.
+/// How the near line names the rung the facility has reached (§7.3/§11.4, #375) —
+/// **one phrase, two callers**: the [`Event::AlertRaised`] message that announces a
+/// step, and the [`ambient`] floor that keeps stating it for the rest of the level.
+/// They were worded separately and read as two different facts.
 ///
-/// It says **rung**, and says which of how many, matching the help panel's ALERT
-/// section word for word. The panel is where the rung's *effects* are written (#375),
-/// so the line that sends the player there has to name the same thing they will find.
+/// The player-facing noun is **condition**, never *rung* — a rung is the shape of the
+/// ladder in the code, and naming the mechanism on screen is exactly the un-diegetic
+/// tell to avoid. It carries the number and the ceiling ("2 of 3"), which is what the
+/// metaphor was buying: how bad it is, and how much worse it can still get.
+///
+/// It is the same `condition N of 3` the help panel's ALERT section prints
+/// (`render::alert::condition_line`), because the panel is where the rung's *effects*
+/// are written and a line that sends the player there must name the thing they will
+/// find. This one wears **security** in front of it, since the near line has no heading
+/// to say what the number counts.
 ///
 /// It is also the rewording the §11.7 width bound was waiting on: *"the facility is on
 /// alert — level 3"* was 34 cells in a 29-cell row and reached the screen clipped, so
 /// the one message about escalation was the one the player could not read.
 fn alert_line(rung: u32) -> String {
-    format!("facility alert — rung {rung} of {}", crate::alert::TOP_RUNG)
+    format!("security condition {rung} of {}", crate::alert::TOP_RUNG)
 }
 
 /// The ambient floor (§11.4): the quiet status the near line rests on between
@@ -539,7 +546,7 @@ mod tests {
             trigger: AlertTrigger::RepeatSightings,
         })
         .expect("an alert step speaks");
-        assert_eq!(alert.text, "facility alert — rung 2 of 3");
+        assert_eq!(alert.text, "security condition 2 of 3");
         assert_eq!(alert.category, Category::Warning);
         assert_eq!(alert.priority, 5);
     }
@@ -608,6 +615,23 @@ mod tests {
         );
     }
 
+    /// §11.8: **the near line never says "rung"** — the ladder's steps are *conditions*
+    /// on screen, because a rung names the shape of the system and the player is reading
+    /// this without the design doc beside them. Walked over every rung the ladder can
+    /// reach, so a later reword cannot let the mechanism's name back out; the help
+    /// panel's half of the same pair is pinned in `render::alert`.
+    #[test]
+    fn the_near_line_speaks_conditions_not_rungs() {
+        for rung in 1..=crate::alert::TOP_RUNG {
+            let line = alert_line(rung);
+            assert!(
+                !line.to_lowercase().contains("rung"),
+                "{line:?} says rung — the design's word, not the player's (§11.8)",
+            );
+            assert_eq!(line, format!("security condition {rung} of 3"));
+        }
+    }
+
     /// §7.3/§11.4: once the radio has stepped the facility alert, the value is
     /// *readable* — with no louder message live, the ambient floor surfaces it in
     /// the Warning band, never written-but-invisible (§2.3).
@@ -642,7 +666,7 @@ mod tests {
         // one phrase, wherever the player meets it.
         let line = near_line(&s);
         assert_eq!(line.text, alert_line(s.alert()));
-        assert_eq!(line.text, "facility alert — rung 1 of 3");
+        assert_eq!(line.text, "security condition 1 of 3");
         assert_eq!(line.category, Category::Warning);
         assert_eq!(
             line.priority,
@@ -789,7 +813,7 @@ mod tests {
             vec![5, 4, 0],
             "loudest first: the escalation, then the found body, then the narration",
         );
-        assert_eq!(live[0].text, "facility alert — rung 3 of 3");
+        assert_eq!(live[0].text, "security condition 3 of 3");
         assert_eq!(live[1].text, "a body has been found");
         assert_eq!(live[2].text, "the guard drops — a body is left");
         assert_eq!(

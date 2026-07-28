@@ -821,8 +821,8 @@ mod tests {
     /// ("the exit needs 2 more intel") is shorter than the fixed rule it replaced.
     /// **The alert line left it in #375**: the one message about escalation was the one
     /// the player could not read, at 34 cells in a 29-cell row, and #375 is where the
-    /// ladder's legibility was owed. Naming the rung the way the help panel names it
-    /// ("facility alert — rung 3 of 3") is both shorter and the same words twice.
+    /// ladder's legibility was owed. Naming it the way the help panel does — "security
+    /// condition 3 of 3" — is both shorter and the same words twice.
     const PRE_EXISTING_OVERFLOW: [&str; 5] = [
         "all the intel — the exit is open",
         "the guard drops — a body is left",
@@ -1001,7 +1001,7 @@ mod tests {
         let g = render_screen(&s, ScreenUi::default());
         let near = row_text(&g, NEAR_ROW);
         assert!(
-            near.contains("facility alert — rung"),
+            near.contains("security condition"),
             "the band speaks the loudest message: {near:?}"
         );
         assert!(
@@ -1037,7 +1037,7 @@ mod tests {
             "the deployed counter points up"
         );
         assert!(
-            row_text(&g, TOP_ROWS).contains("facility alert — rung"),
+            row_text(&g, TOP_ROWS).contains("security condition"),
             "the loudest sits nearest the band"
         );
         assert!(

@@ -1311,8 +1311,8 @@ mod tests {
             "a quiet facility says so rather than showing a blank: {quiet}",
         );
         assert!(
-            !quiet.contains("Rung"),
-            "…and claims no rung it has not reached",
+            !quiet.contains("Condition"),
+            "…and claims no condition it has not reached",
         );
 
         // A raised rung names itself and lists the effects the ladder actually runs —
@@ -1326,7 +1326,7 @@ mod tests {
                 detail: Some("pause 1–3 turns".to_string()),
             }],
         });
-        assert!(raised.contains("Rung 2 of 3"), "{raised}");
+        assert!(raised.contains("Condition 2 of 3"), "{raised}");
         assert!(
             raised.contains("Guards never calm: pause 1–3 turns"),
             "{raised}"
@@ -1367,8 +1367,10 @@ mod tests {
             for trigger in AlertTrigger::ALL {
                 alert.raise(trigger);
                 let readout = alert.readout();
-                let rung_line = format!("Rung {} of {}", readout.rung, crate::TOP_RUNG);
-                assert!(rung_line.chars().count() <= room, "{rung_line:?}");
+                // Read from the drawing's own helper, so the row measured here is the
+                // row the panel draws.
+                let condition = super::super::alert::condition_line(readout.rung);
+                assert!(condition.chars().count() <= room, "{condition:?}");
                 for effect in &readout.effects {
                     let text = match &effect.detail {
                         Some(detail) => format!("{}{CAPTION_SEPARATOR}{detail}", effect.name),

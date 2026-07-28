@@ -354,9 +354,13 @@ mind escalates in the colours one guard's does and there is nothing new to learn
 inherits §4.1's luminance separation for free, so the tint survives a red-green
 deficiency, and it inherits §4.4's second column, so it works on both themes.
 
-The rung line inside the panel (`Rung 2 of 3`) wears the **same** category, because a
-tint saying *danger* over a panel saying *rung 1* would be worse than no tint. The
-mapping is written once, in `render::alert`, and both halves read it.
+The condition line inside the panel (`Condition 2 of 3`) wears the **same** category,
+because a tint saying *danger* over a panel saying *condition 1* would be worse than no
+tint. The mapping is written once, in `render::alert`, and both halves read it.
+
+*(**Rung** is the design and code word for the ladder's steps; the screen says
+**condition** — see §11.8 of the design doc for the whole design↔player glossary. This
+table is a developer reference, so it says rung.)*
 
 **Guard presentation is deliberately unchanged.** A guard the ladder has made never-calm
 still draws as Calm: a guard's colour is *its own state* (§11.2), not the facility's
