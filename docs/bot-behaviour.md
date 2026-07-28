@@ -134,6 +134,51 @@ it, read through core's `guard_detects_now` rather than off the danger overlay,
 because those two differ exactly where this play lives: a cupboard cell can sit
 inside a cone and still be perfectly safe.
 
+### 3.3 The crouch, and why it is not a profile knob
+
+`TakeCover` has a **floor** below the cupboard and the cloak: bump the table at your
+elbow and duck behind it (§10.3). It is tried last of the three because it is the
+weakest of the three — a cupboard is omnidirectional and contact-safe, a bench
+conceals only *across* itself and stops nobody walking into you (§4.5).
+
+It is a **reflex, not an appetite**, which is what makes it unlike the takedown. It
+fires only from where the bot already stands, so it is never a detour and never
+something a temperament could sensibly decline: ducking behind the table beside you
+when a patrol walks in is what anybody does, careful or impatient. So **every profile
+crouches**, and there is no `crouch_reach` to read a zero off — a zero here would be a
+broken policy, not a temperament.
+
+A reach knob *was* built and measured out again (#379). A bench you walk to goes
+**stale**: the spot is chosen for where a guard stands now, and by the time you arrive
+it has moved and the concealing side of the furniture has flipped. Over 100 seeds a
+reach of 2 or more did not add crouches, it **replaced** them — from ~51 down to ~1 —
+as the bot spent its cover turns walking to benches it never ducked behind. The
+profiles still crouch at different rates, on the numbers they already carry: how near
+a patrol has to be before cover is worth a turn (`threat_radius`), and how far a
+*cupboard* is worth walking to instead (`cover_reach`).
+
+Three rules govern the pose, and all three ask **core**, never a local copy of §10.3
+(`State::crouch_would_conceal`, `State::crouch_holds`):
+
+- **Duck** when a table beside the bot hides it from *every* guard it perceives within
+  `threat_radius`. Concealment from one of two patrols is not cover, it is a coin toss.
+  A **sensed** guard counts here even though it does not for the rear strike, and the
+  asymmetry is real: striking a back needs the guard's *facing*, which a sensed guard
+  does not give up; hiding across a bench needs only where it stands, which it does.
+- **Hold** while that stays true — waiting is the one action other than the duck that
+  keeps the pose.
+- **Crouch-walk** when it stops: a plain step landing still hugging the run keeps the
+  pose (§10.3), so the bot shuffles along the furniture as a patrol comes round rather
+  than standing up and re-ducking for two turns.
+
+And when neither holding nor shuffling covers it any more, it **gives the pose up** and
+falls back to the ordinary ladder. That last rule is load-bearing rather than tidy:
+`being_hunted` reads the same `concealed_from` the crouch defeats, so a crouched bot
+*believes* it is unseen. A first cut that simply waited out the patrol behind a bench
+that had stopped covering it put `cautious`'s detections up 46% (549 → 803) — standing
+still in the open while convinced you are hidden. Leaving before the cone arrives, not
+after, is what the give-up buys.
+
 ## 4. Ability cues: which key it presses, and why
 
 The bot does **not** carry a list of abilities it knows how to use. It puts the
@@ -299,9 +344,22 @@ Stated so they read as decisions rather than oversights:
   and `cautious` carry `takedown_reach: 0`: they steer wide of guards rather than
   hunting them, so a flat zero in their takedown row is the temperament working, not
   a defect (§13.3). Read the §7.2 chain off `aggressive` and `careless` instead.
-- **No profile crouches.** Concealment reaches the strike only through a hideout, so
-  the crouch-behind-cover angle (§10.3) is untested — one of §7.2's legal strikes has
-  never been measured, and the bot has no crouch policy to measure it with.
+- **A bench takedown does not exist, and the zero is the geometry** (#379). §7.2 opens
+  the takedown gate against any guard the player is concealed from, whatever the angle —
+  but concealment *across a bench* needs the viewer on the far side of the furniture,
+  which puts it at least two cells away, while a takedown needs it orthogonally
+  adjacent. The two cannot both hold, proven exhaustively in core's
+  `cover::an_adjacent_viewer_is_never_concealed_by_a_bench`. So §7.2's concealed strike
+  is reachable through the cupboard, the duct and the cloak, and **never** through the
+  crouch: a batch reporting zero bench takedowns is right, not shy.
+- **The crouch is a careful player's tool, not an impatient one's.** The profiles with
+  a wide `threat_radius` duck early, while the patrol is still far enough that its
+  angle is stable, and hold the pose for several turns; the tight-radius temperaments
+  duck with a guard already on top of them and are almost always walked round within a
+  turn. Over 60 seeds `cautious` keeps a working pose for ~11 turns per duck and
+  `aggressive` for barely one —
+  so a crouch on the impatient profiles is mostly a turn spent for nothing, which the
+  give-up rule (§3.3) bounds at one.
 - **Stowing has no verb in the histogram.** Takedown, drag and `bodies_found` are all
   metrics; deposit-and-lock (§10.3) is not, so a batch infers it from the gap between
   takedowns and bodies found rather than reading it directly.

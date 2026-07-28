@@ -32,8 +32,8 @@
 
 use intrusion_core::AbilityId;
 
-/// One verb the usage histogram counts (#137, §13.2): the four activated
-/// abilities plus the innate verbs that shape a strategy — Wait, Takedown, Drag.
+/// One verb the usage histogram counts (#137, §13.2): the activated abilities
+/// plus the innate verbs that shape a strategy — Wait, Takedown, Drag, Crouch.
 ///
 /// Move is deliberately absent: it is "not shown in the UI" (§8.3) and is the
 /// default nothing-else verb, so counting it would drown the signal the histogram
@@ -71,13 +71,20 @@ pub enum Verb {
     /// reach, so a flat zero here is as likely to mean "never stands near a doorway" as
     /// "never chooses it".
     Lockdown,
+    /// Ducked behind a bench (§10.3/#379) —
+    /// [`Event::Crouched`](intrusion_core::Event::Crouched). An innate bump verb like
+    /// Takedown and Drag, counted the same way: the *duck* is the decision, so a held
+    /// pose costs one count and the waits and crouch-walks that hold it are Waits and
+    /// Moves. Its zero was the §13.2 false zero in its purest form — the geometry
+    /// §10.1a goes to real trouble over, with no policy that had ever entered it.
+    Crouch,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 11] = [
+    pub const ALL: [Verb; 12] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -89,6 +96,7 @@ impl Verb {
         Verb::Drag,
         Verb::PierceWall,
         Verb::Lockdown,
+        Verb::Crouch,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -127,6 +135,7 @@ impl Verb {
             Verb::Drag => "drag",
             Verb::PierceWall => "pierce_wall",
             Verb::Lockdown => "lockdown",
+            Verb::Crouch => "crouch",
         }
     }
 
@@ -246,7 +255,8 @@ mod tests {
                 "takedown",
                 "drag",
                 "pierce_wall",
-                "lockdown"
+                "lockdown",
+                "crouch"
             ]
         );
         // Each ability activation lands in its own slot.

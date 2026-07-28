@@ -222,6 +222,11 @@ impl Profile {
     /// carry the whole §7.2 chain — takedown, drag, stow — rather than only its first
     /// link. What it does *not* cover is body discovery, because a stowed body can
     /// never be found; that is [`CARELESS`](Profile::CARELESS)'s job.
+    ///
+    /// Its **crouch** (§10.3/#379) is where its temperament shows without a knob of its
+    /// own: the bench is the cover it settles for because a cupboard is only worth five
+    /// cells to it, so it ducks about as often as `careless` and six times as often as
+    /// the `baseline`, which will march eight cells to a proper cupboard instead.
     pub const AGGRESSIVE: Profile = Profile {
         name: "aggressive",
         // A quarter of the baseline weight over a radius of 3: a patrol still
@@ -263,9 +268,9 @@ impl Profile {
     ///
     /// **Keener does not mean more**, and the measured numbers say so plainly: over
     /// 100 seeds this lands *fewer* takedowns than `aggressive` (11 against 18),
-    /// because refusing cupboards costs it every concealment strike (§7.2) and leaves
-    /// it only the rear blind spot (§155) to work with. That is the split doing its
-    /// job rather than a mis-tune — one temperament per legal angle — and it is worth
+    /// because refusing cupboards costs it the concealment strikes from a cupboard
+    /// mouth (§7.2) and leaves it the rear blind spot (§155) and the bench to work
+    /// with. That is the split doing its job rather than a mis-tune — and it is worth
     /// remembering before anyone reads the bigger reach as the bigger number.
     ///
     /// Not a *better* player for striking at all (§13.4) — bodies on the floor are how
