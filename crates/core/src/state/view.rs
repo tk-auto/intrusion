@@ -227,6 +227,47 @@ impl State {
             .unwrap_or_default()
     }
 
+    /// Whether a crouch anchored on `table` would conceal a player standing at
+    /// `from` from a viewer at `viewer` (§10.3) — the geometry half of
+    /// [`concealed_from`](Self::concealed_from), asked of a stance the player has
+    /// **not taken yet**.
+    ///
+    /// [`concealed_from`](Self::concealed_from) answers for the pose actually
+    /// held; this answers *"if I ducked behind that bench from there, would he
+    /// see me?"* — the question §10.3's half-plane rule was shaped to be readable
+    /// at a glance (#377), and the one a player asks before spending the turn. It
+    /// is the same [`cover::run_conceals`] the held pose is judged by, on the same
+    /// whole §10.1a run, so a caller can never drift from the rule by planning
+    /// against a private copy of it.
+    ///
+    /// Deliberately *only* the crouch's geometry: the cupboard, the duct and the
+    /// cloak conceal by their own rules and have nothing to say about a table.
+    /// `false` when `table` is not partial cover at all — nothing to duck behind is
+    /// nothing to be hidden by.
+    ///
+    /// Public for the §13.2 sim bot, which plans its cover on the player's own
+    /// channels (§11.5a — geometry is always known, and a perceived guard's cell
+    /// with it) and must ask core rather than re-derive the half-plane.
+    pub fn crouch_would_conceal(&self, table: Cell, from: Cell, viewer: Cell) -> bool {
+        let run = cover::cover_run(self.layout.facility(), table);
+        cover::run_conceals(&run, from, viewer)
+    }
+
+    /// Whether a crouch anchored on `table` **survives** a plain step to `to`
+    /// (§10.3) — the crouch-walk: the pose is held for exactly as long as the
+    /// player keeps hugging the anchored run, its diagonal corners included, so
+    /// the walk can round the end of a bench without standing up.
+    ///
+    /// The companion to [`crouch_would_conceal`](Self::crouch_would_conceal): one
+    /// says whether a cell is *hidden* by the bench, the other whether stepping
+    /// there keeps you *behind* it, and a crouch-walk needs both. It answers for
+    /// the plain move only — an interaction that spends the turn in place, or any
+    /// other spent action, stands the player up whatever this says (see the turn
+    /// loop's `crouch_walked`).
+    pub fn crouch_holds(&self, table: Cell, to: Cell) -> bool {
+        cover::run_hugs(&cover::cover_run(self.layout.facility(), table), to)
+    }
+
     /// The guards, for rendering and tests.
     pub fn guards(&self) -> &[Guard] {
         &self.guards

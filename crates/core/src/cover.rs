@@ -373,6 +373,69 @@ mod tests {
         assert!(!run_conceals(&run, player, Cell::new(2, 2)));
     }
 
+    /// **A bench never conceals you from somebody standing next to you** — and that
+    /// is a fact about §7.2, not only about §10.3 (#379).
+    ///
+    /// The takedown is a *bump*, so it needs the guard orthogonally adjacent, and
+    /// §7.2 opens the gate against a guard the player is [concealed] from whatever the
+    /// angle. Cupboard, duct and cloak all conceal omnidirectionally, so all three
+    /// grant that strike. **The crouch cannot**, and neither branch of
+    /// [`run_conceals`] can be coaxed into it:
+    ///
+    /// - [`arm_separates`] wants the two on *strictly* opposite sides of a table's
+    ///   line ([`opposite_sides`]), so they differ by at least 2 on that axis;
+    /// - [`ray_crosses_run`] wants a table's own cell to meet a segment which, between
+    ///   orthogonal neighbours, spans nothing but those two cells — and neither is a
+    ///   table, since the player stands on one and the guard on the other.
+    ///
+    /// So §7.2's third route to a legal strike does not exist as a *crouch*, and a sim
+    /// batch reporting zero bench takedowns is the geometry, not a shy bot. Swept
+    /// exhaustively below over every stance and every neighbour of the four run shapes
+    /// §10.1a can stamp, so a change to either branch that opened the case would fail
+    /// here rather than quietly becoming a new play.
+    ///
+    /// [concealed]: crate::State::concealed_from
+    #[test]
+    fn an_adjacent_viewer_is_never_concealed_by_a_bench() {
+        let runs = [
+            vec![Cell::new(5, 3), Cell::new(5, 4), Cell::new(5, 5)], // a north–south bench
+            vec![Cell::new(3, 5), Cell::new(4, 5), Cell::new(5, 5)], // an east–west one
+            vec![
+                Cell::new(5, 3),
+                Cell::new(5, 4),
+                Cell::new(5, 5),
+                Cell::new(6, 5),
+            ], // an L
+            vec![Cell::new(5, 4)],                                   // a lone table
+        ];
+        let mut checked = 0;
+        for run in &runs {
+            for py in 0..12 {
+                for px in 0..12 {
+                    let player = Cell::new(px, py);
+                    if run.contains(&player) {
+                        continue; // the player never stands on the furniture
+                    }
+                    for dir in [(1, 0), (0, 1)] {
+                        let viewer = Cell::new(px + dir.0, py + dir.1);
+                        if run.contains(&viewer) {
+                            continue; // nor does the guard
+                        }
+                        checked += 1;
+                        assert!(
+                            !run_conceals(run, player, viewer),
+                            "{run:?} concealed {player:?} from the adjacent {viewer:?}",
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            checked > 500,
+            "only {checked} pairs swept — too thin to mean it"
+        );
+    }
+
     /// Rounding the corner keeps the cover honest: from below the bench's end
     /// the run blinds a viewer straight up the column, while a viewer level
     /// with the player sees them — cover is where the furniture is, not a
