@@ -10,13 +10,14 @@ use std::process::ExitCode;
 
 use intrusion_core::{parse_script, Input, LevelSeed};
 use intrusion_sim::{
-    ability_names, capture_one_with, intel_gate_named, intel_gate_names, modifier_names,
-    run_batch_with, Profile, RunConfig, Scripted, StealthBot, Summary, DEFAULT_INPUT_CAP,
+    ability_names, alert_knob_names, capture_one_with, intel_gate_named, intel_gate_names,
+    modifier_names, run_batch_with, Profile, RunConfig, Scripted, StealthBot, Summary,
+    DEFAULT_INPUT_CAP,
 };
 
 const USAGE: &str = "\
 Usage: sim [--runs N] [--seed S] [--cap N] [--config TOKEN] [--guards N]
-           [--intel-gate none|one|all] [--modifier NAME]...
+           [--intel-gate none|one|all] [--modifier NAME]... [--alert NAME=N]...
            [--abilities LIST] [--without LIST]
            [--bot [--profile NAME] | --script MOVES] [--emit-replay]
 
@@ -37,6 +38,9 @@ summary row (schema: crates/sim/README.md).
                  none, one or all                             (default: one)
   --modifier N   switch a level modifier on (#225); repeatable
                  and comma-separated. --help lists them        (default: none)
+  --alert K=N    set one §7.3 alert-ladder threshold — how hard
+                 a rung is to reach; repeatable and comma-
+                 separated. --help lists the knobs             (default: the §7.3 [START]s)
   --abilities L  the tech every run holds (§8.3), comma-
                  separated; the innate set is always held      (default: none — bare)
   --without L    tech to drop from the loadout                 (default: none)
@@ -65,12 +69,21 @@ healthy; one where both collapse onto the same line is a puzzle with one answer.
 Every emitted row names the profile that produced it.
 
 The config flags are what a batch is *measuring* (#256): the default is the sim
-preset — the baseline rules and a bare, innate-only loadout, so a win rate says
-the core stealth loop is winnable with no tech — and every flag above states a
-departure from it. They compose in a fixed order whatever order they are written
-in: --config, --guards, --intel-gate, --modifier, --abilities, --without. A batch
-running one flag against none of it is the toggle experiment (#257), and
-generation is seed-derived, so both arms raid the same facilities.
+preset — the baseline rules, a bare innate-only loadout and the shipped alert
+ladder, so a win rate says the core stealth loop is winnable with no tech — and
+every flag above states a departure from it. They compose in a fixed order
+whatever order they are written in: --config, --guards, --intel-gate, --modifier,
+--alert, --abilities, --without. A batch running one flag against none of it is
+the toggle experiment (#257), and generation is seed-derived, so both arms raid
+the same facilities.
+
+--alert is the ladder's own sweep (§7.3/#376): every threshold the design marks
+[START] — how many contact turns make a sighting, how long the window is, how
+many sightings or quiet posts reach a rung, how short the alerted dwell is —
+turned from a flag instead of a rebuild. A ladder the design forbids (a dwell
+floor of 0, a window too short to ever hold a sighting) is refused at the flag
+rather than measured. It is not carried by --emit-replay's token: no shared
+config can encode it, so a swept run reproduces only under the same --alert.
 
 --emit-replay captures the chosen policy's issued inputs for the single seed S
 and prints the `(seed, inputs)` replay: with --bot, the exact run the bot
@@ -97,9 +110,11 @@ fn usage() -> String {
         "{USAGE}\n\n\
          --intel-gate values: {}\n\
          --modifier names:    {}\n\
+         --alert knobs:       {}\n\
          --abilities names:   {}",
         intel_gate_names(),
         modifier_names(),
+        alert_knob_names(),
         ability_names(),
     )
 }
@@ -133,6 +148,10 @@ struct ConfigFlags {
     intel_gate: Option<String>,
     /// Every `--modifier` written, in order — repeatable and comma-separated.
     modifiers: Vec<String>,
+    /// Every `--alert` knob written, in order — repeatable and comma-separated, each
+    /// a `name=value` (§7.3/#376). Later settings of the same knob win, which is what
+    /// lets a sweep script append one without rewriting the command line.
+    alert: Vec<String>,
     abilities: Option<String>,
     without: Option<String>,
 }
@@ -164,6 +183,13 @@ impl ConfigFlags {
                     .map_err(|error| format!("--modifier: {error}"))?;
             }
         }
+        for list in &self.alert {
+            for setting in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                config = config
+                    .with_alert(setting)
+                    .map_err(|error| format!("--alert: {error}"))?;
+            }
+        }
         if let Some(list) = &self.abilities {
             config = config
                 .with_tech(list)
@@ -174,7 +200,11 @@ impl ConfigFlags {
                 .without_tech(list)
                 .map_err(|error| format!("--without: {error}"))?;
         }
-        Ok(config)
+        // Every flag is in: check the finished config describes a game the design
+        // allows, once, at the point the alerted dwell range is whole (§7.3/§7.5).
+        // Unprefixed, unlike the per-flag errors above — this checks the *config*,
+        // and a range spelled across two flags has no one flag to blame.
+        config.validated()
     }
 }
 
@@ -202,6 +232,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--guards" => flags.guards = Some(parse_number::<usize>(&value()?, flag)?),
             "--intel-gate" => flags.intel_gate = Some(value()?),
             "--modifier" => flags.modifiers.push(value()?),
+            "--alert" => flags.alert.push(value()?),
             "--abilities" => flags.abilities = Some(value()?),
             "--without" => flags.without = Some(value()?),
             "--script" => script = Some(parse_script(&value()?)?),
@@ -344,7 +375,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use intrusion_core::{AbilityId, IntelGate, LevelModifiers, Loadout};
+    use intrusion_core::{AbilityId, AlertTuning, IntelGate, LevelModifiers, Loadout};
 
     fn args(argv: &[&str]) -> Result<Args, String> {
         parse_args(&argv.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
@@ -436,6 +467,66 @@ mod tests {
         assert!(!parsed.config.abilities.contains(AbilityId::Decoy));
         assert!(parsed.config.abilities.contains(AbilityId::Run), "innate");
         assert_eq!(parsed.config.facility.guards, 7);
+    }
+
+    /// #376: `--alert` reaches the batch, is repeatable and comma-separated like
+    /// `--modifier`, and leaves the ladder shipped when it is not written — so an
+    /// existing command line keeps measuring the game it always measured.
+    #[test]
+    fn the_alert_flag_sets_the_ladders_thresholds() {
+        assert_eq!(
+            args(&["--bot"]).expect("a bare batch").config.alert,
+            AlertTuning::default(),
+            "no --alert is the shipped §7.3 ladder",
+        );
+        let parsed = args(&[
+            "--alert",
+            "sighting-window-turns=14,sighting-contact-turns=2",
+            "--alert",
+            "dwell-turns-max=5",
+        ])
+        .expect("known knobs");
+        assert_eq!(parsed.config.alert.sighting_window_turns, 14);
+        assert_eq!(parsed.config.alert.sighting_contact_turns, 2);
+        assert_eq!(parsed.config.alert.dwell_turns_max, 5);
+        assert_eq!(
+            parsed.config.alert.sightings_for_second_rung,
+            AlertTuning::default().sightings_for_second_rung,
+            "an unnamed threshold is untouched",
+        );
+
+        // Later wins, so a sweep script can append a setting rather than rewrite one.
+        let swept = args(&[
+            "--alert",
+            "sighting-window-turns=4",
+            "--alert",
+            "sighting-window-turns=20",
+        ])
+        .expect("known knobs");
+        assert_eq!(swept.config.alert.sighting_window_turns, 20);
+    }
+
+    /// An unknown knob, an unreadable value, and a ladder §7.3/§7.5 forbids are all
+    /// refused **before the batch runs** — with the vocabulary, or with the rule.
+    /// Numbers from a game the design does not admit answer nothing (§13.2).
+    #[test]
+    fn a_bad_alert_knob_is_refused_with_its_vocabulary_or_its_rule() {
+        let error = args(&["--alert", "window=4"]).expect_err("no such knob");
+        assert!(error.contains("--alert"), "{error}");
+        assert!(error.contains("sighting-window-turns"), "{error}");
+
+        let error = args(&["--alert", "sighting-window-turns=soon"]).expect_err("not a number");
+        assert!(error.contains("not a number"), "{error}");
+
+        let error = args(&["--alert", "dwell-turns-min=0"]).expect_err("the §7.5 floor");
+        assert!(error.contains("never removed"), "{error}");
+
+        let error = args(&[
+            "--alert",
+            "sighting-window-turns=2,sighting-contact-turns=5",
+        ])
+        .expect_err("unreachable");
+        assert!(error.contains("can never hold"), "{error}");
     }
 
     /// The flags compose in a **fixed order**, not argv order: two command lines that

@@ -10,7 +10,7 @@ use crate::alert::{ALERT_DWELL_TURNS_MAX, SIGHTING_CONTACT_TURNS, SIGHTING_WINDO
 use crate::guard::{GuardState, GUARD_DWELL_TURNS_MIN};
 use crate::state::*;
 use crate::test_support::open_room;
-use crate::{generate_level, AlertTrigger, Rng};
+use crate::{generate_level, AlertTrigger, AlertTuning, Rng};
 
 /// A player in a cupboard with a stationary guard staring down at the cell in front
 /// of it, plus whatever else the caller stamps in first.
@@ -439,4 +439,41 @@ fn the_same_seed_and_inputs_reach_the_same_rungs_on_the_same_turns() {
     for seed in [4, 19] {
         assert_eq!(ladder(seed), ladder(seed), "seed {seed}");
     }
+}
+
+/// #376/§13.2: a swept [`AlertTuning`] reaches the **real turn loop**, not just the
+/// ladder's arithmetic. One turn of certain-zone contact is nothing at all under the
+/// shipped ladder (three are needed) and a whole confirmed sighting under a tuning
+/// that asks for one — and a second such glance reaches rung 2 where the shipped
+/// ladder wants a third.
+///
+/// This is the knob the sim sweeps (#376). If any of it were still read from the
+/// constants it replaced, a swept batch would report a curve for a threshold that
+/// never moved — the §13.4 failure of measuring the instrument instead of the game.
+#[test]
+fn a_swept_tuning_reaches_the_turn_loop() {
+    let mut shipped = watched_cupboard(watched_room());
+    assert!(
+        show_yourself(&mut shipped, 1).is_empty(),
+        "one contact turn is no sighting under the shipped ladder",
+    );
+    assert_eq!(shipped.alert(), 0);
+
+    let mut swept = watched_cupboard(watched_room()).with_alert_tuning(AlertTuning {
+        sighting_contact_turns: 1,
+        sightings_for_second_rung: 2,
+        ..AlertTuning::default()
+    });
+    assert_eq!(
+        show_yourself(&mut swept, 1),
+        vec![(1, AlertTrigger::Sighting)],
+        "…and a whole sighting under a tuning that asks for one",
+    );
+    wait_out_the_window(&mut swept);
+    assert_eq!(
+        show_yourself(&mut swept, 1),
+        vec![(2, AlertTrigger::RepeatSightings)],
+        "the *second* sighting reaches rung 2 under this tuning, not the third",
+    );
+    assert_eq!(swept.alert(), 2);
 }

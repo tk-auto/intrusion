@@ -79,7 +79,7 @@ pub use ability::{
     Ability, AbilityId, AbilityMode, AbilityState, AbilityStatus, Behaviour, Economy, Effect,
     Loadout, TargetingMode,
 };
-pub use alert::AlertTrigger;
+pub use alert::{AlertTrigger, AlertTuning, TOP_RUNG};
 pub use body::Body;
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};

@@ -10,6 +10,7 @@
 
 use intrusion_core::{start_level_with, Event, GenError, Input, Outcome};
 
+use crate::alert::AlertRecord;
 use crate::config::RunConfig;
 use crate::policy::{PlayerPolicy, Recording};
 use crate::replay::Replay;
@@ -57,11 +58,8 @@ impl RunOutcome {
 }
 
 /// One run's metrics — the §13.2 table, counted from core events: the starting
-/// set (#135) plus the ability-usage histogram (#137).
-///
-/// The facility-wide alert peak needs the radio net (#107) before it exists to
-/// measure, so it is not a field yet — the JSON row emits it as `null` (see
-/// `crates/sim/README.md`) rather than faking a number.
+/// set (#135), the ability-usage histogram (#137), and the alert ladder's climb
+/// (#376).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RunRecord {
     /// The seed the run booted from — with the policy's script, the whole replay (§12.4).
@@ -86,6 +84,11 @@ pub struct RunRecord {
     /// core events (a refused activation emits none, so it never counts, §4.4);
     /// Wait, alone among verbs, has no event and is recorded from its spent turn.
     pub usage: UsageHistogram,
+    /// The facility alert's climb (§7.3/#376) — every escalation with the turn it
+    /// happened on and the trigger that caused it, from which the run's **peak rung**
+    /// falls out. §13.2's *"whether escalation escalates"* row, in the shape the
+    /// ladder has: the *path* up it, not only how high it got.
+    pub alert: AlertRecord,
 }
 
 /// Run one seeded game under `policy`, to a win, a loss, or `input_cap` issued
@@ -117,7 +120,11 @@ pub fn run_one_with(
     // being *said*: `RunConfig::sim` is the baseline gate (`AtLeastOne`, which keeps
     // the bot's outcome profile mixed, §13.3) and the bare innate-only loadout
     // (§8.3), where web quick play requires the full intel set and a tech draw (#244).
-    let mut state = start_level_with(&config.facility, &config.level(seed))?;
+    // The §7.3 ladder's thresholds are the batch's too (#376): the sim preset is the
+    // shipped **[START]** set, so a batch that names no knob plays the ladder every
+    // run plays, and a sweep bends one threshold without a rebuild.
+    let mut state =
+        start_level_with(&config.facility, &config.level(seed))?.with_alert_tuning(config.alert);
 
     let mut record = RunRecord {
         seed,
@@ -128,6 +135,7 @@ pub fn run_one_with(
         takedowns: 0,
         bodies_found: 0,
         usage: UsageHistogram::new(),
+        alert: AlertRecord::default(),
     };
     for _ in 0..input_cap {
         let input = policy.decide(&state);
@@ -140,6 +148,16 @@ pub fn run_one_with(
                     record.usage.record(Verb::Takedown);
                 }
                 Event::BodyFound { .. } => record.bodies_found += 1,
+                // The ladder stepped (§7.3/#376). The core reports *escalations*, not
+                // occurrences — a trigger at or below the current rung says nothing —
+                // so this is the run's path up the ladder and nothing else. The turn
+                // is read from the state rather than carried on the event: phase 1
+                // advances the counter before the world phases run, so the state's
+                // turn *is* the turn the escalation happened on, whichever phase
+                // produced it.
+                Event::AlertRaised { rung, trigger } => {
+                    record.alert.record(state.turn(), rung, trigger);
+                }
                 // Ability usage counted from the activation event (#137): a refused
                 // activation emits none, so it never counts (§4.4). The grab starts
                 // the drag; its half-speed steps that follow are Moves.
@@ -253,7 +271,7 @@ pub fn run_batch_with<P: PlayerPolicy>(
 mod tests {
     use super::*;
     use crate::policy::Scripted;
-    use crate::StealthBot;
+    use crate::{Profile, StealthBot};
     use intrusion_core::{AbilityId, Direction, Input, IntelGate};
 
     /// **The default config changes nothing** (#256): a batch given no config is the
@@ -269,7 +287,7 @@ mod tests {
             \"turns\":111,\"detections\":0,\"takedowns\":0,\"bodies_found\":0,\
             \"usage\":{\"wait\":0,\"run\":0,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\
             \"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\
-            \"lockdown\":0,\"crouch\":0},\"alert_peak\":null}";
+            \"lockdown\":0,\"crouch\":0},\"alert_peak\":0,\"alert_escalations\":[]}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.
@@ -335,6 +353,88 @@ mod tests {
             intrusion_core::LevelSeed::decode(&token),
             Some(config.level(42)),
             "the baked token names the captured run",
+        );
+    }
+
+    /// #376: the ladder is **measured through the run**, from the core's own
+    /// escalation events — the turn each rung was reached and the trigger that got it
+    /// there. Driven with the `careless` profile, which strikes and leaves the body,
+    /// so both halves of the ladder (being seen, and the radio) have a chance to fire.
+    ///
+    /// The assertions are about the record's *shape*, not about a particular seed's
+    /// climb: rungs only rise (§7.3 no decay), turns only advance, every escalation
+    /// names the rung its trigger reaches, and the peak agrees with the path. A seed
+    /// whose facility never notices records an empty climb and a peak of **0**, which
+    /// is a reading rather than the old `null`.
+    #[test]
+    fn a_runs_climb_up_the_ladder_is_recorded_from_its_events() {
+        let mut climbed_somewhere = false;
+        for seed in 0..12 {
+            let record = run_one_with(
+                &RunConfig::sim(),
+                seed,
+                &mut StealthBot::with_profile(Profile::CARELESS),
+                400,
+            )
+            .expect("generates");
+
+            let (mut rung, mut turn) = (0, 0);
+            for escalation in record.alert.escalations() {
+                assert!(
+                    escalation.rung > rung,
+                    "seed {seed}: the rung went {rung} → {} — the ladder has no decay",
+                    escalation.rung,
+                );
+                assert!(
+                    escalation.turn >= turn,
+                    "seed {seed}: an escalation ran back"
+                );
+                assert_eq!(
+                    escalation.rung,
+                    escalation.trigger.rung(),
+                    "seed {seed}: {:?} reported a rung it does not reach",
+                    escalation.trigger,
+                );
+                assert!(
+                    escalation.turn <= record.turns,
+                    "seed {seed}: an escalation after the run ended",
+                );
+                (rung, turn) = (escalation.rung, escalation.turn);
+            }
+            assert_eq!(record.alert.peak(), rung, "seed {seed}: peak vs path");
+            climbed_somewhere |= rung > 0;
+        }
+        assert!(
+            climbed_somewhere,
+            "no seed in the sweep escalated at all — the row would be measuring nothing",
+        );
+    }
+
+    /// #376: the ladder's thresholds are a **batch input**, and they reach the run.
+    /// A tuning that makes one turn of contact a confirmed sighting escalates strictly
+    /// more often than the shipped ladder over the same seeds — the property a sweep
+    /// rests on, and the one that fails if the knob is exposed but never read.
+    #[test]
+    fn a_swept_alert_threshold_moves_the_measured_ladder() {
+        let batch = |config: &RunConfig| -> u32 {
+            run_batch_with(config, 0..12, 400, |_| {
+                StealthBot::with_profile(Profile::CARELESS)
+            })
+            .expect("generates")
+            .iter()
+            .map(|r| r.alert.peak())
+            .sum()
+        };
+
+        let shipped = RunConfig::sim();
+        let touchy = shipped
+            .with_alert("sighting-contact-turns=1")
+            .expect("a known knob")
+            .validated()
+            .expect("a legal ladder");
+        assert!(
+            batch(&touchy) > batch(&shipped),
+            "a facility that reports every glance must escalate more, not the same",
         );
     }
 

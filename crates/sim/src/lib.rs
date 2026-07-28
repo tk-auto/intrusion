@@ -22,10 +22,16 @@
 //! is what makes §13.2's strategy-diversity signal visible at all.
 //!
 //! What a batch *boots* is an input too ([`RunConfig`], #256): the facility recipe,
-//! the level modifiers and the ability loadout are a batch parameter rather than a
-//! preset compiled into the harness, so a playtest can ask what one toggle changes
-//! instead of only what the one shipped configuration does. The sim preset (§13.3 —
-//! the baseline rules and a bare, innate-only loadout) is its [`Default`].
+//! the level modifiers, the ability loadout and the §7.3 alert ladder's thresholds
+//! (#376) are batch parameters rather than a preset compiled into the harness, so a
+//! playtest can ask what one toggle or one threshold changes instead of only what the
+//! one shipped configuration does. The sim preset (§13.3 — the baseline rules, a bare
+//! innate-only loadout and the shipped ladder) is its [`Default`].
+//!
+//! The alert ladder is measured as well as swept ([`AlertRecord`], [`AlertTally`]):
+//! §13.2's *"whether escalation escalates"* row, carrying the **path** a run took up
+//! the ladder — which turn, which rung, which trigger — rather than only how high it
+//! got.
 //!
 //! The output schema is documented in `crates/sim/README.md` — the playtest
 //! skill parses it, so changes there are breaking changes.
@@ -34,6 +40,7 @@
 
 #![forbid(unsafe_code)]
 
+mod alert;
 mod bot;
 mod config;
 pub mod cue;
@@ -46,8 +53,11 @@ mod report;
 mod test_support;
 mod usage;
 
+pub use alert::{trigger_key, AlertRecord, AlertTally, Escalation, RUNGS};
 pub use bot::StealthBot;
-pub use config::{ability_names, intel_gate_named, intel_gate_names, modifier_names, RunConfig};
+pub use config::{
+    ability_names, alert_knob_names, intel_gate_named, intel_gate_names, modifier_names, RunConfig,
+};
 pub use cue::{Bid, Intent, Moment};
 pub use harness::{
     capture_one, capture_one_with, run_batch, run_batch_with, run_one, run_one_with, RunOutcome,
