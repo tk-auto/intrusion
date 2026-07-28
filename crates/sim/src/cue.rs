@@ -74,6 +74,17 @@ pub enum Intent {
     Explore,
 }
 
+/// What a crossing must save the router before it is worth **a third of the level's
+/// borer** **[START]** — three times the margin a phase asks for
+/// ([`crate::bot::CROSSING_MARGIN`]).
+///
+/// The two abilities answer the same question ("is there a better way through this
+/// wall?") out of very different pockets: Dephase spends a cooldown that comes back,
+/// Pierce Wall spends one of three permanent uses that does not (§8.2). The scarcer
+/// supply asks the bigger price, which is also what keeps the two cues from bidding
+/// for the same ordinary shortcut.
+pub const BORE_MARGIN: u64 = 3 * crate::bot::CROSSING_MARGIN;
+
 /// **No fit at all**: this is not a moment for the ability. Never pressed,
 /// whatever the floor is set to — a zero urge is the same as declining to bid.
 pub const URGE_NONE: u8 = 0;
@@ -209,7 +220,7 @@ impl Moment<'_> {
             AbilityId::Dephase => self.dephase(status),
             AbilityId::Autodoors => self.autodoors(status),
             AbilityId::Confusion => self.confusion(status),
-            AbilityId::PierceWall => None,
+            AbilityId::PierceWall => self.pierce_wall(status),
             AbilityId::Lockdown => None,
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"
@@ -369,6 +380,43 @@ impl Moment<'_> {
             status,
             URGE_STRONG,
             "breaking contact through a door — shut it behind me and make them reopen it (§8.3)",
+            0,
+        )
+    }
+
+    /// Pierce Wall (§8.3): *"bore straight through your one adjacent wall,
+    /// permanently"*, on a per-level budget of three. What it is **for** is a route
+    /// the facility does not offer — never the fact that a wall happens to be there.
+    ///
+    /// #347 names the failure mode precisely: *"a cue that spends the budget on the
+    /// first legal wall makes the histogram look healthy while measuring nothing"*.
+    /// So the bid is about what boring **saves**, and the target has to be the wall
+    /// the route actually wants.
+    fn pierce_wall(&self, status: AbilityStatus) -> Option<Bid> {
+        // A hole is not a hiding place — it conceals nothing (§8.3, it is not a
+        // cupboard) — so it is never an answer to being hunted.
+        if matches!(self.intent, Intent::Flee | Intent::TakeCover) {
+            return None;
+        }
+        let (dir, saving) = self.crossing?;
+        // **The wall the route wants, not merely a legal one.** The bore target is
+        // unique by precondition (§8.4/#303 — exactly one neighbour is a wall, so
+        // there is nothing to aim), and core owns it; the cue's job is to check that
+        // the unique answer and the crossing the router would use are the same wall.
+        if self.state.player().step(dir) != self.state.bore_target().ok() {
+            return None;
+        }
+        // **The budget is the scarce thing** (§8.2: three a level, no cooldown, and
+        // the hole is permanent), so the borer asks for a bigger saving than the
+        // phase does for the same crossing — Dephase spends a cooldown that comes
+        // back, this spends a third of the level's supply that does not.
+        if saving < BORE_MARGIN {
+            return None;
+        }
+        self.press(
+            status,
+            URGE_STRONG,
+            "a wall standing between me and where I am going, and a route worth a third of the borer (§8.3)",
             0,
         )
     }

@@ -878,6 +878,17 @@ fn crossing(
         if !memory.contains(beyond) {
             continue;
         }
+        // **Walkable, not merely wanted.** The field seeds its goals whether or not
+        // they can be stood on — a console and the exit are solid (§4.3) — so a wall
+        // backing a console has a far side with a cost and no floor. Crossing into it
+        // would leave Dephase to expire inside a solid, which is the eject (§8.3),
+        // and would have Pierce Wall open a pocket while calling it a route.
+        if !facility
+            .terrain(beyond)
+            .is_some_and(|t| !t.blocks_movement())
+        {
+            continue;
+        }
         let Some(&there) = field.get(&beyond) else {
             continue;
         };
@@ -1782,6 +1793,67 @@ mod tests {
         assert!(
             crossings > 0,
             "no phase in 40 seeds × 4 profiles — this test would prove nothing",
+        );
+    }
+
+    /// **Every bore opens a route, never a pocket, and never as an escape** — the
+    /// discipline #347 asks of Pierce Wall's cue, since a budget of three spent on
+    /// the first legal wall *"makes the histogram look healthy while measuring
+    /// nothing"*.
+    ///
+    /// Two checks per press, both re-derived from the state rather than taken from
+    /// the cue's word for it: the bot was not being hunted (a hole conceals nothing,
+    /// §8.3), and the cell beyond the bored wall is floor the bot has already seen —
+    /// which is what makes it a way *through* rather than the one-cell pocket a
+    /// two-thick wall would open.
+    #[test]
+    fn every_bore_opens_a_route_the_bot_has_seen() {
+        let mut bored = 0;
+        for seed in 0..40 {
+            for profile in Profile::ALL {
+                let (state, _) = boot(seed);
+                let mut state = state.with_loadout(Loadout::innate().with(AbilityId::PierceWall));
+                let mut bot = StealthBot::with_profile(profile);
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let danger = danger_cells(&state);
+                    let hunted = being_hunted(&state, &danger);
+                    let input = bot.decide(&state);
+                    if input == Input::Activate(AbilityId::PierceWall) {
+                        assert!(
+                            !hunted,
+                            "seed {seed} ({}): bored a wall while hunted — a hole is \
+                             not a cupboard and conceals nothing (§8.3)",
+                            profile.name,
+                        );
+                        let target = state.bore_target().expect("the press must be legal");
+                        let dir = Direction::ALL
+                            .iter()
+                            .find(|&&d| state.player().step(d) == Some(target))
+                            .expect("the bore target is one of the four neighbours");
+                        let beyond = target.step(*dir).expect("a bore is never the shell");
+                        assert!(
+                            state.memory().contains(beyond)
+                                && state
+                                    .layout()
+                                    .facility()
+                                    .terrain(beyond)
+                                    .is_some_and(|t| !t.blocks_movement()),
+                            "seed {seed} ({}): bored into {beyond:?}, which is not \
+                             seen floor — that is a pocket, not a route (§8.3)",
+                            profile.name,
+                        );
+                        bored += 1;
+                    }
+                    state.step(input);
+                }
+            }
+        }
+        assert!(
+            bored > 0,
+            "no bore in 40 seeds × 4 profiles — this test would prove nothing",
         );
     }
 
