@@ -1489,6 +1489,52 @@ mod tests {
         );
     }
 
+    /// **Every autodoors press is a press with a door on the way out** — §8.3's *"a
+    /// door in your path… shuts behind you"*, which is the whole flight tool (§7.6).
+    /// A press on open floor would spend the turn and a 40-turn cooldown on a window
+    /// that closes nothing, so the cue's job is exactly this precondition.
+    #[test]
+    fn every_autodoors_press_has_a_door_on_the_route() {
+        let mut pressed = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Autodoors));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Autodoors) {
+                    // The cue bids off the step the *plan* would take, which cannot be
+                    // read back off the state — so assert the fact that makes the
+                    // press worth its turn: a door is adjacent to be walked through.
+                    let doors = Direction::ALL
+                        .iter()
+                        .filter_map(|&dir| state.player().step(dir))
+                        .filter(|&cell| {
+                            matches!(
+                                state.layout().facility().terrain(cell),
+                                Some(Terrain::DoorPanelClosed | Terrain::DoorPanelOpen)
+                            )
+                        })
+                        .count();
+                    assert!(
+                        doors > 0,
+                        "seed {seed}: opened the autodoors with no door to walk \
+                         through — the window would shut nothing (§8.3)",
+                    );
+                    pressed += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            pressed > 0,
+            "no autodoors in 40 seeds — this test would prove nothing",
+        );
+    }
+
     /// The profiles are **distinguishable** over a batch — a shape assertion, never
     /// a leaderboard (§13.4). Three directions the temperaments are built to differ
     /// in, checked over the same seeds so the facility is held fixed:

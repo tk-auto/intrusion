@@ -46,7 +46,9 @@
 //! sweeping the per-ability floor ([`Profile::cue_floor`]) and reading the curve —
 //! a flat curve exonerates the cue.
 
-use intrusion_core::{AbilityId, AbilityState, AbilityStatus, Direction, GuardState, Input, State};
+use intrusion_core::{
+    AbilityId, AbilityState, AbilityStatus, Cell, Direction, GuardState, Input, State, Terrain,
+};
 
 use crate::profile::Profile;
 
@@ -197,7 +199,7 @@ impl Moment<'_> {
             // switching five on at once would leave every histogram move
             // unattributable. Until then the slot honestly reads zero.
             AbilityId::Dephase => None,
-            AbilityId::Autodoors => None,
+            AbilityId::Autodoors => self.autodoors(status),
             AbilityId::Confusion => None,
             AbilityId::PierceWall => None,
             AbilityId::Lockdown => None,
@@ -326,6 +328,51 @@ impl Moment<'_> {
             ),
         };
         self.press(status, urge, reason, 0)
+    }
+
+    /// Autodoors (§8.3): a door in your path *"opens as you step into it — no bump,
+    /// no lost turn — and shuts behind you once you clear it"*. A closed door breaks
+    /// line of sight and makes a pursuer reopen it (§10.3/§10.4), which is why the
+    /// row calls it *"a §7.6 flight tool, not invincibility"*.
+    fn autodoors(&self, status: AbilityStatus) -> Option<Bid> {
+        // Flight only. Everything it gives is about what happens *behind* you, so
+        // pressing it on the way to a console buys a 40-turn cooldown and a door
+        // nobody is chasing you through.
+        if self.intent != Intent::Flee {
+            return None;
+        }
+        // The turn it costs is spent standing still (§4.4), which a guard already at
+        // arm's length turns into a capture — the same cell of room Run wants.
+        if self.nearest_guard.is_some_and(|gap| gap <= 1) {
+            return None;
+        }
+        // **A door has to be on the way out**, or there is nothing to shut and the
+        // window burns down on open floor. The route is the step the plan would
+        // otherwise take, so the door that matters is the one it leads into.
+        let ahead = self.route.and_then(|dir| self.state.player().step(dir))?;
+        if !self.door_at(ahead) {
+            return None;
+        }
+        // Strong, not decisive: opening a gap outright (Run) is the better turn when
+        // both are to hand, and this is the trick you play once the gap is open. No
+        // follow-through — the door only shuts once the bot walks *through* it, so
+        // the cue wants the next turns spent moving, not held.
+        self.press(
+            status,
+            URGE_STRONG,
+            "breaking contact through a door — shut it behind me and make them reopen it (§8.3)",
+            0,
+        )
+    }
+
+    /// Whether `cell` holds a door panel, open or closed, **as the player knows it**
+    /// (§11.5a): a door the bot has never seen is not a fact it may plan around.
+    fn door_at(&self, cell: Cell) -> bool {
+        self.state.memory().contains(cell)
+            && matches!(
+                self.state.layout().facility().terrain(cell),
+                Some(Terrain::DoorPanelClosed | Terrain::DoorPanelOpen)
+            )
     }
 
     /// A bid to **activate** `status`'s ability, or `None` when its live state says
