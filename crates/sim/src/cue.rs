@@ -46,7 +46,7 @@
 //! sweeping the per-ability floor ([`Profile::cue_floor`]) and reading the curve —
 //! a flat curve exonerates the cue.
 
-use intrusion_core::{AbilityId, AbilityState, AbilityStatus, Direction, Input, State};
+use intrusion_core::{AbilityId, AbilityState, AbilityStatus, Direction, GuardState, Input, State};
 
 use crate::profile::Profile;
 
@@ -141,6 +141,15 @@ pub struct Moment<'a> {
     /// Manhattan distance to the nearest guard the player can perceive, seen or
     /// sensed (§9.2), or `None` when none is in reach.
     pub nearest_guard: Option<u32>,
+    /// The step the plan would take **if no ability won this turn** — `None` when it
+    /// would hold still, cornered or waiting a cone out.
+    ///
+    /// An ability whose effect lands in a *place* has to know where the bot is
+    /// going, or it aims into its own route: a decoy dropped in the cell the bot is
+    /// about to step into draws the search onto the escape instead of off it
+    /// (§8.3). Handed over rather than re-derived — it is a Dijkstra descent the
+    /// policy has already run.
+    pub route: Option<Direction>,
 }
 
 impl Moment<'_> {
@@ -182,11 +191,11 @@ impl Moment<'_> {
         match status.id {
             AbilityId::Run => self.run(status),
             AbilityId::Camouflage => self.camouflage(status),
+            AbilityId::Decoy => self.decoy(status),
             // The verbs the bot has never pressed. Each gets its own cue, its own
             // diff and its own metric delta (#347) — landed one at a time, because
             // switching five on at once would leave every histogram move
             // unattributable. Until then the slot honestly reads zero.
-            AbilityId::Decoy => None,
             AbilityId::Dephase => None,
             AbilityId::Autodoors => None,
             AbilityId::Confusion => None,
@@ -254,6 +263,69 @@ impl Moment<'_> {
                 "cloaked and still — a stationary cloaked player is unseen (§8.3)",
             )
         })
+    }
+
+    /// Decoy (§8.3): *"a fake intruder in the cell you face. Draws Investigating,
+    /// not Chasing."* What it is **for** is a guard that has **lost** you — a
+    /// search needs somewhere to go, and the fake is somewhere to send it.
+    fn decoy(&self, status: AbilityStatus) -> Option<Bid> {
+        // Only while somebody is looking. Pressing it on the way to a console spends
+        // the fake and its whole cooldown on a facility that is not searching for
+        // anybody.
+        if !matches!(self.intent, Intent::Flee | Intent::TakeCover) {
+            return None;
+        }
+        // **The §8.3 rule, and the one #347 calls a cue bug rather than a tuning
+        // question**: a decoy draws Investigating, never Chasing — so it works on a
+        // guard that has lost you and does nothing about one that has you. A guard
+        // whose cone is live on the player this turn is already coming to the real
+        // intruder; the fake beside them competes with the genuine article and loses.
+        if self
+            .state
+            .guards()
+            .iter()
+            .any(|guard| self.state.guard_detects_now(guard))
+        {
+            return None;
+        }
+        // Somebody has to be hunting for the fake to have a job. These are the three
+        // states of a guard that is looking for *something it cannot see*: walking a
+        // search out (§7.6), heading for a last-known cell, or answering a missed
+        // radio ping (§7.3). A Calm patrol is not searching, so there is nothing to
+        // redirect.
+        let searching = self.state.guards().iter().any(|guard| {
+            self.state.perceive_guard(guard).is_some()
+                && matches!(
+                    guard.state(),
+                    GuardState::Alerted | GuardState::Investigating | GuardState::Responding
+                )
+        });
+        if !searching {
+            return None;
+        }
+        // The fake stands in the cell faced (§8.3), and the bot faces the way it last
+        // stepped — so pressing while still heading that way plants the decoy on the
+        // very route it is about to walk, drawing the search *onto* the escape. Only
+        // worth the turn when the fake is somewhere the bot is not going.
+        if self.route.is_some_and(|step| step == self.state.facing()) {
+            return None;
+        }
+        // Strong while breaking contact — a search closing on your last-known cell is
+        // exactly what the fake is bought for — and a plain fit when a patrol is only
+        // closing, where a cupboard is usually the better turn. No follow-through: a
+        // decoy is worth pressing precisely so the bot can leave while somebody else
+        // walks toward it.
+        let (urge, reason) = match self.intent {
+            Intent::Flee => (
+                URGE_STRONG,
+                "a search is closing and nobody has eyes on me — give it somewhere else to look (§8.3)",
+            ),
+            _ => (
+                URGE_PLAIN,
+                "a patrol is hunting for something it cannot see — offer it the fake (§8.3)",
+            ),
+        };
+        self.press(status, urge, reason, 0)
     }
 
     /// A bid to **activate** `status`'s ability, or `None` when its live state says
@@ -378,35 +450,38 @@ mod tests {
         ] {
             for refuge in [None, Some(Direction::North)] {
                 for nearest_guard in [None, Some(0), Some(1), Some(5)] {
-                    let moment = Moment {
-                        state: &state,
-                        intent,
-                        refuge,
-                        nearest_guard,
-                    };
-                    for id in AbilityId::ALL {
-                        for &ability_state in &states {
-                            let status = AbilityStatus {
-                                id,
-                                state: ability_state,
-                            };
-                            let Some(bid) = moment.bid(status) else {
-                                continue;
-                            };
-                            assert!(
-                                !bid.reason.is_empty(),
-                                "{}: a bid must say why (§13.3)",
-                                id.name(),
-                            );
-                            if bid.input == Input::Activate(id) {
+                    for route in [None, Some(Direction::North), Some(Direction::South)] {
+                        let moment = Moment {
+                            state: &state,
+                            intent,
+                            refuge,
+                            nearest_guard,
+                            route,
+                        };
+                        for id in AbilityId::ALL {
+                            for &ability_state in &states {
+                                let status = AbilityStatus {
+                                    id,
+                                    state: ability_state,
+                                };
+                                let Some(bid) = moment.bid(status) else {
+                                    continue;
+                                };
                                 assert!(
-                                    matches!(
-                                        ability_state,
-                                        AbilityState::Ready | AbilityState::Limited { .. }
-                                    ),
-                                    "{} bid an activation while {ability_state:?}",
+                                    !bid.reason.is_empty(),
+                                    "{}: a bid must say why (§13.3)",
                                     id.name(),
                                 );
+                                if bid.input == Input::Activate(id) {
+                                    assert!(
+                                        matches!(
+                                            ability_state,
+                                            AbilityState::Ready | AbilityState::Limited { .. }
+                                        ),
+                                        "{} bid an activation while {ability_state:?}",
+                                        id.name(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -426,6 +501,7 @@ mod tests {
             intent,
             refuge,
             nearest_guard,
+            route: None,
         };
         let ready = |id| AbilityStatus {
             id,
@@ -501,6 +577,7 @@ mod tests {
             intent: Intent::Flee,
             refuge: None,
             nearest_guard: Some(4),
+            route: None,
         };
         let baseline = Profile::BASELINE;
         assert_eq!(
@@ -528,6 +605,7 @@ mod tests {
             intent: Intent::Flee,
             refuge: None,
             nearest_guard: Some(4),
+            route: None,
         };
         let keen = baseline.with_cue_floor(AbilityId::Camouflage, URGE_NONE);
         assert_eq!(

@@ -259,16 +259,16 @@ impl StealthBot {
         // there only bumps a door that never opens — a free action that spends no
         // turn and so never lets the hunt cool, stalling the run out to the input
         // cap instead of breaking contact.
-        if let Some(input) = self.cue(state, Intent::Flee, refuge) {
+        // Nowhere to run to: back away from the nearest guard, off watched cells when
+        // it can, and hold only if truly cornered. Settled *before* the cues, because
+        // the step this plan would take is itself a fact a cue needs — an ability that
+        // lands in a cell must not aim into the bot's own escape (§8.3, Decoy).
+        let step = refuge.or_else(|| retreat_step(state, danger, blocked));
+
+        if let Some(input) = self.cue(state, Intent::Flee, refuge, step) {
             return input;
         }
-        if let Some(dir) = refuge {
-            return Input::Step(dir);
-        }
-
-        // Nowhere to run to and nothing to cloak with: back away from the nearest
-        // guard, off watched cells when it can, and hold only if truly cornered.
-        retreat_step(state, danger, blocked).map_or(Input::Wait, Input::Step)
+        step.map_or(Input::Wait, Input::Step)
     }
 
     /// Take cover from a closing patrol before it ever sees you: when a guard is
@@ -335,7 +335,7 @@ impl StealthBot {
         // concealed from every viewer, so `being_hunted` will not fire and the hold
         // keeps going until the coast clears. A real cupboard still wins: the cue
         // only speaks when `refuge` is `None`.
-        if let Some(input) = self.cue(state, Intent::TakeCover, refuge) {
+        if let Some(input) = self.cue(state, Intent::TakeCover, refuge, refuge) {
             return Some(input);
         }
         refuge.map(Input::Step)
@@ -572,17 +572,20 @@ impl StealthBot {
             (Intent::Pursue, exit_cell(state).into_iter().collect())
         };
 
+        // The step this plan would take, worked out before the cues rather than after:
+        // an ability that lands in a cell needs to know where the bot is going (§8.3),
+        // and the descent is a pure function of the state, so asking early costs
+        // nothing but the Dijkstra.
+        let step = self.descend(state, &goals, danger, blocked, self.profile.pursue);
+
         // Pushing on is a moment too, and one most of the salvaged tech is *for*
         // (§8.3: bore a shortcut, seal the doors ahead, draw a patrol off the route).
-        // No cue answers it yet — those land one at a time, each with its own metric
-        // delta (#347) — but the plan is named and the seam is asked, so the first
-        // one to arrive needs no new call site. There is no cover on offer here, so
-        // no refuge to weigh against.
-        if let Some(input) = self.cue(state, intent, None) {
+        // There is no cover on offer here, so no refuge to weigh against.
+        if let Some(input) = self.cue(state, intent, None, step) {
             return input;
         }
 
-        let Some(dir) = self.descend(state, &goals, danger, blocked, self.profile.pursue) else {
+        let Some(dir) = step else {
             // No safe progress. Standing still next to a patrol is how you get
             // walked into, so if one is close, sidestep to open ground; otherwise
             // hold a beat and let the cone sweep past (waiting also widens the
@@ -621,12 +624,19 @@ impl StealthBot {
     /// delta rather than an urge. Weighing the two against each other is fuzzy, and
     /// deliberately left fuzzy — a common currency between them is a much larger
     /// change and probably a worse one.
-    fn cue(&mut self, state: &State, intent: Intent, refuge: Option<Direction>) -> Option<Input> {
+    fn cue(
+        &mut self,
+        state: &State,
+        intent: Intent,
+        refuge: Option<Direction>,
+        route: Option<Direction>,
+    ) -> Option<Input> {
         let bid = Moment {
             state,
             intent,
             refuge,
             nearest_guard: nearest_perceived_guard(state),
+            route,
         }
         .best(&self.profile)?;
         self.last_bid = Some(bid);
@@ -1112,7 +1122,7 @@ mod tests {
     use super::*;
     use crate::test_support::boot;
     use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
-    use intrusion_core::{AbilityId, Outcome};
+    use intrusion_core::{AbilityId, Loadout, Outcome};
 
     /// #276: the bot routes by **the core's rule**, never a table of its own.
     ///
@@ -1284,6 +1294,15 @@ mod tests {
     /// *shape* of the batch (endings mixed, the cloak pressed) is what carries the
     /// assertion when the levels underneath it move.
     ///
+    /// **#347 moved every profile**, and that is the ticket landing rather than a
+    /// regression: the batch grants Decoy, so writing its cue is *supposed* to show
+    /// up here as `d` presses and the runs they change. Read the diff as the cue's
+    /// first evidence — `baseline 3` was the batch's lone stall (`playing 1000`) and
+    /// now finishes, while several runs that won now lose. Neither is a verdict:
+    /// twelve seeds are a pin, not a balance signal (§13.4), and the measurement that
+    /// carries the ticket is the 100-seed with/without batch recorded in
+    /// `docs/stats/abilities/decoy.md`.
+    ///
     /// **#316 moved the striking half and left the rest alone**, which is the whole
     /// point of putting the takedown behind [`Profile::takedown_reach`]. The
     /// `baseline` and `cautious` blocks below are **byte-for-byte what they were
@@ -1298,53 +1317,53 @@ mod tests {
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 48] = [
             "baseline 0 won 63 ",
-            "baseline 1 won 325 rrrrrrc",
+            "baseline 1 won 396 rrrrdrrdc",
             "baseline 2 lost 220 r",
-            "baseline 3 playing 1000 rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "baseline 3 won 241 rdr",
             "baseline 4 won 56 ",
-            "baseline 5 lost 116 r",
+            "baseline 5 lost 119 rd",
             "baseline 6 won 137 ",
             "baseline 7 won 96 ",
             "baseline 8 lost 51 ",
-            "baseline 9 lost 399 rrrrrrrrrrrrrrrr",
+            "baseline 9 lost 61 rdr",
             "baseline 10 lost 40 rc",
-            "baseline 11 won 359 crrcrrrrrr",
+            "baseline 11 lost 648 crrcrdrrrrrrrrrrrrrrrrrrrrdrrrrrr",
             "cautious 0 won 67 ",
-            "cautious 1 lost 166 rrrr",
-            "cautious 2 won 658 rrrr",
+            "cautious 1 lost 165 rdrdr",
+            "cautious 2 lost 529 rrrrdrdr",
             "cautious 3 lost 50 r",
-            "cautious 4 lost 129 rcr",
-            "cautious 5 won 217 cr",
+            "cautious 4 won 154 rdcrd",
+            "cautious 5 won 290 crdrdr",
             "cautious 6 won 157 ",
             "cautious 7 won 96 ",
             "cautious 8 lost 88 r",
-            "cautious 9 won 381 rrr",
-            "cautious 10 won 339 rrcr",
-            "cautious 11 lost 635 crrrrrrrrrr",
+            "cautious 9 lost 242 rdrrd",
+            "cautious 10 lost 94 rd",
+            "cautious 11 won 417 crdrdrdr",
             "aggressive 0 won 63 c",
-            "aggressive 1 won 171 rr",
+            "aggressive 1 won 179 rrdc",
             "aggressive 2 won 224 ",
-            "aggressive 3 lost 143 rrcr",
+            "aggressive 3 lost 118 rdr",
             "aggressive 4 won 60 ",
-            "aggressive 5 won 245 rrcrrcr",
+            "aggressive 5 lost 212 rrcrdrrc",
             "aggressive 6 lost 77 r",
             "aggressive 7 won 100 ",
             "aggressive 8 won 99 ",
-            "aggressive 9 won 296 rrrrr",
+            "aggressive 9 won 296 rdrrrr",
             "aggressive 10 lost 33 rc",
-            "aggressive 11 lost 60 rcr",
+            "aggressive 11 lost 28 rdc",
             "careless 0 won 66 c",
-            "careless 1 won 171 rr",
+            "careless 1 won 179 rrdc",
             "careless 2 won 215 c",
-            "careless 3 won 324 rcrrcrc",
-            "careless 4 won 124 crcr",
-            "careless 5 won 249 rrcrcrr",
+            "careless 3 won 220 rdrcrc",
+            "careless 4 lost 91 crcrd",
+            "careless 5 won 226 rrcrdrrd",
             "careless 6 lost 77 r",
             "careless 7 won 100 ",
             "careless 8 won 99 ",
-            "careless 9 won 144 rcrcrr",
+            "careless 9 won 144 rdcrcrr",
             "careless 10 lost 33 rc",
-            "careless 11 won 242 rcrrc",
+            "careless 11 won 247 rcrdcr",
         ];
 
         let mut played = Vec::new();
@@ -1401,6 +1420,72 @@ mod tests {
             cloaked >= 3,
             "only {cloaked} pinned runs press the cloak — this batch would not \
              catch a change to its cue",
+        );
+
+        // Same demand of the decoy (#347): the loadout grants it, so a pin where
+        // nobody presses it would be pinning the fake's *absence* and calling the cue
+        // covered.
+        let fake = AbilityId::Decoy.script_letter();
+        let decoyed = activations
+            .iter()
+            .filter(|pressed| pressed.contains(fake))
+            .count();
+        assert!(
+            decoyed >= 3,
+            "only {decoyed} pinned runs press the decoy — this batch would not \
+             catch a change to its cue",
+        );
+    }
+
+    /// **Every decoy the bot presses is pressed at a guard that has lost it** — the
+    /// §8.3 rule *"draws Investigating, not Chasing"*, which #347 names as a cue bug
+    /// rather than a tuning question, checked over real play instead of a fixture.
+    ///
+    /// Two halves, because the rule has two: nobody's cone may be live on the player
+    /// at the moment of the press (a guard that has you is coming to the real
+    /// intruder, and the fake beside you competes with the genuine article), and
+    /// somebody must actually be searching, or the fake is bought for a facility that
+    /// is not looking for anybody.
+    #[test]
+    fn every_decoy_the_bot_drops_is_dropped_at_a_search() {
+        let mut dropped = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Decoy));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Decoy) {
+                    assert!(
+                        !state.guards().iter().any(|g| state.guard_detects_now(g)),
+                        "seed {seed}: dropped a decoy while a guard had the player — \
+                         a decoy draws Investigating, never Chasing (§8.3)",
+                    );
+                    assert!(
+                        state
+                            .guards()
+                            .iter()
+                            .any(|g| state.perceive_guard(g).is_some()
+                                && matches!(
+                                    g.state(),
+                                    GuardState::Alerted
+                                        | GuardState::Investigating
+                                        | GuardState::Responding
+                                )),
+                        "seed {seed}: dropped a decoy with nobody searching — there \
+                         was no hunt to redirect (§8.3)",
+                    );
+                    dropped += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            dropped > 0,
+            "no decoy in 40 seeds — this test would prove nothing",
         );
     }
 
