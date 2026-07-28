@@ -72,6 +72,17 @@ use crate::profile::{Descent, Profile};
 /// core's constants; conservative, so the bot errs toward not hiding beside a body it left.
 const BODY_HIDE_CLEARANCE: u32 = 4;
 
+/// How the bot routes when closing on a guard's back (§7.2/§155) — the one descent
+/// mode no [`Profile`] sets, because it is not a temperament: **you cannot both keep
+/// your distance from a guard and walk up behind it**, so `keep_clear` is off for
+/// every profile that takes this route at all. Patience stays on: a strike is never
+/// worth crossing a cone to reach, and the whole play is void the moment somebody
+/// sees you coming.
+const APPROACH: Descent = Descent {
+    keep_clear: false,
+    hold_watched: true,
+};
+
 /// A keep-away cost for stepping onto `cell`: the closer a perceived guard, the
 /// steeper it climbs (with the square of how far inside the profile's
 /// [`proximity_radius`](Profile::proximity_radius) the guard sits), so the bot gives
@@ -118,6 +129,11 @@ pub struct StealthBot {
     /// can be traced back to the cue's own stated reason (§13.3), rather than to a
     /// bare "it pressed the key". Pure bookkeeping: no decision reads it.
     last_bid: Option<Bid>,
+    /// Bodies the bot has put down and will not pick up again (§8.3), by the cell they
+    /// were released in. A body it could find no route to a cupboard with is one it
+    /// would otherwise fetch, fail to place, drop, and fetch again for the rest of the
+    /// run — so giving up on one is remembered rather than rediscovered.
+    abandoned: HashSet<Cell>,
 }
 
 impl StealthBot {
@@ -165,17 +181,34 @@ impl PlayerPolicy for StealthBot {
         // The world's own facts, gathered once through the player's channels.
         let danger = danger_cells(state);
         let mut blocked = blocked_cells(state);
-        // Never spring a takedown that would wall you in (§7.2/#170): a guard on the
-        // sole mouth of a dead end is left blocked, not taken down, so the router waits
-        // it out rather than dropping a body across its only way home.
-        blocked.extend(self_sealing_takedowns(state, &blocked));
+        // An unaware guard this temperament will not strike is an obstacle, not an
+        // opportunity — left blocked so the router waits it out (§7.2).
+        blocked.extend(declined_takedowns(state, &blocked, &self.profile));
 
-        // 1. Flee first: nothing else matters while a guard has you (§7.6).
+        // 0. Hands full first: a drag halves the bot's speed and refuses to stack with
+        // Run (§8.3), so the body in hand is settled before anything else is planned.
+        if let Some(input) = self.haul(state, &danger, &blocked) {
+            return input;
+        }
+
+        // 1. Flee: nothing else matters while a guard has you (§7.6).
         if being_hunted(state, &danger) {
             return self.flee(state, &danger, &blocked);
         }
 
-        // 2. Not caught yet, but a patrol is closing and a bolthole is to hand: duck
+        // 2. A patrol with its back turned, and a temperament that wants it (§7.2).
+        // Ahead of cover deliberately: the commonest safe angle in the whole game is
+        // the one from *inside* a cupboard, where `take_cover` would only ever wait.
+        if let Some(input) = self.strike(state, &danger, &blocked) {
+            return input;
+        }
+
+        // 3. Something left on the floor worth tidying away (§7.2/§10.3).
+        if let Some(input) = self.fetch(state, &danger, &blocked) {
+            return input;
+        }
+
+        // 4. Not caught yet, but a patrol is closing and a bolthole is to hand: duck
         // in and let it pass rather than press the objective into its path. This is
         // where most detections are avoided — the player senses a guard as far out as
         // it could see them (both range 10, §9.1), so there is time to take cover.
@@ -183,7 +216,7 @@ impl PlayerPolicy for StealthBot {
             return input;
         }
 
-        // 3 & 4. Pursue the objective, or explore to find it.
+        // 5 & 6. Pursue the objective, or explore to find it.
         self.pursue(state, &danger, &blocked)
     }
 }
@@ -308,6 +341,215 @@ impl StealthBot {
         refuge.map(Input::Step)
     }
 
+    /// Spring a takedown, or take a step toward one (§7.2/§155) — the play a
+    /// temperament with a [`takedown_reach`](Profile::takedown_reach) buys into, and
+    /// nothing at all to one without.
+    ///
+    /// Two moments, and the first is by far the commoner. **At arm's length**: a
+    /// perceived guard is adjacent and the core's own gate is open, so bump it. That
+    /// covers both legal angles at once without naming either — the rear blind spot
+    /// (§155 carves the three cells at a guard's back out of its cone) and concealment
+    /// (§7.2 — a hidden or crouched player is concealed from every viewer, so no cone
+    /// reaches them wherever they stand). **Otherwise**: walk to a back, if one is
+    /// close enough to be a diversion rather than a hunt.
+    ///
+    /// The one thing it will not do is strike while somebody is *watching* — not the
+    /// target, which by definition is not, but any other guard whose cone is live on
+    /// the bot. Read through [`State::guard_detects_now`] rather than off the danger
+    /// overlay, because those two differ exactly where this play lives: a cupboard cell
+    /// can sit inside a cone and still be perfectly safe, since concealment beats the
+    /// cone (§10.3).
+    fn strike(
+        &self,
+        state: &State,
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+    ) -> Option<Input> {
+        if self.profile.takedown_reach == 0 {
+            return None;
+        }
+        let player = state.player();
+
+        // Nobody has eyes on the bot right now — concealment counts, so this is true
+        // inside a cupboard even under a cone.
+        let unwatched = state
+            .guards()
+            .iter()
+            .all(|g| state.perceive_guard(g).is_none() || !state.guard_detects_now(g));
+        if unwatched {
+            for dir in Direction::ALL {
+                let Some(target) = player.step(dir) else {
+                    continue;
+                };
+                let strikeable = state.guards().iter().any(|g| {
+                    g.pos() == target
+                        && state.perceive_guard(g).is_some()
+                        && !state.guard_detects_now(g)
+                });
+                if strikeable {
+                    return Some(Input::Step(dir));
+                }
+            }
+        }
+
+        // No guard at hand: is one's back within a short walk? A sensed-only guard is
+        // no use here — its facing is unknown (§9.2), so where its back is, is too.
+        let spots = rear_strike_cells(state, danger, blocked);
+        if spots.is_empty() {
+            return None;
+        }
+        // Costed with **no keep-away halo**: you cannot both give a guard a wide berth
+        // and walk up behind it, and the halo would price the approach out of every
+        // budget. The cone penalty still applies, which is what makes "within budget"
+        // mean "reachable without being seen on the way" rather than merely "near".
+        let field = cost_field(
+            state.layout().facility(),
+            &spots,
+            blocked,
+            danger,
+            &[],
+            &self.profile,
+        );
+        if field
+            .get(&player)
+            .is_none_or(|&cost| cost > u64::from(self.profile.takedown_reach))
+        {
+            return None;
+        }
+        self.descend(state, &spots, danger, blocked, APPROACH)
+            .map(Input::Step)
+    }
+
+    /// Deal with the body **in hand** (§8.3): haul it to a cupboard and stow it, or
+    /// let it go. `None` with empty hands, which is the usual case.
+    ///
+    /// The grab itself is never a decision — stepping off a body's cell takes hold of
+    /// it automatically (§8.3/#187) — so a temperament that does not stow cannot
+    /// express that by standing still. It has to *act*, by letting go, which is why
+    /// [`body_stow_reach`](Profile::body_stow_reach) of zero still reaches this code.
+    fn haul(
+        &mut self,
+        state: &State,
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+    ) -> Option<Input> {
+        let body = state.dragging()?;
+        // Hands full at half speed is no way to be hunted, and Run will not stack with
+        // a drag (§8.3): drop it and run. Letting go is free (§4.4), so the escape
+        // loses nothing but the input.
+        if being_hunted(state, danger) {
+            return self.let_go(state, body);
+        }
+        let shelters = self.stow_targets(state);
+        if shelters.is_empty() {
+            return self.let_go(state, body);
+        }
+        // Routed like a flight rather than a push — a body is worth hiding, not worth
+        // being *seen* hiding — and never through the body itself, which is the step
+        // that would drop it (see [`descend_avoiding`](Self::descend_avoiding)).
+        self.descend_avoiding(
+            state,
+            &shelters,
+            danger,
+            blocked,
+            self.profile.flee,
+            &[body],
+        )
+        .map(Input::Step)
+        // Nowhere to put it that does not mean walking into it: the geometry has no
+        // loop back to the cupboard (a one-wide corridor has none), so this body
+        // stays where it falls rather than being shuffled about for the rest of the
+        // run.
+        .or_else(|| self.let_go(state, body))
+    }
+
+    /// Go and pick up a body left on the floor (§7.2/§10.3), for a temperament that
+    /// stows. `None` for one that does not, and none when there is nothing worth the
+    /// walk.
+    ///
+    /// Two steps, because the grab is the step *off* a body's cell (#187): get on it,
+    /// then leave in the direction of the cupboard, and the pickup rides that step for
+    /// free. A body only counts as worth fetching when there is somewhere to *put* it —
+    /// hauling one to nowhere is turns spent making the run slower and no quieter.
+    fn fetch(
+        &self,
+        state: &State,
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+    ) -> Option<Input> {
+        if self.profile.body_stow_reach == 0 {
+            return None;
+        }
+        let player = state.player();
+        let reach = self.profile.body_stow_reach;
+        let shelters = self.stow_targets(state);
+        if shelters.is_empty() {
+            return None;
+        }
+        // Already standing on one: any step from here takes hold, so make it the step
+        // that starts the haul — toward the cupboard, but never **into** it. Bumping a
+        // cupboard with empty hands climbs in to hide (§10.3) rather than stowing, and
+        // the body would still be lying on the floor outside.
+        let loose = findable_bodies(state);
+        if loose.contains(&player) {
+            return self
+                .descend_avoiding(
+                    state,
+                    &shelters,
+                    danger,
+                    blocked,
+                    self.profile.flee,
+                    &shelters,
+                )
+                .map(Input::Step);
+        }
+        let worth: Vec<Cell> = loose
+            .into_iter()
+            .filter(|&body| !self.abandoned.contains(&body))
+            .filter(|&body| player.manhattan_distance(body) <= reach)
+            .filter(|&body| {
+                shelters
+                    .iter()
+                    .any(|&h| body.manhattan_distance(h) <= reach)
+            })
+            .collect();
+        if worth.is_empty() {
+            return None;
+        }
+        self.descend(state, &worth, danger, blocked, self.profile.pursue)
+            .map(Input::Step)
+    }
+
+    /// The cupboards a body could be stowed in from here (§10.3): known, empty and
+    /// within this temperament's haul range. Empty for one that never stows.
+    fn stow_targets(&self, state: &State) -> Vec<Cell> {
+        if self.profile.body_stow_reach == 0 {
+            return Vec::new();
+        }
+        let player = state.player();
+        known_hideouts(state)
+            .into_iter()
+            .filter(|&h| player.manhattan_distance(h) <= self.profile.body_stow_reach)
+            .collect()
+    }
+
+    /// Let the carried body go where it lies (§8.3): bump the cell it occupies. A
+    /// dragged body always sits in the cell the bot just left, so it is always one of
+    /// the four neighbours; the release is free (§4.4) and refunds nothing, because
+    /// there is nothing to refund.
+    ///
+    /// The cell is **remembered** ([`abandoned`](Self::abandoned)), so [`fetch`](Self::fetch)
+    /// does not walk straight back and pick up the body it has just decided it cannot
+    /// place. Without that the two would trade the same corpse back and forth for the
+    /// rest of the run, which is a livelock rather than a temperament.
+    fn let_go(&mut self, state: &State, body: Cell) -> Option<Input> {
+        self.abandoned.insert(body);
+        Direction::ALL
+            .into_iter()
+            .find(|&dir| state.player().step(dir) == Some(body))
+            .map(Input::Step)
+    }
+
     /// Pursue the objective — nearest known untaken console, then the exit — or, when
     /// no intel is known yet, explore toward the nearest frontier.
     fn pursue(&mut self, state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Cell>) -> Input {
@@ -420,6 +662,30 @@ impl StealthBot {
         blocked: &HashSet<Cell>,
         mode: Descent,
     ) -> Option<Direction> {
+        self.descend_avoiding(state, goals, danger, blocked, mode, &[])
+    }
+
+    /// [`descend`](Self::descend) with a handful of cells barred from **this turn's
+    /// step** while left perfectly routable in the field.
+    ///
+    /// The distinction is the whole point, and it exists for the drag (§8.3). A
+    /// carried body is not an obstacle — it is one step behind the player and moves
+    /// as the player moves, so the cell it sits on now is clear by the time a route
+    /// reaches it — but stepping *onto* it right now is a bump, and a bump into the
+    /// body you are carrying **lets it go** (§4.4). Bar it from the field instead and
+    /// the router would declare the cupboard unreachable and give up; bar it from the
+    /// step alone and the router walks the loop that the manoeuvre actually needs,
+    /// because coming back to a cupboard mouth by backtracking walks into the body and
+    /// coming back round a square does not.
+    fn descend_avoiding(
+        &self,
+        state: &State,
+        goals: &[Cell],
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+        mode: Descent,
+        avoid: &[Cell],
+    ) -> Option<Direction> {
         if goals.is_empty() {
             return None;
         }
@@ -441,7 +707,7 @@ impl StealthBot {
             // left routable, so a step onto one when it blocks the only way is the
             // takedown (§7.2). A goal cell is solid but seeded into the field, so a
             // console or the exit one step away reads cost 0 and is taken.
-            if blocked.contains(&next) {
+            if blocked.contains(&next) || avoid.contains(&next) {
                 continue;
             }
             let Some(&cost) = field.get(&next) else {
@@ -552,14 +818,18 @@ fn near_findable_body(bodies: &[Cell], hideout: Cell) -> bool {
         .any(|&body| body.sight_distance(hideout) <= BODY_HIDE_CLEARANCE)
 }
 
-/// Cells the bot must not step onto: bodies (solid, §7.2) and any guard that has
-/// already detected the player — bumping an aware guard is a wasted, refused turn
-/// (§7.2), whereas an *unaware* one is left out so the takedown stays available.
+/// Cells the bot must not step onto: any guard that has already detected the player
+/// — bumping an aware guard is a wasted, refused turn (§7.2), whereas an *unaware*
+/// one is left out so the takedown stays available.
+///
+/// **Bodies are deliberately not here** (§7.2/#187). They used to be, on the strength
+/// of a comment calling them solid; they have not been since bodies went
+/// pickup-on-walk, and routing round one cost the bot the only way to *take hold* of
+/// it — the grab is the step **off** a body's cell, so a bot that will not stand on a
+/// body can never drag one (#316). The single exception is the door-crush rule, which
+/// is core's business and not a routing question.
 fn blocked_cells(state: &State) -> HashSet<Cell> {
     let mut cells = HashSet::new();
-    for body in state.bodies() {
-        cells.insert(body.cell());
-    }
     for guard in state.guards() {
         // A guard blocks when bumping it would be *refused* (§7.2): it is perceived
         // and its **live** cone would detect the player — the same gate the takedown
@@ -576,20 +846,34 @@ fn blocked_cells(state: &State) -> HashSet<Cell> {
     cells
 }
 
-/// Unaware guards the bot must **not** take down because the body would seal it in
-/// (§7.2/#170, from the bot's side). A takedown drops the body on the guard's own
-/// cell; when the player sits in a dead end — a hideout, a one-wide stub — whose
-/// *only* routable way out holds that guard, springing the takedown walls the mouth
-/// and strands the bot for the rest of the run (the exact §10.3 cupboard soft-lock).
-/// The bot leaves such a guard blocked instead, so the router waits rather than
-/// striking: the guard is unaware and the hidden bot is safe (§4.5), so the patrol
-/// steps off the mouth on its own and the exit reopens.
+/// Unaware guards this temperament **declines** to take down, left blocked so the
+/// router waits the patrol out rather than bumping it.
 ///
-/// Only a *lone* exit can be a trap — with a second way out, a sealed mouth still
-/// leaves the other — so this fires solely when the player has exactly one routable,
-/// unblocked neighbour and an unaware guard stands on it. A guard the player cannot
-/// even perceive is not planned around (the bot avoids only what it can see or sense).
-fn self_sealing_takedowns(state: &State, blocked: &HashSet<Cell>) -> Vec<Cell> {
+/// This was #170's soft-lock guard rail: a takedown drops the body on the guard's own
+/// cell, so springing one from a dead end — a cupboard, a one-wide stub — whose *only*
+/// way out held that guard walled the mouth and stranded the bot for the run. **That
+/// hazard no longer exists.** #187 made a loose body non-solid: the mouth stays
+/// walkable, and stepping over it on the way out takes hold of it (§8.3). The rule
+/// outlived its reason by four days and went on suppressing every takedown the bot was
+/// ever offered — all of them this exact shape, a hidden bot with a patrol on its
+/// cupboard door (#316).
+///
+/// What is left at that mouth is not a hazard but a **choice**: strike the patrol on
+/// your doorstep from concealment (§7.2 — a hidden player is concealed from every
+/// viewer, so the gate is open), or sit still and let it pass. A choice is a
+/// temperament, so it is [`takedown_reach`](Profile::takedown_reach) that answers:
+/// zero declines and keeps the old, measured behaviour exactly; anything else leaves
+/// the guard available and lets [`strike`](StealthBot::strike) decide.
+///
+/// Only a *lone* exit ever reached this rule, and that is kept — with a second way
+/// out, a declining bot was never going to bump the guard anyway — so it fires solely
+/// when the player has exactly one routable, unblocked neighbour and an unaware guard
+/// stands on it. A guard the player cannot even perceive is not planned around (the
+/// bot avoids only what it can see or sense).
+fn declined_takedowns(state: &State, blocked: &HashSet<Cell>, profile: &Profile) -> Vec<Cell> {
+    if profile.takedown_reach > 0 {
+        return Vec::new(); // this temperament wants the strike
+    }
     let facility = state.layout().facility();
     let player = state.player();
     let mut exits = Direction::ALL
@@ -609,6 +893,33 @@ fn self_sealing_takedowns(state: &State, blocked: &HashSet<Cell>) -> Vec<Cell> {
     }
 }
 
+/// The cells a takedown can be **walked to** and sprung from (§7.2/§155): for each
+/// guard the player can *see*, the one orthogonal cell in its rear blind spot.
+///
+/// §155 carves three cells out of a guard's cone — directly behind and the two rear
+/// diagonals — but movement is four-way ([`Direction::ALL`]), so only the orthogonal
+/// one can be struck *from*: reaching either diagonal and bumping the guard is not a
+/// move the game has. A **sensed-only** guard is excluded rather than guessed at: its
+/// facing is unknown (§9.2), so where its back is, is unknown too, and a bot that
+/// guessed would be walking into cones it cannot see to measure a game it is not
+/// playing (§11.5a).
+///
+/// Filtered to cells that are routable, not blocked, and **not watched by anyone** —
+/// standing in one guard's blind spot inside another's cone is not a safe strike, it
+/// is a detection with extra steps.
+fn rear_strike_cells(state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Cell>) -> Vec<Cell> {
+    let facility = state.layout().facility();
+    state
+        .guards()
+        .iter()
+        .filter(|g| state.perceive_guard(g) == Some(GuardPerception::Seen))
+        .filter_map(|g| g.pos().step(g.facing().opposite()))
+        .filter(|&spot| {
+            routable(facility, spot) && !danger.contains(&spot) && !blocked.contains(&spot)
+        })
+        .collect()
+}
+
 /// The exit cell — the player's own tunnel, known from the start (§4.5). Found by
 /// scanning the always-visible geometry for the one exit tile, so it needs no
 /// fog gate: a player knows the way they came in.
@@ -619,7 +930,12 @@ fn exit_cell(state: &State) -> Option<Cell> {
 
 /// The empty hideouts the bot has seen (§10.3): remembered cupboards ([`State::memory`])
 /// not currently holding a guard or body. These are the boltholes the flee routine
-/// aims for.
+/// aims for, and the cupboards a haul stows a body into.
+///
+/// The body check is stated here rather than inherited from [`blocked_cells`], which no
+/// longer carries one (§7.2/#187 — a loose body is not solid). A cupboard is the one
+/// place a body still refuses entry, because a stowed body **locks** it: it stops being
+/// a hideout at all, so it is neither a bolthole nor somewhere to put a second body.
 fn known_hideouts(state: &State) -> Vec<Cell> {
     let facility = state.layout().facility();
     let memory = state.memory();
@@ -629,6 +945,7 @@ fn known_hideouts(state: &State) -> Vec<Cell> {
             facility.terrain(cell) == Some(Terrain::Hideout)
                 && memory.contains(cell)
                 && !occupied.contains(&cell)
+                && !state.bodies().iter().any(|body| body.cell() == cell)
         })
         .collect()
 }
@@ -966,9 +1283,20 @@ mod tests {
     /// regenerated there — the cue seam itself is untouched, which is why the
     /// *shape* of the batch (endings mixed, the cloak pressed) is what carries the
     /// assertion when the levels underneath it move.
+    ///
+    /// **#316 moved the striking half and left the rest alone**, which is the whole
+    /// point of putting the takedown behind [`Profile::takedown_reach`]. The
+    /// `baseline` and `cautious` blocks below are **byte-for-byte what they were
+    /// before that ticket** — the strongest form of its "the cautious baseline is
+    /// unchanged" criterion, since a profile with a reach of zero declines the verb
+    /// and never reaches a line of the new code. `aggressive` moved because it now
+    /// takes the strikes it walks past, and `careless` is new. Note the script letters
+    /// spell *activations* only: a takedown, a grab and a stow are steps (§7.2/§8.3),
+    /// so they leave no letter here and are asserted in
+    /// [`the_striking_profiles_work_the_body_chain`] instead.
     #[test]
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
-        const PINNED: [&str; 36] = [
+        const PINNED: [&str; 48] = [
             "baseline 0 won 63 ",
             "baseline 1 won 325 rrrrrrc",
             "baseline 2 lost 220 r",
@@ -993,18 +1321,30 @@ mod tests {
             "cautious 9 won 381 rrr",
             "cautious 10 won 339 rrcr",
             "cautious 11 lost 635 crrrrrrrrrr",
-            "aggressive 0 lost 41 c",
-            "aggressive 1 won 158 rc",
+            "aggressive 0 won 63 c",
+            "aggressive 1 won 171 rr",
             "aggressive 2 won 224 ",
-            "aggressive 3 lost 160 rrr",
+            "aggressive 3 lost 143 rrcr",
             "aggressive 4 won 60 ",
-            "aggressive 5 lost 110 rr",
-            "aggressive 6 won 135 ",
+            "aggressive 5 won 245 rrcrrcr",
+            "aggressive 6 lost 77 r",
             "aggressive 7 won 100 ",
             "aggressive 8 won 99 ",
-            "aggressive 9 lost 43 rr",
-            "aggressive 10 lost 43 rrc",
-            "aggressive 11 lost 313 rcrrrrrrr",
+            "aggressive 9 won 296 rrrrr",
+            "aggressive 10 lost 33 rc",
+            "aggressive 11 lost 60 rcr",
+            "careless 0 won 66 c",
+            "careless 1 won 171 rr",
+            "careless 2 won 215 c",
+            "careless 3 won 324 rcrrcrc",
+            "careless 4 won 124 crcr",
+            "careless 5 won 249 rrcrcrr",
+            "careless 6 lost 77 r",
+            "careless 7 won 100 ",
+            "careless 8 won 99 ",
+            "careless 9 won 144 rcrcrr",
+            "careless 10 lost 33 rc",
+            "careless 11 won 242 rcrrc",
         ];
 
         let mut played = Vec::new();
@@ -1125,6 +1465,162 @@ mod tests {
         );
     }
 
+    /// **#316: the §13.2 takedown and bodies rows have a live source.**
+    ///
+    /// Both rows read a flat zero on every batch ever captured, so nothing in the
+    /// harness exercised §7.2 takedowns, §8.3 dragging, §10.3 stowing or §7.3's radio
+    /// clock — the most-churned code in the repo, and a regression anywhere in it
+    /// would have moved no metric at all. This is the test that stops that being true
+    /// again, and it asserts the split the temperaments were built around:
+    ///
+    /// - the **declining** profiles land exactly zero, which is `takedown_reach: 0`
+    ///   working rather than an opportunity that never came (§13.3 — a cautious bot
+    ///   reporting no takedowns is correct behaviour, not a defect);
+    /// - the **striking** ones land some, from the core's own gate and no other —
+    ///   the bot never re-implements a precondition, it bumps and the game rules;
+    /// - `aggressive` **grabs** bodies, so the drag half of the chain runs;
+    /// - `careless` gets bodies **found**, which is the first exercise §7.3's clock
+    ///   has ever had. That is why it exists: a stowed body is beyond every cone, so
+    ///   the tidier the temperament the flatter this row reads.
+    ///
+    /// Loose and direction-only (§13.4), like every other shape assertion here: the
+    /// counts are free to move, the zero-versus-nonzero split is not.
+    #[test]
+    fn the_striking_profiles_work_the_body_chain() {
+        let batch = |profile: Profile| {
+            let records = run_batch(0..60, DEFAULT_INPUT_CAP, move |_| {
+                StealthBot::with_profile(profile)
+            })
+            .expect("generates");
+            let usage = records
+                .iter()
+                .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage));
+            let takedowns: u32 = records.iter().map(|r| r.takedowns).sum();
+            let found: u32 = records.iter().map(|r| r.bodies_found).sum();
+            (takedowns, found, usage)
+        };
+
+        for profile in [Profile::BASELINE, Profile::CAUTIOUS] {
+            let (takedowns, found, usage) = batch(profile);
+            assert_eq!(
+                (
+                    takedowns,
+                    found,
+                    usage.count(Verb::Takedown),
+                    usage.count(Verb::Drag)
+                ),
+                (0, 0, 0, 0),
+                "{}: a profile that declines the verb must land none of it",
+                profile.name,
+            );
+        }
+
+        let (strikes, _, aggressive) = batch(Profile::AGGRESSIVE);
+        assert!(
+            strikes > 0,
+            "aggressive landed no takedown over 60 seeds — the §13.2 row is dead again",
+        );
+        assert_eq!(
+            aggressive.count(Verb::Takedown),
+            strikes,
+            "every takedown must reach the histogram as well as the metric",
+        );
+        assert!(
+            aggressive.count(Verb::Drag) > 0,
+            "aggressive never took hold of a body — §8.3's drag is still unexercised",
+        );
+
+        let (strikes, found, _) = batch(Profile::CARELESS);
+        assert!(strikes > 0, "careless landed no takedown over 60 seeds");
+        assert!(
+            found > 0,
+            "no body careless left on the floor was ever found — §7.3's clock still \
+             has nothing to react to",
+        );
+
+        // The temperaments' actual split is **stowing**, not grabbing. Taking hold is
+        // not a decision — stepping off a body's cell grabs it whether you meant to or
+        // not (§8.3/#187) — so `careless` racks up grabs it immediately undoes, and a
+        // `Drag` count says nothing about temperament on its own. Putting a body
+        // *away* is the decision, it locks the cupboard behind it (§10.3), and it has
+        // no verb in the §13.2 histogram, so it is counted from its own event here.
+        let stowed = |profile: Profile| {
+            let mut stowed = 0;
+            for seed in 0..60 {
+                let (mut state, _) = boot(seed);
+                let mut bot = StealthBot::with_profile(profile);
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let input = bot.decide(&state);
+                    stowed += state
+                        .step(input)
+                        .iter()
+                        .filter(|e| matches!(e, intrusion_core::Event::BodyStored { .. }))
+                        .count();
+                }
+            }
+            stowed
+        };
+        assert!(
+            stowed(Profile::AGGRESSIVE) > 0,
+            "aggressive never stowed a body — §10.3's deposit-and-lock is unexercised",
+        );
+        assert_eq!(
+            stowed(Profile::CARELESS),
+            0,
+            "careless stowed a body — a reach of zero must mean it never tidies up, \
+             or `bodies_found` loses the source this profile exists to be",
+        );
+    }
+
+    /// The strike is **legitimate**, seed by seed, not merely counted (#316/#183).
+    ///
+    /// A takedown is legal from a guard's rear blind spot or under concealment and
+    /// nowhere else (§7.2/§155), and the front strike the old bot could sneak through
+    /// must not come back. Rather than trust the bot's own gate, this replays every
+    /// strike a batch lands and checks the *core's* answer at the moment of the bump:
+    /// the guard must not have detected the player, which is exactly the predicate
+    /// [`State::guard_detects_now`] settles and the one §7.2 refuses a bump against.
+    #[test]
+    fn every_takedown_the_bot_lands_is_a_legal_one() {
+        let mut struck = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state;
+            let mut bot = StealthBot::with_profile(Profile::CARELESS);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                // A step into a guard is the takedown attempt (§7.2) — check the gate
+                // the core will read, before it reads it.
+                if let Input::Step(dir) = input {
+                    if let Some(target) = state.player().step(dir) {
+                        for guard in state.guards() {
+                            if guard.pos() == target {
+                                assert!(
+                                    !state.guard_detects_now(guard),
+                                    "seed {seed}: struck a guard that had the player — \
+                                     a front strike is refused by §7.2 and must never \
+                                     be attempted",
+                                );
+                                struck += 1;
+                            }
+                        }
+                    }
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            struck > 0,
+            "no strike happened in 40 seeds — this test would prove nothing",
+        );
+    }
+
     /// Every shipped profile still **plays the game** (§13.4), not just the
     /// baseline: over a batch each one reaches real endings rather than stalling
     /// out en masse. A temperament whose numbers livelock the bot would quietly
@@ -1170,6 +1666,11 @@ mod tests {
     ///   only mouth, the bot would eventually push on, take the guard down, and drop
     ///   the body across that mouth — the §7.2/#170 soft-lock (seeds 33, 34, 44, 58,
     ///   64, 65). It now leaves such a guard be and waits for the patrol to step off.
+    ///
+    /// The second stall could no longer happen either way: #187 made a loose body
+    /// non-solid, so a body across a mouth stops nobody (#316). The seeds are kept
+    /// under the **baseline**, which still declines the strike, so this stays a
+    /// regression test for the stalls rather than becoming a test of the new play.
     ///
     /// Each seed must reach a real end (win or capture), never the input cap.
     #[test]
@@ -1245,12 +1746,14 @@ mod tests {
     /// baseline this measures); a run that wants to weigh a specific tech grants it
     /// back and asserts on that.
     ///
-    /// The **takedown** is deliberately not required either. It lands only from a
-    /// guard's rear blind spot or under concealment (§7.2/§155, gated live since
-    /// #183), and this avoidance-first bot steers wide of guards rather than hunting
-    /// them, so it reaches that safe angle only rarely — mandating the verb every
-    /// batch would measure a contrived hunt, not the game (§13.3). Deliberate
-    /// rear-takedown play is left to a later bot pass (#196).
+    /// The **takedown** is deliberately not required either, and under this profile
+    /// it must read exactly zero. It lands only from a guard's rear blind spot or
+    /// under concealment (§7.2/§155, gated live since #183), and the baseline is an
+    /// avoidance-first temperament that declines the verb outright
+    /// ([`Profile::takedown_reach`] of zero, #316) — mandating it here would measure a
+    /// contrived hunt rather than the game (§13.3). Deliberate rear-takedown play now
+    /// exists; it lives in the striking profiles, and
+    /// [`the_striking_profiles_work_the_body_chain`] is where it is asserted.
     #[test]
     fn over_a_batch_the_outcome_profile_is_mixed() {
         let runs = 40;

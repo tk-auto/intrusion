@@ -60,6 +60,17 @@ tried in priority order, and the first that applies wins:
 4. **`Explore`** — nothing known to head for, so sweep toward the nearest frontier
    (a seen cell bordering the unseen) until the consoles reveal themselves.
 
+Two **steps without an `Intent` of their own** bracket those four, because both are
+about a physical commitment rather than a plan (§7.2/§8.3), and both are silent for
+a temperament whose reach for them is zero:
+
+- **The body in hand comes first.** A drag halves the bot's speed and refuses to
+  stack with Run, so it is settled before anything else is planned — hauled to a
+  cupboard, or let go.
+- **The strike sits between fleeing and taking cover.** Ahead of cover deliberately:
+  the commonest safe angle in the game is the one from *inside* a cupboard, where
+  taking cover would only ever wait.
+
 Naming the plan is not cosmetic. It is the thing an ability cue is asked its
 question *against* (§4 below), and it is computed once per decision so that no cue
 has to re-derive "am I being hunted?".
@@ -84,10 +95,44 @@ fell into:
 - **It will not hide within reach of a body it left.** A guard that finds a body
   searches the cupboards beside it (§15 Q5), so a bolthole next to your own handiwork
   is a trap.
-- **It will not spring a takedown that would wall it in.** A takedown drops the body
-  on the guard's cell; when the bot's *only* routable way out holds that guard,
-  striking seals the mouth for the rest of the run (§7.2). It leaves the guard be and
-  waits for the patrol to step off.
+- **It will not step onto a body it is carrying.** A bump into the body in hand
+  *lets it go* (§8.3), so the direct route back to a cupboard is the move that drops
+  what you are carrying. The body is barred from **this turn's step** but left
+  routable in the field — it is one step behind the player and moves as the player
+  moves, so the cell it sits on now is clear by the time a route reaches it. What
+  that produces on the board is a small loop: to bring a body back to a cupboard
+  mouth you must return by a square rather than by backtracking.
+
+### 3.2 The takedown, and the rule that used to forbid it
+
+The bot used to carry a fourth refusal — *"it will not spring a takedown that would
+wall it in"* — on the grounds that a body dropped on the guard's cell seals a dead
+end's only mouth (§7.2/#170). **That hazard stopped existing** when #187 made a loose
+body non-solid: the mouth stays walkable, and stepping over it on the way out takes
+hold of it. The rule outlived its reason and went on refusing *every* takedown the
+bot was ever offered — because all of them are that exact shape, a hidden bot with a
+patrol on its cupboard door (#316).
+
+What is left at that mouth is not a hazard but a **choice**, so it is a profile field
+(`takedown_reach`) rather than a rule. Zero declines the verb outright and keeps the
+avoidance-first temperaments byte-identical; anything else lets the strike run:
+
+- **At arm's length** — a perceived guard is adjacent and core's own gate is open, so
+  bump it. That covers both legal angles without naming either: the rear blind spot
+  (§155 carves the three cells at a guard's back out of its cone) and concealment
+  (§7.2 — a hidden or crouched player is concealed from every viewer).
+- **Otherwise** — walk to a guard's back, if one is within the profile's budget. Only
+  a **seen** guard offers one: a sensed guard's facing is unknown (§9.2), so where its
+  back is, is unknown too, and guessing would mean walking into cones the bot cannot
+  see (§11.5a).
+
+The approach is the one route costed with **no keep-away halo** — you cannot both
+give a guard a wide berth and walk up behind it — while the cone penalty still
+stands, so "within budget" means "reachable without being seen on the way" rather
+than merely "near". And the bot will not strike while any *other* guard has eyes on
+it, read through core's `guard_detects_now` rather than off the danger overlay,
+because those two differ exactly where this play lives: a cupboard cell can sit
+inside a cone and still be perfectly safe.
 
 ## 4. Ability cues: which key it presses, and why
 
@@ -166,7 +211,7 @@ whether an ability gets a look-in at all.
 
 Every threshold the bot weighs its options by — how wide a berth it gives a patrol,
 how early it ducks into cover, how long it waits there, how keen a cue must be —
-lives in a `Profile`. Three ship: `baseline`, `cautious`, `aggressive`.
+lives in a `Profile`. Four ship: `baseline`, `cautious`, `aggressive`, `careless`.
 
 A profile is **one row of numbers over the same policy**, never a second bot. This
 is a constraint, not a convenience: if a temperament ever wants a different
@@ -184,6 +229,24 @@ waiting, the other is caught pushing — is precisely the §13.3 flag worth play
 
 And `aggressive` is not a better player. It is an impatient one, and it *should* be
 detected more often; that is the cost of its temperament, not a verdict on it.
+
+### 5.1 Why the takedown needs *two* striking temperaments
+
+`aggressive` strikes when the route offers the angle cheaply and then **tidies up** —
+it hauls the body to a nearby cupboard and stows it, which locks the cupboard behind
+it (§10.3). `careless` strikes more readily and **never** tidies, so its bodies stay
+on the floor.
+
+That split is not decoration; without it one of the two §13.2 rows this bot exists to
+feed cannot move. A stowed body is *gone* — no cone will ever find it — so the tidier
+the temperament, the flatter `bodies_found` reads and the less §7.3's radio clock is
+exercised. One profile covers the drag/stow chain, the other covers body discovery,
+and only together do they cover §7.2's cost from end to end.
+
+Taking hold is worth distinguishing from stowing here, because only one of them is a
+decision: stepping off a body's cell grabs it **automatically** (§8.3/#187), so even
+`careless` racks up grabs — and then immediately drops them. A `drag` count therefore
+says nothing about temperament on its own; putting a body *away* is the choice.
 
 ## 6. The per-ability floor, and the ambiguity it exists to resolve
 
@@ -232,10 +295,16 @@ Stated so they read as decisions rather than oversights:
 - **Ducts.** The bot has no crawl policy (§10.7): climbing in is a mode change into
   the crawlspace with degraded perception, not a step a floor route can take, so duct
   entries are simply not routable for it.
-- **Takedowns are incidental.** A takedown lands only from a guard's rear blind spot
-  or under concealment (§7.2), and this avoidance-first bot steers wide of guards
-  rather than hunting them, so it reaches that angle only rarely. Deliberate rear
-  takedown play — and with it the body chain, §7.3's clock — is unmeasured.
+- **The avoidance-first profiles land no takedowns, and that is correct.** `baseline`
+  and `cautious` carry `takedown_reach: 0`: they steer wide of guards rather than
+  hunting them, so a flat zero in their takedown row is the temperament working, not
+  a defect (§13.3). Read the §7.2 chain off `aggressive` and `careless` instead.
+- **No profile crouches.** Concealment reaches the strike only through a hideout, so
+  the crouch-behind-cover angle (§10.3) is untested — one of §7.2's legal strikes has
+  never been measured, and the bot has no crouch policy to measure it with.
+- **Stowing has no verb in the histogram.** Takedown, drag and `bodies_found` are all
+  metrics; deposit-and-lock (§10.3) is not, so a batch infers it from the gap between
+  takedowns and bodies found rather than reading it directly.
 - **Most tech has no cue yet.** Each is landing one at a time; until one does, its
   histogram slot honestly reads zero, and that zero means "no policy tried it", not
   "the ability is dead".
