@@ -104,8 +104,9 @@ One input per token, the exact string `--emit-replay` prints back:
 | `+<letter>` | activate the ability with script letter `<letter>` — `+r` Run, `+c` Camouflage, `+d` Decoy, `+x` Dephase |
 | `-<key>` | deactivate that ability |
 
-The takedown-bump and the drag-grab are steps *into* a target (§7.2/§8.3), so
-they need no token of their own — `N`/`E`/`S`/`W` already spell them. Whitespace
+The takedown-bump, the drag-grab and the crouch are steps *into* a target
+(§7.2/§8.3/§10.3), so they need no token of their own — `N`/`E`/`S`/`W` already
+spell them. Whitespace
 between tokens is ignored, so a long captured stream can be wrapped for reading.
 An unknown token, or a `+`/`-` with no ability key, is a hard error: a malformed
 replay never silently drops an input (§12.4).
@@ -174,10 +175,10 @@ every seed, so the numbers measure the game, not a hand-tuned solver.
   cones of guards it can *see* (the danger overlay, §11.5) and keeps clear of
   the bare dots of guards it can only *sense*.
 - **Loop:** explore → take each intel → leave by the exit, ducking into a
-  hideout (or cloaking with Camouflage) when a patrol closes, and fleeing to
-  cover when hunted. It uses Run to open a gap, a takedown to clear a guard
-  blocking the only way, and hideouts/Camouflage to wait a hunt out — so the
-  ability histogram has something real to measure.
+  hideout (or cloaking with Camouflage, or crouching behind a bench) when a
+  patrol closes, and fleeing to cover when hunted. It uses Run to open a gap, a
+  takedown to clear a guard blocking the only way, and hideouts/Camouflage to
+  wait a hunt out — so the ability histogram has something real to measure.
 
 It plays nothing like a human — no fear, perfect recall of what it has seen —
 so its win rate is not a difficulty verdict (§13.4). **Flag, never judge:** a
@@ -304,7 +305,7 @@ it is a deliberate, visible break.
 ### Run row
 
 ```json
-{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0},"alert_peak":null}
+{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0,"crouch":3},"alert_peak":null}
 ```
 
 | Field | Meaning |
@@ -316,13 +317,13 @@ it is a deliberate, visible break.
 | `detections` | fresh detections (`Event::Detected`): how often stealth broke — a held chase counts once, not once per turn |
 | `takedowns` | takedowns landed (`Event::TakenDown`) |
 | `bodies_found` | bodies found by guards (`Event::BodyFound`) |
-| `usage` | the **ability-usage histogram** (§13.2): a count per verb spent this run. Keys, in fixed order: `wait`, `run`, `camouflage`, `decoy`, `dephase`, `autodoors`, `confusion`, `takedown`, `drag`, `pierce_wall`, `lockdown`. Counted from core events — a *refused* activation costs no turn and emits none, so it never counts (§4.4); `wait` is the one verb with no event of its own and is counted from its spent turn. `Move` is not counted (it is the default nothing-else verb). The counts sum to `≤ turns` |
+| `usage` | the **ability-usage histogram** (§13.2): a count per verb spent this run. Keys, in fixed order: `wait`, `run`, `camouflage`, `decoy`, `dephase`, `autodoors`, `confusion`, `takedown`, `drag`, `pierce_wall`, `lockdown`, `crouch`. Counted from core events — a *refused* activation costs no turn and emits none, so it never counts (§4.4); `wait` is the one verb with no event of its own and is counted from its spent turn. `Move` is not counted (it is the default nothing-else verb). The counts sum to `≤ turns` |
 | `alert_peak` | **always `null` for now**: the facility-wide alert is the radio net's value (#107), which does not exist yet — `null` says "not measured", where a `0` would lie that it was quiet |
 
 ### Summary row
 
 ```json
-{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000},"diversity":0.1837,"alert_peak":null}}
+{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0,"crouch":18},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000,"crouch":0.0017},"diversity":0.1837,"alert_peak":null}}
 ```
 
 `win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the

@@ -76,6 +76,94 @@ fn crouch_conceals_only_across_the_cover() {
     assert!(!s.concealed_from(Cell::new(2, 4)));
 }
 
+/// The two crouch **previews** (§10.3/#379) answer for a stance not yet taken, and
+/// they must answer what taking it will actually give: `crouch_would_conceal` is
+/// checked against `concealed_from` after ducking for real, and `crouch_holds`
+/// against whether a step keeps the pose.
+///
+/// They exist for the §13.2 sim bot, which has to decide whether a table is worth a
+/// turn *before* spending it and must ask core rather than re-derive §10.3's
+/// half-plane. A preview that could disagree with the pose would be worse than no
+/// preview at all — the bot would plan against a rule the game does not run.
+#[test]
+fn the_crouch_previews_agree_with_the_pose_they_predict() {
+    let mut layout = open_room(12, 12);
+    for y in 3..=5 {
+        layout.place(Cell::new(5, y), Terrain::PartialCover);
+    }
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+    let table = Cell::new(5, 4);
+    let stance = Cell::new(4, 4);
+    // Asked while still standing — the whole point of a preview.
+    assert!(!s.crouched());
+    let viewers = [
+        Cell::new(6, 4), // across the bench
+        Cell::new(6, 7), // oblique, across its south table
+        Cell::new(4, 1), // past its end, on the player's own side
+        Cell::new(1, 4), // behind the player
+    ];
+    let predicted: Vec<bool> = viewers
+        .iter()
+        .map(|&v| s.crouch_would_conceal(table, stance, v))
+        .collect();
+    assert_eq!(
+        predicted,
+        vec![true, true, false, false],
+        "the preview must read §10.3's own geometry",
+    );
+
+    // Now take the pose and check the game agrees, viewer for viewer.
+    s.step(Input::Step(Direction::East));
+    assert!(s.crouched());
+    for (&viewer, &was_predicted) in viewers.iter().zip(&predicted) {
+        assert_eq!(
+            s.concealed_from(viewer),
+            was_predicted,
+            "{viewer:?}: the preview promised something the pose does not give",
+        );
+    }
+
+    // The crouch-walk half: the preview says which steps keep the pose, and the
+    // turn loop then keeps it for exactly those. South is along the bench (still
+    // hugging), west is a cell of air away from it.
+    assert!(s.crouch_holds(table, Cell::new(4, 5)), "along the bench");
+    assert!(!s.crouch_holds(table, Cell::new(3, 4)), "off the furniture");
+    s.step(Input::Step(Direction::South));
+    assert!(s.crouched(), "a crouch-walk holds the pose (§10.3)");
+    assert_eq!(s.player(), Cell::new(4, 5));
+    s.step(Input::Step(Direction::West));
+    assert!(!s.crouched(), "and stepping off the bench stands you up");
+}
+
+/// A table the player is nowhere near hides nobody, and a cell that is not partial
+/// cover at all names no run — so a stale or mistaken anchor previews `false`
+/// rather than panicking or inventing cover (§10.3).
+#[test]
+fn a_preview_against_a_cell_that_is_not_cover_conceals_nothing() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 4), Terrain::PartialCover);
+    let s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+    let floor = Cell::new(8, 8);
+    assert!(!s.crouch_would_conceal(floor, Cell::new(7, 8), Cell::new(9, 8)));
+    assert!(!s.crouch_holds(floor, Cell::new(8, 7)));
+    // …while the real table still previews as cover, so the check is not vacuous.
+    assert!(s.crouch_would_conceal(Cell::new(5, 4), Cell::new(4, 4), Cell::new(6, 4)));
+}
+
 /// §10.3: the cupboard is the stronger hide — omnidirectional. A hidden
 /// player is concealed from every direction, cover or none.
 #[test]

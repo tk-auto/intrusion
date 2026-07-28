@@ -173,9 +173,11 @@ impl PlayerPolicy for StealthBot {
     }
 
     fn decide(&mut self, state: &State) -> Input {
-        // A cover stint only counts while actually in a cupboard; stepping out of one
-        // (or never being in one) resets it.
-        if !state.hidden() {
+        // A cover stint only counts while actually *in* cover — a cupboard, or the
+        // crouch behind a bench (§10.3); standing up (or never ducking) resets it.
+        // A temperament that declines the pose can never be crouched, so the second
+        // clause is silent for it.
+        if !state.hidden() && !state.crouched() {
             self.hide_turns = 0;
         }
 
@@ -289,6 +291,12 @@ impl StealthBot {
     /// Inside the cupboard it holds until the coast clears (no guard within
     /// [`clear_radius`](Profile::clear_radius)), then pursuit resumes: the "hide, let it pass, carry on" loop
     /// that is the whole point of a hideout.
+    ///
+    /// Below both of those sits a second, weaker refuge for the temperaments that
+    /// take it: ducking behind a bench (§10.3, [`crouch`](Self::crouch)). It is **last**
+    /// because it is the weakest of the three — concealment that is directional, only
+    /// across the chosen furniture, and never contact-safe (§4.5) — and the pose is
+    /// given up again the moment it stops covering the bot, rather than waited out.
     fn take_cover(
         &mut self,
         state: &State,
@@ -311,6 +319,34 @@ impl StealthBot {
                 return None;
             }
             return Some(Input::Wait);
+        }
+        // Already crouched (§10.3): the turn is spent, so the stint runs out on the
+        // same hysteresis and the same cap as a cupboard's — stand up once the patrol
+        // is well clear, and never wait forever.
+        if let Some(anchor) = state.crouched_behind() {
+            self.hide_turns += 1;
+            let clear = nearest.is_none_or(|d| d > self.profile.clear_radius);
+            if clear || self.hide_turns > self.profile.max_hide {
+                self.cover_cooldown = self.profile.cover_cooldown;
+                return None;
+            }
+            let threats = self.nearby_threats(state);
+            // The pose still hides us from everyone near: hold it, which is the one
+            // thing that costs nothing and keeps it (§10.3).
+            if conceals_from_all(state, anchor, player, &threats) {
+                return Some(Input::Wait);
+            }
+            // It has stopped. A patrol has come round to *this* side of the bench, so
+            // shuffle along the furniture — the crouch-walk is the only spent step
+            // that does not stand you up (§10.3).
+            if let Some(step) = self.crouch_walk(state, anchor, blocked, &threats) {
+                return Some(step);
+            }
+            // Neither hides us any more. **Do not wait here**: waiting out a patrol
+            // behind a bench that has stopped covering you is standing still in the
+            // open, and it is how a bot that believes itself hidden gets seen. Fall
+            // through to the ordinary ladder instead — a cupboard, the cloak, or a
+            // different bench — and give the spent pose up.
         }
         // Fresh out of cover: press on for a stretch before hiding again, so a patrol
         // looping past a cupboard cannot trap the bot in an in-and-out shuffle.
@@ -347,7 +383,136 @@ impl StealthBot {
         if let Some(input) = self.cue(state, Intent::TakeCover, refuge, refuge, None) {
             return Some(input);
         }
-        refuge.map(Input::Step)
+        // Last and weakest (§10.3): no cupboard within reach and nothing to cloak
+        // with, but a bench may be underfoot. Below the other two on purpose — see
+        // [`crouch`](Self::crouch) for what the trade actually is.
+        refuge.map(Input::Step).or_else(|| self.crouch(state))
+    }
+
+    /// Duck behind a bench (§10.3): bump a table at the bot's elbow and be concealed
+    /// from every viewer across it — the last and weakest thing the `TakeCover` intent
+    /// has to offer, and nothing at all to a temperament that declines concealment
+    /// ([`crouches`](Profile::crouches)).
+    ///
+    /// **It is not a cheaper cupboard, it is a different trade.** A cupboard is
+    /// omnidirectional and contact-safe: hidden, nothing detects you and nothing can
+    /// walk into you (§4.5). A bench conceals *directionally* — only from viewers
+    /// across the furniture — and stops no one: a patrol that strolls onto the
+    /// crouching bot captures it, believing itself unobserved right up to the moment
+    /// it is caught, because [`being_hunted`] reads the very `concealed_from` the
+    /// crouch defeats. What it buys instead is that it is **everywhere and free**:
+    /// §10.1a stamps benches all over the facility, while a cupboard is scarce and
+    /// usually the wrong side of the patrol.
+    ///
+    /// So it serves the **`TakeCover`** intent and no other, as that intent's floor.
+    /// It is not `Flee` — you do not break contact behind a table a guard can walk
+    /// through your cell to reach — and it is not `Pursue`, because it makes no
+    /// progress: the crouch is worth a turn only when a patrol is closing and the turn
+    /// was going to be spent hiding anyway.
+    ///
+    /// # A flag, not a reach
+    ///
+    /// From your own cell the crouch is a **reflex rather than an appetite**, which is
+    /// what makes it unlike the takedown ([`strike`](Self::strike)) next door: ducking
+    /// behind the table at your elbow when a patrol walks in is what anybody does,
+    /// careful or impatient. So among the profiles that spend turns on cover at all
+    /// there is nothing left to dial, and the profiles that crouch still do it at very
+    /// different rates (`baseline` 8, `cautious` 13, `aggressive` 2 over 100 seeds) on
+    /// the numbers they already carry: how near a patrol has to be before cover is
+    /// worth a turn ([`threat_radius`](Profile::threat_radius)), and how far a
+    /// *cupboard* is worth walking to instead ([`cover_reach`](Profile::cover_reach)).
+    ///
+    /// A `crouch_reach` — *how far will it walk to a bench*, the obvious sibling to
+    /// [`takedown_reach`](Profile::takedown_reach) — was built and **measured out
+    /// again** (#379), because a bench you walk to goes *stale*: the spot is chosen for
+    /// where a guard stands now, and by the time the bot arrives it has moved and the
+    /// concealing side of the furniture has flipped. Over 100 seeds a reach of 2 or
+    /// more did not add crouches, it **replaced** them — from ~51 down to ~1 — as the
+    /// bot spent its cover turns walking to benches it never ducked behind. What is
+    /// left to say is yes or no, which is [`crouches`](Profile::crouches): `careless`
+    /// declines, for the same reason it declines cupboards, and its §7.2 row is the
+    /// rear blind spot and nothing else.
+    ///
+    /// A table is worth ducking behind only when it hides the bot from **every** guard
+    /// it currently perceives nearby. Concealment from one of two patrols is not cover,
+    /// it is a coin toss — and the question is put to the core's own geometry
+    /// ([`State::crouch_would_conceal`]), never re-derived here, which is the rule the
+    /// routing and legality predicates already keep (§13.2).
+    fn crouch(&self, state: &State) -> Option<Input> {
+        if !self.profile.crouches {
+            return None;
+        }
+        let threats = self.nearby_threats(state);
+        if threats.is_empty() {
+            return None;
+        }
+        let facility = state.layout().facility();
+        let player = state.player();
+        // In `Direction::ALL` order, so a cell with tables on two sides ducks behind
+        // the same one every time (§12.4).
+        Direction::ALL
+            .into_iter()
+            .find(|&dir| {
+                player.step(dir).is_some_and(|table| {
+                    facility.terrain(table) == Some(Terrain::PartialCover)
+                        && conceals_from_all(state, table, player, &threats)
+                })
+            })
+            .map(Input::Step)
+    }
+
+    /// Shuffle along the bench to keep a pose that has stopped working (§10.3): the
+    /// **crouch-walk**, the one spent action other than the duck itself that does not
+    /// stand the player up.
+    ///
+    /// Cover is where the furniture is, not a status the crouch grants, so a patrol
+    /// that walks round to the player's own side of a bench sees them. Standing up and
+    /// re-ducking would cost two turns and be exposed for the first; a plain step that
+    /// lands still hugging the anchored run costs one and is exposed for none. Both
+    /// halves are asked of core — [`State::crouch_holds`] for whether the pose survives
+    /// the step, [`State::crouch_would_conceal`] for whether the cell it lands on is
+    /// hidden from every threat — so the bot never carries its own copy of §10.3.
+    ///
+    /// `None` when no step along the bench restores the cover, which is the caller's
+    /// signal to give the pose up rather than sit still behind furniture that has
+    /// stopped working.
+    fn crouch_walk(
+        &self,
+        state: &State,
+        anchor: Cell,
+        blocked: &HashSet<Cell>,
+        threats: &[Cell],
+    ) -> Option<Input> {
+        let facility = state.layout().facility();
+        let player = state.player();
+        Direction::ALL
+            .into_iter()
+            .find(|&dir| {
+                player.step(dir).is_some_and(|next| {
+                    routable(facility, next)
+                        && !blocked.contains(&next)
+                        && state.crouch_holds(anchor, next)
+                        && conceals_from_all(state, anchor, next, threats)
+                })
+            })
+            .map(Input::Step)
+    }
+
+    /// The guards worth taking cover from: every guard the bot perceives — seen or
+    /// merely sensed (§9.2) — within this temperament's
+    /// [`threat_radius`](Profile::threat_radius), by cell.
+    ///
+    /// A **sensed** guard counts here, unlike in the rear-strike scan, and the
+    /// difference is real rather than an oversight: striking a back needs the guard's
+    /// *facing*, which a sensed guard does not give up, while hiding across a bench
+    /// needs only where it is standing — which a sensed guard does give up exactly
+    /// (§9.2: "the exact cell is known, nothing about where it looks").
+    fn nearby_threats(&self, state: &State) -> Vec<Cell> {
+        let player = state.player();
+        perceived_guard_cells(state)
+            .into_iter()
+            .filter(|&guard| player.manhattan_distance(guard) <= self.profile.threat_radius)
+            .collect()
     }
 
     /// Spring a takedown, or take a step toward one (§7.2/§155) — the play a
@@ -588,12 +753,26 @@ impl StealthBot {
         // re-derived.
         let field = self.field(state, &goals, danger, blocked, self.profile.pursue);
         let step = self.step_down(state, &field, danger, blocked, self.profile.pursue, &[]);
-        let crossing = crossing(
-            state.layout().facility(),
-            state.memory(),
-            &field,
-            state.player(),
+        // **No crossing while the sprint is up.** A phased crossing is costed in
+        // single steps — in at one turn, out at the next, with a turn of the window
+        // spare — and Run moves two cells a step (§8.3), which overshoots the far side
+        // and leaves the bot shuffling across the hole until the duration dies inside
+        // it. Nothing in the catalogue forbids holding both; what the geometry forbids
+        // is *crossing* on them, so the offer is withdrawn rather than the ability.
+        let sprinting = matches!(
+            state.ability_state(AbilityId::Run),
+            AbilityState::Active { .. }
         );
+        let crossing = (!sprinting)
+            .then(|| {
+                crossing(
+                    state.layout().facility(),
+                    state.memory(),
+                    &field,
+                    state.player(),
+                )
+            })
+            .flatten();
 
         // Pushing on is a moment too, and one most of the salvaged tech is *for*
         // (§8.3: bore a shortcut, seal the doors ahead, draw a patrol off the route).
@@ -606,12 +785,18 @@ impl StealthBot {
         // walked here: while the phase is up, step into the solid rather than round
         // it. Getting *out* the far side is settled earlier still, before every other
         // plan (§8.3 — a duration that expires inside a solid costs the eject).
-        if matches!(
-            state.ability_state(AbilityId::Dephase),
-            AbilityState::Active { .. }
-        ) {
-            if let Some((dir, _)) = crossing {
-                return Input::Step(dir);
+        // **Only with enough of the window left to come out the other side.** The
+        // crossing is two steps, in and out, so stepping into a solid with one turn
+        // left is walking into the eject on purpose (§8.3) — and the turn the bot
+        // meant to spend crossing is not always the turn it gets, since anything
+        // higher up the ladder (a patrol closing, a bench to duck behind) can take it
+        // first. Checking the remaining duration is what makes the crossing safe
+        // whoever steals the turn.
+        if let AbilityState::Active { remaining } = state.ability_state(AbilityId::Dephase) {
+            if remaining >= 2 {
+                if let Some((dir, _)) = crossing {
+                    return Input::Step(dir);
+                }
             }
         }
 
@@ -1183,6 +1368,21 @@ fn retreat_step(
     best.map(|(_, _, dir)| dir)
 }
 
+/// Whether a crouch anchored on `table` would hide a player at `from` from **every**
+/// one of `viewers` (§10.3) — the question the duck and the crouch-walk both ask, put
+/// to the core's own geometry ([`State::crouch_would_conceal`]) rather than re-derived
+/// here (§13.2: a private copy of a game rule is how the bot's metrics quietly stop
+/// describing this game).
+///
+/// *Every* viewer, deliberately: concealment from one of two patrols is not cover, it
+/// is a coin toss. With no viewers at all it is vacuously true, which is why both
+/// callers check for a threat before asking.
+fn conceals_from_all(state: &State, table: Cell, from: Cell, viewers: &[Cell]) -> bool {
+    viewers
+        .iter()
+        .all(|&viewer| state.crouch_would_conceal(table, from, viewer))
+}
+
 /// The Manhattan distance to the nearest guard the player can perceive (seen or
 /// sensed), or `None` when none is in reach — the gap the flee routine reads to
 /// decide whether it can afford a turn spent activating Run.
@@ -1472,7 +1672,18 @@ mod tests {
     /// now finishes, while several runs that won now lose. Neither is a verdict:
     /// twelve seeds are a pin, not a balance signal (§13.4), and the measurement that
     /// carries the ticket is the 100-seed with/without batch recorded in
-    /// `docs/stats/abilities/decoy.md`.
+    /// `docs/stats/abilities/decoy.md`. Its rows were regenerated *on top of* #379's
+    /// crouch below, so the batch carries both changes at once.
+    ///
+    /// **#379 moved exactly one row of the forty-eight** — `cautious 5`, from
+    /// `won 217 cr` to `won 343 crr` — and that narrowness is the finding rather than
+    /// luck. The crouch (§10.3) is the one behaviour here that *every* profile carries,
+    /// so unlike #316 there is no reach of zero making the avoidance-first blocks
+    /// unchanged by construction; they are unchanged because the pose is rare and
+    /// cheap. On seed 5 the cautious bot ducks behind a bench instead of pressing on,
+    /// the patrol passes differently, and it wins later by a longer route. Note the
+    /// crouch spells no letter either: ducking is a bump (§4.3), like the takedown and
+    /// the grab, so it shows in the turn counts and not in the script.
     ///
     /// **#316 moved the striking half and left the rest alone**, which is the whole
     /// point of putting the takedown behind [`Profile::takedown_reach`]. The
@@ -1504,7 +1715,7 @@ mod tests {
             "cautious 2 lost 529 rrrrdrdr",
             "cautious 3 lost 50 r",
             "cautious 4 won 154 rdcrd",
-            "cautious 5 won 290 crdrdr",
+            "cautious 5 won 363 crdrr",
             "cautious 6 won 157 ",
             "cautious 7 won 96 ",
             "cautious 8 lost 88 r",
@@ -2073,6 +2284,169 @@ mod tests {
         );
     }
 
+    /// **#379: §10.3's partial cover has a live source, on every temperament.**
+    ///
+    /// Before this, `crouched_behind` was `None` for every turn of every run under
+    /// every profile — so §10.1a's benches and the exact run geometry `cover.rs`
+    /// computes for them were **inert in the harness**: a regression in
+    /// core's `cover::run_conceals` or `cover::run_hugs` would have moved no metric at
+    /// all. This is the test that stops that being true again, and it asserts three
+    /// things a false zero could not fake:
+    ///
+    /// - every profile that **takes cover at all** ducks, because from your own cell
+    ///   the crouch is a reflex rather than an appetite (see [`StealthBot::crouch`]) —
+    ///   so a zero on one of those is a broken policy, not a temperament;
+    /// - and `careless`, which declines concealment outright
+    ///   ([`Profile::crouches`]), lands exactly none — the decline working rather than
+    ///   an opportunity that never came, exactly as its `takedowns: 0` siblings do;
+    /// - the **histogram** sees each duck, so the §13.2 row and the events agree;
+    /// - the pose is entered from where the bot stands and **not left immediately**:
+    ///   crouched turns outnumber the ducks that started them, which is the "spent a
+    ///   turn for nothing" failure the ticket names.
+    ///
+    /// Direction-only and loose (§13.4) — the counts are free to move, the
+    /// zero-versus-nonzero is not.
+    #[test]
+    fn every_profile_ducks_behind_a_bench() {
+        for profile in Profile::ALL {
+            let (mut ducks, mut crouched_turns) = (0u32, 0u32);
+            for seed in 0..60 {
+                let (mut state, _) = boot(seed);
+                let mut bot = StealthBot::with_profile(profile);
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let before = state.turn();
+                    ducks += state
+                        .step(bot.decide(&state))
+                        .iter()
+                        .filter(|e| matches!(e, intrusion_core::Event::Crouched { .. }))
+                        .count() as u32;
+                    if state.turn() > before && state.crouched() {
+                        crouched_turns += 1;
+                    }
+                }
+            }
+            if !profile.crouches {
+                assert_eq!(
+                    (ducks, crouched_turns),
+                    (0, 0),
+                    "{}: a temperament that declines concealment must never crouch",
+                    profile.name,
+                );
+                continue;
+            }
+            assert!(
+                ducks > 0,
+                "{}: never ducked behind a bench over 60 seeds — §10.3 is inert again",
+                profile.name,
+            );
+            assert!(
+                crouched_turns > ducks,
+                "{}: {crouched_turns} crouched turns from {ducks} ducks — the pose is \
+                 being dropped the turn after it is taken, so the turn bought nothing",
+                profile.name,
+            );
+            // The same runs through the harness, so the §13.2 row cannot drift from
+            // the events the policy actually produced.
+            let records = run_batch(0..60, DEFAULT_INPUT_CAP, move |_| {
+                StealthBot::with_profile(profile)
+            })
+            .expect("generates");
+            let histogram = records
+                .iter()
+                .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage))
+                .count(Verb::Crouch);
+            assert!(
+                histogram > 0,
+                "{}: the crouch never reached the usage histogram",
+                profile.name,
+            );
+        }
+    }
+
+    /// The bench geometry is **genuinely entered**, not merely brushed past (#379).
+    ///
+    /// The acceptance criterion in its own words: a test that fails if
+    /// `cover::run_conceals` regressed. It asserts the payoff rather than the call —
+    /// over a batch there are crouched turns where the player stands **inside a
+    /// guard's live cone** and is concealed from it anyway, which is exactly what the
+    /// run geometry is for and what nothing in the harness could previously produce.
+    /// A `run_conceals` that returned `false` would leave the bot standing up (and the
+    /// count at zero); one that returned `true` everywhere would break the core's own
+    /// directional tests next door.
+    ///
+    /// Read off `cautious`, which crouches most: it holds out for a cupboard, so the
+    /// bench is what it settles for when a patrol arrives and none is near.
+    #[test]
+    fn the_bots_crouch_beats_a_live_cone() {
+        let mut beat_a_cone = 0;
+        for seed in 0..60 {
+            let (mut state, _) = boot(seed);
+            let mut bot = StealthBot::with_profile(Profile::CAUTIOUS);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                state.step(bot.decide(&state));
+                if state.crouched() {
+                    beat_a_cone += state
+                        .guards()
+                        .iter()
+                        .filter(|g| {
+                            g.fov().contains(state.player()) && state.concealed_from(g.pos())
+                        })
+                        .count()
+                        .min(1);
+                }
+            }
+        }
+        assert!(
+            beat_a_cone > 0,
+            "no crouched turn ever had a cone on the player it was concealed from — \
+             the bench's run geometry is not being exercised",
+        );
+    }
+
+    /// The **crouch-walk** (§10.3/#379): the bot shuffles along the bench rather than
+    /// standing up when a patrol comes round to its side of the furniture, and the
+    /// pose survives the step.
+    ///
+    /// This is the half of `cover.rs` the duck alone never reaches — `run_hugs`, the
+    /// rule that a plain step landing still against the run keeps the pose, corners
+    /// included. Counted as "the anchor was there before the step and is still there
+    /// after, and the turn produced a `Moved`", which is precisely the turn loop's own
+    /// `crouch_walked` predicate observed from outside.
+    #[test]
+    fn the_bot_crouch_walks_along_the_bench() {
+        let mut walks = 0;
+        for profile in [Profile::CAUTIOUS, Profile::BASELINE] {
+            for seed in 0..60 {
+                let (mut state, _) = boot(seed);
+                let mut bot = StealthBot::with_profile(profile);
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let anchor = state.crouched_behind();
+                    let events = state.step(bot.decide(&state));
+                    let moved = events
+                        .iter()
+                        .any(|e| matches!(e, intrusion_core::Event::Moved { .. }));
+                    if anchor.is_some() && moved && state.crouched_behind() == anchor {
+                        walks += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            walks > 0,
+            "the bot never crouch-walked — §10.3's `run_hugs` is unexercised, so the \
+             bot only ever ducks and waits",
+        );
+    }
+
     /// The strike is **legitimate**, seed by seed, not merely counted (#316/#183).
     ///
     /// A takedown is legal from a guard's rear blind spot or under concealment and
@@ -2081,6 +2455,15 @@ mod tests {
     /// strike a batch lands and checks the *core's* answer at the moment of the bump:
     /// the guard must not have detected the player, which is exactly the predicate
     /// [`State::guard_detects_now`] settles and the one §7.2 refuses a bump against.
+    ///
+    /// **The concealed strikes it lands are cupboard ones, never bench ones** (#379),
+    /// and that is geometry rather than a shy policy: concealment across a bench needs
+    /// the viewer on the far side of the furniture, which puts it at least two cells
+    /// away, while a takedown needs it orthogonally adjacent. The two conditions
+    /// cannot both hold — proven exhaustively in core's
+    /// `cover::an_adjacent_viewer_is_never_concealed_by_a_bench` — so there is no
+    /// crouch strike here to assert legal, and a batch reporting zero of them is the
+    /// right answer rather than a gap to close.
     #[test]
     fn every_takedown_the_bot_lands_is_a_legal_one() {
         let mut struck = 0;
