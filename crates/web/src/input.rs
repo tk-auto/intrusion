@@ -4,9 +4,10 @@
 //! The shell never interprets a key — the §11.6 bindings live in
 //! `core::input_for_key` / `core::ui_command_for_key` / `core::ability_slot_for_code`
 //! / `core::ability_slot_for_letter`, pinned by native tests. What lives *here* is the plumbing the core cannot own:
-//! browser listeners, the gesture's live state, and the repeat timers. The one pure
-//! rule of this module, [`gesture_input`], is natively tested below like any core
-//! table.
+//! browser listeners, the gesture's live state, and the repeat timers — plus the
+//! *order* those tables are consulted in ([`play_key`]), which is the shell's alone
+//! because only the shell holds both halves of the event. Every pure rule of this
+//! module is natively tested below like any core table.
 //!
 //! **The touch model** (replacing the old edge-zone tap slice): a **swipe**
 //! steps along the drag's dominant axis and *keeps* stepping while the finger
@@ -49,16 +50,18 @@ impl Game {
     /// It takes **both** halves of the browser's event: the `key` character the layout
     /// produced, and the physical `code` under the finger. Most bindings are on the
     /// character, but the digits bind by position (#359) — the ability bar's `1`–`4`
-    /// straight off `Digit1`–`Digit4`, and the numpad folded onto the movement digits
-    /// by `key_for_code` before any character table is consulted — so an AZERTY or
+    /// straight off `Digit1`–`Digit4`, and the numpad folded onto the arrows by
+    /// `key_for_code` before any character table is consulted — so an AZERTY or
     /// Dvorak player presses the same physical keys as a QWERTY one. The abilities'
     /// mnemonic letters (#360) go the other way, on the character, because there the
     /// binding is the letter the bar is showing.
     fn handle_key(&mut self, key: &str, code: &str, is_repeat: bool) -> bool {
         // The numpad's meaning is its position, not the character the layout put on
-        // it, so it is folded to the digit the §11.6 tables spell it with — once,
-        // here, ahead of every table below (movement, the help panel's tabs, the
-        // menu's list), so they cannot drift apart on which digits they take.
+        // it, so it is folded to the §11.6 key it duplicates — the arrows, and `w` for
+        // wait — once, here, ahead of every table below (movement, the help panel's
+        // tabs, the menu's list), so they cannot drift apart on what the numpad takes.
+        // It folds onto the arrows rather than onto `8` `2` `4` `6` deliberately
+        // (#369): those characters are the top row's too, and the top row is the bar's.
         let key = key_for_code(code).unwrap_or(key);
         // Before a run starts, the menu owns the keyboard (§14/#268): it is modal in
         // the strongest sense — there is no world to step underneath it. Everything
@@ -69,9 +72,7 @@ impl Game {
                 self.apply_menu_nav(nav);
                 return true;
             }
-            return ui_command_for_key(key).is_some()
-                || input_for_key(key).is_some()
-                || self.ability_slot_for_key(key, code).is_some();
+            return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
         }
         // While the help panel is open it is **modal** (§14 v2/#248): it captures
         // input, so keys route to help navigation first and the world never steps
@@ -85,9 +86,7 @@ impl Game {
                 self.draw();
                 return true;
             }
-            return ui_command_for_key(key).is_some()
-                || input_for_key(key).is_some()
-                || self.ability_slot_for_key(key, code).is_some();
+            return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
         }
         // UI commands (§11.4) come next: they toggle view state and redraw without
         // ever touching the turn loop. `m` deploys the message list; `?` opens help.
@@ -108,29 +107,32 @@ impl Game {
         // on switches it off again (§4.4/#304). A tap on the bar entry goes through the
         // same calls from `ability_at` on, so neither key can disagree with the entry
         // above it.
-        let input = if let Some(input) = input_for_key(key) {
-            input
-        } else if let Some(slot) = self.ability_slot_for_key(key, code) {
-            // A **held** ability key is swallowed (§11.6/#304): now that the key is a
-            // toggle, letting the browser's auto-repeat through would switch the
-            // ability straight back off a frame after switching it on. Toggling takes
-            // a deliberate press, in both directions — and the repeat was a free
-            // no-op before this, so nothing is lost. Consumed, so the page is still.
-            if is_repeat {
-                return true;
+        let input = match play_key(key, code, |letter| {
+            ability_slot_for_letter(&self.state, letter)
+        }) {
+            Some(PlayKey::Move(input)) => input,
+            Some(PlayKey::Slot(slot)) => {
+                // A **held** ability key is swallowed (§11.6/#304): now that the key is
+                // a toggle, letting the browser's auto-repeat through would switch the
+                // ability straight back off a frame after switching it on. Toggling
+                // takes a deliberate press, in both directions — and the repeat was a
+                // free no-op before this, so nothing is lost. Consumed, so the page is
+                // still.
+                if is_repeat {
+                    return true;
+                }
+                // A digit past the run's held count fires nothing: no turn, no state
+                // change (§11.6 — a miss is free). Still consumed, because the four
+                // digits are the game's whether or not this run filled them, and a `4`
+                // that scrolled the page on a three-ability run would be worse than one
+                // that does nothing. (A mnemonic never lands here — a letter no entry
+                // claimed resolves to no slot at all, and stays the page's.)
+                let Some(id) = ability_in_slot(&self.state, slot) else {
+                    return true;
+                };
+                self.state.ability_input(id)
             }
-            // A digit past the run's held count fires nothing: no turn, no state
-            // change (§11.6 — a miss is free). Still consumed, because the four digits
-            // are the game's whether or not this run filled them, and a `4` that
-            // scrolled the page on a three-ability run would be worse than one that
-            // does nothing. (A mnemonic never lands here — a letter no entry claimed
-            // resolves to no slot at all, and stays the page's.)
-            let Some(id) = ability_in_slot(&self.state, slot) else {
-                return true;
-            };
-            self.state.ability_input(id)
-        } else {
-            return false;
+            None => return false,
         };
         // A keyboard **auto-repeat** (`KeyboardEvent.repeat`) that would walk the
         // player into visible danger is swallowed here (§11.6/#223): the deliberate
@@ -144,13 +146,15 @@ impl Game {
         true
     }
 
-    /// The ability-bar slot this keypress fires, by either of its two keys (§11.6):
-    /// the slot's **digit**, resolved from the physical code (#359), or its
-    /// **mnemonic letter**, resolved from the character (#360). The digit is asked
-    /// first — it is the primary, stable-by-position key — but the two can never
-    /// answer the same press, since a mnemonic is never a digit.
-    fn ability_slot_for_key(&self, key: &str, code: &str) -> Option<usize> {
-        ability_slot_for_code(code).or_else(|| ability_slot_for_letter(&self.state, key))
+    /// Whether the game would claim this press *in play*, used by the modal screens
+    /// to decide what to swallow. Asking [`play_key`] rather than a list of tables is
+    /// what keeps "the menu swallows everything the game would take" true as those
+    /// tables move.
+    fn game_claims_key(&self, key: &str, code: &str) -> bool {
+        play_key(key, code, |letter| {
+            ability_slot_for_letter(&self.state, letter)
+        })
+        .is_some()
     }
 
     /// Feed one [`Input`] to the loop and repaint — the single seam every input
@@ -260,6 +264,47 @@ impl Game {
     pub(crate) fn screen_height(&self) -> u32 {
         self.state.layout().facility().height() + TOP_ROWS + BOTTOM_ROWS
     }
+}
+
+/// What a keypress means to the **running game** (§11.6): a bar slot to fire, or an
+/// [`Input`] for the turn loop. Resolved by [`play_key`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PlayKey {
+    /// An ability-bar slot, counting from `0` at the bar's leftmost drawn entry —
+    /// which ability sits there is live state, so the rule stops at the slot.
+    Slot(usize),
+    /// A movement or wait, straight into the turn loop.
+    Move(Input),
+}
+
+/// Resolve a keypress against §11.6's tables, **positions first** — the pure rule
+/// behind #369, in the spirit of [`gesture_input`] and so natively tested below.
+///
+/// `key` is the character the layout produced, already folded through
+/// `core::key_for_code` so a numpad key arrives as the arrow it means; `code` is the
+/// physical key. `slot_for_letter` is the run's mnemonic lookup
+/// (`core::ability_slot_for_letter`, #360) — a closure because *which* letters the
+/// bar claims is a fact about the live loadout, and this rule is not.
+///
+/// The order is the fix. The bar's **digit** is asked first, off the code (#359),
+/// because it names a *position* and a character table cannot see which of the two
+/// digit blocks was pressed: consulting movement first is what made a top-row `2`
+/// step south instead of firing slot 2, spending the turn and moving the player in
+/// the bargain (§2.2). Then the **character** tables: movement and wait. Then the
+/// **mnemonic letter** last, so a letter can never shadow a movement key even if the
+/// mnemonic scheme's own reservation rule (`core::mnemonic`) were to change.
+fn play_key(
+    key: &str,
+    code: &str,
+    slot_for_letter: impl FnOnce(&str) -> Option<usize>,
+) -> Option<PlayKey> {
+    if let Some(slot) = ability_slot_for_code(code) {
+        return Some(PlayKey::Slot(slot));
+    }
+    if let Some(input) = input_for_key(key) {
+        return Some(PlayKey::Move(input));
+    }
+    slot_for_letter(key).map(PlayKey::Slot)
 }
 
 /// Install the keydown pump: each keypress drives one [`Game::handle_key`]. The
@@ -775,6 +820,83 @@ pub(crate) fn install_gestures(
 mod tests {
     use super::*;
     use intrusion_core::AbilityId;
+
+    /// #369, the reported bug, at the seam it lived on: a **top-row** `2` fires the
+    /// bar's second slot. The press arrives as `code: "Digit2"`, `key: "2"` — the
+    /// character the movement table used to answer first, stepping the player south
+    /// and spending the turn instead of firing the ability. All four digits, since
+    /// slots 1 and 3 worked by luck (nothing claimed `1` or `3`) and that is exactly
+    /// what hid the bug.
+    #[test]
+    fn a_top_row_digit_fires_its_bar_slot_and_never_steps() {
+        for (code, key, slot) in [
+            ("Digit1", "1", 0),
+            ("Digit2", "2", 1),
+            ("Digit3", "3", 2),
+            ("Digit4", "4", 3),
+        ] {
+            assert_eq!(
+                play_key(key, code, |_| None),
+                Some(PlayKey::Slot(slot)),
+                "{code} fires slot {slot}",
+            );
+        }
+    }
+
+    /// …and the other half of the same split: the **numpad** still moves. It arrives
+    /// with its own codes and is folded to the arrows before this rule sees it, so
+    /// `Numpad2` steps south where `Digit2` fires a slot — the two digit blocks kept
+    /// apart by the only thing that can tell them apart, the code.
+    #[test]
+    fn the_numpad_still_steps_and_waits() {
+        for (code, expected) in [
+            ("Numpad8", Input::Step(Direction::North)),
+            ("Numpad2", Input::Step(Direction::South)),
+            ("Numpad4", Input::Step(Direction::West)),
+            ("Numpad6", Input::Step(Direction::East)),
+            ("Numpad5", Input::Wait),
+        ] {
+            let key = key_for_code(code).expect("the numpad folds");
+            assert_eq!(
+                play_key(key, code, |_| None),
+                Some(PlayKey::Move(expected)),
+                "{code}",
+            );
+        }
+    }
+
+    /// The precedence in full (§11.6): a **position** outranks every character table,
+    /// then movement, then the run's **mnemonic letter** last — so a letter can never
+    /// shadow a step even if the mnemonic scheme stopped reserving the movement keys.
+    /// A key no table owns is left to the page.
+    #[test]
+    fn play_resolves_position_then_movement_then_mnemonic() {
+        // A mnemonic lookup greedy enough to claim anything it is offered: it still
+        // never sees a digit or a movement key, because both are answered above it.
+        let greedy = |_: &str| Some(7);
+        assert_eq!(
+            play_key("2", "Digit2", greedy),
+            Some(PlayKey::Slot(1)),
+            "the bar's digit outranks the mnemonic",
+        );
+        assert_eq!(
+            play_key("h", "KeyH", greedy),
+            Some(PlayKey::Move(Input::Step(Direction::West))),
+            "a movement key outranks the mnemonic",
+        );
+        assert_eq!(
+            play_key("c", "KeyC", greedy),
+            Some(PlayKey::Slot(7)),
+            "a free letter reaches the mnemonic lookup",
+        );
+        for (key, code) in [("q", "KeyQ"), ("F5", "F5"), ("5", "Digit5")] {
+            assert_eq!(
+                play_key(key, code, |_| None),
+                None,
+                "{key:?} is left to the page",
+            );
+        }
+    }
 
     /// §11.6's hold rule: a press that never crosses the swipe threshold is Wait —
     /// from the zero-displacement press up to the last sub-threshold pixel, on
