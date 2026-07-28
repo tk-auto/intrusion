@@ -30,6 +30,21 @@
 //! **Guards never accelerate** (§7.1 **[SETTLED]**). The ladder shortens the pause a
 //! Calm guard takes; no rung touches how fast anything moves. That is the tempting
 //! wrong answer, so [`State`](crate::State) asserts it.
+//!
+//! # The numbers are a value, not a recompile
+//!
+//! Every threshold below is a **[START]** the design expects to move, and moving one
+//! used to mean editing a constant and rebuilding — which is why nothing had ever
+//! measured what any of them do (#376). They are gathered into [`AlertTuning`], a
+//! plain value threaded in at boot
+//! ([`State::with_alert_tuning`](crate::State::with_alert_tuning)), whose [`Default`]
+//! **is** the constants below. So the game plays exactly as it did unless something
+//! says otherwise, and the §13.2 sim can sweep a threshold across a batch without a
+//! rebuild.
+//!
+//! Like [`DebugModifiers`](crate::DebugModifiers), the tuning is deliberately *not*
+//! part of the [`LevelSeed`](crate::LevelSeed): no shared token can carry it, so a
+//! swept batch is a measuring instrument rather than a game anyone is handed.
 
 /// How many turns of certain-zone contact make one **confirmed sighting** (§7.6,
 /// **[START] = 3**), inside [`SIGHTING_WINDOW_TURNS`]. Any turn in which **any**
@@ -75,7 +90,89 @@ const _: () = assert!(ALERT_DWELL_TURNS_MAX < crate::guard::GUARD_DWELL_TURNS_MA
 
 /// The top of the ladder (§7.3). There is no rung 4: the design specifies three, and
 /// control has nothing louder to say than "send everyone".
-pub(crate) const TOP_RUNG: u32 = 3;
+pub const TOP_RUNG: u32 = 3;
+
+/// The ladder's **[START]** thresholds as one value (§7.3/§13.2) — what a batch can
+/// sweep without a rebuild (#376).
+///
+/// [`Default`] is the shipped ladder, read off the constants in this module rather
+/// than restated, so the two cannot drift and a run given no tuning plays the game
+/// everybody else gets. Every field is a number the design marks **[START]**; none of
+/// them is a rule, and the rules that *are* settled are held by
+/// [`validate`](Self::validate) rather than by the field types.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AlertTuning {
+    /// Turns of certain-zone contact that make one confirmed sighting
+    /// ([`SIGHTING_CONTACT_TURNS`]).
+    pub sighting_contact_turns: u32,
+    /// The sliding window those contact turns must fall inside
+    /// ([`SIGHTING_WINDOW_TURNS`]).
+    pub sighting_window_turns: u32,
+    /// Confirmed sightings that reach rung 2 ([`SIGHTINGS_FOR_SECOND_RUNG`]).
+    pub sightings_for_second_rung: u32,
+    /// Distinct posts that must fall silent to reach rung 3
+    /// ([`SILENT_POSTS_FOR_THIRD_RUNG`]).
+    pub silent_posts_for_third_rung: u32,
+    /// The shortest Calm dwell from rung 1 up ([`ALERT_DWELL_TURNS_MIN`]).
+    pub dwell_turns_min: u32,
+    /// The longest Calm dwell from rung 1 up ([`ALERT_DWELL_TURNS_MAX`]).
+    pub dwell_turns_max: u32,
+}
+
+impl Default for AlertTuning {
+    fn default() -> Self {
+        Self {
+            sighting_contact_turns: SIGHTING_CONTACT_TURNS,
+            sighting_window_turns: SIGHTING_WINDOW_TURNS,
+            sightings_for_second_rung: SIGHTINGS_FOR_SECOND_RUNG,
+            silent_posts_for_third_rung: SILENT_POSTS_FOR_THIRD_RUNG,
+            dwell_turns_min: ALERT_DWELL_TURNS_MIN,
+            dwell_turns_max: ALERT_DWELL_TURNS_MAX,
+        }
+    }
+}
+
+impl AlertTuning {
+    /// Whether this is a ladder the design allows, or the rule it breaks (§7.3/§7.5).
+    ///
+    /// The shipped constants hold these at *compile* time; a swept value can only be
+    /// checked at runtime, so the same rules are written once more here — and a sweep
+    /// that would break one is refused at the flag rather than measured (§13.2: a
+    /// batch measuring a game the design forbids answers nothing).
+    ///
+    /// The load-bearing one is the **dwell floor**: §7.5 shortens the Calm pause and
+    /// never removes it, because almost every run sits at rung 1 for good and a dwell
+    /// that could reach 0 would take the Takedown (§7.2) off the table for the rest of
+    /// the level.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.sighting_contact_turns == 0 {
+            return Err("a sighting needs at least 1 contact turn (§7.6)".to_string());
+        }
+        if self.sighting_window_turns < self.sighting_contact_turns {
+            return Err(format!(
+                "a {}-turn window can never hold {} contact turns (§7.6)",
+                self.sighting_window_turns, self.sighting_contact_turns,
+            ));
+        }
+        if self.sightings_for_second_rung == 0 || self.silent_posts_for_third_rung == 0 {
+            return Err("a rung needs at least one of its trigger's events (§7.3)".to_string());
+        }
+        if self.dwell_turns_min < 1 {
+            return Err(
+                "the alerted dwell is shortened, never removed — the pause is the \
+                 window to act (§7.5)"
+                    .to_string(),
+            );
+        }
+        if self.dwell_turns_min > self.dwell_turns_max {
+            return Err(format!(
+                "the alerted dwell floor ({}) is above its ceiling ({})",
+                self.dwell_turns_min, self.dwell_turns_max,
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// **Why** the facility alert stepped (§7.3) — carried by
 /// [`Event::AlertRaised`](crate::Event::AlertRaised) so an escalation is always
@@ -112,6 +209,23 @@ pub enum AlertTrigger {
 }
 
 impl AlertTrigger {
+    /// Every trigger, in rung order — the §7.3 table as a list, for a consumer that
+    /// must be exhaustive over it. The §13.2 sim's **attribution** is the one that
+    /// needs this (#376): a trigger missing from the report reads as a trigger that
+    /// never fired, which is exactly the zero §13.4 forbids misreading, so the columns
+    /// come from here rather than from a hand-written list.
+    ///
+    /// Its length is checked against the ladder in this module's tests, so a new
+    /// trigger left out of it fails the build's tests rather than going unreported.
+    pub const ALL: [Self; 6] = [
+        Self::Sighting,
+        Self::MissedPing,
+        Self::RepeatSightings,
+        Self::ConsoleTampered,
+        Self::BodyFound,
+        Self::SecondPostSilent,
+    ];
+
     /// The rung this trigger reaches (§7.3). The ladder is defined by the trigger
     /// table, so this function *is* that table — and it is total over the enum, so a
     /// new trigger cannot be added without saying how loud it is.
@@ -146,12 +260,27 @@ pub(crate) struct Alert {
     counted: bool,
     /// How many **distinct** posts have missed a ping (§7.3) — bodies, not pings.
     silent_posts: u32,
+    /// The **[START]** thresholds this ladder runs on (§7.3/#376) — the shipped ones
+    /// unless a boot said otherwise. Read on every decision below, so a swept value
+    /// takes effect everywhere the constants used to be read and nowhere else.
+    tuning: AlertTuning,
 }
 
 impl Alert {
-    /// A quiet facility: rung 0, nothing tallied.
+    /// A quiet facility: rung 0, nothing tallied, the shipped thresholds.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Run this ladder on `tuning` instead of the shipped **[START]** thresholds
+    /// (§13.2/#376), leaving what it has already tallied alone.
+    ///
+    /// Set at boot, from [`State::with_alert_tuning`](crate::State::with_alert_tuning).
+    /// It writes the thresholds rather than replacing the whole ladder precisely so it
+    /// cannot silently discard a tally: the sliding window is re-pruned against the
+    /// live tuning on the very next turn, so there is no stale reading to inherit.
+    pub(crate) fn set_tuning(&mut self, tuning: AlertTuning) {
+        self.tuning = tuning;
     }
 
     /// The rung the facility has reached (§7.3) — what
@@ -173,7 +302,7 @@ impl Alert {
     /// the branch asks "at least 1", not "exactly 1".
     pub(crate) fn dwell_turns(&self) -> (u32, u32) {
         if self.rung >= 1 {
-            (ALERT_DWELL_TURNS_MIN, ALERT_DWELL_TURNS_MAX)
+            (self.tuning.dwell_turns_min, self.tuning.dwell_turns_max)
         } else {
             (
                 crate::guard::GUARD_DWELL_TURNS_MIN,
@@ -210,17 +339,18 @@ impl Alert {
         }
         // Keep only the turns still inside the window — `t + WINDOW > turn` is the
         // half-open "within the last WINDOW turns, this one included".
-        self.contacts.retain(|&t| t + SIGHTING_WINDOW_TURNS > turn);
+        self.contacts
+            .retain(|&t| t + self.tuning.sighting_window_turns > turn);
         if self.contacts.is_empty() {
             // The window fell back to 0: the next run of contact is a *new* sighting.
             self.counted = false;
         }
-        if self.counted || (self.contacts.len() as u32) < SIGHTING_CONTACT_TURNS {
+        if self.counted || (self.contacts.len() as u32) < self.tuning.sighting_contact_turns {
             return None;
         }
         self.counted = true;
         self.sightings += 1;
-        Some(if self.sightings >= SIGHTINGS_FOR_SECOND_RUNG {
+        Some(if self.sightings >= self.tuning.sightings_for_second_rung {
             AlertTrigger::RepeatSightings
         } else {
             AlertTrigger::Sighting
@@ -233,7 +363,7 @@ impl Alert {
     /// first miss only: a post that has already gone quiet tells control nothing new.
     pub(crate) fn post_fell_silent(&mut self) -> AlertTrigger {
         self.silent_posts += 1;
-        if self.silent_posts >= SILENT_POSTS_FOR_THIRD_RUNG {
+        if self.silent_posts >= self.tuning.silent_posts_for_third_rung {
             AlertTrigger::SecondPostSilent
         } else {
             AlertTrigger::MissedPing
@@ -269,7 +399,126 @@ mod tests {
         assert_eq!(TOP_RUNG, 3, "three rungs, and no rung 4");
     }
 
-    /// §7.3: the trigger table *is* the ladder — each trigger names its rung.
+    /// #376: the default tuning **is** the shipped ladder. The two definitions of the
+    /// §7.3 thresholds — the constants and the sweepable value — must agree, or a
+    /// batch given no knobs would quietly measure a different game from the one it
+    /// booted.
+    #[test]
+    fn the_default_tuning_is_the_shipped_ladder() {
+        let tuning = AlertTuning::default();
+        assert_eq!(tuning.sighting_contact_turns, SIGHTING_CONTACT_TURNS);
+        assert_eq!(tuning.sighting_window_turns, SIGHTING_WINDOW_TURNS);
+        assert_eq!(tuning.sightings_for_second_rung, SIGHTINGS_FOR_SECOND_RUNG);
+        assert_eq!(
+            tuning.silent_posts_for_third_rung,
+            SILENT_POSTS_FOR_THIRD_RUNG
+        );
+        assert_eq!(tuning.dwell_turns_min, ALERT_DWELL_TURNS_MIN);
+        assert_eq!(tuning.dwell_turns_max, ALERT_DWELL_TURNS_MAX);
+        assert_eq!(tuning.validate(), Ok(()), "the shipped ladder is legal");
+    }
+
+    /// §7.5/§7.6: the rules the constants hold at compile time are held for a **swept**
+    /// value too, at the flag rather than in the batch. The dwell floor is the
+    /// load-bearing one — a 0 floor would delete the Takedown window for the rest of
+    /// the level — and a window shorter than the contact run makes a sighting
+    /// unreachable, which would read as "the trigger does nothing" (§13.4).
+    #[test]
+    fn a_tuning_that_breaks_a_settled_rule_is_refused() {
+        let illegal = |tuning: AlertTuning, expect: &str| {
+            let error = tuning.validate().expect_err("an illegal ladder");
+            assert!(error.contains(expect), "{error}");
+        };
+        illegal(
+            AlertTuning {
+                dwell_turns_min: 0,
+                ..AlertTuning::default()
+            },
+            "never removed",
+        );
+        illegal(
+            AlertTuning {
+                dwell_turns_min: 5,
+                dwell_turns_max: 3,
+                ..AlertTuning::default()
+            },
+            "above its ceiling",
+        );
+        illegal(
+            AlertTuning {
+                sighting_contact_turns: 0,
+                ..AlertTuning::default()
+            },
+            "at least 1 contact turn",
+        );
+        illegal(
+            AlertTuning {
+                sighting_contact_turns: 6,
+                sighting_window_turns: 4,
+                ..AlertTuning::default()
+            },
+            "can never hold",
+        );
+        illegal(
+            AlertTuning {
+                sightings_for_second_rung: 0,
+                ..AlertTuning::default()
+            },
+            "at least one",
+        );
+
+        // A legal sweep — a tighter window and a harsher dwell — passes.
+        assert_eq!(
+            AlertTuning {
+                sighting_window_turns: 4,
+                dwell_turns_max: 2,
+                ..AlertTuning::default()
+            }
+            .validate(),
+            Ok(()),
+        );
+    }
+
+    /// #376: a swept threshold **reaches the ladder** — every one of them, so no knob
+    /// can be exposed on the CLI while being read from the constant it replaced.
+    #[test]
+    fn a_swept_threshold_changes_when_the_ladder_steps() {
+        // A window of one contact turn: the first turn of contact is a sighting, where
+        // the shipped ladder needs three.
+        let mut alert = Alert::new();
+        alert.set_tuning(AlertTuning {
+            sighting_contact_turns: 1,
+            sightings_for_second_rung: 2,
+            ..AlertTuning::default()
+        });
+        assert_eq!(alert.watch(0, true), Some(AlertTrigger::Sighting));
+        // …and the second sighting reaches rung 2 rather than the third.
+        for turn in 1..1 + SIGHTING_WINDOW_TURNS {
+            assert_eq!(alert.watch(turn, false), None);
+        }
+        assert_eq!(
+            alert.watch(20, true),
+            Some(AlertTrigger::RepeatSightings),
+            "two sightings reach rung 2 under this tuning",
+        );
+
+        // One quiet post straight to rung 3, and a harsher alerted dwell.
+        let mut alert = Alert::new();
+        alert.set_tuning(AlertTuning {
+            silent_posts_for_third_rung: 1,
+            dwell_turns_min: 2,
+            dwell_turns_max: 2,
+            ..AlertTuning::default()
+        });
+        assert_eq!(alert.post_fell_silent(), AlertTrigger::SecondPostSilent);
+        alert.raise(AlertTrigger::Sighting);
+        assert_eq!(alert.dwell_turns(), (2, 2));
+    }
+
+    /// §7.3: the trigger table *is* the ladder — each trigger names its rung, and
+    /// [`AlertTrigger::ALL`] lists every one of them exactly once. A trigger missing
+    /// from that list would read in the §13.2 attribution as a trigger that never
+    /// fired (#376), so the list is checked rather than trusted.
     #[test]
     fn every_trigger_names_its_rung() {
         assert_eq!(AlertTrigger::Sighting.rung(), 1);
@@ -278,6 +527,23 @@ mod tests {
         assert_eq!(AlertTrigger::ConsoleTampered.rung(), 2);
         assert_eq!(AlertTrigger::BodyFound.rung(), TOP_RUNG);
         assert_eq!(AlertTrigger::SecondPostSilent.rung(), TOP_RUNG);
+
+        // Every rung 1..=TOP is reachable, and no trigger is listed twice or fires at
+        // a rung the ladder does not have.
+        for trigger in AlertTrigger::ALL {
+            assert!((1..=TOP_RUNG).contains(&trigger.rung()), "{trigger:?}");
+            assert_eq!(
+                AlertTrigger::ALL.iter().filter(|&&t| t == trigger).count(),
+                1,
+                "{trigger:?} is listed more than once",
+            );
+        }
+        for rung in 1..=TOP_RUNG {
+            assert!(
+                AlertTrigger::ALL.iter().any(|t| t.rung() == rung),
+                "no trigger reaches rung {rung}",
+            );
+        }
     }
 
     /// §7.3 **no decay**, and the ladder never double-reports: a rung only ever

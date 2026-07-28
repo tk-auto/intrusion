@@ -48,7 +48,7 @@
 use crate::ability::{
     AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout, TargetingMode,
 };
-use crate::alert::{Alert, AlertTrigger};
+use crate::alert::{Alert, AlertTrigger, AlertTuning};
 use crate::body::Body;
 
 use crate::category::Category;
@@ -761,6 +761,27 @@ impl State {
     /// close can rely on the fixed default set in [`new`](Self::new).
     pub fn with_rng(mut self, rng: Rng) -> Self {
         self.rng = rng;
+        self
+    }
+
+    /// Run the facility alert on `tuning` instead of the shipped §7.3 **[START]**
+    /// thresholds (#376) — the seam the §13.2 sim sweeps a rung's difficulty through
+    /// without a rebuild.
+    ///
+    /// Applied *after* [`new`](Self::new)'s startup turn, which is safe by
+    /// construction: placement guarantees no guard's turn-one cone covers the spawn
+    /// (§10.6), so the startup turn tallies no contact, and the tuning is written onto
+    /// the ladder rather than replacing it — there is no tally for this to discard,
+    /// and the sliding window is re-pruned against the live thresholds on the next
+    /// turn regardless.
+    ///
+    /// Like [`with_debug`](Self::with_debug) this is **not** part of the
+    /// [`LevelSeed`]: no shared token can carry it, so a swept run is an instrument
+    /// reading rather than a game a player could be handed. A state built without it
+    /// plays the shipped ladder, which is every real run.
+    #[must_use]
+    pub fn with_alert_tuning(mut self, tuning: AlertTuning) -> Self {
+        self.alert.set_tuning(tuning);
         self
     }
 
