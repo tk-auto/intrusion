@@ -25,12 +25,12 @@ it, which makes the committed baseline itself Run's measurement — the control 
 of every other page is a Run column.
 
 From [`baseline.json`](../../../.claude/skills/playtest/baseline.json) at
-`b0828ae+bot-takedowns-316`, `--runs 100 --seed 0 --cap 1000`:
+`36d033f+sim-crouching-379`, `--runs 100 --seed 0 --cap 1000`:
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `usage.run` | 397 | 202 | 190 | 195 |
-| `usage_share.run` | 0.0242 | 0.0091 | 0.0148 | 0.0161 |
+| `usage.run` | 400 | 212 | 167 | 195 |
+| `usage_share.run` | 0.0240 | 0.0094 | 0.0139 | 0.0161 |
 
 ## The reading
 
@@ -38,7 +38,7 @@ From [`baseline.json`](../../../.claude/skills/playtest/baseline.json) at
   does, which is the point of the profiles: the careful one is seen less and so has
   less to run from. `aggressive` and `careless` are seen far more but run less than
   `baseline` — they tolerate a cone rather than spending a turn to break it.
-- **Around 1–2% of spent turns**, against `wait` at 23% for the careful profiles.
+- **Around 1–2% of spent turns**, against `wait` at 24% for the careful profiles.
   Nowhere near dominant, and its cue is the strictest in the module — decisive, but
   only in a situation the bot has to already be losing.
 - **Unlike every other page here, these numbers are gated.** CI re-runs this batch on
@@ -48,3 +48,6 @@ From [`baseline.json`](../../../.claude/skills/playtest/baseline.json) at
 
 - `6cce986+stats-family-347` (#347) — page created. Numbers are the committed
   baseline's, not a fresh measurement: Run is innate, so its control *is* the batch.
+- `7d5dc01+cues-347-remeasured` (#347) — figures re-read off the baseline #382
+  refreshed. `aggressive` runs less than it did (190 → 167): it now has a pose to
+  duck into, so some of what it used to sprint out of it crouches through instead.

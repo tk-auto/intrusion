@@ -57,35 +57,38 @@ pages follow:
 ## The full-kit sweep
 
 A verb measured alone cannot be dominant, so dominance is read from batches holding a
-real three-tech loadout — the §8.3 cap. Two kits cover the six salvaged verbs that were cued first; Lockdown landed after
-the sweep was run and is not in either kit, so its share below is its solo one:
+real three-tech loadout — the §8.3 cap. Two kits cover the six salvaged verbs that share the §8.3 cap of three. Lockdown is
+in neither — a third kit would hold it alone — so the share on its page is a solo one,
+which is the weaker claim and is labelled as such there:
 
 ```
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities camouflage,decoy,confusion --runs 100 --seed 0 --cap 1000
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities autodoors,dephase,pierce-wall --runs 100 --seed 0 --cap 1000
 ```
 
-At `6cce986+stats-family-347`, over both seed blocks and all four temperaments:
+At `7d5dc01+cues-347-remeasured`, over both seed blocks and all four temperaments:
 
 | | kit A — camouflage, decoy, confusion | kit B — autodoors, dephase, pierce-wall |
 |---|---|---|
-| `win_rate` vs innate | **up** in 7 of 8 (+0.00 … +0.15) | flat, ±0.03 but for `cautious` |
-| detections / turn | **down** in 8 of 8, by up to 45% | down in 6 of 8, mildly |
-| `diversity` | **down in 8 of 8** (−0.04 … −0.20) | **up in 6 of 8** (−0.04 … +0.12) |
-| biggest single verb | `confusion`, 0.61%–0.98% of turns | `dephase`, 0.49%–0.71% of turns |
-| all active verbs together | 2.2%–4.4% of turns | 1.9%–3.2% of turns |
+| `win_rate` vs innate | **up** in 8 of 8 (+0.01 … +0.18) | flat, ±0.03 but for `cautious` at +0.11 |
+| detections / turn | **down** in 8 of 8, by up to 50% | mixed, small |
+| `diversity` | **down in 8 of 8** (−0.05 … −0.18) | **up in 6 of 8** (−0.02 … +0.14) |
+| biggest single verb | `confusion`, 0.62%–0.98% of turns | `dephase`, 0.46%–0.69% of turns |
+| all active verbs together | 2.2%–4.4% of turns | 1.8%–3.0% of turns |
 
 **Nothing is dominant.** The largest single active verb anywhere is Confusion at under
 1% of spent turns, every active verb *combined* is under 5%, and `wait` alone is
-17%–27% for the careful temperaments. The ~50% watermark is not remotely in sight.
+17%–26% for the careful temperaments. The ~50% watermark is not remotely in sight.
 
 **The two kits pull the boredom metric in opposite directions**, and that is the
 clearest thing this measurement produced. The hide-and-misdirect kit buys survival and
 makes runs *more alike*; the geometry kit barely moves survival and makes them *less*
-alike. It reproduces across both seed blocks and every temperament, and it matches
-what the individual pages found. It is a finding to hand a human (§13.3), not a
-conclusion: whether "an escape that always works" is a real design problem is exactly
-the judgement the sim is not allowed to make.
+alike. It reproduces across both seed blocks and every temperament, it matches what the
+individual pages found, and it survived a re-measurement on a different bot — #382's
+crouch landed mid-ticket and moved every control column without touching the pattern.
+It is a finding to hand a human (§13.3), not a conclusion: whether "an escape that
+always works" is a real design problem is exactly the judgement the sim is not allowed
+to make.
 
 ## The pages
 

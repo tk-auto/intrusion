@@ -36,35 +36,39 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 100 --seed
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities dephase --runs 100 --seed 0 --cap 1000
 ```
 
-Measured at `a010a3b+pierce-wall-cue-347`, after the crossing fix below.
+Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
+**its own** control, never against another's (§13.4).
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.38 → **0.39** | 0.60 → **0.67** | 0.49 → **0.52** | 0.49 → **0.53** |
-| `turns_to_win_median` | 117.0 → **109.0** | 183.5 → **192.0** | 111.0 → **119.0** | 116.0 → **122.0** |
-| detections / turn | 0.0527 → **0.0470** | 0.0246 → **0.0286** | 0.0605 → **0.0391** | 0.0704 → **0.0524** |
-| `diversity` | 0.6918 → **0.7056** | 0.5399 → **0.5757** | 0.6187 → **0.7133** | 0.5835 → **0.7148** |
-| `timeouts` | 3 → **4** | 2 → **1** | 2 → **1** | 1 → **0** |
+| `win_rate` | 0.38 → **0.38** | 0.60 → **0.64** | 0.50 → **0.52** | 0.49 → **0.52** |
+| `turns_to_win_median` | 117.5 → **104.0** | 183.5 → **192.0** | 111.0 → **119.0** | 116.0 → **127.0** |
+| detections / turn | 0.0527 → **0.0477** | 0.0248 → **0.0286** | 0.0432 → **0.0398** | 0.0704 → **0.0519** |
+| `diversity` | 0.6730 → **0.7083** | 0.4867 → **0.5453** | 0.6230 → **0.7152** | 0.5835 → **0.7164** |
+| `timeouts` | 3 → **4** | 2 → **1** | 1 → **1** | 1 → **0** |
 | `entombed` | 0 → **0** | 0 → **0** | 0 → **0** | 0 → **0** |
-| `usage.dephase` | **100** | **161** | **61** | **61** |
-| `usage_share.dephase` | **0.0057** | **0.0070** | **0.0053** | **0.0052** |
+| `usage.dephase` | **88** | **159** | **59** | **55** |
+| `usage_share.dephase` | **0.0052** | **0.0070** | **0.0051** | **0.0047** |
 
 Disjoint block, `--seed 100 --runs 100`:
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.44 → **0.43** | 0.62 → **0.67** | 0.40 → **0.37** | 0.46 → **0.41** |
-| detections / turn | 0.0406 → **0.0371** | 0.0239 → **0.0256** | 0.0660 → **0.0581** | 0.0590 → **0.0626** |
-| `diversity` | 0.6093 → **0.6611** | 0.4413 → **0.4672** | 0.6043 → **0.6922** | 0.5455 → **0.6274** |
-| `usage.dephase` | **81** | **191** | **56** | **64** |
-| `usage_share.dephase` | **0.0072** | **0.0072** | **0.0050** | **0.0057** |
+| `win_rate` | 0.44 → **0.43** | 0.63 → **0.63** | 0.37 → **0.39** | 0.46 → **0.43** |
+| `turns_to_win_median` | 117.5 → **113.0** | 204.0 → **226.0** | 92.0 → **103.0** | 110.0 → **116.0** |
+| detections / turn | 0.0411 → **0.0393** | 0.0233 → **0.0262** | 0.0683 → **0.0586** | 0.0590 → **0.0611** |
+| `diversity` | 0.5723 → **0.6438** | 0.4394 → **0.4603** | 0.6146 → **0.6865** | 0.5455 → **0.6160** |
+| `timeouts` | 1 → **1** | 1 → **1** | 1 → **0** | 0 → **0** |
+| `entombed` | 0 → **0** | 0 → **0** | 0 → **0** | 0 → **0** |
+| `usage.dephase` | **82** | **172** | **52** | **58** |
+| `usage_share.dephase` | **0.0063** | **0.0068** | **0.0047** | **0.0052** |
 
 ## The reading
 
 - **`diversity` rises in all eight profile-blocks** — the only metric any cue has
   moved consistently in the same direction across both seed blocks, and here it is
-  the largest effect too (`careless` +0.131 and +0.082, `aggressive` +0.095 and
-  +0.088). §13.2 reads diversity as the boredom metric, so a shortcut that varies by
+  the largest effect too (`careless` +0.133 and +0.071, `aggressive` +0.092 and
+  +0.072). §13.2 reads diversity as the boredom metric, so a shortcut that varies by
   facility geometry making runs *less* alike is exactly the shape you would hope for.
   It is also the mirror image of Confusion, which moved the same number the other
   way — a useful contrast, and the strongest argument in this ticket that the metric
@@ -72,13 +76,13 @@ Disjoint block, `--seed 100 --runs 100`:
 - **Win rate is not a finding.** Up in all four at seed 0, down in three of four at
   seed 100. Block noise.
 - **`cautious` presses it two to three times as often** as the striking temperaments
-  (161/191 against 56–64), consistently across both blocks. That reads as the
+  (159/172 against 52–59), consistently across both blocks. That reads as the
   temperament: it walks longer, more careful routes, so more crossings clear the
   saving margin.
 - **The eject never fired.** `entombed` is 0 in every arm, and the invariant test
   over 40 seeds × 4 profiles asserts the sharper form — the player is never stunned,
   and the phase eject is the only thing in the game that stuns.
-- **Not dominant** — 0.50%–0.72% of spent turns.
+- **Not dominant** — 0.47%–0.70% of spent turns.
 
 ## History
 
@@ -93,3 +97,6 @@ Disjoint block, `--seed 100 --runs 100`:
   simply had not come up in these seeds. The crossing now requires walkable floor.
   Presses fell by a few per batch (161 from 169 under `cautious`); the diversity
   finding is unchanged.
+- `7d5dc01+cues-347-remeasured` (#347) — **re-measured on the post-crouch bot**
+  (#382 landed while this branch was open, changing the policy and refreshing the
+  innate baseline, so every control column above moved). The finding survived intact — `diversity` still up in all eight profile-blocks.

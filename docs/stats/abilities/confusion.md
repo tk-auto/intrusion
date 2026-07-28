@@ -34,44 +34,47 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 100 --seed
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities confusion --runs 100 --seed 0 --cap 1000
 ```
 
-Measured at `690fb61+confusion-cue-347`. Each profile against its own control.
+Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
+**its own** control, never against another's (§13.4).
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.38 → **0.44** | 0.60 → **0.68** | 0.49 → **0.55** | 0.49 → **0.51** |
-| `turns_to_win_median` | 117.0 → **123.5** | 183.5 → **207.5** | 111.0 → **116.0** | 116.0 → **115.0** |
-| detections / turn | 0.0527 → **0.0385** | 0.0246 → **0.0205** | 0.0605 → **0.0386** | 0.0704 → **0.0437** |
-| `diversity` | 0.6918 → **0.5915** | 0.5399 → **0.4568** | 0.6187 → **0.5632** | 0.5835 → **0.5610** |
-| `timeouts` | 3 → **3** | 2 → **1** | 2 → **2** | 1 → **1** |
-| `usage.confusion` | **194** | **132** | **104** | **125** |
-| `usage_share.confusion` | **0.0109** | **0.0058** | **0.0087** | **0.0094** |
+| `win_rate` | 0.38 → **0.45** | 0.60 → **0.70** | 0.50 → **0.55** | 0.49 → **0.51** |
+| `turns_to_win_median` | 117.5 → **137.0** | 183.5 → **211.5** | 111.0 → **116.0** | 116.0 → **115.0** |
+| detections / turn | 0.0527 → **0.0384** | 0.0248 → **0.0208** | 0.0432 → **0.0386** | 0.0704 → **0.0437** |
+| `diversity` | 0.6730 → **0.5688** | 0.4867 → **0.4535** | 0.6230 → **0.5632** | 0.5835 → **0.5610** |
+| `timeouts` | 3 → **3** | 2 → **1** | 1 → **2** | 1 → **1** |
+| `usage.confusion` | **193** | **143** | **104** | **125** |
+| `usage_share.confusion` | **0.0107** | **0.0060** | **0.0087** | **0.0094** |
 
 Disjoint block, `--seed 100 --runs 100`:
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.44 → **0.49** | 0.62 → **0.71** | 0.40 → **0.45** | 0.46 → **0.54** |
-| detections / turn | 0.0406 → **0.0356** | 0.0239 → **0.0228** | 0.0660 → **0.0423** | 0.0590 → **0.0495** |
-| `diversity` | 0.6093 → **0.5377** | 0.4413 → **0.4462** | 0.6043 → **0.5426** | 0.5455 → **0.5131** |
-| `usage.confusion` | **152** | **173** | **115** | **135** |
-| `usage_share.confusion` | **0.0096** | **0.0064** | **0.0099** | **0.0102** |
+| `win_rate` | 0.44 → **0.50** | 0.63 → **0.68** | 0.37 → **0.46** | 0.46 → **0.54** |
+| `turns_to_win_median` | 117.5 → **118.5** | 204.0 → **228.0** | 92.0 → **109.0** | 110.0 → **117.0** |
+| detections / turn | 0.0411 → **0.0346** | 0.0233 → **0.0232** | 0.0683 → **0.0434** | 0.0590 → **0.0495** |
+| `diversity` | 0.5723 → **0.5332** | 0.4394 → **0.4156** | 0.6146 → **0.5427** | 0.5455 → **0.5131** |
+| `timeouts` | 1 → **2** | 1 → **0** | 1 → **1** | 0 → **1** |
+| `usage.confusion` | **147** | **172** | **120** | **135** |
+| `usage_share.confusion` | **0.0095** | **0.0067** | **0.0101** | **0.0102** |
 
 ## The reading
 
 This is the first cue whose effect **reproduced across both seed blocks**, and it
 moved two things in opposite directions.
 
-- **Win rate up everywhere, in both blocks** — +0.02 to +0.08 at seed 0, +0.05 to
+- **Win rate up everywhere, in both blocks** — +0.02 to +0.10 at seed 0, +0.05 to
   +0.09 at seed 100, every temperament, no exceptions. Detections per turn fall
-  everywhere too, by as much as a third under `aggressive`. That is a coherent,
+  everywhere too, by as much as a third under `aggressive` on the seed-100 block. That is a coherent,
   ability-shaped effect and not noise.
-- **`diversity` falls, and that is the flag.** Seven of the eight profile-blocks drop
-  (only `cautious` at seed 100 ticks up), and `baseline` loses 0.10 and 0.07. §13.2
+- **`diversity` falls, and that is the flag.** **All eight** profile-blocks drop, and
+  `baseline` loses 0.10 and 0.04. §13.2
   calls diversity the boredom metric: runs are becoming *more alike*. An escape that
   always works makes every hunt end the same way, which is exactly the shape of "a
   puzzle with one answer" — and it is worth more attention than the win rate that
   looks like good news.
-- **Not dominant by the watermark** — 0.58%–1.09% of spent turns, the highest of the
+- **Not dominant by the watermark** — 0.60%–1.07% of spent turns, the highest of the
   cues so far but two orders of magnitude below the ~50% scream. Inside a single run
   the heaviest use is ~2% of that run's turns. **No cue has been tuned to make this
   number look reasonable**, per #347: what is written above is what the §8.3 row
@@ -98,7 +101,7 @@ cargo run --release -p intrusion-sim -- --bot --profile baseline --runs 1 --seed
 Seed 40 is the one to play first: it *won* without the ability and stalls out with
 it. Whether that is the ability, the cue, or the bot's inability to convert bought
 time into progress is a human call (§13.4) — the sim only says it is worth looking
-at. 30 of 100 seeds changed outcome under `baseline`, so there is no shortage of
+at. 31 of 100 seeds changed outcome under `baseline`, so there is no shortage of
 material.
 
 ## History
@@ -107,3 +110,6 @@ material.
   to 104–194 presses per 100-run batch. Win rate up and detections down in every
   profile across both seed blocks; `diversity` down in seven of eight, flagged as
   the boredom signal rather than tuned away.
+- `7d5dc01+cues-347-remeasured` (#347) — **re-measured on the post-crouch bot**
+  (#382 landed while this branch was open, changing the policy and refreshing the
+  innate baseline, so every control column above moved). The finding **strengthened**: `diversity` now falls in all eight profile-blocks rather than seven, and the three flagged seeds reproduce exactly.

@@ -42,35 +42,38 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 100 --seed
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities pierce-wall --runs 100 --seed 0 --cap 1000
 ```
 
-Measured at `a010a3b+pierce-wall-cue-347`.
+Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
+**its own** control, never against another's (§13.4).
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.38 → **0.40** | 0.60 → **0.61** | 0.49 → **0.52** | 0.49 → **0.50** |
-| `turns_to_win_median` | 117.0 → **117.0** | 183.5 → **178.0** | 111.0 → **111.0** | 116.0 → **108.5** |
-| detections / turn | 0.0527 → **0.0521** | 0.0246 → **0.0256** | 0.0605 → **0.0608** | 0.0704 → **0.0706** |
-| `diversity` | 0.6918 → **0.7062** | 0.5399 → **0.5341** | 0.6187 → **0.6328** | 0.5835 → **0.6181** |
-| `timeouts` | 3 → **3** | 2 → **1** | 2 → **2** | 1 → **1** |
-| `usage.pierce_wall` | **12** | **23** | **8** | **13** |
-| `usage_share.pierce_wall` | **0.0008** | **0.0011** | **0.0006** | **0.0011** |
+| `win_rate` | 0.38 → **0.42** | 0.60 → **0.62** | 0.50 → **0.52** | 0.49 → **0.49** |
+| `turns_to_win_median` | 117.5 → **118.5** | 183.5 → **183.5** | 111.0 → **111.0** | 116.0 → **106.0** |
+| detections / turn | 0.0527 → **0.0509** | 0.0248 → **0.0255** | 0.0432 → **0.0467** | 0.0704 → **0.0708** |
+| `diversity` | 0.6730 → **0.6879** | 0.4867 → **0.4712** | 0.6230 → **0.6310** | 0.5835 → **0.6146** |
+| `timeouts` | 3 → **3** | 2 → **1** | 1 → **1** | 1 → **1** |
+| `usage.pierce_wall` | **8** | **19** | **7** | **10** |
+| `usage_share.pierce_wall` | **0.0005** | **0.0009** | **0.0006** | **0.0008** |
 
 Disjoint block, `--seed 100 --runs 100`:
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.44 → **0.42** | 0.62 → **0.61** | 0.40 → **0.39** | 0.46 → **0.48** |
-| detections / turn | 0.0406 → **0.0446** | 0.0239 → **0.0255** | 0.0660 → **0.0545** | 0.0590 → **0.0538** |
-| `diversity` | 0.6093 → **0.6198** | 0.4413 → **0.4702** | 0.6043 → **0.6435** | 0.5455 → **0.5873** |
-| `usage.pierce_wall` | **21** | **24** | **15** | **18** |
-| `usage_share.pierce_wall` | **0.0015** | **0.0009** | **0.0014** | **0.0016** |
+| `win_rate` | 0.44 → **0.42** | 0.63 → **0.62** | 0.37 → **0.37** | 0.46 → **0.48** |
+| `turns_to_win_median` | 117.5 → **115.0** | 204.0 → **198.0** | 92.0 → **92.0** | 110.0 → **113.5** |
+| detections / turn | 0.0411 → **0.0458** | 0.0233 → **0.0241** | 0.0683 → **0.0572** | 0.0590 → **0.0540** |
+| `diversity` | 0.5723 → **0.5934** | 0.4394 → **0.4369** | 0.6146 → **0.6493** | 0.5455 → **0.5871** |
+| `timeouts` | 1 → **1** | 1 → **1** | 1 → **0** | 0 → **0** |
+| `usage.pierce_wall` | **15** | **21** | **11** | **16** |
+| `usage_share.pierce_wall` | **0.0011** | **0.0009** | **0.0011** | **0.0014** |
 
 ## The reading
 
-- **The slot is non-zero, and that is most of what this measurement proves.** 8–24
-  bores per 100-run batch, 0.06%–0.16% of spent turns — the smallest share of the
-  five cues by some way.
-- **The cue is shy, and it is worth saying so plainly.** Only 11 of 100 `baseline`
-  runs bored at all, and no run spent more than its three uses (most spent one). So
+- **The slot is non-zero, and that is most of what this measurement proves.** 7–21
+  bores per 100-run batch, 0.05%–0.14% of spent turns — the smallest share of the
+  six cues by some way.
+- **The cue is shy, and it is worth saying so plainly.** Only 8 of 100 `baseline`
+  runs bored at all, and **no run spent more than one** of its three uses. So
   the honest statement is not "Pierce Wall is a small ability" but *"this cue asks a
   high price and the facility rarely offers it"* — the exact "weak ability **or** shy
   cue" ambiguity #347 warns the histogram now carries. `BORE_MARGIN` is a **[START]**
@@ -78,7 +81,7 @@ Disjoint block, `--seed 100 --runs 100`:
   quiet edit to the constant here.
 - **Nothing else moved.** Win rate within ±0.03 in both directions across the two
   blocks; detections per turn flat at seed 0 and mixed at seed 100. `diversity` is up
-  in seven of eight profile-blocks, the same mild direction Dephase moved it, which
+  in six of eight profile-blocks, the same mild direction Dephase moved it, which
   makes sense — both are shortcuts through geometry, so both make routes differ more
   between runs.
 - **No pockets, no bores while hunted.** The invariant test re-derives both from the
@@ -100,3 +103,6 @@ long as the throw. The crossing now requires the far side to be walkable floor, 
   to 8–24 bores per 100-run batch. No headline metric moved; the cue is shy by
   construction and the shy-versus-weak question is left open for #349 rather than
   tuned away.
+- `7d5dc01+cues-347-remeasured` (#347) — **re-measured on the post-crouch bot**
+  (#382 landed while this branch was open, changing the policy and refreshing the
+  innate baseline, so every control column above moved). The cue reads **shyer** than before: 8 of 100 `baseline` runs bore, and no run now spends more than one of its three uses.

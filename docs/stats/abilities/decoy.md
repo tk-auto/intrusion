@@ -40,35 +40,36 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 100 --seed
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities decoy --runs 100 --seed 0 --cap 1000
 ```
 
-Measured at `f7a514a+decoy-cue-347`. Each profile against **its own** control, never
-against another's (§13.4).
+Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
+**its own** control, never against another's (§13.4).
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.38 → **0.36** | 0.60 → **0.64** | 0.49 → **0.51** | 0.49 → **0.53** |
-| `turns_to_win_median` | 117.0 → **110.0** | 183.5 → **211.0** | 111.0 → **111.0** | 116.0 → **133.0** |
-| detections / turn | 0.0527 → **0.0436** | 0.0246 → **0.0246** | 0.0605 → **0.0408** | 0.0704 → **0.0534** |
-| `diversity` | 0.6918 → **0.6839** | 0.5399 → **0.5314** | 0.6187 → **0.6365** | 0.5835 → **0.6335** |
-| `timeouts` | 3 → **2** | 2 → **0** | 2 → **1** | 1 → **0** |
-| `usage.decoy` | **57** | **98** | **27** | **40** |
-| `usage_share.decoy` | **0.0038** | **0.0044** | **0.0024** | **0.0033** |
+| `win_rate` | 0.38 → **0.35** | 0.60 → **0.64** | 0.50 → **0.52** | 0.49 → **0.53** |
+| `turns_to_win_median` | 117.5 → **116.0** | 183.5 → **206.0** | 111.0 → **111.0** | 116.0 → **133.0** |
+| detections / turn | 0.0527 → **0.0433** | 0.0248 → **0.0250** | 0.0432 → **0.0406** | 0.0704 → **0.0534** |
+| `diversity` | 0.6730 → **0.6598** | 0.4867 → **0.4809** | 0.6230 → **0.6360** | 0.5835 → **0.6335** |
+| `timeouts` | 3 → **2** | 2 → **0** | 1 → **1** | 1 → **0** |
+| `usage.decoy` | **56** | **95** | **26** | **40** |
+| `usage_share.decoy` | **0.0038** | **0.0042** | **0.0023** | **0.0033** |
 
-Re-run on the disjoint block `--seed 100 --runs 100`, because the seed-0 detection
-drop looked too good:
+Disjoint block, `--seed 100 --runs 100`:
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.44 → **0.45** | 0.62 → **0.64** | 0.40 → **0.36** | 0.46 → **0.43** |
-| detections / turn | 0.0406 → **0.0410** | 0.0239 → **0.0252** | 0.0660 → **0.0699** | 0.0590 → **0.0728** |
-| `diversity` | 0.6093 → **0.6592** | 0.4413 → **0.4298** | 0.6043 → **0.6144** | 0.5455 → **0.5803** |
-| `usage.decoy` | **57** | **104** | **42** | **45** |
-| `usage_share.decoy` | **0.0043** | **0.0042** | **0.0037** | **0.0036** |
+| `win_rate` | 0.44 → **0.44** | 0.63 → **0.65** | 0.37 → **0.35** | 0.46 → **0.43** |
+| `turns_to_win_median` | 117.5 → **118.0** | 204.0 → **225.0** | 92.0 → **90.0** | 110.0 → **107.0** |
+| detections / turn | 0.0411 → **0.0424** | 0.0233 → **0.0242** | 0.0683 → **0.0562** | 0.0590 → **0.0728** |
+| `diversity` | 0.5723 → **0.6169** | 0.4394 → **0.4216** | 0.6146 → **0.6155** | 0.5455 → **0.5803** |
+| `timeouts` | 1 → **1** | 1 → **3** | 1 → **1** | 0 → **1** |
+| `usage.decoy` | **60** | **99** | **34** | **45** |
+| `usage_share.decoy` | **0.0046** | **0.0039** | **0.0033** | **0.0036** |
 
 ## The reading
 
-- **The slot stops reading a false zero.** Every temperament presses it, 27–104
+- **The slot stops reading a false zero.** Every temperament presses it, 26–99
   times over 100 runs, and the share is stable across two disjoint seed blocks
-  (0.24%–0.44%). Whatever else is uncertain, the cue fires.
+  (0.23%–0.46%). Whatever else is uncertain, the cue fires.
 - **Nothing moved reliably.** The seed-0 block showed detections per turn falling
   in three profiles of four — and the seed-100 block showed them *rising* in three
   of four. Win rate is mixed in both directions in both blocks. On this evidence the
@@ -90,3 +91,6 @@ drop looked too good:
 - `f7a514a+decoy-cue-347` (#347) — cue written; slot went from a structural zero
   (the sim never granted the tech) to 27–104 presses per 100-run batch. No headline
   metric moved beyond seed-block wobble.
+- `7d5dc01+cues-347-remeasured` (#347) — **re-measured on the post-crouch bot**
+  (#382 landed while this branch was open, changing the policy and refreshing the
+  innate baseline, so every control column above moved). Unchanged in substance: the cue still fires 26–99 times a batch and still moves no headline metric beyond seed-block wobble.

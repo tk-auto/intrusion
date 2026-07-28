@@ -34,44 +34,46 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 100 --seed
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities lockdown --runs 100 --seed 0 --cap 1000
 ```
 
-Measured at `3d9f690+lockdown-cue-347`.
+Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
+**its own** control, never against another's (§13.4).
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.38 → **0.36** | 0.60 → **0.59** | 0.49 → **0.49** | 0.49 → **0.46** |
-| `turns_to_win_median` | 117.0 → **110.0** | 183.5 → **172.0** | 111.0 → **111.0** | 116.0 → **101.0** |
-| detections / turn | 0.0527 → **0.0496** | 0.0246 → **0.0255** | 0.0605 → **0.0475** | 0.0704 → **0.0484** |
-| `diversity` | 0.6918 → **0.6316** | 0.5399 → **0.4860** | 0.6187 → **0.5289** | 0.5835 → **0.5431** |
-| `timeouts` | 3 → **2** | 2 → **1** | 2 → **0** | 1 → **0** |
-| `usage.lockdown` | **103** | **122** | **88** | **90** |
-| `usage_share.lockdown` | **0.0073** | **0.0056** | **0.0081** | **0.0086** |
+| `win_rate` | 0.38 → **0.36** | 0.60 → **0.59** | 0.50 → **0.49** | 0.49 → **0.46** |
+| `turns_to_win_median` | 117.5 → **115.0** | 183.5 → **172.0** | 111.0 → **111.0** | 116.0 → **101.0** |
+| detections / turn | 0.0527 → **0.0501** | 0.0248 → **0.0256** | 0.0432 → **0.0476** | 0.0704 → **0.0484** |
+| `diversity` | 0.6730 → **0.6098** | 0.4867 → **0.4436** | 0.6230 → **0.5275** | 0.5835 → **0.5431** |
+| `timeouts` | 3 → **2** | 2 → **1** | 1 → **0** | 1 → **0** |
+| `usage.lockdown` | **102** | **128** | **89** | **90** |
+| `usage_share.lockdown` | **0.0072** | **0.0056** | **0.0082** | **0.0086** |
 
 Disjoint block, `--seed 100 --runs 100`:
 
 | Metric | baseline | cautious | aggressive | careless |
 |---|---|---|---|---|
-| `win_rate` | 0.44 → **0.37** | 0.62 → **0.59** | 0.40 → **0.42** | 0.46 → **0.49** |
-| `turns_to_win_median` | 115.0 → **109.0** | 192.0 → **192.0** | 97.5 → **101.5** | 110.0 → **117.0** |
-| detections / turn | 0.0406 → **0.0384** | 0.0239 → **0.0252** | 0.0660 → **0.0625** | 0.0590 → **0.0454** |
-| `diversity` | 0.6093 → **0.6000** | 0.4413 → **0.4020** | 0.6043 → **0.5402** | 0.5455 → **0.5102** |
-| `usage.lockdown` | **100** | **143** | **85** | **99** |
-| `usage_share.lockdown` | **0.0082** | **0.0062** | **0.0082** | **0.0092** |
+| `win_rate` | 0.44 → **0.36** | 0.63 → **0.61** | 0.37 → **0.41** | 0.46 → **0.49** |
+| `turns_to_win_median` | 117.5 → **115.5** | 204.0 → **195.0** | 92.0 → **97.0** | 110.0 → **117.0** |
+| detections / turn | 0.0411 → **0.0441** | 0.0233 → **0.0246** | 0.0683 → **0.0619** | 0.0590 → **0.0454** |
+| `diversity` | 0.5723 → **0.5876** | 0.4394 → **0.3805** | 0.6146 → **0.5440** | 0.5455 → **0.5102** |
+| `timeouts` | 1 → **1** | 1 → **2** | 1 → **2** | 0 → **0** |
+| `usage.lockdown` | **104** | **139** | **88** | **99** |
+| `usage_share.lockdown` | **0.0078** | **0.0061** | **0.0083** | **0.0092** |
 
 ## The reading
 
-- **`diversity` falls in all eight profile-blocks** (−0.01 … −0.09) — the third
+- **`diversity` falls in seven of eight profile-blocks** (−0.03 … −0.10) — the third
   ability to move the boredom metric down, alongside Confusion and Camouflage, and
   against Dephase and Pierce Wall which move it up. The pattern across all seven cued
   verbs is now hard to miss: the abilities that **answer a hunt** make runs more
   alike, and the abilities that **change the geometry** make them less alike.
-- **Win rate leans down** — six of eight profile-blocks, and `baseline` loses 0.02 and
-  0.07. It is the only cue here whose win rate leans negative on both blocks, and the
+- **Win rate leans down** — five of eight profile-blocks, and `baseline` loses 0.02 and
+  0.08. It is the only cue here whose win rate leans negative on both blocks, and the
   §8.3 row predicts exactly that: your own lock is never refused but it *is* paid for,
   a turn at a time, and a bot that seals the ground it is fleeing across will meet its
   own handiwork. Whether this cue is spending the ability badly, or the ability is
   genuinely double-edged, is precisely the shy-cue ambiguity #349's floor sweep exists
   to settle.
-- **Wins get faster when they happen** (`baseline` median 117 → 110, `careless` 116 →
+- **Wins get faster when they happen** (`baseline` median 117.5 → 115, `careless` 116 →
   101 at seed 0) and every temperament times out less at seed 0. Fewer wins, quicker
   ones — a real §13.3 flag rather than a verdict.
 - **Not dominant** — 0.56%–0.92% of spent turns.
@@ -89,3 +91,6 @@ Disjoint block, `--seed 100 --runs 100`:
   the test caught the cue firing from *inside* a doorway — sealing the one cell the
   bot was halfway through — which the cue now refuses. `diversity` down in all eight
   profile-blocks, win rate leaning down, wins faster when they come.
+- `7d5dc01+cues-347-remeasured` (#347) — **re-measured on the post-crouch bot**
+  (#382 landed while this branch was open, changing the policy and refreshing the
+  innate baseline, so every control column above moved). Slightly softened: `diversity` now falls in seven of eight profile-blocks rather than all eight, and the win-rate lean is five of eight.
