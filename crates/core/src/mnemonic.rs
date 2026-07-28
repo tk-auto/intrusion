@@ -32,11 +32,27 @@
 //!
 //! # The rule
 //!
-//! Left to right through the bar, each name claims the first of its own characters
-//! that is neither **reserved** (bound by §11.6's own tables — a mnemonic must never
-//! shadow a movement or system key) nor already claimed by an entry to its left. A
-//! name with nothing left to claim simply gets **none**: its digit stands alone and
-//! nothing is silently reassigned.
+//! **An entry claims its own initial, unless another entry in the same run took it
+//! first.** That one sentence is the whole rule a player needs, and it is the rule
+//! because a skip a player cannot *see* breaks the safety argument above: point 2
+//! only holds if the reason a letter was passed over is derivable from the bar, and
+//! the bar shows the run's four entries and nothing else.
+//!
+//! Mechanically, left to right, each name claims the first of its own characters
+//! that is neither already claimed by an entry to its left nor **reserved** (bound
+//! by §11.6's own tables — a mnemonic must never shadow a movement or system key).
+//! A name with nothing left to claim simply gets **none**: its digit stands alone
+//! and nothing is silently reassigned.
+//!
+//! The reservation is the part that has to stay *invisible in practice*, and #368 is
+//! what it costs when it does not. Movement used to include the vi keys, so `Lock`
+//! could never claim `l` — in any loadout, alone or not, with nothing on screen to
+//! explain the `o` it showed instead. The fix was upstream: §11.6's movement is the
+//! arrows and the numpad, so the reserved set is now `w` `.` `m` `n` `?`, which
+//! collides with no initial in the catalogue. The reservation stays as the
+//! disjointness guarantee, and `every_ability_alone_claims_its_own_initial` is the
+//! trip-wire that fails at the gate the day a new ability or a new binding makes it
+//! bite again.
 
 use crate::input::{input_for_key, ui_command_for_key};
 
@@ -44,9 +60,14 @@ use crate::input::{input_for_key, ui_command_for_key};
 ///
 /// Asked of the **tables themselves** rather than a copied list, so a key added to
 /// either one is off-limits here from the moment it is added — the drift a
-/// hand-written set of reserved letters would invite. `w` waits, `hjkl` step and `m`
-/// / `?` / `n` are the UI toggles; a mnemonic that shadowed one of those would make a
+/// hand-written set of reserved letters would invite. `w` and `.` wait and `m` / `?`
+/// / `n` are the UI toggles; a mnemonic that shadowed one of those would make a
 /// mis-key routine in a game where a mis-key ends a run.
+///
+/// It is a **guarantee, not a rule the player has to know** (#368). No bar name in
+/// the catalogue starts with a reserved character, so this never moves a letter off
+/// an initial today, and the test below fails at the gate on the day something makes
+/// it start to — because a skip nobody can see is the defect, not the skip.
 fn is_reserved(ch: char) -> bool {
     let key = ch.to_string();
     input_for_key(&key).is_some() || ui_command_for_key(&key).is_some()
@@ -132,18 +153,42 @@ mod tests {
         }
     }
 
-    /// A mnemonic never shadows a §11.6 key. `Lock` is the case in the shipping
-    /// catalogue that proves the check is doing work rather than passing by luck: `l`
-    /// steps east and `k` steps north, so the name's own initial is unavailable and
-    /// the claim falls through to `o`.
+    /// #368's rule, over the whole catalogue: **an ability alone in a loadout answers
+    /// to its own initial.** Nothing but another held entry may push a mnemonic off
+    /// its first letter, because nothing else is on the bar for a player to read the
+    /// reason off. `Lock` is the case that used to fail — `l` stepped east, so it
+    /// showed `o` and no loadout could give it back.
+    #[test]
+    fn every_ability_alone_claims_its_own_initial() {
+        for id in AbilityId::ALL {
+            let name = id.bar_name();
+            let initial = name
+                .chars()
+                .next()
+                .expect("a bar name is never empty")
+                .to_ascii_lowercase();
+            assert_eq!(
+                letters(&[name]),
+                vec![Some(initial)],
+                "{name} alone must answer to {initial:?}",
+            );
+        }
+    }
+
+    /// A mnemonic never shadows a §11.6 key — the reservation is still there, as the
+    /// guarantee behind [`the_mnemonics_and_the_key_tables_are_disjoint`]. It just no
+    /// longer fires on any name the catalogue ships (#368), so the case is written
+    /// with stand-in names: the rule is a fact about names, and the catalogue should
+    /// not be able to make a hole in the test.
     #[test]
     fn a_reserved_letter_is_skipped_over() {
-        assert_eq!(letters(&["Lock"]), vec![Some('o')]);
-        // Two of its four characters are reserved, and it survives both: with `o`
-        // claimed ahead of it too, it falls again to `c`. (`Oboe` is a stand-in — no
-        // shipping bar name claims `o` — because the rule is a fact about names, and
-        // the catalogue should not be able to make a hole in the test.)
-        assert_eq!(letters(&["Oboe", "Lock"]), vec![Some('o'), Some('c')]);
+        // `w` waits, so `Ward` falls through to `a`; `.` and the UI letters are the
+        // rest of the reserved set.
+        assert_eq!(letters(&["Ward"]), vec![Some('a')]);
+        assert_eq!(letters(&["Mist"]), vec![Some('i')]);
+        // Reserved *and* claimed, stacked: `Warp` cannot take `w`, and with `a` gone
+        // ahead of it too it falls again to `r`.
+        assert_eq!(letters(&["Aegis", "Warp"]), vec![Some('a'), Some('r')]);
     }
 
     /// The rule is **total**: a name with nothing left to claim gets `None` rather
@@ -151,14 +196,46 @@ mod tests {
     /// whole reason the digit is the primary key.
     #[test]
     fn a_name_with_nothing_left_to_claim_gets_no_letter() {
-        // `Lock` with `o` and `c` both gone ahead of it: `l` and `k` are reserved, so
-        // there is nothing of the name left to take.
+        // `Warm` with `a` and `r` gone ahead of it: `w` and `m` are reserved, so there
+        // is nothing of the name left to take.
         assert_eq!(
-            letters(&["Oboe", "Cell", "Lock"]),
-            vec![Some('o'), Some('c'), None],
+            letters(&["Aegis", "Rig", "Warm"]),
+            vec![Some('a'), Some('r'), None],
         );
         // A name made entirely of reserved characters claims nothing from the start.
-        assert_eq!(letters(&["whlkj"]), vec![None]);
+        assert_eq!(letters(&["wmn?."]), vec![None]);
+    }
+
+    /// #368's disjointness criterion, asserted over the **whole catalogue** rather
+    /// than by inspection: no loadout a run can hold produces a mnemonic that would
+    /// fire the same press as a movement, wait or UI key. That is what makes it safe
+    /// for a letter to reach the turn loop at all (§11.6 — a mis-key ends a run), and
+    /// it is checked here against the live tables, so a binding added to either side
+    /// is caught by this test rather than by a player.
+    #[test]
+    fn the_mnemonics_and_the_key_tables_are_disjoint() {
+        for id in AbilityId::ALL {
+            let name = id.bar_name();
+            // Every letter the name could ever claim, in *any* loadout: the fallback
+            // only ever walks rightwards through its own characters, so the whole name
+            // bounds the set.
+            for ch in name.chars().map(|c| c.to_ascii_lowercase()) {
+                let key = ch.to_string();
+                let claimable = !is_reserved(ch);
+                if claimable {
+                    assert_eq!(
+                        crate::input::input_for_key(&key),
+                        None,
+                        "{name}: {ch:?} is claimable and also steps",
+                    );
+                    assert_eq!(
+                        crate::input::ui_command_for_key(&key),
+                        None,
+                        "{name}: {ch:?} is claimable and also toggles a panel",
+                    );
+                }
+            }
+        }
     }
 
     /// Every claim is a real position in its own name, and the letter read back from

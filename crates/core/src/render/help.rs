@@ -624,7 +624,10 @@ fn control_rows() -> Vec<(String, String)> {
         // layout, while the top row's digits went to the abilities below. The keys
         // column has 22 cells, which is why the digits themselves are left to §11.6
         // and to the numpad's own printing.
-        ("arrows / hjkl / num".to_string(), "move".to_string()),
+        // `hjkl` left the row with the binding (#368): the vi keys stepped for a
+        // while, and the alphabet they held was worth more to the ability mnemonics
+        // than the comfort was.
+        ("arrows / num".to_string(), "move".to_string()),
         ("w / num 5 / .".to_string(), "wait & sense".to_string()),
         // The abilities are a standing control after all (#359): *which* ability a
         // digit fires is the run's business — the Abilities tab pairs each with its
@@ -862,7 +865,7 @@ mod tests {
         for glyph in [Terrain::DuctEntry.glyph(), Terrain::Exit.glyph(), '}', '$'] {
             assert!(text.contains(glyph), "the legend shows {glyph:?}");
         }
-        for keys in ["arrows / hjkl / num", "w / num 5 / .", "1234"] {
+        for keys in ["arrows / num", "w / num 5 / .", "1234"] {
             assert!(text.contains(keys), "the controls show {keys:?}");
         }
         // The Legend tab is not the Level-info tab: its modifier section is elsewhere.
