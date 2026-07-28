@@ -55,6 +55,8 @@ The flags (full table in [`crates/sim/README.md`](../../../crates/sim/README.md)
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
 | `--script MOVES` | replay a fixed input list every run (`N`/`E`/`S`/`W` step, `.` wait) — a `(seed, script)` replay (§12.4), not a balance signal | empty |
+| `--abilities LIST` | the **whole** salvaged loadout every run holds, comma-separated (`camouflage,decoy`), on top of the innate set — at most three (§8.3). Without it a batch holds Run alone, so every tech verb reads a structural zero | innate only |
+| `--without LIST` | the same loadout with these verbs removed — the without-form, for asking what one verb is worth by taking it out of a kit (#257). Innate abilities cannot be dropped | empty |
 
 - **Almost always run `--bot`.** Without it the empty default script is the *idle
   baseline* — how often patrols stumble onto a player who never moves — useful as
@@ -190,6 +192,53 @@ you meant to make, and refresh. Run it locally before pushing with:
 ./scripts/baseline.py                 # exit 1 and a field-by-field diff on drift
 ```
 
+## 4a. Comparing a single ability — with/without, before/after
+
+The baseline pins the **innate** batch (Run and nothing salvaged), so every salvaged
+verb reads a structural zero in it. To measure one, run a pair that differs in exactly
+one thing and diff the summaries yourself — there is no comparison script, and there
+is deliberately no committed baseline per ability: the loadout space is far too large
+to pin, and a snapshot nothing re-runs is worse than none.
+
+**With/without one verb** — what does holding it change?
+
+```
+# control: the innate loadout. At --runs 100 --seed 0 --cap 1000 this IS the
+# committed baseline block, so it costs nothing to run and cannot drift unnoticed.
+cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 100 --seed 0 --cap 1000 > /tmp/ctrl-<NAME>.jsonl
+# arm: the same batch holding the one verb under test
+cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities <VERB> --runs 100 --seed 0 --cap 1000 > /tmp/arm-<NAME>.jsonl
+```
+
+**Before/after a change** — did the change move the numbers? Same flags on both
+sides, one on `main` and one on the branch: run the batch, save the summary, switch,
+rebuild, run again. Never compare across different `--seed/--runs/--cap`, and never
+against a batch you did not run yourself on the same commit as the code you are
+judging.
+
+Rules that make the numbers mean something:
+
+- **All four temperaments**, each against **its own** control (§13.4 — never against
+  another profile's).
+- **Rates, not raw totals** for anything that scales with run length. Total spent
+  turns is not in the summary: sum the per-run `turns` from the JSONL rows.
+- **Re-run a marginal delta on a disjoint seed block** (`--seed 100`) before believing
+  it. A 100-seed batch wobbles several points on its own, and more than one effect
+  that looked real at `--seed 0` has failed this — including a 25% detection drop that
+  reversed sign.
+- **Dominance needs competition.** A verb measured alone cannot be dominant, so read
+  shares from a full three-tech kit (`--abilities a,b,c`), not from a solo arm.
+- **A cue's number is not the ability's number.** Once an ability has a cue, a low
+  share means "weak ability **or** shy cue" and no batch here can separate them; the
+  instrument that can is a cue-floor sweep (#349). Say which you are claiming.
+
+**Where the numbers go.** Per-ability results belong in
+[`docs/stats/abilities/<verb>.md`](../../../docs/stats/abilities/README.md) — current
+table at the top, a one-line `## History` entry per measurement, the exact commands and
+the commit recorded. Refresh the page in the same PR as the change that moved it. That
+directory is exhaustive over `AbilityId` on purpose: an ability with no cue still has a
+page saying so.
+
 ## 5. The report — flag, never judge
 
 Produce a short report, in this order:
@@ -284,9 +333,10 @@ a batch where that number collapsed toward zero would be the one-answer smell.
 **Suspicious seeds — go play these:**
 
 - **Every ability but `wait`/`run` never exercised** across all three profiles.
-  Flagged as *never exercised*, not *useless* — the sim boots the bare
-  innate-only loadout and the bot's policy reaches for nothing else, so this
-  measures the bot, not the game (§13.4). Teaching it a cue per ability is #346/#347.
+  Flagged as *never exercised*, not *useless* — this batch runs the bare innate-only
+  loadout, so the tech is not held rather than not wanted (§13.4). Every activated
+  verb but Lockdown now has a cue (#346/#347); to see one fire, grant it with
+  `--abilities` and follow §4a.
 - **`takedowns 0` under every temperament.** Deliberate takedown play is #316's
   ticket; until it lands the row honestly reads zero rather than measuring a
   contrived hunt.

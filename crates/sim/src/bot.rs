@@ -58,7 +58,8 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use intrusion_core::{
-    Cell, Direction, Facility, GuardPerception, GuardState, Input, State, Terrain,
+    AbilityId, AbilityState, Cell, Direction, Facility, GuardPerception, GuardState, Input, State,
+    Terrain,
 };
 
 use crate::cue::{Bid, Intent, Moment};
@@ -193,6 +194,14 @@ impl PlayerPolicy for StealthBot {
             return input;
         }
 
+        // 0.5. Phased inside a solid: get out, before anything else is considered.
+        // A duration that expires in there costs a safety eject *plus* a stun as long
+        // as the throw (§8.3), which is worse than anything the other branches are
+        // weighing — including being seen, since the phase conceals nothing anyway.
+        if let Some(input) = self.leave_the_wall(state) {
+            return input;
+        }
+
         // 1. Flee: nothing else matters while a guard has you (§7.6).
         if being_hunted(state, &danger) {
             return self.flee(state, &danger, &blocked);
@@ -261,16 +270,16 @@ impl StealthBot {
         // there only bumps a door that never opens — a free action that spends no
         // turn and so never lets the hunt cool, stalling the run out to the input
         // cap instead of breaking contact.
-        if let Some(input) = self.cue(state, Intent::Flee, refuge) {
+        // Nowhere to run to: back away from the nearest guard, off watched cells when
+        // it can, and hold only if truly cornered. Settled *before* the cues, because
+        // the step this plan would take is itself a fact a cue needs — an ability that
+        // lands in a cell must not aim into the bot's own escape (§8.3, Decoy).
+        let step = refuge.or_else(|| retreat_step(state, danger, blocked));
+
+        if let Some(input) = self.cue(state, Intent::Flee, refuge, step, None) {
             return input;
         }
-        if let Some(dir) = refuge {
-            return Input::Step(dir);
-        }
-
-        // Nowhere to run to and nothing to cloak with: back away from the nearest
-        // guard, off watched cells when it can, and hold only if truly cornered.
-        retreat_step(state, danger, blocked).map_or(Input::Wait, Input::Step)
+        step.map_or(Input::Wait, Input::Step)
     }
 
     /// Take cover from a closing patrol before it ever sees you: when a guard is
@@ -371,7 +380,7 @@ impl StealthBot {
         // concealed from every viewer, so `being_hunted` will not fire and the hold
         // keeps going until the coast clears. A real cupboard still wins: the cue
         // only speaks when `refuge` is `None`.
-        if let Some(input) = self.cue(state, Intent::TakeCover, refuge) {
+        if let Some(input) = self.cue(state, Intent::TakeCover, refuge, refuge, None) {
             return Some(input);
         }
         // Last and weakest (§10.3): no cupboard within reach and nothing to cloak
@@ -737,17 +746,61 @@ impl StealthBot {
             (Intent::Pursue, exit_cell(state).into_iter().collect())
         };
 
+        // The route this plan would walk, worked out before the cues rather than
+        // after: an ability that lands in a cell needs to know where the bot is going,
+        // and one that offers a *better way through* needs the router's own costs to
+        // weigh itself against (§8.3). Both come off one Dijkstra, shared rather than
+        // re-derived.
+        let field = self.field(state, &goals, danger, blocked, self.profile.pursue);
+        let step = self.step_down(state, &field, danger, blocked, self.profile.pursue, &[]);
+        // **No crossing while the sprint is up.** A phased crossing is costed in
+        // single steps — in at one turn, out at the next, with a turn of the window
+        // spare — and Run moves two cells a step (§8.3), which overshoots the far side
+        // and leaves the bot shuffling across the hole until the duration dies inside
+        // it. Nothing in the catalogue forbids holding both; what the geometry forbids
+        // is *crossing* on them, so the offer is withdrawn rather than the ability.
+        let sprinting = matches!(
+            state.ability_state(AbilityId::Run),
+            AbilityState::Active { .. }
+        );
+        let crossing = (!sprinting)
+            .then(|| {
+                crossing(
+                    state.layout().facility(),
+                    state.memory(),
+                    &field,
+                    state.player(),
+                )
+            })
+            .flatten();
+
         // Pushing on is a moment too, and one most of the salvaged tech is *for*
         // (§8.3: bore a shortcut, seal the doors ahead, draw a patrol off the route).
-        // No cue answers it yet — those land one at a time, each with its own metric
-        // delta (#347) — but the plan is named and the seam is asked, so the first
-        // one to arrive needs no new call site. There is no cover on offer here, so
-        // no refuge to weigh against.
-        if let Some(input) = self.cue(state, intent, None) {
+        // There is no cover on offer here, so no refuge to weigh against.
+        if let Some(input) = self.cue(state, intent, None, step, crossing) {
             return input;
         }
 
-        let Some(dir) = self.descend(state, &goals, danger, blocked, self.profile.pursue) else {
+        // The router cannot plan through a wall, so the crossing the cue bought is
+        // walked here: while the phase is up, step into the solid rather than round
+        // it. Getting *out* the far side is settled earlier still, before every other
+        // plan (§8.3 — a duration that expires inside a solid costs the eject).
+        // **Only with enough of the window left to come out the other side.** The
+        // crossing is two steps, in and out, so stepping into a solid with one turn
+        // left is walking into the eject on purpose (§8.3) — and the turn the bot
+        // meant to spend crossing is not always the turn it gets, since anything
+        // higher up the ladder (a patrol closing, a bench to duck behind) can take it
+        // first. Checking the remaining duration is what makes the crossing safe
+        // whoever steals the turn.
+        if let AbilityState::Active { remaining } = state.ability_state(AbilityId::Dephase) {
+            if remaining >= 2 {
+                if let Some((dir, _)) = crossing {
+                    return Input::Step(dir);
+                }
+            }
+        }
+
+        let Some(dir) = step else {
             // No safe progress. Standing still next to a patrol is how you get
             // walked into, so if one is close, sidestep to open ground; otherwise
             // hold a beat and let the cone sweep past (waiting also widens the
@@ -772,6 +825,36 @@ impl StealthBot {
         Input::Step(dir)
     }
 
+    /// Step out of the solid the bot is phased inside, or `None` when it is not in one
+    /// (which is almost always).
+    ///
+    /// The whole cost of Dephase lives here (§8.3): the walk-through is free while the
+    /// duration lasts and brutal the moment it does not, so a bot standing in a wall
+    /// has exactly one plan. It leaves by the nearest **walkable** neighbour, which is
+    /// the far side it phased in for, or the side it came from if the far side has
+    /// gone — either beats the eject.
+    fn leave_the_wall(&self, state: &State) -> Option<Input> {
+        let player = state.player();
+        let facility = state.layout().facility();
+        // Inside a solid only. Standing on floor, phased or not, is somebody else's
+        // decision.
+        if !facility
+            .terrain(player)
+            .is_some_and(|t| t.blocks_movement())
+        {
+            return None;
+        }
+        Direction::ALL
+            .iter()
+            .find(|&&dir| {
+                player
+                    .step(dir)
+                    .and_then(|cell| facility.terrain(cell))
+                    .is_some_and(|t| !t.blocks_movement())
+            })
+            .map(|&dir| Input::Step(dir))
+    }
+
     /// Put this moment to every held ability's cue (§13.2/#346) and return the
     /// winning bid's input, or `None` to spend the turn stepping or waiting as
     /// usual.
@@ -786,12 +869,21 @@ impl StealthBot {
     /// delta rather than an urge. Weighing the two against each other is fuzzy, and
     /// deliberately left fuzzy — a common currency between them is a much larger
     /// change and probably a worse one.
-    fn cue(&mut self, state: &State, intent: Intent, refuge: Option<Direction>) -> Option<Input> {
+    fn cue(
+        &mut self,
+        state: &State,
+        intent: Intent,
+        refuge: Option<Direction>,
+        route: Option<Direction>,
+        crossing: Option<(Direction, u64)>,
+    ) -> Option<Input> {
         let bid = Moment {
             state,
             intent,
             refuge,
             nearest_guard: nearest_perceived_guard(state),
+            route,
+            crossing,
         }
         .best(&self.profile)?;
         self.last_bid = Some(bid);
@@ -851,18 +943,56 @@ impl StealthBot {
         mode: Descent,
         avoid: &[Cell],
     ) -> Option<Direction> {
+        let field = self.field(state, goals, danger, blocked, mode);
+        self.step_down(state, &field, danger, blocked, mode, avoid)
+    }
+
+    /// The router's own **turns-to-goal potential**: one Dijkstra from `goals`,
+    /// shaped by the [`Descent`] mode exactly as [`descend`](Self::descend) shapes it.
+    ///
+    /// Split out from the descent because it is a fact worth *sharing*: an ability
+    /// whose whole question is "would this be a better way through?" — Dephase's
+    /// crossing, Pierce Wall's bore (§8.3) — has to weigh a shortcut against the
+    /// route the bot would otherwise walk, and re-deriving that inside a cue would be
+    /// both a second Dijkstra and a second opinion.
+    fn field(
+        &self,
+        state: &State,
+        goals: &[Cell],
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+        mode: Descent,
+    ) -> HashMap<Cell, u64> {
         if goals.is_empty() {
-            return None;
+            return HashMap::new();
         }
-        let facility = state.layout().facility();
-        let player = state.player();
         let guards = if mode.keep_clear {
             perceived_guard_cells(state)
         } else {
             Vec::new()
         };
-        let field = cost_field(facility, goals, blocked, danger, &guards, &self.profile);
+        cost_field(
+            state.layout().facility(),
+            goals,
+            blocked,
+            danger,
+            &guards,
+            &self.profile,
+        )
+    }
 
+    /// One step down a prebuilt [`field`](Self::field) — the second half of the
+    /// descent, so a caller holding a field already does not pay for it twice.
+    fn step_down(
+        &self,
+        state: &State,
+        field: &HashMap<Cell, u64>,
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+        mode: Descent,
+        avoid: &[Cell],
+    ) -> Option<Direction> {
+        let player = state.player();
         let mut best: Option<(u64, bool, Direction)> = None;
         for dir in Direction::ALL {
             let Some(next) = player.step(dir) else {
@@ -895,6 +1025,77 @@ impl StealthBot {
         Some(dir)
     }
 }
+
+/// The **one-cell crossing** worth phasing through from `from`, if the field knows
+/// of one: a direction whose adjacent cell is solid and whose far cell is a routable
+/// cell the router already wants, materially closer to the goal than standing here.
+///
+/// Shared between the cue that presses Dephase and the steps that walk it (§8.3), so
+/// the ability can never be pressed for a crossing the policy would then decline to
+/// take — the shy-cue failure #347 warns about, in its most literal form.
+///
+/// **One cell of solid, never two.** The duration is 3 turns: in at 1, out at 2,
+/// with a turn in hand. A two-cell run would land on expiry, and a duration that ends
+/// inside a solid costs a safety eject plus a stun as long as the throw (§8.3) — the
+/// exact trap the cue must not walk into.
+fn crossing(
+    facility: &Facility,
+    memory: &intrusion_core::VisibleSet,
+    field: &HashMap<Cell, u64>,
+    from: Cell,
+) -> Option<(Direction, u64)> {
+    let here = *field.get(&from)?;
+    let mut best: Option<(Direction, u64)> = None;
+    for dir in Direction::ALL {
+        let Some(wall) = from.step(dir) else { continue };
+        let Some(beyond) = wall.step(dir) else {
+            continue;
+        };
+        // A wall to phase through, and floor the other side. Read as the player reads
+        // it (§11.5a): a far side the bot has never seen is not a crossing it knows
+        // about, whatever the map says.
+        if !facility
+            .terrain(wall)
+            .is_some_and(|t| t.blocks_movement() && t.blocks_pathing())
+        {
+            continue;
+        }
+        if !memory.contains(beyond) {
+            continue;
+        }
+        // **Walkable, not merely wanted.** The field seeds its goals whether or not
+        // they can be stood on — a console and the exit are solid (§4.3) — so a wall
+        // backing a console has a far side with a cost and no floor. Crossing into it
+        // would leave Dephase to expire inside a solid, which is the eject (§8.3),
+        // and would have Pierce Wall open a pocket while calling it a route.
+        if !facility
+            .terrain(beyond)
+            .is_some_and(|t| !t.blocks_movement())
+        {
+            continue;
+        }
+        let Some(&there) = field.get(&beyond) else {
+            continue;
+        };
+        // Worth the turn only if the router's own cost falls by more than the crossing
+        // costs it: one turn to press and two to walk through. The margin is [START].
+        let Some(saving) = here.checked_sub(there) else {
+            continue;
+        };
+        if saving < CROSSING_MARGIN {
+            continue;
+        }
+        if best.is_none_or(|(_, held)| saving > held) {
+            best = Some((dir, saving));
+        }
+    }
+    best
+}
+
+/// How much the router's own cost must fall before a phased crossing is worth it
+/// **[START]** — twice the three turns it spends (one to press, two to walk through),
+/// so a shortcut has to be a real one and not a tie.
+pub(crate) const CROSSING_MARGIN: u64 = 6;
 
 /// Whether a guard currently has the player, or is about to (§7.6). True when a
 /// visible guard is actively hunting (chasing or investigating), or when the
@@ -1292,7 +1493,7 @@ mod tests {
     use super::*;
     use crate::test_support::boot;
     use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
-    use intrusion_core::{AbilityId, Outcome};
+    use intrusion_core::{Loadout, Outcome};
 
     /// #276: the bot routes by **the core's rule**, never a table of its own.
     ///
@@ -1464,6 +1665,16 @@ mod tests {
     /// *shape* of the batch (endings mixed, the cloak pressed) is what carries the
     /// assertion when the levels underneath it move.
     ///
+    /// **#347 moved every profile**, and that is the ticket landing rather than a
+    /// regression: the batch grants Decoy, so writing its cue is *supposed* to show
+    /// up here as `d` presses and the runs they change. Read the diff as the cue's
+    /// first evidence — `baseline 3` was the batch's lone stall (`playing 1000`) and
+    /// now finishes, while several runs that won now lose. Neither is a verdict:
+    /// twelve seeds are a pin, not a balance signal (§13.4), and the measurement that
+    /// carries the ticket is the 100-seed with/without batch recorded in
+    /// `docs/stats/abilities/decoy.md`. Its rows were regenerated *on top of* #379's
+    /// crouch below, so the batch carries both changes at once.
+    ///
     /// **#379 moved exactly one row of the forty-eight** — `cautious 5`, from
     /// `won 217 cr` to `won 343 crr` — and that narrowness is the finding rather than
     /// luck. The crouch (§10.3) is the one behaviour here that *every* profile carries,
@@ -1488,53 +1699,53 @@ mod tests {
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 48] = [
             "baseline 0 won 63 ",
-            "baseline 1 won 325 rrrrrrc",
+            "baseline 1 won 396 rrrrdrrdc",
             "baseline 2 lost 220 r",
-            "baseline 3 playing 1000 rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "baseline 3 won 241 rdr",
             "baseline 4 won 56 ",
-            "baseline 5 lost 116 r",
+            "baseline 5 lost 119 rd",
             "baseline 6 won 137 ",
             "baseline 7 won 96 ",
             "baseline 8 lost 51 ",
-            "baseline 9 lost 399 rrrrrrrrrrrrrrrr",
+            "baseline 9 lost 61 rdr",
             "baseline 10 lost 40 rc",
-            "baseline 11 won 359 crrcrrrrrr",
+            "baseline 11 lost 648 crrcrdrrrrrrrrrrrrrrrrrrrrdrrrrrr",
             "cautious 0 won 67 ",
-            "cautious 1 lost 166 rrrr",
-            "cautious 2 won 658 rrrr",
+            "cautious 1 lost 165 rdrdr",
+            "cautious 2 lost 529 rrrrdrdr",
             "cautious 3 lost 50 r",
-            "cautious 4 lost 129 rcr",
-            "cautious 5 won 343 crr",
+            "cautious 4 won 154 rdcrd",
+            "cautious 5 won 363 crdrr",
             "cautious 6 won 157 ",
             "cautious 7 won 96 ",
             "cautious 8 lost 88 r",
-            "cautious 9 won 381 rrr",
-            "cautious 10 won 339 rrcr",
-            "cautious 11 lost 635 crrrrrrrrrr",
+            "cautious 9 lost 242 rdrrd",
+            "cautious 10 lost 94 rd",
+            "cautious 11 won 417 crdrdrdr",
             "aggressive 0 won 63 c",
-            "aggressive 1 won 171 rr",
+            "aggressive 1 won 179 rrdc",
             "aggressive 2 won 224 ",
-            "aggressive 3 lost 143 rrcr",
+            "aggressive 3 lost 118 rdr",
             "aggressive 4 won 60 ",
-            "aggressive 5 won 245 rrcrrcr",
+            "aggressive 5 lost 212 rrcrdrrc",
             "aggressive 6 lost 77 r",
             "aggressive 7 won 100 ",
             "aggressive 8 won 99 ",
-            "aggressive 9 won 296 rrrrr",
+            "aggressive 9 won 296 rdrrrr",
             "aggressive 10 lost 33 rc",
-            "aggressive 11 lost 60 rcr",
+            "aggressive 11 lost 28 rdc",
             "careless 0 won 66 c",
-            "careless 1 won 171 rr",
+            "careless 1 won 179 rrdc",
             "careless 2 won 215 c",
-            "careless 3 won 324 rcrrcrc",
-            "careless 4 won 124 crcr",
-            "careless 5 won 249 rrcrcrr",
+            "careless 3 won 220 rdrcrc",
+            "careless 4 lost 91 crcrd",
+            "careless 5 won 226 rrcrdrrd",
             "careless 6 lost 77 r",
             "careless 7 won 100 ",
             "careless 8 won 99 ",
-            "careless 9 won 144 rcrcrr",
+            "careless 9 won 144 rdcrcrr",
             "careless 10 lost 33 rc",
-            "careless 11 won 242 rcrrc",
+            "careless 11 won 247 rcrdcr",
         ];
 
         let mut played = Vec::new();
@@ -1591,6 +1802,314 @@ mod tests {
             cloaked >= 3,
             "only {cloaked} pinned runs press the cloak — this batch would not \
              catch a change to its cue",
+        );
+
+        // Same demand of the decoy (#347): the loadout grants it, so a pin where
+        // nobody presses it would be pinning the fake's *absence* and calling the cue
+        // covered.
+        let fake = AbilityId::Decoy.script_letter();
+        let decoyed = activations
+            .iter()
+            .filter(|pressed| pressed.contains(fake))
+            .count();
+        assert!(
+            decoyed >= 3,
+            "only {decoyed} pinned runs press the decoy — this batch would not \
+             catch a change to its cue",
+        );
+    }
+
+    /// **Every decoy the bot presses is pressed at a guard that has lost it** — the
+    /// §8.3 rule *"draws Investigating, not Chasing"*, which #347 names as a cue bug
+    /// rather than a tuning question, checked over real play instead of a fixture.
+    ///
+    /// Two halves, because the rule has two: nobody's cone may be live on the player
+    /// at the moment of the press (a guard that has you is coming to the real
+    /// intruder, and the fake beside you competes with the genuine article), and
+    /// somebody must actually be searching, or the fake is bought for a facility that
+    /// is not looking for anybody.
+    #[test]
+    fn every_decoy_the_bot_drops_is_dropped_at_a_search() {
+        let mut dropped = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Decoy));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Decoy) {
+                    assert!(
+                        !state.guards().iter().any(|g| state.guard_detects_now(g)),
+                        "seed {seed}: dropped a decoy while a guard had the player — \
+                         a decoy draws Investigating, never Chasing (§8.3)",
+                    );
+                    assert!(
+                        state
+                            .guards()
+                            .iter()
+                            .any(|g| state.perceive_guard(g).is_some()
+                                && matches!(
+                                    g.state(),
+                                    GuardState::Alerted
+                                        | GuardState::Investigating
+                                        | GuardState::Responding
+                                )),
+                        "seed {seed}: dropped a decoy with nobody searching — there \
+                         was no hunt to redirect (§8.3)",
+                    );
+                    dropped += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            dropped > 0,
+            "no decoy in 40 seeds — this test would prove nothing",
+        );
+    }
+
+    /// **Every autodoors press is a press with a door on the way out** — §8.3's *"a
+    /// door in your path… shuts behind you"*, which is the whole flight tool (§7.6).
+    /// A press on open floor would spend the turn and a 40-turn cooldown on a window
+    /// that closes nothing, so the cue's job is exactly this precondition.
+    #[test]
+    fn every_autodoors_press_has_a_door_on_the_route() {
+        let mut pressed = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Autodoors));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Autodoors) {
+                    // The cue bids off the step the *plan* would take, which cannot be
+                    // read back off the state — so assert the fact that makes the
+                    // press worth its turn: a door is adjacent to be walked through.
+                    let doors = Direction::ALL
+                        .iter()
+                        .filter_map(|&dir| state.player().step(dir))
+                        .filter(|&cell| {
+                            matches!(
+                                state.layout().facility().terrain(cell),
+                                Some(Terrain::DoorPanelClosed | Terrain::DoorPanelOpen)
+                            )
+                        })
+                        .count();
+                    assert!(
+                        doors > 0,
+                        "seed {seed}: opened the autodoors with no door to walk \
+                         through — the window would shut nothing (§8.3)",
+                    );
+                    pressed += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            pressed > 0,
+            "no autodoors in 40 seeds — this test would prove nothing",
+        );
+    }
+
+    /// **Every confusion is fired in a panic, at somebody it actually catches** —
+    /// §8.3's *"a costed panic-buy of time, not a kill"*. Two facts per press: the bot
+    /// was being hunted, and at least one guard stood inside the clamped blast.
+    ///
+    /// The second is core's own precondition (a firing that catches nobody is
+    /// `Unusable`, §4.4's free no-op), asserted here anyway — it is the difference
+    /// between a cue that reads the blast and one that presses hopefully and lets the
+    /// refusal absorb it.
+    #[test]
+    fn every_confusion_is_fired_at_a_guard_it_catches() {
+        let mut fired = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Confusion));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let danger = danger_cells(&state);
+                let hunted = being_hunted(&state, &danger);
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Confusion) {
+                    assert!(
+                        hunted,
+                        "seed {seed}: fired confusion without being hunted — the \
+                         longest cooldown in the catalog is a panic-buy (§8.3)",
+                    );
+                    let blast = state.confusion_blast();
+                    assert!(
+                        state.guards().iter().any(|g| blast.contains(g.pos())),
+                        "seed {seed}: fired confusion at nobody — the blast catches \
+                         no guard and the press is a free no-op (§8.3/§4.4)",
+                    );
+                    fired += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            fired > 0,
+            "no confusion in 40 seeds — this test would prove nothing",
+        );
+    }
+
+    /// **The bot never gets caught in a wall it phased into** — the risk #347 names
+    /// as Dephase's own: a duration that expires inside a solid costs a safety eject
+    /// plus a stun as long as the throw was deep (§8.3), and a bot that phases
+    /// casually will find it.
+    ///
+    /// The eject is the *only* thing in the game that stuns the player
+    /// (`phase_eject_stun`, core's `state/abilities.rs`), which makes `stunned() == 0`
+    /// over a batch an exact statement that it never fired — a much sharper assertion
+    /// than counting crossings. Two policies hold it up together: the cue only wants a
+    /// **one-cell** crossing (in at turn 1, out at 2, of a 3-turn duration), and
+    /// leaving the wall outranks every other plan while the bot is in one.
+    #[test]
+    fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
+        let mut crossings = 0;
+        for seed in 0..40 {
+            for profile in Profile::ALL {
+                let (state, _) = boot(seed);
+                let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Dephase));
+                let mut bot = StealthBot::with_profile(profile);
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let input = bot.decide(&state);
+                    if input == Input::Activate(AbilityId::Dephase) {
+                        crossings += 1;
+                    }
+                    state.step(input);
+                    assert_eq!(
+                        state.stunned(),
+                        0,
+                        "seed {seed} ({}): stunned, so a phase expired inside a solid \
+                         — the safety eject is the one thing Dephase's cue must never \
+                         walk into (§8.3)",
+                        profile.name,
+                    );
+                }
+            }
+        }
+        assert!(
+            crossings > 0,
+            "no phase in 40 seeds × 4 profiles — this test would prove nothing",
+        );
+    }
+
+    /// **Every bore opens a route, never a pocket, and never as an escape** — the
+    /// discipline #347 asks of Pierce Wall's cue, since a budget of three spent on
+    /// the first legal wall *"makes the histogram look healthy while measuring
+    /// nothing"*.
+    ///
+    /// Two checks per press, both re-derived from the state rather than taken from
+    /// the cue's word for it: the bot was not being hunted (a hole conceals nothing,
+    /// §8.3), and the cell beyond the bored wall is floor the bot has already seen —
+    /// which is what makes it a way *through* rather than the one-cell pocket a
+    /// two-thick wall would open.
+    #[test]
+    fn every_bore_opens_a_route_the_bot_has_seen() {
+        let mut bored = 0;
+        for seed in 0..40 {
+            for profile in Profile::ALL {
+                let (state, _) = boot(seed);
+                let mut state = state.with_loadout(Loadout::innate().with(AbilityId::PierceWall));
+                let mut bot = StealthBot::with_profile(profile);
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let danger = danger_cells(&state);
+                    let hunted = being_hunted(&state, &danger);
+                    let input = bot.decide(&state);
+                    if input == Input::Activate(AbilityId::PierceWall) {
+                        assert!(
+                            !hunted,
+                            "seed {seed} ({}): bored a wall while hunted — a hole is \
+                             not a cupboard and conceals nothing (§8.3)",
+                            profile.name,
+                        );
+                        let target = state.bore_target().expect("the press must be legal");
+                        let dir = Direction::ALL
+                            .iter()
+                            .find(|&&d| state.player().step(d) == Some(target))
+                            .expect("the bore target is one of the four neighbours");
+                        let beyond = target.step(*dir).expect("a bore is never the shell");
+                        assert!(
+                            state.memory().contains(beyond)
+                                && state
+                                    .layout()
+                                    .facility()
+                                    .terrain(beyond)
+                                    .is_some_and(|t| !t.blocks_movement()),
+                            "seed {seed} ({}): bored into {beyond:?}, which is not \
+                             seen floor — that is a pocket, not a route (§8.3)",
+                            profile.name,
+                        );
+                        bored += 1;
+                    }
+                    state.step(input);
+                }
+            }
+        }
+        assert!(
+            bored > 0,
+            "no bore in 40 seeds × 4 profiles — this test would prove nothing",
+        );
+    }
+
+    /// **Every lockdown seals something, and never the door the bot is about to walk
+    /// through** — §8.3's own warning that *"a lockdown fired across a route you still
+    /// have to travel is a real mistake"*, since your own lock is never refused but
+    /// bumping it open costs the turn and leaves the door standing open.
+    #[test]
+    fn every_lockdown_seals_doors_that_are_not_on_the_way_out() {
+        let mut sealed = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Lockdown));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Lockdown) {
+                    assert!(
+                        !state.lockdown_doors().is_empty(),
+                        "seed {seed}: fired a lockdown with no door in reach — a \
+                         window bought to seal nothing (§8.3)",
+                    );
+                    // The cue bids off the step the *plan* would take, which cannot be
+                    // read back off the state. What can: the bot is not standing in a
+                    // doorway it is mid-way through, which is the same mistake in its
+                    // sharpest form.
+                    assert!(
+                        !matches!(
+                            state.layout().facility().terrain(state.player()),
+                            Some(Terrain::DoorPanelOpen)
+                        ),
+                        "seed {seed}: sealed the doors while standing in a doorway — \
+                         that is a route the bot still has to travel (§8.3)",
+                    );
+                    sealed += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            sealed > 0,
+            "no lockdown in 40 seeds — this test would prove nothing",
         );
     }
 

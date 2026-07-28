@@ -30,6 +30,13 @@ seam behind every key it presses, and how to add a cue without making the histog
 measure the bot. Same footing as the render reference — a companion to §13.2–§13.4,
 with the values in `crates/sim`.
 
+**Reference: [`docs/stats/abilities/`](docs/stats/abilities/README.md)** — one page
+per ability: what its §8.3 row promises, what the bot's cue says it is for, and what
+the sim measured when the bot was actually given it. Exhaustive over `AbilityId`, so a
+verb with no cue has a page saying why. Not a gate and not committed data — the gate
+is the playtest baseline; these are the record of what was measured, refreshed in the
+PR that moves them (recipe in the playtest skill, §4a).
+
 ## Skills
 
 Project skills live in `.claude/skills/` (see its
