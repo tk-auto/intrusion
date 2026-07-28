@@ -141,21 +141,29 @@ elbow and duck behind it (§10.3). It is tried last of the three because it is t
 weakest of the three — a cupboard is omnidirectional and contact-safe, a bench
 conceals only *across* itself and stops nobody walking into you (§4.5).
 
-It is a **reflex, not an appetite**, which is what makes it unlike the takedown. It
-fires only from where the bot already stands, so it is never a detour and never
-something a temperament could sensibly decline: ducking behind the table beside you
-when a patrol walks in is what anybody does, careful or impatient. So **every profile
-crouches**, and there is no `crouch_reach` to read a zero off — a zero here would be a
-broken policy, not a temperament.
+From your own cell it is a **reflex, not an appetite**, which is what makes it unlike
+the takedown: ducking behind the table beside you when a patrol walks in is what
+anybody does, careful or impatient. So among the profiles that spend turns on cover at
+all there is nothing left to dial — they crouch, and at very different rates, on the
+numbers they already carry: how near a patrol has to be before cover is worth a turn
+(`threat_radius`), and how far a *cupboard* is worth walking to instead
+(`cover_reach`).
 
-A reach knob *was* built and measured out again (#379). A bench you walk to goes
-**stale**: the spot is chosen for where a guard stands now, and by the time you arrive
-it has moved and the concealing side of the furniture has flipped. Over 100 seeds a
-reach of 2 or more did not add crouches, it **replaced** them — from ~51 down to ~1 —
-as the bot spent its cover turns walking to benches it never ducked behind. The
-profiles still crouch at different rates, on the numbers they already carry: how near
-a patrol has to be before cover is worth a turn (`threat_radius`), and how far a
-*cupboard* is worth walking to instead (`cover_reach`).
+The profile field is therefore a flag, `crouches`, and it exists for one temperament.
+**`careless` declines**, for the same reason it declines cupboards (`cover_reach: 0`):
+a bot that spends no turn on concealment must refuse all of it, or its §7.2 row stops
+meaning what it is there to mean — with no concealment available, every takedown it
+lands is a rear blind spot one (§155), while `aggressive` covers the concealed angle.
+Concealment is one decision, not two, and the two profiles' rows only stay readable
+while it is. Like `takedown_reach: 0`, the decline keeps `careless` byte-identical
+across this seam rather than merely similar.
+
+A **reach** — *how far will it walk to a bench* — was built and measured out again
+(#379). A bench you walk to goes **stale**: the spot is chosen for where a guard stands
+now, and by the time you arrive it has moved and the concealing side of the furniture
+has flipped. Over 100 seeds a reach of 2 or more did not add crouches, it **replaced**
+them — from ~51 down to ~1 — as the bot spent its cover turns walking to benches it
+never ducked behind.
 
 Three rules govern the pose, and all three ask **core**, never a local copy of §10.3
 (`State::crouch_would_conceal`, `State::crouch_holds`):
@@ -288,6 +296,13 @@ the temperament, the flatter `bodies_found` reads and the less §7.3's radio clo
 exercised. One profile covers the drag/stow chain, the other covers body discovery,
 and only together do they cover §7.2's cost from end to end.
 
+They split the **strike's two legal angles** the same way, and that is why `careless`
+refuses concealment of every kind — cupboards (`cover_reach: 0`) and benches
+(`crouches: false`) alike. With none available to it, every takedown it lands is a
+rear blind spot one (§155); `aggressive` takes cover, so it gets the concealed ones
+(§7.2). Loosen either half and both profiles cover both angles, which is one
+temperament measured twice.
+
 Taking hold is worth distinguishing from stowing here, because only one of them is a
 decision: stepping off a body's cell grabs it **automatically** (§8.3/#187), so even
 `careless` racks up grabs — and then immediately drops them. A `drag` count therefore
@@ -352,6 +367,11 @@ Stated so they read as decisions rather than oversights:
   `cover::an_adjacent_viewer_is_never_concealed_by_a_bench`. So §7.2's concealed strike
   is reachable through the cupboard, the duct and the cloak, and **never** through the
   crouch: a batch reporting zero bench takedowns is right, not shy.
+- **`careless` never crouches, and that is correct.** It carries `crouches: false`
+  alongside its `cover_reach: 0`: a temperament that spends no turn on concealment
+  refuses the bench as it refuses the cupboard, so a flat zero in its crouch row is the
+  decline working (§13.3). It is what makes its §7.2 row readable as the rear blind
+  spot alone. Read the crouch off the other three.
 - **The crouch is a careful player's tool, not an impatient one's.** The profiles with
   a wide `threat_radius` duck early, while the patrol is still far enough that its
   angle is stable, and hold the pose for several turns; the tight-radius temperaments

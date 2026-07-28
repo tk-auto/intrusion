@@ -283,8 +283,8 @@ impl StealthBot {
     /// [`clear_radius`](Profile::clear_radius)), then pursuit resumes: the "hide, let it pass, carry on" loop
     /// that is the whole point of a hideout.
     ///
-    /// Below both of those sits a second, weaker refuge every temperament carries:
-    /// ducking behind a bench (§10.3, [`crouch`](Self::crouch)). It is tried **last**
+    /// Below both of those sits a second, weaker refuge for the temperaments that
+    /// take it: ducking behind a bench (§10.3, [`crouch`](Self::crouch)). It is **last**
     /// because it is the weakest of the three — concealment that is directional, only
     /// across the chosen furniture, and never contact-safe (§4.5) — and the pose is
     /// given up again the moment it stops covering the bot, rather than waited out.
@@ -381,8 +381,9 @@ impl StealthBot {
     }
 
     /// Duck behind a bench (§10.3): bump a table at the bot's elbow and be concealed
-    /// from every viewer across it. The last and weakest thing the `TakeCover` intent
-    /// has to offer, and the only one **every** temperament carries.
+    /// from every viewer across it — the last and weakest thing the `TakeCover` intent
+    /// has to offer, and nothing at all to a temperament that declines concealment
+    /// ([`crouches`](Profile::crouches)).
     ///
     /// **It is not a cheaper cupboard, it is a different trade.** A cupboard is
     /// omnidirectional and contact-safe: hidden, nothing detects you and nothing can
@@ -400,26 +401,28 @@ impl StealthBot {
     /// progress: the crouch is worth a turn only when a patrol is closing and the turn
     /// was going to be spent hiding anyway.
     ///
-    /// # Why there is no reach knob, and why every profile has it
+    /// # A flag, not a reach
     ///
-    /// This is a **reflex, not an appetite**, which is what makes it unlike the
-    /// takedown ([`strike`](Self::strike)) next door. It fires only from where the bot
-    /// already stands, so it is never a detour and never something a temperament could
-    /// sensibly decline: ducking behind the table at your elbow when a patrol walks in
-    /// is what anybody does, careful or impatient.
+    /// From your own cell the crouch is a **reflex rather than an appetite**, which is
+    /// what makes it unlike the takedown ([`strike`](Self::strike)) next door: ducking
+    /// behind the table at your elbow when a patrol walks in is what anybody does,
+    /// careful or impatient. So among the profiles that spend turns on cover at all
+    /// there is nothing left to dial, and the profiles that crouch still do it at very
+    /// different rates (`baseline` 8, `cautious` 13, `aggressive` 2 over 100 seeds) on
+    /// the numbers they already carry: how near a patrol has to be before cover is
+    /// worth a turn ([`threat_radius`](Profile::threat_radius)), and how far a
+    /// *cupboard* is worth walking to instead ([`cover_reach`](Profile::cover_reach)).
     ///
-    /// A `crouch_reach` — the obvious sibling to
+    /// A `crouch_reach` — *how far will it walk to a bench*, the obvious sibling to
     /// [`takedown_reach`](Profile::takedown_reach) — was built and **measured out
     /// again** (#379), because a bench you walk to goes *stale*: the spot is chosen for
     /// where a guard stands now, and by the time the bot arrives it has moved and the
     /// concealing side of the furniture has flipped. Over 100 seeds a reach of 2 or
     /// more did not add crouches, it **replaced** them — from ~51 down to ~1 — as the
-    /// bot spent its cover turns walking to benches it never ducked behind. The
-    /// profiles still crouch at different rates (`baseline` 8, `cautious` 13,
-    /// `aggressive` 2, `careless` 3 over 100 seeds), and they do it on the numbers
-    /// they already carry: how near a patrol has to be before cover is worth a turn
-    /// ([`threat_radius`](Profile::threat_radius)), and how far a *cupboard* is worth
-    /// walking to instead ([`cover_reach`](Profile::cover_reach)).
+    /// bot spent its cover turns walking to benches it never ducked behind. What is
+    /// left to say is yes or no, which is [`crouches`](Profile::crouches): `careless`
+    /// declines, for the same reason it declines cupboards, and its §7.2 row is the
+    /// rear blind spot and nothing else.
     ///
     /// A table is worth ducking behind only when it hides the bot from **every** guard
     /// it currently perceives nearby. Concealment from one of two patrols is not cover,
@@ -427,6 +430,9 @@ impl StealthBot {
     /// ([`State::crouch_would_conceal`]), never re-derived here, which is the rule the
     /// routing and legality predicates already keep (§13.2).
     fn crouch(&self, state: &State) -> Option<Input> {
+        if !self.profile.crouches {
+            return None;
+        }
         let threats = self.nearby_threats(state);
         if threats.is_empty() {
             return None;
@@ -1768,9 +1774,12 @@ mod tests {
     /// all. This is the test that stops that being true again, and it asserts three
     /// things a false zero could not fake:
     ///
-    /// - **every** profile ducks, because the crouch is a reflex rather than an
-    ///   appetite (see [`StealthBot::crouch`]) — there is no `crouch_reach: 0` to
-    ///   read a zero off, so a zero here is a broken policy;
+    /// - every profile that **takes cover at all** ducks, because from your own cell
+    ///   the crouch is a reflex rather than an appetite (see [`StealthBot::crouch`]) —
+    ///   so a zero on one of those is a broken policy, not a temperament;
+    /// - and `careless`, which declines concealment outright
+    ///   ([`Profile::crouches`]), lands exactly none — the decline working rather than
+    ///   an opportunity that never came, exactly as its `takedowns: 0` siblings do;
     /// - the **histogram** sees each duck, so the §13.2 row and the events agree;
     /// - the pose is entered from where the bot stands and **not left immediately**:
     ///   crouched turns outnumber the ducks that started them, which is the "spent a
@@ -1799,6 +1808,15 @@ mod tests {
                         crouched_turns += 1;
                     }
                 }
+            }
+            if !profile.crouches {
+                assert_eq!(
+                    (ducks, crouched_turns),
+                    (0, 0),
+                    "{}: a temperament that declines concealment must never crouch",
+                    profile.name,
+                );
+                continue;
             }
             assert!(
                 ducks > 0,
@@ -1884,7 +1902,7 @@ mod tests {
     #[test]
     fn the_bot_crouch_walks_along_the_bench() {
         let mut walks = 0;
-        for profile in [Profile::CAUTIOUS, Profile::CARELESS] {
+        for profile in [Profile::CAUTIOUS, Profile::BASELINE] {
             for seed in 0..60 {
                 let (mut state, _) = boot(seed);
                 let mut bot = StealthBot::with_profile(profile);

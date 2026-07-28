@@ -135,6 +135,31 @@ pub struct Profile {
     /// goes back to being untested. Splitting the two across temperaments is how one
     /// batch covers the drag/stow chain and another covers body discovery (#316).
     pub body_stow_reach: u32,
+    /// Whether this temperament will **duck behind a bench** at all (§10.3/#379).
+    ///
+    /// A flag rather than a reach, and the shape is the finding. The obvious sibling
+    /// to [`takedown_reach`](Profile::takedown_reach) — *how far will it walk to one* —
+    /// was built and measured out again: a bench you walk to goes **stale**, because
+    /// the spot is chosen for where a guard stands now and the concealing side of the
+    /// furniture has flipped by the time you arrive. Over 100 seeds a reach of 2 or
+    /// more did not add crouches, it **replaced** them, from ~51 down to ~1, as the bot
+    /// spent its cover turns walking to benches it never ducked behind. So the crouch
+    /// is only ever taken from where the bot already stands, and the one thing left to
+    /// say about it is yes or no.
+    ///
+    /// **True for every temperament that spends turns on cover at all**, because from
+    /// your own cell it is a reflex rather than an appetite: ducking behind the table
+    /// at your elbow when a patrol walks in is what anybody does, careful or impatient.
+    /// The profiles that do it still crouch at very different rates, on the numbers
+    /// they already carry — how near a patrol must be before cover is worth a turn
+    /// ([`threat_radius`](Profile::threat_radius)), and how far a *cupboard* is worth
+    /// walking to instead ([`cover_reach`](Profile::cover_reach)).
+    ///
+    /// **False is what [`CARELESS`](Profile::CARELESS) needs**, and it is the same
+    /// decision as its `cover_reach: 0`: a temperament that spends no turn on
+    /// concealment must decline *all* of it, or its §7.2 row stops meaning what it is
+    /// there to mean.
+    pub crouches: bool,
     /// The **urge floor** each ability's cue must clear before the bot will press
     /// it (§13.2/#346), indexed by [`cue::slot`] — the ability's permanent position
     /// in [`AbilityId::ALL`].
@@ -180,6 +205,13 @@ impl Profile {
         // still true after #316 added the play.
         takedown_reach: 0,
         body_stow_reach: 0,
+        // It *does* duck behind a table when a patrol walks in on it and there is no
+        // cupboard to reach — survival, not a plan, and never a detour (#379). Unlike
+        // the strike, this moves the baseline's numbers rather than leaving them
+        // byte-identical, because the crouch is an innate reflex rather than a
+        // temperament's appetite: declining it outright would have been a claim about
+        // *this bot* rather than about avoidance-first play.
+        crouches: true,
         // Every cue starts at the same plain-fit floor. The floors are a per-ability
         // dial precisely so a *sweep* can move one of them; a profile that shipped
         // with them already scattered would make its own metrics harder to read.
@@ -223,10 +255,12 @@ impl Profile {
     /// link. What it does *not* cover is body discovery, because a stowed body can
     /// never be found; that is [`CARELESS`](Profile::CARELESS)'s job.
     ///
-    /// Its **crouch** (§10.3/#379) is where its temperament shows without a knob of its
-    /// own: the bench is the cover it settles for because a cupboard is only worth five
-    /// cells to it, so it ducks about as often as `careless` and six times as often as
-    /// the `baseline`, which will march eight cells to a proper cupboard instead.
+    /// It **crouches** too (§10.3/#379), and needs no number of its own to say how
+    /// much: the bench is the cover it settles for because a cupboard is only worth
+    /// five cells to it. What its tight `threat_radius` costs is the *pose* rather than
+    /// the duck — it ducks with a guard already on top of it, so the patrol is round
+    /// the furniture within a turn and the crouch buys about one turn of cover, where
+    /// `cautious` ducks early and holds for a dozen.
     pub const AGGRESSIVE: Profile = Profile {
         name: "aggressive",
         // A quarter of the baseline weight over a radius of 3: a patrol still
@@ -260,6 +294,9 @@ impl Profile {
     /// and a stow reach of zero, so every body it leaves stays on the floor where a
     /// patrol will eventually walk its cone over it.
     ///
+    /// Declining the crouch is part of the same bargain: it is the profile whose §7.2
+    /// row is **only** §155, so a bench would blur the very split it is here to keep.
+    ///
     /// It exists because a *tidy* bot cannot measure body discovery — stowing puts a
     /// body beyond every cone, so the tidier the temperament, the flatter §7.3's
     /// radio clock and the `bodies_found` row read (§13.2). This is the profile those
@@ -268,10 +305,11 @@ impl Profile {
     ///
     /// **Keener does not mean more**, and the measured numbers say so plainly: over
     /// 100 seeds this lands *fewer* takedowns than `aggressive` (11 against 18),
-    /// because refusing cupboards costs it the concealment strikes from a cupboard
-    /// mouth (§7.2) and leaves it the rear blind spot (§155) and the bench to work
-    /// with. That is the split doing its job rather than a mis-tune — and it is worth
-    /// remembering before anyone reads the bigger reach as the bigger number.
+    /// because refusing every kind of concealment — cupboards and benches alike — costs
+    /// it every concealed strike (§7.2) and leaves it only the rear blind spot (§155)
+    /// to work with. That is the split doing its job rather than a mis-tune — one
+    /// temperament per legal angle — and it is worth remembering before anyone reads
+    /// the bigger reach as the bigger number.
     ///
     /// Not a *better* player for striking at all (§13.4) — bodies on the floor are how
     /// a run gets loud, and its detections should say so.
@@ -286,6 +324,14 @@ impl Profile {
         // while `aggressive` still gets the cupboard-mouth concealment ones (§7.2). One
         // temperament per legal angle, rather than both crowding onto the easy one.
         cover_reach: 0,
+        // **And it does not crouch** (#379), which is the same decision as the line
+        // above rather than a second one: a temperament that spends no turn on a
+        // cupboard spends none on worse cover either. It is what keeps this profile's
+        // takedowns readable — with concealment off the table entirely, every strike it
+        // lands is a **rear blind spot** one (§155), while `aggressive` gets the
+        // concealed ones (§7.2). One temperament per legal angle, which is the split
+        // #316 built these two around and the reason the row is worth reading at all.
+        crouches: false,
         // The signature: it drops what it is carrying rather than spend a dozen turns
         // hauling. The grab itself is not optional — stepping off a body's cell takes
         // hold automatically (§8.3/#187) — so "never stows" is a decision the bot has
@@ -448,6 +494,38 @@ mod tests {
             0,
             "careless never does — that is what gives `bodies_found` a source",
         );
+    }
+
+    /// **Concealment is one decision, not two** (#379). `careless` refuses the
+    /// cupboard *and* the bench, and the pairing is what its §7.2 row rests on: with
+    /// no concealment of any kind available to it, every takedown it lands is a rear
+    /// blind spot one (§155), while `aggressive` covers the concealed angle. Split the
+    /// pair — let it duck behind furniture while refusing cupboards — and the two
+    /// profiles both cover both angles, which is one temperament measured twice.
+    ///
+    /// The converse is asserted too, because it is the easier thing to get wrong: a
+    /// profile that *does* spend turns on cover must also crouch. From your own cell
+    /// the pose is a reflex rather than an appetite, so declining it there would be a
+    /// claim about the bot rather than about the temperament.
+    #[test]
+    fn a_profile_that_refuses_cupboards_refuses_benches_too() {
+        for p in Profile::ALL {
+            assert_eq!(
+                p.crouches,
+                p.cover_reach > 0,
+                "{}: concealment must be one decision — cover_reach {} against \
+                 crouches {}",
+                p.name,
+                p.cover_reach,
+                p.crouches,
+            );
+        }
+        // Named rather than only derived, so the shipped vocabulary is the assertion.
+        let by = |name: &str| Profile::by_name(name).expect("a shipped profile");
+        assert!(!by("careless").crouches, "careless declines the pose");
+        for name in ["baseline", "cautious", "aggressive"] {
+            assert!(by(name).crouches, "{name} takes cover, so it crouches");
+        }
     }
 
     /// Hysteresis, per profile: the bot must come out of cover on a *wider*
