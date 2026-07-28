@@ -7,10 +7,15 @@
 //! harness controls entirely, so the encoding is hand-rolled here rather than
 //! buying a serialization dependency for eight fields.
 //!
-//! `alert_peak` is emitted as `null` on every row: the facility-wide alert it
-//! would measure is the radio net's value (#107), which does not exist yet —
-//! a `null` says "not measured", where a `0` would lie that it was quiet.
+//! `alert_peak` used to be `null` on every row — the §13.2 metric with nothing behind
+//! it. Since #311 gave the facility a ladder and #376 measured it, the row carries the
+//! rung a run reached **and the path it took there** (`alert_escalations`), and the
+//! summary carries the batch's rung distribution and trigger attribution rather than a
+//! single maximum. There is no `null` left in the alert rows: rung **0** is a real
+//! reading — a raid the facility never noticed — where the old `null` meant "nothing
+//! measured this".
 
+use crate::alert::AlertTally;
 use crate::harness::{RunOutcome, RunRecord};
 use crate::usage::{diversity, UsageHistogram, Verb};
 
@@ -35,7 +40,7 @@ impl RunRecord {
     /// The run's JSONL row. Field order is fixed; see `crates/sim/README.md`.
     pub fn to_json_line(&self) -> String {
         format!(
-            "{{\"seed\":{},\"profile\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":null}}",
+            "{{\"seed\":{},\"profile\":{},\"outcome\":\"{}\",\"turns\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"alert_peak\":{},\"alert_escalations\":{}}}",
             self.seed,
             profile_json(self.profile),
             self.outcome.as_str(),
@@ -44,6 +49,8 @@ impl RunRecord {
             self.takedowns,
             self.bodies_found,
             usage_counts_json(&self.usage),
+            self.alert.peak(),
+            self.alert.to_json(),
         )
     }
 }
@@ -90,6 +97,13 @@ pub struct Summary {
     /// Total spent turns across the batch — the denominator of the per-verb usage
     /// share (§13.2's "share of turns").
     pub total_turns: u64,
+    /// The §7.3 ladder across the batch (#376): how the runs' peak rungs were
+    /// **distributed**, and which trigger caused each escalation.
+    ///
+    /// The distribution rather than a maximum, because a maximum cannot tell the two
+    /// findings apart: *"most runs end at rung 1"* and *"most runs end at rung 3"* are
+    /// opposite balance verdicts and both peak at 3.
+    pub alert: AlertTally,
 }
 
 impl Summary {
@@ -139,6 +153,7 @@ impl Summary {
                 .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage)),
             diversity: diversity(&records.iter().map(|r| r.usage).collect::<Vec<_>>()),
             total_turns: records.iter().map(|r| u64::from(r.turns)).sum(),
+            alert: AlertTally::of(records.iter().map(|r| &r.alert)),
         }
     }
 
@@ -171,7 +186,7 @@ impl Summary {
             .map(|(&v, s)| format!("\"{}\":{s:.4}", v.key()))
             .collect();
         format!(
-            "{{\"summary\":{{\"profile\":{},\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak\":null}}}}",
+            "{{\"summary\":{{\"profile\":{},\"runs\":{},\"wins\":{},\"captures\":{},\"entombed\":{},\"timeouts\":{},\"win_rate\":{:.4},\"turns_to_win_mean\":{},\"turns_to_win_median\":{},\"detections\":{},\"takedowns\":{},\"bodies_found\":{},\"usage\":{},\"usage_share\":{{{}}},\"diversity\":{:.4},\"alert_peak_mean\":{:.4},\"alert_rungs\":{},\"alert_triggers\":{}}}}}",
             profile_json(self.profile),
             self.runs,
             self.wins,
@@ -187,6 +202,9 @@ impl Summary {
             usage_counts_json(&self.usage),
             share_json.join(","),
             self.diversity,
+            self.alert.peak_mean(self.runs),
+            self.alert.rungs_json(),
+            self.alert.triggers_json(),
         )
     }
 }
@@ -194,6 +212,8 @@ impl Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alert::AlertRecord;
+    use intrusion_core::AlertTrigger;
 
     fn record(seed: u64, outcome: RunOutcome, turns: u32) -> RunRecord {
         // A fixed sample usage so the schema strings pin deterministically: two
@@ -203,6 +223,11 @@ mod tests {
         usage.record(Verb::Wait);
         usage.record(Verb::Wait);
         usage.record(Verb::Run);
+        // A fixed sample climb, likewise: seen once, then seen enough — a two-rung
+        // path, so the row pins both the peak and the shape of the escalation list.
+        let mut alert = AlertRecord::default();
+        alert.record(9, 1, AlertTrigger::Sighting);
+        alert.record(31, 2, AlertTrigger::RepeatSightings);
         RunRecord {
             seed,
             profile: Some("baseline"),
@@ -212,6 +237,7 @@ mod tests {
             takedowns: 1,
             bodies_found: 0,
             usage,
+            alert,
         }
     }
 
@@ -221,7 +247,7 @@ mod tests {
     fn the_run_row_schema_is_pinned() {
         assert_eq!(
             record(17, RunOutcome::Win, 214).to_json_line(),
-            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"alert_peak\":null}"
+            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}]}"
         );
     }
 
@@ -239,7 +265,7 @@ mod tests {
         let summary = Summary::of(&records);
         assert_eq!(
             summary.to_json_line(),
-            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000},\"diversity\":0.0000,\"alert_peak\":null}}"
+            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0}}}"
         );
     }
 

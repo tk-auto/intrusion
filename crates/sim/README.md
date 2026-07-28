@@ -37,6 +37,7 @@ And the **run config** (below): what every run of the batch boots from.
 | `--guards N` | guards to place per facility — the §10.2 recipe knob the balance sweep drives (all else stays v1) | 4 |
 | `--intel-gate G` | how much intel the exit asks for (§4.5): `none`, `one`, `all` | `one` |
 | `--modifier NAME` | switch a level modifier on (#225) — repeatable, and comma-separated | none on |
+| `--alert NAME=N` | set one §7.3 **alert-ladder threshold** (#376) — how hard a rung is to reach; repeatable, and comma-separated | the §7.3 `[START]`s |
 | `--abilities LIST` | the tech every run holds (§8.3), comma-separated | none — bare |
 | `--without LIST` | tech to drop from the loadout | none |
 
@@ -50,7 +51,7 @@ core stealth loop is winnable with no tech at all. Every flag above states a
 departure from it.
 
 They compose in a **fixed order**, whatever order they are written in — `--config`,
-`--guards`, `--intel-gate`, `--modifier`, `--abilities`, `--without` — so two
+`--guards`, `--intel-gate`, `--modifier`, `--alert`, `--abilities`, `--without` — so two
 command lines naming the same flags describe the same batch. `--abilities` states
 the *whole* tech set rather than adding to what a `--config` preset held, and
 `--without` runs last, so it can never be undone by an earlier-resolved flag.
@@ -79,6 +80,43 @@ whose rows claim a config it never ran is worse than a batch that did not start*
   `--emit-replay` would print a replay that decodes to nothing. `--without` naming
   an **innate** ability is refused for the same reason: §8.3 makes the innate set
   unconditional and the token cannot describe its absence.
+
+#### Sweeping the alert ladder (`--alert`, §7.3/#376)
+
+Every threshold the alert ladder is built from is a `[START]` the design expects to
+move, and until #376 moving one meant editing a constant and rebuilding — which is why
+nothing had ever measured what any of them do. The knobs, spelled as the
+`AlertTuning` field names in kebab case:
+
+```
+sighting-contact-turns        turns of certain-zone contact that make one sighting
+sighting-window-turns         the sliding window they must fall inside
+sightings-for-second-rung     sightings that reach rung 2
+silent-posts-for-third-rung   quiet posts (bodies, not pings) that reach rung 3
+dwell-turns-min               the shortest Calm dwell from rung 1 up
+dwell-turns-max               the longest
+```
+
+A sweep is then a shell loop, one batch per point on the curve:
+
+```
+for w in 4 6 8 10 14 20; do
+  cargo run --release -p intrusion-sim -- --bot --profile careless --runs 100 --seed 0 \
+    --alert sighting-window-turns=$w | tail -1
+done
+```
+
+Two refusals, both the §13.2 rule that a batch measuring a game the design forbids
+answers nothing: an **unknown knob** is refused with the vocabulary rather than
+ignored (a silently-dropped knob would report a flat curve for a threshold that never
+moved), and a **ladder §7.3/§7.5 forbids** — a dwell floor of `0`, which would delete
+the Takedown window for the rest of every level; a window too short to ever hold a
+sighting — is refused at the flag. The check runs once, after every flag is in, so a
+dwell range spelled across two knobs is not rejected halfway through being written.
+
+The tuning is **not** carried by a `--emit-replay` token: no shared config can encode
+it (§12.4/#245), so a swept run reproduces only under the same `--alert` — the same
+honest gap `--guards` has.
 
 Measuring one toggle is then one batch against another over the same seeds:
 
@@ -305,7 +343,7 @@ it is a deliberate, visible break.
 ### Run row
 
 ```json
-{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0,"crouch":3},"alert_peak":null}
+{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0,"crouch":3},"alert_peak":2,"alert_escalations":[{"turn":9,"rung":1,"trigger":"sighting"},{"turn":31,"rung":2,"trigger":"repeat-sightings"}]}
 ```
 
 | Field | Meaning |
@@ -318,12 +356,13 @@ it is a deliberate, visible break.
 | `takedowns` | takedowns landed (`Event::TakenDown`) |
 | `bodies_found` | bodies found by guards (`Event::BodyFound`) |
 | `usage` | the **ability-usage histogram** (§13.2): a count per verb spent this run. Keys, in fixed order: `wait`, `run`, `camouflage`, `decoy`, `dephase`, `autodoors`, `confusion`, `takedown`, `drag`, `pierce_wall`, `lockdown`, `crouch`. Counted from core events — a *refused* activation costs no turn and emits none, so it never counts (§4.4); `wait` is the one verb with no event of its own and is counted from its spent turn. `Move` is not counted (it is the default nothing-else verb). The counts sum to `≤ turns` |
-| `alert_peak` | **always `null` for now**: the facility-wide alert is the radio net's value (#107), which does not exist yet — `null` says "not measured", where a `0` would lie that it was quiet |
+| `alert_peak` | the highest §7.3 **alert rung** the facility reached, `0`..=`3` (#311/#376). A `0` is a real reading — a raid nobody noticed — where this field's old `null` meant "nothing measures this" |
+| `alert_escalations` | the **path** up the ladder: one object per escalation, oldest first, each `{"turn":T,"rung":R,"trigger":"…"}`. At most three (the ladder is monotone and three rungs tall), and `[]` for a facility that stayed quiet. The peak alone cannot tell a run that reached rung 3 by leaving bodies from one that got there by being seen over and over; this can. Trigger keys, in ladder order: `sighting`, `missed-ping`, `repeat-sightings`, `console-tampered`, `body-found`, `second-post-silent` |
 
 ### Summary row
 
 ```json
-{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0,"crouch":18},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000,"crouch":0.0017},"diversity":0.1837,"alert_peak":null}}
+{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0,"crouch":18},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000,"crouch":0.0017},"diversity":0.1837,"alert_peak_mean":1.8700,"alert_rungs":{"0":4,"1":31,"2":22,"3":43},"alert_triggers":{"sighting":96,"missed-ping":12,"repeat-sightings":22,"console-tampered":9,"body-found":12,"second-post-silent":3}}}
 ```
 
 `win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the
@@ -355,6 +394,27 @@ The §13.2 signature metrics (#137):
 
 Both the signature (normalised usage vector) and the diversity distance are
 `[START]` definitions, named in `src/usage.rs` so they are easy to swap.
+
+And the §7.3 **alert ladder** (#311/#376) — §13.2's *"whether escalation escalates"*
+row:
+
+- `alert_peak_mean` — the mean peak rung over the batch. The single number a
+  `--alert` sweep plots.
+- `alert_rungs` — how the runs' peaks were **distributed**, one key per rung
+  `0`..=`3`. This, not the maximum, is the finding: *"most runs end at rung 1"* and
+  *"most runs end at rung 3"* are opposite balance verdicts and both peak at 3.
+- `alert_triggers` — **attribution**: how many escalations each §7.3 trigger caused,
+  same keys as the run row's `trigger`. Which *path* a batch takes up the ladder is
+  the interesting half — a facility driven to rung 3 by bodies is a different game
+  from one driven there by sightings.
+
+> **Reading a zero in `alert_triggers` (§13.4/#260).** The count is escalations a
+> trigger **caused**, which is what the core reports: a trigger firing at or below the
+> rung already reached escalates nothing and says nothing. So a `0` has two readings —
+> the bot never did the thing, or something louder always got to that rung first — and
+> neither is *"this trigger does not matter"*. Report it as **never exercised**, not as
+> no impact. Every trigger is always a column, including the ones at zero, so an
+> unexercised trigger is visible rather than absent.
 
 **Flag, never judge (§13.4):** these are numbers, not verdicts. A histogram spike
 or a near-zero diversity is a seed to *go play*, not a ruling that the game is

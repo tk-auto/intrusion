@@ -112,11 +112,52 @@ metrics and what each catches:
 | `takedowns` | whether §7.2's cost is real |
 | `bodies_found` | whether §7.3's radio clock has teeth |
 | `diversity` | **boredom** — mean pairwise distance between runs' usage signatures; near `0` = every run played the same = a puzzle with one answer |
-| `alert_peak` | **not measured yet** — always `null`; the facility-wide alert is the radio net's value (#107), which does not exist. A `null` says "not measured" where a `0` would lie. |
+| `alert_peak_mean` | how loud a batch got — the mean §7.3 rung reached. The single number an `--alert` sweep plots |
+| `alert_rungs` | the rung **distribution**, `{"0":n,…,"3":n}`. This, not the mean, is the finding: "most runs end at rung 1" and "most runs end at rung 3" are opposite verdicts |
+| `alert_triggers` | **attribution** — which trigger caused each escalation. Which *path* a batch takes up the ladder; see the zero-reading rule below |
+
+Per-run rows carry `alert_peak` (`0`..=`3`, and a `0` is a raid nobody noticed —
+never a `null` any more) plus `alert_escalations`, the run's climb: one
+`{"turn":T,"rung":R,"trigger":"…"}` per step, at most three.
+
+> **A zero in `alert_triggers` is inconclusive, never "no impact" (§13.4/#260).**
+> The count is escalations a trigger *caused*, and the core only reports a trigger
+> that actually raised the rung — so a zero means either the bot never did the thing
+> **or** something louder always reached that rung first. Report it as **never
+> exercised** and say which reading you think it is. Two known ones: `body-found` and
+> the ping triggers are structurally zero under `baseline`/`cautious` (they land no
+> takedowns, by design), and `second-post-silent` reads zero even under `careless`
+> because a found body has already taken the facility to rung 3 before a second post
+> can.
 
 Per-run rows carry the same metrics plus the `seed`, the `profile` that played
 them, and the `outcome` (`win`/`capture`/`entombed`/`timeout`) — that is where you
 find the seeds to flag.
+
+### Sweeping the alert ladder (`--alert`, §7.3/#376)
+
+The §7.3 thresholds are the one family of `[START]` knobs that is **not** a recompile
+(see §4a's rule for the rest): `--alert NAME=N` turns any of them per batch, so a
+curve is a shell loop.
+
+```
+for c in 1 2 3 5 8; do
+  cargo run --release -p intrusion-sim -- --bot --profile baseline --runs 100 --seed 0 \
+    --cap 1000 --alert sighting-contact-turns=$c | tail -1
+done
+```
+
+Knobs: `sighting-contact-turns`, `sighting-window-turns`, `sightings-for-second-rung`,
+`silent-posts-for-third-rung`, `dwell-turns-min`, `dwell-turns-max`
+(`crates/sim/README.md` has the full table). A ladder §7.3/§7.5 forbids — a dwell
+floor of `0`, a window too short to hold a sighting — is refused at the flag, not run.
+
+**Sweep the triggers, not the magnitudes.** §10.2 puts one guard at ~8–10 points of
+win rate, so the reinforcement counts are coarse by construction; the fine shape is in
+how hard each rung is to *reach*. And read the results against what §7.3 already
+records from the first sweeps: the contact threshold moves the reach across nearly the
+ladder's whole range while the win rate stays flat, so a batch that shows a *win-rate*
+move from an alert knob is news, and one that shows only a reach move is confirmation.
 
 ### Reading the profiles against each other
 
@@ -337,9 +378,10 @@ a batch where that number collapsed toward zero would be the one-answer smell.
   loadout, so the tech is not held rather than not wanted (§13.4). Every activated
   verb but Lockdown now has a cue (#346/#347); to see one fire, grant it with
   `--abilities` and follow §4a.
-- **`takedowns 0` under every temperament.** Deliberate takedown play is #316's
-  ticket; until it lands the row honestly reads zero rather than measuring a
-  contrived hunt.
+- **`takedowns 0` under every temperament** — as this batch predates #316, which
+  gave the takedown play to `aggressive` and `careless`. A modern batch reads zero
+  only for the two avoidance-first temperaments, where it is correct behaviour
+  rather than a defect.
 - **No stall in any batch.** The four timeouts ran the full turn budget rather than
   burning inputs on free actions. The *stall* watermark (a `timeout` whose `turns`
   are far below `--cap`) is what caught #171 before its fix (#175); a future batch
@@ -354,7 +396,9 @@ problem. Go play the flagged seeds and rule.
 
 ## Caveats to keep in the report
 
-- **`alert_peak` is always `null`** until the radio-net alert value (#107) exists.
+- **The bot has no rung-aware policy.** It does not play differently when the
+  facility is loud, so the alert rows measure *pressure*, not *play* — a real signal
+  about difficulty, but not about how a player would answer it (§13.3).
 - **The bot is deliberately crude** (§13.4): a low win rate and unused abilities
   can be the policy, not the game (its close-behind-door stall was #171, fixed in
   #175, but it is still no substitute for a player). Sharper policies are

@@ -24,7 +24,9 @@
 //! varying the config never shifts the facility a seed carves. That is the property
 //! a paired A/B (#257) rests on.
 
-use intrusion_core::{AbilityId, IntelGate, LevelConfig, LevelModifiers, LevelSeed, Loadout};
+use intrusion_core::{
+    AbilityId, AlertTuning, IntelGate, LevelConfig, LevelModifiers, LevelSeed, Loadout,
+};
 
 /// What every run in a batch boots from (§13.2): the facility recipe, the modifiers
 /// bending the run, and the abilities it holds — everything but the seed.
@@ -40,6 +42,15 @@ pub struct RunConfig {
     pub modifiers: LevelModifiers,
     /// The abilities every run of the batch holds (§8.3/#244).
     pub abilities: Loadout,
+    /// The §7.3 alert ladder's **[START]** thresholds (#376) — how hard each rung is
+    /// to reach. The sim preset is the shipped set, so a batch naming no knob measures
+    /// the ladder the game ships.
+    ///
+    /// Deliberately *not* carried by [`level`](Self::level): no level-seed token can
+    /// encode it (§12.4/#245), so a swept batch is an instrument reading rather than a
+    /// run anyone could be handed — the same honest gap the facility recipe has.
+    /// [`capture_one_with`](crate::capture_one_with) says so where it matters.
+    pub alert: AlertTuning,
 }
 
 impl Default for RunConfig {
@@ -62,6 +73,7 @@ impl RunConfig {
             facility: LevelConfig::V1,
             modifiers: preset.modifiers,
             abilities: preset.abilities,
+            alert: AlertTuning::default(),
         }
     }
 
@@ -137,6 +149,53 @@ impl RunConfig {
         let mut modifiers = self.modifiers;
         set(&mut modifiers);
         Ok(Self { modifiers, ..self })
+    }
+
+    /// The same config with one §7.3 alert threshold set (#376), written
+    /// `name=value` — the knob a sweep turns without a rebuild.
+    ///
+    /// Names are the [`AlertTuning`] field names in kebab case, matched loosely
+    /// ([`normalise`]) like every other vocabulary here. The ladder is **not**
+    /// validated per knob, deliberately: a dwell range is two knobs, and
+    /// `dwell-turns-min=4 dwell-turns-max=6` would fail halfway through if each
+    /// setting had to stand alone. [`validated`](Self::validated) checks the finished
+    /// ladder, once, after every flag has been applied.
+    pub fn with_alert(self, setting: &str) -> Result<Self, String> {
+        let (name, value) = setting.split_once('=').ok_or_else(|| {
+            format!(
+                "{setting}: an alert knob is written name=value; known knobs: {}",
+                alert_knob_names(),
+            )
+        })?;
+        let wanted = normalise(name);
+        let Some((_, set)) = ALERT_KNOBS
+            .iter()
+            .find(|(known, _)| normalise(known) == wanted)
+        else {
+            return Err(format!(
+                "unknown alert knob {name}; known knobs: {}",
+                alert_knob_names(),
+            ));
+        };
+        let value: u32 = value
+            .trim()
+            .parse()
+            .map_err(|_| format!("{name}: not a number: {value}"))?;
+        let mut alert = self.alert;
+        set(&mut alert, value);
+        Ok(Self { alert, ..self })
+    }
+
+    /// This config, if it describes a game the design allows — or the rule it breaks.
+    ///
+    /// Run **once**, after every flag has been applied, because that is the only point
+    /// at which a multi-knob setting (the alerted dwell range) is whole. A batch that
+    /// would measure a game §7.3/§7.5 forbids — a dwell floor of 0, a sighting window
+    /// too short to ever hold a sighting — is refused at the flag rather than run and
+    /// reported: numbers from a game the design does not admit answer nothing (§13.2).
+    pub fn validated(self) -> Result<Self, String> {
+        self.alert.validate()?;
+        self.holdable()
     }
 
     /// The same config holding **exactly** the tech in `list` (plus the innate set,
@@ -220,6 +279,35 @@ const MODIFIERS: [(&str, SetModifier); 5] = [
     }),
     ("full-layout-known", |m| m.full_layout_known = true),
 ];
+
+/// The `--alert` vocabulary (§7.3/#376): each threshold paired with the field it
+/// sets. The names are the [`AlertTuning`] field names in kebab case, on the same
+/// one-concept-one-spelling rule the modifiers follow.
+type SetAlert = fn(&mut AlertTuning, u32);
+const ALERT_KNOBS: [(&str, SetAlert); 6] = [
+    ("sighting-contact-turns", |a, v| {
+        a.sighting_contact_turns = v
+    }),
+    ("sighting-window-turns", |a, v| a.sighting_window_turns = v),
+    ("sightings-for-second-rung", |a, v| {
+        a.sightings_for_second_rung = v
+    }),
+    ("silent-posts-for-third-rung", |a, v| {
+        a.silent_posts_for_third_rung = v
+    }),
+    ("dwell-turns-min", |a, v| a.dwell_turns_min = v),
+    ("dwell-turns-max", |a, v| a.dwell_turns_max = v),
+];
+
+/// Every `--alert` knob name, read off the table above so a threshold added to §7.3
+/// is spellable and documented the day it lands.
+pub fn alert_knob_names() -> String {
+    ALERT_KNOBS
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// Every `--modifier` name, for the usage text and for an unknown name's error.
 pub fn modifier_names() -> String {
@@ -320,6 +408,111 @@ mod tests {
         for seed in [0, 1, 42, 8371] {
             assert_eq!(config.level(seed), LevelSeed::sim(seed));
         }
+    }
+
+    /// #376: every §7.3 alert threshold has a knob name, and each name sets **its
+    /// own** field — so a sweep of one threshold moves one threshold.
+    ///
+    /// The destructure is the obligation: a new [`AlertTuning`] field will not compile
+    /// here until somebody names it, and then the assertion fails until
+    /// [`ALERT_KNOBS`] carries it.
+    #[test]
+    fn every_alert_threshold_has_a_knob_that_sets_it() {
+        for (name, _) in ALERT_KNOBS {
+            // 7 is a value no shipped threshold already holds, so "it changed" and
+            // "it changed the right one" are the same assertion.
+            let config = RunConfig::sim()
+                .with_alert(&format!("{name}=7"))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let AlertTuning {
+                sighting_contact_turns,
+                sighting_window_turns,
+                sightings_for_second_rung,
+                silent_posts_for_third_rung,
+                dwell_turns_min,
+                dwell_turns_max,
+            } = config.alert;
+            let moved = [
+                sighting_contact_turns,
+                sighting_window_turns,
+                sightings_for_second_rung,
+                silent_posts_for_third_rung,
+                dwell_turns_min,
+                dwell_turns_max,
+            ]
+            .iter()
+            .filter(|&&v| v == 7)
+            .count();
+            assert_eq!(moved, 1, "{name} did not set exactly one threshold");
+        }
+        assert!(
+            ALERT_KNOBS
+                .iter()
+                .all(|(name, _)| alert_knob_names().contains(name)),
+            "a knob is unspellable from the usage text",
+        );
+    }
+
+    /// The knob names are matched on what they *say*, like every other vocabulary
+    /// here — and an unknown one is refused **with the vocabulary**, never applied to
+    /// the nearest field. A batch swept on a knob that silently did nothing would
+    /// report a flat curve for a threshold that never moved (§13.4).
+    #[test]
+    fn an_alert_knob_is_matched_loosely_and_refused_loudly() {
+        for spelling in [
+            "sighting-window-turns=14",
+            "sighting_window_turns=14",
+            "Sighting Window Turns = 14",
+        ] {
+            let config = RunConfig::sim().with_alert(spelling).expect("a known knob");
+            assert_eq!(config.alert.sighting_window_turns, 14, "{spelling}");
+        }
+
+        let error = RunConfig::sim()
+            .with_alert("window=4")
+            .expect_err("no such knob");
+        assert!(error.contains("window"), "{error}");
+        assert!(error.contains("sighting-window-turns"), "{error}");
+
+        let error = RunConfig::sim()
+            .with_alert("sighting-window-turns=soon")
+            .expect_err("not a number");
+        assert!(error.contains("not a number"), "{error}");
+
+        let error = RunConfig::sim()
+            .with_alert("sighting-window-turns")
+            .expect_err("no value");
+        assert!(error.contains("name=value"), "{error}");
+    }
+
+    /// §7.3/§7.5: a ladder the design forbids is refused at the flag rather than
+    /// measured — but only once the **whole** config is in, so a dwell range spelled
+    /// across two knobs is not rejected halfway through being written.
+    #[test]
+    fn an_illegal_ladder_is_refused_once_the_config_is_whole() {
+        let half_written = RunConfig::sim()
+            .with_alert("dwell-turns-min=4")
+            .expect("a known knob");
+        assert!(
+            half_written.validated().is_err(),
+            "a floor above the ceiling is not a ladder",
+        );
+        assert_eq!(
+            half_written
+                .with_alert("dwell-turns-max=6")
+                .expect("a known knob")
+                .validated()
+                .map(|c| (c.alert.dwell_turns_min, c.alert.dwell_turns_max)),
+            Ok((4, 6)),
+            "…and the finished range is legal",
+        );
+
+        let error = RunConfig::sim()
+            .with_alert("dwell-turns-min=0")
+            .expect("a known knob")
+            .validated()
+            .expect_err("the §7.5 floor");
+        assert!(error.contains("never removed"), "{error}");
     }
 
     /// Every modifier has a name, and each name flips **its own** field.

@@ -533,6 +533,53 @@ Guard *presentation* is unchanged: a never-calm guard still reads as Calm (§7.4
 colour column). The ladder's legibility is the Level info tab and the tinted help
 button (§11.4).
 
+##### What the sim measured (#376)
+
+Every threshold above is a knob the headless sim turns without a rebuild (`--alert`,
+§13.2), and the ladder is measured: each run records the **rung it reached, the turn
+it reached it, and the trigger that got it there**, so a batch reports the *path* up
+the ladder rather than a single number. The first sweeps, 100 seeds each
+(`--seed 0 --cap 1000`), repeated on a disjoint block:
+
+| `sighting-contact-turns` | 1 | 2 | **3** | 5 | 8 |
+|---|---|---|---|---|---|
+| Mean peak rung (baseline profile) | 0.98 | 0.88 | **0.70** | 0.45 | 0.15 |
+| Runs never noticed (rung 0) | 25% | 28% | **42%** | 63% | 88% |
+| Win rate | 0.38 | 0.34 | **0.35** | 0.36 | 0.38 |
+
+Three findings, and the third is the one that matters:
+
+- **The contact threshold is the ladder's real reach knob.** It moves the mean peak
+  rung across nearly the whole range the ladder has. The **window** length barely
+  does: 8, 10, 14 and 20 all read a mean peak of 0.69–0.70, because widening it makes
+  one sighting easier and three *separate* sightings harder, and the two cancel. So
+  the **10** above is not load-bearing and does not need agonising over; the **3** is.
+- **Rung 3 is unreachable without takedowns.** Over 200 baseline-profile seeds, at
+  every threshold swept, **no run reached rung 3** — its triggers are a found body and
+  a second quiet post, and a player who strikes nobody produces neither. The profiles
+  that leave bodies reach it in ~8–9% of runs. The top of the ladder is a *takedown
+  player's* rung, which is coherent with §7.2 but worth knowing.
+- **Reach is tunable; consequence is not yet measurable.** Across every sweep the win
+  rate stayed flat — 0.34–0.38 on one seed block and 0.41–0.44 on a disjoint one —
+  while the mean peak rung moved from 0.15 to 0.98. Sweeping the rung-1 dwell cut
+  itself, from *no cut at all* (3–7) to the harshest (1–1), moved the win rate by
+  about three points, which is inside a 100-seed batch's own wobble.
+
+So **the [START] values above stay where they are.** The curve that would justify
+moving one is the outcome curve, and it is flat: retuning a threshold against a flat
+curve is tuning noise, not evidence (§13.3). What the flat curve actually says is that
+**rung 1's teeth are its only teeth** — shortening a patrol dwell changes how a
+facility *feels* without changing how often the raid succeeds. Rungs 2 and 3 currently
+escalate to nothing at all, which is what the reinforcements above are for; the
+thresholds are worth retuning once the ladder has a consequence to be worth reaching.
+
+Two caveats the numbers carry (§13.4): the bot has **no rung-aware policy** — it does
+not play differently when the facility is loud, so this measures *pressure*, not
+*play* — and a trigger reading zero is **inconclusive**, not harmless. `second-post-
+silent` fires in no batch measured, and the honest reading is not "the trigger does
+nothing" but that a found body has already taken the facility to rung 3 before a
+second post can, so the escalation belongs to the louder event.
+
 #### The comms console — the counterplay to the net
 
 The net above is pressure the player is meant to be able to *answer*, not merely
@@ -2705,7 +2752,7 @@ Metrics to start with **[START]**:
 | Detection events per run | Whether stealth is actually happening |
 | Takedowns per run | Whether §7.2's cost is real |
 | Bodies found by guards | Whether §7.3's clock has teeth |
-| Alert peak | Whether escalation escalates |
+| Alert peak, **and the path to it** | Whether escalation escalates — the rung reached, the turn it was reached, and which §7.3 trigger got it there. A run driven to rung 3 by bodies is a different game from one driven there by being seen, and both peak at 3, so the peak alone answers half the question (#376) |
 | **Strategy diversity across seeds** | **Boredom.** If every seed is solved by the same ability sequence, the game is a puzzle with one answer. |
 
 That last one is the most important and the least obvious. **Win rate tells you if
