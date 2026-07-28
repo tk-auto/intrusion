@@ -333,6 +333,40 @@ there as an `[n]` footer button for touch. It is the one key the modal help pane
 forwards rather than swallows, because the panel is where the option lives until v2
 grows an options screen. Nothing persists it yet: a reload comes back dark.
 
+### 4.5 The alert rung's tint
+
+The facility alert ladder (§7.3) has three rungs and no way back down, and the near
+line can only state a step on the turn it happens — anything louder overwrites it
+(§11.7). So the standing state lives on the help panel's **Level info** tab, and the
+`[?]` toggle that opens the panel is **tinted by the rung**: the always-visible half,
+saying there is something new to read behind the control the player already knows.
+
+| Rung | Category | Why that one |
+|---|---|---|
+| **0** | System | Not a threat statement. The `[?]` is furniture, the same tan every HUD control wears — an unnoticed raid changes nothing about the screen |
+| **1** | Caution | *A threat that is unaware* — the facility knows somebody is in it and not where |
+| **2** | Warning | *A threat that is hunting* — three sightings, or it knows what you came for |
+| **3** | Danger | *A threat that has you* — the top of the ladder |
+
+**It invents no colour vocabulary.** 1–3 are the standing threat ladder, the same
+yellow → orange → red the player already reads off a guard's glyph, so the facility's
+mind escalates in the colours one guard's does and there is nothing new to learn. It
+inherits §4.1's luminance separation for free, so the tint survives a red-green
+deficiency, and it inherits §4.4's second column, so it works on both themes.
+
+The rung line inside the panel (`Rung 2 of 3`) wears the **same** category, because a
+tint saying *danger* over a panel saying *rung 1* would be worse than no tint. The
+mapping is written once, in `render::alert`, and both halves read it.
+
+**Guard presentation is deliberately unchanged.** A guard the ladder has made never-calm
+still draws as Calm: a guard's colour is *its own state* (§11.2), not the facility's
+mood, and folding one into the other would break the "the colour of `g` is the AI state
+machine" rule the whole scheme rests on. The tint is the only new colour the ladder gets.
+
+The tinted button is flagged **experimental**. If it reads as noise beside the
+categories already in play, the tab alone is the fallback — the panel is the load-bearing
+half.
+
 ---
 
 ## 5. Backgrounds

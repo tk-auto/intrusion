@@ -48,7 +48,7 @@
 use crate::ability::{
     AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout, TargetingMode,
 };
-use crate::alert::{Alert, AlertTrigger, AlertTuning};
+use crate::alert::{Alert, AlertReadout, AlertTrigger, AlertTuning};
 use crate::body::Body;
 
 use crate::category::Category;

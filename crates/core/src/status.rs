@@ -160,9 +160,9 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::BodyCalledIn { .. } => ("a body has been reported".to_string(), 5),
         // The facility alert climbed a rung (§7.3): the loudest radio event, a
         // facility-wide escalation — above a found body, below being caught. What the
-        // rung *does* to the player, and why it climbed, is the Level info tab's job
-        // (#375); the near line states the fact.
-        Event::AlertRaised { rung, .. } => (format!("the facility is on alert — level {rung}"), 5),
+        // rung *does* to the player is the Level info tab's job (#375); the near line
+        // states the fact, in the same words the tab does ([`alert_line`]).
+        Event::AlertRaised { rung, .. } => (alert_line(rung), 5),
         // Handling the body (§8.3): quiet self-narration, like the crouch. The
         // held state itself lives on the ambient floor, not in a message.
         Event::BodyGrabbed { .. } => ("you take hold of the body".to_string(), 0),
@@ -274,11 +274,27 @@ pub fn near_line(state: &State) -> Message {
         .unwrap_or_else(|| ambient(state))
 }
 
+/// How the near line names a facility alert rung (§7.3/§11.4, #375) — **one phrase,
+/// two callers**: the [`Event::AlertRaised`] message that announces a step, and the
+/// [`ambient`] floor that keeps stating it for the rest of the level. They were worded
+/// separately and read as two different facts.
+///
+/// It says **rung**, and says which of how many, matching the help panel's ALERT
+/// section word for word. The panel is where the rung's *effects* are written (#375),
+/// so the line that sends the player there has to name the same thing they will find.
+///
+/// It is also the rewording the §11.7 width bound was waiting on: *"the facility is on
+/// alert — level 3"* was 34 cells in a 29-cell row and reached the screen clipped, so
+/// the one message about escalation was the one the player could not read.
+fn alert_line(rung: u32) -> String {
+    format!("facility alert — rung {rung} of {}", crate::alert::TOP_RUNG)
+}
+
 /// The ambient floor (§11.4): the quiet status the near line rests on between
 /// messages, so it never sits empty. Concealment first — while hidden, crouched
 /// or dragging, *that* is the fact shaping the player's next decision (and the
 /// Owned band matches the recoloured cupboard or table, §10.3). Otherwise, when
-/// the facility is on alert (§7.3), the standing alert level — a raised alert is
+/// the facility is on alert (§7.3), the standing alert rung — a raised alert is
 /// the thing reshaping every choice out in the open, and this is where it stays
 /// *visible* rather than written-but-unseen (§2.3). Failing all that, the objective:
 /// what the run's intel gate still wants, or — once it is met — the exit (§4.5/#310).
@@ -316,10 +332,7 @@ fn ambient(state: &State) -> Message {
         // here whenever no louder message is live — a Warning-band fact, not a
         // threat that has you (Danger). It never falls, so once it is up this is the
         // standing ambient line of the level.
-        (
-            format!("facility alert — level {}", state.alert()),
-            Category::Warning,
-        )
+        (alert_line(state.alert()), Category::Warning)
     } else if !state.exit_ready() {
         // The gate is not met: state the **requirement**, not the tally. Under
         // `AtLeastOne` with three consoles out, three are remaining but only one is
@@ -526,7 +539,7 @@ mod tests {
             trigger: AlertTrigger::RepeatSightings,
         })
         .expect("an alert step speaks");
-        assert_eq!(alert.text, "the facility is on alert — level 2");
+        assert_eq!(alert.text, "facility alert — rung 2 of 3");
         assert_eq!(alert.category, Category::Warning);
         assert_eq!(alert.priority, 5);
     }
@@ -625,8 +638,11 @@ mod tests {
         );
 
         // No message is live after the quiet waits: the near line rests on the alert.
+        // In the same words the step message and the help panel use (#375) — one fact,
+        // one phrase, wherever the player meets it.
         let line = near_line(&s);
-        assert_eq!(line.text, format!("facility alert — level {}", s.alert()));
+        assert_eq!(line.text, alert_line(s.alert()));
+        assert_eq!(line.text, "facility alert — rung 1 of 3");
         assert_eq!(line.category, Category::Warning);
         assert_eq!(
             line.priority,
@@ -773,7 +789,7 @@ mod tests {
             vec![5, 4, 0],
             "loudest first: the escalation, then the found body, then the narration",
         );
-        assert_eq!(live[0].text, "the facility is on alert — level 3");
+        assert_eq!(live[0].text, "facility alert — rung 3 of 3");
         assert_eq!(live[1].text, "a body has been found");
         assert_eq!(live[2].text, "the guard drops — a body is left");
         assert_eq!(

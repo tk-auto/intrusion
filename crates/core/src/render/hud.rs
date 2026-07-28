@@ -294,6 +294,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
             ui.help_tab,
             state.level(),
             state.modifiers(),
+            &state.alert_readout(),
             state.loadout(),
             ui.seed_copy,
         );
@@ -340,7 +341,17 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     if extra > 0 {
         draw_message_button(&mut near, width, top.category, extra, ui.message_log_open);
     }
-    draw_help_button(&mut near, width, top.category);
+    // The help toggle, tinted by the facility alert rung (§7.3/#375): the ladder's
+    // glance-level tell. The panel behind this button is where the standing alert state
+    // is written, so the button is the thing that has to say there is something new to
+    // read — the near line said it once, on the turn it happened, and was overwritten by
+    // the next louder message (§11.7).
+    draw_help_button(
+        &mut near,
+        width,
+        top.category,
+        super::alert::rung_category(state.alert()),
+    );
 
     // One grid, top to bottom: the two status lines, the map, the ability bar.
     let mut cells = near;
@@ -507,17 +518,27 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
 }
 
 /// Draw the help toggle over the already-built near line `row` (§14 v2/#139/#267):
-/// [`HELP_BUTTON`] right-aligned in System — the HUD control colour, like the
-/// deploy button — over the message's own category band, which keeps painting
-/// behind it.
-fn draw_help_button(row: &mut [GlyphCell], width: u32, band: Category) {
+/// [`HELP_BUTTON`] right-aligned in `tint`, over the message's own category `band`,
+/// which keeps painting behind it.
+///
+/// `tint` is the **facility alert rung's** category (§7.3/#375,
+/// [`rung_category`](super::alert::rung_category)) — System, the HUD-control colour the
+/// deploy button and the panel's `[x]` wear, on a facility that has not noticed you, and
+/// the threat ladder's yellow → orange → red above that. It is the ladder's
+/// always-visible half: the panel is where the standing alert state can be *read*, and
+/// this is the control changing colour to say there is something new behind it.
+///
+/// **The button is the only thing that moves.** Guard presentation is deliberately
+/// untouched by the rung (#311): a never-calm guard still reads as Calm, because its
+/// colour is its own state (§11.2) and not the facility's mood.
+fn draw_help_button(row: &mut [GlyphCell], width: u32, band: Category, tint: Category) {
     let start = help_button_start(width);
     for (i, glyph) in HELP_BUTTON.chars().enumerate() {
         let x = start + i as u32;
         if x < width {
             row[x as usize] = GlyphCell {
                 glyph,
-                fg: Category::System,
+                fg: tint,
                 bg: Some(band),
                 vis: Visibility::Live,
             };
@@ -798,15 +819,15 @@ mod tests {
     ///
     /// The exit's refusal left this list in #310: naming the gate's real requirement
     /// ("the exit needs 2 more intel") is shorter than the fixed rule it replaced.
-    /// The alert line got one cell shorter in #311 without leaving: the ladder tops
-    /// at three rungs, so the old open-ended "level 99" cannot occur — but the
-    /// wording still overflows, and rewording it is #375's job, not this list's.
-    const PRE_EXISTING_OVERFLOW: [&str; 6] = [
+    /// **The alert line left it in #375**: the one message about escalation was the one
+    /// the player could not read, at 34 cells in a 29-cell row, and #375 is where the
+    /// ladder's legibility was owed. Naming the rung the way the help panel names it
+    /// ("facility alert — rung 3 of 3") is both shorter and the same words twice.
+    const PRE_EXISTING_OVERFLOW: [&str; 5] = [
         "all the intel — the exit is open",
         "the guard drops — a body is left",
         "you slip away — the run is won",
         "you stow the body — the cupboard is sealed",
-        "the facility is on alert — level 3",
         "intel in hand — the exit is open (9 more out)",
     ];
 
@@ -980,7 +1001,7 @@ mod tests {
         let g = render_screen(&s, ScreenUi::default());
         let near = row_text(&g, NEAR_ROW);
         assert!(
-            near.contains("the facility is on alert"),
+            near.contains("facility alert — rung"),
             "the band speaks the loudest message: {near:?}"
         );
         assert!(
@@ -1016,7 +1037,7 @@ mod tests {
             "the deployed counter points up"
         );
         assert!(
-            row_text(&g, TOP_ROWS).contains("the facility is on alert"),
+            row_text(&g, TOP_ROWS).contains("facility alert — rung"),
             "the loudest sits nearest the band"
         );
         assert!(
@@ -1129,6 +1150,59 @@ mod tests {
             (0..width).all(|x| !is_message_button(&s, x, NEAR_ROW)),
             "and nothing to click"
         );
+    }
+
+    /// #375/§2.2: the `[?]` toggle is **tinted by the facility alert rung** — the
+    /// ladder's always-visible half. The near line states a step on the turn it happens
+    /// and is overwritten by the next louder message (§11.7), so without a standing tell
+    /// a player who blinked would never learn the facility had changed its mind about
+    /// them, and the panel that *does* carry the standing state would never be opened.
+    ///
+    /// A quiet facility leaves the control the System tan every HUD control wears: the
+    /// tint is a claim about the raid, so it says nothing until there is something to
+    /// say.
+    #[test]
+    fn the_help_toggle_is_tinted_by_the_alert_rung() {
+        let mut layout = open_room(40, 14);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(5, 4)),
+                Guard::stationary(Cell::new(5, 2)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        let width = s.layout().facility().width();
+        let toggle = |s: &State| {
+            render_screen(s, ScreenUi::default())
+                .get(help_button_start(width), NEAR_ROW)
+                .fg
+        };
+
+        assert_eq!(s.alert(), 0, "a fresh raid is unnoticed");
+        assert_eq!(
+            toggle(&s),
+            Category::System,
+            "an unnoticed raid leaves the control furniture-coloured",
+        );
+
+        // A takedown whose body the second guard's cone covers: rung 3, the top.
+        s.step(Input::Step(Direction::North));
+        assert_eq!(s.alert(), crate::TOP_RUNG, "the find tops the ladder");
+        assert_eq!(
+            toggle(&s),
+            Category::Danger,
+            "…and the toggle wears the rung's own colour",
+        );
+
+        // The tint is the *rung's* colour and nothing else — it is read from the one
+        // mapping the panel's rung line reads, so the tell and the surface it points at
+        // can never disagree.
+        assert_eq!(toggle(&s), super::alert::rung_category(s.alert()));
     }
 
     /// The §11.4 golden test, whole screen (#267/#287): the near and usable lines on

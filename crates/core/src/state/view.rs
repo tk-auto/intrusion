@@ -587,6 +587,18 @@ impl State {
         self.alert.rung()
     }
 
+    /// What the help panel says about the facility alert (§7.3/#375): the rung, and
+    /// the retaliation that rung has **in force**, generated from the ladder itself.
+    ///
+    /// The near line states an escalation the turn it happens and is then overwritten
+    /// by anything louder (§11.7), so this is the standing surface the player can go
+    /// and read — without it the ladder is perceptible for one turn and inert after
+    /// (§2.2). Rendering stays a pure function of state (§11.1): the readout is threaded
+    /// into [`render_screen`](crate::render_screen) like any other world fact.
+    pub fn alert_readout(&self) -> AlertReadout {
+        self.alert.readout()
+    }
+
     /// Whether the run is live, won, or lost (§4.5).
     pub fn outcome(&self) -> Outcome {
         self.outcome

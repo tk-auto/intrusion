@@ -2020,10 +2020,13 @@ is the case this serves.
   collected — drawn as a **solid band in the message's category colour**. Threat
   reads as a colour flash across the top of the screen, legible without reading
   the words; that's a nice piece of design — keep it. When no message is live,
-  the line falls back to quiet **ambient status** (alert level, an active
+  the line falls back to quiet **ambient status** (the alert rung, an active
   ability's remaining turns) instead of sitting empty. Its right-hand corner
   carries the two view toggles: the live-message counter and the `[?]` help
-  button.
+  button, the latter **tinted by the alert rung** (§7.3) — the ladder's standing
+  state lives on the help panel's Level info tab, and the tint is what says there
+  is something new to read behind the control (see
+  [`docs/render-reference.md`](render-reference.md) §4.5).
 - **Usable line** — *what you can act on*: the bump affordances adjacent to the
   player right now, each **with an arrow giving the bump's direction** (`↑
   console: take intel`, `← table: crouch`, `↓ cupboard: hide`, `door: open →`).
