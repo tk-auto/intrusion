@@ -1535,6 +1535,51 @@ mod tests {
         );
     }
 
+    /// **Every confusion is fired in a panic, at somebody it actually catches** —
+    /// §8.3's *"a costed panic-buy of time, not a kill"*. Two facts per press: the bot
+    /// was being hunted, and at least one guard stood inside the clamped blast.
+    ///
+    /// The second is core's own precondition (a firing that catches nobody is
+    /// `Unusable`, §4.4's free no-op), asserted here anyway — it is the difference
+    /// between a cue that reads the blast and one that presses hopefully and lets the
+    /// refusal absorb it.
+    #[test]
+    fn every_confusion_is_fired_at_a_guard_it_catches() {
+        let mut fired = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Confusion));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let danger = danger_cells(&state);
+                let hunted = being_hunted(&state, &danger);
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Confusion) {
+                    assert!(
+                        hunted,
+                        "seed {seed}: fired confusion without being hunted — the \
+                         longest cooldown in the catalog is a panic-buy (§8.3)",
+                    );
+                    let blast = state.confusion_blast();
+                    assert!(
+                        state.guards().iter().any(|g| blast.contains(g.pos())),
+                        "seed {seed}: fired confusion at nobody — the blast catches \
+                         no guard and the press is a free no-op (§8.3/§4.4)",
+                    );
+                    fired += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            fired > 0,
+            "no confusion in 40 seeds — this test would prove nothing",
+        );
+    }
+
     /// The profiles are **distinguishable** over a batch — a shape assertion, never
     /// a leaderboard (§13.4). Three directions the temperaments are built to differ
     /// in, checked over the same seeds so the facility is held fixed:

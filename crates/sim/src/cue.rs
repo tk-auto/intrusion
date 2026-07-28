@@ -200,7 +200,7 @@ impl Moment<'_> {
             // unattributable. Until then the slot honestly reads zero.
             AbilityId::Dephase => None,
             AbilityId::Autodoors => self.autodoors(status),
-            AbilityId::Confusion => None,
+            AbilityId::Confusion => self.confusion(status),
             AbilityId::PierceWall => None,
             AbilityId::Lockdown => None,
             // **Passive** (§8.2/#264): always on while held, with no activation to
@@ -363,6 +363,61 @@ impl Moment<'_> {
             "breaking contact through a door — shut it behind me and make them reopen it (§8.3)",
             0,
         )
+    }
+
+    /// Confusion (§8.3): *"a costed panic-buy of time, not a kill"* — fired once from
+    /// the cell you stand in, freezing every guard the clamped blast catches for six
+    /// turns. What it is **for** is the moment the time is worth more than the
+    /// 45-turn cooldown.
+    fn confusion(&self, status: AbilityStatus) -> Option<Bid> {
+        // A panic-buy is bought in a panic. Freezing a patrol you have not been seen
+        // by spends the longest cooldown in the catalog on a guard that was going to
+        // walk past anyway.
+        if self.intent != Intent::Flee {
+            return None;
+        }
+        // How many the blast would catch. The reach is core's, already clamped to the
+        // live guard sense (§8.3 [SETTLED]: `min(CONFUSION_RADIUS, sense_range())`),
+        // so counting guards inside it stays within what the player was shown —
+        // anything it could catch, they were already sensing. Legality is core's too:
+        // a firing that catches nobody is `Unusable`, so `press` refuses it and this
+        // count is never zero by the time it matters.
+        let blast = self.state.confusion_blast();
+        let caught = self
+            .state
+            .guards()
+            .iter()
+            .filter(|guard| blast.contains(guard.pos()))
+            .count();
+
+        // **Cornered is the moment this ability exists for.** A guard at arm's length
+        // is a capture next turn (§4.5) and the two escapes both decline here — Run
+        // and Autodoors need a cell of room to spend the activation turn in. A dazed
+        // adjacent guard cannot step into you (§8.3), so this is the one turn that
+        // buys the run back, and it does not get another.
+        if self.nearest_guard.is_some_and(|gap| gap <= 1) {
+            return self.press(
+                status,
+                URGE_DECISIVE,
+                "a guard at arm's length and nowhere to spend a turn — freeze it or be taken (§8.3)",
+                0,
+            );
+        }
+        // Otherwise the daze is worth its cooldown when it buys time against more than
+        // one hunter at once; against a single chaser with room to run, outrunning it
+        // is the cheaper turn and Run will say so.
+        let (urge, reason) = if caught > 1 {
+            (
+                URGE_STRONG,
+                "more than one hunter inside the blast — buy six turns from all of them at once (§8.3)",
+            )
+        } else {
+            (
+                URGE_PLAIN,
+                "hunted, with the blast on a guard — buy the six turns (§8.3)",
+            )
+        };
+        self.press(status, urge, reason, 0)
     }
 
     /// Whether `cell` holds a door panel, open or closed, **as the player knows it**
