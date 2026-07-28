@@ -51,10 +51,11 @@ pub enum Terrain {
     /// Partial cover — a table (§10.1a, §10.3): the furniture the sightline pass
     /// stamps into over-long straight runs. Solid to movement and pathing like a
     /// wall, but it does **not block sight** — a guard sees straight over it. Its
-    /// counterplay is behavioural, not optical: a player who spends a turn
-    /// *waiting* beside one auto-crouches and is concealed from any viewer whose
-    /// line of sight crosses the table ([`provides_cover`](Self::provides_cover);
-    /// the crouch itself lives on the turn loop). Renders `π` (§10.3).
+    /// counterplay is behavioural, not optical: a player who **bumps** one crouches
+    /// behind its whole run and is concealed from any viewer on the far side of the
+    /// furniture ([`provides_cover`](Self::provides_cover); the crouch itself lives
+    /// on the turn loop, its geometry in [`cover`](crate::cover)). Renders `π`
+    /// (§10.3).
     PartialCover,
     /// A duct entry: the mouth-bearing end of a player-only crawlspace threaded
     /// through the walls (§10.7). Wall-like to everyone but the player — solid,
@@ -190,8 +191,8 @@ impl Terrain {
     }
 
     /// Whether this terrain is **partial cover** (§10.1a/§10.3): see-through, but a
-    /// player crouched beside it is concealed from any viewer whose line of sight
-    /// crosses it. Cover also *terminates* a §10.1a sightline run — the rule
+    /// player crouched beside it is concealed from any viewer across it. Cover also
+    /// *terminates* a §10.1a sightline run — the rule
     /// guarantees counterplay on every long straight, which cover provides without
     /// blocking sight.
     pub fn provides_cover(self) -> bool {

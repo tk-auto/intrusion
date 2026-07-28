@@ -3,15 +3,28 @@
 //! The generator never places a lone table — §10.1a stamps **benches**, straight
 //! rows of 2+ partial-cover cells — so cover comes in *runs*, and the crouch
 //! treats a run as one piece of furniture: bump any table of it to duck, stay
-//! crouched while you keep hugging it ([`run_hugs`]), and be concealed from any
-//! viewer whose line of sight to you crosses **any** cell of it
-//! ([`run_conceals`]). The old rule — a quarter-plane behind the single bumped
-//! cell — let a guard look straight down a bench and see the player through its
-//! other tables, which undercut the exact cover §10.1a places.
+//! crouched while you keep hugging it ([`run_hugs`]), and be concealed by the
+//! **side of it you are on** ([`run_conceals`]).
 //!
-//! Everything here is integer arithmetic on doubled coordinates, so the answers
-//! are exact and deterministic (§12.4): no floats, no epsilon, no tie that two
-//! platforms could break differently.
+//! That last rule has been narrowed twice and widened once, and both moves are
+//! worth keeping in view:
+//!
+//! - It began as the **quarter-plane** behind the single bumped cell, which let a
+//!   guard look straight down a bench and see the player through its other
+//!   tables — undercutting the exact cover §10.1a places.
+//! - It became a **per-ray** test across the whole run, which fixed that but was
+//!   too tight the other way (#377): a short bench subtends a narrow wedge, so a
+//!   guard only a little off the run's axis had a clear line, and the player
+//!   could not compute that wedge at a glance. A turn spent on protection you
+//!   cannot predict is a turn not spent.
+//! - It is now the **half-plane** taken from each straight arm's own line, with
+//!   the ray test kept as a union so the on-axis cases a half-plane cannot
+//!   express still work. A viewer across the furniture from you does not see you;
+//!   one that has come round to *your* side does.
+//!
+//! Everything here is integer arithmetic — side-of-line signs, and doubled
+//! coordinates for the ray — so the answers are exact and deterministic (§12.4):
+//! no floats, no epsilon, no tie that two platforms could break differently.
 
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
@@ -50,17 +63,81 @@ pub(crate) fn run_hugs(run: &[Cell], pos: Cell) -> bool {
 }
 
 /// Whether a crouched player at `player` is concealed from a viewer at `viewer`
-/// by this run (§10.3): true when the straight sight line between the two cell
-/// centres crosses any table of the run. Grazing a table's corner counts — the
-/// crouch is generous at the exact diagonal, as the single-table rule was.
+/// by this run (§10.3). Two ways, unioned:
+///
+/// - **Across the furniture** ([`arm_separates`]) — the viewer is strictly on the
+///   far side of one of the run's straight arms from the player. This is the rule
+///   the player reads at a glance: *which side of the bench is he on?* It holds
+///   however far past the arm's ends the viewer stands, which is the whole point
+///   — the old per-ray wedge was the part nobody could predict (#377).
+/// - **Through the furniture** ([`ray_crosses_run`]) — the straight sight line
+///   between the two cell centres crosses a table of the run, corner grazes
+///   included. Kept because a half-plane has nothing to say when the player
+///   stands *in* the arm's own line — rounding the end of a bench, or a lone
+///   table with no arm at all — and looking down the bench must still be blocked.
 ///
 /// This is deliberately *not* the vision system's shadowcast: a table does not
 /// block sight (§10.3 — a guard sees straight over it). It is the crouch's own
-/// question — "is that table between us?" — answered per-viewer.
+/// question — "is that furniture between us?" — answered per-viewer.
 pub(crate) fn run_conceals(run: &[Cell], player: Cell, viewer: Cell) -> bool {
     if player == viewer {
         return false;
     }
+    arm_separates(run, player, viewer) || ray_crosses_run(run, player, viewer)
+}
+
+/// Whether any straight arm of the run has the player and the viewer strictly on
+/// opposite sides of its line (§10.3).
+///
+/// An *arm* is a direction in which two of the run's tables sit adjacent, so a
+/// §10.1a bench contributes its own line and an L-shaped run (two stamped
+/// benches touching) contributes one per arm — the arms' half-planes union,
+/// which keeps [`cover_run`]'s flood-fill definition of a run intact rather than
+/// asking a bent run for a single axis it does not have.
+///
+/// A lone table has no arm and so hides nobody this way; it falls back to the ray
+/// test, which is exactly the quarter-plane it always granted.
+fn arm_separates(run: &[Cell], player: Cell, viewer: Cell) -> bool {
+    run.iter().any(|&table| {
+        (has_table_south_of(run, table) && opposite_sides(player.x, viewer.x, table.x))
+            || (has_table_east_of(run, table) && opposite_sides(player.y, viewer.y, table.y))
+    })
+}
+
+/// Whether the run has a second table directly south of `table` — i.e. `table`
+/// sits on a north–south arm. Checking one direction per axis is enough because
+/// [`arm_separates`] asks it of every table in turn.
+fn has_table_south_of(run: &[Cell], table: Cell) -> bool {
+    table
+        .y
+        .checked_add(1)
+        .is_some_and(|y| run.contains(&Cell::new(table.x, y)))
+}
+
+/// Whether the run has a second table directly east of `table` — i.e. `table`
+/// sits on an east–west arm.
+fn has_table_east_of(run: &[Cell], table: Cell) -> bool {
+    table
+        .x
+        .checked_add(1)
+        .is_some_and(|x| run.contains(&Cell::new(x, table.y)))
+}
+
+/// Whether `player` and `viewer` lie strictly on opposite sides of the arm's line
+/// at `line`, along one axis.
+///
+/// Sitting *on* the line is neither side: a viewer standing in the bench's own
+/// column is looking **along** the furniture rather than across it, and a player
+/// there has rounded its end. Both are the ray test's business, not the
+/// half-plane's — which is why the two are unioned.
+fn opposite_sides(player: u32, viewer: u32, line: u32) -> bool {
+    (player < line && viewer > line) || (player > line && viewer < line)
+}
+
+/// Whether the straight line between the two cell centres crosses any table of
+/// the run — the pre-#377 rule, now the union's second half. Grazing a table's
+/// corner counts, out to the exact 45° diagonal, as it always did.
+fn ray_crosses_run(run: &[Cell], player: Cell, viewer: Cell) -> bool {
     let p = doubled(player);
     let v = doubled(viewer);
     run.iter().any(|&c| segment_crosses_cell(p, v, doubled(c)))
@@ -197,6 +274,103 @@ mod tests {
         assert!(!run_conceals(&run, player, Cell::new(4, 0)));
         // Behind the player, away from the bench: seen.
         assert!(!run_conceals(&run, player, Cell::new(2, 4)));
+    }
+
+    /// #377's repro, and the confirmation the ticket asked for. The reported
+    /// geometry: crouched round the end of a bench — hugging its last table on the
+    /// diagonal, so the pose is held and the run draws Owned — with a guard a
+    /// couple of cells to the south-east, off that end. The per-ray rule
+    /// *correctly* left that uncovered (no table lies on the line, and it is not
+    /// even a corner graze), so #377 was the rule being too tight, not a bug in
+    /// the segment test. The arm's half-plane covers it now; the mirror case on
+    /// the player's own side stays seen.
+    #[test]
+    fn a_guard_off_the_ends_far_side_is_covered_by_the_arm_not_the_ray() {
+        let run = vec![Cell::new(5, 3), Cell::new(5, 4), Cell::new(5, 5)];
+        let player = Cell::new(4, 6); // round the south end, hugging (5,5) diagonally
+        assert!(
+            run_hugs(&run, player),
+            "the pose is held here (the crouch-walk)"
+        );
+        let far = Cell::new(6, 8); // a couple of cells south-east, across the bench
+        assert!(
+            !ray_crosses_run(&run, player, far),
+            "the old per-ray rule genuinely missed this — the geometry is faithful, \
+             the rule was too tight"
+        );
+        assert!(
+            run_conceals(&run, player, far),
+            "the bench's line is between them, so the crouch protects"
+        );
+        // The mirror image, the same way off the end but on the player's own side.
+        let near = Cell::new(2, 8);
+        assert!(!run_conceals(&run, player, near), "same side of the bench");
+    }
+
+    /// The rule the half-plane has to keep honest (§10.3): a bench is directional,
+    /// so a guard that has walked round to the **player's** side sees them, and
+    /// the cupboard stays the stronger tool. Distance past the ends buys the guard
+    /// nothing — only changing sides does.
+    #[test]
+    fn coming_round_to_the_players_side_sees_them() {
+        let run = vec![Cell::new(5, 3), Cell::new(5, 4), Cell::new(5, 5)];
+        let player = Cell::new(4, 4);
+        for viewer in [
+            Cell::new(4, 1), // north, up the player's own column
+            Cell::new(3, 4), // due west, behind the player
+            Cell::new(4, 8), // south, well past the bench's end
+            Cell::new(2, 7), // south-west and far off
+            Cell::new(5, 8), // on the bench's own line, past its end
+        ] {
+            assert!(
+                !run_conceals(&run, player, viewer),
+                "{viewer:?} is not across the bench from the player"
+            );
+        }
+    }
+
+    /// The regression the per-ray rule was introduced to fix, which the union
+    /// preserves: a viewer looking straight **down** the bench's axis is on the
+    /// line, not across it, so the half-plane says nothing — the ray test still
+    /// blocks it through the intervening tables.
+    #[test]
+    fn looking_down_the_bench_axis_is_still_blocked() {
+        let run = vec![Cell::new(5, 3), Cell::new(5, 4), Cell::new(5, 5)];
+        let player = Cell::new(5, 6); // rounded the end, on the bench's own line
+        let down_the_axis = Cell::new(5, 1);
+        assert!(
+            !arm_separates(&run, player, down_the_axis),
+            "both stand on the arm's line, so neither is across it"
+        );
+        assert!(
+            run_conceals(&run, player, down_the_axis),
+            "the tables between them still block the look"
+        );
+    }
+
+    /// An L-shaped run (two §10.1a benches that happen to touch) has no single
+    /// axis, so each arm contributes its own half-plane and they union — the whole
+    /// L is honestly one piece of cover, per [`cover_run`].
+    #[test]
+    fn each_arm_of_an_l_contributes_its_half_plane() {
+        // A vertical arm at x = 5 and a horizontal arm at y = 5, meeting at (5,5).
+        let run = vec![
+            Cell::new(5, 3),
+            Cell::new(5, 4),
+            Cell::new(5, 5),
+            Cell::new(6, 5),
+            Cell::new(7, 5),
+        ];
+        // The player stands inside the L's elbow.
+        let player = Cell::new(4, 4);
+        // Across the vertical arm.
+        assert!(run_conceals(&run, player, Cell::new(8, 2)));
+        // Across the horizontal arm, on the player's side of the vertical one.
+        assert!(run_conceals(&run, player, Cell::new(4, 9)));
+        // Across both.
+        assert!(run_conceals(&run, player, Cell::new(9, 9)));
+        // Inside the elbow with the player: neither arm is between them.
+        assert!(!run_conceals(&run, player, Cell::new(2, 2)));
     }
 
     /// Rounding the corner keeps the cover honest: from below the bench's end

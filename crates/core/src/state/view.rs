@@ -159,13 +159,15 @@ impl State {
     ///   [`camouflage_holding`](Self::camouflage_holding), so the effect mark that
     ///   reports it (#341) reads the rule rather than a copy of it.
     /// - **Crouched behind a run of tables** ([`crouched`](Self::crouched)):
-    ///   directional — from viewers whose line of sight to the player crosses
-    ///   **any table of the run the player ducked behind** (the whole §10.1a
-    ///   bench, not just the bumped cell — a guard cannot look down a bench and
-    ///   see the player through its other tables), grazing a table's corner
-    ///   included. Other runs the player happens to stand beside cover nothing.
-    ///   Integer arithmetic throughout ([`cover::run_conceals`]), so it is
-    ///   exactly deterministic (§12.4).
+    ///   directional — from viewers **across the furniture**, meaning on the far
+    ///   side of one of the run's straight arms from the player, or with a table of
+    ///   the run on the sight line between them (#377/§10.3). It is the whole
+    ///   §10.1a bench that hides you, not just the bumped cell, so a guard cannot
+    ///   look down a bench and see the player through its other tables; a guard
+    ///   that has come round to the player's *own* side does see them. Other runs
+    ///   the player happens to stand beside cover nothing. Integer arithmetic
+    ///   throughout ([`cover::run_conceals`]), so it is exactly deterministic
+    ///   (§12.4).
     ///
     /// Concealment is not cover from *contact*: a guard can still walk into a
     /// crouched player and capture (§4.5). And it composes with sight, not

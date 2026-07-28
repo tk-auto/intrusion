@@ -1460,6 +1460,55 @@ mod tests {
         );
     }
 
+    /// §11.5 and §10.3 agree cell for cell under #377's half-plane too, not just the
+    /// old per-ray rule: a guard off the **end** of the bench but on its far side
+    /// paints its cone, and the crouched player's cell is spared — because the same
+    /// `concealed_from` seam answers the overlay, the guard's own sight, and the
+    /// §7.2 takedown gate. Red under you still means *detected*.
+    #[test]
+    fn the_overlay_agrees_with_the_half_plane_off_the_benchs_end() {
+        // A two-cell bench at x = 5; the player crouches at (4,5) and crouch-walks
+        // north to (4,4), round the bench's end and still hugging it on the
+        // diagonal. The guard sits north-east at (6,2) — across the bench's line
+        // but past its end, which is exactly the line the ray test misses.
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 5), Terrain::PartialCover);
+        layout.place(Cell::new(5, 6), Terrain::PartialCover);
+        let mut s = State::new(
+            layout,
+            Cell::new(4, 5),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(6, 2))],
+            Vec::new(),
+            Cell::new(10, 10),
+        );
+        s.step(Input::Step(Direction::East)); // bump the bench: crouch
+        s.step(Input::Step(Direction::North)); // crouch-walk round its end
+        assert_eq!(s.player(), Cell::new(4, 4));
+        assert!(s.crouched(), "the diagonal hug holds the pose (§10.3)");
+
+        let guard = &s.guards()[0];
+        assert!(
+            guard.fov().contains(Cell::new(4, 4)),
+            "the guard's cone reaches the player — sight passes over a table"
+        );
+        assert!(
+            !s.guard_detects_now(guard),
+            "but the bench is between them, so it does not see them (§10.3)"
+        );
+        let g = render(&s);
+        assert_eq!(
+            g.get(4, 4).bg,
+            None,
+            "the overlay spares the concealed player's cell"
+        );
+        assert_eq!(
+            g.get(5, 4).bg,
+            Some(Category::Danger),
+            "while the rest of the visible cone stays red"
+        );
+    }
+
     /// §11.5a (#307): a table stands **in a room**, not in the building's fabric, so
     /// the plans do not carry it. Unexplored it reads as schematic floor like the rest
     /// of the room's area; walk in and it resolves into the `π` you can crouch behind,
