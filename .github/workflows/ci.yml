@@ -1,4 +1,5 @@
-# Intrusion CI gate — the fmt/clippy/test quality gate (issue #1).
+# Intrusion CI — the fmt/clippy/test quality gate (issue #1), and the simbot
+# baseline drift check beside it.
 name: CI
 
 on:
@@ -53,3 +54,42 @@ jobs:
 
       - name: Build web crate for wasm
         run: cargo build -p intrusion-web --target wasm32-unknown-unknown
+
+  baseline:
+    name: simbot baseline
+    runs-on: ubuntu-latest
+    # Its own job rather than a fourth step in the gate: it is a *released*
+    # build (a 100-run batch is seconds released, minutes in debug), so it
+    # shares nothing with the gate's cache, and a red tick here means something
+    # different from a red gate — the code is fine, the committed numbers are
+    # stale. Running in parallel also keeps it off the gate's critical path.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo registry and release target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          # A key of its own: this job builds `--release` where the gate builds
+          # debug, so sharing the gate's key would have the two jobs overwriting
+          # each other's cache with artefacts the other cannot use.
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+
+      - name: Check the committed simbot baseline has not drifted
+        # `.claude/skills/playtest/baseline.json` is the snapshot the playtest
+        # skill diffs a batch against, and it is *supposed* to move when the game
+        # does — a `[START]` knob, guard/ability behaviour, generation or the bot
+        # policy all legitimately shift the numbers, and the convention is to
+        # refresh it in the same PR. What the convention cannot enforce on its own
+        # is that anybody noticed: a stale baseline is silently compared against
+        # for months, which is exactly what §13.2's snapshot exists to prevent.
+        # Re-running it here turns "you forgot" into a red tick, and the fix is
+        # `./scripts/baseline.py --refresh` plus a commit — never a hand edit.
+        run: ./scripts/baseline.py
