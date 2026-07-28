@@ -9,15 +9,17 @@
 use crate::guard::{GuardState, PATROL_RADIUS, SEARCH_RADIUS};
 use crate::state::*;
 use crate::test_support::{open_room, region_strip};
-use crate::{generate_level, LevelModifiers, Rng};
+use crate::{generate_level, AlertTrigger, LevelModifiers, Rng};
 
-/// §7.3: a downed guard misses its radio ping a period after the takedown, and
-/// control dispatches the nearest active guard to its last known post (→
-/// [`Responding`](GuardState::Responding)); a second missed ping a period later
-/// steps the facility-wide alert. Both surface on the near line (§11.4/§11.7).
-/// A 1-wide corridor keeps the responder's patrol on a single predictable line.
+/// §7.3: a downed guard misses its radio ping a period after the takedown; control
+/// dispatches the nearest active guard to its last known post (→
+/// [`Responding`](GuardState::Responding)) **and** the silence steps the facility
+/// alert ladder to rung 1. Both surface on the near line (§11.4/§11.7). A second
+/// miss from the *same* post escalates nothing — the ladder's rung-3 trigger counts
+/// bodies, not pings (§7.3). A 1-wide corridor keeps the responder's patrol on a
+/// single predictable line.
 #[test]
-fn a_downed_guard_pings_a_dispatch_then_an_alert_step() {
+fn a_downed_guards_first_missed_ping_dispatches_and_steps_the_ladder() {
     // The player starts in a cupboard so the adjacent victim's 360° touching
     // ring (§6.1) does not detect it — the takedown lands, and staying hidden
     // keeps the player safe while the radio ticks (contact is refused, §7.6).
@@ -60,27 +62,26 @@ fn a_downed_guard_pings_a_dispatch_then_an_alert_step() {
         GuardState::Responding,
         "control dispatched the nearest active guard",
     );
-    assert_eq!(s.alert(), 0, "one miss does not raise the alert");
+    assert!(
+        dispatch.contains(&Event::AlertRaised {
+            rung: 1,
+            trigger: AlertTrigger::MissedPing,
+        }),
+        "the same silence steps the ladder, and says why",
+    );
+    assert_eq!(s.alert(), 1, "the rung is written and readable");
 
-    // Three more quiet turns: the second missed ping steps the facility alert.
-    let mut stepped_to = None;
+    // Three more quiet turns bring the second missed ping from the same post.
+    // Control gives up on it, and the ladder hears nothing new.
     for _ in 0..3 {
-        for e in s.step(Input::Wait) {
-            if let Event::AlertRaised { level } = e {
-                stepped_to = Some(level);
-            }
-        }
+        assert!(
+            !s.step(Input::Wait)
+                .iter()
+                .any(|e| matches!(e, Event::AlertRaised { .. })),
+            "one post going quiet twice is one fact, not a louder one",
+        );
     }
-    assert_eq!(
-        stepped_to,
-        Some(radio::ALERT_STEP),
-        "the second miss steps it"
-    );
-    assert_eq!(
-        s.alert(),
-        radio::ALERT_STEP,
-        "the alert is written and readable"
-    );
+    assert_eq!(s.alert(), 1, "still rung 1 — the ladder counts bodies");
 }
 
 /// §7.3: the radio net bites only a guard that is *down*. A live guard answers
@@ -99,12 +100,24 @@ fn a_live_guard_answers_and_never_trips_the_net() {
     for _ in 0..40 {
         for e in s.step(Input::Wait) {
             assert!(
-                !matches!(e, Event::RadioSilence { .. } | Event::AlertRaised { .. }),
+                !matches!(e, Event::RadioSilence { .. }),
                 "a live guard never trips the radio net",
+            );
+            // The patrol may well spot a player waiting in the open, and the §7.3
+            // ladder steps for that — what it can never do here is escalate from a
+            // *ping*, because nobody is down to miss one.
+            assert!(
+                !matches!(
+                    e,
+                    Event::AlertRaised {
+                        trigger: AlertTrigger::MissedPing | AlertTrigger::SecondPostSilent,
+                        ..
+                    }
+                ),
+                "no silent post, so no rung from the net",
             );
         }
     }
-    assert_eq!(s.alert(), 0);
 }
 
 /// §7.3: a **hidden** body still misses its ping. Hiding a body confuses the
@@ -659,7 +672,15 @@ fn a_found_body_is_registered_once_and_flushes_the_cupboard_beside_it() {
     let events = s.step(Input::Step(Direction::North));
     assert_eq!(
         events,
-        vec![Event::TakenDown { at: body }, Event::BodyFound { at: body }],
+        vec![
+            Event::TakenDown { at: body },
+            Event::BodyFound { at: body },
+            // The loudest event in the game takes the §7.3 ladder straight to its top.
+            Event::AlertRaised {
+                rung: 3,
+                trigger: AlertTrigger::BodyFound,
+            },
+        ],
         "the finder's cone covers the fresh body: found the same turn",
     );
     assert_eq!(s.bodies()[0].cell(), body);

@@ -60,6 +60,23 @@ impl GuardState {
     }
 }
 
+/// What a single **look** made of the player (§7.6) — the two detection zones, as
+/// the guard's own per-turn reading rather than as the mood it left behind.
+///
+/// The distinction is load-bearing for the facility alert (§7.3): a **confirmed
+/// sighting** is certain-zone contact, and a glimpse counts nothing toward it.
+/// Keeping both in one field is what stops the ladder ever re-deriving "was that
+/// certain?" from the guard's state, where a hideout flush or a body search could
+/// have moved it on since (#199/#200 — one reading, not two that merely agree).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Contact {
+    /// The player was inside [`CERTAIN_RANGE`]: the guard knows where they are.
+    Certain,
+    /// The player was past [`CERTAIN_RANGE`] but inside [`GLIMPSE_RANGE`]: the guard
+    /// knows *something* is there, and heads for where it last knew them to be.
+    Glimpse,
+}
+
 /// A guard on the level.
 ///
 /// A Calm guard **patrols** (§7.5): from its station it sweeps toward the farthest
@@ -131,13 +148,18 @@ pub struct Guard {
     /// [`WATCH_RADIUS`], so the just-searched region is watched harder before the sweep
     /// widens back to the station territory.
     watch: u32,
-    /// Whether this guard's most recent [`sense`](Self::sense) detected the player —
-    /// the §7.2 takedown gate ("the target has not detected you this turn"
-    /// **[SETTLED]**). Distinct from [`state`](Self::state): a Chasing guard whose
-    /// current look missed the player (concealed, or out of the cone) has *not*
-    /// detected them this turn, and is takedown-able — awareness is per-turn fact,
-    /// the state is the lingering mood.
-    detected: bool,
+    /// What this guard's most recent [`sense`](Self::sense) made of the player, or
+    /// `None` for a look that missed them — the §7.2 takedown gate ("the target has
+    /// not detected you this turn" **[SETTLED]**). Distinct from
+    /// [`state`](Self::state): a Chasing guard whose current look missed the player
+    /// (concealed, or out of the cone) has *not* detected them this turn, and is
+    /// takedown-able — awareness is per-turn fact, the state is the lingering mood.
+    ///
+    /// It keeps the **zone** (§7.6) rather than a bare flag because the facility
+    /// alert counts certain-zone turns and nothing else (§7.3): one field, so a
+    /// glimpse can never be read as a confirmed sighting by a second, drifting
+    /// reading of the same look.
+    contact: Option<Contact>,
     fov: VisibleSet,
     state: GuardState,
     /// Turns of Calm patrol **dwell** remaining (§7.5 dwell, §153): a guard that has
@@ -323,6 +345,53 @@ pub(crate) const GUARD_DWELL_TURNS_MAX: u32 = 7;
 // [START] numbers are retuned to.
 const _: () = assert!(GUARD_DWELL_TURNS_MIN >= 1 && GUARD_DWELL_TURNS_MIN <= GUARD_DWELL_TURNS_MAX);
 
+/// The §7.5 dwell rule in force this turn: how often an arriving Calm guard pauses,
+/// and how long it holds when it does.
+///
+/// It is handed to [`decide`](Guard::decide) rather than read from constants because
+/// the length is **not** a constant any more: the facility alert shortens it from
+/// rung 1 up (§7.3), so a guard's pause is a fact about the level's current state,
+/// not about the guard. The chance stays the playtest knob it was
+/// (`State::set_guard_dwell_chance`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Dwell {
+    /// The percentage chance an arrival pauses at all ([`GUARD_DWELL_CHANCE_PERCENT`]).
+    pub chance: u32,
+    /// The inclusive length range, in turns — [`GUARD_DWELL_TURNS_MIN`]..=[`GUARD_DWELL_TURNS_MAX`]
+    /// in a quiet facility, shortened once the alert is up
+    /// ([`Alert::dwell_turns`](crate::alert::Alert::dwell_turns)).
+    pub turns: (u32, u32),
+}
+
+impl Dwell {
+    /// The §7.5 rule as the design's own numbers state it — a quiet facility, every
+    /// arrival pausing 3–7 turns. The fixtures and guard-level tests that have no
+    /// [`State`](crate::State) to ask use this.
+    #[cfg(test)]
+    pub(crate) const CALM: Self = Self {
+        chance: GUARD_DWELL_CHANCE_PERCENT,
+        turns: (GUARD_DWELL_TURNS_MIN, GUARD_DWELL_TURNS_MAX),
+    };
+
+    /// The rule with the pause switched **off** — what `set_guard_dwell_chance(0)`
+    /// produces. The scene tests that want a guard walking every turn use this.
+    #[cfg(test)]
+    pub(crate) const NEVER: Self = Self {
+        chance: 0,
+        ..Self::CALM
+    };
+
+    /// [`CALM`](Self::CALM) with the chance knob turned to `chance` — for the test
+    /// that sweeps it.
+    #[cfg(test)]
+    pub(crate) fn with_chance(chance: u32) -> Self {
+        Self {
+            chance,
+            ..Self::CALM
+        }
+    }
+}
+
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
 /// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
 /// if the spawn facing ever changes, the "no guard eyes the player's spawn"
@@ -346,7 +415,7 @@ impl Guard {
             focus: None,
             search: 0,
             watch: 0,
-            detected: false,
+            contact: None,
             fov: VisibleSet::default(),
             state: GuardState::Calm,
             dwell: 0,
@@ -465,7 +534,15 @@ impl Guard {
     ///
     /// [`Detected`]: crate::Event::Detected
     pub fn detected_player(&self) -> bool {
-        self.detected
+        self.contact.is_some()
+    }
+
+    /// Whether this guard's most recent look had the player in the **certain** zone
+    /// (§7.6) — the facility alert's confirmed-sighting input (§7.3). Strictly
+    /// narrower than [`detected_player`](Self::detected_player): a glimpse is a
+    /// detection, and it is not a sighting.
+    pub(crate) fn certain_contact(&self) -> bool {
+        self.contact == Some(Contact::Certain)
     }
 
     /// Whether this guard is **dazed** right now (§8.3/#325): caught by a Confusion
@@ -590,7 +667,7 @@ impl Guard {
         self.alert = self.alert.saturating_sub(1);
         self.search = self.search.saturating_sub(1);
         self.watch = self.watch.saturating_sub(1);
-        self.detected = false;
+        self.contact = None;
         self.see(player, concealed);
     }
 
@@ -619,13 +696,13 @@ impl Guard {
             self.destination = Some(player);
             self.last_seen = Some(player);
             self.alert = ALERT_DURATION;
-            self.detected = true;
+            self.contact = Some(Contact::Certain);
             self.end_search_and_watch();
         } else if range <= GLIMPSE_RANGE {
             self.state = GuardState::Investigating;
             self.destination = self.last_seen.or(Some(player));
             self.alert = ALERT_DURATION;
-            self.detected = true;
+            self.contact = Some(Contact::Glimpse);
             self.end_search_and_watch();
         }
     }
@@ -680,7 +757,7 @@ impl Guard {
     /// this is the finder's own reaction.
     pub(crate) fn find_body(&mut self, at: Cell) {
         self.alert = self.alert.max(BODY_ALERT_DURATION);
-        if self.detected {
+        if self.detected_player() {
             return; // the live player outranks the body
         }
         self.state = GuardState::Alerted;
@@ -818,9 +895,10 @@ impl Guard {
     /// nowhere to go, holds. A Calm guard that must **change heading** by 90° first
     /// spends a turn rotating in place before it steps the new way, and no guard —
     /// Calm or reactive — flips 180° in one move: both are [`commit_step`]'s job,
-    /// applied to whichever step the branches above chose. `rng` and `dwell_chance`
+    /// applied to whichever step the branches above chose. `rng` and [`dwell`](Dwell)
     /// drive the dwell roll and are the loop's only stochastic input here (§12.4); a
-    /// `0` chance draws nothing.
+    /// `0` chance draws nothing. The dwell *length* comes in with the rule rather than
+    /// from a constant, because the facility alert shortens it (§7.3/§7.5).
     /// `blocked` are the cells other guards currently stand on: guards are solid to
     /// each other and must **path around** a colleague, not through one (§7.8). A
     /// route the pass finds steps only into cells no other guard holds, so a guard
@@ -834,7 +912,7 @@ impl Guard {
         facility: &Facility,
         blocked: &[Cell],
         rng: &mut Rng,
-        dwell_chance: u32,
+        dwell: Dwell,
     ) -> Option<Direction> {
         if !self.patrols {
             return None;
@@ -924,7 +1002,7 @@ impl Guard {
             // is about to be picked, but a Calm guard dwells first (§7.5/§153) —
             // the pause comes **before** the repick, so the guard is never seen to
             // arrive and about-face in the same breath.
-            if let Some(turns) = roll_dwell(rng, dwell_chance) {
+            if let Some(turns) = roll_dwell(rng, dwell) {
                 self.dwell = turns;
                 return None;
             }
@@ -1137,15 +1215,14 @@ impl Guard {
 /// *chance* — a `0` never dwells and perturbs no stream, a `100` always does — so
 /// only the tuned middle spends a chance draw; a dwell that *does* start then
 /// spends one more draw for its length in [`GUARD_DWELL_TURNS_MIN`]..=[`GUARD_DWELL_TURNS_MAX`].
-fn roll_dwell(rng: &mut Rng, chance: u32) -> Option<u32> {
-    let dwelling = match chance {
+fn roll_dwell(rng: &mut Rng, dwell: Dwell) -> Option<u32> {
+    let dwelling = match dwell.chance {
         0 => false,
         c if c >= 100 => true,
         c => rng.below(100) < c,
     };
-    dwelling.then(|| {
-        rng.range_inclusive(GUARD_DWELL_TURNS_MIN as i32, GUARD_DWELL_TURNS_MAX as i32) as u32
-    })
+    let (min, max) = dwell.turns;
+    dwelling.then(|| rng.range_inclusive(min as i32, max as i32) as u32)
 }
 
 /// Whether a guard may **patrol through** `cell` (§7.5/§10.3): a cell it can both
@@ -1409,7 +1486,7 @@ mod tests {
 
         // On arrival, with the chance forced to 100, it begins a dwell rather than
         // immediately picking the next target.
-        let first = guard.decide(&facility, &[], &mut rng, 100);
+        let first = guard.decide(&facility, &[], &mut rng, Dwell::CALM);
         assert!(
             first.is_none() && guard.is_dwelling(),
             "reaching a target begins a dwell",
@@ -1419,7 +1496,7 @@ mod tests {
         // un-re-aimed, until the dwell elapses and the guard steps off.
         let mut holds = 1;
         loop {
-            let step = guard.decide(&facility, &[], &mut rng, 100);
+            let step = guard.decide(&facility, &[], &mut rng, Dwell::CALM);
             if !guard.is_dwelling() {
                 // The dwell has ended and the sweep resumes: the guard is active
                 // again. It may first spend a turn or two rotating toward its new
@@ -1430,7 +1507,9 @@ mod tests {
                     if resumed {
                         break;
                     }
-                    resumed = guard.decide(&facility, &[], &mut rng, 100).is_some();
+                    resumed = guard
+                        .decide(&facility, &[], &mut rng, Dwell::CALM)
+                        .is_some();
                 }
                 assert!(resumed, "the sweep resumes once the dwell ends");
                 break;
@@ -1476,7 +1555,7 @@ mod tests {
             let mut rng = Rng::new(seed);
             let chance = GUARD_DWELL_CHANCE_PERCENT;
 
-            let first = guard.decide(&facility, &[], &mut rng, chance);
+            let first = guard.decide(&facility, &[], &mut rng, Dwell::with_chance(chance));
             assert!(
                 first.is_none() && guard.is_dwelling(),
                 "seed {seed}: an arrival must pause, not pick the next target and walk",
@@ -1484,7 +1563,7 @@ mod tests {
 
             let mut holds = 1;
             loop {
-                let step = guard.decide(&facility, &[], &mut rng, chance);
+                let step = guard.decide(&facility, &[], &mut rng, Dwell::with_chance(chance));
                 if !guard.is_dwelling() {
                     break; // the window elapsed and the sweep resumed this turn
                 }
@@ -1513,7 +1592,7 @@ mod tests {
         guard.look(&facility);
         let mut rng = Rng::new(3);
 
-        guard.decide(&facility, &[], &mut rng, 100);
+        guard.decide(&facility, &[], &mut rng, Dwell::CALM);
         assert!(guard.is_dwelling(), "precondition: dwelling");
 
         // A player appears down the cone (certain zone): the guard turns reactive.
@@ -1523,7 +1602,7 @@ mod tests {
         assert_eq!(guard.state(), GuardState::Chasing);
 
         // The next decision clears the dwell and steps toward the player.
-        let step = guard.decide(&facility, &[], &mut rng, 100);
+        let step = guard.decide(&facility, &[], &mut rng, Dwell::CALM);
         assert!(!guard.is_dwelling(), "going reactive cancels the dwell");
         assert!(step.is_some(), "a chasing guard moves, it does not dwell");
     }
@@ -1546,7 +1625,7 @@ mod tests {
 
         // Turn one: rotate in place. No step, unmoved, but the cone now faces east —
         // the overlay a frame paints is honest about the mid-turn facing (§11.5).
-        let first = guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        let first = guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
         assert_eq!(first, None, "the quarter-turn spends the whole turn");
         assert_eq!(
             guard.pos(),
@@ -1560,7 +1639,7 @@ mod tests {
         );
 
         // Turn two: now aligned, it steps — straight ahead costs nothing.
-        let second = guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        let second = guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
         assert_eq!(
             second,
             Some(Direction::East),
@@ -1577,7 +1656,7 @@ mod tests {
         let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 9));
         guard.look(&facility);
         assert_eq!(
-            guard.decide(&facility, &[], &mut Rng::new(0), 0),
+            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
             Some(Direction::South),
             "a guard already facing its heading steps at once",
         );
@@ -1596,7 +1675,7 @@ mod tests {
         let mut calm = Guard::patrolling_to(Cell::new(5, 5), post);
         calm.look(&facility);
         assert_eq!(
-            calm.decide(&facility, &[], &mut Rng::new(0), 0),
+            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
             None,
             "the Calm guard spends the turn rotating",
         );
@@ -1606,7 +1685,7 @@ mod tests {
         reactive.look(&facility);
         reactive.respond_to(post); // Responding, walking to the post, lead warm
         assert_eq!(
-            reactive.decide(&facility, &[], &mut Rng::new(0), 0),
+            reactive.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
             Some(Direction::East),
             "a reactive guard turns fast and steps the same turn",
         );
@@ -1632,7 +1711,7 @@ mod tests {
                 break;
             }
             let step = guard
-                .decide(&facility, &[], &mut Rng::new(0), 0)
+                .decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER)
                 .expect("the responder is still walking");
             let next = guard.pos.step(step).expect("in bounds");
             guard.advance_to(next, step, &facility);
@@ -1645,7 +1724,7 @@ mod tests {
         );
 
         // The turn it has nowhere further to walk, the errand becomes a search.
-        guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
         assert_eq!(guard.state, GuardState::Alerted, "arrival opens a search");
         assert_eq!(guard.search, SEARCH_DURATION);
         assert_eq!(
@@ -1676,12 +1755,12 @@ mod tests {
                 break;
             }
             let step = guard
-                .decide(&facility, &[], &mut Rng::new(0), 0)
+                .decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER)
                 .expect("walking");
             let next = guard.pos.step(step).expect("in bounds");
             guard.advance_to(next, step, &facility);
         }
-        guard.decide(&facility, &[], &mut Rng::new(0), 0); // arrive → search
+        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER); // arrive → search
         assert_eq!(
             guard.focus,
             Some(called_to),
@@ -1704,7 +1783,7 @@ mod tests {
         reactive.look(&facility);
         reactive.respond_to(Cell::new(5, 1)); // due north — a 180° reversal
         assert_eq!(
-            reactive.decide(&facility, &[], &mut Rng::new(0), 0),
+            reactive.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
             None,
             "a reactive guard cannot half-turn in one move",
         );
@@ -1714,7 +1793,7 @@ mod tests {
             "it rotated through the fixed clockwise quarter, not straight about",
         );
         assert_eq!(
-            reactive.decide(&facility, &[], &mut Rng::new(0), 0),
+            reactive.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
             Some(Direction::North),
             "now a quarter off, the fast turn steps north",
         );
@@ -1724,16 +1803,22 @@ mod tests {
         // second rotation, never in one move.
         let mut calm = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 1));
         calm.look(&facility);
-        assert_eq!(calm.decide(&facility, &[], &mut Rng::new(0), 0), None);
+        assert_eq!(
+            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            None
+        );
         assert_eq!(
             calm.facing(),
             Direction::West,
             "first the clockwise quarter"
         );
-        assert_eq!(calm.decide(&facility, &[], &mut Rng::new(0), 0), None);
+        assert_eq!(
+            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            None
+        );
         assert_eq!(calm.facing(), Direction::North, "then the second quarter");
         assert_eq!(
-            calm.decide(&facility, &[], &mut Rng::new(0), 0),
+            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
             Some(Direction::North),
             "aligned at last, it steps",
         );
@@ -1750,14 +1835,17 @@ mod tests {
         // Rotate in place once: south spawn facing, target due east — the Calm quarter.
         let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(8, 5));
         guard.look(&facility);
-        assert_eq!(guard.decide(&facility, &[], &mut Rng::new(0), 0), None);
+        assert_eq!(
+            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            None
+        );
         assert_eq!(guard.facing(), Direction::East, "mid-corner, facing east");
 
         // Now dispatched due north — 90° off the current east facing. A Calm guard
         // would spend another turn rotating; going reactive drops the tax and steps.
         guard.respond_to(Cell::new(5, 1));
         assert_eq!(
-            guard.decide(&facility, &[], &mut Rng::new(0), 0),
+            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
             Some(Direction::North),
             "the reactive dispatch steps at once — no pending rotation to wait out",
         );
@@ -1779,7 +1867,7 @@ mod tests {
             if guard.pos() == target {
                 break;
             }
-            match guard.decide(&facility, &[], &mut Rng::new(0), 0) {
+            match guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER) {
                 Some(dir) => {
                     let dest = guard.pos().step(dir).expect("interior step");
                     guard.advance_to(dest, dir, &facility);
@@ -1815,7 +1903,7 @@ mod tests {
 
         // Arrive at the lead with nothing more seen: the search begins, not patrol.
         guard.advance_to(glimpse, Direction::South, &facility);
-        guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
         assert_eq!(
             guard.state(),
             GuardState::Alerted,
@@ -1830,7 +1918,7 @@ mod tests {
             if guard.state() == GuardState::Alerted {
                 alerted_turns += 1;
             }
-            guard.decide(&facility, &[], &mut Rng::new(0), 0);
+            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
         }
         assert_eq!(
             alerted_turns, SEARCH_DURATION,
@@ -2051,7 +2139,7 @@ mod tests {
         }
 
         // With the lead cold, deciding stands the guard down to patrol.
-        guard.decide(&facility, &[], &mut Rng::new(0), 0);
+        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
         assert_eq!(guard.state(), GuardState::Calm, "a cold lead is given up");
     }
 

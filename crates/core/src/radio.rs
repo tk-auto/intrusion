@@ -5,7 +5,7 @@
 //! guard periodically, and a guard that is down does not answer.** A missed ping
 //! dispatches the nearest still-active guard to **where that guard fell**
 //! ([`Body::fell_at`](crate::body::Body::fell_at)) — control's last fix on it — to
-//! search there; a second missed ping steps a facility-wide alert. So every
+//! search there, and the silence steps the facility alert ladder (§7.3, [`Alert`](crate::alert::Alert)). So every
 //! takedown starts a clock — a future appointment — and three takedowns is three
 //! clocks running at once, which is why a full clear collapses under its own weight
 //! with no rule needed to ban it (§7.3).
@@ -13,7 +13,8 @@
 //! This module owns the *timing and selection* — the per-guard cadence and the
 //! pure "who responds" query; the [`State`](crate::State) turn loop owns the
 //! orchestration (which body is silent this turn, mutating the responder, stepping
-//! the alert), because that reaches across guards, bodies and the alert together.
+//! the alert ladder), because that reaches across guards, bodies and the alert
+//! together.
 //! The tell is deliberately **visual** (§7.3/§9.3, sound is gone): the silence is a
 //! near-line message and the responder is the player's own sensed dot peeling off
 //! toward the takedown site — no ping the player has to hear.
@@ -42,19 +43,16 @@ pub(crate) const PING_JITTER: u32 = 3;
 // held at compile time, like the §7.2 body-vs-sighting alert relation (guard.rs).
 const _: () = assert!(PING_JITTER < PING_INTERVAL);
 
-/// How many pings a downed guard misses before control stops calling (§7.3): the
-/// **first** miss dispatches a responder, the **second** steps the facility alert,
-/// and after that the guard is presumed gone — control has escalated as far as the
-/// design specifies, so it stops pinging a corpse forever. This is the cap both the
-/// dispatch and the alert step count against.
+/// How many times control calls a post that does not answer before giving up on it
+/// (§7.3, **[START] = 2**): the **first** miss dispatches a responder and steps the
+/// facility alert ladder (§7.3), and after the second the guard is presumed gone —
+/// control has nothing left to try, so it stops pinging a corpse forever.
+///
+/// The escalation hangs off the *first* miss, not the second: the ladder's rung-3
+/// trigger is two missed pings **across two bodies**
+/// ([`SILENT_POSTS_FOR_THIRD_RUNG`](crate::alert::SILENT_POSTS_FOR_THIRD_RUNG)), so a
+/// single post going quiet twice is one fact reported twice, not a louder one.
 pub(crate) const MAX_MISSED_PINGS: u8 = 2;
-
-/// How much a second missed ping raises the facility alert (§7.3, **[START] = 1**):
-/// the escalation the alert system was always meant to provide, from a concrete,
-/// explainable source (a guard stopped answering) rather than a global number
-/// (§2.3 — "Alert: never written to, never read" was the old failure). The alert
-/// this steps is a real value, written here and read by the near line (§11.4).
-pub(crate) const ALERT_STEP: u32 = 1;
 
 /// How many guards a **lost confirmed sighting** calls in (§7.7, **[START] = 1**),
 /// when the `sighting_lost_calls_a_guard` modifier is on (§12.6). This count *is*
@@ -136,9 +134,9 @@ impl Default for RadioClock {
 ///
 /// Returns **fewer than `count`** when fewer are free — including empty when every
 /// guard has the player, in which case the call simply goes unanswered (for a
-/// missed ping the silence goes un-investigated and the second miss still steps the
-/// alert). A call is never queued or retried: whoever is free at the moment it is
-/// made is who comes.
+/// missed ping the silence goes un-investigated and the alert steps regardless). A
+/// call is never queued or retried: whoever is free at the moment it is made is who
+/// comes.
 ///
 /// This is the one seam every call in the game shares: control's dispatch to a
 /// takedown site sends one, and the §7.7 cooperation call-ins send one on a lost
@@ -168,15 +166,14 @@ mod tests {
 
     /// The §7.3 timing knobs are **[START]** values a later tune must move
     /// deliberately — pinned here so the edit is visible. The jitter must keep the
-    /// period positive, and the miss cap is exactly two (dispatch, then alert).
+    /// period positive, and the miss cap is exactly two (call, call again, give up).
     #[test]
     fn the_radio_constants_are_pinned() {
         assert_eq!(PING_INTERVAL, 20, "the [START] ping interval");
         assert_eq!(PING_JITTER, 3, "the [START] ping jitter");
-        assert_eq!(ALERT_STEP, 1, "the [START] alert step");
         assert_eq!(
             MAX_MISSED_PINGS, 2,
-            "dispatch on the first miss, alert on the second"
+            "control calls twice, then gives up on the post"
         );
         // (That the jittered period stays positive is a compile-time assert above.)
     }
