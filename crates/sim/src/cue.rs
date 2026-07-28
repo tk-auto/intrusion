@@ -143,6 +143,14 @@ pub struct Moment<'a> {
     /// Manhattan distance to the nearest guard the player can perceive, seen or
     /// sensed (§9.2), or `None` when none is in reach.
     pub nearest_guard: Option<u32>,
+    /// The **crossing** the policy has found worth phasing through, when it has one:
+    /// the direction and how much of the router's own cost it saves (§8.3, Dephase).
+    ///
+    /// Computed by the policy, from the same field it routes on, precisely so the cue
+    /// and the steps that follow it cannot disagree about what the shortcut is —
+    /// pressing an ability for a crossing the policy would then decline to walk is
+    /// the shy cue in its most literal form.
+    pub crossing: Option<(Direction, u64)>,
     /// The step the plan would take **if no ability won this turn** — `None` when it
     /// would hold still, cornered or waiting a cone out.
     ///
@@ -198,7 +206,7 @@ impl Moment<'_> {
             // diff and its own metric delta (#347) — landed one at a time, because
             // switching five on at once would leave every histogram move
             // unattributable. Until then the slot honestly reads zero.
-            AbilityId::Dephase => None,
+            AbilityId::Dephase => self.dephase(status),
             AbilityId::Autodoors => self.autodoors(status),
             AbilityId::Confusion => self.confusion(status),
             AbilityId::PierceWall => None,
@@ -363,6 +371,39 @@ impl Moment<'_> {
             "breaking contact through a door — shut it behind me and make them reopen it (§8.3)",
             0,
         )
+    }
+
+    /// Dephase (§8.3): *"walk through walls, doors, guards"* for three turns — and
+    /// **it does not conceal you**. So what it is *for* is a short crossing you can
+    /// see the far side of, never a way out of being seen.
+    fn dephase(&self, status: AbilityStatus) -> Option<Bid> {
+        // **Never an escape.** A phased player is as visible as any other, so pressing
+        // it while hunted spends a turn and changes nothing about being seen — and
+        // walking into a wall to hide is how the safety eject is found (§8.3).
+        if matches!(self.intent, Intent::Flee | Intent::TakeCover) {
+            return None;
+        }
+        // The crossing is the policy's, worked out on the field it routes on: one cell
+        // of solid, a far side the bot has actually seen, and a saving big enough to
+        // pay for the three turns the crossing costs. No crossing, no bid — "there is
+        // a wall here" is not a reason.
+        let (_, saving) = self.crossing?;
+        // Plain by default and strong for a crossing that saves a lot: the ability is
+        // a shortcut, and a shortcut is worth exactly what it saves. Nothing here is
+        // ever decisive — no crossing is worth losing the run over, which is the
+        // difference between a shortcut and an escape.
+        let (urge, reason) = if saving >= 2 * crate::bot::CROSSING_MARGIN {
+            (
+                URGE_STRONG,
+                "a wall between me and where I am going, with the far side in view (§8.3)",
+            )
+        } else {
+            (
+                URGE_PLAIN,
+                "a short crossing that beats walking round it (§8.3)",
+            )
+        };
+        self.press(status, urge, reason, 0)
     }
 
     /// Confusion (§8.3): *"a costed panic-buy of time, not a kill"* — fired once from
@@ -553,36 +594,43 @@ mod tests {
             for refuge in [None, Some(Direction::North)] {
                 for nearest_guard in [None, Some(0), Some(1), Some(5)] {
                     for route in [None, Some(Direction::North), Some(Direction::South)] {
-                        let moment = Moment {
-                            state: &state,
-                            intent,
-                            refuge,
-                            nearest_guard,
-                            route,
-                        };
-                        for id in AbilityId::ALL {
-                            for &ability_state in &states {
-                                let status = AbilityStatus {
-                                    id,
-                                    state: ability_state,
-                                };
-                                let Some(bid) = moment.bid(status) else {
-                                    continue;
-                                };
-                                assert!(
-                                    !bid.reason.is_empty(),
-                                    "{}: a bid must say why (§13.3)",
-                                    id.name(),
-                                );
-                                if bid.input == Input::Activate(id) {
+                        for crossing in [
+                            None,
+                            Some((Direction::East, 4)),
+                            Some((Direction::East, 40)),
+                        ] {
+                            let moment = Moment {
+                                state: &state,
+                                intent,
+                                refuge,
+                                nearest_guard,
+                                route,
+                                crossing,
+                            };
+                            for id in AbilityId::ALL {
+                                for &ability_state in &states {
+                                    let status = AbilityStatus {
+                                        id,
+                                        state: ability_state,
+                                    };
+                                    let Some(bid) = moment.bid(status) else {
+                                        continue;
+                                    };
                                     assert!(
-                                        matches!(
-                                            ability_state,
-                                            AbilityState::Ready | AbilityState::Limited { .. }
-                                        ),
-                                        "{} bid an activation while {ability_state:?}",
+                                        !bid.reason.is_empty(),
+                                        "{}: a bid must say why (§13.3)",
                                         id.name(),
                                     );
+                                    if bid.input == Input::Activate(id) {
+                                        assert!(
+                                            matches!(
+                                                ability_state,
+                                                AbilityState::Ready | AbilityState::Limited { .. }
+                                            ),
+                                            "{} bid an activation while {ability_state:?}",
+                                            id.name(),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -604,6 +652,7 @@ mod tests {
             refuge,
             nearest_guard,
             route: None,
+            crossing: None,
         };
         let ready = |id| AbilityStatus {
             id,
@@ -680,6 +729,7 @@ mod tests {
             refuge: None,
             nearest_guard: Some(4),
             route: None,
+            crossing: None,
         };
         let baseline = Profile::BASELINE;
         assert_eq!(
@@ -708,6 +758,7 @@ mod tests {
             refuge: None,
             nearest_guard: Some(4),
             route: None,
+            crossing: None,
         };
         let keen = baseline.with_cue_floor(AbilityId::Camouflage, URGE_NONE);
         assert_eq!(

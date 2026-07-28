@@ -58,7 +58,8 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use intrusion_core::{
-    Cell, Direction, Facility, GuardPerception, GuardState, Input, State, Terrain,
+    AbilityId, AbilityState, Cell, Direction, Facility, GuardPerception, GuardState, Input, State,
+    Terrain,
 };
 
 use crate::cue::{Bid, Intent, Moment};
@@ -191,6 +192,14 @@ impl PlayerPolicy for StealthBot {
             return input;
         }
 
+        // 0.5. Phased inside a solid: get out, before anything else is considered.
+        // A duration that expires in there costs a safety eject *plus* a stun as long
+        // as the throw (§8.3), which is worse than anything the other branches are
+        // weighing — including being seen, since the phase conceals nothing anyway.
+        if let Some(input) = self.leave_the_wall(state) {
+            return input;
+        }
+
         // 1. Flee: nothing else matters while a guard has you (§7.6).
         if being_hunted(state, &danger) {
             return self.flee(state, &danger, &blocked);
@@ -265,7 +274,7 @@ impl StealthBot {
         // lands in a cell must not aim into the bot's own escape (§8.3, Decoy).
         let step = refuge.or_else(|| retreat_step(state, danger, blocked));
 
-        if let Some(input) = self.cue(state, Intent::Flee, refuge, step) {
+        if let Some(input) = self.cue(state, Intent::Flee, refuge, step, None) {
             return input;
         }
         step.map_or(Input::Wait, Input::Step)
@@ -335,7 +344,7 @@ impl StealthBot {
         // concealed from every viewer, so `being_hunted` will not fire and the hold
         // keeps going until the coast clears. A real cupboard still wins: the cue
         // only speaks when `refuge` is `None`.
-        if let Some(input) = self.cue(state, Intent::TakeCover, refuge, refuge) {
+        if let Some(input) = self.cue(state, Intent::TakeCover, refuge, refuge, None) {
             return Some(input);
         }
         refuge.map(Input::Step)
@@ -572,17 +581,38 @@ impl StealthBot {
             (Intent::Pursue, exit_cell(state).into_iter().collect())
         };
 
-        // The step this plan would take, worked out before the cues rather than after:
-        // an ability that lands in a cell needs to know where the bot is going (§8.3),
-        // and the descent is a pure function of the state, so asking early costs
-        // nothing but the Dijkstra.
-        let step = self.descend(state, &goals, danger, blocked, self.profile.pursue);
+        // The route this plan would walk, worked out before the cues rather than
+        // after: an ability that lands in a cell needs to know where the bot is going,
+        // and one that offers a *better way through* needs the router's own costs to
+        // weigh itself against (§8.3). Both come off one Dijkstra, shared rather than
+        // re-derived.
+        let field = self.field(state, &goals, danger, blocked, self.profile.pursue);
+        let step = self.step_down(state, &field, danger, blocked, self.profile.pursue, &[]);
+        let crossing = crossing(
+            state.layout().facility(),
+            state.memory(),
+            &field,
+            state.player(),
+        );
 
         // Pushing on is a moment too, and one most of the salvaged tech is *for*
         // (§8.3: bore a shortcut, seal the doors ahead, draw a patrol off the route).
         // There is no cover on offer here, so no refuge to weigh against.
-        if let Some(input) = self.cue(state, intent, None, step) {
+        if let Some(input) = self.cue(state, intent, None, step, crossing) {
             return input;
+        }
+
+        // The router cannot plan through a wall, so the crossing the cue bought is
+        // walked here: while the phase is up, step into the solid rather than round
+        // it. Getting *out* the far side is settled earlier still, before every other
+        // plan (§8.3 — a duration that expires inside a solid costs the eject).
+        if matches!(
+            state.ability_state(AbilityId::Dephase),
+            AbilityState::Active { .. }
+        ) {
+            if let Some((dir, _)) = crossing {
+                return Input::Step(dir);
+            }
         }
 
         let Some(dir) = step else {
@@ -610,6 +640,36 @@ impl StealthBot {
         Input::Step(dir)
     }
 
+    /// Step out of the solid the bot is phased inside, or `None` when it is not in one
+    /// (which is almost always).
+    ///
+    /// The whole cost of Dephase lives here (§8.3): the walk-through is free while the
+    /// duration lasts and brutal the moment it does not, so a bot standing in a wall
+    /// has exactly one plan. It leaves by the nearest **walkable** neighbour, which is
+    /// the far side it phased in for, or the side it came from if the far side has
+    /// gone — either beats the eject.
+    fn leave_the_wall(&self, state: &State) -> Option<Input> {
+        let player = state.player();
+        let facility = state.layout().facility();
+        // Inside a solid only. Standing on floor, phased or not, is somebody else's
+        // decision.
+        if !facility
+            .terrain(player)
+            .is_some_and(|t| t.blocks_movement())
+        {
+            return None;
+        }
+        Direction::ALL
+            .iter()
+            .find(|&&dir| {
+                player
+                    .step(dir)
+                    .and_then(|cell| facility.terrain(cell))
+                    .is_some_and(|t| !t.blocks_movement())
+            })
+            .map(|&dir| Input::Step(dir))
+    }
+
     /// Put this moment to every held ability's cue (§13.2/#346) and return the
     /// winning bid's input, or `None` to spend the turn stepping or waiting as
     /// usual.
@@ -630,6 +690,7 @@ impl StealthBot {
         intent: Intent,
         refuge: Option<Direction>,
         route: Option<Direction>,
+        crossing: Option<(Direction, u64)>,
     ) -> Option<Input> {
         let bid = Moment {
             state,
@@ -637,6 +698,7 @@ impl StealthBot {
             refuge,
             nearest_guard: nearest_perceived_guard(state),
             route,
+            crossing,
         }
         .best(&self.profile)?;
         self.last_bid = Some(bid);
@@ -696,18 +758,56 @@ impl StealthBot {
         mode: Descent,
         avoid: &[Cell],
     ) -> Option<Direction> {
+        let field = self.field(state, goals, danger, blocked, mode);
+        self.step_down(state, &field, danger, blocked, mode, avoid)
+    }
+
+    /// The router's own **turns-to-goal potential**: one Dijkstra from `goals`,
+    /// shaped by the [`Descent`] mode exactly as [`descend`](Self::descend) shapes it.
+    ///
+    /// Split out from the descent because it is a fact worth *sharing*: an ability
+    /// whose whole question is "would this be a better way through?" — Dephase's
+    /// crossing, Pierce Wall's bore (§8.3) — has to weigh a shortcut against the
+    /// route the bot would otherwise walk, and re-deriving that inside a cue would be
+    /// both a second Dijkstra and a second opinion.
+    fn field(
+        &self,
+        state: &State,
+        goals: &[Cell],
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+        mode: Descent,
+    ) -> HashMap<Cell, u64> {
         if goals.is_empty() {
-            return None;
+            return HashMap::new();
         }
-        let facility = state.layout().facility();
-        let player = state.player();
         let guards = if mode.keep_clear {
             perceived_guard_cells(state)
         } else {
             Vec::new()
         };
-        let field = cost_field(facility, goals, blocked, danger, &guards, &self.profile);
+        cost_field(
+            state.layout().facility(),
+            goals,
+            blocked,
+            danger,
+            &guards,
+            &self.profile,
+        )
+    }
 
+    /// One step down a prebuilt [`field`](Self::field) — the second half of the
+    /// descent, so a caller holding a field already does not pay for it twice.
+    fn step_down(
+        &self,
+        state: &State,
+        field: &HashMap<Cell, u64>,
+        danger: &HashSet<Cell>,
+        blocked: &HashSet<Cell>,
+        mode: Descent,
+        avoid: &[Cell],
+    ) -> Option<Direction> {
+        let player = state.player();
         let mut best: Option<(u64, bool, Direction)> = None;
         for dir in Direction::ALL {
             let Some(next) = player.step(dir) else {
@@ -740,6 +840,66 @@ impl StealthBot {
         Some(dir)
     }
 }
+
+/// The **one-cell crossing** worth phasing through from `from`, if the field knows
+/// of one: a direction whose adjacent cell is solid and whose far cell is a routable
+/// cell the router already wants, materially closer to the goal than standing here.
+///
+/// Shared between the cue that presses Dephase and the steps that walk it (§8.3), so
+/// the ability can never be pressed for a crossing the policy would then decline to
+/// take — the shy-cue failure #347 warns about, in its most literal form.
+///
+/// **One cell of solid, never two.** The duration is 3 turns: in at 1, out at 2,
+/// with a turn in hand. A two-cell run would land on expiry, and a duration that ends
+/// inside a solid costs a safety eject plus a stun as long as the throw (§8.3) — the
+/// exact trap the cue must not walk into.
+fn crossing(
+    facility: &Facility,
+    memory: &intrusion_core::VisibleSet,
+    field: &HashMap<Cell, u64>,
+    from: Cell,
+) -> Option<(Direction, u64)> {
+    let here = *field.get(&from)?;
+    let mut best: Option<(Direction, u64)> = None;
+    for dir in Direction::ALL {
+        let Some(wall) = from.step(dir) else { continue };
+        let Some(beyond) = wall.step(dir) else {
+            continue;
+        };
+        // A wall to phase through, and floor the other side. Read as the player reads
+        // it (§11.5a): a far side the bot has never seen is not a crossing it knows
+        // about, whatever the map says.
+        if !facility
+            .terrain(wall)
+            .is_some_and(|t| t.blocks_movement() && t.blocks_pathing())
+        {
+            continue;
+        }
+        if !memory.contains(beyond) {
+            continue;
+        }
+        let Some(&there) = field.get(&beyond) else {
+            continue;
+        };
+        // Worth the turn only if the router's own cost falls by more than the crossing
+        // costs it: one turn to press and two to walk through. The margin is [START].
+        let Some(saving) = here.checked_sub(there) else {
+            continue;
+        };
+        if saving < CROSSING_MARGIN {
+            continue;
+        }
+        if best.is_none_or(|(_, held)| saving > held) {
+            best = Some((dir, saving));
+        }
+    }
+    best
+}
+
+/// How much the router's own cost must fall before a phased crossing is worth it
+/// **[START]** — twice the three turns it spends (one to press, two to walk through),
+/// so a shortcut has to be a real one and not a tie.
+pub(crate) const CROSSING_MARGIN: u64 = 6;
 
 /// Whether a guard currently has the player, or is about to (§7.6). True when a
 /// visible guard is actively hunting (chasing or investigating), or when the
@@ -1122,7 +1282,7 @@ mod tests {
     use super::*;
     use crate::test_support::boot;
     use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
-    use intrusion_core::{AbilityId, Loadout, Outcome};
+    use intrusion_core::{Loadout, Outcome};
 
     /// #276: the bot routes by **the core's rule**, never a table of its own.
     ///
@@ -1577,6 +1737,51 @@ mod tests {
         assert!(
             fired > 0,
             "no confusion in 40 seeds — this test would prove nothing",
+        );
+    }
+
+    /// **The bot never gets caught in a wall it phased into** — the risk #347 names
+    /// as Dephase's own: a duration that expires inside a solid costs a safety eject
+    /// plus a stun as long as the throw was deep (§8.3), and a bot that phases
+    /// casually will find it.
+    ///
+    /// The eject is the *only* thing in the game that stuns the player
+    /// (`phase_eject_stun`, core's `state/abilities.rs`), which makes `stunned() == 0`
+    /// over a batch an exact statement that it never fired — a much sharper assertion
+    /// than counting crossings. Two policies hold it up together: the cue only wants a
+    /// **one-cell** crossing (in at turn 1, out at 2, of a 3-turn duration), and
+    /// leaving the wall outranks every other plan while the bot is in one.
+    #[test]
+    fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
+        let mut crossings = 0;
+        for seed in 0..40 {
+            for profile in Profile::ALL {
+                let (state, _) = boot(seed);
+                let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Dephase));
+                let mut bot = StealthBot::with_profile(profile);
+                for _ in 0..DEFAULT_INPUT_CAP {
+                    if state.outcome() != Outcome::Playing {
+                        break;
+                    }
+                    let input = bot.decide(&state);
+                    if input == Input::Activate(AbilityId::Dephase) {
+                        crossings += 1;
+                    }
+                    state.step(input);
+                    assert_eq!(
+                        state.stunned(),
+                        0,
+                        "seed {seed} ({}): stunned, so a phase expired inside a solid \
+                         — the safety eject is the one thing Dephase's cue must never \
+                         walk into (§8.3)",
+                        profile.name,
+                    );
+                }
+            }
+        }
+        assert!(
+            crossings > 0,
+            "no phase in 40 seeds × 4 profiles — this test would prove nothing",
         );
     }
 
