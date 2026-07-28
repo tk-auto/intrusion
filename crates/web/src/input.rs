@@ -29,12 +29,13 @@ use std::rc::Rc;
 use intrusion_core::{
     ability_in_slot, ability_slot_for_code, ability_slot_for_letter, help_nav_for_key,
     input_for_key, key_for_code, menu_nav_for_key, ui_command_for_key, Cell, Direction, HelpHit,
-    HelpNav, Input, InputModality, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    HelpNav, HelpTab, Input, InputModality, SeedCopy, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, KeyboardEvent, PointerEvent};
 
+use crate::clipboard;
 use crate::tap::{Control, Tap};
 use crate::Game;
 
@@ -204,6 +205,11 @@ impl Game {
             }
             UiCommand::ToggleHelp => {
                 self.ui.help_open = !self.ui.help_open;
+                // The seed-copy line answers a press the player made a moment ago
+                // (§13.1/#353), so it does not survive the panel: reopening must not
+                // greet them with an acknowledgement of a copy from another minute of
+                // the run.
+                self.ui.seed_copy = SeedCopy::default();
             }
             // The shell holds *both* colour tables and the core holds the flag
             // (§11.2/#189), so switching theme is this one line here and a column of
@@ -214,25 +220,101 @@ impl Game {
         }
     }
 
-    /// Apply a [`HelpNav`] from the open modal panel (§14 v2/#248) — close it, or
-    /// cycle the shown tab. Still a pure view action: no [`State`], no turn (§4.4).
+    /// Apply a [`HelpNav`] from the open modal panel (§14 v2/#248) — close it, cycle
+    /// the shown tab, or copy the run's token (#353). Still a pure view action: no
+    /// [`State`], no turn (§4.4), whichever arm runs.
     fn apply_help_nav(&mut self, nav: HelpNav) {
         match nav {
-            HelpNav::Close => self.ui.help_open = false,
-            HelpNav::NextTab => self.ui.help_tab = self.ui.help_tab.next(),
-            HelpNav::PrevTab => self.ui.help_tab = self.ui.help_tab.prev(),
+            HelpNav::Close => self.close_help(),
+            HelpNav::NextTab => self.show_help_tab(self.ui.help_tab.next()),
+            HelpNav::PrevTab => self.show_help_tab(self.ui.help_tab.prev()),
             HelpNav::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
+            HelpNav::CopySeed => self.copy_seed(),
         }
     }
 
-    /// Apply a [`HelpHit`] from a tap on the open panel: switch to the tapped tab or
-    /// close. A view action like [`apply_help_nav`](Self::apply_help_nav).
+    /// Apply a [`HelpHit`] from a tap on the open panel: switch to the tapped tab,
+    /// copy the token, or close. A view action like
+    /// [`apply_help_nav`](Self::apply_help_nav), and the same arms — the two halves of
+    /// §11.6's key-*and*-touch pairing go through the same handlers below, so neither
+    /// can do something the other does not.
     pub(crate) fn apply_help_hit(&mut self, hit: HelpHit) {
         match hit {
-            HelpHit::Close => self.ui.help_open = false,
-            HelpHit::Tab(tab) => self.ui.help_tab = tab,
+            HelpHit::Close => self.close_help(),
+            HelpHit::Tab(tab) => self.show_help_tab(tab),
             HelpHit::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
+            HelpHit::CopySeed => self.copy_seed(),
         }
+    }
+
+    /// Dismiss the panel, dropping the seed-copy acknowledgement with it (#353).
+    fn close_help(&mut self) {
+        self.ui.help_open = false;
+        self.ui.seed_copy = SeedCopy::default();
+    }
+
+    /// Show `tab`, dropping the acknowledgement for the same reason: it is a reply to
+    /// a press on the Level info tab and belongs to the moment, not to the panel.
+    fn show_help_tab(&mut self, tab: HelpTab) {
+        self.ui.help_tab = tab;
+        self.ui.seed_copy = SeedCopy::default();
+    }
+
+    /// Put this run's **level-seed token** on the system clipboard (§13.1/#353) — the
+    /// one thing on the panel that exists to be taken away, and until now the only
+    /// thing there the player could not actually take.
+    ///
+    /// It mirrors the drawn control exactly ([`seed_to_copy`]): on the Level info tab,
+    /// and only when this run has a token at all. A press with no control under it
+    /// does nothing — no acknowledgement either, because nothing was attempted.
+    ///
+    /// The clipboard is conditional, so the outcome comes back in two pieces. No
+    /// clipboard on this page at all is known *now*, and says so on this frame; a
+    /// clipboard that refuses (a frame without permission — which the artifact build's
+    /// own `<iframe>` may well be) only rejects a microtask later, and corrects the
+    /// line then. Either way the token stays printed one row above, and nothing claims
+    /// a copy that did not happen.
+    fn copy_seed(&mut self) {
+        let Some(token) = self.seed_to_copy() else {
+            return;
+        };
+        let handle = self.handle.clone();
+        let started = clipboard::write_text(&token, move |ok| {
+            // The promise settles in a microtask, long after the borrow this call was
+            // made under; a page that has gone away simply has nobody to tell.
+            if let Some(game) = handle.upgrade() {
+                game.borrow_mut().note_seed_copy(if ok {
+                    SeedCopy::Copied
+                } else {
+                    SeedCopy::Unavailable
+                });
+            }
+        });
+        self.ui.seed_copy = if started {
+            // The answer is still coming; say nothing until it does.
+            SeedCopy::default()
+        } else {
+            SeedCopy::Unavailable
+        };
+    }
+
+    /// The token the panel is currently offering to copy, or `None` when it is
+    /// offering none — the shell's side of [`help_hit`](intrusion_core::help_hit)'s
+    /// rule, read off the same [`State::level`](intrusion_core::State::level) the frame
+    /// was drawn from so the key can never copy something the panel is not showing.
+    fn seed_to_copy(&self) -> Option<String> {
+        if self.ui.help_tab != HelpTab::LevelInfo {
+            return None;
+        }
+        self.state.level().and_then(|level| level.encode())
+    }
+
+    /// Record what the browser said about the copy and repaint (#353) — the microtask
+    /// half of [`copy_seed`](Self::copy_seed). A view change like every other on this
+    /// panel: no [`State`], no turn.
+    fn note_seed_copy(&mut self, outcome: SeedCopy) {
+        self.ui.seed_copy = outcome;
+        self.draw();
     }
 
     /// Map a viewport point `(client_x, client_y)` to the **screen cell** under it at

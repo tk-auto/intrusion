@@ -88,6 +88,12 @@ pub enum HelpNav {
     /// panel is where the option lives until v2 grows an options screen, and its
     /// colour key is the best thing on the screen to judge a theme against.
     ToggleTheme,
+    /// Copy this run's **level-seed token** to the system clipboard (§13.1/#353) —
+    /// the keyboard half of the Level info tab's `copy [c]` control, so the panel is
+    /// reachable without a pointer and so is this (§11.6). The shell performs the
+    /// write and mirrors the control exactly: a run whose panel draws no token has
+    /// nothing to copy, and the key does nothing there, as the absent control does.
+    CopySeed,
 }
 
 /// Map a key to the [`HelpNav`] it drives **while the help panel is open**, or
@@ -112,6 +118,12 @@ pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
         // The one binding the modal panel does **not** swallow (#189): the theme
         // toggle lives on this panel, so it has to work with the panel up.
         "n" => Some(HelpNav::ToggleTheme),
+        // `c` copies the run's level-seed token (#353). It is listed *here only* — the
+        // panel is the one surface the token is drawn on, so a board-wide binding
+        // would name a control that is not on screen, and leaving it off
+        // `ui_command_for_key` also leaves the letter free for an ability mnemonic
+        // (#360), which the modal panel swallows anyway while it is up.
+        "c" => Some(HelpNav::CopySeed),
         _ => None,
     }
 }
@@ -405,6 +417,11 @@ mod tests {
             Some(HelpNav::PrevTab),
             "← → prev tab"
         );
+        // `c` copies the run's level-seed token (#353) — a panel-only binding, so it
+        // is here and *not* in the board's table: outside this panel there is no token
+        // drawn for it to name.
+        assert_eq!(help_nav_for_key("c"), Some(HelpNav::CopySeed));
+        assert_eq!(ui_command_for_key("c"), None, "and nothing on the board");
         // A movement/wait/ability/other-UI key is swallowed by the open modal panel —
         // the vi keys among them, now that they navigate nothing anywhere (#368).
         for key in ["k", "j", "l", "h", "w", "5", "r", "t", "m", "Enter"] {
