@@ -13,7 +13,10 @@ not a judge.
 ## Running
 
 ```
-cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--guards N] [--bot [--profile NAME] | --script MOVES] [--emit-replay]
+cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] \
+    [--config TOKEN] [--guards N] [--intel-gate none|one|all] [--modifier NAME]... \
+    [--abilities LIST] [--without LIST] \
+    [--bot [--profile NAME] | --script MOVES] [--emit-replay]
 ```
 
 | Flag | Meaning | Default |
@@ -21,11 +24,74 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] [--guard
 | `--runs N` | how many runs; seeds are `S, S+1, … S+N-1` | 100 |
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
-| `--guards N` | guards to place per facility — the §10.2 recipe knob the balance sweep drives (all else stays v1) | 4 |
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
 | `--profile NAME` | which **playstyle profile** the bot plays (below); needs `--bot` | `baseline` |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
 | `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed token (#245) — instead of the metrics batch | off |
+
+And the **run config** (below): what every run of the batch boots from.
+
+| Flag | Meaning | Default |
+|---|---|---|
+| `--config TOKEN` | a **level-seed token** (#245): the batch runs that token's modifiers and loadout, and its seed is the first seed unless `--seed` says otherwise | the sim preset |
+| `--guards N` | guards to place per facility — the §10.2 recipe knob the balance sweep drives (all else stays v1) | 4 |
+| `--intel-gate G` | how much intel the exit asks for (§4.5): `none`, `one`, `all` | `one` |
+| `--modifier NAME` | switch a level modifier on (#225) — repeatable, and comma-separated | none on |
+| `--abilities LIST` | the tech every run holds (§8.3), comma-separated | none — bare |
+| `--without LIST` | tech to drop from the loadout | none |
+
+### The run config — what a batch is measuring (#256)
+
+A batch is *N* seeds over **one** config, so the config is the thing the batch is
+asking about and the seed is what varies underneath it. The default is the **sim
+preset** (§13.3): the v1 recipe, the baseline rules with the intel gate at
+`AtLeastOne`, and the **bare, innate-only** loadout — a win rate that means the
+core stealth loop is winnable with no tech at all. Every flag above states a
+departure from it.
+
+They compose in a **fixed order**, whatever order they are written in — `--config`,
+`--guards`, `--intel-gate`, `--modifier`, `--abilities`, `--without` — so two
+command lines naming the same flags describe the same batch. `--abilities` states
+the *whole* tech set rather than adding to what a `--config` preset held, and
+`--without` runs last, so it can never be undone by an earlier-resolved flag.
+
+Names are matched by what they say: case, spaces, hyphens and underscores are
+noise, so `pierce-wall`, `Pierce Wall` and `piercewall` are the same ability, and a
+modifier can be typed the way the source spells its field or the way the flag does.
+`--help` lists every value, read off the catalog rather than hand-copied, so a
+newly shipped ability is spellable the day it lands. The modifier names are the
+`LevelModifiers` field names in kebab case:
+
+```
+guards-always-search-hideouts   sighting-lost-calls-a-guard   body-found-calls-two-guards
+always-show-vision-cones        full-layout-known
+```
+
+Two refusals are deliberate, and both are the §13.2 attribution rule — *a batch
+whose rows claim a config it never ran is worse than a batch that did not start*:
+
+- **A malformed `--config` token is a hard error**, with the usage text. The web
+  seed surface falls gracefully to a fresh run on a bad token (#110); a batch must
+  not, because nothing downstream would notice.
+- **A loadout over the §8.3 cap** (`AbilityId::MAX_TECH_HELD`, three tech) is
+  refused at the flag. It is not a run the game can produce — the ability bar is
+  not sized for it (§11.4) and the level-seed token cannot carry it, so
+  `--emit-replay` would print a replay that decodes to nothing. `--without` naming
+  an **innate** ability is refused for the same reason: §8.3 makes the innate set
+  unconditional and the token cannot describe its absence.
+
+Measuring one toggle is then one batch against another over the same seeds:
+
+```
+cargo run --release -p intrusion-sim -- --bot --runs 100 --seed 0 | tail -1
+cargo run --release -p intrusion-sim -- --bot --runs 100 --seed 0 --abilities decoy | tail -1
+```
+
+Generation is seed-derived and independent of modifiers and loadout (proven in
+core's `level_seed.rs`), so both arms raid the **same facilities** — the delta is
+about the toggle rather than about batch-to-batch luck. Running the two arms and
+reading the delta *for* you is the A/B mode (#257); this ticket is the config the
+arms are made of. Reading a delta is still §13.4: a number, not a verdict.
 
 ### The script notation
 
@@ -63,8 +129,9 @@ seed to the whole config `(seed, modifiers, abilities)` once modifiers (#225) an
 seeded loadout (#244) shaped a run. `--emit-replay` plays one run — seed `S`, the
 chosen policy — records the exact input stream it issued, and prints that pair on
 stdout as one JSON line. The `seed` field is the run's **level-seed token** (#245),
-so a baked replay reproduces the captured preset — the sim's `AtLeastOne` intel gate,
-not quick play's stricter one — and not just the geometry:
+carrying the config the run was **actually played under** — so a non-default batch's
+replay reproduces rather than approximates, and the default one reproduces the sim's
+`AtLeastOne` intel gate rather than quick play's stricter one:
 
 ```
 $ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
@@ -72,9 +139,15 @@ $ cargo run --release -p intrusion-sim -- --bot --seed 42 --emit-replay
 seed 42: win in 214 turns, 187 inputs          # (human summary, on stderr)
 ```
 
-The ability field is just `r` (Run): the sim boots the **bare, innate-only**
-loadout (§8.3) — a level must be winnable with no salvaged tech is the baseline the
-bot's win rate is measured against.
+The only ability in that stream is `r` (Run), because the default config boots the
+**bare, innate-only** loadout (§8.3) — a level must be winnable with no salvaged
+tech is the baseline the bot's win rate is measured against. Under
+`--abilities camouflage` the token names *that* run instead, and the captured
+stream can press `+c`.
+
+The one thing the token does **not** carry is the facility **recipe**: `--guards` is
+a §10.2 knob, not part of the shareable config, so a replay captured off a swept
+guard count only reproduces under the same `--guards` (the web viewer plays v1).
 
 The `inputs` string is the script notation above, so it feeds straight back:
 `--script "$(…)" --seed 42 --runs 1` reproduces the run byte-for-byte, and the
@@ -221,7 +294,7 @@ it is a deliberate, visible break.
 ### Run row
 
 ```json
-{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1},"alert_peak":null}
+{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0},"alert_peak":null}
 ```
 
 | Field | Meaning |
@@ -233,13 +306,13 @@ it is a deliberate, visible break.
 | `detections` | fresh detections (`Event::Detected`): how often stealth broke — a held chase counts once, not once per turn |
 | `takedowns` | takedowns landed (`Event::TakenDown`) |
 | `bodies_found` | bodies found by guards (`Event::BodyFound`) |
-| `usage` | the **ability-usage histogram** (§13.2): a count per verb spent this run. Keys, in fixed order: `wait`, `run`, `camouflage`, `decoy`, `dephase`, `autodoors`, `confusion`, `takedown`, `drag`. Counted from core events — a *refused* activation costs no turn and emits none, so it never counts (§4.4); `wait` is the one verb with no event of its own and is counted from its spent turn. `Move` is not counted (it is the default nothing-else verb). The counts sum to `≤ turns` |
+| `usage` | the **ability-usage histogram** (§13.2): a count per verb spent this run. Keys, in fixed order: `wait`, `run`, `camouflage`, `decoy`, `dephase`, `autodoors`, `confusion`, `takedown`, `drag`, `pierce_wall`, `lockdown`. Counted from core events — a *refused* activation costs no turn and emits none, so it never counts (§4.4); `wait` is the one verb with no event of its own and is counted from its spent turn. `Move` is not counted (it is the default nothing-else verb). The counts sum to `≤ turns` |
 | `alert_peak` | **always `null` for now**: the facility-wide alert is the radio net's value (#107), which does not exist yet — `null` says "not measured", where a `0` would lie that it was quiet |
 
 ### Summary row
 
 ```json
-{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038},"diversity":0.1837,"alert_peak":null}}
+{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000},"diversity":0.1837,"alert_peak":null}}
 ```
 
 `win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the

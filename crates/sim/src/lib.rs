@@ -21,6 +21,12 @@
 //! settings — so the same seeds can be raided cautiously and aggressively, which
 //! is what makes §13.2's strategy-diversity signal visible at all.
 //!
+//! What a batch *boots* is an input too ([`RunConfig`], #256): the facility recipe,
+//! the level modifiers and the ability loadout are a batch parameter rather than a
+//! preset compiled into the harness, so a playtest can ask what one toggle changes
+//! instead of only what the one shipped configuration does. The sim preset (§13.3 —
+//! the baseline rules and a bare, innate-only loadout) is its [`Default`].
+//!
 //! The output schema is documented in `crates/sim/README.md` — the playtest
 //! skill parses it, so changes there are breaking changes.
 //!
@@ -29,6 +35,7 @@
 #![forbid(unsafe_code)]
 
 mod bot;
+mod config;
 pub mod cue;
 mod harness;
 mod policy;
@@ -40,6 +47,7 @@ mod test_support;
 mod usage;
 
 pub use bot::StealthBot;
+pub use config::{ability_names, intel_gate_named, intel_gate_names, modifier_names, RunConfig};
 pub use cue::{Bid, Intent, Moment};
 pub use harness::{
     capture_one, capture_one_with, run_batch, run_batch_with, run_one, run_one_with, RunOutcome,
