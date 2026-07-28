@@ -29,7 +29,6 @@
 
 use super::*;
 use crate::ability::{AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
-use crate::cell::Direction;
 use crate::mnemonic;
 use crate::place::LevelConfig;
 use crate::status::{live_messages, near_line, Message};
@@ -50,7 +49,7 @@ const NEAR_ROW: u32 = 0;
 
 /// The usable line's row (§11.4): directly under the near line, still above the
 /// map. Never blank — with nothing adjacent to offer it teaches the innate verbs
-/// instead ([`usable_hint`], #323).
+/// instead ([`usable_row`](super::usable::usable_row), #323).
 const USABLE_ROW: u32 = 1;
 
 /// The screen row the ability bar occupies, on a map `map_h` tall: the last row
@@ -148,7 +147,7 @@ pub struct ScreenUi {
     /// no state and the copy still costs no turn (§4.4).
     pub seed_copy: SeedCopy,
     /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
-    /// wording of the usable line's floor ([`usable_hint`]), and nothing else.
+    /// wording of the usable line's floor ([`usable`](super::usable)), and nothing else.
     /// The shell answers only *is this a touch session?*; the core keeps the words
     /// and the layout, so the hint stays inside the golden tests (§11.2/§12.1).
     pub modality: InputModality,
@@ -157,7 +156,7 @@ pub struct ScreenUi {
 /// The input vocabulary the player is actually using (§11.6/#323) — the one thing
 /// a shell knows about the player's hands that the core cannot derive from state.
 /// It decides how the usable line's floor words the two innate verbs
-/// ([`usable_hint`]) and nothing else: keys and gestures are both live at all
+/// ([`usable`](super::usable)) and nothing else: keys and gestures are both live at all
 /// times, whatever this says.
 ///
 /// [`Keys`](Self::Keys) is the [`Default`], so a shell that never sets it — the
@@ -246,7 +245,8 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 ///   message-log counter beside it.
 /// - **Usable line** (row `1`): the adjacent bump affordances
 ///   ([`State::affordances`]), each in its own category, no band — or, when there
-///   are none, the move/wait floor ([`usable_hint`], §11.6/#323).
+///   are none, the move/wait floor (§11.6/#323). Aimed where each arrow points
+///   — west flush left, north/south centred, east flush right (#384).
 /// - **Ability bar** (row `height-1`): the always-on named readout — every held
 ///   ability's bar name coloured by state, its active/cooling number tucked against
 ///   it ([`AbilityStatus::bar_entry`]) — **right-aligned** into the bottom-right
@@ -344,26 +344,21 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
 
     // One grid, top to bottom: the two status lines, the map, the ability bar.
     let mut cells = near;
-    let usable: Vec<(String, Category)> = state
-        .affordances()
-        .into_iter()
-        .map(|(dir, a)| (format!("{} {}", arrow(dir), a.label()), a.category()))
-        .collect();
-    // Nothing to act on: the row teaches the two innate verbs instead of sitting
-    // empty (§11.4/#323), in the modality the shell says the player is using. A
-    // floor, never a competitor — one adjacent usable and the affordances have the
-    // row back.
-    let usable = if usable.is_empty() {
-        usable_hint(ui.modality)
-    } else {
-        usable
-    };
     debug_assert_eq!(
         cells.len() as u32,
         USABLE_ROW * width,
         "the usable line follows the near line"
     );
-    cells.extend(status_row(width, width, &usable, None));
+    // The usable line owns its own row end to end (§11.4): the adjacent
+    // affordances aimed where they point (#384), or — with nothing to act on —
+    // the innate-verb floor in the modality the shell says the player is using
+    // (#323). A floor, never a competitor: one adjacent usable and the
+    // affordances have the row back.
+    cells.extend(super::usable::usable_row(
+        width,
+        &state.affordances(),
+        ui.modality,
+    ));
     cells.extend(map.cells);
     cells.extend(ability_bar(width, &statuses));
 
@@ -601,104 +596,13 @@ fn bar_category(state: AbilityState) -> Category {
     }
 }
 
-/// The usable line's floor, on touch (§11.4/§11.6/#323): the two innate verbs in
-/// the gesture vocabulary. The third gesture — a press held in place, which
-/// repeats Wait — is deliberately unnamed: the hint is a floor, not a manual, and
-/// the help panel's Help card is where the full set is read.
-const TOUCH_HINT: [&str; 2] = ["swipe: move", "tap: wait"];
-
-/// The usable line's floor, on keys (§11.4/§11.6/#323): the same two verbs off
-/// §11.6's own table — the arrows the row already draws, and `w` to wait.
-///
-/// It names `w` alone rather than the `5/w` it used to (#369). The wait digit is the
-/// **numpad**'s `5`, and a floor hint has no room to say which `5` it means — a
-/// player reading it off a laptop and pressing the top row would get nothing at all.
-/// `w` is the key that is there on every keyboard; the full spelling is one `?` away.
-const KEYS_HINT: [&str; 2] = ["↑↓←→: move", "w: wait"];
-
-/// How many **cells** a hint segment occupies: its `char` count, since every glyph
-/// the hints use is one grid cell wide. Counts the UTF-8 lead bytes rather than
-/// calling `chars`, so the budget below can be spent at compile time.
-const fn hint_cells(text: &str) -> u32 {
-    let bytes = text.as_bytes();
-    let (mut i, mut cells) = (0, 0);
-    while i < bytes.len() {
-        // Every byte that is not a continuation byte (`10xxxxxx`) starts a char.
-        if bytes[i] & 0xC0 != 0x80 {
-            cells += 1;
-        }
-        i += 1;
-    }
-    cells
-}
-
-/// The width a two-segment hint draws to, in cells: [`status_row`]'s one-cell left
-/// margin, the two segments, and the two spaces between them.
-const fn hint_width(hint: [&str; 2]) -> u32 {
-    1 + hint_cells(hint[0]) + 2 + hint_cells(hint[1])
-}
-
-/// **Both hints must fit the board they are drawn on**, the way the ability bar's
-/// worst case does (#287): a hint clipped mid-word teaches nothing, and discovering
-/// that in a screenshot is discovering it too late. Rewording either variant past
-/// the v1 width (§10.2) fails the *build*, not the frame.
-const _: () = assert!(
-    hint_width(TOUCH_HINT) <= LevelConfig::V1.width
-        && hint_width(KEYS_HINT) <= LevelConfig::V1.width,
-    "the usable line's move/wait hint must fit the v1 board (§10.2): shorten a segment",
-);
-
-/// The usable line's **floor** (§11.4/#323): how to move and how to wait, in the
-/// vocabulary the player's hands are using, drawn whenever there is no affordance
-/// to offer instead.
-///
-/// The row is the one piece of permanent screen the HUD would otherwise give away
-/// for nothing, and it sits directly above a board on which the player has to work
-/// out unaided that **waiting is an action at all** — the only 360° look (§9.1),
-/// the way a crouch is held (§10.3) and the way a cone is let past (§7.6). Wait has
-/// no ability-bar entry by design (the bar is the ability *economy*, §8.3), so
-/// without this the two innate verbs live on a row that never mentions them.
-///
-/// It is the same move the near line already makes one row up — ambient status
-/// instead of an empty line (§11.4) — and it is a **floor, never a competitor**:
-/// the moment anything is adjacent, the affordances take the row back whole.
-///
-/// The words draw in [`Owned`](Category::Owned) — *you, and the things you made*
-/// (§11.2). [`Ground`](Category::Ground) was the first answer and it was the wrong
-/// one on the screen: Ground's meaning is **absence**, drawn to recede so that
-/// everything else pops against it, which is precisely the wrong instruction for a
-/// row whose whole job is to be read. Owned says what these two verbs actually are
-/// — not scenery, not something to bump, but *yours*, the pair you always hold —
-/// and it puts them in the same blue as the ability bar's ready entries, so the
-/// two surfaces that answer "what can I do right now" answer in one colour.
-fn usable_hint(modality: InputModality) -> Vec<(String, Category)> {
-    let hint = match modality {
-        InputModality::Keys => KEYS_HINT,
-        InputModality::Touch => TOUCH_HINT,
-    };
-    hint.iter()
-        .map(|text| ((*text).to_string(), Category::Owned))
-        .collect()
-}
-
-/// The usable line's direction glyph (§11.4): which way to bump for the
-/// affordance beside it.
-fn arrow(dir: Direction) -> char {
-    match dir {
-        Direction::North => '↑',
-        Direction::East => '→',
-        Direction::South => '↓',
-        Direction::West => '←',
-    }
-}
-
 /// Lay one status row out as grid cells: segments left to right from a one-cell
 /// margin, two spaces between segments, stopping at column `limit`; `band` paints
 /// every cell's background (the §11.4 message band) or none. The row is `width`
 /// cells wide either way — `limit` only bounds the *words*, so the near line's
 /// corner controls (#267) keep their cells instead of being written over by a long
 /// message.
-fn status_row(
+pub(super) fn status_row(
     width: u32,
     limit: u32,
     segments: &[(String, Category)],
@@ -1256,7 +1160,9 @@ mod tests {
             text,
             vec![
                 " 1 more intel to leave              [?] ".to_string(),
-                " → console: take intel                  ".to_string(),
+                // The console is east of the player, so its entry is flush right
+                // with the arrow trailing — the row aims where it points (#384).
+                "                  console: take intel → ".to_string(),
                 "##################≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈".to_string(),
                 "#·················~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
                 "#·@$··············~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
@@ -1343,11 +1249,9 @@ mod tests {
                 },
             );
             let row: String = (0..g.width()).map(|x| g.get(x, USABLE_ROW).glyph).collect();
-            assert_eq!(
-                row.trim_end(),
-                " → console: take intel",
-                "{modality:?}: {row:?}"
-            );
+            // Aimed east — flush right, arrow trailing (#384) — and nothing of the
+            // floor left on the row beside it.
+            assert_eq!(row.trim(), "console: take intel →", "{modality:?}: {row:?}");
         }
     }
 
@@ -1384,12 +1288,15 @@ mod tests {
         // The `[?]` rides the band in the HUD control colour, not the words' Neutral.
         assert_eq!(g.get(help, near_y).glyph, '[');
         assert_eq!(g.get(help, near_y).fg, Category::System);
-        // The affordance leads with its bump direction and speaks its own
-        // category: `→ console: take intel` is Interest (§11.2 — goals and
-        // rewards), and the console is east of the player.
-        assert_eq!(g.get(1, usable_y).glyph, '→');
-        assert_eq!(g.get(1, usable_y).fg, Category::Interest);
-        assert_eq!(g.get(3, usable_y).glyph, 'c');
+        // The affordance names its bump direction and speaks its own category:
+        // `console: take intel →` is Interest (§11.2 — goals and rewards). The
+        // console is east of the player, so the entry is flush right behind a
+        // one-cell margin with the arrow trailing (#384).
+        let right = g.width() - 2;
+        assert_eq!(g.get(right, usable_y).glyph, '→');
+        assert_eq!(g.get(right, usable_y).fg, Category::Interest);
+        assert_eq!(g.get(right - 20, usable_y).glyph, 'c');
+        assert_eq!(g.get(right - 20, usable_y).fg, Category::Interest);
 
         // A threat message flips the whole band to its category: get captured
         // and the near line reads Danger — the colour flash before the words.

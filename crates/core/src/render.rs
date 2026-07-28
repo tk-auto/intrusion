@@ -703,6 +703,7 @@ pub(super) fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Catego
 mod help;
 mod hud;
 mod menu;
+mod usable;
 pub use help::{help_hit, HelpHit, HelpTab, SeedCopy};
 pub use hud::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, is_help_button,

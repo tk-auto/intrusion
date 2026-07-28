@@ -2025,15 +2025,27 @@ is the case this serves.
   carries the two view toggles: the live-message counter and the `[?]` help
   button.
 - **Usable line** — *what you can act on*: the bump affordances adjacent to the
-  player right now, each **with an arrow giving the bump's direction** (`→ door:
-  open`, `↑ console: take intel`, `← table: crouch`, `↓ cupboard: hide`). Not a
-  message — a **pure derived function of state**, recomputed every frame, no
+  player right now, each **with an arrow giving the bump's direction** (`↑
+  console: take intel`, `← table: crouch`, `↓ cupboard: hide`, `door: open →`).
+  Not a message — a **pure derived function of state**, recomputed every frame, no
   plumbing. When nothing is adjacent it falls back to the **innate-verb floor**
   below rather than sitting empty (#323). The arrow makes each bump an aimed
   "press this way, get that", so even the rare cell beside two usables stays
   unambiguous — one row lists each with its own direction. The generator
   *prefers* one usable per floor cell (§10.6, best-effort) to keep the common
   case to a single line, but does not guarantee it.
+
+  **The row is aimed, not packed** (#384): each entry draws where its direction
+  points — **west** flush left, **north and south** centred, **east** flush right
+  with its arrow **trailing** the words so it points off the right edge the way
+  the west entry's points off the left. The row is a tiny compass around the
+  player: *press towards the words*. Packed left to right, the row said a
+  direction and showed nothing, and with two affordances the left-most entry was
+  as likely as not the one on your right. Labels reach 21 cells, so two long
+  entries already overrun a 40-wide board (§10.2); when the groups will not all
+  fit, the **whole** row falls back to the packed left-to-right list with every
+  arrow leading — one rule, no half-aligned hybrid, and never a clipped word. The
+  innate-verb floor is never aimed: it describes the keys, not the geometry.
 
 **Neither status row is ever blank.** The near line falls back to ambient status;
 the usable line falls back to **how to move and how to wait** (#323), in the input
