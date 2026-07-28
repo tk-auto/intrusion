@@ -10,26 +10,40 @@
 //! module is natively tested below like any core table.
 //!
 //! **The touch model** (replacing the old edge-zone tap slice): a **swipe**
-//! steps along the drag's dominant axis and *keeps* stepping while the finger
-//! stays down, the direction re-read live from the drag; a **press held in
-//! place** waits, repeatedly; a **quick tap** is a single Wait. Lifting the
-//! finger stops everything instantly — fairness (§2.2/§4.5) demands no step or
-//! wait ever lands after the lift, and every repeat is one ordinary [`Input`]
-//! through the same seam as a held arrow key, never a batch.
+//! along the drag's dominant axis *keeps* firing while the finger stays down, the
+//! direction re-read live from the drag; a **press held in place** repeats; a
+//! **quick tap** is a single input, resolved at the lift. Lifting the finger stops
+//! everything instantly — fairness (§2.2/§4.5) demands nothing ever lands after
+//! the lift, and every repeat is one ordinary input through the same seam as a
+//! held arrow key, never a batch.
 //!
-//! **Where** the finger is decides whether the ambiguous half of that model is
-//! allowed at all: the Wait-producing gestures resolve through
-//! [`Game::tap_at`](crate::tap) (§11.6/#306), so a tap or a held press that landed on
-//! the chrome, in its dead band, or off the canvas does nothing instead of silently
-//! spending a turn. Swipes are exempt — a directional drag is unambiguous.
+//! **One pump, every surface** (#336). What a drag *did* — [`drag_gesture`] — is
+//! surface-neutral: a direction, or a press. What that **means** is a binding, and
+//! bindings live in the core beside the key tables, one per screen
+//! (`core::input_for_gesture` / `menu_nav_for_gesture` / `help_nav_for_gesture`).
+//! So the same thresholds, the same repeat cadence and the same
+//! lift-stops-everything guarantee walk the board, the title screen's list and the
+//! help panel's tab bar, and the next screen that wants touch costs a binding
+//! table rather than a pump. The one thing that stays here is the *order* the
+//! tables are consulted in ([`surface_command`], mirroring [`play_key`]).
+//!
+//! **Where** the finger is decides whether the ambiguous half of the model is
+//! allowed at all — but only on the board: the Wait-producing gestures resolve
+//! through [`Game::tap_at`](crate::tap) (§11.6/#306), so a tap or a held press that
+//! landed on the chrome, in its dead band, or off the canvas does nothing instead
+//! of silently spending a turn. Swipes are exempt — a directional drag is
+//! unambiguous. A modal screen owns the whole viewport and has no board, so
+//! neither that gate nor #223's danger gate applies there; both live in the one
+//! `Play` arm of [`GesturePump::apply`], which is what keeps them from leaking.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_in_slot, ability_slot_for_code, ability_slot_for_letter, help_nav_for_key,
-    input_for_key, key_for_code, menu_nav_for_key, ui_command_for_key, Cell, Direction, HelpHit,
-    HelpNav, HelpTab, Input, InputModality, SeedCopy, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    ability_in_slot, ability_slot_for_code, ability_slot_for_letter, help_nav_for_gesture,
+    help_nav_for_key, input_for_gesture, input_for_key, key_for_code, menu_nav_for_gesture,
+    menu_nav_for_key, ui_command_for_key, Cell, Direction, Gesture, HelpHit, HelpNav, HelpTab,
+    Input, InputModality, MenuNav, SeedCopy, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -145,6 +159,27 @@ impl Game {
         }
         self.step_and_draw(input);
         true
+    }
+
+    /// What a [`Gesture`] means on the surface that is up (§11.6/#336) — the touch
+    /// counterpart of [`handle_key`](Self::handle_key)'s opening, and deliberately
+    /// the *same* modal precedence: the menu owns the frame before a run starts, the
+    /// open help panel owns it during one, and only underneath both is there a board
+    /// to walk. One pump drives whichever of the three is showing.
+    ///
+    /// The tables themselves are the core's (§11.6/§12.1), so a screen's touch and
+    /// key bindings sit side by side and are pinned by the same native tests. What
+    /// lives here is only the *order* they are consulted in — the shell's, because
+    /// only the shell holds the view state that decides it.
+    ///
+    /// `None` is a gesture the showing surface declines: a press on a modal, a
+    /// sideways swipe across a vertical list. It spends nothing and changes nothing,
+    /// exactly as an unbound key does.
+    ///
+    /// The rule itself is [`surface_command`], pure so it is pinned natively like
+    /// every other §11.6 rule here; this reads the two view flags it needs.
+    fn gesture_command(&self, gesture: Gesture) -> Option<GestureCommand> {
+        surface_command(self.ui.menu.is_some(), self.ui.help_open, gesture)
     }
 
     /// Whether the game would claim this press *in play*, used by the modal screens
@@ -479,22 +514,24 @@ pub(crate) const REPEAT_DELAY_MS: i32 = 300;
 pub(crate) const REPEAT_INTERVAL_MS: i32 = 120;
 
 /// Map a drag displacement `(dx, dy)` — CSS pixels from where the finger went
-/// down to where it is now — to the [`Input`] a gesture fires: the touch half of
-/// §11.6, pure so the gesture rule is testable natively.
+/// down to where it is now — to the [`Gesture`] it *is*: **what the finger did**,
+/// with no surface's meaning attached (§11.6/#336). Pure, so the rule is testable
+/// natively; what the gesture then *means* is a core binding table
+/// ([`Game::gesture_command`]), the way a key's meaning is.
 ///
-/// Inside [`SWIPE_THRESHOLD_PX`] on both axes the press is a **hold**: Wait.
-/// Past it, the drag is a **swipe**: a `Step` along its dominant axis — movement
-/// has no diagonals (§4.1 [SETTLED]) — with an exact tie going horizontal. The
-/// pump re-reads the live displacement on every repeat tick, so dragging to a
-/// new heading re-aims the walk mid-hold and pulling back inside the threshold
-/// turns it into waiting; nothing is cached but the gesture's origin. A
-/// non-finite displacement maps to nothing rather than a garbage turn.
-fn gesture_input(dx: f64, dy: f64) -> Option<Input> {
+/// Inside [`SWIPE_THRESHOLD_PX`] on both axes the finger has stayed put: a
+/// [`Press`](Gesture::Press). Past it, the drag is a [`Swipe`](Gesture::Swipe)
+/// along its dominant axis — no diagonals (§4.1 [SETTLED]) — with an exact tie
+/// going horizontal. The pump re-reads the live displacement on every repeat tick,
+/// so dragging to a new heading re-aims mid-hold and pulling back inside the
+/// threshold turns it into a press again; nothing is cached but the gesture's
+/// origin. A non-finite displacement maps to nothing rather than a garbage turn.
+fn drag_gesture(dx: f64, dy: f64) -> Option<Gesture> {
     if !(dx.is_finite() && dy.is_finite()) {
         return None;
     }
     if dx.abs() < SWIPE_THRESHOLD_PX && dy.abs() < SWIPE_THRESHOLD_PX {
-        return Some(Input::Wait);
+        return Some(Gesture::Press);
     }
     let direction = if dx.abs() >= dy.abs() {
         if dx < 0.0 {
@@ -507,11 +544,51 @@ fn gesture_input(dx: f64, dy: f64) -> Option<Input> {
     } else {
         Direction::South
     };
-    Some(Input::Step(direction))
+    Some(Gesture::Swipe(direction))
+}
+
+/// What a gesture resolved to on the surface currently up (§11.6/#336) — one
+/// variant per command type the three bindings produce, so the pump can carry a
+/// resolved gesture across a `RefCell` borrow without knowing which screen it came
+/// from.
+///
+/// Only [`Play`](Self::Play) reaches the turn loop. That is the line the two
+/// board-only gates are drawn along: the #223 danger gate and #306's dead band both
+/// ask questions about a board, and a title screen has none.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GestureCommand {
+    /// An ordinary board input — the only kind that steps the world and spends a
+    /// turn (§4.1/§4.3).
+    Play(Input),
+    /// A title-screen navigation (§14/#268): walk the list. Costs no turn, changes
+    /// no [`State`](intrusion_core::State).
+    Menu(MenuNav),
+    /// A navigation inside the open help panel (§14 v2/#248): walk the tab bar.
+    /// Likewise free (§4.4).
+    Help(HelpNav),
+}
+
+/// Which surface a [`Gesture`] is aimed at, and what it means there (§11.6/#336) —
+/// the pure rule behind [`Game::gesture_command`], in the spirit of
+/// [`drag_gesture`], so the *order* the shell owns is pinned natively too.
+///
+/// The precedence is the keyboard's, deliberately: menu, then help, then the board.
+/// Only the last arm can produce a [`Play`](GestureCommand::Play), which is what
+/// makes the two board-only gates in [`GesturePump::apply`] structurally
+/// unreachable from a modal screen — #223 asks about visible danger and #306's dead
+/// band about the board's edges, and a title screen has neither.
+fn surface_command(menu_up: bool, help_open: bool, gesture: Gesture) -> Option<GestureCommand> {
+    if menu_up {
+        return menu_nav_for_gesture(gesture).map(GestureCommand::Menu);
+    }
+    if help_open {
+        return help_nav_for_gesture(gesture).map(GestureCommand::Help);
+    }
+    input_for_gesture(gesture).map(GestureCommand::Play)
 }
 
 /// Whether a held movement's **repeat** should be suppressed this tick — the pure
-/// §11.6 rule behind #223, in the spirit of [`gesture_input`]. Given the player's
+/// §11.6 rule behind #223, in the spirit of [`drag_gesture`]. Given the player's
 /// cell, the repeat's [`Input`], and a membership test for the §11.5 danger set
 /// (`in_danger`, wired to
 /// [`State::in_visible_danger`](intrusion_core::State::in_visible_danger)), it says
@@ -565,9 +642,9 @@ enum Pointer {
     /// path already honours on `pointercancel` — and it puts both surfaces' resolution
     /// at the same moment, so they behave alike.
     Armed { pointer_id: i32, control: Control },
-    /// A press on the board (or on anything the controls declined): the swipe / hold /
-    /// tap gesture.
-    Gesture(Gesture),
+    /// A press the controls declined: the swipe / hold / tap gesture, aimed at
+    /// whichever surface is up (#336).
+    Drag(Drag),
 }
 
 impl Pointer {
@@ -575,7 +652,7 @@ impl Pointer {
     fn pointer_id(&self) -> i32 {
         match self {
             Pointer::Armed { pointer_id, .. } => *pointer_id,
-            Pointer::Gesture(g) => g.pointer_id,
+            Pointer::Drag(d) => d.pointer_id,
         }
     }
 }
@@ -585,17 +662,20 @@ impl Pointer {
 enum Lift {
     /// The armed control, to fire only if the lift is still over it.
     Control(Control),
-    /// The unfired gesture's own input: a tap's Wait, or a flick too fast for a
+    /// The unfired drag's own gesture: a tap's press, or a flick too fast for a
     /// pointermove to have seen.
-    Gesture(Input),
+    Drag(Gesture),
     /// Nothing to apply — a gesture that already fired, or an abandoned press.
     Nothing,
 }
 
-/// One finger's live gesture: where it pressed, where it is now, and the timer
+/// One finger's live drag: where it pressed, where it is now, and the timer
 /// keeping it repeating. Exists only while that pointer is down — release (or a
 /// browser cancel) destroys it and its timer together.
-struct Gesture {
+///
+/// It holds no *meaning*, only geometry: what the finger is doing is re-read from
+/// the live displacement through [`drag_gesture`] on every tick (#336).
+struct Drag {
     /// The pointer that owns the gesture; other fingers are ignored while it lives.
     pointer_id: i32,
     /// Where the pointer went down, in viewport CSS pixels.
@@ -611,7 +691,7 @@ struct Gesture {
     timer: RepeatTimer,
 }
 
-impl Gesture {
+impl Drag {
     /// Where the finger is **now**, in viewport CSS pixels — the origin plus the live
     /// displacement. The Wait-producing gestures are routed against this rather than
     /// the origin (#306), so it is the same point a lift would resolve at: drag out of
@@ -700,17 +780,17 @@ impl GesturePump {
                         pointer_id: e.pointer_id(),
                         control,
                     }),
-                    // A modal screen captured the press (§14/#268, §14 v2/#248): not
-                    // even a gesture starts, since there is no world underneath to
-                    // walk. (The seed box's own presses never reach here; its panel
+                    // Anything the controls declined starts a drag — **including a
+                    // modal screen's captured press** (#336). There may be no world
+                    // underneath, but there is always a surface: the menu's list and
+                    // the help panel's tab bar are walked by the same pump, through
+                    // their own bindings ([`Game::gesture_command`]). A drag may begin
+                    // *anywhere* the controls declined — the dead band and the chrome
+                    // included — because a swipe from there is unambiguous; it is only
+                    // the board's Wait that the routing gates, at the moment the drag
+                    // resolves. (The seed box's own presses never reach here; its panel
                     // stops them at itself.)
-                    Tap::Captured => None,
-                    // Anything else starts a gesture. It may begin *anywhere* the
-                    // controls declined — the dead band and the chrome included —
-                    // because a swipe from there is unambiguous and must still step;
-                    // it is only the Wait that the routing gates, at the moment the
-                    // gesture resolves.
-                    Tap::Wait | Tap::Nothing => Some(Pointer::Gesture(Gesture {
+                    Tap::Captured | Tap::Wait | Tap::Nothing => Some(Pointer::Drag(Drag {
                         pointer_id: e.pointer_id(),
                         origin: (x, y),
                         delta: (0.0, 0.0),
@@ -725,73 +805,103 @@ impl GesturePump {
         e.prevent_default();
     }
 
-    /// The gesture's pointer moved: track the live displacement, and the instant
-    /// the drag first crosses the swipe threshold fire its step — the swipe
-    /// declaring itself — restarting the repeat cadence from that input exactly
-    /// as a fresh keydown would.
+    /// The drag's pointer moved: track the live displacement, and the instant it
+    /// first crosses the swipe threshold fire that swipe — the gesture declaring
+    /// itself — restarting the repeat cadence from it exactly as a fresh keydown
+    /// would. Whichever surface is up receives it (#336); on the board it is the
+    /// first step, on the menu the first move of the selection.
     ///
     /// An armed control ignores moves entirely: the lift re-routes the point, so
     /// sliding off and back on again is decided once, at the end.
     fn on_move(&self, e: &PointerEvent) {
-        let first_step = {
+        let first_swipe = {
             let mut active = self.active.borrow_mut();
-            let Some(Pointer::Gesture(g)) =
+            let Some(Pointer::Drag(d)) =
                 active.as_mut().filter(|p| p.pointer_id() == e.pointer_id())
             else {
                 return;
             };
-            g.delta = (
-                e.client_x() as f64 - g.origin.0,
-                e.client_y() as f64 - g.origin.1,
+            d.delta = (
+                e.client_x() as f64 - d.origin.0,
+                e.client_y() as f64 - d.origin.1,
             );
-            let input = gesture_input(g.delta.0, g.delta.1);
-            if !g.fired && matches!(input, Some(Input::Step(_))) {
-                g.fired = true;
-                clear_timer(g.timer);
-                g.timer = RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false));
-                input
+            let gesture = drag_gesture(d.delta.0, d.delta.1);
+            if !d.fired && matches!(gesture, Some(Gesture::Swipe(_))) {
+                d.fired = true;
+                clear_timer(d.timer);
+                d.timer = RepeatTimer::Delay(self.arm(REPEAT_DELAY_MS, false));
+                gesture.map(|g| (g, d.point()))
             } else {
                 None
             }
         };
-        if let Some(input) = first_step {
-            self.game.borrow_mut().step_and_draw(input);
+        if let Some((gesture, at)) = first_swipe {
+            self.apply(gesture, at, false);
         }
     }
 
-    /// The armed timer fired: feed one input re-read from the live displacement —
-    /// a hold's Wait, a swipe's step, whichever the finger says *now* — and, if
-    /// this was the one-shot delay, settle into the steady cadence.
+    /// The armed timer fired: feed one gesture re-read from the live displacement —
+    /// a press, a swipe, whichever the finger says *now* — to whichever surface is
+    /// up, and, if this was the one-shot delay, settle into the steady cadence. This
+    /// is the repeat, so it is the tick the #223 danger gate reads.
     fn on_tick(&self) {
         let tick = {
             let mut active = self.active.borrow_mut();
-            let Some(Pointer::Gesture(g)) = active.as_mut() else {
+            let Some(Pointer::Drag(d)) = active.as_mut() else {
                 return; // released while the tick was in flight — nothing may fire
             };
-            g.fired = true;
-            if let RepeatTimer::Delay(_) = g.timer {
-                g.timer = RepeatTimer::Interval(self.arm(REPEAT_INTERVAL_MS, true));
+            d.fired = true;
+            if let RepeatTimer::Delay(_) = d.timer {
+                d.timer = RepeatTimer::Interval(self.arm(REPEAT_INTERVAL_MS, true));
             }
-            gesture_input(g.delta.0, g.delta.1).map(|input| (input, g.point()))
+            drag_gesture(d.delta.0, d.delta.1).map(|gesture| (gesture, d.point()))
         };
-        if let Some((input, (x, y))) = tick {
-            let mut game = self.game.borrow_mut();
-            // A held swipe never auto-walks into visible danger (§11.6/#223): the
-            // repeat is swallowed at the cone edge, the cadence left running so
-            // dragging to a safe heading fires again — but going deeper needs a
-            // fresh gesture. A held Wait (press-in-place) is never gated and keeps
-            // waiting.
-            if game.repeat_into_danger(input) {
-                return;
+        if let Some((gesture, at)) = tick {
+            self.apply(gesture, at, true);
+        }
+    }
+
+    /// Apply one resolved [`Gesture`] to the surface that is up (§11.6/#336) — the
+    /// single place the pump's *plumbing* meets a *meaning*, so the two board-only
+    /// gates below are written once and can never leak onto a screen that has no
+    /// board. `at` is where the finger is now; `repeat` says this came from the
+    /// repeat cadence rather than the gesture's own first input.
+    ///
+    /// A gesture the showing surface declines spends nothing, and the cadence is
+    /// deliberately left running either way: drag to a heading the surface *does*
+    /// bind and the next tick fires.
+    fn apply(&self, gesture: Gesture, at: (f64, f64), repeat: bool) {
+        let mut game = self.game.borrow_mut();
+        match game.gesture_command(gesture) {
+            None => {}
+            // The modal screens: a free view action (§4.4), so neither gate applies —
+            // #223 asks about visible danger and #306's dead band about the board's
+            // edges, and a title screen has neither. It owns the whole viewport, so
+            // there is nowhere on it a swipe could be a misaimed something else.
+            Some(GestureCommand::Menu(nav)) => game.apply_menu_nav(nav),
+            Some(GestureCommand::Help(nav)) => {
+                game.apply_help_nav(nav);
+                game.draw();
             }
-            // A press held **in place** only waits where a tap would (§11.6/#306): a
-            // resting finger on the chrome, in the dead band or off the canvas is more
-            // likely a missed button than a deliberate hold, so it produces nothing.
-            // The cadence is left running — drag out onto clear board and it waits.
-            if !gesture_lands(input, game.tap_at(x, y)) {
-                return;
+            Some(GestureCommand::Play(input)) => {
+                // A held swipe never auto-walks into visible danger (§11.6/#223): the
+                // repeat is swallowed at the cone edge, the cadence left running so
+                // dragging to a safe heading fires again — but going deeper needs a
+                // fresh gesture. A held Wait (press-in-place) is never gated and keeps
+                // waiting. Board-only, and repeats only: the deliberate first input
+                // always lands.
+                if repeat && game.repeat_into_danger(input) {
+                    return;
+                }
+                // A press held **in place** only waits where a tap would (§11.6/#306): a
+                // resting finger on the chrome, in the dead band or off the canvas is more
+                // likely a missed button than a deliberate hold, so it produces nothing.
+                // The cadence is left running — drag out onto clear board and it waits.
+                if !gesture_lands(input, game.tap_at(at.0, at.1)) {
+                    return;
+                }
+                game.step_and_draw(input);
             }
-            game.step_and_draw(input);
         }
     }
 
@@ -812,10 +922,10 @@ impl GesturePump {
             }
             match active.take().expect("matched just above") {
                 Pointer::Armed { control, .. } => Lift::Control(control),
-                Pointer::Gesture(g) => {
-                    clear_timer(g.timer);
-                    match gesture_input(x - g.origin.0, y - g.origin.1) {
-                        Some(input) if !g.fired => Lift::Gesture(input),
+                Pointer::Drag(d) => {
+                    clear_timer(d.timer);
+                    match drag_gesture(x - d.origin.0, y - d.origin.1) {
+                        Some(gesture) if !d.fired => Lift::Drag(gesture),
                         _ => Lift::Nothing,
                     }
                 }
@@ -830,15 +940,12 @@ impl GesturePump {
                     game.apply_control(armed);
                 }
             }
-            Lift::Gesture(input) => {
-                let mut game = self.game.borrow_mut();
-                // The tap's Wait is the ambiguous gesture this ticket gates: it lands
-                // only on board clear of the chrome's dead band (#306). A flick's
-                // `Step` is unambiguous and lands wherever it was aimed.
-                if gesture_lands(input, game.tap_at(x, y)) {
-                    game.step_and_draw(input);
-                }
-            }
+            // The gesture's own input, not a repeat — so `repeat` is false and the
+            // #223 gate does not read it. On the board the tap's Wait is still the
+            // ambiguous half #306 gates, inside `apply`; on a modal screen a tap is
+            // bound to nothing at all, which is what keeps a stray one from starting
+            // a run (§2.1).
+            Lift::Drag(gesture) => self.apply(gesture, (x, y), false),
         }
     }
 
@@ -851,8 +958,8 @@ impl GesturePump {
         if !matches!(active.as_ref(), Some(p) if p.pointer_id() == e.pointer_id()) {
             return;
         }
-        if let Some(Pointer::Gesture(g)) = active.take() {
-            clear_timer(g.timer);
+        if let Some(Pointer::Drag(d)) = active.take() {
+            clear_timer(d.timer);
         }
     }
 }
@@ -914,7 +1021,7 @@ pub(crate) fn install_gestures(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use intrusion_core::AbilityId;
+    use intrusion_core::{AbilityId, MenuEntry, MenuHit};
 
     /// #369, the reported bug, at the seam it lived on: a **top-row** `2` fires the
     /// bar's second slot. The press arrives as `code: "Digit2"`, `key: "2"` — the
@@ -993,6 +1100,15 @@ mod tests {
                 "{key:?} is left to the page",
             );
         }
+    }
+
+    /// **The board's** reading of a drag: the composition the pump makes there
+    /// (§11.6/#336) — the shell's arithmetic, then the core's board binding. The
+    /// gesture tests below are the ones that shipped with the pump and they assert
+    /// exactly the [`Input`]s they always did: splitting the vocabulary out changed
+    /// where the meaning is written down, and nothing about what a finger does.
+    fn gesture_input(dx: f64, dy: f64) -> Option<Input> {
+        drag_gesture(dx, dy).and_then(input_for_gesture)
     }
 
     /// §11.6's hold rule: a press that never crosses the swipe threshold is Wait —
@@ -1217,5 +1333,145 @@ mod tests {
             Input::Step(Direction::West),
             |c| c == corner
         ));
+    }
+
+    /// The arithmetic on its own, now that it answers in the surface-neutral
+    /// vocabulary (§11.6/#336): a drag says *what the finger did*, and nothing about
+    /// what any screen makes of it. The dead band and dominant-axis rules are the
+    /// board tests' above, unchanged — this pins the shape they come back in.
+    #[test]
+    fn a_drag_resolves_to_the_surface_neutral_vocabulary() {
+        assert_eq!(drag_gesture(0.0, 0.0), Some(Gesture::Press));
+        assert_eq!(
+            drag_gesture(SWIPE_THRESHOLD_PX - 0.5, 0.0),
+            Some(Gesture::Press)
+        );
+        for ((dx, dy), direction) in [
+            ((-40.0, 10.0), Direction::West),
+            ((40.0, -10.0), Direction::East),
+            ((10.0, -40.0), Direction::North),
+            ((-10.0, 40.0), Direction::South),
+        ] {
+            assert_eq!(drag_gesture(dx, dy), Some(Gesture::Swipe(direction)));
+        }
+        assert_eq!(drag_gesture(f64::NAN, 0.0), None);
+    }
+
+    /// One pump, three surfaces, and the keyboard's own precedence (§11.6/#336):
+    /// the menu owns the frame before a run starts, the open help panel owns it
+    /// during one, and only underneath both is there a board to walk. The menu wins
+    /// even with `help_open` set, exactly as `handle_key` reads them.
+    #[test]
+    fn the_gesture_goes_to_whichever_surface_is_up() {
+        let up = Gesture::Swipe(Direction::North);
+        let left = Gesture::Swipe(Direction::West);
+        assert_eq!(
+            surface_command(true, false, up),
+            Some(GestureCommand::Menu(MenuNav::Prev)),
+        );
+        assert_eq!(
+            surface_command(true, true, up),
+            Some(GestureCommand::Menu(MenuNav::Prev)),
+            "the menu outranks the panel, as it does on the keyboard",
+        );
+        assert_eq!(
+            surface_command(false, true, left),
+            Some(GestureCommand::Help(HelpNav::PrevTab)),
+        );
+        assert_eq!(
+            surface_command(false, false, up),
+            Some(GestureCommand::Play(Input::Step(Direction::North))),
+        );
+        assert_eq!(
+            surface_command(false, false, Gesture::Press),
+            Some(GestureCommand::Play(Input::Wait)),
+        );
+    }
+
+    /// **The board-only gates stay board-only** (§11.6/#223, #306). Both live in the
+    /// [`GestureCommand::Play`] arm of [`GesturePump::apply`], so this is the test
+    /// that keeps them there: no gesture on either modal screen resolves to `Play`,
+    /// and every gesture on the board does. A shared pump must not carry the danger
+    /// gate onto a title screen — where `in_visible_danger` is meaningless — nor
+    /// lose it on the board.
+    #[test]
+    fn the_danger_gate_and_the_dead_band_never_reach_a_modal_screen() {
+        let every = [
+            Gesture::Press,
+            Gesture::Swipe(Direction::North),
+            Gesture::Swipe(Direction::East),
+            Gesture::Swipe(Direction::South),
+            Gesture::Swipe(Direction::West),
+        ];
+        for gesture in every {
+            for (menu_up, help_open) in [(true, false), (false, true)] {
+                assert!(
+                    !matches!(
+                        surface_command(menu_up, help_open, gesture),
+                        Some(GestureCommand::Play(_))
+                    ),
+                    "{gesture:?} on a modal must never reach the board's gates",
+                );
+            }
+            assert!(
+                matches!(
+                    surface_command(false, false, gesture),
+                    Some(GestureCommand::Play(_))
+                ),
+                "{gesture:?} on the board still goes through the gates",
+            );
+        }
+    }
+
+    /// **A tap on empty menu space does nothing** (§2.1/#306/#336) — never
+    /// `Activate`. Starting a run is not undoable in a permadeath game, so the
+    /// ambiguous zero-displacement gesture must not be what starts it; entries fire
+    /// only on the arm-on-press / lift-over-the-same-control path
+    /// ([`armed_fires`]), which this leaves untouched.
+    #[test]
+    fn a_tap_on_empty_menu_space_never_activates_an_entry() {
+        assert_eq!(surface_command(true, false, Gesture::Press), None);
+        // Nor does a swipe across the list's grain — it is a vertical list.
+        for direction in [Direction::East, Direction::West] {
+            assert_eq!(
+                surface_command(true, false, Gesture::Swipe(direction)),
+                None
+            );
+        }
+        // The one path that does activate is unchanged, and it still needs the lift
+        // to land back on the very entry the press armed.
+        let entry = Control::Menu(MenuHit::Entry(MenuEntry::QuickPlay));
+        assert!(armed_fires(entry, Tap::Control(entry)));
+        assert!(!armed_fires(entry, Tap::Captured));
+    }
+
+    /// The menu walks by swipe with the same wrap and the same skipping of disabled
+    /// entries the keys have, because both go through the one [`MenuNav`] handler
+    /// (§11.6/#336) — the commands are literally equal, so the two input paths
+    /// cannot disagree the first time an entry is disabled (§14 v2/v3 entries
+    /// already are).
+    #[test]
+    fn the_menu_swipe_and_the_menu_arrow_are_the_same_command() {
+        for (gesture, key) in [
+            (Gesture::Swipe(Direction::North), "ArrowUp"),
+            (Gesture::Swipe(Direction::South), "ArrowDown"),
+        ] {
+            assert_eq!(
+                surface_command(true, false, gesture),
+                menu_nav_for_key(key).map(GestureCommand::Menu),
+                "{gesture:?} and {key} walk the list the same way",
+            );
+        }
+        // And the help panel's tab swipes match its own arrows, the second consumer
+        // that proves the abstraction is not a board-plus-menu special case.
+        for (gesture, key) in [
+            (Gesture::Swipe(Direction::West), "ArrowLeft"),
+            (Gesture::Swipe(Direction::East), "ArrowRight"),
+        ] {
+            assert_eq!(
+                surface_command(false, true, gesture),
+                help_nav_for_key(key).map(GestureCommand::Help),
+            );
+        }
     }
 }
