@@ -14,8 +14,17 @@
 //! read-only status rows, a tap on the message list you had just opened to read, or a
 //! press in the letterbox margin all silently spent a turn — in a permadeath run with
 //! no undo (§2.1). The fix is that a **miss costs nothing**, never that a miss becomes
-//! impossible: §11.4's nine-cell slot and its fixed position are [SETTLED] and no
-//! target here moves or grows.
+//! impossible: §11.4's nine-cell slot and its fixed position are [SETTLED] and nothing
+//! the frame *draws* moves or grows here.
+//!
+//! **The bar is forgiven one row of slack** on each side (§11.6/#386): a press on the
+//! map row directly above the drawn bar, or within one row's height below the frame's
+//! bottom edge, resolves to the slot in that column exactly as a press on the bar
+//! does. Both rows are silent today — the row above is always inside the dead band,
+//! and below the last row there is only letterbox — so the slack claims no live tap,
+//! which is why it is applied on [`tap_route`]'s silent fallthrough rather than inside
+//! the hit-test. The core's [`ability_at`] stays exact: what grows is the shell's
+//! invisible hit region, not the drawn target.
 //!
 //! **Swipes are exempt.** A directional drag is unambiguous, so it may start anywhere
 //! the controls decline, the band included — the band gates only the ambiguous
@@ -99,11 +108,35 @@ impl TapGeometry {
         SWIPE_THRESHOLD_PX.max(self.row_px)
     }
 
+    /// Whether the frame has been fitted: a zero or non-finite row height is a screen
+    /// nobody has painted yet, and every pixel-scaled rule here reads it as *dead*.
+    fn painted(&self) -> bool {
+        self.row_px.is_finite() && self.row_px > 0.0
+    }
+
     /// The map row index of screen row `row`, or `None` for a chrome row — the two
     /// read-only status lines above the map and the ability bar beneath it (§11.4).
     fn map_row(&self, row: u32) -> Option<u32> {
         let i = row.checked_sub(TOP_ROWS)?;
         (i < self.map_h).then_some(i)
+    }
+
+    /// The screen row the ability bar is drawn on (§11.4): the frame's last row.
+    fn bar_row(&self) -> u32 {
+        TOP_ROWS + self.map_h
+    }
+
+    /// Whether screen row `row` is one of the bar's **slack** rows (§11.6/#386): the
+    /// map row directly above the drawn bar, or the one-row strip below the frame's
+    /// bottom edge, which [`screen_cell`](Game::screen_cell) reports as the first row
+    /// past the frame. Both are rows the router answers with silence today — the row above
+    /// the bar is always inside the [dead band](Self::dead_band_px), which is floored
+    /// at one full map row, and below the last row there is only letterbox.
+    ///
+    /// An unpainted fit has no slack at all: forgiveness is a fingertip measure, and a
+    /// screen nobody has seen yet is dead all the way through.
+    fn bar_slack_row(&self, row: u32) -> bool {
+        self.painted() && (row == self.bar_row() - 1 || row == self.bar_row() + 1)
     }
 
     /// Whether map row `i` is too close to the chrome to read as the board: inside the
@@ -118,7 +151,7 @@ impl TapGeometry {
         if i < self.log_rows {
             return true; // the log's own rows are chrome while it is deployed
         }
-        if !(self.row_px.is_finite() && self.row_px > 0.0) {
+        if !self.painted() {
             return true;
         }
         let band = self.dead_band_px();
@@ -157,6 +190,16 @@ pub(crate) fn tap_route(
     }
     match geometry.map_row(row) {
         Some(i) if !geometry.in_dead_band(i) => Tap::Wait,
+        // Silence, unless the point is a near-miss on the ability bar: one row of
+        // slack above and below it is forgiven (§11.6/#386), re-asked at the bar row
+        // in the *same column* so forgiveness can never change **which** ability
+        // fires. It lives here, on the fallthrough, and only here: it may turn
+        // silence into a hit, and may never take a live board tap away from the
+        // board.
+        _ if geometry.bar_slack_row(row) => match control_at(col, geometry.bar_row()) {
+            Some(Control::Ability(id)) => Tap::Control(Control::Ability(id)),
+            _ => Tap::Nothing,
+        },
         // A map row inside the band, or a chrome row no control claimed: the bar's
         // bare cells left of the flush-right block (§11.4/#267), the read-only status
         // rows, the deployed log. All silent — a no-op tap says nothing, because the
@@ -483,24 +526,15 @@ mod tests {
         }
     }
 
-    /// **The near-miss this ticket exists for** (§11.4/#267), pinned for a two- and a
+    /// **The near-miss #306 exists for** (§11.4/#267), pinned for a two- and a
     /// three-ability loadout: the bar block is flush right, so a short loadout leaves
     /// bare cells to its left. Reaching for the leftmost slot and landing one cell
-    /// short — or one row *above* it, on the board — must cost nothing, while the
-    /// slot's own cells still activate. The targets themselves are untouched: the fix
-    /// is that a miss is free, not that a miss is impossible.
+    /// short must cost nothing, while the slot's own cells still activate. The drawn
+    /// targets are untouched: a miss is free, not impossible.
     #[test]
     fn the_ability_bar_near_miss_costs_nothing() {
         for count in [2, 3] {
-            let mut abilities = Loadout::empty();
-            for id in AbilityId::ALL
-                .iter()
-                .filter(|id| !id.is_passive())
-                .take(count)
-            {
-                abilities = abilities.with(*id);
-            }
-            let state = run_with(abilities);
+            let state = run_holding(count);
             let statuses = state.ability_statuses();
             assert_eq!(statuses.len(), count, "the loadout holds {count}");
 
@@ -548,11 +582,13 @@ mod tests {
                 Tap::Nothing,
                 "{count} abilities: the cell left of the block is free"
             );
-            // One row above it: the board's last row, which the dead band owns.
+            // One row above it is the board's last row — always inside the dead band,
+            // so it costs no turn, and since #386 it is the bar's slack rather than
+            // silence (pinned in full by the slack tests below).
             assert_eq!(
                 route(leftmost, bar_row - 1),
-                Tap::Nothing,
-                "{count} abilities: the board cell above the block is free"
+                route(leftmost, bar_row),
+                "{count} abilities: the row above the block is the block's slack"
             );
             // And the slot itself still fires.
             assert!(
@@ -560,6 +596,192 @@ mod tests {
                 "{count} abilities: the leftmost slot still activates"
             );
         }
+    }
+
+    /// Route against a real run's ability bar — the core's own hit-test, so these
+    /// cases exercise `ability_at` → `ability_in_slot` exactly as the shell does.
+    fn route_bar(state: &State, g: TapGeometry, col: u32, row: u32) -> Tap {
+        tap_route(g, Some((col, row)), |c, r| {
+            ability_at(state, c, r).map(Control::Ability)
+        })
+    }
+
+    /// A run holding `count` activated abilities, for the slack cases below.
+    fn run_holding(count: usize) -> State {
+        let mut abilities = Loadout::empty();
+        for id in AbilityId::ALL
+            .iter()
+            .filter(|id| !id.is_passive())
+            .take(count)
+        {
+            abilities = abilities.with(*id);
+        }
+        run_with(abilities)
+    }
+
+    /// **The slack this ticket exists for** (§11.6/#386): a press on the map row
+    /// directly above the drawn bar, and one within the row-tall strip below the
+    /// frame's bottom edge, resolve to the very ability the column below (or above)
+    /// them draws. Same identity, same slot arithmetic, same `ability_in_slot` seam.
+    #[test]
+    fn a_near_miss_one_row_off_the_bar_still_fires_its_slot() {
+        for count in [2, 3] {
+            let state = run_holding(count);
+            let width = state.layout().facility().width();
+            let g = geometry_for(&state);
+            let bar = TOP_ROWS + g.map_h;
+            // The strip below is the first row *past* the frame — what `tap_cell`
+            // reports for a point in the one-row slack under the canvas.
+            let below = TOP_ROWS + g.map_h + BOTTOM_ROWS;
+            assert_eq!(below, bar + 1, "the frame ends at the bar");
+
+            let mut hit = 0;
+            for col in 0..width {
+                let on_bar = route_bar(&state, g, col, bar);
+                // **Forgiveness may never change which ability fires**: both slack
+                // rows answer exactly what the bar row answers, column by column.
+                assert_eq!(
+                    route_bar(&state, g, col, bar - 1),
+                    on_bar,
+                    "above col {col}"
+                );
+                assert_eq!(route_bar(&state, g, col, below), on_bar, "below col {col}");
+                if matches!(on_bar, Tap::Control(Control::Ability(_))) {
+                    hit += 1;
+                }
+            }
+            assert!(hit > 0, "{count} abilities: the bar has cells to forgive");
+
+            // Two rows above the bar is board again, and two rows below the frame is
+            // nothing at all: the slack is one row, not a widening funnel.
+            assert_eq!(route_bar(&state, g, width - 1, below + 1), Tap::Nothing);
+            assert!(matches!(
+                route_bar(&state, g, width - 1, bar - 2),
+                Tap::Nothing | Tap::Wait
+            ));
+        }
+    }
+
+    /// **The slack never takes a turn from the board.** Asserted directly rather than
+    /// left to the routing order: at every fit, every screen row that waits without a
+    /// bar under it still waits with one — the slack only ever converts silence.
+    #[test]
+    fn the_slack_never_takes_a_wait_from_the_board() {
+        let state = run_holding(3);
+        for row_px in [4.0, 6.0, SWIPE_THRESHOLD_PX, 19.0, 40.0] {
+            let g = TapGeometry {
+                row_px,
+                ..geometry_for(&state)
+            };
+            for row in 0..TOP_ROWS + g.map_h + BOTTOM_ROWS + 1 {
+                if bare(g, 30, row) == Tap::Wait {
+                    assert_eq!(
+                        route_bar(&state, g, 30, row),
+                        Tap::Wait,
+                        "row {row} at {row_px}px is the board's"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Horizontal geometry is untouched (§11.4): the slack is a *vertical* allowance,
+    /// so the `BAR_GAP` between slots and the bare cells left of the flush-right block
+    /// stay as dead one row off the bar as they are on it.
+    #[test]
+    fn the_slack_forgives_no_column_the_bar_does_not_own() {
+        let state = run_holding(2);
+        let width = state.layout().facility().width();
+        let g = geometry_for(&state);
+        let bar = TOP_ROWS + g.map_h;
+        let below = bar + 1;
+        let owned = |col| matches!(route_bar(&state, g, col, bar), Tap::Control(_));
+        let leftmost = (0..width).find(|c| owned(*c)).expect("the block is drawn");
+        assert!(
+            leftmost > 0,
+            "a short loadout leaves bare cells to the left"
+        );
+        for row in [bar - 1, below] {
+            assert_eq!(route_bar(&state, g, leftmost - 1, row), Tap::Nothing);
+            assert_eq!(
+                route_bar(&state, g, width - 1, row),
+                Tap::Nothing,
+                "the gap"
+            );
+        }
+    }
+
+    /// A slot the row **truncated away** (the oversized-loadout path in
+    /// `ability_line_layout`) is no more hittable from the slack rows than from the
+    /// bar: the slack asks the same hit-test, so an entry nobody drew answers nobody.
+    #[test]
+    fn a_truncated_slot_is_unhittable_from_the_slack_too() {
+        let state = run_with(Loadout::full());
+        let width = state.layout().facility().width();
+        let g = geometry_for(&state);
+        let bar = TOP_ROWS + g.map_h;
+        let drawn: Vec<AbilityId> = (0..width)
+            .filter_map(|col| match route_bar(&state, g, col, bar) {
+                Tap::Control(Control::Ability(id)) => Some(id),
+                _ => None,
+            })
+            .collect();
+        let mut held = state.ability_statuses();
+        held.retain(|s| !drawn.contains(&s.id));
+        assert!(
+            !held.is_empty(),
+            "the row is too narrow for the whole deck — some slots were dropped",
+        );
+        for row in [bar - 1, bar + 1] {
+            for col in 0..width {
+                match route_bar(&state, g, col, row) {
+                    Tap::Control(Control::Ability(id)) => {
+                        assert!(drawn.contains(&id), "col {col} fires an entry it drew")
+                    }
+                    other => assert_eq!(other, route_bar(&state, g, col, bar), "col {col}"),
+                }
+            }
+        }
+    }
+
+    /// The slack is inert while a modal owns the frame (§14/#268, §14 v2/#248) and on
+    /// a fit nobody has painted yet — the same two guards the board rule already has.
+    #[test]
+    fn the_slack_is_inert_under_a_modal_and_before_the_first_fit() {
+        let state = run_holding(3);
+        let base = geometry_for(&state);
+        let bar = TOP_ROWS + base.map_h;
+        let live = (0..state.layout().facility().width())
+            .find(|c| matches!(route_bar(&state, base, *c, bar), Tap::Control(_)))
+            .expect("the block is drawn");
+
+        let modal = TapGeometry {
+            modal: true,
+            ..base
+        };
+        for row in [bar - 1, bar + 1] {
+            assert_eq!(
+                route_bar(&state, modal, live, row),
+                Tap::Captured,
+                "row {row}"
+            );
+        }
+        for row_px in [0.0, -3.0, f64::NAN, f64::INFINITY] {
+            let unfitted = TapGeometry { row_px, ..base };
+            for row in [bar - 1, bar + 1] {
+                assert_eq!(
+                    route_bar(&state, unfitted, live, row),
+                    Tap::Nothing,
+                    "row {row} at row_px {row_px}"
+                );
+            }
+        }
+        // …and the bar's own row still fires in both cases the board is dead in: the
+        // drawn target is never what the guards take away.
+        assert!(matches!(
+            route_bar(&state, base, live, bar),
+            Tap::Control(Control::Ability(_))
+        ));
     }
 
     /// The near line's corner cluster (§11.4/#267): `[?]` resolves to the help toggle,

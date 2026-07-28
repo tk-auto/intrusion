@@ -2035,7 +2035,9 @@ granting a fourth tech fails the *build*, not the frame (#287).
 
 The slot is also the **tap target**, all nine cells of it: a short name is no
 harder to hit than a long one, and the target does not move when the ability's
-state does (§11.6's touch rule).
+state does (§11.6's touch rule). Touch is forgiven **one row of slack above and
+below the bar** (#386) — the drawn slot is unchanged, and the slack rows are the
+ones the router already answered with silence; see §11.6.
 
 ### 11.5 Field of view and the danger overlay
 
@@ -2343,8 +2345,29 @@ band, on the chrome, and off the canvas, a tap that hits no control does **nothi
 no turn, no state change. The point is that the boundary is *forgiving*, not merely
 correct — a near-miss on the flush-right ability block (§11.4) must cost nothing,
 because in a permadeath run with no undo a silently spent turn is unrecoverable
-(§2.1/§2.2). **The fix is never to grow or move a target**: §11.4's nine-cell slot
-and its fixed position are settled; a miss is free, not impossible.
+(§2.1/§2.2). **The fix is never to move a drawn target, and never to grow one into
+space that answers**: §11.4's nine-cell slot, its fixed position and the air between
+slots are settled, and a miss stays free.
+
+**The ability bar is forgiven one row of slack above and below it** (#386). A press
+on the map row directly above the drawn bar, or within one row's height below the
+frame's bottom edge, resolves to the slot in that column exactly as a press on the
+bar does — armed on the press, fired on the lift like every other control. This
+amends the rule above, and the distinction it stands on is that **nothing drawn
+changes**: the slot is still nine cells at a fixed position, the block is still flush
+right, and what grows is the invisible hit region, into two rows that are silent by
+construction — the row above the bar is always inside the dead band, which is floored
+at one full map row, and below the last row there is only letterbox, which owns
+nothing. Forgiveness may turn silence into a hit and may never take a live board tap
+away from the board, which is why it is applied only where the router was about to
+answer with nothing. It never changes *which* ability fires: the slack column asks the
+same hit-test as the bar column beneath it. The cost is honest — a tap one row above
+the bar was free and can now spend a turn (§8.2) — and it is the one thing to watch in
+play: nobody can be *aiming* a Wait at a dead-band row, but it is the row a thumb
+reaching for the board's bottom edge brushes. **[START]** — if it misfires by thumb,
+drop the upper row and keep the lower one rather than widening further. The near
+line's `[?]` and message counter have the same one-row problem and deliberately do not
+have this slack yet.
 
 Two rules keep the band from taking anything away. **Swipes are exempt** — a
 directional drag is unambiguous, so it may start anywhere, band included; only the
