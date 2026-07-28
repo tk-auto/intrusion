@@ -30,10 +30,10 @@
 //! [`Event`]: intrusion_core::Event
 //! [`Event::AbilityActivated`]: intrusion_core::Event::AbilityActivated
 
-use intrusion_core::AbilityId;
+use intrusion_core::{AbilityId, Event};
 
 /// One verb the usage histogram counts (#137, §13.2): the activated abilities
-/// plus the innate verbs that shape a strategy — Wait, Takedown, Drag, Crouch.
+/// plus the innate verbs that shape a strategy — Wait, Takedown, Drag, Crouch, Stow.
 ///
 /// Move is deliberately absent: it is "not shown in the UI" (§8.3) and is the
 /// default nothing-else verb, so counting it would drown the signal the histogram
@@ -78,13 +78,22 @@ pub enum Verb {
     /// Moves. Its zero was the §13.2 false zero in its purest form — the geometry
     /// §10.1a goes to real trouble over, with no policy that had ever entered it.
     Crouch,
+    /// Put a dragged body away inside a cupboard (§10.3/#381) —
+    /// [`Event::BodyStored`](intrusion_core::Event::BodyStored). The last link in
+    /// §7.2's body chain, and the only one that is a *choice*: the takedown's cost is
+    /// the body, taking hold of it is automatic (stepping off its cell grabs it,
+    /// §8.3/#187), and letting it go is free — but stowing it spends the turn, puts
+    /// the body beyond every cone and **locks** the cupboard behind it, which stops it
+    /// being a hideout at all. Read it against `bodies_found`: the tidier the run, the
+    /// flatter that row.
+    Stow,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 12] = [
+    pub const ALL: [Verb; 13] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -97,6 +106,7 @@ impl Verb {
         Verb::PierceWall,
         Verb::Lockdown,
         Verb::Crouch,
+        Verb::Stow,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -121,6 +131,39 @@ impl Verb {
         })
     }
 
+    /// The verb an [`Event`] counts as — the bridge from the core's event stream to a
+    /// histogram slot, and the one place that mapping lives (§13.2: count from
+    /// events, never from issued inputs, so an activation the economy refused takes
+    /// no slot).
+    ///
+    /// `None` is the load-bearing half. A **free action** (§4.4) spends no turn and
+    /// so has no slot, and the body chain holds both sides of that line side by side:
+    /// [`Event::BodyStored`] is a decision that costs the turn and locks a cupboard
+    /// (§10.3), so it counts as [`Verb::Stow`]; [`Event::BodyReleased`] beside it
+    /// costs nothing and counts as nothing, exactly as a Move does.
+    ///
+    /// [`Verb::Wait`] is absent because it has no event of its own — the harness
+    /// records it from the spent turn.
+    ///
+    /// [`Event`]: intrusion_core::Event
+    /// [`Event::BodyStored`]: intrusion_core::Event::BodyStored
+    /// [`Event::BodyReleased`]: intrusion_core::Event::BodyReleased
+    pub fn of_event(event: Event) -> Option<Verb> {
+        match event {
+            Event::AbilityActivated { ability, .. } => Verb::of_ability(ability),
+            Event::TakenDown { .. } => Some(Verb::Takedown),
+            // The grab is the decision the histogram counts; the half-speed steps
+            // that follow are Moves.
+            Event::BodyGrabbed { .. } => Some(Verb::Drag),
+            Event::BodyStored { .. } => Some(Verb::Stow),
+            // The duck itself, and only it (§10.3/#379): re-bumping a table the run
+            // already crouched behind is a free no-op that emits no event, so a pose
+            // held for a dozen turns still counts once.
+            Event::Crouched { .. } => Some(Verb::Crouch),
+            _ => None,
+        }
+    }
+
     /// The stable JSON key for this verb (see `crates/sim/README.md`).
     pub fn key(self) -> &'static str {
         match self {
@@ -136,6 +179,7 @@ impl Verb {
             Verb::PierceWall => "pierce_wall",
             Verb::Lockdown => "lockdown",
             Verb::Crouch => "crouch",
+            Verb::Stow => "stow",
         }
     }
 
@@ -236,6 +280,7 @@ pub fn diversity(histograms: &[UsageHistogram]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use intrusion_core::Cell;
 
     /// The verb order is fixed and every verb maps to a distinct JSON key — the
     /// schema the playtest skill parses (pinned so a reorder is a visible break).
@@ -256,7 +301,8 @@ mod tests {
                 "drag",
                 "pierce_wall",
                 "lockdown",
-                "crouch"
+                "crouch",
+                "stow"
             ]
         );
         // Each ability activation lands in its own slot.
@@ -290,6 +336,49 @@ mod tests {
                 id.name(),
             );
         }
+    }
+
+    /// §7.2's body chain, event by event (#381): the takedown, the grab and the
+    /// **stow** each land in their own slot, and the **release** lands in none.
+    ///
+    /// The release is the assertion worth having. It is §4.4's free action — letting
+    /// a body go costs no turn and refunds nothing — and the histogram counts turns
+    /// spent on a decision, so a slot for it would be a turn that was never spent.
+    /// Pinned here rather than left implied, so a later change cannot quietly give a
+    /// free action a slot (`Move` sits on the same side of the line, and for the same
+    /// reason).
+    #[test]
+    fn the_body_chain_counts_the_stow_and_never_the_release() {
+        let at = Cell::new(3, 4);
+        assert_eq!(
+            Verb::of_event(Event::TakenDown { at }),
+            Some(Verb::Takedown)
+        );
+        assert_eq!(Verb::of_event(Event::BodyGrabbed { at }), Some(Verb::Drag));
+        assert_eq!(Verb::of_event(Event::BodyStored { at }), Some(Verb::Stow));
+        assert_eq!(Verb::of_event(Event::BodyReleased { at }), None);
+
+        // The same line, drawn through the other verbs: a bump-verb decision counts,
+        // a free toggle-off does not, and a *refused* activation emits no
+        // `AbilityActivated` at all so it never reaches here.
+        assert_eq!(
+            Verb::of_event(Event::Crouched { behind: at }),
+            Some(Verb::Crouch)
+        );
+        assert_eq!(
+            Verb::of_event(Event::AbilityActivated {
+                ability: AbilityId::Run,
+                uses_left: None,
+            }),
+            Some(Verb::Run)
+        );
+        assert_eq!(
+            Verb::of_event(Event::AbilityDeactivated {
+                ability: AbilityId::Run,
+            }),
+            None
+        );
+        assert_eq!(Verb::of_event(Event::Moved { to: at }), None);
     }
 
     /// Recording accumulates the exact per-verb counts, and `total` sums them —

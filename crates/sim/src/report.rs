@@ -247,7 +247,7 @@ mod tests {
     fn the_run_row_schema_is_pinned() {
         assert_eq!(
             record(17, RunOutcome::Win, 214).to_json_line(),
-            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}]}"
+            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}]}"
         );
     }
 
@@ -265,7 +265,7 @@ mod tests {
         let summary = Summary::of(&records);
         assert_eq!(
             summary.to_json_line(),
-            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0}}}"
+            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000,\"stow\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0}}}"
         );
     }
 
