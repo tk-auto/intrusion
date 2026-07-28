@@ -601,8 +601,13 @@ fn bar_category(state: AbilityState) -> Category {
 const TOUCH_HINT: [&str; 2] = ["swipe: move", "tap: wait"];
 
 /// The usable line's floor, on keys (§11.4/§11.6/#323): the same two verbs off
-/// §11.6's own table — the arrows the row already draws, and `5` / `w` to wait.
-const KEYS_HINT: [&str; 2] = ["↑↓←→: move", "5/w: wait"];
+/// §11.6's own table — the arrows the row already draws, and `w` to wait.
+///
+/// It names `w` alone rather than the `5/w` it used to (#369). The wait digit is the
+/// **numpad**'s `5`, and a floor hint has no room to say which `5` it means — a
+/// player reading it off a laptop and pressing the top row would get nothing at all.
+/// `w` is the key that is there on every keyboard; the full spelling is one `?` away.
+const KEYS_HINT: [&str; 2] = ["↑↓←→: move", "w: wait"];
 
 /// How many **cells** a hint segment occupies: its `char` count, since every glyph
 /// the hints use is one grid cell wide. Counts the UTF-8 lead bytes rather than
@@ -1270,7 +1275,7 @@ mod tests {
         };
         assert_eq!(
             row(ScreenUi::default()),
-            " ↑↓←→: move  5/w: wait                  ",
+            " ↑↓←→: move  w: wait                    ",
             "keys: §11.6's own table, in the row's `input: action` rhythm"
         );
         assert_eq!(

@@ -1914,7 +1914,8 @@ is the case this serves.
 **Neither status row is ever blank.** The near line falls back to ambient status;
 the usable line falls back to **how to move and how to wait** (#323), in the input
 vocabulary the player is actually using — `swipe: move  tap: wait` on touch,
-`↑↓←→: move  5/w: wait` on keys (§11.6's own table). One rule, two rows: permanent
+`↑↓←→: move  w: wait` on keys (§11.6's own table — `w`, not `5`, because the wait
+digit is the *numpad*'s and a floor hint has no room to say so). One rule, two rows: permanent
 screen real estate is never given away for nothing.
 
 That row is where the innate verbs have to live. **Wait is the least discoverable
@@ -2199,7 +2200,7 @@ finally having a mechanism.
 | Key | Action |
 |---|---|
 | Arrows / `h` `j` `k` `l` / numpad `4` `6` `8` `2` | Move |
-| `w` / numpad `5` / `.` | Wait |
+| `w` / numpad `5` / `.` | Wait — the top row's `5` is *not* a wait key |
 | `1` `2` `3` `4` (top row) | Fire ability bar slots 1–4 |
 | The bar's marked letters | Fire the same four, by mnemonic |
 | `Enter` / `Space` | Confirm |
@@ -2213,6 +2214,17 @@ character binding would want Shift to fire an ability in the turn things go wron
 It also settles which digits are which: the **numpad** moves and the **top row**
 fires abilities, a split the table above could not state while it said only `4`
 `6` `8` `2`.
+
+**No character binding may name a digit** (#369). The split above only holds if
+nothing downstream can undo it, and a character can't: both blocks produce `"2"`,
+so a table matching on `"2"` is answering a press it cannot identify — and whichever
+table is asked first wins. So the digits appear *only* in the code tables, the
+numpad folds onto the keys it duplicates (`ArrowDown`, `w`) rather than onto `8` `2`
+`4` `6` `5`, and a **position outranks every character table** when a press is
+resolved. Without all three, a top-row `2` steps south instead of firing slot 2 —
+which is worse than nothing happening, because it spends the turn *and* moves you
+(§2.2), and it hides: slots 1 and 3 work, because no movement key happened to claim
+those characters.
 
 **Ability keys are the bar's slots** (#359). `1`–`4` fire the first through fourth
 entries **of the bar as drawn** (§11.4) — the *drawn* row, which is flush right, so
