@@ -1857,6 +1857,51 @@ mod tests {
         );
     }
 
+    /// **Every lockdown seals something, and never the door the bot is about to walk
+    /// through** — §8.3's own warning that *"a lockdown fired across a route you still
+    /// have to travel is a real mistake"*, since your own lock is never refused but
+    /// bumping it open costs the turn and leaves the door standing open.
+    #[test]
+    fn every_lockdown_seals_doors_that_are_not_on_the_way_out() {
+        let mut sealed = 0;
+        for seed in 0..40 {
+            let (state, _) = boot(seed);
+            let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Lockdown));
+            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            for _ in 0..DEFAULT_INPUT_CAP {
+                if state.outcome() != Outcome::Playing {
+                    break;
+                }
+                let input = bot.decide(&state);
+                if input == Input::Activate(AbilityId::Lockdown) {
+                    assert!(
+                        !state.lockdown_doors().is_empty(),
+                        "seed {seed}: fired a lockdown with no door in reach — a \
+                         window bought to seal nothing (§8.3)",
+                    );
+                    // The cue bids off the step the *plan* would take, which cannot be
+                    // read back off the state. What can: the bot is not standing in a
+                    // doorway it is mid-way through, which is the same mistake in its
+                    // sharpest form.
+                    assert!(
+                        !matches!(
+                            state.layout().facility().terrain(state.player()),
+                            Some(Terrain::DoorPanelOpen)
+                        ),
+                        "seed {seed}: sealed the doors while standing in a doorway — \
+                         that is a route the bot still has to travel (§8.3)",
+                    );
+                    sealed += 1;
+                }
+                state.step(input);
+            }
+        }
+        assert!(
+            sealed > 0,
+            "no lockdown in 40 seeds — this test would prove nothing",
+        );
+    }
+
     /// The profiles are **distinguishable** over a batch — a shape assertion, never
     /// a leaderboard (§13.4). Three directions the temperaments are built to differ
     /// in, checked over the same seeds so the facility is held fixed:

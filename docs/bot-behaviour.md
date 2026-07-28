@@ -195,7 +195,7 @@ it is ruled out the same way.
 
 ### 4.4a The cues that exist, and the fact each one reads
 
-Every activated verb but Lockdown is cued (#347). What a cue is *allowed* to key off
+Every activated verb is cued (#347). What a cue is *allowed* to key off
 is a fact the surrounding policy has already computed and handed over — the sharing is
 the seam's reason to exist — so the right-hand column is also the list of what the
 `Moment` carries:
@@ -209,7 +209,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Confusion** | a panic-buy of six turns; **decisive when cornered** | how many guards core's clamped blast catches |
 | **Dephase** | a short crossing you can see the far side of | the `crossing` the policy found on its own cost field |
 | **Pierce Wall** | a route the facility does not offer | the same crossing, at three times the price — the budget is scarcer |
-| **Lockdown** | — **deferred**: its value is route denial in a chase, and the chase is §15 Q1 | — |
+| **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
 
 Two of these are worth reading twice, because they are the seam's own rules biting:
@@ -342,9 +342,9 @@ Stated so they read as decisions rather than oversights:
 - **Stowing has no verb in the histogram.** Takedown, drag and `bodies_found` are all
   metrics; deposit-and-lock (§10.3) is not, so a batch infers it from the gap between
   takedowns and bodies found rather than reading it directly.
-- **Lockdown has no cue** (#347). Deferred rather than omitted: its whole value is
-  route denial during a chase, and the shape of the chase is §15 Q1, so a cue written
-  now would measure an answer that has not been given. Its slot reads an honest zero.
+- **Lockdown's cue is the most provisional of the set.** Route denial during a chase
+  *is* §15 Q1, more completely than for Autodoors or Confusion, which are merely
+  coupled to it — so its numbers should be expected to move when that question does.
 - **The pocket half of Pierce Wall is uncued.** §8.3 offers a second use — bore a
   dead-end alcove and sit a sweep out in it — and judging "out of the through-routes"
   means knowing where guards patrol, which the bot may not know (§2). So the measured

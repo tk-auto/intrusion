@@ -217,13 +217,7 @@ impl Moment<'_> {
             AbilityId::Autodoors => self.autodoors(status),
             AbilityId::Confusion => self.confusion(status),
             AbilityId::PierceWall => self.pierce_wall(status),
-            // **Deferred, not omitted** (#347). Lockdown's whole value is route denial
-            // during a chase (§7.6/§10.4), and the shape of the chase is §15 Q1 — the
-            // design's most important open question. A cue written now would be
-            // measuring an answer that has not been given, so the slot reads an honest
-            // zero until it has. Every other activated verb is cued above; see
-            // `docs/stats/abilities/lockdown.md`.
-            AbilityId::Lockdown => None,
+            AbilityId::Lockdown => self.lockdown(status),
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"
             // reads as a decision and not an omission.
@@ -506,6 +500,56 @@ impl Moment<'_> {
             (
                 URGE_PLAIN,
                 "hunted, with the blast on a guard — buy the six turns (§8.3)",
+            )
+        };
+        self.press(status, urge, reason, 0)
+    }
+
+    /// Lockdown (§8.3/#242): every door within `LOCKDOWN_RADIUS` of **where you fired
+    /// it** is shut and sealed, so *"a guard cannot work the handle and its route goes
+    /// the long way round"*. What it is **for** is sending a pursuit round the houses
+    /// while you take the short way.
+    fn lockdown(&self, status: AbilityStatus) -> Option<Bid> {
+        // Flight. Route denial only means something against somebody following a
+        // route to you — a sealed door costs a patrol nothing it was not already
+        // walking past.
+        if self.intent != Intent::Flee {
+            return None;
+        }
+        // The turn is spent standing still (§4.4), so the same cell of room Run and
+        // Autodoors insist on.
+        if self.nearest_guard.is_some_and(|gap| gap <= 1) {
+            return None;
+        }
+        // **Never across a route you still have to travel.** §8.3 names this as the
+        // real mistake: your own lock is never refused, but bumping it open costs the
+        // turn and leaves the door standing open — "unmaking it is paid in the very
+        // turns the ability was bought to save". The step the plan would take is the
+        // route, so a door in it means the seal would land on the bot's own way out.
+        // The sharpest form of it first: **standing in the doorway itself**. Sealing
+        // from inside a door shuts the one cell the bot is halfway through, which is
+        // a route it has to travel by definition.
+        if self.door_at(self.state.player()) {
+            return None;
+        }
+        let ahead = self.route.and_then(|dir| self.state.player().step(dir));
+        if ahead.is_some_and(|cell| self.door_at(cell)) {
+            return None;
+        }
+        // How much is actually being denied. Legality is core's — a firing with no
+        // door in reach is `Unusable`, refused for free (§4.4) — so this count is
+        // never zero here; what it grades is whether the box is worth a 40-turn
+        // cooldown, and one door is a detour where three is a wall.
+        let doors = self.state.lockdown_doors().len();
+        let (urge, reason) = if doors > 1 {
+            (
+                URGE_STRONG,
+                "breaking contact with a knot of doors around me — seal them and send the hunt round (§8.3)",
+            )
+        } else {
+            (
+                URGE_PLAIN,
+                "one door in reach while hunted — a sealed handle is a detour they have to walk (§8.3)",
             )
         };
         self.press(status, urge, reason, 0)

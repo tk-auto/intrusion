@@ -5,7 +5,7 @@ bot's **cue** says it is for (`crates/sim/src/cue.rs`), and what a batch measure
 when the bot was actually given it. The set is exhaustive over `AbilityId` on
 purpose — the same move the cue seam makes in code (#366), so a missing file means
 "not an ability", never "nobody got round to it". A verb with no cue still gets a
-file; it says so, and says why.
+file; it says so, and says why — today that is Vision alone, which is passive.
 
 ## These are numbers, not verdicts (§13.4)
 
@@ -57,7 +57,8 @@ pages follow:
 ## The full-kit sweep
 
 A verb measured alone cannot be dominant, so dominance is read from batches holding a
-real three-tech loadout — the §8.3 cap. Two kits cover every cued activated verb:
+real three-tech loadout — the §8.3 cap. Two kits cover the six salvaged verbs that were cued first; Lockdown landed after
+the sweep was run and is not in either kit, so its share below is its solo one:
 
 ```
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities camouflage,decoy,confusion --runs 100 --seed 0 --cap 1000
@@ -97,5 +98,5 @@ the judgement the sim is not allowed to make.
 | Autodoors | cued | [`autodoors.md`](autodoors.md) |
 | Confusion | cued | [`confusion.md`](confusion.md) |
 | Pierce Wall | cued | [`pierce-wall.md`](pierce-wall.md) |
-| Lockdown | **none yet** — deferred, not omitted | [`lockdown.md`](lockdown.md) |
+| Lockdown | cued | [`lockdown.md`](lockdown.md) |
 | Vision | **none** — passive, nothing to activate | [`vision.md`](vision.md) |
