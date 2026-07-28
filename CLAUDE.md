@@ -68,6 +68,15 @@ consistently in identifiers, comments, and prose (`neighbour`, `behaviour`,
 exception is external vocabulary that is fixed by its source — CSS keywords
 such as `color` and `background-color` keep their canonical spelling.
 
+## Asking the user questions
+
+When you need something from the user — a decision, a clarification, a
+preference — ask **one question at a time**, in plain text, and wait for the
+answer before asking the next. Do not batch several questions into a single
+message, and do not use the `AskUserQuestion` choice tool: write the question
+out and let the user reply freely. If the answer to the first question makes
+later ones moot, you have saved the user the trouble of answering them.
+
 ## Waiting on external state: basic monitors only
 
 **Never use the Claude Code Remote MCP tools** — no `subscribe_pr_activity`,
