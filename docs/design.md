@@ -1386,13 +1386,22 @@ stay a future axis.
 > crouch behind it — and behind its whole **run**: the contiguous piece of
 > furniture that table belongs to (the §10.1a bench; benches are never a lone
 > cell). While crouched you still see everything (your own sight is
-> unchanged), but you are **concealed from any viewer whose line of sight to
-> you crosses any table of that run** — grazing a table's corner counts, out
-> to the exact 45° diagonal. Concealment is directional, per-guard, and per
-> *the run you ducked behind* — not every table you happen to stand beside; a
-> guard looking straight down the bench cannot see you through its other
-> tables, but the open flanks past the run's ends and your back are exactly as
-> exposed as they look. That is what keeps a bench weaker than a cupboard
+> unchanged), but you are **concealed from any viewer across the furniture**:
+> each straight **arm** of the run defines a **line**, and a viewer on the far
+> side of one of those lines cannot see you — however far past that arm's ends
+> they stand. **A viewer who has come round to *your* side of the bench sees
+> you**, which is what keeps the crouch directional. A viewer standing *on* the
+> line — looking along the bench rather than across it — is on neither side, so
+> it is settled by the older test that still runs beside this one: a table of
+> the run on the sight line between you also conceals, corner grazes included,
+> out to the exact 45° diagonal. That is why looking straight down a bench is
+> still blocked by its own tables, and why a lone table (which the generator
+> never places, §10.1a) still grants exactly the quarter-plane it always did.
+> Concealment is directional, per-guard, and per *the run you ducked behind* —
+> not every table you happen to stand beside. A **bent** run — an L, where two
+> stamped benches touch — has no single axis, so **each arm contributes its own
+> half-plane and they union**: the whole L is one piece of cover, exactly as the
+> flood fill already treats it. That is what keeps a bench weaker than a cupboard
 > (omnidirectional, contact-safe) — and a crouched player **can still be
 > captured by contact** (§4.5); unseen is not safe. The crouch spends the turn;
 > **waiting holds it** (hold still, watch the cone sweep past, §7.6); and so
@@ -1407,10 +1416,25 @@ stay a future axis.
 > a free no-op.
 > *(Waiting beside a table used to crouch automatically; that coupling is gone —
 > wait is pure (§5, §8.3's 360° look), and the crouch shows its direction in
-> the usable line (§11.4) like every other bump. And concealment used to be the
-> quarter-plane behind the single bumped table — which let a guard look down a
-> bench and see you through its other tables, undercutting the exact cover
-> §10.1a places; the run rule replaced it.)* Legibility rides the same
+> the usable line (§11.4) like every other bump. And concealment has been rewritten
+> twice, each time because the shape of the protected zone was wrong rather than
+> because the geometry was computed wrongly. It began as the **quarter-plane**
+> behind the single bumped table — which let a guard look down a bench and see you
+> through its other tables, undercutting the exact cover §10.1a places. That was
+> replaced by a **per-ray** test across the whole run, faithful and exact but too
+> tight in the other direction: a short bench subtends a narrow wedge, so a guard
+> only a little off the run's axis had a clear line, and — the deciding
+> complaint — **the player cannot compute that wedge at a glance**, which made the
+> crouch a turn spent on protection you could not predict and usually did not get.
+> Since partial cover is the counterplay §10.1a places in every corridor, a
+> coin-flip crouch means that counterplay is not there. The **half-plane** above
+> replaced it: it costs the crouch some precision at the ends of a bench and buys
+> back the one property a counterplay has to have, which is being readable before
+> you spend the turn. It is deliberately the more generous of the two — if
+> bench-hugging turns out to dominate, the levers are the ones already named here
+> (the turn it costs, contact-vulnerability, the crouch-walk's requirement to keep
+> hugging), **not** re-narrowing the geometry the player has to read.)* Legibility
+> rides the same
 > conventions as the cupboard: the covering run recolours to **Owned** while
 > it conceals you (§11.3), the crouch reports itself once as an Owned message,
 > and the §11.5 danger overlay spares your cell — red under you always means
