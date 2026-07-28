@@ -77,11 +77,11 @@ pub enum HelpNav {
     /// the header `[?]` button used to be (§11.6: never inescapable).
     Close,
     /// Move to the next tab (Level info → Legend → …), cycling — `Tab`, or the
-    /// rightward movement keys (`→` / `l`, and the numpad's `6` folded onto the
-    /// arrow), read here as "next".
+    /// rightward movement key (`→`, and the numpad's `6` folded onto the arrow),
+    /// read here as "next".
     NextTab,
-    /// Move to the previous tab, cycling — the leftward movement keys (`←` / `h`,
-    /// and the numpad's `4`).
+    /// Move to the previous tab, cycling — the leftward movement key (`←`, and the
+    /// numpad's `4`).
     PrevTab,
     /// Flip the colour theme without leaving the panel (§11.2/#189) — the same
     /// [`UiCommand::ToggleTheme`] the board answers, re-offered here because the
@@ -96,18 +96,19 @@ pub enum HelpNav {
 /// the panel is modal (§14 v2/#248), so no key falls through to a game action or
 /// another UI toggle while it is up.
 ///
-/// The movement keys are re-read as tab motion — `→`/`l` next, `←`/`h` prev — so
-/// the same left/right the board uses walks the tab bar; `Tab`, which binds to
-/// nothing in game (#287), advances the tabs here. `?` and `Escape` both close, the
-/// two conventional exits — and `n` flips the theme (#189), the one key the panel
+/// The movement keys are re-read as tab motion — `→` next, `←` prev — so the same
+/// left/right the board uses walks the tab bar; `Tab`, which binds to nothing in
+/// game (#287), advances the tabs here. `?` and `Escape` both close, the two
+/// conventional exits — and `n` flips the theme (#189), the one key the panel
 /// forwards rather than swallows. The numpad reaches the tabs the way it reaches
 /// everything else, by folding onto the arrows through [`key_for_code`]; no digit
-/// *character* is listed, because a digit means a bar slot (#369).
+/// *character* is listed, because a digit means a bar slot (#369), and no letter,
+/// because §11.6's movement is arrows and numpad only (#368).
 pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
     match key {
         "?" | "Escape" => Some(HelpNav::Close),
-        "Tab" | "ArrowRight" | "l" => Some(HelpNav::NextTab),
-        "ArrowLeft" | "h" => Some(HelpNav::PrevTab),
+        "Tab" | "ArrowRight" => Some(HelpNav::NextTab),
+        "ArrowLeft" => Some(HelpNav::PrevTab),
         // The one binding the modal panel does **not** swallow (#189): the theme
         // toggle lives on this panel, so it has to work with the panel up.
         "n" => Some(HelpNav::ToggleTheme),
@@ -142,16 +143,16 @@ pub enum MenuNav {
 /// Map a key to the [`MenuNav`] it drives **while the menu is up**, or `None` for a
 /// key the modal menu swallows (§14/#268).
 ///
-/// The vertical movement keys walk the list — `↑`/`k` up, `↓`/`j` down, the same
-/// spelling the board takes (§11.6) — and `Enter`/`Space` and `Escape` finally do
-/// the *confirm* and *cancel* jobs §11.6 reserved for them ("arrive with the first
+/// The vertical movement keys walk the list — `↑` up, `↓` down, the same spelling
+/// the board takes (§11.6) — and `Enter`/`Space` and `Escape` finally do the
+/// *confirm* and *cancel* jobs §11.6 reserved for them ("arrive with the first
 /// menu"). This is that menu. As on the help panel, the numpad walks the list by
 /// folding onto the arrows ([`key_for_code`]) rather than by a digit character,
 /// which belongs to the bar (#369).
 pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
     match key {
-        "ArrowUp" | "k" => Some(MenuNav::Prev),
-        "ArrowDown" | "j" => Some(MenuNav::Next),
+        "ArrowUp" => Some(MenuNav::Prev),
+        "ArrowDown" => Some(MenuNav::Next),
         "Enter" | " " => Some(MenuNav::Activate),
         "Escape" => Some(MenuNav::Back),
         // The theme toggle reaches every modal screen (#189), here as on the help
@@ -193,12 +194,18 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
 /// `None` for a key the game does not own — which the shell must then leave to
 /// the page (scrolling, browser shortcuts).
 ///
-/// The §11.6 table: arrows move and `w` waits — plus the vi keys `h` `j` `k` `l`
-/// and `.`-to-wait as roguelike comfort. Note `w` *waits* (§11.6): it is not a WASD
-/// movement key, and no movement binding may ever claim it. `Enter`/`Space` confirm
-/// and `Escape` cancel arrive with the first menu; the abilities are on the digits
-/// and resolve by *position*, through [`ability_slot_for_code`], before this table
-/// is consulted at all.
+/// The §11.6 table: arrows move, `w` and `.` wait. Note `w` *waits* (§11.6): it is
+/// not a WASD movement key, and no movement binding may ever claim it.
+/// `Enter`/`Space` confirm and `Escape` cancel arrive with the first menu; the
+/// abilities are on the digits and resolve by *position*, through
+/// [`ability_slot_for_code`], before this table is consulted at all.
+///
+/// **The vi keys are not here** (#368). `h` `j` `k` `l` stepped for a while as
+/// roguelike comfort, and what that cost was a quarter of the alphabet the ability
+/// **mnemonics** could never claim: a movement key is off-limits to a mnemonic
+/// (a mis-key ends a run, §2.2), so `Lock` could not have `l` in any loadout, alone
+/// or not, with nothing on the bar to say why. §11.6's movement is the arrows and
+/// the numpad; the letters are the abilities', and this table stays out of them.
 ///
 /// **The digits are not here** (#369). §11.6's movement digits are the **numpad**'s
 /// (#359), and the shell folds `Numpad4` and its siblings onto the arrow and wait
@@ -208,10 +215,10 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
 /// answer a press aimed at the bar's fourth slot.
 pub fn input_for_key(key: &str) -> Option<Input> {
     Some(match key {
-        "ArrowUp" | "k" => Input::Step(Direction::North),
-        "ArrowDown" | "j" => Input::Step(Direction::South),
-        "ArrowLeft" | "h" => Input::Step(Direction::West),
-        "ArrowRight" | "l" => Input::Step(Direction::East),
+        "ArrowUp" => Input::Step(Direction::North),
+        "ArrowDown" => Input::Step(Direction::South),
+        "ArrowLeft" => Input::Step(Direction::West),
+        "ArrowRight" => Input::Step(Direction::East),
         "w" | "." => Input::Wait,
         _ => return None,
     })
@@ -278,17 +285,17 @@ pub fn key_for_code(code: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// The §11.6 movement table, pinned: arrows and vi keys step; `w` and `.` wait.
-    /// `w` waiting is the regression to watch — a WASD binding once claimed it, and
+    /// The §11.6 movement table, pinned: the arrows step, `w` and `.` wait. `w`
+    /// waiting is the regression to watch — a WASD binding once claimed it, and
     /// §11.6 says it waits. The numpad reaches these same rows through
     /// [`key_for_code`], which is why no digit appears in the table itself (#369).
     #[test]
     fn the_movement_table_maps_per_the_design() {
         for (keys, expected) in [
-            (&["ArrowUp", "k"][..], Input::Step(Direction::North)),
-            (&["ArrowDown", "j"][..], Input::Step(Direction::South)),
-            (&["ArrowLeft", "h"][..], Input::Step(Direction::West)),
-            (&["ArrowRight", "l"][..], Input::Step(Direction::East)),
+            (&["ArrowUp"][..], Input::Step(Direction::North)),
+            (&["ArrowDown"][..], Input::Step(Direction::South)),
+            (&["ArrowLeft"][..], Input::Step(Direction::West)),
+            (&["ArrowRight"][..], Input::Step(Direction::East)),
             (&["w", "."][..], Input::Wait),
         ] {
             for key in keys {
@@ -301,9 +308,14 @@ mod tests {
     /// scrolling and shortcuts. `Tab` is *not* here: it is a UI control
     /// ([`ui_command_for_key`]), not a game action, but it still returns `None`
     /// from [`input_for_key`] — the two tables are disjoint.
+    ///
+    /// The **vi keys** are here now (#368). They stepped for a while, and a movement
+    /// key is one no ability mnemonic may claim — which cost `Lock` its `l` for a
+    /// reason no player could see. Movement is the arrows and the numpad; a letter
+    /// this table does not own is one the bar can.
     #[test]
     fn unowned_keys_are_left_to_the_page() {
-        for key in ["q", "F5", "Meta", " ", "PageDown"] {
+        for key in ["q", "F5", "Meta", " ", "PageDown", "h", "j", "k", "l"] {
             assert_eq!(input_for_key(key), None, "key {key:?}");
         }
     }
@@ -381,22 +393,21 @@ mod tests {
                 "{key:?} closes"
             );
         }
-        for key in ["Tab", "ArrowRight", "l"] {
+        for key in ["Tab", "ArrowRight"] {
             assert_eq!(
                 help_nav_for_key(key),
                 Some(HelpNav::NextTab),
                 "{key:?} → next tab"
             );
         }
-        for key in ["ArrowLeft", "h"] {
-            assert_eq!(
-                help_nav_for_key(key),
-                Some(HelpNav::PrevTab),
-                "{key:?} → prev tab"
-            );
-        }
-        // A movement/wait/ability/other-UI key is swallowed by the open modal panel.
-        for key in ["k", "j", "w", "5", "r", "t", "m", "Enter"] {
+        assert_eq!(
+            help_nav_for_key("ArrowLeft"),
+            Some(HelpNav::PrevTab),
+            "← → prev tab"
+        );
+        // A movement/wait/ability/other-UI key is swallowed by the open modal panel —
+        // the vi keys among them, now that they navigate nothing anywhere (#368).
+        for key in ["k", "j", "l", "h", "w", "5", "r", "t", "m", "Enter"] {
             assert_eq!(
                 help_nav_for_key(key),
                 None,
@@ -412,12 +423,12 @@ mod tests {
     /// runs underneath the title screen.
     #[test]
     fn the_open_menu_captures_input_and_walks_the_list() {
-        for key in ["ArrowUp", "k"] {
-            assert_eq!(menu_nav_for_key(key), Some(MenuNav::Prev), "{key:?} → up");
-        }
-        for key in ["ArrowDown", "j"] {
-            assert_eq!(menu_nav_for_key(key), Some(MenuNav::Next), "{key:?} → down");
-        }
+        assert_eq!(menu_nav_for_key("ArrowUp"), Some(MenuNav::Prev), "↑ → up");
+        assert_eq!(
+            menu_nav_for_key("ArrowDown"),
+            Some(MenuNav::Next),
+            "↓ → down"
+        );
         for key in ["Enter", " "] {
             assert_eq!(
                 menu_nav_for_key(key),
@@ -427,7 +438,20 @@ mod tests {
         }
         assert_eq!(menu_nav_for_key("Escape"), Some(MenuNav::Back));
         // A key the game would otherwise own is swallowed by the open menu.
-        for key in ["ArrowLeft", "h", "w", "5", "r", "t", "m", "?", "Tab"] {
+        for key in [
+            "ArrowLeft",
+            "h",
+            "j",
+            "k",
+            "l",
+            "w",
+            "5",
+            "r",
+            "t",
+            "m",
+            "?",
+            "Tab",
+        ] {
             assert_eq!(
                 menu_nav_for_key(key),
                 None,
@@ -526,20 +550,24 @@ mod tests {
         }
     }
 
-    /// Every single-character key a **UI command** claims (§11.4). Abilities no
-    /// longer take letters (#359), so the collision that mattered is the one left:
-    /// a UI key must never also be a movement key. A mis-key that opened the help
-    /// card instead of stepping is the same lost run as one that walked the wrong way.
+    /// Every single-character key a **UI command** claims (§11.4). Abilities take
+    /// letters again (#360's mnemonics), but those are checked against these tables
+    /// in [`crate::mnemonic`]; the collision this pair guards is the older one, a UI
+    /// key that also moves. A mis-key that opened the help card instead of stepping
+    /// is the same lost run as one that walked the wrong way.
     const UI_KEYS: [&str; 3] = ["m", "?", "n"];
 
-    /// Every single-character key the movement table owns. No digit is among them
-    /// (#369): the movement digits are the numpad's, and they arrive folded onto the
-    /// arrow names, which are not characters at all.
-    const MOVEMENT_KEYS: [&str; 6] = ["w", "k", "j", "h", "l", "."];
+    /// Every single-character key the movement table owns — just the two wait
+    /// spellings now. No digit is among them (#369): the movement digits are the
+    /// numpad's, and they arrive folded onto the arrow names, which are not
+    /// characters at all. And no letter steps (#368): the vi keys left, so the
+    /// alphabet they held is the ability mnemonics' to claim.
+    const MOVEMENT_KEYS: [&str; 2] = ["w", "."];
 
-    /// The UI keys hold their half of the bargain, including the theme toggle (#189),
-    /// which had to go to `n` precisely because `t`, `d` and `l` were already spoken
-    /// for.
+    /// The UI keys hold their half of the bargain, including the theme toggle (#189)
+    /// — which went to `n` when `t`, `d` and `l` were all spoken for, `l` by the vi
+    /// step that has since left (#368). `n` stays: a binding is not re-shuffled just
+    /// because a better letter came free.
     #[test]
     fn the_ui_keys_collide_with_no_movement_key() {
         for key in UI_KEYS {

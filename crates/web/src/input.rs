@@ -880,15 +880,17 @@ mod tests {
             "the bar's digit outranks the mnemonic",
         );
         assert_eq!(
-            play_key("h", "KeyH", greedy),
+            play_key("ArrowLeft", "ArrowLeft", greedy),
             Some(PlayKey::Move(Input::Step(Direction::West))),
             "a movement key outranks the mnemonic",
         );
-        assert_eq!(
-            play_key("c", "KeyC", greedy),
-            Some(PlayKey::Slot(7)),
-            "a free letter reaches the mnemonic lookup",
-        );
+        for (key, code) in [("c", "KeyC"), ("l", "KeyL")] {
+            assert_eq!(
+                play_key(key, code, greedy),
+                Some(PlayKey::Slot(7)),
+                "{key:?} is a free letter and reaches the mnemonic lookup",
+            );
+        }
         for (key, code) in [("q", "KeyQ"), ("F5", "F5"), ("5", "Digit5")] {
             assert_eq!(
                 play_key(key, code, |_| None),

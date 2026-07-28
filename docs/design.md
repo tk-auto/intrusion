@@ -2199,7 +2199,7 @@ finally having a mechanism.
 
 | Key | Action |
 |---|---|
-| Arrows / `h` `j` `k` `l` / numpad `4` `6` `8` `2` | Move |
+| Arrows / numpad `4` `6` `8` `2` | Move |
 | `w` / numpad `5` / `.` | Wait — the top row's `5` is *not* a wait key |
 | `1` `2` `3` `4` (top row) | Fire ability bar slots 1–4 |
 | The bar's marked letters | Fire the same four, by mnemonic |
@@ -2247,9 +2247,9 @@ say so. A bar slot is visible, stable within the run, and the same thing your th
 taps.
 
 **A second way in: the mnemonic letter** (#360). Beside the digit, each entry
-claims a **letter** — the first character of its bar name that is neither bound by
-this table already nor taken by an entry to its left — and the bar **draws that one
-letter in the ink colour**, lifted out of the name around it, in the entry it fires
+claims a **letter**: *its own initial, unless another entry in the same run took it
+first* — the whole rule, and the whole rule a player has to know. And the bar **draws
+that one letter in the ink colour**, lifted out of the name around it, in the entry it fires
 (§11.4). `1` and `c` both fire `Camo`. Nothing is drawn behind it and nothing is
 added beside it: the bar stays the quiet strip §11.4 settled on, and the mark costs
 no width. **An entry you cannot use is not marked** — an exhausted or unusable entry
@@ -2261,6 +2261,17 @@ not a letter could be claimed. The letter is the one you reach for when you know
 its digit alone; nothing is silently reassigned. Letters resolve on the **character**
 (`key`), not the code — you press the key labelled with the letter you can see, which
 is the mirror of why a position binds by position.
+
+**Only a held ability may push a mnemonic off its initial** (#368). A mnemonic still
+may not shadow a movement or system key — a mis-key ends a run — but that guarantee
+has to be one the rule above never *notices*, because a skip whose cause is off screen
+is unreadable: Lockdown showed `o` with nothing in the run holding `l`, and no way to
+find out why. So the tables give way instead of the letters. Movement is the arrows
+and the numpad, and the vi keys `h` `j` `k` `l` are gone with it — a comfort binding
+is not worth a quarter of the alphabet the bar can never use, and it was costing a
+shipping ability its own name. What is left reserved — `w` `.` `m` `n` `?` — starts no
+bar name in the catalogue, and a test says so, so the day it starts to is a failed
+build rather than a letter a player cannot account for.
 
 **Why this is not the derivation this section designed out.** The paragraph below
 warns about exactly this shape of rule, and three things separate them. The claim set
