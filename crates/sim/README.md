@@ -260,7 +260,17 @@ a second bot:
 |---|---|
 | `baseline` | today's bot, unchanged — the numbers the policy carried as constants, so metrics stay comparable across the seam |
 | `cautious` | gives patrols a wide berth, ducks into cover early and waits long; even bolting, it would rather round a patrol than brush past one. Trades speed for not being seen |
-| `aggressive` | pushes toward the objective, **tolerates a cone to save turns** (it walks a watched cell rather than waiting the sweep out), hides late and briefly |
+| `aggressive` | pushes toward the objective, **tolerates a cone to save turns** (it walks a watched cell rather than waiting the sweep out), hides late and briefly — and clears a patrol out of its way when the route offers the angle, then **stows the body** in a nearby cupboard |
+| `careless` | `aggressive` carried further: **strikes more readily and never tidies up**, so the bodies it leaves stay on the floor to be found |
+
+Two of the four take takedowns, and they differ in what they do afterwards for a
+reason. A stowed body is *gone* — no cone will ever find it (§10.3) — so a bot
+that always tidies up drives `bodies_found` to zero and leaves §7.3's radio clock
+untested. `aggressive` covers the drag/stow chain and `careless` covers body
+discovery; only together do they cover §7.2's cost end to end. `baseline` and
+`cautious` carry a `takedown_reach` of **zero**, which declines the verb outright:
+their flat takedown row is the temperament working, not an opportunity that never
+came (§13.3).
 
 Why more than one: §13.2 calls strategy diversity *"the most important and the
 least obvious"* metric — **win rate tells you if the game is hard, strategy

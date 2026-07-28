@@ -42,8 +42,8 @@ summary row (schema: crates/sim/README.md).
   --without L    tech to drop from the loadout                 (default: none)
   --bot          play each run with the baseline stealth bot
                  instead of a script (design §13.2)           (default: off)
-  --profile NAME the bot's playstyle temperament (§13.2):
-                 baseline, cautious or aggressive; needs --bot (default: baseline)
+  --profile NAME the bot's playstyle temperament (§13.2): baseline, cautious,
+                 aggressive or careless; needs --bot        (default: baseline)
   --script MOVES inputs replayed from the start of every run:
                  N/E/S/W step, `.` waits, +/- an ability key
                  (e.g. +r) activates/deactivates; after the
@@ -378,7 +378,7 @@ mod tests {
     fn an_unknown_profile_is_refused_with_the_known_names() {
         let error = args(&["--bot", "--profile", "reckless"]).expect_err("unknown name");
         assert!(error.contains("reckless"), "{error}");
-        assert!(error.contains("baseline, cautious, aggressive"), "{error}");
+        assert!(error.contains(&Profile::names()), "{error}");
     }
 
     /// The usage text spells the profile vocabulary out by hand (the `const` cannot

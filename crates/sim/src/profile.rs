@@ -110,6 +110,31 @@ pub struct Profile {
     pub pursue: Descent,
     /// How the bot routes when bolting for a refuge.
     pub flee: Descent,
+    /// How far out of its way this temperament will go to spring a takedown from a
+    /// guard's **rear blind spot** (§7.2/§155), counted in steps of route that cross
+    /// no cone.
+    ///
+    /// **Zero declines the verb outright** — not "never gets the chance", but "does
+    /// not want it": an unaware guard is left blocked, so the router waits the patrol
+    /// out exactly as it did before this knob existed. That is what keeps the
+    /// avoidance-first temperaments byte-identical across this seam (#316), and it is
+    /// the honest reading of a bot that steers wide of guards rather than hunting
+    /// them (§13.3) — a cautious profile reporting `takedowns: 0` is **correct
+    /// behaviour**, not a defect.
+    ///
+    /// Larger is keener rather than better (§13.4). The budget is the *whole* point:
+    /// a takedown taken because the route offered one cheaply measures the game; a
+    /// bot that crosses the facility to hunt measures the bot.
+    pub takedown_reach: u32,
+    /// How far this temperament will haul a body to stow it in a cupboard
+    /// (§8.3/§10.3), counted the same way — the tidy-up half of §7.2's cost.
+    ///
+    /// **Zero leaves every body where it fell**, which is not laziness but the other
+    /// half of the measurement: a stowed body is *gone* (no cone ever finds it), so a
+    /// bot that always tidies up drives `bodies_found` to zero and §7.3's radio clock
+    /// goes back to being untested. Splitting the two across temperaments is how one
+    /// batch covers the drag/stow chain and another covers body discovery (#316).
+    pub body_stow_reach: u32,
     /// The **urge floor** each ability's cue must clear before the bot will press
     /// it (§13.2/#346), indexed by [`cue::slot`] — the ability's permanent position
     /// in [`AbilityId::ALL`].
@@ -150,6 +175,11 @@ impl Profile {
             keep_clear: false,
             hold_watched: false,
         },
+        // Avoidance-first: it does not want the verb (§13.3), so it never strikes and
+        // never has a body to tidy. Both zero is what makes "today's bot, unchanged"
+        // still true after #316 added the play.
+        takedown_reach: 0,
+        body_stow_reach: 0,
         // Every cue starts at the same plain-fit floor. The floors are a per-ability
         // dial precisely so a *sweep* can move one of them; a profile that shipped
         // with them already scattered would make its own metrics harder to read.
@@ -180,11 +210,18 @@ impl Profile {
     };
 
     /// **Pushes toward the objective, tolerates a cone to save turns, hides late
-    /// and briefly.** A tight halo it will skim rather than round, cover taken
-    /// only when a patrol is nearly on top of it, and — the temperament's
-    /// signature — `hold_watched: false` while pursuing, so it walks a watched
-    /// cell instead of waiting the sweep out. It is not a better player, just an
-    /// impatient one (§13.4): it should be *detected more*, which is the point.
+    /// and briefly — and clears a patrol out of its way when the route offers the
+    /// angle.** A tight halo it will skim rather than round, cover taken only when a
+    /// patrol is nearly on top of it, and — the temperament's signature —
+    /// `hold_watched: false` while pursuing, so it walks a watched cell instead of
+    /// waiting the sweep out. It is not a better player, just an impatient one
+    /// (§13.4): it should be *detected more*, which is the point.
+    ///
+    /// It also **tidies up after itself**: a short strike detour and a stow reach
+    /// wide enough to reach the cupboard the guard was patrolling past, so its rows
+    /// carry the whole §7.2 chain — takedown, drag, stow — rather than only its first
+    /// link. What it does *not* cover is body discovery, because a stowed body can
+    /// never be found; that is [`CARELESS`](Profile::CARELESS)'s job.
     pub const AGGRESSIVE: Profile = Profile {
         name: "aggressive",
         // A quarter of the baseline weight over a radius of 3: a patrol still
@@ -201,12 +238,65 @@ impl Profile {
             keep_clear: true,
             hold_watched: false,
         },
+        // Short: a guard already beside the route, not one across the map. Four steps
+        // is about a room's width on the v1 footprint, so the detour stays a
+        // *diversion* from the push rather than becoming the push.
+        takedown_reach: 4,
+        // Wider than the strike detour, because the haul is the expensive half: at
+        // half speed (§8.3) a six-step carry is a dozen turns, which is exactly the
+        // price §7.2 means the body to be.
+        body_stow_reach: 6,
         ..Profile::BASELINE
+    };
+
+    /// **Strikes readily, never hides, never tidies up.**
+    /// [`AGGRESSIVE`](Profile::AGGRESSIVE)'s impatience carried one step further:
+    /// twice the detour for a rear blind spot, no cupboard ever worth diverting to,
+    /// and a stow reach of zero, so every body it leaves stays on the floor where a
+    /// patrol will eventually walk its cone over it.
+    ///
+    /// It exists because a *tidy* bot cannot measure body discovery — stowing puts a
+    /// body beyond every cone, so the tidier the temperament, the flatter §7.3's
+    /// radio clock and the `bodies_found` row read (§13.2). This is the profile those
+    /// two rows have a live source from, and #198 anticipated it by name: *"a
+    /// takedown-happy one … cheap follow-ups once the `Profile` seam exists"*.
+    ///
+    /// **Keener does not mean more**, and the measured numbers say so plainly: over
+    /// 100 seeds this lands *fewer* takedowns than `aggressive` (11 against 18),
+    /// because refusing cupboards costs it every concealment strike (§7.2) and leaves
+    /// it only the rear blind spot (§155) to work with. That is the split doing its
+    /// job rather than a mis-tune — one temperament per legal angle — and it is worth
+    /// remembering before anyone reads the bigger reach as the bigger number.
+    ///
+    /// Not a *better* player for striking at all (§13.4) — bodies on the floor are how
+    /// a run gets loud, and its detections should say so.
+    pub const CARELESS: Profile = Profile {
+        name: "careless",
+        takedown_reach: 8,
+        // **It does not use cupboards at all.** No bolthole is ever worth diverting
+        // to, so it never ducks in, never waits a patrol out, and never stows. That
+        // needs no new mechanism — a reach of zero is the existing knob turned all the
+        // way down — and it sharpens what the profile measures: with concealment off
+        // the table, its takedowns can only be **rear blind spot** strikes (§155),
+        // while `aggressive` still gets the cupboard-mouth concealment ones (§7.2). One
+        // temperament per legal angle, rather than both crowding onto the easy one.
+        cover_reach: 0,
+        // The signature: it drops what it is carrying rather than spend a dozen turns
+        // hauling. The grab itself is not optional — stepping off a body's cell takes
+        // hold automatically (§8.3/#187) — so "never stows" is a decision the bot has
+        // to *act* on, by letting go, not one it can make by standing still.
+        body_stow_reach: 0,
+        ..Profile::AGGRESSIVE
     };
 
     /// Every profile that ships, in a fixed order — the `--profile` vocabulary,
     /// and the order a multi-profile report walks.
-    pub const ALL: [Profile; 3] = [Profile::BASELINE, Profile::CAUTIOUS, Profile::AGGRESSIVE];
+    pub const ALL: [Profile; 4] = [
+        Profile::BASELINE,
+        Profile::CAUTIOUS,
+        Profile::AGGRESSIVE,
+        Profile::CARELESS,
+    ];
 
     /// The profile called `name`, or `None` when nothing is. Lookup is exact:
     /// a near-miss is an error the caller reports with the vocabulary, never a
@@ -271,7 +361,7 @@ mod tests {
         }
         assert_eq!(Profile::by_name("Baseline"), None, "lookup is exact");
         assert_eq!(Profile::by_name("reckless"), None);
-        assert_eq!(Profile::names(), "baseline, cautious, aggressive");
+        assert_eq!(Profile::names(), "baseline, cautious, aggressive, careless");
     }
 
     /// Names are unique, or `--profile` would be ambiguous and a row's
@@ -301,6 +391,58 @@ mod tests {
                 p.watched_penalty,
             );
         }
+    }
+
+    /// The takedown axis is a **temperament**, not a capability the seam hands to
+    /// everybody (#316). Two claims worth pinning, because both are load-bearing:
+    ///
+    /// - the avoidance-first profiles decline the verb outright, which is what makes
+    ///   "the cautious baseline is unchanged" true by construction rather than by
+    ///   measurement — a reach of zero never reaches a line of the strike code;
+    /// - a profile that never strikes has no body to deal with, so a stow reach on one
+    ///   would be a number that could never do anything.
+    #[test]
+    fn only_the_striking_temperaments_carry_a_takedown_reach() {
+        // Read back through the name lookup rather than off the constants, so these
+        // are assertions about the shipped `--profile` vocabulary and not arithmetic
+        // the compiler can fold away.
+        let by = |name: &str| Profile::by_name(name).expect("a shipped profile");
+        let (declines, strikes): (Vec<Profile>, Vec<Profile>) = Profile::ALL
+            .into_iter()
+            .partition(|p| p.takedown_reach == 0);
+
+        assert_eq!(
+            declines.iter().map(|p| p.name).collect::<Vec<_>>(),
+            ["baseline", "cautious"],
+            "exactly the avoidance-first temperaments decline the verb",
+        );
+        for p in &declines {
+            assert_eq!(
+                p.body_stow_reach, 0,
+                "{}: never strikes, so it can never have a body to stow",
+                p.name,
+            );
+        }
+        assert_eq!(
+            strikes.iter().map(|p| p.name).collect::<Vec<_>>(),
+            ["aggressive", "careless"],
+        );
+
+        // The two that strike differ in *both* directions, or they would be one
+        // temperament measured twice: careless wants it more and tidies less.
+        assert!(
+            by("careless").takedown_reach > by("aggressive").takedown_reach,
+            "careless must be the keener striker",
+        );
+        assert!(
+            by("aggressive").body_stow_reach > 0,
+            "aggressive tidies up — that is what covers the drag/stow chain",
+        );
+        assert_eq!(
+            by("careless").body_stow_reach,
+            0,
+            "careless never does — that is what gives `bodies_found` a source",
+        );
     }
 
     /// Hysteresis, per profile: the bot must come out of cover on a *wider*

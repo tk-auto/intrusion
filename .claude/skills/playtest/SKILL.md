@@ -50,7 +50,7 @@ The flags (full table in [`crates/sim/README.md`](../../../crates/sim/README.md)
 | Flag | Meaning | Default |
 |---|---|---|
 | `--bot` | play each run with the baseline stealth bot — **the balance-signal mode** | off |
-| `--profile NAME` | which **playstyle temperament** the bot plays: `baseline`, `cautious`, `aggressive` (needs `--bot`) | `baseline` |
+| `--profile NAME` | which **playstyle temperament** the bot plays: `baseline`, `cautious`, `aggressive`, `careless` (needs `--bot`) | `baseline` |
 | `--runs N` | how many runs; seeds are `S, S+1, … S+N-1` | 100 |
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
@@ -63,14 +63,21 @@ The flags (full table in [`crates/sim/README.md`](../../../crates/sim/README.md)
   bump `--runs` (and vary `--seed`) before you believe a small effect. Seeds are
   contiguous from `--seed`, so `--seed 0 --runs 100` and `--seed 100 --runs 100`
   are disjoint batches.
-- **Run all three profiles by default.** They are one policy at three
+- **Run all four profiles by default.** They are one policy at four
   temperaments (`crates/sim/README.md`), and running them over the *same* seeds is
   the only way §13.2's headline metric — strategy diversity — becomes visible: a
   seed solvable both cautiously and aggressively is healthy; one where both
   collapse onto the same line is a puzzle with one answer.
 
+  It also takes all four to cover §7.2's takedown chain, because no single
+  temperament can: `baseline` and `cautious` decline the verb, `aggressive` strikes
+  and **stows** the body (covering the drag and the §10.3 deposit-and-lock), and
+  `careless` strikes and **leaves** it (covering `bodies_found` and §7.3's radio
+  clock). A stowed body is beyond every cone, so a batch of tidy profiles alone
+  reports `bodies_found: 0` and says nothing about whether discovery works.
+
   ```
-  for p in baseline cautious aggressive; do
+  for p in baseline cautious aggressive careless; do
     cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 \
       > /tmp/playtest-$p.jsonl
     tail -1 /tmp/playtest-$p.jsonl
@@ -113,7 +120,10 @@ find the seeds to flag.
 
 **Never as a leaderboard (§13.4).** A profile is a *temperament*, not a better
 player: `cautious` is meant to be slow and `aggressive` is meant to be seen more.
-"Aggressive wins less" is not a finding. What the comparison is *for*:
+"Aggressive wins less" is not a finding. Nor is "careless lands fewer takedowns
+than aggressive despite wanting them more" — it refuses cupboards, so it forgoes
+every concealment strike and works only the rear blind spot. What the comparison
+is *for*:
 
 - **Where the temperaments disagree on a seed** — one wins by waiting, the other
   is captured pushing. That is the §13.3 flag worth playing: the seed admits more
