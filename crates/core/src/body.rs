@@ -1,12 +1,17 @@
 //! The body a takedown leaves behind (§7.2) — the cost made physical.
 //!
 //! A takedown is permanent and free of cooldown; **the body is the cost**. It is
-//! a solid entity (fill 1.0, like every actor — §4.3) the level owns directly
-//! (§12.3), not terrain stamped into the grid: it blocks movement and guards
-//! route around it, but it does not block sight — which is exactly what makes it
-//! dangerous to leave lying about. Any guard whose cone covers a body has
-//! *found* it, and finding a body is the loudest event in the game (§7.2): it
-//! raises that guard's alert harder than seeing the player does.
+//! an entity the level owns directly (§12.3), not terrain stamped into the grid,
+//! and since #187 a loose one is **non-solid** (§7.2): it blocks neither movement
+//! nor pathing, so you walk over it and take hold by stepping *off* its cell. The
+//! one place it counts as an occupant is the door-crush check — a door never
+//! shuts on a body ([`actor_occupies`](crate::state)) — which is the exception
+//! that makes the rule worth stating.
+//!
+//! What it never blocks is **sight**, and that is what makes it dangerous to
+//! leave lying about. Any guard whose cone covers a body has *found* it, and
+//! finding a body is the loudest event in the game (§7.2): it raises that guard's
+//! alert harder than seeing the player does.
 //!
 //! The body also carries what the later systems need: it **can be moved** — the
 //! drag (§8.3, #103) — and its [`fell_at`](Body::fell_at) remembers **where the
