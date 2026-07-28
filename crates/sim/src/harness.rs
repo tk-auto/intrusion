@@ -1,14 +1,16 @@
 //! The run loop (§13.2): one seeded game under a policy, and batches of them.
 //!
 //! A run boots exactly as the web shell does — `Rng::new(seed)` →
-//! [`generate_level`] with [`LevelConfig::V1`] → [`State::new`] facing north —
-//! so a seed here is the same level a player would get from that seed, and a
-//! sim finding reproduces in the browser. Metrics are counted from the core's
-//! [`Event`] stream as the run steps, never scraped from state or the rendered
-//! grid.
+//! [`generate_level`] → [`State::new`] facing north — so a seed here is the same
+//! level a player would get from that seed, and a sim finding reproduces in the
+//! browser. What the run boots *with* is a [`RunConfig`] (#256): the recipe, the
+//! modifiers and the loadout are a batch input, and the sim preset is only the
+//! default. Metrics are counted from the core's [`Event`] stream as the run steps,
+//! never scraped from state or the rendered grid.
 
-use intrusion_core::{start_level_with, Event, GenError, Input, LevelConfig, LevelSeed, Outcome};
+use intrusion_core::{start_level_with, Event, GenError, Input, Outcome};
 
+use crate::config::RunConfig;
 use crate::policy::{PlayerPolicy, Recording};
 use crate::replay::Replay;
 use crate::usage::{UsageHistogram, Verb};
@@ -94,16 +96,15 @@ pub fn run_one(
     policy: &mut dyn PlayerPolicy,
     input_cap: u32,
 ) -> Result<RunRecord, GenError> {
-    run_one_with(&LevelConfig::V1, seed, policy, input_cap)
+    run_one_with(&RunConfig::sim(), seed, policy, input_cap)
 }
 
-/// Run one seeded game under `policy` on a facility carved from `config` — the
-/// [`run_one`] loop with the recipe opened up as a knob (§13.2), so the sim can
-/// **sweep** the guard count (and the other §10.2 parameters) and watch the balance
-/// numbers move. [`run_one`] is this called with [`LevelConfig::V1`], the shipped
-/// v1 recipe.
+/// Run one seeded game under `policy` on the batch's [`RunConfig`] — the [`run_one`]
+/// loop with what a run boots from opened up as an input (§13.2/#256), so the sim can
+/// measure a modifier, a loadout or a guard count rather than the one preset it was
+/// compiled with. [`run_one`] is this called with [`RunConfig::sim`].
 pub fn run_one_with(
-    config: &LevelConfig,
+    config: &RunConfig,
     seed: u64,
     policy: &mut dyn PlayerPolicy,
     input_cap: u32,
@@ -112,12 +113,11 @@ pub fn run_one_with(
     // the guard close-behind roll draws from it (§10.4/#146), so a sim run is as
     // deterministic and as faithful to the web build as the rest of the pipeline.
     // The sim boots through the *same* [`start_level_with`] path the web shell and
-    // the replay viewer use (§13.2) — only the preset differs: the sim's
-    // [`IntelGate`] is `AtLeastOne`, which keeps the bot's outcome profile mixed
-    // (§13.3), where web quick play requires the full set (#244); and the sim holds
-    // the innate-only loadout (§8.3), so it plays *bare* — a level winnable with no
-    // tech is the baseline the win rate is measured against.
-    let mut state = start_level_with(config, &LevelSeed::sim(seed))?;
+    // the replay viewer use (§13.2) — only the config differs, and it differs by
+    // being *said*: `RunConfig::sim` is the baseline gate (`AtLeastOne`, which keeps
+    // the bot's outcome profile mixed, §13.3) and the bare innate-only loadout
+    // (§8.3), where web quick play requires the full intel set and a tech draw (#244).
+    let mut state = start_level_with(&config.facility, &config.level(seed))?;
 
     let mut record = RunRecord {
         seed,
@@ -175,28 +175,29 @@ pub fn run_one_with(
 /// [`Replay`] — `(level, [inputs])` — that reproduces it through
 /// [`Scripted`](crate::Scripted).
 ///
-/// The replay carries the **sim [`LevelSeed`]** it was captured under, not a bare
-/// seed (#245): the sim's intel gate is `AtLeastOne` (§13.3), so a baked replay must
-/// boot *that* preset in the web viewer, or the run would replay against quick play's
-/// stricter gate and diverge. Recording is a transparent decorator, so the captured
-/// run is byte-identical to an unwrapped one; feeding the returned inputs back on the
-/// same seed lands on the same record. This is the sim half of the replay loop the
-/// web viewer (#197) plays back.
+/// The replay carries the [`LevelSeed`](intrusion_core::LevelSeed) it was **actually
+/// captured under**, not a bare seed and not a fixed preset (#245/#256): the config's
+/// modifiers and loadout go into the token, so a baked replay boots the run the sim
+/// played rather than one that drifted underneath it. Recording is a transparent
+/// decorator, so the captured run is byte-identical to an unwrapped one; feeding the
+/// returned inputs back on the same config lands on the same record. This is the sim
+/// half of the replay loop the web viewer (#197) plays back.
 pub fn capture_one<P: PlayerPolicy>(
     seed: u64,
     policy: P,
     input_cap: u32,
 ) -> Result<(RunRecord, Replay), GenError> {
-    capture_one_with(&LevelConfig::V1, seed, policy, input_cap)
+    capture_one_with(&RunConfig::sim(), seed, policy, input_cap)
 }
 
-/// Capture a run under an explicit [`LevelConfig`] — [`capture_one`] with the recipe
-/// as a knob (§13.2). The baked replay still carries the sim [`LevelSeed`] (#245);
-/// note the guard-count sweep lives in the recipe, not the shareable token, so a
-/// replay captured off a swept config only reproduces under the same `--guards` (the
-/// web viewer plays the v1 recipe).
+/// Capture a run under an explicit [`RunConfig`] — [`capture_one`] with what the run
+/// boots from as an input (§13.2/#256).
+///
+/// The baked replay carries that config, with one honest gap: the **facility recipe**
+/// is not part of the shareable token, so a replay captured off a swept `--guards`
+/// only reproduces under the same `--guards` (the web viewer plays the v1 recipe).
 pub fn capture_one_with<P: PlayerPolicy>(
-    config: &LevelConfig,
+    config: &RunConfig,
     seed: u64,
     policy: P,
     input_cap: u32,
@@ -204,7 +205,7 @@ pub fn capture_one_with<P: PlayerPolicy>(
     let mut recording = Recording::new(policy);
     let record = run_one_with(config, seed, &mut recording, input_cap)?;
     let replay = Replay {
-        level: LevelSeed::sim(seed),
+        level: config.level(seed),
         inputs: recording.into_inputs(),
     };
     Ok((record, replay))
@@ -219,14 +220,19 @@ pub fn run_batch<P: PlayerPolicy>(
     input_cap: u32,
     policy_for: impl FnMut(u64) -> P,
 ) -> Result<Vec<RunRecord>, (u64, GenError)> {
-    run_batch_with(&LevelConfig::V1, seeds, input_cap, policy_for)
+    run_batch_with(&RunConfig::sim(), seeds, input_cap, policy_for)
 }
 
-/// Run a batch on a facility carved from `config` — [`run_batch`] with the recipe as
-/// a knob (§13.2), the entry point the guard-count sweep drives. [`run_batch`] is
-/// this called with [`LevelConfig::V1`].
+/// Run a batch under `config` — [`run_batch`] with what every run boots from as an
+/// input (§13.2/#256), the entry point a modifier, loadout or guard-count sweep
+/// drives. [`run_batch`] is this called with [`RunConfig::sim`].
+///
+/// The config is fixed across the batch and the **seed** is what varies, which is
+/// what makes a batch's rows comparable: generation is seed-derived and independent
+/// of modifiers and loadout, so two configs over the same seeds raid the same
+/// facilities (the property a paired A/B rests on, #257).
 pub fn run_batch_with<P: PlayerPolicy>(
-    config: &LevelConfig,
+    config: &RunConfig,
     seeds: impl IntoIterator<Item = u64>,
     input_cap: u32,
     mut policy_for: impl FnMut(u64) -> P,
@@ -243,7 +249,90 @@ pub fn run_batch_with<P: PlayerPolicy>(
 mod tests {
     use super::*;
     use crate::policy::Scripted;
-    use intrusion_core::{AbilityId, Direction, Input};
+    use crate::StealthBot;
+    use intrusion_core::{AbilityId, Direction, Input, IntelGate};
+
+    /// **The default config changes nothing** (#256): a batch given no config is the
+    /// batch the sim ran before the config was an input at all.
+    ///
+    /// Pinned as a literal row captured from the previous build rather than compared
+    /// against a freshly computed one, because the failure this guards against is
+    /// precisely a default that quietly moved — a self-comparison would agree with
+    /// itself all the way to a changed baseline.
+    #[test]
+    fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"baseline\",\"outcome\":\"win\",\
+            \"turns\":111,\"detections\":0,\"takedowns\":0,\"bodies_found\":0,\
+            \"usage\":{\"wait\":0,\"run\":0,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\
+            \"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\
+            \"lockdown\":0},\"alert_peak\":null}";
+        let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
+        assert_eq!(record.to_json_line(), PINNED);
+        // …and the explicit default is the same run, not merely a similar one.
+        let explicit = run_one_with(&RunConfig::default(), 42, &mut StealthBot::new(), 400)
+            .expect("generates");
+        assert_eq!(explicit, record);
+    }
+
+    /// The config **reaches the run**: a batch that grants tech plays a game holding
+    /// it, and one that bends a modifier plays a game bent by it. Asserted through
+    /// the booted state rather than through a metric, so it holds whatever the bot
+    /// decides to do with them (#256 is the plumbing; #347 is the deciding).
+    #[test]
+    fn the_config_reaches_the_booted_run() {
+        let config = RunConfig::sim()
+            .with_tech("camouflage,decoy")
+            .expect("known abilities")
+            .with_intel_gate(IntelGate::All)
+            .with_modifier("full-layout-known")
+            .expect("a known modifier");
+        let state = intrusion_core::start_level_with(&config.facility, &config.level(7))
+            .expect("generates");
+        assert!(state.loadout().contains(AbilityId::Camouflage));
+        assert!(state.loadout().contains(AbilityId::Decoy));
+        assert_eq!(state.modifiers().intel_to_exit, IntelGate::All);
+        assert!(state.modifiers().full_layout_known);
+        // The facility a seed carves is independent of the config it is played under
+        // — the property a paired A/B (#257) rests on.
+        let sim = RunConfig::sim();
+        let bare =
+            intrusion_core::start_level_with(&sim.facility, &sim.level(7)).expect("generates");
+        assert_eq!(
+            terrain_of(&state),
+            terrain_of(&bare),
+            "the config moved the carve"
+        );
+        assert_eq!(state.player(), bare.player());
+    }
+
+    /// Every cell's terrain, as the fingerprint of a carved facility — `Facility` is
+    /// storage rather than a value type, so a comparison is spelled out here.
+    fn terrain_of(state: &intrusion_core::State) -> Vec<Option<intrusion_core::Terrain>> {
+        let facility = state.layout().facility();
+        (0..facility.height())
+            .flat_map(|y| (0..facility.width()).map(move |x| (x, y)))
+            .map(|(x, y)| facility.terrain_at(x, y))
+            .collect()
+    }
+
+    /// A captured replay carries the config it was **played under** (#245/#256), not
+    /// the sim preset: the token decodes back to the very loadout and modifiers the
+    /// run held, so a non-default batch's replay reproduces rather than approximates.
+    #[test]
+    fn a_captured_replay_carries_the_config_it_played() {
+        let config = RunConfig::sim()
+            .with_tech("camouflage")
+            .expect("a known ability")
+            .with_intel_gate(IntelGate::All);
+        let (_, replay) = capture_one_with(&config, 42, StealthBot::new(), 200).expect("generates");
+        assert_eq!(replay.level, config.level(42));
+        let token = replay.level.encode().expect("a holdable config");
+        assert_eq!(
+            intrusion_core::LevelSeed::decode(&token),
+            Some(config.level(42)),
+            "the baked token names the captured run",
+        );
+    }
 
     /// The acceptance criterion verbatim (§12.4): the same `(seed, policy)`
     /// twice produces byte-identical metric rows.

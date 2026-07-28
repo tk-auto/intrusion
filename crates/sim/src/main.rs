@@ -8,13 +8,17 @@
 
 use std::process::ExitCode;
 
-use intrusion_core::{parse_script, Input, LevelConfig};
+use intrusion_core::{parse_script, Input, LevelSeed};
 use intrusion_sim::{
-    capture_one_with, run_batch_with, Profile, Scripted, StealthBot, Summary, DEFAULT_INPUT_CAP,
+    ability_names, capture_one_with, intel_gate_named, intel_gate_names, modifier_names,
+    run_batch_with, Profile, RunConfig, Scripted, StealthBot, Summary, DEFAULT_INPUT_CAP,
 };
 
 const USAGE: &str = "\
-Usage: sim [--runs N] [--seed S] [--cap N] [--guards N] [--bot [--profile NAME] | --script MOVES] [--emit-replay]
+Usage: sim [--runs N] [--seed S] [--cap N] [--config TOKEN] [--guards N]
+           [--intel-gate none|one|all] [--modifier NAME]...
+           [--abilities LIST] [--without LIST]
+           [--bot [--profile NAME] | --script MOVES] [--emit-replay]
 
 Run N seeded games headlessly and print JSON lines: one row per run, then a
 summary row (schema: crates/sim/README.md).
@@ -23,8 +27,19 @@ summary row (schema: crates/sim/README.md).
   --seed S       the first seed                               (default 0)
   --cap N        inputs issued per run before it is ruled a
                  timeout                                      (default 1000)
+  --config TOKEN a level-seed token (§12.4/#245): the batch
+                 runs that token's modifiers and loadout, and
+                 its seed is the first seed unless --seed says
+                 otherwise                                    (default: the sim preset)
   --guards N     guards to place per facility — the §10.2
                  recipe knob the balance sweep drives         (default 4)
+  --intel-gate G how much intel the exit asks for (§4.5):
+                 none, one or all                             (default: one)
+  --modifier N   switch a level modifier on (#225); repeatable
+                 and comma-separated. --help lists them        (default: none)
+  --abilities L  the tech every run holds (§8.3), comma-
+                 separated; the innate set is always held      (default: none — bare)
+  --without L    tech to drop from the loadout                 (default: none)
   --bot          play each run with the baseline stealth bot
                  instead of a script (design §13.2)           (default: off)
   --profile NAME the bot's playstyle temperament (§13.2):
@@ -49,9 +64,19 @@ diversity becomes visible — a seed solvable both cautiously and aggressively i
 healthy; one where both collapse onto the same line is a puzzle with one answer.
 Every emitted row names the profile that produced it.
 
+The config flags are what a batch is *measuring* (#256): the default is the sim
+preset — the baseline rules and a bare, innate-only loadout, so a win rate says
+the core stealth loop is winnable with no tech — and every flag above states a
+departure from it. They compose in a fixed order whatever order they are written
+in: --config, --guards, --intel-gate, --modifier, --abilities, --without. A batch
+running one flag against none of it is the toggle experiment (#257), and
+generation is seed-derived, so both arms raid the same facilities.
+
 --emit-replay captures the chosen policy's issued inputs for the single seed S
 and prints the `(seed, inputs)` replay: with --bot, the exact run the bot
-played, ready to hand to the web viewer or bake into an Artifact (#197).";
+played, ready to hand to the web viewer or bake into an Artifact (#197). Its
+token carries the config the run was played under, so a non-default batch's
+replay reproduces rather than approximates.";
 
 /// Which player drives the batch.
 #[derive(Debug)]
@@ -62,25 +87,102 @@ enum Policy {
     Bot(Profile),
 }
 
+/// The whole usage text: the fixed prose above plus the vocabularies, which a
+/// `const` cannot interpolate. Read off the catalog rather than hand-listed, so a
+/// new modifier or a newly shipped ability is spellable *and* documented the day it
+/// lands — the failure mode `the_usage_text_names_every_vocabulary` exists to catch,
+/// fixed at the source rather than pinned by a test.
+fn usage() -> String {
+    format!(
+        "{USAGE}\n\n\
+         --intel-gate values: {}\n\
+         --modifier names:    {}\n\
+         --abilities names:   {}",
+        intel_gate_names(),
+        modifier_names(),
+        ability_names(),
+    )
+}
+
 /// The parsed flags, defaults filled in.
 #[derive(Debug)]
 struct Args {
     runs: u64,
     seed: u64,
     cap: u32,
-    /// The facility recipe the batch carves from (§10.2) — v1 with the guard count
-    /// overridden by `--guards`, so the sweep varies guards and holds the rest.
-    config: LevelConfig,
+    /// What every run of the batch boots from (§13.2/#256): the §10.2 recipe, the
+    /// modifiers bending the run, and the loadout it holds.
+    config: RunConfig,
     policy: Policy,
     /// Emit the single-seed captured replay (§12.4) instead of the metrics batch.
     emit_replay: bool,
 }
 
+/// The config flags, held as written and applied afterwards in a fixed order.
+///
+/// Order matters — `--abilities` states the whole tech set, so it must not be able to
+/// undo a `--without` written before it — and argv order is the wrong thing to take
+/// it from: two command lines that name the same flags should describe the same
+/// batch. So the flags are collected here and [`resolve`](ConfigFlags::resolve)
+/// applies them in the order the usage text promises.
+#[derive(Debug, Default)]
+struct ConfigFlags {
+    /// A level-seed token to take the modifiers and loadout from (#245).
+    preset: Option<LevelSeed>,
+    guards: Option<usize>,
+    intel_gate: Option<String>,
+    /// Every `--modifier` written, in order — repeatable and comma-separated.
+    modifiers: Vec<String>,
+    abilities: Option<String>,
+    without: Option<String>,
+}
+
+impl ConfigFlags {
+    /// The [`RunConfig`] these flags describe, applied to the sim preset in the fixed
+    /// order the usage text promises.
+    fn resolve(&self) -> Result<RunConfig, String> {
+        let mut config = RunConfig::sim();
+        if let Some(preset) = self.preset {
+            config = config.with_preset(preset);
+        }
+        if let Some(guards) = self.guards {
+            config = config.with_guards(guards);
+        }
+        if let Some(name) = &self.intel_gate {
+            let gate = intel_gate_named(name).ok_or_else(|| {
+                format!(
+                    "--intel-gate: unknown gate {name}; known gates: {}",
+                    intel_gate_names(),
+                )
+            })?;
+            config = config.with_intel_gate(gate);
+        }
+        for list in &self.modifiers {
+            for name in list.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                config = config
+                    .with_modifier(name)
+                    .map_err(|error| format!("--modifier: {error}"))?;
+            }
+        }
+        if let Some(list) = &self.abilities {
+            config = config
+                .with_tech(list)
+                .map_err(|error| format!("--abilities: {error}"))?;
+        }
+        if let Some(list) = &self.without {
+            config = config
+                .without_tech(list)
+                .map_err(|error| format!("--without: {error}"))?;
+        }
+        Ok(config)
+    }
+}
+
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut runs = 100;
-    let mut seed = 0;
+    let mut seed: Option<u64> = None;
     let mut cap = DEFAULT_INPUT_CAP;
-    let mut guards = LevelConfig::V1.guards;
+    let mut flags = ConfigFlags::default();
     let mut script: Option<Vec<Input>> = None;
     let mut bot = false;
     let mut profile: Option<String> = None;
@@ -94,38 +196,54 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         };
         match flag.as_str() {
             "--runs" => runs = parse_number(&value()?, flag)?,
-            "--seed" => seed = parse_number(&value()?, flag)?,
+            "--seed" => seed = Some(parse_number(&value()?, flag)?),
             "--cap" => cap = parse_number::<u32>(&value()?, flag)?,
-            "--guards" => guards = parse_number::<usize>(&value()?, flag)?,
+            "--config" => flags.preset = Some(parse_token(&value()?)?),
+            "--guards" => flags.guards = Some(parse_number::<usize>(&value()?, flag)?),
+            "--intel-gate" => flags.intel_gate = Some(value()?),
+            "--modifier" => flags.modifiers.push(value()?),
+            "--abilities" => flags.abilities = Some(value()?),
+            "--without" => flags.without = Some(value()?),
             "--script" => script = Some(parse_script(&value()?)?),
             "--bot" => bot = true,
             "--profile" => profile = Some(value()?),
             "--emit-replay" => emit_replay = true,
-            "--help" | "-h" => return Err(USAGE.to_string()),
-            other => return Err(format!("unknown flag {other}\n\n{USAGE}")),
+            "--help" | "-h" => return Err(usage()),
+            other => return Err(format!("unknown flag {other}\n\n{}", usage())),
         }
     }
     let policy = match (bot, script) {
-        (true, Some(_)) => return Err(format!("--bot and --script are exclusive\n\n{USAGE}")),
+        (true, Some(_)) => return Err(format!("--bot and --script are exclusive\n\n{}", usage())),
         (true, None) => Policy::Bot(resolve_profile(profile.as_deref())?),
         (false, _) if profile.is_some() => {
             // A profile is the *bot's* temperament; silently ignoring it under a
             // script would emit rows attributed to a profile that never played.
-            return Err(format!("--profile needs --bot\n\n{USAGE}"));
+            return Err(format!("--profile needs --bot\n\n{}", usage()));
         }
         (false, script) => Policy::Scripted(script.unwrap_or_default()),
     };
     Ok(Args {
         runs,
-        seed,
+        // A token names a *run*, seed included, so it stands in as the first seed —
+        // which is what makes `--config <token> --runs 1` replay the run it names.
+        // An explicit `--seed` still wins: the token is then the preset alone.
+        seed: seed.or(flags.preset.map(|preset| preset.seed)).unwrap_or(0),
         cap,
-        config: LevelConfig {
-            guards,
-            ..LevelConfig::V1
-        },
+        config: flags.resolve()?,
         policy,
         emit_replay,
     })
+}
+
+/// Decode a `--config` level-seed token (#245/#333), or refuse it.
+///
+/// A malformed token is a **hard error**, never a silent fall to the default preset:
+/// a batch whose rows claim a config it never ran is the §13.2 attribution failure,
+/// and it is exactly what the web surface's graceful fall to a fresh run (#110) must
+/// *not* be copied into here.
+fn parse_token(token: &str) -> Result<LevelSeed, String> {
+    LevelSeed::decode(token)
+        .ok_or_else(|| format!("--config: not a level-seed token: {token}\n\n{}", usage()))
 }
 
 fn parse_number<T: std::str::FromStr>(text: &str, flag: &str) -> Result<T, String> {
@@ -226,6 +344,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use intrusion_core::{AbilityId, IntelGate, LevelModifiers, Loadout};
 
     fn args(argv: &[&str]) -> Result<Args, String> {
         parse_args(&argv.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
@@ -262,17 +381,131 @@ mod tests {
         assert!(error.contains("baseline, cautious, aggressive"), "{error}");
     }
 
-    /// The usage text spells the vocabulary out by hand (it is a `const`, so it
-    /// cannot interpolate), which is exactly how a new profile ships undocumented.
-    /// This is the tie that makes that a failing test rather than a silence.
+    /// The usage text spells the profile vocabulary out by hand (the `const` cannot
+    /// interpolate), which is exactly how a new profile ships undocumented. This is
+    /// the tie that makes that a failing test rather than a silence.
+    ///
+    /// The config vocabularies are not pinned that way: [`usage`] reads them off the
+    /// catalog, so this asserts the *mechanism* rather than a list — a new modifier
+    /// or a newly shipped ability documents itself.
     #[test]
-    fn the_usage_text_names_every_shipped_profile() {
+    fn the_usage_text_names_every_vocabulary() {
+        let help = usage();
         for name in Profile::ALL.map(|p| p.name) {
             assert!(
-                USAGE.contains(name),
+                help.contains(name),
                 "--help does not mention the {name} profile",
             );
         }
+        for name in [modifier_names(), ability_names(), intel_gate_names()] {
+            assert!(help.contains(&name), "--help does not list {name}");
+        }
+        // Read off the catalog, so this holds for a row that ships tomorrow.
+        assert!(
+            help.contains("lockdown"),
+            "a shipped ability is unspellable"
+        );
+    }
+
+    /// The config flags reach the batch (#256): each states a departure from the sim
+    /// preset, and a command line with none of them is that preset unchanged.
+    #[test]
+    fn the_config_flags_describe_the_batch() {
+        assert_eq!(
+            args(&["--bot"]).expect("a bare batch").config,
+            RunConfig::sim(),
+            "no config flags is the sim preset",
+        );
+        let parsed = args(&[
+            "--intel-gate",
+            "all",
+            "--modifier",
+            "full-layout-known,always-show-vision-cones",
+            "--abilities",
+            "camouflage,decoy",
+            "--without",
+            "decoy",
+            "--guards",
+            "7",
+        ])
+        .expect("known values");
+        assert_eq!(parsed.config.modifiers.intel_to_exit, IntelGate::All);
+        assert!(parsed.config.modifiers.full_layout_known);
+        assert!(parsed.config.modifiers.always_show_vision_cones);
+        assert!(parsed.config.abilities.contains(AbilityId::Camouflage));
+        assert!(!parsed.config.abilities.contains(AbilityId::Decoy));
+        assert!(parsed.config.abilities.contains(AbilityId::Run), "innate");
+        assert_eq!(parsed.config.facility.guards, 7);
+    }
+
+    /// The flags compose in a **fixed order**, not argv order: two command lines that
+    /// name the same flags describe the same batch, so `--without` cannot be undone
+    /// by an `--abilities` that happened to be typed after it.
+    #[test]
+    fn the_config_flags_compose_in_a_fixed_order() {
+        let written_one_way = args(&["--abilities", "camouflage,decoy", "--without", "decoy"]);
+        let written_the_other = args(&["--without", "decoy", "--abilities", "camouflage,decoy"]);
+        assert_eq!(
+            written_one_way.expect("known values").config,
+            written_the_other.expect("known values").config,
+        );
+    }
+
+    /// `--config` is a whole run (#245): its modifiers and loadout are the batch's,
+    /// and its seed stands in as the first seed — so `--config TOKEN --runs 1`
+    /// replays the run the token names. An explicit `--seed` still wins.
+    #[test]
+    fn a_config_token_carries_the_preset_and_the_first_seed() {
+        let named = LevelSeed {
+            seed: 8371,
+            modifiers: LevelModifiers {
+                intel_to_exit: IntelGate::All,
+                ..LevelModifiers::default()
+            },
+            abilities: Loadout::innate().with(AbilityId::Vision),
+        };
+        let token = named.encode().expect("a holdable config");
+        let parsed = args(&["--config", &token]).expect("its own token");
+        assert_eq!(parsed.seed, 8371, "the token names the first seed");
+        assert_eq!(parsed.config.level(8371), named, "…and the whole run");
+
+        let overridden = args(&["--config", &token, "--seed", "5"]).expect("its own token");
+        assert_eq!(overridden.seed, 5, "an explicit --seed wins");
+        assert_eq!(overridden.config, parsed.config, "the preset is unchanged");
+    }
+
+    /// A malformed `--config` token is a **hard error** with the usage, never a
+    /// silent fall to the default preset: rows attributed to a config that never ran
+    /// are worse than a batch that did not start (§12.4/§13.2). The web surface's
+    /// graceful fall to a fresh run (#110) is deliberately not copied here.
+    #[test]
+    fn a_malformed_config_token_is_a_hard_error() {
+        // A bare decimal seed (#333), a wrong length, a non-alphabetic character, and
+        // nothing at all — the four shapes a mistyped token arrives in.
+        for bad in ["8371", "prbjdokbxcqgjnrnc", "prbjdokbxcqgjnrnc9", ""] {
+            let error = args(&["--config", bad]).expect_err("not a token");
+            assert!(error.contains("not a level-seed token"), "{bad}: {error}");
+            assert!(error.contains("Usage:"), "{bad}: no usage text");
+        }
+    }
+
+    /// Every config flag refuses an unknown value **with its vocabulary**, and the
+    /// §8.3 cap is refused at the flag rather than run.
+    #[test]
+    fn an_unknown_config_value_is_refused_with_its_vocabulary() {
+        let error = args(&["--intel-gate", "some"]).expect_err("no such gate");
+        assert!(error.contains("none, one, all"), "{error}");
+        let error = args(&["--modifier", "deafen-the-guards"]).expect_err("no such modifier");
+        assert!(error.contains("--modifier"), "{error}");
+        assert!(error.contains("full-layout-known"), "{error}");
+        let error = args(&["--abilities", "smoke-grenade"]).expect_err("no such ability");
+        assert!(error.contains("--abilities"), "{error}");
+        assert!(error.contains("camouflage"), "{error}");
+        let error = args(&["--abilities", "camouflage,decoy,vision,dephase"])
+            .expect_err("over the §8.3 cap");
+        assert!(error.contains("at most 3"), "{error}");
+        let error = args(&["--without", "run"]).expect_err("Run is innate");
+        assert!(error.contains("innate"), "{error}");
     }
 
     /// A profile is the *bot's* temperament: pairing it with a script (or with no
