@@ -318,11 +318,21 @@ impl Game {
     }
 
     /// Map a viewport point `(client_x, client_y)` to the **screen cell** under it at
-    /// the current fit, or `None` for a point off the canvas (a letterbox tap). The
-    /// screen is `map + TOP_ROWS + BOTTOM_ROWS` rows fitted to the canvas, so a
-    /// linear scale from the canvas rect gives the `(col, row)` the core drew — the
-    /// one place the shell turns pixels into a grid coordinate, shared by every
-    /// pointer hit-test so they can never disagree.
+    /// the current fit, or `None` for a point the pointer rule owns nowhere (a
+    /// letterbox tap). The screen is `map + TOP_ROWS + BOTTOM_ROWS` rows fitted to the
+    /// canvas, so a linear scale from the canvas rect gives the `(col, row)` the core
+    /// drew — the one place the shell turns pixels into a grid coordinate, shared by
+    /// every pointer hit-test so they can never disagree.
+    ///
+    /// It answers **one row past the frame's bottom edge** as well (§11.6/#386): a
+    /// point in that strip, horizontally inside the canvas, reports row
+    /// [`screen_height`](Self::screen_height) — the row [`tap_route`](crate::tap) reads
+    /// as the ability bar's lower slack. A thumb aimed at the flush-right bar (§11.4)
+    /// that lands a hair low is off the canvas entirely, and off-canvas is silence;
+    /// that a fingertip is wider than a cell is a fact about touch, so the allowance
+    /// lives here beside [`SWIPE_THRESHOLD_PX`] rather than in the core's exact
+    /// hit-test. Bounded to one row and to the canvas's horizontal extent, so the
+    /// letterbox margins stay as inert as they were.
     pub(crate) fn screen_cell(&self, client_x: f64, client_y: f64) -> Option<(u32, u32)> {
         let rect = self.canvas.get_bounding_client_rect();
         let (rw, rh) = (rect.width(), rect.height());
@@ -330,14 +340,17 @@ impl Game {
             return None;
         }
         let (lx, ly) = (client_x - rect.left(), client_y - rect.top());
-        if lx < 0.0 || ly < 0.0 || lx >= rw || ly >= rh {
+        if lx < 0.0 || ly < 0.0 || lx >= rw {
             return None; // outside the canvas (a letterbox tap)
         }
         let cols = self.state.layout().facility().width();
         let rows = self.screen_height();
         let col = (lx / rw * cols as f64).floor() as u32;
-        let row = (ly / rh * rows as f64).floor() as u32;
-        Some((col, row))
+        if ly < rh {
+            return Some((col, (ly / rh * rows as f64).floor() as u32));
+        }
+        // Below the frame: one row's height of slack, and no more.
+        (ly < rh + rh / rows as f64).then_some((col, rows))
     }
 
     /// The screen's height in rows: the map plus the §11.4 status lines above it and
