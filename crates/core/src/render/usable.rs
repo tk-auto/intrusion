@@ -275,12 +275,7 @@ pub(super) fn usable_row(
         return status_row(width, 1, width, &packed, None);
     };
 
-    let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: None,
-        vis: Visibility::Live,
-    };
+    let blank = GlyphCell::blank();
     let mut cells = vec![blank; width as usize];
     for (start, entries) in starts.iter().zip(&groups) {
         if !entries.is_empty() {

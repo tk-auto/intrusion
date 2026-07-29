@@ -1901,10 +1901,23 @@ is the case this serves.
   two — then reclaiming the blank cell that had sat beyond the control, which was
   band rather than air and separated it from nothing but the edge of the screen —
   took the budget from 28 glyphs to 32. Three messages that had been clipping since
-  before the bound existed now fit, with no wording changed. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
-  standing state lives on the help panel's Level info tab, and the tint is what
-  says there is something new to read behind the control (see
+  before the bound existed now fit, with no wording changed. The `[?]` wears **one
+  static colour** — the System tan every HUD control wears — at every alert rung. It
+  was tinted by the rung (§7.3) for as long as the near line could only state a step
+  on the turn it happened; now that the row itself carries the standing alert, in
+  words and in the colour of its band, a tinted button was a second and quieter
+  statement of what the row already said (see
   [`docs/render-reference.md`](render-reference.md) §4.5).
+
+  **An ambient band paints the dim background shade; a message band paints the live
+  one.** The row's colour then distinguishes *the facility's standing mood* — a quiet
+  permanent tint — from *something that just happened*, which flashes and is gone on
+  the next action (§11.7). It is also what lets the row carry the alert condition
+  without spending the §11.5 danger overlay's own fill on a standing fact: that shade
+  means **a threat has you right now**, and a permanent row wearing it would dilute
+  the one place it is true. A HUD row has no fog to derive the choice from and says
+  outright which shade it wants — reaching for the map's "explored" knowledge state
+  to get the dim one for free would pick the right colour by telling a lie.
 
   > **The row is laid out once, and the message's width comes *from* it.**
   > **[SETTLED]** Both controls, both hit-tests and the words' span are read off a

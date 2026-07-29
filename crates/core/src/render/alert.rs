@@ -5,20 +5,25 @@
 //! escalation on the turn it happens and is then overwritten by anything louder
 //! (§11.7), so a player who blinked never learned the facility had changed its mind
 //! about them. An escalation the player cannot perceive is inert in a second way
-//! (§2.2), so the ladder needs two things — a place to go and *read* the standing
-//! state, and a glance-level tell that says when to go and read it. This module owns
-//! both halves' presentation:
+//! (§2.2), so the ladder needs a place the standing state can be *read* and a colour
+//! that says which rung it is. This module owns both:
 //!
-//! - [`rung_category`] — the tell. The `[?]` help toggle on the near line is tinted by
-//!   rung, so the control the player already knows changes colour when there is
-//!   something new behind it (see [`hud`](super::hud)).
+//! - [`rung_category`] — the rung as a colour, on the §11.2 threat ladder the player
+//!   already reads off a guard's glyph.
 //! - [`draw_alert`] — the surface. The **ALERT** section of the help panel's Level info
 //!   tab, beside the seed and the modifiers: what is bending the rules right now
 //!   (see [`help`](super::help)).
 //!
-//! They live together because they are one claim made twice. A tint that said *danger*
-//! over a panel that said *rung 1* would be worse than no tint at all, so the mapping
-//! is written once and both halves read it.
+//! They live together because they are one claim made twice, and the mapping is written
+//! once so no two surfaces can disagree — a colour saying *danger* over a line saying
+//! *condition 1* would be worse than no colour at all.
+//!
+//! **The tell was the `[?]` toggle, and is not any more** (#375, reverted by #420). The
+//! button was tinted by rung for as long as the near line could only state a step on the
+//! turn it happened; the row now carries the standing alert itself, so the tint had
+//! become a second, quieter statement of what the row directly beneath it already said.
+//! The colour still has readers — the panel's condition line, and the near line's own
+//! band — and the button is furniture again.
 //!
 //! **Everything drawn here is derived** (§11.3): the rows come from
 //! [`AlertReadout`](crate::AlertReadout), which the ladder generates from its own table
@@ -63,7 +68,7 @@ pub(super) fn condition_line(rung: u32) -> String {
 ///
 /// | Rung | Category | Why |
 /// |---|---|---|
-/// | 0 | System | Not a threat statement at all. The `[?]` is furniture — the tan every HUD control already wears — so an unnoticed raid changes nothing about the screen |
+/// | 0 | System | Not a threat statement at all — the furniture tan, so an unnoticed raid claims nothing |
 /// | 1 | Caution | *A threat that is unaware.* The facility knows somebody is in it and does not know where |
 /// | 2 | Warning | *A threat that is hunting.* Three sightings, or it knows what you came for |
 /// | 3 | Danger | *A threat that has you.* The top of the ladder, and the same red a guard with eyes on you wears |
@@ -71,8 +76,9 @@ pub(super) fn condition_line(rung: u32) -> String {
 /// The yellow → orange → red run is the one the player already reads off a guard's
 /// glyph (§11.2), which is exactly why it is reused: the facility's mind escalates in
 /// the same colours one guard's does, so there is nothing new to learn. It is also the
-/// ladder the palette's tests separate by luminance as well as hue, so the tint
-/// survives a red-green deficiency (see `docs/render-reference.md` §4.5).
+/// ladder the palette's tests separate by luminance as well as hue — at background
+/// strength since #419, which is what lets a *band* in these colours be read as a rung
+/// rather than as a dark warm shade (see `docs/render-reference.md` §4.5).
 ///
 /// Total over the rungs rather than a table lookup: a rung 4 would have to say what it
 /// means here before it could be drawn.
@@ -101,8 +107,8 @@ pub(super) fn rung_category(rung: u32) -> Category {
 /// noticed you would teach the ladder exists at the exact moment that knowledge stopped
 /// being useful — and a row that vanishes reads as a bug rather than as a fact.
 ///
-/// The condition line is tinted by [`rung_category`], the same colour the `[?]` toggle
-/// wears on the board, so the tell and the thing it points at agree. Effect rows are
+/// The condition line is tinted by [`rung_category`], so the panel and every other
+/// surface that shows the rung agree about its colour. Effect rows are
 /// drawn in Warning, the standing *this is a rule bent against you* cue the harder
 /// modifiers already use — every one of them is retaliation, so none needs its own shade.
 pub(super) fn draw_alert(grid: &mut Grid, mut y: u32, readout: &AlertReadout, indent: u32) -> u32 {
@@ -151,20 +157,19 @@ mod tests {
             .to_string()
     }
 
-    /// #375/§11.2: the tint is the **standing threat ladder** and nothing new. Rung 0
-    /// leaves the control the furniture colour it has always been; 1–3 climb
-    /// yellow → orange → red, the same run a guard's glyph walks, so the player has no
-    /// second vocabulary to learn.
+    /// #375/§11.2: the rung's colour is the **standing threat ladder** and nothing new.
+    /// Rung 0 is the furniture colour; 1–3 climb yellow → orange → red, the same run a
+    /// guard's glyph walks, so the player has no second vocabulary to learn.
     #[test]
-    fn the_rung_tint_is_the_standing_threat_ladder() {
+    fn the_rung_colour_is_the_standing_threat_ladder() {
         assert_eq!(rung_category(0), Category::System, "no alert, no claim");
         assert_eq!(rung_category(1), Category::Caution);
         assert_eq!(rung_category(2), Category::Warning);
         assert_eq!(rung_category(TOP_RUNG), Category::Danger);
 
         // Every rung the ladder can reach has a category, and no two adjacent rungs
-        // share one — a tint that did not change on a step would tell the player
-        // nothing, which is the whole point of the tell (§2.2).
+        // share one — a colour that did not change on a step would tell the player
+        // nothing about the step (§2.2).
         for rung in 1..=TOP_RUNG {
             assert_ne!(
                 rung_category(rung),

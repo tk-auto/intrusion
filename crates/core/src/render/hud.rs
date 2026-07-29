@@ -358,6 +358,17 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // or the ambient floor when nothing is live — plus the right-aligned help
     // toggle and, when the log has more to show, its deploy control beside it.
     let top = near_line(state);
+    // **An ambient band paints the quiet fill; a message band paints the full one**
+    // (§11.4/§11.5, #420). The row's colour then separates the facility's standing mood
+    // — a permanent tint the eye stops reading as news — from something that just
+    // happened, which flashes. It also keeps a standing Danger row from spending the
+    // §11.5 overlay's own fill: that shade means *a threat has you right now*, and a
+    // permanent row wearing it dilutes the one place it is true.
+    let band_fill = if top.is_ambient() {
+        Fill::Quiet
+    } else {
+        Fill::Full
+    };
     // One layout for both controls: where each goes, and the span of row that leaves
     // the message. The budget comes *from* the layout, so a row can never run under a
     // control that is up (§11.4).
@@ -367,22 +378,26 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         controls.text_start,
         controls.text_max,
         &[(top.text, Category::Neutral)],
-        Some(top.category),
+        Some((top.category, band_fill)),
     );
     if let Some((label, start)) = &controls.log {
-        super::message_log::draw_message_button(&mut near, width, *start, top.category, label);
+        super::message_log::draw_message_button(
+            &mut near,
+            width,
+            *start,
+            top.category,
+            band_fill,
+            label,
+        );
     }
-    // The help toggle, tinted by the facility alert rung (§7.3/#375): the ladder's
-    // glance-level tell. The panel behind this button is where the standing alert state
-    // is written, so the button is the thing that has to say there is something new to
-    // read — the near line said it once, on the turn it happened, and was overwritten by
-    // the next louder message (§11.7).
+    // The help toggle, in the one static System colour every other HUD control wears
+    // (#420). It is drawn last so it owns column 0 whatever the row said.
     draw_help_button(
         &mut near,
         width,
         controls.help_start,
         top.category,
-        super::alert::rung_category(state.alert()),
+        band_fill,
     );
 
     // One grid, top to bottom: the two status lines, the map, the ability bar.
@@ -468,12 +483,7 @@ fn ability_line_layout(width: u32, statuses: &[AbilityStatus]) -> Vec<(usize, u3
 /// The letter still *works* there (it resolves like any other, and refuses for free in
 /// the economy, §4.4); it simply does not shout.
 fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
-    let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: None,
-        vis: Visibility::Live,
-    };
+    let blank = GlyphCell::blank();
     let mut cells = vec![blank; width as usize];
 
     let put = |cells: &mut [GlyphCell], at: u32, text: &str, category: Category| {
@@ -560,28 +570,30 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
 }
 
 /// Draw the help toggle over the already-built near line `row` (§14 v2/#139/#267):
-/// [`HELP_BUTTON`] right-aligned in `tint`, over the message's own category `band`,
-/// which keeps painting behind it.
+/// [`HELP_BUTTON`] in [`Category::System`] — the HUD-control colour the deploy button
+/// and the panel's `[x]` wear — over the near line's own `band`, which keeps painting
+/// behind it.
 ///
-/// `tint` is the **facility alert rung's** category (§7.3/#375,
-/// [`rung_category`](super::alert::rung_category)) — System, the HUD-control colour the
-/// deploy button and the panel's `[x]` wear, on a facility that has not noticed you, and
-/// the threat ladder's yellow → orange → red above that. It is the ladder's
-/// always-visible half: the panel is where the standing alert state can be *read*, and
-/// this is the control changing colour to say there is something new behind it.
+/// **It used to be tinted by the alert rung** (#375), on the argument that the button is
+/// the ladder's always-visible half: the panel behind it is where the standing alert
+/// state can be read, so the control changed colour to say there was something new
+/// there. That argument transferred wholesale to the near line the moment the row began
+/// saying the condition in words *and* in its band (#420/#421) — and a red `[?]` sitting
+/// on a red band at condition 3 is a second, quieter statement of what the row already
+/// says. The mechanism goes; the job it was doing is done better one row down.
 ///
-/// **The button is the only thing that moves.** Guard presentation is deliberately
-/// untouched by the rung (#311): a never-calm guard still reads as Calm, because its
-/// colour is its own state (§11.2) and not the facility's mood.
-fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32, band: Category, tint: Category) {
+/// The alert stays readable in the help panel's ALERT section throughout (§7.3/#375), so
+/// what went is a redundant channel and not the only one.
+fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32, band: Category, fill: Fill) {
     for (i, glyph) in HELP_BUTTON.chars().enumerate() {
         let x = start + i as u32;
         if x < width {
             row[x as usize] = GlyphCell {
                 glyph,
-                fg: tint,
+                fg: Category::System,
                 bg: Some(band),
-                vis: Visibility::Live,
+                fill,
+                ..GlyphCell::blank()
             };
         }
     }
@@ -663,18 +675,21 @@ fn bar_category(state: AbilityState) -> Category {
 /// background (the §11.4 message band) or none. The row is `width` cells wide either
 /// way — `start` and `limit` bound only the *words*, so the near line's controls (#267)
 /// keep their cells at both ends instead of being written over by a long message.
+///
+/// The band carries its own [`Fill`] (§11.4/#420): a row has no fog to derive one from,
+/// so it says outright which of the category's two shades it wants — the full one for a
+/// message, the quiet one for a standing fact.
 pub(super) fn status_row(
     width: u32,
     start: u32,
     limit: u32,
     segments: &[(String, Category)],
-    band: Option<Category>,
+    band: Option<(Category, Fill)>,
 ) -> Vec<GlyphCell> {
     let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: band,
-        vis: Visibility::Live,
+        bg: band.map(|(category, _)| category),
+        fill: band.map_or(Fill::Full, |(_, fill)| fill),
+        ..GlyphCell::blank()
     };
     let mut cells = vec![blank; width as usize];
     let limit = (limit as usize).min(cells.len());
@@ -915,17 +930,16 @@ mod tests {
         }
     }
 
-    /// #375/§2.2: the `[?]` toggle is **tinted by the facility alert rung** — the
-    /// ladder's always-visible half. The near line states a step on the turn it happens
-    /// and is overwritten by the next louder message (§11.7), so without a standing tell
-    /// a player who blinked would never learn the facility had changed its mind about
-    /// them, and the panel that *does* carry the standing state would never be opened.
+    /// #420, reversing #375: the `[?]` toggle wears **one static colour at every rung**
+    /// — the System tan the deploy control and the panel's `[x]` wear.
     ///
-    /// A quiet facility leaves the control the System tan every HUD control wears: the
-    /// tint is a claim about the raid, so it says nothing until there is something to
-    /// say.
+    /// The tint was the ladder's always-visible half while the near line said the
+    /// condition once and was overwritten. The near line now carries the standing alert
+    /// itself, in words and in its band, so the tint became a second and quieter
+    /// statement of the same fact sitting on top of it — a red `[?]` on a red band at
+    /// the top rung. The job survives; the duplicate does not.
     #[test]
-    fn the_help_toggle_is_tinted_by_the_alert_rung() {
+    fn the_help_toggle_is_one_colour_at_every_rung() {
         let mut layout = open_room(40, 14);
         layout.place(Cell::new(5, 5), Terrain::Hideout);
         let mut s = State::new(
@@ -943,25 +957,114 @@ mod tests {
         let toggle = |s: &State| render_screen(s, ScreenUi::default()).get(0, NEAR_ROW).fg;
 
         assert_eq!(s.alert(), 0, "a fresh raid is unnoticed");
-        assert_eq!(
-            toggle(&s),
-            Category::System,
-            "an unnoticed raid leaves the control furniture-coloured",
-        );
+        assert_eq!(toggle(&s), Category::System);
 
-        // A takedown whose body the second guard's cone covers: rung 3, the top.
+        // A takedown whose body the second guard's cone covers: rung 3, the top — the
+        // one case the old tint shouted loudest about.
         s.step(Input::Step(Direction::North));
         assert_eq!(s.alert(), crate::TOP_RUNG, "the find tops the ladder");
         assert_eq!(
             toggle(&s),
-            Category::Danger,
-            "…and the toggle wears the rung's own colour",
+            Category::System,
+            "the control is furniture at every rung — the row below it carries the alert",
         );
+    }
 
-        // The tint is the *rung's* colour and nothing else — it is read from the one
-        // mapping the panel's rung line reads, so the tell and the surface it points at
-        // can never disagree.
-        assert_eq!(toggle(&s), super::alert::rung_category(s.alert()));
+    /// #420, the rule the near line's band now runs on: **an ambient band paints the
+    /// quiet fill, a message band the full one.** The row's colour separates the
+    /// facility's standing mood — permanently on screen, and so not news — from
+    /// something that has just happened, which flashes.
+    ///
+    /// It matters most where the two shades mean different things: a standing Danger row
+    /// in the *live* fill would spend the §11.5 overlay's own colour, the one that means
+    /// a threat has you **right now**, on a fact that is simply true from here on.
+    #[test]
+    fn an_ambient_band_is_quiet_and_a_message_band_is_not() {
+        let mut s = State::new(
+            open_room(40, 14),
+            Cell::new(5, 6),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(5, 5)],
+            Cell::new(8, 8),
+        );
+        let band = |s: &State| {
+            let cell = render_screen(s, ScreenUi::default()).get(0, NEAR_ROW);
+            (cell.bg, cell.fill)
+        };
+
+        // A quiet turn: the near line rests on the ambient floor (§11.4).
+        s.step(Input::Wait);
+        assert!(near_line(&s).is_ambient(), "the floor, not a message");
+        assert_eq!(band(&s), (Some(Category::Interest), Fill::Quiet));
+
+        // Taking the intel raises a real message: the same row, the full fill.
+        s.step(Input::Step(Direction::North));
+        assert!(!near_line(&s).is_ambient(), "a live message");
+        assert_eq!(band(&s), (Some(Category::Interest), Fill::Full));
+
+        // …and the next action clears it back to the floor, and to the quiet fill with
+        // it — the flash is exactly as long as the message (§11.7).
+        s.step(Input::Step(Direction::South));
+        assert!(near_line(&s).is_ambient());
+        assert_eq!(band(&s).1, Fill::Quiet);
+    }
+
+    /// #420: the band's fill is the row's **whole** width, controls included. The `[?]`
+    /// and the deploy toggle draw over the band rather than beside it, so a control
+    /// painting the other shade would put a bright notch in a quiet row.
+    #[test]
+    fn the_near_lines_controls_share_the_bands_fill() {
+        let mut s = State::new(
+            open_room(40, 14),
+            Cell::new(5, 6),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(5, 5)],
+            Cell::new(8, 8),
+        );
+        s.set_auto_slide(false);
+        for expected in [Fill::Quiet, Fill::Full] {
+            let g = render_screen(&s, ScreenUi::default());
+            for x in 0..g.width() {
+                let cell = g.get(x, NEAR_ROW);
+                assert_eq!(
+                    (cell.bg.is_some(), cell.fill),
+                    (true, expected),
+                    "column {x} of the near line breaks the band",
+                );
+            }
+            s.step(Input::Step(Direction::North)); // take the intel: a live message
+        }
+    }
+
+    /// §11.5/#420: the **map** is untouched. Its fills still follow the fog — full in
+    /// view, quiet beyond it — which is what `Fill::fogged` exists to guarantee, and
+    /// what the danger overlay's in-view/out-of-view pair is built on.
+    #[test]
+    fn the_boards_fills_still_follow_the_fog() {
+        let s = State::new(
+            open_room(20, 12),
+            Cell::new(5, 8),
+            Direction::North,
+            vec![Guard::stationary(Cell::new(5, 4))],
+            Vec::new(),
+            Cell::new(18, 10),
+        );
+        let g = render(&s);
+        let mut watched = 0;
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                let cell = g.get(x, y);
+                assert_eq!(
+                    cell.fill,
+                    Fill::fogged(cell.vis),
+                    "board cell ({x},{y}) paints against its own fog",
+                );
+                watched += u32::from(cell.bg == Some(Category::Danger));
+            }
+        }
+        assert!(watched > 0, "the fixture puts a cone on the board");
     }
 
     /// The §11.4 golden test, whole screen (#267/#287): the near and usable lines on
