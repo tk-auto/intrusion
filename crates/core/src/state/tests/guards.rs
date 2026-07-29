@@ -2310,6 +2310,58 @@ fn the_call_in_is_deterministic() {
     assert_eq!(run(), run(), "same seed + same modifiers + same inputs");
 }
 
+/// §7.7/§7.3 (#409): a colleague's call is the **same code path** as control's
+/// dispatch, so it inherits the same fix — a guard called from across the facility
+/// arrives and searches, instead of spending its lead on the commute and standing
+/// down halfway. Without it a §7.7 call was quietly free whenever the caller was far
+/// enough away, which is the opposite of what "a body out-calls a sighting" is meant
+/// to buy.
+#[test]
+fn a_call_from_across_the_facility_still_arrives() {
+    // A long 2-wide corridor: the walk is unambiguous and far longer than the lead.
+    // The exit sits up by the player's cupboard rather than on the walk — a tunnel
+    // mouth is solid to a guard's route (§10.3), and one across a 1-wide corridor
+    // would seal the far end instead of testing the lead.
+    let mut layout = open_room(4, 40);
+    layout.place(Cell::new(1, 1), Terrain::Hideout);
+    let called_to = Cell::new(1, 38);
+    let mut s = State::new(
+        layout,
+        Cell::new(1, 1), // shut in a cupboard, so no sighting refreshes anything
+        Direction::North,
+        // Facing south at spawn (§7.1), so the whole walk is straight ahead.
+        vec![Guard::patrolling(Cell::new(1, 3)).with_beat(open_beat(4, 40))],
+        Vec::new(),
+        Cell::new(2, 1),
+    );
+    s.set_guard_close_chance(0);
+
+    let journey = Cell::new(1, 3).manhattan_distance(called_to);
+    assert!(
+        journey > crate::guard::ALERT_DURATION,
+        "the fixture must out-walk the lead, or it tests nothing: {journey} steps",
+    );
+    assert!(s.call_guards_to_for_test(called_to, 1), "somebody answered");
+
+    for _ in 0..journey * 2 {
+        if s.guards()[0].state() != GuardState::Responding {
+            break;
+        }
+        s.step(Input::Wait);
+    }
+
+    assert_eq!(
+        s.guards()[0].pos(),
+        called_to,
+        "the answering guard walked the whole way (§7.7)",
+    );
+    assert_eq!(
+        s.guards()[0].state(),
+        GuardState::Alerted,
+        "and opened the §7.6 search the call was for",
+    );
+}
+
 /// §7.7: **"silence it before it reports"**, which the design gets for free. The
 /// call fires when a chase *ends*, so a chaser taken down before that never reports
 /// — there is no report timer to interrupt, just a guard that no longer exists to

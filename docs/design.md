@@ -456,6 +456,8 @@ answer.** A guard that is down does not answer.
 |---|---|
 | Ping interval | **every ~20 turns per guard, jittered** **[START]** |
 | Missed ping → | Control dispatches the nearest active guard to the **takedown location** — the cell the guard fell in — where it **searches** (§7.6) rather than merely standing, **and** the facility alert steps to rung 1 (the ladder below) |
+| "Nearest" means | the shortest **walk**, not the shortest straight line — a guard two rooms down the corridor is nearer than one just the other side of a wall |
+| A responder's lead | bounds the **investigation, not the commute**: it does not run down on a turn the responder is still walking to the cell. However far the call is, the guard **arrives** — §7.6's cold-lead backstop then fires at the site, not on the road (appendix 27) |
 | Second missed ping → | Control gives up on the post and stops calling it. It escalates nothing on its own: a post already known to be quiet tells control nothing new, so the ladder counts **bodies**, not pings |
 
 What the shape buys:
@@ -516,9 +518,10 @@ search, they do not hunt.* More guards converging on a stale cell is **the net
 closing**, which is what §7.6 asks for; more guards tracking the player's live position
 is the un-fun chase §7.6 exists to prevent.
 
-Their lead is sized to the **journey**, not to the ordinary §7.4 duration, because a
-reinforcement starts at the far end by construction. §7.1's cold-lead backstop still
-applies — just at the end of the errand rather than in the middle of it.
+Their lead is the ordinary §7.4 one, and it covers the walk however long it is,
+because **no responder spends its lead travelling** (§7.3 above): a reinforcement
+starting at the far end by construction needs no special case. §7.1's cold-lead
+backstop still applies — just at the end of the errand rather than in the middle of it.
 
 **Guards in every other respect** (§7.4/§11.3): no glyph of their own, no colour of
 their own, **normal speed** (§7.1 **[SETTLED]** — a reinforcement never accelerates),

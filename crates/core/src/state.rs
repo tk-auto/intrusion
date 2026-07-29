@@ -1816,7 +1816,8 @@ impl State {
                 // First miss: send the nearest guard who isn't already on the
                 // player. `respond_to` sets its destination and lead (§7.4), and
                 // the walk ends in a search of the takedown site (§7.6).
-                for g in radio::nearest_respondable(&self.guards, at, 1) {
+                let sent = radio::nearest_respondable(&self.guards, at, 1, self.layout.facility());
+                for g in sent {
                     self.guards[g].respond_to(at);
                 }
                 events.push(Event::RadioSilence { at });

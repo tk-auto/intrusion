@@ -249,10 +249,14 @@ moves.
 closing*, which is what §7.6 asks for; more guards tracking the player's live position is
 the un-fun chase §7.6 exists to prevent.
 
-**Why their lead is sized to the journey.** A radio dispatch picks the *nearest* guard, so
-the ordinary §7.4 duration always covers its walk. A reinforcement starts at the far end by
-construction, and the same constant would strand it halfway across the map having looked at
-nothing.
+**Why their lead is *not* sized to the journey any more.** It was, originally: a
+reinforcement starts at the far end by construction, and the ordinary §7.4 duration would
+strand it halfway across the map having looked at nothing. That was a local patch on a
+general bug — **every** responder was spending its investigation clock on its commute, so a
+radio dispatch far from the patrols quietly cost the player nothing (appendix 27). With the
+lead frozen while a responder is walking, the ordinary constant covers any distance and the
+special case is gone; a walk-in and a dispatch from next door now behave identically,
+which is what §7.3 claimed all along.
 
 **Why a silenced radio does not stop them.** The comms console's effects are the enumerated
 ones, and the ladder's rungs are not among them: silencing the net buys you the *internal*
@@ -968,3 +972,76 @@ guard cooperation (§7.7) and the radio net (§7.3) add pressure the bot current
 
 The same per-guard slope is the lever appendix 9 points at when the §7.5 partition proves too harsh,
 and the units the appendix 5 reinforcement cost is measured in.
+
+---
+
+## Appendix 27 — The lead bounds the investigation, not the commute
+
+*(§7.3/§7.6/§7.7.)*
+
+A missed ping dispatches a guard to the takedown site, where it searches. That is the
+appointment §7.3 sells: *"three takedowns is three clocks running at once"*, and the
+strategy scales badly on its own. It did not, quite. The dispatched guard went
+`Responding` with the ordinary §7.4 lead of 30, and the lead cooled by one on **every**
+turn — travel turns included — so on a 40×40 board a site more than 30 steps away
+(routinely, once doors and detours are counted) saw the responder stand down on the
+road and drift back into patrol having looked at nothing.
+
+The consequence inverted the mechanic: **the further from the patrols you struck, the
+less the radio cost you.** It also made the game lie. §7.3 sells the tell as legible —
+"a dot that visibly peels off toward the place you struck" — and a dot that peels off,
+wanders halfway and turns yellow again teaches a rule that is not the rule.
+
+**Measured before believing.** Over 480 bot runs (four §13.2 profiles × 120 seeds,
+the sim preset), **12 of 64 finished errands — 19% — expired on the road**; on
+`cautious` it was half of them. The distance sample says why: of the dispatches whose
+site could be attributed, the median responder was 13 cells away *in a straight line*,
+and a fifth were beyond 30 — and the straight line is a floor on the walk, never an
+estimate of it. After the fix the same sweep expires **none**.
+
+**The rule.** *A responder does not burn its lead while it is still on its way.* It is
+scoped to `Responding` and to a turn on which the guard actually has a route to walk.
+
+- **Why only `Responding`.** A call carries a **fixed cell that never updates** — the
+  dispatch drops the responder's stale sighting — so a responder cannot follow the
+  player, and freezing its clock cannot rebuild the tracking turret. A *chase's*
+  destination follows you, and there the cooling lead **is** §7.6's anti-turret
+  backstop; it is untouched, and pinned by its own test.
+- **Why "has a route", not "is responding".** A guard held up by a colleague (§7.8) or
+  sent somewhere it cannot reach still cools and still stands down. Nothing paces
+  forever; only the distance penalty goes.
+- **Why not simply raise `ALERT_DURATION`.** A bigger constant still couples the
+  investigation's length to the commute — it only moves the distance at which the bug
+  bites — and it lengthens every chase as a side effect. The two clocks wanted
+  separating, not scaling.
+
+**The second cause, found while auditing.** "The nearest active guard" was picked by
+**Manhattan distance**, so the dispatch could go to the guard on the far side of a wall
+with a sixty-step way round while one two rooms down the corridor stayed on patrol.
+Over 8,312 (site, roster) cases across 200 generated levels the two orders name a
+different guard **25% of the time**, and in *every* one of those the straight-line pick
+was the longer walk — **1.36× the route length** on average. Not rare, then: a quarter
+of all dispatches were handed to a guard that would take a third longer to arrive. One
+flood from the site prices every guard's true journey in a single pass, which is cheap
+enough on a 40×40 board to run per call. A guard with no route at all sorts behind
+every guard that has one, and is still sent when nobody else is free — §7.7's rule is
+that whoever is free answers, and control cannot know the way is severed.
+
+**What it retired.** Reinforcements (appendix 6) had their own lead "sized to the
+journey" for exactly this reason. That was a local patch on a general bug; with the
+general rule in place a walk-in from the far edge and a dispatch from next door behave
+identically, on one constant, and the special case is gone.
+
+**What it deliberately did not touch.** The decoy's `Investigating` pull (§8.3) is also
+a fixed cell, and so looks like the same shape — but the *bounded* pull is the decoy's
+balance, not an accident. The §15 Q5 witness flush chases a cupboard with a fresh lead;
+its sightline is bounded by the cone's own reach, so it is usually fine, but a long way
+round through doors could still expire it. If that shows up in play it belongs in this
+family and wants its own ticket rather than a quiet extra hunk here.
+
+**The expected knock-on.** Responders that used to evaporate now arrive and search, so
+bodies are found more often and the ladder is climbed harder. That is §7.3 working —
+takedowns are *supposed* to scale badly — but it is a live balance change, and
+`ALERT_DURATION`, `SEARCH_DURATION` and the ping interval are all **[START]** numbers
+that may want to move once the sim has the new picture. Retuning them in the same
+change would have been indistinguishable from the fix.

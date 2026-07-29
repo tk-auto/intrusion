@@ -87,28 +87,6 @@ pub(crate) const RUNG_TWO_REINFORCEMENTS: usize = 1;
 /// **rung 3 is the top** — that ceiling is what keeps a loud run from spiralling.
 pub(crate) const RUNG_THREE_REINFORCEMENTS: usize = 2;
 
-/// How much longer than the straight line a walk across the facility is allowed to be
-/// when sizing a reinforcement's lead (**[START] = 2**).
-///
-/// The lead has to outlast the journey (see
-/// [`Guard::respond_across`](crate::Guard::respond_across)), and the journey is a route
-/// around walls and doors rather than a straight line, so the Manhattan distance is a
-/// floor rather than an estimate. Doubling it is the allowance; it is deliberately
-/// generous, because the cost of overshooting is a guard that searches slightly longer
-/// than it needed to, while the cost of undershooting is the errand quietly evaporating
-/// — a reinforcement that walks halfway and forgets why (§2.3's inert system, in
-/// miniature).
-const ROUTE_ALLOWANCE: u32 = 2;
-
-/// The lead a reinforcement arriving at `from` needs to reach `to` and search it
-/// (§7.3/§7.6/#374) — never shorter than the ordinary
-/// [`ALERT_DURATION`](crate::guard::ALERT_DURATION), so a short errand behaves exactly
-/// like any other dispatch.
-fn errand_lead(from: Cell, to: Cell) -> u32 {
-    let journey = from.manhattan_distance(to) * ROUTE_ALLOWANCE;
-    crate::guard::ALERT_DURATION.max(journey + crate::guard::SEARCH_DURATION)
-}
-
 /// How many guards `rung` sends in on its own under `tuning` (§7.3). Rung 1 sends
 /// none — being noticed costs you the calm patrol dwell and nothing else — and there
 /// is no rung 4.
@@ -160,10 +138,13 @@ impl State {
             // the wrong moment.
             let mut guard = Guard::patrolling(cell).with_radio_clock(clock);
             // The errand: walk to the trigger cell and search it (§7.6), exactly as a
-            // dispatch does. It searches — it does not hunt (§7.6's trap) — and its
-            // lead is sized to the trip, or §7.1's cold-lead backstop would strand it
-            // halfway across the map having looked at nothing.
-            guard.respond_across(errand, errand_lead(cell, errand));
+            // dispatch does — the same call, the same ordinary lead. A newcomer starts
+            // at the far edge of the facility by construction, and it no longer needs a
+            // lead sized to that trip (#374's `respond_across`, retired with #409):
+            // a responder does not burn its lead while it is still on its way, so
+            // §7.1's cold-lead backstop fires at the far end of the errand rather than
+            // halfway along it, for a walk-in exactly as for a dispatch next door.
+            guard.respond_to(errand);
             self.guards.push(guard);
             events.push(Event::ReinforcementArrived { at: cell });
         }
