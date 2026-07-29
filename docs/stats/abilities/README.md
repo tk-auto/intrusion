@@ -63,7 +63,7 @@ which is the weaker claim and is labelled as such there:
 
 ```
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities camouflage,decoy,confusion --runs 100 --seed 0 --cap 1000
-cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities autodoors,dephase,pierce-wall --runs 100 --seed 0 --cap 1000
+cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities autodoors,phase-out,pierce-wall --runs 100 --seed 0 --cap 1000
 ```
 
 At `7d5dc01+cues-347-remeasured`, over both seed blocks and all four temperaments:

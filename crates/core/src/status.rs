@@ -1056,7 +1056,7 @@ mod tests {
             assert_eq!(spoken(Some(left)), None, "the bar already says {left}");
         }
         let unbudgeted = spoken(None).expect("an ordinary activation still speaks");
-        assert_eq!(unbudgeted.text, "Dephase active");
+        assert_eq!(unbudgeted.text, "Phase Out active");
         assert_eq!(unbudgeted.category, Category::Owned, "your own tool");
         assert_eq!(unbudgeted.priority, 0, "quiet self-narration, like a bump");
     }

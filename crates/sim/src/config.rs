@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn a_loadout_over_the_cap_is_refused() {
         let error = RunConfig::sim()
-            .with_tech("camouflage,decoy,vision,dephase")
+            .with_tech("camouflage,decoy,vision,phase-out")
             .expect_err("four tech is over the cap of three");
         assert!(error.contains("at most 3"), "{error}");
         // The cap itself is fine, and encodes — which is what `--emit-replay` needs.
