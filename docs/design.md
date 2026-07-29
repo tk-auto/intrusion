@@ -2329,6 +2329,25 @@ system — it is derived from adjacency every frame and carries no state.
 
 - Messages carry a **category**, a **priority**, and optionally a **source cell**.
 - The near line shows only the **highest-priority** live message.
+- **One event, one message — which may carry a subordinate line under it** (#418).
+  An event whose headline cannot hold its *why* adds a second message that wears the
+  headline's category and priority and is **spliced back directly underneath it after
+  the ordering is done**, so it never sorts on its own. That coupling is the point:
+  the turn an alert climbs is exactly a turn with other loud events, and a
+  free-floating reason would be pulled away from its headline — below it by anything
+  at an intermediate priority, or above it by the later-first tie-break. Nothing the
+  turn does can come between a fact and its reason. The **near line never shows the
+  subordinate line**: that row is one row and speaks the headline alone; the reason
+  is what the player finds on deploying the log, live or remembered — which is where
+  they go to ask *what just happened*. The alert raise is the first event to use the
+  shape, and any later event with a *why* reuses it.
+  - **Why the facility climbed** (§7.3), one line per trigger, exhaustive so a
+    seventh trigger cannot ship unnamed: a confirmed sighting → *"you were seen"*; a
+    missed ping → *"a post stopped answering"*; repeat sightings → *"seen three times
+    now"*; a console tampered with → *"they know the intel was touched"*; a body found
+    → *"a guard found a body"*; a second post silent → *"a second post stopped
+    answering"*. §11.8 applies to them as to any player-facing string: they name the
+    world, never the mechanism.
 - **Messages clear on the player's next action** — a status line, not a
   scrollback — falling back to the ambient status of §11.4, never to an empty
   row. **[SETTLED]** for the **near line**: one row, one live message, wiped by
