@@ -246,12 +246,26 @@ the spares are claimed by naming them. The hex above is the **dark** theme's; §
 covers the light one, which uses the same rows for the same categories and different
 values for all of them.
 
-Constraints the tests enforce, so a recolour cannot quietly break them:
+Constraints the tests enforce, so a recolour cannot quietly break them. The first two
+are asserted **at background strength as well as foreground** (#419) — they used to be
+claims about the `fg` column alone, which is how a threat ladder of three near-blacks
+shipped without anything objecting:
 
 - **Every pair is visibly distinct** at a minimum RGB distance. The old palette had
-  a tan that blurred into Caution's yellow; that specific regression is pinned.
+  a tan that blurred into Caution's yellow; that specific regression is pinned. The
+  background half measures what the screen actually paints, so an out-of-view `Sensed`
+  fill (full strength, never fogged) is compared against an out-of-view `Danger` fill
+  (dimmed) — the pair a player really has side by side.
 - **The threat ladder is separated by luminance as well as hue**, so
-  yellow → orange → red survives a red-green deficiency.
+  yellow → orange → red survives a red-green deficiency — and so does the band of a
+  near line carrying the alert condition, which is what the fills are for.
+- **A cell you can see and a cell beyond it are tellable apart**, for every category
+  that paints a fill — the general form of §11.5's *watched must never look safe*,
+  which had only ever been checked for the danger overlay. `Sensed` and `Effect` are
+  outside it: they have no second shade by design (§5).
+- **The near line's words read over every band.** The row is a solid category band
+  with its text in Neutral (§11.4), so how far the backgrounds may be lifted off the
+  page is bounded by the ink that has to stay legible on them.
 - **Ground recedes beneath every other category**, and its live and dim shades stay
   far enough apart that the sight boundary reads across open floor.
 - **The memory slate stands apart from every live colour** and from the dim gray —
@@ -271,8 +285,24 @@ moment you round the corner, is the seen/sensed distinction made visible.
 ### 4.3 Full range
 
 Each row carries four values: a full-strength foreground, the **dim** shade the same
-glyph draws in outside your field of view, and two darkened **background** variants
-— one for a cell you can see, one for a cell beyond it.
+glyph draws in outside your field of view, and two **background** variants — one for a
+cell you can see, one for a cell beyond it. Both recede *toward the page* (§4.4), which
+is a darkening on the dark theme and a lightening on the light one.
+
+They are **placed by luminance, and they sit well off the page** (#419). Each rung of
+the threat ladder is a real step below the last, in the same direction the foregrounds
+take, so a fill reads as *which* rung rather than as "a dark warm colour". Where two
+hues would otherwise compress together at background strength — tan against orange,
+cyan against blue, either against the neutral gray — the shade carries more saturation
+than a straight scaling of its foreground would give it, because a dark colour needs
+more of it to read as a hue at all.
+
+The values they replaced are worth naming, since they are the failure the ticket was
+filed for: the dark theme's beyond-view ladder was `#302e0d` / `#2e2000` / `#521717` on
+a black page — three near-blacks separated almost entirely by hue, at the luminance
+where hue discrimination is worst, with the red *brighter* than the orange so the ladder
+doubled back on itself. The bound on lifting them is the near line's ink: the words are
+Neutral over the band (§4.1), and they have to stay readable.
 
 The palette is deliberately **full-range**: true black and true white are both in it.
 The old game pushed every colour through a gamma curve that compressed everything
@@ -326,7 +356,12 @@ Okabe–Ito's yellow is bright by construction and disappears on white, so Cauti
 becomes a dark gold; Danger trades brightness for depth. The gold/orange/tan cluster
 is the whole difficulty — three warm hues that must stay pairwise distinct while all
 three are dark enough to read on a white page — and it is the reason the light
-Caution keeps as much green as it can while Warning is pushed toward red.
+Caution keeps as much green as it can while Warning is pushed toward red. That cluster
+is the hardest part of §4.3's background re-tone too, and on the pale tier it is
+*four* warm rows rather than three, since System's tan lands among them: they are
+separated there by spacing the rungs out in luminance, with System pulled well clear
+below the ladder rather than by making the tan warmer, which would only have walked it
+into the orange.
 
 **The toggle is `n`** (for *night*), listed on the help panel's controls and offered
 there as an `[n]` footer button for touch. It is the one key the modal help panel

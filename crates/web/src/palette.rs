@@ -11,9 +11,18 @@ use intrusion_core::{Category, Theme, Visibility};
 
 /// One row of the base palette (§11.2): a full-strength **foreground**, the
 /// **dim** shade the same glyph draws in outside the player's FOV (§11.5 — "the
-/// same glyph at low light"), and the **darkened background variants** — `bg` on
+/// same glyph at low light"), and the two **background variants** — `bg` on
 /// a live cell, `bg_dim` beyond the FOV (§11.5 fix #1: watched-but-unseen must
 /// read as watched, never as safe dark-on-dark).
+///
+/// **All four columns carry the §11.2 guarantees, not just `fg`** (#419). The
+/// background pair used to be toned by eye while the tests only ever measured
+/// foregrounds, and it showed: on the dark theme the threat ladder at `bg_dim` was
+/// three near-blacks separated by hue alone, at the luminance where hue
+/// discrimination is worst. Every pair is now asserted visibly distinct at
+/// background strength too, the ladder is separated by luminance there as it is at
+/// full strength, each row's own two variants are tellable apart, and the near
+/// line's Neutral words are asserted legible over every band (§11.4).
 #[derive(Clone, Copy)]
 pub(crate) struct Swatch {
     pub(crate) fg: &'static str,
@@ -100,24 +109,34 @@ const DARK_DIM: &str = "#4a4a4a";
 /// visibly distinct below. Ten rows carry the §11.2 categories today; the
 /// spare rows are ready for the message bar, ability labels, and any category
 /// yet to come — claimed by naming them, like the row constants above.
+///
+/// The **background pair sits well off the page** (#419). Both variants keep their
+/// row's hue and are placed by luminance: each rung of the ladder a real step below
+/// the last, in the same descending direction the foregrounds take, so a band reads
+/// as its rung rather than as "a dark warm colour". Where the dark tier compressed
+/// two hues together — tan against orange, cyan against blue, either against the
+/// neutral gray — the shade carries **more** saturation than a straight scaling of
+/// its foreground would give it, because a dark colour needs more of it to read as a
+/// hue at all. The old values put the whole warm cluster inside `#2e2000`–`#521717`
+/// and they were, correctly, reported as indistinguishable in play.
 const DARK: Palette = Palette {
     rows: [
         sw("#000000", "#000000", "#000000", "#000000"), //  0 true black — the page backdrop
-        sw("#ffffff", DARK_DIM, "#5c5c5c", "#2e2e2e"),  //  1 true white — Neutral
-        sw("#4a4a4a", "#262626", "#1e1e1e", "#121212"), //  2 dark gray — Ground (floor dots)
-        sw("#a8a8a8", DARK_DIM, "#434343", "#222222"),  //  3 light gray — spare (secondary text)
-        sw("#667a8a", DARK_DIM, "#293138", "#14181c"),  //  4 slate — tile memory (§11.5a)
-        sw("#4ea6ff", DARK_DIM, "#1f4266", "#102133"),  //  5 blue — Owned
-        sw("#2456b8", DARK_DIM, "#0e224a", "#071125"),  //  6 deep blue — spare
-        sw("#2ee6d6", "#1f9c92", "#134540", "#0b2926"), //  7 cyan — Effect (dim keeps the tint)
-        sw("#3ecf5a", DARK_DIM, "#195324", "#0c2a12"),  //  8 green — spare
-        sw("#157f33", "#0e3f1a", "#083314", "#04190a"), //  9 deep green — spare (darker than the std dim)
-        sw("#f0e442", DARK_DIM, "#605b1a", "#302e0d"),  // 10 yellow — Caution
-        sw("#e69f00", DARK_DIM, "#5c4000", "#2e2000"),  // 11 orange — Warning / Sensed
-        sw("#ff3333", DARK_DIM, "#8c2020", "#521717"),  // 12 red — Danger
-        sw("#bd6bd6", "#8a4a9e", "#4c2b56", "#26152b"), // 13 purple — Interest (dim keeps the tint)
-        sw("#9a7040", DARK_DIM, "#3e2d1a", "#1f160d"),  // 14 tan — System
-        sw("#ff7ab8", DARK_DIM, "#66314a", "#331825"),  // 15 pink — spare
+        sw("#ffffff", DARK_DIM, "#646464", "#373737"),  //  1 true white — Neutral
+        sw("#4a4a4a", "#262626", "#202020", "#121212"), //  2 dark gray — Ground (floor dots)
+        sw("#a8a8a8", DARK_DIM, "#535353", "#353535"),  //  3 light gray — spare (secondary text)
+        sw("#667a8a", DARK_DIM, "#303941", "#1e2328"),  //  4 slate — tile memory (§11.5a)
+        sw("#4ea6ff", DARK_DIM, "#2a649e", "#194169"),  //  5 blue — Owned
+        sw("#2456b8", DARK_DIM, "#183878", "#0e2248"),  //  6 deep blue — spare
+        sw("#2ee6d6", "#1f9c92", "#087e74", "#005c53"), //  7 cyan — Effect (dim keeps the tint)
+        sw("#3ecf5a", DARK_DIM, "#2b903f", "#1b5927"),  //  8 green — spare
+        sw("#157f33", "#0e3f1a", "#126c2c", "#0b401a"), //  9 deep green — spare (darker than the std dim)
+        sw("#f0e442", DARK_DIM, "#9b932b", "#777121"),  // 10 yellow — Caution
+        sw("#e69f00", DARK_DIM, "#ab7700", "#795400"),  // 11 orange — Warning / Sensed
+        sw("#ff3333", DARK_DIM, "#b32424", "#6b1515"),  // 12 red — Danger
+        sw("#bd6bd6", "#8a4a9e", "#7c468d", "#573163"), // 13 purple — Interest (dim keeps the tint)
+        sw("#9a7040", DARK_DIM, "#714a1d", "#4a2c0b"),  // 14 tan — System
+        sw("#ff7ab8", DARK_DIM, "#7f3d5c", "#502639"),  // 15 pink — spare
     ],
 };
 
@@ -142,27 +161,30 @@ const LIGHT_DIM: &str = "#b0b0b0";
 ///   *darkened* variants receding toward the page; here they are *lightened* ones,
 ///   receding toward the page just the same. "Darken" was never the rule — "move
 ///   toward the backdrop" was, and the test that pinned the dark-only spelling now
-///   measures distance to [`Palette::page`].
+///   measures distance to [`Palette::page`]. The same holds for the #419 re-tone:
+///   what the dark theme achieved by lifting its backgrounds *off* black, this one
+///   achieves by pulling them *away* from white, and the constraint both satisfy is
+///   the one written in terms of the page.
 /// - **Rows 0 and 1 swap.** The page is white and the ink is black, which is exactly
 ///   why those two rows are named for their role rather than their colour.
 const LIGHT: Palette = Palette {
     rows: [
         sw("#ffffff", "#ffffff", "#ffffff", "#ffffff"), //  0 true white — the page backdrop
-        sw("#000000", LIGHT_DIM, "#b8b8b8", "#dedede"), //  1 true black — Neutral
-        sw("#b8b8b8", "#d8d8d8", "#ebebeb", "#f6f6f6"), //  2 light gray — Ground (floor dots)
-        sw("#8a8a8a", LIGHT_DIM, "#dedede", "#f0f0f0"), //  3 mid gray — spare (secondary text)
-        sw("#3f5f80", LIGHT_DIM, "#c9d2db", "#e6eaee"), //  4 slate — tile memory (§11.5a)
-        sw("#0060c0", LIGHT_DIM, "#b8d2ed", "#deeaf7"), //  5 blue — Owned
-        sw("#082a72", LIGHT_DIM, "#bac3d8", "#dfe3ed"), //  6 deep blue — spare
-        sw("#00857c", "#8fcfc9", "#a8e6e0", "#cdf1ee"), //  7 cyan — Effect (dim keeps the tint)
-        sw("#1a8f38", LIGHT_DIM, "#bfe0c7", "#e1f0e5"), //  8 green — spare
-        sw("#0a4a1a", LIGHT_DIM, "#baccbf", "#dfe7e1"), //  9 deep green — spare
-        sw("#b09600", LIGHT_DIM, "#e9e2b8", "#f5f1de"), // 10 gold — Caution
-        sw("#cc4c00", LIGHT_DIM, "#ffcf8a", "#ffe4bf"), // 11 orange — Warning / Sensed
-        sw("#b00000", LIGHT_DIM, "#ef9494", "#fac9c9"), // 12 red — Danger
-        sw("#7b2fa0", "#b070d8", "#dac5e4", "#eee4f3"), // 13 purple — Interest (dim keeps the tint)
-        sw("#6b4320", LIGHT_DIM, "#d6cac1", "#ece7e2"), // 14 tan — System
-        sw("#c02a72", LIGHT_DIM, "#edc3d8", "#f7e3ed"), // 15 pink — spare
+        sw("#000000", LIGHT_DIM, "#858585", "#adadad"), //  1 true black — Neutral
+        sw("#b8b8b8", "#d8d8d8", "#dadada", "#ededed"), //  2 light gray — Ground (floor dots)
+        sw("#8a8a8a", LIGHT_DIM, "#9d9d9d", "#c5c5c5"), //  3 mid gray — spare (secondary text)
+        sw("#3f5f80", LIGHT_DIM, "#a7b6c5", "#cdd5de"), //  4 slate — tile memory (§11.5a)
+        sw("#0060c0", LIGHT_DIM, "#64a3e3", "#8dc0f2"), //  5 blue — Owned
+        sw("#082a72", LIGHT_DIM, "#8a9abc", "#bbc5d8"), //  6 deep blue — spare
+        sw("#00857c", "#8fcfc9", "#73cbc6", "#a2e0dc"), //  7 cyan — Effect (dim keeps the tint)
+        sw("#1a8f38", LIGHT_DIM, "#99cda7", "#c6e3cd"), //  8 green — spare
+        sw("#0a4a1a", LIGHT_DIM, "#9eb7a4", "#c7d6cb"), //  9 deep green — spare
+        sw("#b09600", LIGHT_DIM, "#dbcf8b", "#ebe5bf"), // 10 gold — Caution
+        sw("#cc4c00", LIGHT_DIM, "#eb9966", "#fbbc97"), // 11 orange — Warning / Sensed
+        sw("#b00000", LIGHT_DIM, "#d16c6c", "#df9797"), // 12 red — Danger
+        sw("#7b2fa0", "#b070d8", "#af80c5", "#ceb2dc"), // 13 purple — Interest (dim keeps the tint)
+        sw("#6b4320", LIGHT_DIM, "#9e7e60", "#b1977f"), // 14 tan — System
+        sw("#c02a72", LIGHT_DIM, "#d87aa7", "#e8b2cc"), // 15 pink — spare
     ],
 };
 
@@ -345,6 +367,49 @@ mod tests {
     /// read on area colour even where 70 is the bar for thin glyph strokes.
     const MIN_BG_DIST2: i32 = 40 * 40;
 
+    /// Every category that paints **area colour** — a near-line band (§11.4), the
+    /// §11.5 danger overlay, the §9.2 sensed fill, the §8.3 effect wash.
+    ///
+    /// Two categories are deliberately absent, and both for reasons that would make
+    /// the check meaningless rather than for convenience:
+    ///
+    /// - **`Ground`** is the one category whose job is to *recede* (§11.5). Its fill is
+    ///   the absence of a fill, and demanding it be tellable from Neutral's would be
+    ///   demanding it stop doing that job. It is never a message band.
+    /// - **`Sensed`** shares `Warning`'s row on purpose (§9.2) — it is the same orange,
+    ///   used where Warning never paints — so a distinctness check over the pair would
+    ///   assert against the design.
+    const BG_CATEGORIES: [Category; 8] = [
+        Category::Neutral,
+        Category::Owned,
+        Category::Caution,
+        Category::Warning,
+        Category::Danger,
+        Category::Interest,
+        Category::System,
+        Category::Effect,
+    ];
+
+    /// How far the near line's **words** must stand off the band behind them
+    /// (§11.4/#419), in summed-channel luminance — 100 per channel.
+    ///
+    /// The row is a solid category band with its text in [`Category::Neutral`], so
+    /// every band the palette can produce has to leave that ink readable. This is the
+    /// bound that stops "lift the backgrounds until the ladder reads" from being
+    /// answered by lifting them until the words stop being.
+    const MIN_BAND_CONTRAST: i32 = 300;
+
+    /// The background variant a category paints at each knowledge state, as the board
+    /// actually paints it ([`bg_color`]) — so the `Sensed`/`Effect` full-strength
+    /// exception is honoured here rather than re-derived, and a check can never assert
+    /// something about a shade the screen never shows.
+    fn bg_shades(theme: Theme, c: Category) -> [&'static str; 2] {
+        [
+            bg_color(theme, c, Visibility::Live),
+            bg_color(theme, c, Visibility::Explored),
+        ]
+    }
+
     /// Every category must map to a **visibly distinct** colour, in either theme. The
     /// regression this guards: `System` (doors, hideouts) once sat a tan hair away
     /// from `Caution` (unaware guards), so doors, hideouts and guards all read as one
@@ -382,6 +447,124 @@ mod tests {
                 d >= MIN_DIST2 / 2,
                 "{theme:?}: dimmed and remembered blur (dist^2 {d})"
             );
+        }
+    }
+
+    /// #419: **the same demand at background strength as at foreground.** Every pair of
+    /// area colours the board can put side by side must be tellable apart — in view and
+    /// beyond it alike, in both themes.
+    ///
+    /// The regression this pins is the one reported in play: on the dark theme the
+    /// threat ladder beyond the FOV was `#302e0d` / `#2e2000` / `#521717` on a black
+    /// page — three near-blacks separated almost entirely by hue, at the luminance where
+    /// hue discrimination is worst — and nothing in the suite objected, because every
+    /// distinctness guarantee was asserted on the `fg` column alone.
+    ///
+    /// Measured through [`bg_color`] rather than off the [`Swatch`], so it compares what
+    /// the screen actually paints: an out-of-FOV `Sensed` or `Effect` cell paints its
+    /// full-strength fill beside an out-of-FOV `Danger` cell's dimmed one, and those two
+    /// are exactly the pair a player has to tell apart.
+    #[test]
+    fn background_fills_are_all_visibly_distinct() {
+        for theme in THEMES {
+            for (tier, label) in [(0, "in view"), (1, "beyond it")] {
+                for (i, &a) in BG_CATEGORIES.iter().enumerate() {
+                    for &b in &BG_CATEGORIES[i + 1..] {
+                        let (fill_a, fill_b) =
+                            (bg_shades(theme, a)[tier], bg_shades(theme, b)[tier]);
+                        let d = dist2(rgb(fill_a), rgb(fill_b));
+                        assert!(
+                            d >= MIN_BG_DIST2,
+                            "{theme:?} ({label}): {a:?} {fill_a} and {b:?} {fill_b} are too \
+                             close to tell apart (dist^2 {d} < {MIN_BG_DIST2})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// §11.5 fix #1, generalised (#419): **a cell you can see and a cell beyond it must
+    /// not look the same**, for every category that paints a fill — not only for the
+    /// danger overlay, which was the one pair the suite happened to check.
+    ///
+    /// `Sensed` and `Effect` are excluded because they have no second shade *by design*
+    /// (§9.2/§8.3): both are certain, position-only knowledge and paint at full strength
+    /// in and out of the FOV. Their exemption is asserted where it belongs — in the two
+    /// tests that own it — rather than weakened into a skip here.
+    #[test]
+    fn each_row_separates_the_seen_cell_from_the_one_beyond_it() {
+        for theme in THEMES {
+            for c in BG_CATEGORIES {
+                if matches!(c, Category::Sensed | Category::Effect) {
+                    continue;
+                }
+                let s = swatch(theme, c);
+                let d = dist2(rgb(s.bg), rgb(s.bg_dim));
+                assert!(
+                    d >= MIN_BG_DIST2,
+                    "{theme:?}: {c:?}'s in-view fill {} and beyond-view fill {} blur \
+                     (dist^2 {d} < {MIN_BG_DIST2})",
+                    s.bg,
+                    s.bg_dim,
+                );
+            }
+        }
+    }
+
+    /// The threat ladder is separated by luminance at **background** strength too
+    /// (§11.2/#419) — the same property the foregrounds are held to, asserted where the
+    /// near line's band and the map's fills actually read it.
+    ///
+    /// Like its foreground twin this is a claim about spacing, not direction: on black
+    /// the fills descend (a gold band, a darker orange, a darker red still) and on white
+    /// they descend toward the page too. What is forbidden is a rung that doubles back —
+    /// which is exactly what the old dark table did, its `bg_dim` red sitting *brighter*
+    /// than its orange, so the ladder read as gold, dark, bright rather than as a ladder.
+    #[test]
+    fn the_threat_ladder_holds_at_background_strength() {
+        const MIN_BG_STEP: i32 = 20;
+        for theme in THEMES {
+            for (tier, label) in [(0, "in view"), (1, "beyond it")] {
+                let rungs = [Category::Caution, Category::Warning, Category::Danger]
+                    .map(|c| lum(bg_shades(theme, c)[tier]));
+                let steps = [rungs[1] - rungs[0], rungs[2] - rungs[1]];
+                for (i, step) in steps.iter().enumerate() {
+                    assert!(
+                        step.abs() >= MIN_BG_STEP,
+                        "{theme:?} ({label}): ladder fills {i} and {} sit at the same \
+                         brightness ({rungs:?})",
+                        i + 1,
+                    );
+                }
+                assert!(
+                    steps[0].signum() == steps[1].signum(),
+                    "{theme:?} ({label}): the ladder's fills double back ({rungs:?})",
+                );
+            }
+        }
+    }
+
+    /// §11.4: the near line is a solid category band with its **words in Neutral** over
+    /// it, so every band the palette can produce has to leave that ink readable.
+    ///
+    /// This is the bound that keeps the #419 re-tone honest. "Lift the backgrounds until
+    /// the ladder reads" has an obvious wrong answer — lift them until the words stop
+    /// reading — and without this assertion nothing would have caught it.
+    #[test]
+    fn the_near_lines_words_read_over_every_band() {
+        for theme in THEMES {
+            let ink = swatch(theme, Category::Neutral).fg;
+            for c in BG_CATEGORIES {
+                for (band, label) in bg_shades(theme, c).into_iter().zip(["ambient", "message"]) {
+                    let gap = (lum(ink) - lum(band)).abs();
+                    assert!(
+                        gap >= MIN_BAND_CONTRAST,
+                        "{theme:?}: the near line's words {ink} are unreadable over a \
+                         {label} {c:?} band {band} (gap {gap} < {MIN_BAND_CONTRAST})"
+                    );
+                }
+            }
         }
     }
 
