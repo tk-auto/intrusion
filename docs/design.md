@@ -2620,8 +2620,12 @@ system — it is derived from adjacency every frame and carries no state.
   after the near line has moved on. Bounded twice — a cap on remembered actions and
   a cap on total rows, both **[START]** — and then clamped to the board, because it
   is drawn *over* the map and burying the §11.5 danger overlay is the failure mode.
-  An action that said nothing contributes no block and no rule. Still **no camera
-  and no scrolling** (§11.4): if it feels short, move the bound, not the surface.
+  An action that said nothing contributes no block and no rule. **Now reads louder
+  than then**: the current action's rows draw at full strength and every remembered
+  row — and every rule — draws in its category's *dim* shade (§11.5's fog channel,
+  reused as chrome), so a message keeps its §11.2 meaning and simply recedes. Still
+  **no camera and no scrolling** (§11.4): if it feels short, move the bound, not the
+  surface.
   The corner counter keeps counting **live** extras only — history never inflates
   it — and with nothing extra live it is the bare chevron.
 - Modal messages anchor **near their source cell**, positioned so they never cover

@@ -19,8 +19,13 @@
 //! scrolling (§11.4 **[SETTLED]**). The block is bounded twice over — by
 //! [`HISTORY_ACTIONS`](crate::status::HISTORY_ACTIONS) and by [`MAX_LOG_ROWS`] — and
 //! then clamped to whatever the board can hold, so it either fits or shows what fits
-//! from the top. If it ever
-//! feels too short, the answer is the **[START]** bound, not a scrollbar.
+//! from the top. If it ever feels too short, the answer is the **[START]** bound, not
+//! a scrollbar.
+//!
+//! **Now reads louder than then.** The current action's rows draw at full strength and
+//! every remembered row — and every rule — draws in its category's dim shade ([`PAST`]),
+//! so a glance separates what just happened from what is merely on the record, without
+//! having to count rules.
 
 use super::hud::{help_button_start, ScreenUi, NEAR_ROW};
 use super::*;
@@ -44,17 +49,42 @@ pub const MAX_LOG_ROWS: usize = 10;
 /// It is chrome, not content, and the colour is the whole reason it can be: the
 /// message categories are the §11.2 meaning ladder, and a rule in any of them would
 /// read as a threat flash that happened to be one cell tall. System says *"this is
-/// the frame talking"*, which is exactly what a rule between turns is.
+/// the frame talking"*, which is exactly what a rule between turns is — and it draws
+/// [`PAST`], since everything from it down is.
 const SEPARATOR_GLYPH: char = '─';
 
 /// One row of the deployed block: a message, or the rule that divides two actions.
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum LogRow {
-    /// A message, drawn in its own §11.2 category.
-    Message(Message),
+    /// A message, drawn in its own §11.2 category — at full strength when it is the
+    /// current action's, in that category's **dim** shade when it is a past one's
+    /// ([`PAST`]).
+    Message { message: Message, past: bool },
     /// The chrome rule between one action's block and the older one beneath it.
+    /// Always dim: it *is* the boundary, so it belongs to the quiet half.
     Separator,
 }
+
+impl LogRow {
+    /// A row of the current action.
+    fn live(message: Message) -> Self {
+        Self::Message {
+            message,
+            past: false,
+        }
+    }
+}
+
+/// How a **past** action's rows are drawn (§11.5/#300): the knowledge state whose
+/// palette entry is each category's own dim shade, so a remembered message keeps its
+/// §11.2 meaning and simply recedes — a body find two turns ago is still orange, just
+/// not shouting over the one that landed this turn.
+///
+/// Reusing the map's fog channel for chrome is deliberate. The alternative is a second
+/// dimming mechanism that the theme has to keep in step with the first, and the seam
+/// here is exactly the one [`Visibility`] already names: *how certain and how present
+/// is this*, answered per glyph, resolved to a colour by the shell alone (§11.1).
+const PAST: Visibility = Visibility::Explored;
 
 /// Every row the deployed log would draw, top to bottom (§11.7/#300) — the current
 /// action's messages loudest first, then a [`LogRow::Separator`] and the previous
@@ -83,7 +113,7 @@ fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
         return Vec::new();
     }
 
-    let mut rows: Vec<LogRow> = live.into_iter().map(LogRow::Message).collect();
+    let mut rows: Vec<LogRow> = live.into_iter().map(LogRow::live).collect();
     for block in history.blocks() {
         // A block only earns its rule by having a row to follow it — and a block with
         // no messages was never filed (`MessageHistory::record`), so there is no empty
@@ -92,7 +122,13 @@ fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
         if !rows.is_empty() {
             rows.push(LogRow::Separator);
         }
-        rows.extend(block.iter().cloned().map(LogRow::Message));
+        // Every remembered block is dim, including the first one under a silent
+        // current action — what makes a row quiet is *which turn it is from*, not
+        // whether a rule happens to sit above it.
+        rows.extend(block.iter().cloned().map(|message| LogRow::Message {
+            message,
+            past: true,
+        }));
         if rows.len() >= MAX_LOG_ROWS {
             break;
         }
@@ -231,7 +267,7 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
     let band = (rows
         .iter()
         .map(|row| match row {
-            LogRow::Message(m) => m.text.chars().count(),
+            LogRow::Message { message, .. } => message.text.chars().count(),
             // A rule claims no width of its own — it spans whatever the messages
             // beside it earned, so a block of one short line is not given a rule
             // three times its length.
@@ -258,7 +294,7 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
         match row {
             // A one-cell left margin, matching the near line, so the list lines up
             // under the band it hangs from.
-            LogRow::Message(message) => {
+            LogRow::Message { message, past } => {
                 for (dx, glyph) in message.text.chars().enumerate() {
                     let x = 1 + dx as u32;
                     if x >= band {
@@ -267,6 +303,7 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
                     grid.cells[(y * width + x) as usize] = GlyphCell {
                         glyph,
                         fg: message.category,
+                        vis: if *past { PAST } else { Visibility::Live },
                         ..blank
                     };
                 }
@@ -278,6 +315,7 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
                     grid.cells[(y * width + dx) as usize] = GlyphCell {
                         glyph: SEPARATOR_GLYPH,
                         fg: Category::System,
+                        vis: PAST,
                         ..blank
                     };
                 }
@@ -493,7 +531,8 @@ mod tests {
     /// **The golden block across two turns** (#300): the deployed log lists this
     /// action's messages loudest-first, then a separator rule, then the previous
     /// message-bearing action's block — each message in its own §11.2 category, the
-    /// rule in the System chrome colour, and no rule where a turn said nothing.
+    /// rule in the System chrome colour, past rows dimmed, and no rule where a turn
+    /// said nothing.
     #[test]
     fn the_deployed_log_stacks_past_turns_behind_a_rule() {
         // Action 1: the takedown-with-witness step — three messages.
@@ -535,7 +574,7 @@ mod tests {
         let band = log_rows(&s)
             .iter()
             .filter_map(|r| match r {
-                LogRow::Message(m) => Some(m.text.chars().count()),
+                LogRow::Message { message, .. } => Some(message.text.chars().count()),
                 LogRow::Separator => None,
             })
             .max()
@@ -551,6 +590,11 @@ mod tests {
             Category::System,
             "the rule is chrome, not a message category"
         );
+        assert_eq!(
+            g.get(0, TOP_ROWS + 1).vis,
+            PAST,
+            "and it draws dim — everything from the rule down is past"
+        );
         assert!(row_text(&g, TOP_ROWS + 2).contains("security condition"));
         assert!(row_text(&g, TOP_ROWS + 3).contains("a body has been found"));
         assert!(row_text(&g, TOP_ROWS + 4).contains("the guard drops"));
@@ -561,6 +605,21 @@ mod tests {
             "the alert step"
         );
         assert_eq!(g.get(1, TOP_ROWS + 4).fg, Category::Owned, "the takedown");
+
+        // **Now reads louder than then**: this action's row is at full strength and
+        // every remembered row is dimmed, category intact.
+        assert_eq!(
+            g.get(1, TOP_ROWS).vis,
+            Visibility::Live,
+            "the current action draws at full strength"
+        );
+        for dy in 2..=4 {
+            assert_eq!(
+                g.get(1, TOP_ROWS + dy).vis,
+                PAST,
+                "row {dy} is a past action's, so it recedes"
+            );
+        }
 
         // Exactly one rule, and none trailing: five rows in all.
         assert_eq!(message_log_rows(&s, deployed), 5);
@@ -714,9 +773,11 @@ mod tests {
         let rows = assemble(Vec::new(), &history);
         assert_eq!(
             rows.first(),
-            Some(&LogRow::Message(
-                history.blocks().next().unwrap()[0].clone()
-            ))
+            Some(&LogRow::Message {
+                message: history.blocks().next().unwrap()[0].clone(),
+                past: true,
+            }),
+            "the newest remembered block leads, and is still drawn as past"
         );
 
         // And nothing at all to say is no log — never a bare rule over the board.
