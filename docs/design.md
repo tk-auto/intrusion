@@ -2615,7 +2615,10 @@ danger overlay in full (easier); *"full layout known"* draws the building's real
 architecture where the §11.5a schematic would otherwise stand, so doorways, duct
 mouths and furniture are all on the map from turn one (easier); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
-summon anyone (harder). This is the
+summon anyone (harder); *"calm guards detect only their cone"* drops a **Calm**
+guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
+wedge while a guard that is hunting still watches its sides (easier — an
+**experiment**, see below). This is the
 **mechanism** difficulty and mode rules flow through — the shared seam #210 (alert
 scaling), #244 (quick play), and the v3 catalogue (#232–#236) all plug into
 instead of each inventing its own knobs.
@@ -2647,6 +2650,16 @@ a toggle is active if **any** source requests it; a knob composes *harder-ward*.
 Adding a source is a new field and a line in `resolve`, never a new difficulty
 path — #210 owns the alert→modifier *mapping* and its own fairness (decay, floor,
 §2.2); this seam owns only the merge and the application.
+
+**A modifier is also how an experiment ships.** `calm_guards_detect_only_their_cone`
+(#410) bends a **[SETTLED]** sentence — §6.1/§6.2/§7.2's *"you can never stand
+beside or in front of a guard undetected"* — so it ships as a knob to be measured
+rather than as a rule. Both arms of a paired A/B then run from **one build** on
+identical seeds, which is the only way the comparison is exact; and because
+placement is pinned to the shipped carve, the two arms generate the *same
+facility*, so nothing in a diff is geometry. Adopting an experiment is a
+design-doc edit, not a merge: the sections above move only if the numbers say so.
+Appendix 28 records what this one measured — and why it was not adopted.
 
 **Determinism (§12.4 [SETTLED]).** The resolved set is part of the reproducible
 config: same seed + **same modifiers** + same inputs → identical run. It is plain

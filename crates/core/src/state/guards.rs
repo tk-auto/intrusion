@@ -425,6 +425,7 @@ impl State {
         // any one guard: with the comms console bumped there is no coordination left to
         // divide the building, so every Calm guard wanders the whole of it.
         let style = self.patrol_style();
+        let blind = self.guard_blind_policy();
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
@@ -453,7 +454,8 @@ impl State {
             // zone (§7.6) — an Investigating guard only ever had a glimpse and
             // reports nothing — and `decide` is the one place a chase can run out.
             let was_chasing = self.guards[i].state() == GuardState::Chasing;
-            let step = self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style);
+            let step =
+                self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style, blind);
             if was_chasing {
                 self.call_in_lost_sighting(i, events);
             }
@@ -522,7 +524,7 @@ impl State {
             {
                 let from = self.guards[i].pos();
                 let facility = self.layout.facility();
-                self.guards[i].advance_to(target, dir, facility);
+                self.guards[i].advance_to(target, dir, facility, blind);
                 // A guard arriving on the decoy's cell tramples it (§8.3):
                 // walking into the "intruder" is how the fake is found out.
                 self.stomp_decoy(target, events);

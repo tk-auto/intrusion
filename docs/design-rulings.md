@@ -1045,3 +1045,110 @@ takedowns are *supposed* to scale badly — but it is a live balance change, and
 `ALERT_DURATION`, `SEARCH_DURATION` and the ping interval are all **[START]** numbers
 that may want to move once the sim has the new picture. Retuning them in the same
 change would have been indistinguishable from the fix.
+
+---
+
+## Appendix 28 — The flank experiment, and why it is conditional on the guard's mood
+
+*(§6.1, §6.2, §7.2, §12.6. The knob ships **off**; this is what it measured.)*
+
+§155 carved the three cells at a guard's back out of its detection set, so a takedown
+can be lined up from directly behind. Its *sides* — §6.2 tier 3 — still detect, and
+§6.1/§6.2/§7.2 all say so: *"you can never stand beside or in front of a guard
+undetected."* Two things follow, and #410 asked whether they should:
+
+- **A takedown must come from directly behind or rear-diagonal.** Step to a guard's
+  flank and you are seen, though it is looking the other way.
+- **You cannot tail a guard.** Walk in its blind spot and the moment it turns 90° at a
+  corner you are at its side, tier 3, detected — so the one manoeuvre that should be
+  the reward for reading a patrol is impossible.
+
+**The experiment.** Carve tiers 3-5 instead of 4-5, so a guard detects exactly what its
+cone covers and the free touching ring becomes player-only. A 180° turn still catches
+you: that lands you at tier 1, dead ahead.
+
+**Why it is a knob and not a constant.** It bends a **[SETTLED]** sentence, so it ships
+as `calm_guards_detect_only_their_cone` (§12.6) and both arms run from one build. Two
+properties make the comparison exact, and both are asserted:
+
+- **The cone's silhouette is identical in both arms.** The carved cells stay §6.2
+  artificial cone-carving walls; only their membership in the *detection* set changes.
+  Anything else would change what walls shadow, which is a different experiment.
+- **The two arms generate the same facility.** Spawn safety (`place.rs`) uses the same
+  fov, so a narrower carve would pass more cells and shift where guards spawn. It is
+  pinned to the shipped rear carve instead — the conservative rule, since a cell safe
+  under it is safe under any wider blind spot — so **generation is not part of the
+  diff** and a shifted seed's geometry can never be mistaken for a result.
+
+### The unconditional form, and why it failed
+
+Measured first without any condition: every guard, in every mood, blind at its flanks.
+Paired A/B, 150 seeds x four profiles x two arms.
+
+| | balanced | cautious | aggressive | careless |
+|---|---|---|---|---|
+| win rate | .360 → **.433** | .527 → **.573** | .387 → **.460** | .367 → **.520** |
+| detections | 1352 → 1336 | 1684 → **1260** | 1206 → **959** | 1675 → **1222** |
+| takedowns | 0 → 16 | 0 → 5 | 28 → **80** | 13 → **98** |
+| alert peak | .76 → .94 | .77 → .82 | .99 → 1.17 | 1.08 → **1.45** |
+
+The pre-registered sink was *"the striking profiles' win rate jumping while `detections`
+collapses means the flank is simply cheaper stealth with no new decision"*. Its
+**surface fired** — win rate up 7.3 and 15.3 points, detections down 20% and 27%. Its
+stated *reason* did not: takedowns tripled and septupled and the facility got markedly
+louder, so a new decision *was* being taken and paid for.
+
+What sank it was something the pre-registration had not anticipated: **the win rate rose
+on temperaments that never strike at all.** `cautious` gained 4.7 points on 5 takedowns
+across 150 runs with a 25% fall in detections — almost pure free safety. The
+unconditional form was doing two separable things: opening a genuine new play, and
+quietly making a guard's side a safe place to stand. The second is exactly what §7.2
+means when it says the takedown's constraints *are* the cost.
+
+### The conditional form: blind at the flank **only while Calm**
+
+A guard that is not Calm — chasing, investigating, searching, answering a call —
+watches its sides exactly as it always did. Same seeds, same build:
+
+| | balanced | cautious | aggressive | careless |
+|---|---|---|---|---|
+| win rate | .360 → .380 | .527 → **.567** | .387 → .393 | .367 → **.367** |
+| detections | 1352 → 1372 | 1684 → 1735 | 1206 → 1170 | 1675 → 1297 |
+| takedowns | 0 → **0** | 0 → **0** | 28 → **36** | 13 → **28** |
+| bodies found | 0 → 0 | 0 → 0 | 12 → 9 | 12 → **21** |
+| diversity | .653 → .639 | .436 → .434 | .586 → .584 | .514 → .533 |
+| alert peak | .76 → .77 | .77 → .77 | .99 → .99 | 1.08 → 1.15 |
+| reinforcements | 19 → 21 | 29 → 33 | 54 → **47** | 60 → **82** |
+
+**Both pre-registered criteria are now clean.** No striking profile's win rate jumps —
+`aggressive` +0.7 points, `careless` **exactly flat** — so the first does not fire, on
+its surface or in its reason. Diversity moves −.014 to +.019, so the second does not
+fire either.
+
+**The free safety is gone, and the option is not.** The profiles that never strike are
+back to baseline: `balanced` +2.0 points with **zero** takedowns, and its detections
+actually rise. Meanwhile the striking ones take the new play — `careless` doubles its
+takedowns (13 → 28) and its bodies found (12 → 21), pays for it in reinforcements
+(60 → 82), and **wins exactly as often as before**. That is the shape an option is
+supposed to have: it changes how a run is played without changing how often it is won.
+
+`cautious` keeps +4.0 points, on zero takedowns and *more* detections than baseline.
+That is the reward landing where it was aimed — it is the temperament built to read and
+avoid patrols, and reading a patrol is what the rule pays for.
+
+**Why the condition is the whole design and not a tuning fudge.** It says: a patrol you
+have read is predictable, and a guard that is hunting you is not. The flank becomes
+somewhere to **work from** and never somewhere to **hide**. It needs no new state and no
+new timer — the mood is already on the guard, and the cone is already recomputed every
+sight phase, so a guard's sides come back the turn it stops being calm. Because the
+§11.5 overlay is drawn from the same one cone, a patrol and a searcher standing side by
+side paint differently: the rule is legible on screen rather than remembered.
+
+**Interaction with #430** (a guard cannot act on the turn it first spots you). The two
+compose in the same direction and neither needs the other: #430 makes a first sighting
+cost the guard its turn, and this makes a calm guard's flank not a sighting at all. Both
+say the same thing — a patrol you have read is a patrol you can act against.
+
+**Still a knob, still off.** Adopting it is a design-doc edit to §6.1, §6.2 and §7.2,
+which is a human judgement about *feel* (§13.4) — tailing a guard through a corner is
+not something these metrics can score. The numbers no longer argue against it.

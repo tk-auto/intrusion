@@ -1160,6 +1160,7 @@ mod tests {
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: true,
                 full_layout_known: true,
+                calm_guards_detect_only_their_cone: true,
                 intel_to_exit: gate,
             };
             let g = render_help(

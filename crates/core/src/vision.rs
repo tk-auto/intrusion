@@ -65,10 +65,92 @@ pub const GUARD_SIGHT_RANGE: u32 = 10;
 /// A guard's sight arc (§7.1/§6.2): width 2, the ~90° forward wedge. **[START]**
 pub const GUARD_SIGHT_ARC: u8 = 2;
 
-/// The lowest §6.2 ring tier a guard's **rear blind spot** (§155) removes from
-/// detection: tiers 4 (the two rear diagonals) and 5 (directly behind) — the three
-/// cells at a guard's back. Tier 3 (the sides) and everything forward still detect.
-const REAR_BLIND_TIER: u8 = 4;
+/// How much of a guard's **touching ring** (§6.1) is blind — the lowest §6.2 ring
+/// tier dropped from its detection set, and everything above it with it.
+///
+/// The §6.2 tier ladder, by angular deviation from the guard's facing:
+///
+/// | tier | cells | |
+/// |---|---|---|
+/// | 1 | directly ahead | always detects |
+/// | 2 | the two forward diagonals | always detects |
+/// | 3 | the two **sides** | the experiment's question |
+/// | 4 | the two rear diagonals | blind since §155 |
+/// | 5 | directly behind | blind since §155 |
+///
+/// It is deliberately **not** called "rear" any more (#410): the name has to keep
+/// describing what it carves whichever way the flank experiment goes, and "rear"
+/// stopped being true the moment tier 3 became a candidate.
+///
+/// Whatever it carves, it carves **after the cast has run**, so the cells stay §6.2
+/// artificial cone-carving walls and the ~90° silhouette is untouched — this changes
+/// what a guard *notices*, never what it can see past. The player's ring is not
+/// negotiable either way (§6.1 **[SETTLED]**).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct BlindTier(u8);
+
+impl BlindTier {
+    /// **The shipped rule** (§155, §6.1/§7.2): the three cells at a guard's back —
+    /// the two rear diagonals (tier 4) and directly behind (tier 5). Its *sides*
+    /// still detect, so a takedown must come from directly behind or rear-diagonal,
+    /// and you can never stand beside or in front of a guard undetected.
+    pub const REAR: Self = Self(4);
+
+    /// **The experiment** (#410): tiers 3–5, so a guard detects exactly what its
+    /// ~90° cone covers and the free touching ring becomes player-only. Two things
+    /// follow — a **flank** takedown opens up, and a **tail** survives a corner: walk
+    /// in a guard's blind spot and its 90° turn no longer catches you (a 180° turn
+    /// still does, since that lands you at tier 1, dead ahead).
+    ///
+    /// Never a whole level's rule: it is reached only through
+    /// [`BlindPolicy::FlankWhileCalm`], and so only ever by a guard that is **Calm**.
+    pub const FLANK: Self = Self(3);
+
+    /// Whether a ring neighbour at `tier` is dropped from detection.
+    fn carves(self, tier: u8) -> bool {
+        tier >= self.0
+    }
+}
+
+/// A level's rule for how much of a guard's ring goes blind (§12.6/#410) — the
+/// **policy**, resolved to a [`BlindTier`] per guard by the guard's own
+/// [`GuardState`](crate::GuardState).
+///
+/// It is a policy rather than a tier because the interesting version of the flank
+/// experiment is **conditional on the guard's mood**, and the mood lives on the
+/// guard. Passing the policy down and resolving it there keeps one reading of one
+/// fact: nothing has to remember to ask "is this guard calm?" alongside "which arm is
+/// this level?", and the two can never be answered inconsistently.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BlindPolicy {
+    /// **The shipped rule** (§155): every guard, in every mood, is blind only at
+    /// [`BlindTier::REAR`] — the three cells at its back.
+    #[default]
+    Rear,
+    /// **The experiment** (#410): a **Calm** guard is blind at its flanks too
+    /// ([`BlindTier::FLANK`]) — it detects exactly its ~90° cone — and any guard that
+    /// is *not* Calm falls back to [`BlindTier::REAR`] and watches its sides again.
+    ///
+    /// The point of the condition is that it prices the gift. Reading a patrol is
+    /// rewarded: you can tail a calm guard through a corner and take it from the
+    /// flank. Being *hunted* is not: the moment a guard is chasing, investigating,
+    /// searching or answering a call, its sides are live, so the flank is a place you
+    /// can work from and never a place you can hide in. The unconditional form gave
+    /// avoidance-first play a win-rate rise with no new decision attached, which is
+    /// the un-priced safety §7.2 exists to prevent.
+    FlankWhileCalm,
+}
+
+impl BlindPolicy {
+    /// The tier this policy carves for a guard in `state`.
+    pub(crate) fn tier(self, state: crate::GuardState) -> BlindTier {
+        match self {
+            BlindPolicy::Rear => BlindTier::REAR,
+            BlindPolicy::FlankWhileCalm if state == crate::GuardState::Calm => BlindTier::FLANK,
+            BlindPolicy::FlankWhileCalm => BlindTier::REAR,
+        }
+    }
+}
 
 /// The set of cells a viewer can currently see — one viewer's field of view,
 /// recomputed every sight phase (§4.2) and stored on the viewer.
@@ -321,36 +403,36 @@ pub(crate) fn duct_field_of_view(
     fov
 }
 
-/// A guard's sight for **detection**: the §6 cone with the guard **rear blind
-/// spot** (§155) carved out. The three cells at the guard's back — the two rear
-/// diagonals (tier 4) and directly behind (tier 5) — are dropped from the visible
-/// set, so a player standing directly behind or rear-diagonal to an unaware guard
-/// is undetected and a behind-the-back Takedown (§7.2) becomes possible to line
-/// up.
+/// A guard's sight for **detection**: the §6 cone with `blind` carved out of its
+/// touching ring (§155/#410). At [`BlindTier::REAR`] that is the three cells at the
+/// guard's back, so a player standing directly behind or rear-diagonal to an unaware
+/// guard is undetected and a behind-the-back Takedown (§7.2) can be lined up; at
+/// [`BlindTier::FLANK`] the two side cells go too, and the guard detects exactly its
+/// cone.
 ///
-/// This narrows the **[SETTLED]** 360° touching ring (§6.1) for guards only. The
-/// ring's forward and *side* (tier 3) cells still detect — you can never stand
-/// beside or in front of a guard undetected — and the rear cells **remain the
-/// artificial cone-carving walls** of §6.2: they are removed from the *visible*
-/// set only *after* the cast has run, so every cell beyond the ring is untouched
-/// and the ~90° cone silhouette is exactly [`field_of_view`]'s. The player keeps
-/// the full ring; carving the rear is a property of a guard's attention, not of
+/// This narrows the **[SETTLED]** 360° touching ring (§6.1) for guards only — the
+/// player keeps the full ring, unqualified. The carved cells **remain the artificial
+/// cone-carving walls** of §6.2: they are removed from the *visible* set only *after*
+/// the cast has run, so every cell beyond the ring is untouched and the ~90°
+/// silhouette is exactly [`field_of_view`]'s **whichever tier is carved**. That is
+/// what makes the flank experiment a change to what a guard notices rather than to
+/// what walls shadow. Carving the ring is a property of a guard's attention, not of
 /// sight itself, so it lives here beside the player's one-sided peek rather than
 /// inside the shared cast.
-pub fn field_of_view_with_rear_blind_spot(
+pub fn field_of_view_with_blind_spot(
     facility: &Facility,
     origin: Cell,
     facing: Direction,
     arc_width: u8,
     range: u32,
+    blind: BlindTier,
 ) -> VisibleSet {
     let mut fov = field_of_view(facility, origin, facing, arc_width, range);
-    // The rear three are exactly the ring neighbours of tier 4 (rear diagonals)
-    // and 5 (directly behind). Unmarking them leaves the cast that used them as
-    // walls — and therefore the whole silhouette beyond the ring — intact.
+    // Unmarking ring neighbours leaves the cast that used them as walls — and
+    // therefore the whole silhouette beyond the ring — intact.
     for dy in -1..=1 {
         for dx in -1..=1 {
-            if (dx, dy) != (0, 0) && ring_tier(facing, dx, dy) >= REAR_BLIND_TIER {
+            if (dx, dy) != (0, 0) && blind.carves(ring_tier(facing, dx, dy)) {
                 let (x, y) = (i64::from(origin.x) + dx, i64::from(origin.y) + dy);
                 if let (Ok(x), Ok(y)) = (u32::try_from(x), u32::try_from(y)) {
                     fov.unmark(Cell::new(x, y));
@@ -1497,8 +1579,14 @@ mod tests {
     fn a_guard_is_blind_to_the_three_cells_at_its_back() {
         let f = open(11, 11);
         let origin = Cell::new(5, 5);
-        let fov =
-            field_of_view_with_rear_blind_spot(&f, origin, Direction::North, GUARD_SIGHT_ARC, 4);
+        let fov = field_of_view_with_blind_spot(
+            &f,
+            origin,
+            Direction::North,
+            GUARD_SIGHT_ARC,
+            4,
+            BlindTier::REAR,
+        );
 
         // The rear three go dark: rear diagonals and directly behind.
         for c in [Cell::new(4, 6), Cell::new(5, 6), Cell::new(6, 6)] {
@@ -1522,8 +1610,14 @@ mod tests {
     fn golden_guard_cone_with_the_rear_blind_spot() {
         let f = open(11, 11);
         let origin = Cell::new(5, 5);
-        let fov =
-            field_of_view_with_rear_blind_spot(&f, origin, Direction::North, GUARD_SIGHT_ARC, 4);
+        let fov = field_of_view_with_blind_spot(
+            &f,
+            origin,
+            Direction::North,
+            GUARD_SIGHT_ARC,
+            4,
+            BlindTier::REAR,
+        );
         assert_eq!(
             picture(&f, &fov, origin),
             vec![
@@ -1542,45 +1636,100 @@ mod tests {
         );
     }
 
-    /// §155: the carve touches only the three rear ring cells. Every cell beyond
-    /// the touching ring — the whole ~90° cone silhouette — is exactly what the
-    /// plain cast produces, because the rear cells still act as artificial walls
-    /// during the cast and are only unmarked afterwards. Checked at every facing.
+    /// §155/#410: **the silhouette is the same in both arms.** Whatever tier is
+    /// carved, the carve touches only ring cells — every cell beyond the touching
+    /// ring is exactly what the plain cast produces, because the carved cells still
+    /// act as §6.2 artificial walls *during* the cast and are only unmarked
+    /// afterwards.
+    ///
+    /// This is the acceptance criterion the flank experiment turns on: it must change
+    /// what a guard **notices**, never what walls shadow. Comparing the whole cast's
+    /// shape rather than only the detection set is what makes that a real assertion —
+    /// a carve that reshaped the cone would move cells past the ring, and this would
+    /// catch it. Checked at every facing, for every tier.
     #[test]
-    fn the_rear_blind_spot_leaves_the_cone_silhouette_untouched() {
+    fn a_blind_spot_leaves_the_cone_silhouette_untouched() {
         let f = open(11, 11);
         let origin = Cell::new(5, 5);
-        for facing in Direction::ALL {
-            let plain = field_of_view(&f, origin, facing, GUARD_SIGHT_ARC, 4);
-            let carved = field_of_view_with_rear_blind_spot(&f, origin, facing, GUARD_SIGHT_ARC, 4);
-            // Beyond the ring the two sets agree exactly.
-            for c in plain.cells() {
-                if c.sight_distance(origin) > 1 {
+        // Tier 4 carves the three cells at the back; tier 3 those plus the two sides.
+        for (blind, expected_removed) in [(BlindTier::REAR, 3), (BlindTier::FLANK, 5)] {
+            for facing in Direction::ALL {
+                let plain = field_of_view(&f, origin, facing, GUARD_SIGHT_ARC, 4);
+                let carved =
+                    field_of_view_with_blind_spot(&f, origin, facing, GUARD_SIGHT_ARC, 4, blind);
+                // Beyond the ring the two sets agree exactly — the silhouette is the
+                // plain cast's, in both arms.
+                for c in plain.cells() {
+                    if c.sight_distance(origin) > 1 {
+                        assert!(
+                            carved.contains(c),
+                            "{blind:?} {facing:?} {c:?}: silhouette changed beyond the ring"
+                        );
+                    }
+                }
+                // The whole difference is exactly the carved ring cells.
+                let removed: Vec<Cell> = plain.cells().filter(|&c| !carved.contains(c)).collect();
+                assert_eq!(
+                    removed.len(),
+                    expected_removed,
+                    "{blind:?} {facing:?}: exactly the carved ring cells are removed"
+                );
+                for c in removed {
+                    assert_eq!(
+                        c.sight_distance(origin),
+                        1,
+                        "{blind:?} {facing:?} {c:?}: a removed cell must be a ring cell"
+                    );
+                    let (dx, dy) = (i64::from(c.x) - 5, i64::from(c.y) - 5);
                     assert!(
-                        carved.contains(c),
-                        "{facing:?} {c:?}: silhouette changed beyond the ring"
+                        blind.carves(ring_tier(facing, dx, dy)),
+                        "{blind:?} {facing:?} {c:?}: a removed cell must be one this tier carves"
                     );
                 }
             }
-            // The whole difference is exactly the three rear ring cells.
-            let removed: Vec<Cell> = plain.cells().filter(|&c| !carved.contains(c)).collect();
-            assert_eq!(
-                removed.len(),
-                3,
-                "{facing:?}: exactly the three rear cells are removed"
+        }
+    }
+
+    /// #410: the two arms differ by **exactly the two flank cells** — the ring
+    /// cardinals square-on to the facing (§6.2 tier 3), and nothing else. The
+    /// experiment is one tier wide, so a change that quietly took a forward cell
+    /// with it would be a different experiment.
+    #[test]
+    fn the_flank_arm_removes_exactly_the_two_side_cells() {
+        let f = open(11, 11);
+        let origin = Cell::new(5, 5);
+        for facing in Direction::ALL {
+            let rear = field_of_view_with_blind_spot(
+                &f,
+                origin,
+                facing,
+                GUARD_SIGHT_ARC,
+                4,
+                BlindTier::REAR,
             );
-            for c in removed {
-                assert_eq!(
-                    c.sight_distance(origin),
-                    1,
-                    "{facing:?} {c:?}: a removed cell must be a ring cell"
-                );
+            let flank = field_of_view_with_blind_spot(
+                &f,
+                origin,
+                facing,
+                GUARD_SIGHT_ARC,
+                4,
+                BlindTier::FLANK,
+            );
+            let extra: Vec<Cell> = rear.cells().filter(|&c| !flank.contains(c)).collect();
+            assert_eq!(extra.len(), 2, "{facing:?}: the two flanks, no more");
+            for c in extra {
                 let (dx, dy) = (i64::from(c.x) - 5, i64::from(c.y) - 5);
-                assert!(
-                    ring_tier(facing, dx, dy) >= REAR_BLIND_TIER,
-                    "{facing:?} {c:?}: a removed cell must be a rear cell"
+                assert_eq!(
+                    ring_tier(facing, dx, dy),
+                    3,
+                    "{facing:?} {c:?}: the extra cells are exactly tier 3"
                 );
             }
+            // And the flank arm never *adds* anything the rear arm did not have.
+            assert!(
+                flank.cells().all(|c| rear.contains(c)),
+                "{facing:?}: the narrower arm is a strict subset",
+            );
         }
     }
 

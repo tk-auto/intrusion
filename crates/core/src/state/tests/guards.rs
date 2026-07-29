@@ -509,6 +509,201 @@ fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
     );
 }
 
+/// #410 (§6.1/§7.2): the **flank takedown** the experiment opens up, against a guard
+/// that is **Calm**. The same scene in both arms — a south-facing stationary patrol
+/// with the player walking up to its side, on open floor, no cupboard and no decoy.
+///
+/// Baseline the side cell detects, so the bump is refused and the usable line offers
+/// nothing (§11.4): a takedown must come from directly behind or rear-diagonal. With
+/// `calm_guards_detect_only_their_cone` a calm guard detects exactly its cone, the
+/// flank goes blind, and the takedown lands — widening the approach surface against a
+/// patrol from three cells to five, which is the real loosening of §7.2's price this
+/// experiment is for.
+///
+/// The player **walks in** rather than starting at the flank: the §4.2 startup world
+/// phase runs before a builder can set the arm, so a player placed at the flank would
+/// be detected once under the shipped rule and the guard would never be Calm again.
+#[test]
+fn a_flank_takedown_lands_only_in_the_experimental_arm() {
+    let scene = |experimental: bool| {
+        let mut s = State::new(
+            open_room(10, 10),
+            Cell::new(2, 5), // clear of the guard to start
+            Direction::East,
+            vec![Guard::stationary(Cell::new(5, 5))], // faces south (§7.1), holds
+            Vec::new(),
+            Cell::new(8, 8),
+        )
+        .with_modifiers(LevelModifiers {
+            calm_guards_detect_only_their_cone: experimental,
+            ..LevelModifiers::default()
+        });
+        // Up to the guard's western flank.
+        s.step(Input::Step(Direction::East));
+        s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(4, 5), "at the guard's side");
+        assert!(!s.hidden(), "on open floor, not concealed");
+        s
+    };
+
+    // Control: the flank detects, so there is no takedown to offer.
+    let control = scene(false);
+    assert!(
+        control.guard_detects_now(&control.guards()[0]),
+        "control: standing beside a guard is detected (§6.1/§7.2)",
+    );
+    assert!(
+        !control
+            .affordances()
+            .iter()
+            .any(|(_, a)| *a == Affordance::Takedown),
+        "control: a detecting guard refuses the takedown",
+    );
+
+    // Experiment: the calm guard's flank is blind, so the same bump takes it down.
+    let mut experiment = scene(true);
+    assert_eq!(
+        experiment.guards()[0].state(),
+        GuardState::Calm,
+        "it never noticed, so it is still a patrol",
+    );
+    assert!(
+        !experiment.guard_detects_now(&experiment.guards()[0]),
+        "experiment: a calm guard detects exactly its cone, so its flank is blind",
+    );
+    assert_eq!(
+        experiment.affordances(),
+        vec![(Direction::East, Affordance::Takedown)],
+        "the usable line offers the flank takedown (§11.4)",
+    );
+
+    let events = experiment.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::TakenDown {
+            at: Cell::new(5, 5)
+        }]
+    );
+    assert!(experiment.guards().is_empty(), "the takedown is permanent");
+    assert_eq!(experiment.bodies().len(), 1, "a body is left behind");
+    assert_eq!(
+        experiment.player(),
+        Cell::new(4, 5),
+        "a takedown is a bump, not a move"
+    );
+}
+
+/// #410 + §4.5 **[SETTLED]**: **capture is contact, not detection.** A blind flank
+/// buys a stealth window, never immunity — a guard that walks onto the player still
+/// catches them, whichever arm is playing. This is the reason the experiment is not
+/// as dangerous as it sounds, so it is asserted rather than left to prose.
+///
+/// A 1-wide corridor, the guard facing across it (§7.1's spawn facing) so its ~90°
+/// wedge points at a wall and the corridor itself is outside it. The player walks up
+/// to the guard's side: in the control arm tier 3 detects them there, and in the
+/// experimental arm it does not. Then the guard is called down the corridor — its
+/// route runs straight through the player's cell — and it steps onto them and
+/// captures, **without ever having seen them**. Standing at a moving guard's side is
+/// still a gamble against where it walks next.
+#[test]
+fn contact_still_captures_at_a_blind_flank() {
+    for experimental in [false, true] {
+        let mut s = State::new(
+            open_room(10, 3),
+            Cell::new(3, 1), // well clear of the guard to start
+            Direction::East,
+            vec![Guard::patrolling(Cell::new(7, 1))], // faces south, into the wall
+            Vec::new(),
+            Cell::new(1, 1),
+        )
+        .with_modifiers(LevelModifiers {
+            calm_guards_detect_only_their_cone: experimental,
+            ..LevelModifiers::default()
+        });
+        s.set_guard_close_chance(0);
+        assert_eq!(s.outcome(), Outcome::Playing, "the scene starts clean");
+
+        // Walk up to the guard's flank.
+        for _ in 0..3 {
+            s.step(Input::Step(Direction::East));
+        }
+        assert_eq!(s.player(), Cell::new(6, 1), "at the guard's side");
+        assert_eq!(
+            s.guard_detects_now(&s.guards()[0]),
+            !experimental,
+            "the flank detects in the control arm and is blind in the experimental one",
+        );
+
+        // In the control arm the guard has already seen the player and is coming of
+        // its own accord — it is Chasing, so §7.4 would not dispatch it anyway. In
+        // the experimental arm nothing has drawn it, so call it down the corridor:
+        // its only route runs straight through the cell the player is standing in.
+        if experimental {
+            assert!(
+                s.call_guards_to_for_test(Cell::new(1, 1), 1),
+                "the blind guard was free to answer",
+            );
+            // **The narrowing, seen from the player's side.** Answering the call makes
+            // it Responding, so on its next look its flanks are live again — the
+            // player is standing in a blind spot that has just closed under them.
+            s.step(Input::Wait);
+            assert!(
+                s.guard_detects_now(&s.guards()[0]),
+                "a guard that stops being calm watches its sides again (#410)",
+            );
+        }
+        for _ in 0..16 {
+            if s.outcome() != Outcome::Playing {
+                break;
+            }
+            s.step(Input::Wait);
+        }
+        assert_eq!(
+            s.outcome(),
+            Outcome::Lost,
+            "experimental={experimental}: contact is capture (§4.5), blind flank or not",
+        );
+    }
+}
+
+/// §6.1 **[SETTLED]** + #410: the **player's** touching ring is untouched by the
+/// experiment, and unqualified. §6.1 settles the ring for the player; the guard half
+/// is the revision (§155), which is why widening *it* is an experiment rather than a
+/// violation. Asserted at every facing, in both arms: all eight neighbours are seen,
+/// including the three the guard's own carve would drop.
+#[test]
+fn the_players_touching_ring_survives_both_arms() {
+    for experimental in [false, true] {
+        for facing in Direction::ALL {
+            let s = State::new(
+                open_room(11, 11),
+                Cell::new(5, 5),
+                facing,
+                Vec::new(),
+                Vec::new(),
+                Cell::new(9, 9),
+            )
+            .with_modifiers(LevelModifiers {
+                calm_guards_detect_only_their_cone: experimental,
+                ..LevelModifiers::default()
+            });
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    if (dx, dy) == (0, 0) {
+                        continue;
+                    }
+                    let cell = Cell::new((5 + dx) as u32, (5 + dy) as u32);
+                    assert!(
+                        s.player_fov().contains(cell),
+                        "experimental={experimental} {facing:?} {cell:?}: \
+                         the player's ring is unqualified (§6.1)",
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// §7.2/§6.1 regression: a guard that steps **adjacent to and facing** the player
 /// during its own move phase (phase 3, §4.2) cannot be taken down from the front on
 /// the next turn. The takedown gate must read the guard's *live* cone, not the
