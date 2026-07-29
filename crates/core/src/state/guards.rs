@@ -381,6 +381,11 @@ impl State {
     /// The guard that made the discovery still searches on its own either way — that is
     /// §7.6/§7.2 behaviour, not a call — so a silenced facility is lonelier, never
     /// blind.
+    #[cfg(test)]
+    pub(crate) fn call_guards_to_for_test(&mut self, at: Cell, count: usize) -> bool {
+        self.call_guards_to(at, &[], count)
+    }
+
     fn call_guards_to(&mut self, at: Cell, exclude: &[usize], count: usize) -> bool {
         if self.radio_silenced {
             return false;

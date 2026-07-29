@@ -869,6 +869,27 @@ glued, or gone. Never hunted.**
 | **Hunted** | You are in a hideout / behind a pillar, holding still. Cones sweep. | **The best part** |
 | **Released** | They give up. Alert decays. Patrol resumes — but *this region gets watched harder*. | Earned |
 
+**Watched harder means covered, not crowded.** Every guard that answered one call
+carries the same `focus` — a call carries its own cell and inherits nobody's memory
+(§7.7) — so the raised-coverage territory is the watch disc **intersected with the
+guard's own §7.5 slice**, not substituted for it. Handed the same disc, two responders
+spend the whole window pacing one region and converge into the single moving clump this
+section exists to prevent; measured on a two-guard scene, mean separation over the watch
+runs 4.2 cells on a shared disc against 7.9 on clipped territory, closing to
+shoulder-to-shoulder against three cells apart. Sharing a focus is right; sharing a
+*territory* is the accident. The plain disc is the fallback when the intersection is
+empty — a guard called clear across the facility must still watch something — and on a
+silenced net (§7.3) there is no partition to clip against, which is harmless because
+call-ins do not fire on a dead net and no two guards are sent to one cell anyway.
+
+**It also makes the watch slightly kinder, which was not the aim.** Two responders
+splitting one area into halves cover it *less densely* than two pacing all of it, so
+over 100 seeded bot runs the win rate rises — baseline 0.34 → 0.38, careless 0.30 →
+0.35, cautious 0.55 → 0.53 — clawing back part of what the §7.5 partition cost. The
+goal was legibility rather than difficulty, and the honest reading is that a clump is
+both uglier *and* harder than coverage. If the watch wants its bite back, the knobs are
+`WATCH_RADIUS` and `WATCH_DURATION`, not un-splitting the responders.
+
 The old version had phase 1 and nothing else.
 
 #### The fixes, in order of importance

@@ -20,6 +20,8 @@ use crate::path;
 use crate::radio::RadioClock;
 use crate::rng::Rng;
 use crate::state::ACTOR_FILL;
+use std::collections::HashSet;
+
 use crate::vision::{
     field_of_view_with_rear_blind_spot, VisibleSet, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE,
 };
@@ -636,6 +638,13 @@ impl Guard {
     #[cfg(test)]
     pub(crate) fn destination(&self) -> Option<Cell> {
         self.destination
+    }
+
+    /// Whether this guard is in the §7.6 post-search **watch** — Calm again, but still
+    /// sweeping the area its search was centred on rather than its ordinary beat.
+    #[cfg(test)]
+    pub(crate) fn watching(&self) -> bool {
+        self.watch > 0 && self.focus.is_some()
     }
 
     /// The cell an active search or watch is centred on (§7.6) — where this guard
@@ -1266,11 +1275,40 @@ impl Guard {
         // While a released search still watches the region (§7.6), the sweep draws its
         // territory around the searched area with the tighter [`WATCH_RADIUS`], so
         // coverage there stays raised; otherwise it is the full Calm territory.
+        //
+        // **Clipped to the guard's own beat, not substituted for it.** Every guard that
+        // answered a call to one cell gets the same `focus` (§7.7 — a call carries its
+        // own cell), so handing them all the same disc hands them all the same
+        // territory: two responders spend the whole watch window pacing one region, and
+        // `pick_farthest` being deterministic they frequently pick the same cell and
+        // walk in lockstep. That reads as guards converging into a moving clump, which
+        // is the failure §7.6's standing warning exists to prevent — *harder coverage
+        // of one area* is the goal, and two guards tracing one path across it is not
+        // coverage. Sharing a `focus` is correct; sharing a *territory* is the accident.
+        //
+        // Intersected, two responders watch different halves of the same area. The
+        // plain disc is the fallback when the intersection is empty, because a guard
+        // can always be called clear across the facility and must still watch
+        // *something*.
         if let Some(focus) = self.focus {
             if self.watch > 0 {
-                return path::reachable_within(focus, WATCH_RADIUS, |cell| {
-                    patrollable(facility, cell)
-                });
+                let disc =
+                    path::reachable_within(focus, WATCH_RADIUS, |cell| patrollable(facility, cell));
+                // A dead net has no partition to clip against (§7.3): every guard's
+                // territory is the whole level, so the intersection would be the disc
+                // anyway — and no two guards are sent to one cell in the first place,
+                // since call-ins do not fire on a silenced net.
+                if style == PatrolStyle::Wander {
+                    return disc;
+                }
+                let watched: HashSet<Cell> = disc.iter().copied().collect();
+                let mine: Vec<Cell> = self
+                    .beat
+                    .iter()
+                    .copied()
+                    .filter(|&cell| watched.contains(&cell) && patrollable(facility, cell))
+                    .collect();
+                return if mine.is_empty() { disc } else { mine };
             }
         }
         // A dead net leaves nothing dividing the building (§7.3): there is no beat to
@@ -1442,6 +1480,128 @@ mod tests {
         assert!(
             !territory.contains(&Cell::new(3, 1)),
             "off-beat cells are not territory, however close to the guard",
+        );
+    }
+
+    /// A guard part-way through the §7.6 **watch** that follows a released search:
+    /// Calm again, centred on `focus`, and carrying `beat` as its own territory.
+    #[cfg(test)]
+    fn watcher(pos: Cell, focus: Cell, beat: Vec<Cell>) -> Guard {
+        let mut guard = Guard::patrolling(pos).with_beat(beat);
+        guard.focus = Some(focus);
+        guard.watch = WATCH_DURATION;
+        guard
+    }
+
+    /// §7.6/§7.7 — the clustering a player sees **during** a hunt. Two guards answering
+    /// one call share a `focus`, which is correct (a call carries its own cell, §7.7).
+    /// What they must not share is a *territory*: handed the same watch disc they pace
+    /// the same region for the whole 20-turn window, and `pick_farthest` being
+    /// deterministic they keep choosing the same cell and walk in lockstep.
+    ///
+    /// Clipped to each guard's own beat, the same call leaves them watching different
+    /// halves of the same area — which is what "watched harder" was supposed to mean.
+    #[test]
+    fn two_guards_watching_one_cell_cover_disjoint_ground() {
+        let facility = Facility::walled_box(20, 8);
+        let focus = Cell::new(10, 4);
+        // Two beats meeting at the focus: west of it and east of it.
+        let half = |xs: std::ops::Range<u32>| -> Vec<Cell> {
+            xs.flat_map(|x| (1..7).map(move |y| Cell::new(x, y)))
+                .collect::<Vec<_>>()
+        };
+        let west = watcher(Cell::new(6, 4), focus, half(1..11));
+        let east = watcher(Cell::new(14, 4), focus, half(11..19));
+
+        let (a, b) = (
+            west.territory(&facility, PatrolStyle::Beat),
+            east.territory(&facility, PatrolStyle::Beat),
+        );
+        assert!(!a.is_empty() && !b.is_empty(), "both watch something");
+        assert!(
+            !a.iter().any(|cell| b.contains(cell)),
+            "two responders to one cell watch disjoint ground",
+        );
+        // …and each is watching near the focus, not merely somewhere else.
+        for territory in [&a, &b] {
+            assert!(
+                territory
+                    .iter()
+                    .all(
+                        |c| path::reachable_within(focus, WATCH_RADIUS, |cell| patrollable(
+                            &facility, cell
+                        ))
+                        .contains(c)
+                    ),
+                "the watch stays inside the disc it is centred on",
+            );
+        }
+    }
+
+    /// The solo case is **unchanged**: a guard whose beat contains the whole disc
+    /// watches exactly the disc it always did. This must not quietly retune the
+    /// one-guard behaviour while fixing the two-guard one.
+    #[test]
+    fn a_lone_watchers_disc_is_unchanged() {
+        let facility = Facility::walled_box(20, 8);
+        let focus = Cell::new(10, 4);
+        let whole: Vec<Cell> = (1..19)
+            .flat_map(|x| (1..7).map(move |y| Cell::new(x, y)))
+            .collect();
+        let guard = watcher(Cell::new(10, 4), focus, whole);
+
+        let disc = path::reachable_within(focus, WATCH_RADIUS, |cell| patrollable(&facility, cell));
+        let mut watched = guard.territory(&facility, PatrolStyle::Beat);
+        let mut expected = disc;
+        watched.sort_by_key(|c| (c.y, c.x));
+        expected.sort_by_key(|c| (c.y, c.x));
+        assert_eq!(
+            watched, expected,
+            "a beat containing the disc watches the disc"
+        );
+    }
+
+    /// §7.6's fallback: a guard called clear across the facility has no beat cells
+    /// anywhere near the focus, and an empty intersection would leave it with nothing
+    /// to sweep. It watches the plain disc instead — a responder must always watch
+    /// *something*.
+    #[test]
+    fn a_watcher_called_off_its_beat_falls_back_to_the_plain_disc() {
+        let facility = Facility::walled_box(40, 8);
+        let focus = Cell::new(35, 4);
+        // A beat at the far west; the focus is 25 cells east of its nearest cell.
+        let far: Vec<Cell> = (1..8)
+            .flat_map(|x| (1..7).map(move |y| Cell::new(x, y)))
+            .collect();
+        let guard = watcher(Cell::new(35, 4), focus, far);
+
+        let watched = guard.territory(&facility, PatrolStyle::Beat);
+        let disc = path::reachable_within(focus, WATCH_RADIUS, |cell| patrollable(&facility, cell));
+        assert!(!watched.is_empty(), "it still watches something");
+        assert_eq!(watched.len(), disc.len(), "…and it is the plain disc");
+    }
+
+    /// §7.3: on a dead net there is no partition to clip against, so the watch is the
+    /// plain disc — and that is correct rather than a gap, since call-ins do not fire
+    /// on a silenced net and no two guards are sent to one cell in the first place.
+    #[test]
+    fn a_silenced_nets_watch_is_the_plain_disc() {
+        let facility = Facility::walled_box(20, 8);
+        let focus = Cell::new(10, 4);
+        let half: Vec<Cell> = (1..11)
+            .flat_map(|x| (1..7).map(move |y| Cell::new(x, y)))
+            .collect();
+        let guard = watcher(Cell::new(6, 4), focus, half);
+
+        let disc = path::reachable_within(focus, WATCH_RADIUS, |cell| patrollable(&facility, cell));
+        assert_eq!(
+            guard.territory(&facility, PatrolStyle::Wander).len(),
+            disc.len(),
+            "a dead net watches the whole disc",
+        );
+        assert!(
+            guard.territory(&facility, PatrolStyle::Beat).len() < disc.len(),
+            "…where a live one clips it to the guard's own half",
         );
     }
 
