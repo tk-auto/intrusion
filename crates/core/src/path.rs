@@ -92,6 +92,46 @@ pub(crate) fn reachable_within(
     cells
 }
 
+/// How many steps each cell reachable from `origin` is away across `passable`
+/// cells — the same 4-connected flood as [`flood_from`], keeping the depth it
+/// reached each cell at rather than only that it did.
+///
+/// One pass answers "how far is every guard from here" for a whole roster
+/// ([`nearest_respondable`](crate::radio::nearest_respondable)), which straight-line
+/// distance cannot: a cell two rooms down the corridor is nearer than one just
+/// across a wall. Cells the flood never reaches are simply absent — the caller
+/// decides what an unreachable actor means, since "no route" is a different fact
+/// from "a long route".
+///
+/// `origin` seeds the flood unconditionally and maps to `0`, like [`flood_from`]:
+/// a dispatch site may be a cell nobody could stand on, and it is still the place
+/// everyone is measured from. Only the cells stepped *into* are gated on `passable`.
+pub(crate) fn route_lengths_from(
+    origin: Cell,
+    passable: impl Fn(Cell) -> bool,
+) -> HashMap<Cell, u32> {
+    let mut lengths = HashMap::new();
+    lengths.insert(origin, 0);
+    let mut frontier = VecDeque::new();
+    frontier.push_back(origin);
+    while let Some(cell) = frontier.pop_front() {
+        let next_length = lengths[&cell] + 1;
+        for dir in Direction::ALL {
+            let Some(next) = cell.step(dir) else {
+                continue;
+            };
+            if !passable(next) {
+                continue;
+            }
+            if let Entry::Vacant(slot) = lengths.entry(next) {
+                slot.insert(next_length);
+                frontier.push_back(next);
+            }
+        }
+    }
+    lengths
+}
+
 /// Every cell reachable from `start` across `passable` cells on a `width × height`
 /// grid — the full-grid 4-connected flood fill. A sibling to [`reachable_within`]
 /// with no distance bound: only the `passable` predicate stops it.
@@ -196,6 +236,48 @@ mod tests {
             !cells.contains(&Cell::new(8, 10)),
             "the walled-off side is not reached, though it is within the radius",
         );
+    }
+
+    /// The route length is the walk, not the straight line: a cell just the other
+    /// side of a wall is far, and one further away down an open lane is near. That
+    /// inversion is the whole reason dispatch selection uses this (§7.3/#409).
+    #[test]
+    fn route_lengths_measure_the_walk_not_the_line() {
+        // A wall column at x=1 spanning the box, with the one gap at its foot.
+        let wall: Vec<Cell> = (0..5).map(|y| Cell::new(1, y)).collect();
+        let passable = open_box(6, 6, &wall);
+        let lengths = route_lengths_from(Cell::new(0, 0), &passable);
+
+        assert_eq!(lengths[&Cell::new(0, 0)], 0, "the origin is zero");
+        assert_eq!(lengths[&Cell::new(0, 3)], 3, "straight down the open lane");
+        // (2,0) is 2 cells away in a straight line but the wall forces the walk
+        // down to the gap at y=5 and back up: 5 + 2 + 5 = 12.
+        assert_eq!(lengths[&Cell::new(2, 0)], 12, "around the wall");
+        assert!(
+            lengths[&Cell::new(2, 0)] > lengths[&Cell::new(0, 3)],
+            "nearer by line is farther by route",
+        );
+    }
+
+    /// A cell with no route is **absent**, not far away — the caller distinguishes
+    /// "a long walk" from "no walk at all". The origin still maps to zero even when
+    /// it is itself impassable, so a dispatch site nobody can stand on still
+    /// measures everyone (§7.3).
+    #[test]
+    fn route_lengths_omit_the_unreachable_and_seed_the_origin() {
+        let sealed = open_box(6, 6, &[Cell::new(0, 1), Cell::new(1, 0), Cell::new(1, 1)]);
+        let lengths = route_lengths_from(Cell::new(0, 0), &sealed);
+        assert_eq!(lengths.len(), 1, "boxed into its own corner");
+        assert_eq!(lengths[&Cell::new(0, 0)], 0);
+        assert!(
+            !lengths.contains_key(&Cell::new(5, 5)),
+            "no route, no entry"
+        );
+
+        let blocked_origin = open_box(6, 6, &[Cell::new(2, 2)]);
+        let lengths = route_lengths_from(Cell::new(2, 2), &blocked_origin);
+        assert_eq!(lengths[&Cell::new(2, 2)], 0, "the origin seeds regardless");
+        assert_eq!(lengths[&Cell::new(2, 4)], 2, "and the flood leaves it");
     }
 
     #[test]
