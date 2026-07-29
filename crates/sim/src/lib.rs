@@ -44,6 +44,7 @@ mod alert;
 mod bot;
 mod config;
 pub mod cue;
+pub mod dispatch;
 mod harness;
 mod policy;
 mod profile;
