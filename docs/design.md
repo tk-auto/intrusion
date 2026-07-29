@@ -2405,6 +2405,7 @@ Two rules for a player-facing word:
 | `DuctEntry` (§10.7) | **duct** — *"duct — bump to crawl in"* | glyph legend, usable line |
 | `Console` (§10.3) | **intel** — *"intel — bump to take"* | glyph legend, usable line |
 | `CommsConsole` (§7.3) | **comms** — *"comms — bump to kill the radio"* | glyph legend, usable line |
+| `Dephase` (§8.3) | **Phase Out** — the bar's short `Phase` reads as its *opposite* beside *Dephase*, so the short name taught the wrong verb | ability bar (as `Phase`), help panel, near line |
 | the **schematic** (§11.5a) | *"not yet seen"* — the building and the floor of it | glyph legend |
 
 **No row is the good case.** Where the design word is already the world's word — intel,
