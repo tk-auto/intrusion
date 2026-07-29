@@ -305,15 +305,44 @@ impl Grid {
 pub fn render(state: &State) -> Grid {
     let facility = state.layout().facility();
     let (width, height) = (facility.width(), facility.height());
+
+    // The board is painted in fixed passes, last writer wins. Glyphs first —
+    // terrain under entities, the player over everything — then the recolours
+    // and remembered facts, then the backgrounds from the weakest cue up to the
+    // danger overlay, which always paints last and always wins (§11.5).
+    let mut cells = terrain_pass(state);
+    spent_console_recolour(state, &mut cells);
+    duct_pass(state, &mut cells);
+    entity_pass(state, &mut cells);
+    crouch_signal(state, &mut cells);
+    stowed_body_memory(state, &mut cells);
+    effect_wash(state, &mut cells);
+    spot_flash_pass(state, &mut cells);
+    door_cue_wash(state, &mut cells);
+    sensed_guard_wash(state, &mut cells);
+    effect_thing_wash(state, &mut cells);
+    danger_overlay(state, &mut cells);
+
+    Grid {
+        width,
+        height,
+        cells,
+    }
+}
+
+/// The terrain layer, through the fog: what the player knows of each cell.
+///
+/// The §12.6 `full_layout_known` modifier draws the architecture of cells the
+/// player has never had eyes on, instead of the schematic. Contents stay hidden —
+/// it buys the building, not the objectives.
+fn terrain_pass(state: &State) -> Vec<GlyphCell> {
+    let facility = state.layout().facility();
+    let (width, height) = (facility.width(), facility.height());
     let fov = state.player_fov();
     let memory = state.memory();
-    // The §12.6 `full_layout_known` modifier: draw the architecture of cells the
-    // player has never had eyes on, instead of the schematic. Contents stay hidden —
-    // it buys the building, not the objectives.
     let layout_known = state.modifiers().full_layout_known;
 
-    // Terrain layer, through the fog: what the player knows of each cell.
-    let mut cells: Vec<GlyphCell> = (0..height)
+    (0..height)
         .flat_map(|y| (0..width).map(move |x| (x, y)))
         .map(|(x, y)| {
             let terrain = facility
@@ -348,56 +377,70 @@ pub fn render(state: &State) -> Grid {
             };
             GlyphCell::on_board(glyph, shown.category(), vis)
         })
-        .collect();
+        .collect()
+}
 
-    // A spent objective is Neutral scenery (§11.2): once its intel is taken a console
-    // stops being a live goal, so it recolours from Interest to Neutral while keeping
-    // its `$` glyph — "there was intel here, it's collected" — instead of staying
-    // indistinguishable from a live console. Terrain stays `Console` (geometry is
-    // static); only the category changes, so the core stays colour-blind (§11.2) and
-    // the shell's one table owns the actual colour. Runs on the terrain layer, before
-    // the entity/overlay passes, so a guard or the player standing on a spent console
-    // still draws over it. Taking intel requires reaching (thus seeing) the console and
-    // memory is monotonic (§11.5a), so a spent console is always at least remembered —
-    // recolour only where it actually shows, both live and in memory, never a masked
-    // floor dot standing in for a never-seen console.
+/// A spent objective is Neutral scenery (§11.2): once its intel is taken a console
+/// stops being a live goal, so it recolours from Interest to Neutral while keeping
+/// its `$` glyph — "there was intel here, it's collected" — instead of staying
+/// indistinguishable from a live console. Terrain stays `Console` (geometry is
+/// static); only the category changes, so the core stays colour-blind (§11.2) and
+/// the shell's one table owns the actual colour. Runs on the terrain layer, before
+/// the entity/overlay passes, so a guard or the player standing on a spent console
+/// still draws over it. Taking intel requires reaching (thus seeing) the console and
+/// memory is monotonic (§11.5a), so a spent console is always at least remembered —
+/// recolour only where it actually shows, both live and in memory, never a masked
+/// floor dot standing in for a never-seen console.
+fn spent_console_recolour(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
+    let fov = state.player_fov();
+    let memory = state.memory();
     for cell in state.spent_consoles() {
         if fov.contains(cell) || memory.contains(cell) {
             cells[(cell.y * width + cell.x) as usize].fg = Category::Neutral;
         }
     }
+}
 
-    // The duct interior view (§11.5a/§10.7, #134). A duct's path is shown **only
-    // while the player is crawling it**: the whole occupied run lights as one
-    // connected `=` — the crawlspace read as a single space (the player's own cell is
-    // overwritten by the `@` below; glyph priority `@` > `=`). The interior carries no
-    // tell on the base map and is never remembered once the player climbs out
-    // (§11.5a): the path lives in its own layer, so the shortcut's route is given away
-    // to nobody. The two **entries** are the exception — they are geometry, drawn `=`
-    // from turn one by the fog above whether occupied or not — so nothing here needs
-    // to draw an unoccupied duct at all.
+/// The duct interior view (§11.5a/§10.7, #134). A duct's path is shown **only
+/// while the player is crawling it**: the whole occupied run lights as one
+/// connected `=` — the crawlspace read as a single space (the player's own cell is
+/// overwritten by the entity pass's `@`; glyph priority `@` > `=`). The interior
+/// carries no tell on the base map and is never remembered once the player climbs
+/// out (§11.5a): the path lives in its own layer, so the shortcut's route is given
+/// away to nobody. The two **entries** are the exception — they are geometry, drawn
+/// `=` from turn one by the terrain fog whether occupied or not — so nothing here
+/// needs to draw an unoccupied duct at all.
+fn duct_pass(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     if let Some(duct) = state.occupied_duct() {
         for &c in duct.cells() {
             cells[(c.y * width + c.x) as usize] =
                 GlyphCell::on_board('=', Category::System, Visibility::Live);
         }
     }
+}
 
-    // Entity layers, lowest priority first so the top entity is the last writer.
-    // The decoy (§8.3) draws lowest: an Owned `@` — a thing you made wearing
-    // your own glyph, which is the whole trick (§10.3/§11.3). Alone among the
-    // entities it draws **wherever it is**, in the FOV or out of it (§11.5a's
-    // second exception, #321): the whole point of a fake is to walk away from it
-    // and let a guard investigate the wrong cell, so a marker you can only see by
-    // standing next to it is a marker the ability cannot use. Its cell is the
-    // player's own knowledge, on the same footing as their own position — not a
-    // content of the facility they have to keep looking at. It leaks nothing:
-    // a decoy dies the turn anything steps on it, and that death already flips
-    // the §11.4 bar into cooldown and prints the §11.7 message unconditionally,
-    // so the `@` vanishing only puts a fact the player is already told where they
-    // are already looking. Out of view it draws `Remembered`, not `Live`: the
-    // marker persists at full Owned colour while the three-state discipline
-    // (§11.5a) keeps telling the truth about what is actually being seen.
+/// Entity layers, lowest priority first so the top entity is the last writer.
+///
+/// The decoy (§8.3) draws lowest: an Owned `@` — a thing you made wearing
+/// your own glyph, which is the whole trick (§10.3/§11.3). Alone among the
+/// entities it draws **wherever it is**, in the FOV or out of it (§11.5a's
+/// second exception, #321): the whole point of a fake is to walk away from it
+/// and let a guard investigate the wrong cell, so a marker you can only see by
+/// standing next to it is a marker the ability cannot use. Its cell is the
+/// player's own knowledge, on the same footing as their own position — not a
+/// content of the facility they have to keep looking at. It leaks nothing:
+/// a decoy dies the turn anything steps on it, and that death already flips
+/// the §11.4 bar into cooldown and prints the §11.7 message unconditionally,
+/// so the `@` vanishing only puts a fact the player is already told where they
+/// are already looking. Out of view it draws `Remembered`, not `Live`: the
+/// marker persists at full Owned colour while the three-state discipline
+/// (§11.5a) keeps telling the truth about what is actually being seen.
+fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
+    let facility = state.layout().facility();
+    let width = facility.width();
+    let fov = state.player_fov();
     if let Some(decoy) = state.decoy() {
         cells[(decoy.y * width + decoy.x) as usize] = GlyphCell::on_board(
             PLAYER_GLYPH,
@@ -422,7 +465,7 @@ pub fn render(state: &State) -> Grid {
     // yours while you hold it, and a body **stowed in a cupboard** (§7.2) — gone to
     // every guard, but shown to *you* as an Owned `z` marking the **locked** cupboard
     // (no longer a hideout). A **loose** body is never remembered; the locked-cupboard
-    // status **is**, persisted out of view by the memory pass below.
+    // status **is**, persisted out of view by [`stowed_body_memory`].
     for body in state.bodies() {
         if !fov.contains(body.cell()) {
             continue;
@@ -459,25 +502,34 @@ pub fn render(state: &State) -> Grid {
     // the picture cannot disagree.
     let player_glyph = if state.hidden() { '}' } else { PLAYER_GLYPH };
     put(state.player(), player_glyph, Category::Owned);
+}
 
-    // The crouch signal (§10.3/§11.3): while the player is crouched, the whole
-    // run they ducked behind — that bench, not every table they stand beside —
-    // recolours to Owned, the same vocabulary the occupied cupboard speaks
-    // ("Owned = what is concealing you"), so the blue @-π pair reads as one
-    // hidden unit whose π half is as long as the furniture. Read through the
-    // same anchored run the concealment rule uses, so the picture cannot
-    // disagree with the rules.
+/// The crouch signal (§10.3/§11.3): while the player is crouched, the whole
+/// run they ducked behind — that bench, not every table they stand beside —
+/// recolours to Owned, the same vocabulary the occupied cupboard speaks
+/// ("Owned = what is concealing you"), so the blue @-π pair reads as one
+/// hidden unit whose π half is as long as the furniture. Read through the
+/// same anchored run the concealment rule uses, so the picture cannot
+/// disagree with the rules.
+fn crouch_signal(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     for cover in state.crouch_cover() {
         cells[(cover.y * width + cover.x) as usize].fg = Category::Owned;
     }
+}
 
-    // The locked-cupboard signal persists in memory (§11.5a/§7.2): a cupboard you
-    // have seen with a body stowed in it is a permanent fact — a spent hideout — so
-    // out of view it is **remembered** as an Owned `z`, the same way a seen console
-    // is remembered (§11.5a), rather than reverting to the empty
-    // `}`. Only the stowed lock persists; a loose body is live state and is never
-    // remembered, so it is not drawn here. Runs after the entity layer, writing only
-    // out-of-FOV cells (in view they are already the live `z` above).
+/// The locked-cupboard signal persists in memory (§11.5a/§7.2): a cupboard you
+/// have seen with a body stowed in it is a permanent fact — a spent hideout — so
+/// out of view it is **remembered** as an Owned `z`, the same way a seen console
+/// is remembered (§11.5a), rather than reverting to the empty
+/// `}`. Only the stowed lock persists; a loose body is live state and is never
+/// remembered, so it is not drawn here. Runs after the entity layer, writing only
+/// out-of-FOV cells (in view they are already the entity pass's live `z`).
+fn stowed_body_memory(state: &State, cells: &mut [GlyphCell]) {
+    let facility = state.layout().facility();
+    let width = facility.width();
+    let fov = state.player_fov();
+    let memory = state.memory();
     for body in state.bodies() {
         let cell = body.cell();
         if fov.contains(cell) {
@@ -488,104 +540,116 @@ pub fn render(state: &State) -> Grid {
                 GlyphCell::on_board(BODY_GLYPH, Category::Owned, Visibility::Remembered);
         }
     }
+}
 
-    // The effect layer's **wash** (§11.5, #308/#325/#338): every fixed-cell mark an
-    // ability effect has lit — the §6.1 box a blast reached, the cell a bore opened —
-    // painted in `Category::Effect`. Painted **first of all the backgrounds**, so it is
-    // the weakest cue on the board: every mark below overwrites it, and an advisory
-    // layer can never hide the §11.5 [SETTLED] detection set or a sensed cue. It
-    // reaches through walls and over unseen ground because that is what the effect does
-    // — your own gadget's reach is not something the fog can keep from you — and each
-    // set is the geometry the mechanic resolved against ([`State::effect_cell_marks`]),
-    // fixed where it happened rather than following the player.
+/// The effect layer's **wash** (§11.5, #308/#325/#338): every fixed-cell mark an
+/// ability effect has lit — the §6.1 box a blast reached, the cell a bore opened —
+/// painted in `Category::Effect`. Painted **first of all the backgrounds**, so it is
+/// the weakest cue on the board: every later mark overwrites it, and an advisory
+/// layer can never hide the §11.5 [SETTLED] detection set or a sensed cue. It
+/// reaches through walls and over unseen ground because that is what the effect does
+/// — your own gadget's reach is not something the fog can keep from you — and each
+/// set is the geometry the mechanic resolved against ([`State::effect_cell_marks`]),
+/// fixed where it happened rather than following the player.
+fn effect_wash(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     for cell in state.effect_cell_marks() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
     }
+}
 
-    // The spot flash (§11.5/§9.2/§7.6, #222): the one-beat sightline of a guard that
-    // *freshly* spotted the player from **outside their view** — the "a guard just saw
-    // you, and here is where it is" cue the loop was missing (§7.6). It lights the
-    // straight line between spotter and player red (`Danger`): honest, because that
-    // guard's cone genuinely watches those cells, and a strict momentary *subset* of
-    // the overlay, gone on the next action. Painted **first**, the weakest background
-    // cue, so the marks below win where they coincide: a *sensed* spotter keeps its
-    // orange position dot with the red line running up to it, and a guard that is
-    // neither seen nor sensed is marked by the red line's own endpoint. Guards the
-    // player can see are filtered upstream ([`State::spot_flash`]) — their real cone
-    // paints anyway (§9.2), so this never double-draws or restates a seen cone.
+/// The spot flash (§11.5/§9.2/§7.6, #222): the one-beat sightline of a guard that
+/// *freshly* spotted the player from **outside their view** — the "a guard just saw
+/// you, and here is where it is" cue the loop was missing (§7.6). It lights the
+/// straight line between spotter and player red (`Danger`): honest, because that
+/// guard's cone genuinely watches those cells, and a strict momentary *subset* of
+/// the overlay, gone on the next action. Painted among the **weakest** background
+/// cues, so the later marks win where they coincide: a *sensed* spotter keeps its
+/// orange position dot with the red line running up to it, and a guard that is
+/// neither seen nor sensed is marked by the red line's own endpoint. Guards the
+/// player can see are filtered upstream ([`State::spot_flash`]) — their real cone
+/// paints anyway (§9.2), so this never double-draws or restates a seen cone.
+fn spot_flash_pass(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     for cell in state.spot_flash() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
     }
+}
 
-    // The door-change cue (§9.4/§10.4): the whole footprint of every door that opened
-    // or shut away from the player, within `DOOR_SENSE_RANGE`, gets a
-    // `Category::Sensed` background — the *same* orange "sensed through a wall" channel
-    // as a guard felt through a wall, a filled highlight that fades over a few turns
-    // (evidence someone passed, position only, never who or which way). Painted
-    // *before* the danger overlay so a coincident cone outranks it (§11.5: being seen
-    // outranks). Painted with the sensed-guard pass below, which shares the category.
+/// The door-change cue (§9.4/§10.4): the whole footprint of every door that opened
+/// or shut away from the player, within `DOOR_SENSE_RANGE`, gets a
+/// `Category::Sensed` background — the *same* orange "sensed through a wall" channel
+/// as a guard felt through a wall, a filled highlight that fades over a few turns
+/// (evidence someone passed, position only, never who or which way). Painted
+/// *before* the danger overlay so a coincident cone outranks it (§11.5: being seen
+/// outranks). Painted with [`sensed_guard_wash`], which shares the category.
+fn door_cue_wash(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     for cell in state.door_cues() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Sensed);
     }
+}
 
-    // The sensed highlight (§9.2): every guard the player *senses* through a wall but
-    // cannot see gets an orange `Category::Sensed` background on its exact cell — a
-    // filled, eye-catching marker over whatever geometry masks the cell, position only
-    // and never a glyph of its own. It carries no cone and no danger overlay: knowing
-    // where a guard is is not knowing whether it can see you. Painted *before* the
-    // danger overlay so a coincident red still wins — a sensed guard's cell that a
-    // *seen* guard also watches reads danger first (§11.5: being seen outranks) — and
-    // *after* the door cue, so a sensed guard sitting on a just-changed door reads as
-    // the guard, not the trace.
+/// The sensed highlight (§9.2): every guard the player *senses* through a wall but
+/// cannot see gets an orange `Category::Sensed` background on its exact cell — a
+/// filled, eye-catching marker over whatever geometry masks the cell, position only
+/// and never a glyph of its own. It carries no cone and no danger overlay: knowing
+/// where a guard is is not knowing whether it can see you. Painted *before* the
+/// danger overlay so a coincident red still wins — a sensed guard's cell that a
+/// *seen* guard also watches reads danger first (§11.5: being seen outranks) — and
+/// *after* the door cue, so a sensed guard sitting on a just-changed door reads as
+/// the guard, not the trace.
+fn sensed_guard_wash(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Sensed) {
             cells[(guard.pos().y * width + guard.pos().x) as usize].bg = Some(Category::Sensed);
         }
     }
+}
 
-    // The effect layer's marks on **things** (§11.5, #308/#338/#340/#341): every actor
-    // an ability effect currently holds — every guard a blast froze and the player can
-    // perceive, the live decoy, whose `@` is otherwise the player's own ink told apart
-    // by position alone, and the player themselves on the turns a **conditional** effect
-    // is actually in force on them (Camouflage's concealment, which lapses the turn they
-    // move). Painted *after* the sense channel and *before* the danger
-    // overlay, because it is not a competing claim about the cell but a **refinement of
-    // the cue the thing already draws**: a sensed guard's filled cell still says "a
-    // guard is exactly here", and cyan adds "and it cannot move"; the decoy's `@` still
-    // says "something of yours stands here", and cyan adds "and it is the ability
-    // running"; the player's own `@` still says "you are here", and cyan adds "and right
-    // now they cannot see you". Losing that to the orange it refines would throw away the
-    // whole point of a layer that reaches through walls — the blast freezes what you
-    // cannot see, so this is the common case, not the corner one. It is only ever a
-    // recolour of a thing already drawn ([`State::effect_thing_marks`] carries each
-    // thing's own visibility rule — perception for a guard, always for the decoy and the
-    // player), never a new mark, so the fog gives nothing away.
-    //
-    // The danger overlay still paints last and still wins, and the two cannot contradict
-    // each other: a player concealed from a guard is dropped from that guard's cone
-    // upstream (`visible_cone_cells`), so a red cell under a cyan-marked player would
-    // have to come from a guard the camo is *not* hiding them from — which is the truth
-    // worth shouting.
+/// The effect layer's marks on **things** (§11.5, #308/#338/#340/#341): every actor
+/// an ability effect currently holds — every guard a blast froze and the player can
+/// perceive, the live decoy, whose `@` is otherwise the player's own ink told apart
+/// by position alone, and the player themselves on the turns a **conditional** effect
+/// is actually in force on them (Camouflage's concealment, which lapses the turn they
+/// move). Painted *after* the sense channel and *before* the danger
+/// overlay, because it is not a competing claim about the cell but a **refinement of
+/// the cue the thing already draws**: a sensed guard's filled cell still says "a
+/// guard is exactly here", and cyan adds "and it cannot move"; the decoy's `@` still
+/// says "something of yours stands here", and cyan adds "and it is the ability
+/// running"; the player's own `@` still says "you are here", and cyan adds "and right
+/// now they cannot see you". Losing that to the orange it refines would throw away the
+/// whole point of a layer that reaches through walls — the blast freezes what you
+/// cannot see, so this is the common case, not the corner one. It is only ever a
+/// recolour of a thing already drawn ([`State::effect_thing_marks`] carries each
+/// thing's own visibility rule — perception for a guard, always for the decoy and the
+/// player), never a new mark, so the fog gives nothing away.
+///
+/// The danger overlay still paints last and still wins, and the two cannot contradict
+/// each other: a player concealed from a guard is dropped from that guard's cone
+/// upstream (`visible_cone_cells`), so a red cell under a cyan-marked player would
+/// have to come from a guard the camo is *not* hiding them from — which is the truth
+/// worth shouting.
+fn effect_thing_wash(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     for cell in state.effect_thing_marks() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Effect);
     }
+}
 
-    // The danger overlay's cone pass (§11.5), last, across terrain and entities
-    // alike: the union of every visible guard's cone. Its definition — the "seen"
-    // gate, the concealment spare (a player concealed from that guard is not
-    // detected, §10.3), the in-duct mouth-peek clip (§10.7/#134), and the
-    // `always_show_vision_cones` widening (§12.6) — lives in
-    // [`State::visible_cone_cells`], so this paint and the held-movement guard
-    // (#223) read one set and cannot disagree. Backgrounds compose with whatever
-    // glyph is on the cell: a watched guard, a watched player, watched floor.
+/// The danger overlay's cone pass (§11.5), last, across terrain and entities
+/// alike: the union of every visible guard's cone. Its definition — the "seen"
+/// gate, the concealment spare (a player concealed from that guard is not
+/// detected, §10.3), the in-duct mouth-peek clip (§10.7/#134), and the
+/// `always_show_vision_cones` widening (§12.6) — lives in
+/// [`State::visible_cone_cells`], so this paint and the held-movement guard
+/// (#223) read one set and cannot disagree. Backgrounds compose with whatever
+/// glyph is on the cell: a watched guard, a watched player, watched floor.
+fn danger_overlay(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
     for cell in state.visible_cone_cells() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
-    }
-
-    Grid {
-        width,
-        height,
-        cells,
     }
 }
 
