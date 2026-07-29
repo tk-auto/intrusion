@@ -404,7 +404,7 @@ fn a_guards_cone_reaches_through_a_fresh_hole() {
 /// for them the moment it exists, with nothing anyone has to remember to update.
 ///
 /// The fixture makes the claim unambiguous: a wall course seals the room in two, and
-/// a guard's patrol beat has a station on **each** side of it. Before a bore it can
+/// a guard's patrol beat has ground on **each** side of it. Before a bore it can
 /// never reach the far one — the control run below proves it never does — and after
 /// one, the hole is the only way it could have got there.
 #[test]
@@ -429,7 +429,7 @@ fn a_guard_walks_through_a_fresh_hole_and_could_not_before() {
     };
     let crossed = |s: &State| s.guards().iter().any(|g| g.pos().y >= 5);
 
-    // The control: no bore, and the beat's far station is simply unreachable.
+    // The control: no bore, and the beat's far half is simply unreachable.
     let mut sealed = fixture();
     for _ in 0..40 {
         if sealed.outcome() != Outcome::Playing {

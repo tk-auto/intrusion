@@ -79,12 +79,13 @@ pub(crate) enum Contact {
 
 /// A guard on the level.
 ///
-/// A Calm guard **patrols** (§7.5): from its station it sweeps toward the farthest
-/// cell in its territory it has not recently looked at, keeping a private memory of
+/// A Calm guard **patrols** (§7.5): it sweeps toward the farthest cell in its
+/// territory it has not recently looked at, keeping a private memory of
 /// the cells its cone has covered and wiping it to start over once the territory is
 /// exhausted. On a generated level its territory is a region **beat** (§10.5, see
-/// [`crate::beat`]): rooms *and the corridors joining them*, grown from the
-/// station's region across door edges, so the sweep walks room → corridor → room.
+/// [`crate::beat`]): rooms *and the corridors joining them*, grown across door edges
+/// from the region the guard **stood in** when the beat was cut, so the sweep walks
+/// room → corridor → room.
 /// It has a real field of view — the ~90° cone (§6.2/§7.1), recomputed every sight
 /// phase — a [`GuardState`], and a `destination` it walks to along the shortest
 /// routable path (routing *around* furniture, cover and cupboards, and straight
@@ -102,14 +103,22 @@ pub(crate) enum Contact {
 pub struct Guard {
     pos: Cell,
     facing: Direction,
-    /// The spawn cell and the anchor of the patrol territory (§7.5).
-    station: Cell,
-    /// The cells of this guard's region beat (§7.5/§10.5): the station's region
-    /// grown across door edges at placement ([`crate::beat`]), so every cell is
-    /// walkable from the station and no territory straddles a wall. The sweep
-    /// filters it to the patrollable cells each pick, so later-stamped solids (a
-    /// console) never become targets. Empty for a guard built without a graph —
-    /// a hand-placed fixture — which falls back to the [`PATROL_RADIUS`] flood.
+    /// The cells of this guard's region beat (§7.5/§10.5): the region the guard
+    /// **stood in when the beat was cut**, grown across door edges ([`crate::beat`]),
+    /// so every cell is walkable from that anchor and no territory straddles a wall.
+    /// The sweep filters it to the patrollable cells each pick, so later-stamped
+    /// solids (a console) never become targets.
+    ///
+    /// The anchor is a *live position*, not a spawn cell: a guard that arrived
+    /// mid-level (§7.3/#374) is cut a beat around where its errand **finished**, not
+    /// around the room it walked in by. That is why growth is called only at
+    /// placement and when the guard set changes — never per turn, or a moving anchor
+    /// would make patrols churn.
+    ///
+    /// Empty for a guard built without a graph — a hand-placed fixture, or a
+    /// reinforcement still on its errand — and a guard with no beat has **no
+    /// territory**: it holds rather than sweeping a box drawn round a phantom
+    /// anchor (§7.5).
     beat: Vec<Cell>,
     /// Whether this guard patrols. `false` is a held-in-place fixture — a guard that
     /// only looks, for the sight and placement tests that need a fixed cone; `true`
@@ -146,7 +155,7 @@ pub struct Guard {
     /// Turns of post-search raised coverage remaining (§7.6 Released). While positive,
     /// Calm patrol draws its territory around [`focus`](Self::focus) with the tighter
     /// [`WATCH_RADIUS`], so the just-searched region is watched harder before the sweep
-    /// widens back to the station territory.
+    /// widens back to the beat territory.
     watch: u32,
     /// What this guard's most recent [`sense`](Self::sense) made of the player, or
     /// `None` for a look that missed them — the §7.2 takedown gate ("the target has
@@ -218,13 +227,6 @@ pub struct Guard {
     dazed: u32,
 }
 
-/// Patrol radius (§7.5, **[START] = 15**): how far the *fallback* territory
-/// reaches — the patrollable cells within this many steps of the station. On a
-/// generated level the Calm territory is the region beat instead
-/// ([`crate::beat::BEAT_REGIONS`] replaces this box, §10.5); the radius flood
-/// remains for guards built without a region graph — hand-placed fixtures.
-pub(crate) const PATROL_RADIUS: u32 = 15;
-
 /// How long a detection lead survives with nothing sensed (§7.1 alert duration,
 /// **[START] = 30**). A fresh sighting resets the alert timer to this; each quiet
 /// turn drops it by one, and a reactive guard gives up its lead once it hits zero.
@@ -282,7 +284,7 @@ pub(crate) const SEARCH_RADIUS: u32 = 4;
 /// After a search **releases**, the region is watched harder for this many turns
 /// (§7.6 Released row, **[START] = 20**): the guard keeps patrolling — Calm again —
 /// but biased onto the searched area (see [`WATCH_RADIUS`]) rather than its whole
-/// station territory, so coverage there is briefly raised before the sweep drifts
+/// beat territory, so coverage there is briefly raised before the sweep drifts
 /// back to normal.
 pub(crate) const WATCH_DURATION: u32 = 20;
 
@@ -405,7 +407,6 @@ impl Guard {
         Self {
             pos,
             facing: GUARD_INITIAL_FACING,
-            station: pos,
             beat: Vec::new(),
             patrols: false,
             inspected: VisibleSet::default(),
@@ -445,16 +446,6 @@ impl Guard {
         }
     }
 
-    /// The same guard stationed at `station` while standing where it was built —
-    /// the seam for pinning that a takedown is reported **where the guard fell**
-    /// and not at the post it was assigned to (§7.3). Only a walked patrol
-    /// separates the two in a real run, so tests set them apart directly.
-    #[cfg(test)]
-    pub(crate) fn with_station(mut self, station: Cell) -> Self {
-        self.station = station;
-        self
-    }
-
     /// The same guard in `state`. The §7.4 transitions are the reactive guard AI
     /// tickets' job; until they land, this is how a scenario — a test, the sim —
     /// puts a guard in a non-[`Calm`](GuardState::Calm) state.
@@ -464,13 +455,29 @@ impl Guard {
     }
 
     /// The same guard sweeping `beat` as its Calm territory (§7.5/§10.5) — the
-    /// cells of the region beat placement grew from its station's region across
-    /// door edges. This is how [`Placement::guards`](crate::Placement::guards)
-    /// spawns every guard on a generated level; a guard given no beat falls back
-    /// to the [`PATROL_RADIUS`] flood around its station.
+    /// cells of the region beat grown across door edges from the region the guard
+    /// stands in. This is how [`Placement::guards`](crate::Placement::guards) spawns
+    /// every guard on a generated level, and how a reinforcement is cut one once its
+    /// errand ends ([`State::settle_new_beats`](crate::State)); a guard given no beat
+    /// has no territory and holds.
     pub fn with_beat(mut self, beat: Vec<Cell>) -> Self {
         self.beat = beat;
         self
+    }
+
+    /// Give this guard `beat` as its Calm territory (§7.5/§10.5) — the in-place form
+    /// of [`with_beat`](Self::with_beat), for a beat cut after the guard already
+    /// exists ([`State::settle_new_beats`](crate::State)).
+    pub(crate) fn set_beat(&mut self, beat: Vec<Cell>) {
+        self.beat = beat;
+    }
+
+    /// Whether this guard has a §7.5 beat to patrol. `false` is a guard with no
+    /// territory — a hand-placed fixture, or a reinforcement whose beat has not been
+    /// cut yet — and is the seam the reinforcement settle pass looks for
+    /// ([`State::settle_new_beats`](crate::State)).
+    pub(crate) fn has_beat(&self) -> bool {
+        !self.beat.is_empty()
     }
 
     /// The same guard carrying radio cadence `clock` (§7.3): its personal ping
@@ -613,16 +620,6 @@ impl Guard {
     /// can never disagree.
     pub(crate) fn focus(&self) -> Option<Cell> {
         self.focus
-    }
-
-    /// The guard's station (§7.5) — the anchor its Calm beat is grown from. The
-    /// radio net does not read it: a dispatch heads for where the guard *fell*
-    /// (§7.3), not the post it was assigned to. What does read it is a **reinforcement
-    /// arriving** (§7.3/#374): the newcomer's beat is grown with the incumbents'
-    /// stations seeded first, so it fans out into ground they do not already hold
-    /// (§7.5's cooperative growth) rather than grinding the same wing.
-    pub(crate) fn station(&self) -> Cell {
-        self.station
     }
 
     /// This guard's §7.5 beat — the cells of its territory, empty for a guard built
@@ -1128,7 +1125,7 @@ impl Guard {
     /// Release from a search (§7.6 Released): drop to Calm patrol but keep the region
     /// under raised coverage for [`WATCH_DURATION`] turns — the sweep stays biased onto
     /// the [`focus`](Self::focus) area (see [`territory`](Self::territory)) before it
-    /// widens back to the station. The live lead — destination, alert, last-known cell
+    /// widens back to the beat. The live lead — destination, alert, last-known cell
     /// — is cleared; the focus survives to steer the watch.
     fn release_from_search(&mut self) {
         self.state = GuardState::Calm;
@@ -1200,12 +1197,17 @@ impl Guard {
     }
 
     /// The guard's patrol territory (§7.5): the patrollable cells of its region
-    /// **beat** — rooms and the corridors joining them, grown from the station's
-    /// region across door edges (§10.5, [`crate::beat`]) — so no territory
-    /// straddles a wall into a space the guard cannot walk to, and corridors get
-    /// real coverage instead of being crossed incidentally. A fixture guard built
-    /// without a beat sweeps the [`PATROL_RADIUS`] flood around its station
-    /// instead — bounded by walkability either way.
+    /// **beat** — rooms and the corridors joining them, grown across door edges
+    /// from the region the guard stood in when the beat was cut (§10.5,
+    /// [`crate::beat`]) — so no territory straddles a wall into a space the guard
+    /// cannot walk to, and corridors get real coverage instead of being crossed
+    /// incidentally.
+    ///
+    /// A guard with **no beat** has no territory and holds. There is deliberately no
+    /// box fallback: a flood around a remembered spawn cell was §7.5's named weakness
+    /// ("territories are boxes around spawn points, which have no relationship to the
+    /// building"), and an anchor a guard has since walked away from is the half of it
+    /// that survived the region beat. Better to stand still than to sweep a phantom.
     fn territory(&self, facility: &Facility) -> Vec<Cell> {
         // While a released search still watches the region (§7.6), the sweep draws its
         // territory around the searched area with the tighter [`WATCH_RADIUS`], so
@@ -1217,19 +1219,13 @@ impl Guard {
                 });
             }
         }
-        if !self.beat.is_empty() {
-            // Filtered at sweep time, not at placement: a console stamped in
-            // later, furniture, or a cupboard is never picked as a target.
-            return self
-                .beat
-                .iter()
-                .copied()
-                .filter(|&cell| patrollable(facility, cell))
-                .collect();
-        }
-        path::reachable_within(self.station, PATROL_RADIUS, |cell| {
-            patrollable(facility, cell)
-        })
+        // Filtered at sweep time, not at placement: a console stamped in later,
+        // furniture, or a cupboard is never picked as a target.
+        self.beat
+            .iter()
+            .copied()
+            .filter(|&cell| patrollable(facility, cell))
+            .collect()
     }
 }
 
@@ -1298,70 +1294,60 @@ fn pick_farthest(territory: &[Cell], inspected: &VisibleSet, origin: Cell) -> Op
 mod tests {
     use super::*;
     use crate::facility::Facility;
+    use crate::test_support::open_beat;
     use crate::vision::{field_of_view, FULL_SIGHT_ARC};
 
-    /// §7.5: a *fixture* guard — one built without a region beat — falls back to
-    /// the patrollable cells within [`PATROL_RADIUS`] of the station. The radius is
-    /// pinned here so a later change to the **[START] = 15** value is visible — a
-    /// floor cell exactly at the radius is in, one step past is out. (On generated
-    /// levels the beat replaces this box: see the tests below.)
+    /// §7.5: a guard with **no beat** has no territory and holds. There is no box
+    /// fallback any more — a flood around a remembered spawn cell was the half of
+    /// §7.5's named weakness that survived the region beat, and a guard that has
+    /// walked away from that cell would be sweeping a phantom.
     #[test]
-    fn patrol_territory_is_bounded_by_the_radius() {
-        // A room large enough that the radius, not a wall, is what bounds it.
+    fn a_guard_without_a_beat_has_no_territory() {
+        // A room big enough that any radius box would have found plenty of ground.
         let facility = Facility::walled_box(60, 60);
-        let station = Cell::new(30, 30);
-        let territory = Guard::patrolling(station).territory(&facility);
+        let mut guard = Guard::patrolling(Cell::new(30, 30));
 
-        assert_eq!(PATROL_RADIUS, 15, "the [START] patrol radius");
+        assert!(!guard.has_beat());
         assert!(
-            territory
-                .iter()
-                .all(|&c| station.manhattan_distance(c) <= PATROL_RADIUS),
-            "no cell beyond the radius is in territory",
+            guard.territory(&facility).is_empty(),
+            "no beat, no territory",
         );
-        assert!(
-            territory.contains(&Cell::new(30 + PATROL_RADIUS, 30)),
-            "a floor cell exactly at the radius is in territory",
-        );
-        assert!(
-            !territory.contains(&Cell::new(30 + PATROL_RADIUS + 1, 30)),
-            "one step past the radius is out",
+        assert_eq!(
+            guard.farthest_uninspected(&facility),
+            None,
+            "and so nothing to walk to — the guard holds",
         );
     }
 
-    /// §7.5/§10.5: a guard carrying a region beat sweeps *it* — the radius box is
-    /// gone: a beat cell far beyond [`PATROL_RADIUS`] is territory, a cell beside
-    /// the station that is not on the beat is not, and unsweepable terrain
-    /// (furniture) is filtered out at sweep time rather than baked in.
+    /// §7.5/§10.5: a guard carrying a region beat sweeps *it* — a beat cell far
+    /// across the map is territory, a cell beside the guard that is not on the beat
+    /// is not, and unsweepable terrain (furniture) is filtered out at sweep time
+    /// rather than baked in.
     #[test]
-    fn a_beat_guard_sweeps_its_beat_not_the_radius_box() {
+    fn a_beat_guard_sweeps_its_beat() {
         let mut facility = Facility::walled_box(40, 5);
         facility.set_terrain(20, 1, Terrain::PartialCover);
-        let station = Cell::new(1, 1);
+        let anchor = Cell::new(1, 1);
         let far = Cell::new(35, 1);
-        assert!(station.manhattan_distance(far) > PATROL_RADIUS);
 
-        let beat = vec![station, Cell::new(2, 1), Cell::new(20, 1), far];
-        let territory = Guard::patrolling(station)
+        let beat = vec![anchor, Cell::new(2, 1), Cell::new(20, 1), far];
+        let territory = Guard::patrolling(anchor)
             .with_beat(beat)
             .territory(&facility);
-        assert!(
-            territory.contains(&far),
-            "the beat, not the radius, bounds it"
-        );
+        assert!(territory.contains(&far), "the beat bounds the territory");
         assert!(
             !territory.contains(&Cell::new(20, 1)),
             "furniture on the beat is not a sweep target",
         );
         assert!(
             !territory.contains(&Cell::new(3, 1)),
-            "off-beat cells are not territory, however close to the station",
+            "off-beat cells are not territory, however close to the guard",
         );
     }
 
     /// §7.5/§10.5 on generated levels: every placed guard's Calm territory is its
-    /// region beat — every cell of it walkable from the station (no territory
-    /// straddles a wall into a space the guard cannot reach), and the corridors
+    /// region beat — every cell of it walkable from where the guard stands (no
+    /// territory straddles a wall into a space it cannot reach), and the corridors
     /// adjacent to its rooms are genuinely part of the beat, not ground crossed
     /// incidentally.
     #[test]
@@ -1382,7 +1368,7 @@ mod tests {
                 assert!(!territory.is_empty(), "seed {seed}: an empty beat");
 
                 let reached: HashSet<Cell> =
-                    path::flood_from(guard.station(), facility.width(), facility.height(), |c| {
+                    path::flood_from(guard.pos(), facility.width(), facility.height(), |c| {
                         routable(facility, c)
                     })
                     .into_iter()
@@ -1391,8 +1377,8 @@ mod tests {
                     assert!(
                         reached.contains(&cell),
                         "seed {seed}: territory cell {cell:?} is not walkable from \
-                         the station {:?}",
-                        guard.station(),
+                         the guard at {:?}",
+                        guard.pos(),
                     );
                 }
 
@@ -1467,7 +1453,7 @@ mod tests {
     #[test]
     fn patrol_memory_wipes_when_the_territory_is_exhausted() {
         let facility = Facility::walled_box(5, 5); // a 3×3 interior
-        let mut guard = Guard::patrolling(Cell::new(2, 2));
+        let mut guard = Guard::patrolling(Cell::new(2, 2)).with_beat(open_beat(5, 5));
         // The guard has looked at its whole territory: fold a full-circle view in.
         let whole_room = field_of_view(
             &facility,
@@ -1506,7 +1492,8 @@ mod tests {
         // Already standing on its patrol target (destination == pos): the fixture
         // for "just arrived", the moment a dwell is rolled. (A fresh guard with no
         // target picks one and walks without pausing.)
-        let mut guard = Guard::patrolling_to(Cell::new(4, 4), Cell::new(4, 4));
+        let mut guard =
+            Guard::patrolling_to(Cell::new(4, 4), Cell::new(4, 4)).with_beat(open_beat(9, 9));
         guard.look(&facility);
         let (start, facing) = (guard.pos(), guard.facing());
         let mut rng = Rng::new(7);

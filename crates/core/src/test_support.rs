@@ -52,6 +52,20 @@ pub(crate) fn open_room(w: u32, h: u32) -> Layout {
     Layout::from_facility(Facility::walled_box(w, h))
 }
 
+/// The interior cells of a `w × h` walled box — the §7.5 beat a *fixture* guard is
+/// handed so it has somewhere to patrol.
+///
+/// A beat is normally cut from the §10.5 region graph ([`crate::beat`]), and a
+/// hand-built room has none; a guard with no beat has no territory and holds
+/// ([`Guard::territory`](crate::Guard)). So a test that wants a guard to actually
+/// sweep an open room says so with this, rather than relying on a box drawn around a
+/// remembered spawn cell — the anchor #398 removed.
+pub(crate) fn open_beat(w: u32, h: u32) -> Vec<Cell> {
+    (1..h.saturating_sub(1))
+        .flat_map(|y| (1..w.saturating_sub(1)).map(move |x| Cell::new(x, y)))
+        .collect()
+}
+
 /// A passability predicate for a `w × h` open box (cells `[0,w) × [0,h)`) with a
 /// set of blocked cells punched out — an infinite-grid predicate for pathing tests,
 /// the counterpart to [`open_room`]'s real bounded [`Layout`].

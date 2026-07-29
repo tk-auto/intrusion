@@ -1707,12 +1707,20 @@ mod tests {
     /// so they leave no letter here and are asserted in
     /// [`the_striking_profiles_work_the_body_chain`] instead.
     ///
-    /// The pin has moved once since, and for a reason worth naming: rungs 2 and 3
-    /// began **walking guards into the facility** (§7.3/#374). This list is the bot's
-    /// play against a fixed game, so a change to the *game* moves it exactly as a
-    /// change to the cue seam would — which is why the refresh belongs in the PR that
-    /// changed the game, with the deltas read rather than waved through. What it must
-    /// never do is move on a refactor that was supposed to change nothing.
+    /// The pin has moved twice since, and for reasons worth naming. First, rungs 2 and
+    /// 3 began **walking guards into the facility** (§7.3/#374). Then #398 took the
+    /// spawn-cell anchor off patrol territory, so a reinforcement is cut its beat
+    /// around where its errand **finished** rather than around the room it walked in
+    /// by — two rows moved, both keeping their outcome: `cautious 11` still wins, four
+    /// turns later, and `careless 3` still loses at turn 181 having pressed one cloak
+    /// fewer. Only runs that saw a reinforcement stand down could move at all, which is
+    /// why 46 of 48 rows are untouched.
+    ///
+    /// This list is the bot's play against a fixed game, so a change to the *game*
+    /// moves it exactly as a change to the cue seam would — which is why the refresh
+    /// belongs in the PR that changed the game, with the deltas read rather than waved
+    /// through. What it must never do is move on a refactor that was supposed to change
+    /// nothing.
     #[test]
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 48] = [
@@ -1739,7 +1747,7 @@ mod tests {
             "cautious 8 lost 88 r",
             "cautious 9 lost 242 rdrrd",
             "cautious 10 lost 94 rd",
-            "cautious 11 won 539 crdrrdrdrd",
+            "cautious 11 won 543 crdrrdrdrd",
             "aggressive 0 won 63 c",
             "aggressive 1 won 179 rrdc",
             "aggressive 2 won 224 ",
@@ -1755,7 +1763,7 @@ mod tests {
             "careless 0 won 66 c",
             "careless 1 won 179 rrdc",
             "careless 2 won 215 c",
-            "careless 3 lost 181 rdrcrcrdrc",
+            "careless 3 lost 181 rdrcrcrdr",
             "careless 4 lost 91 crcrd",
             "careless 5 won 242 rrcrdrrcr",
             "careless 6 lost 77 r",

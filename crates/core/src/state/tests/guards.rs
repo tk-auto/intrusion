@@ -6,9 +6,9 @@
 //! and its beat (§7.5), the cupboard wait-out and the §15 Q5 flush (§10.3), and
 //! Confusion suppressing the whole phase for the guards it catches (§8.3).
 
-use crate::guard::{GuardState, PATROL_RADIUS, SEARCH_RADIUS};
+use crate::guard::{GuardState, SEARCH_RADIUS};
 use crate::state::*;
-use crate::test_support::{open_room, region_strip};
+use crate::test_support::{open_beat, open_room, region_strip};
 use crate::{generate_level, AlertTrigger, LevelModifiers, Rng};
 
 /// §7.3: a downed guard misses its radio ping a period after the takedown; control
@@ -164,50 +164,6 @@ fn a_hidden_body_still_misses_its_ping() {
     }
     assert!(silenced, "the hidden body still missed its ping (§7.3)");
     assert!(!s.bodies()[0].found(), "confusion, not cancellation");
-}
-
-/// §7.3: control's last fix on a guard is **where it fell**, not the post it was
-/// assigned to. A guard taken down far from its station is reported — and searched
-/// for — at the takedown site; the station never enters into it.
-#[test]
-fn a_dispatch_heads_for_the_takedown_site_not_the_station() {
-    let fell = Cell::new(1, 2);
-    let station = Cell::new(1, 25); // its post, right across the level
-    let mut layout = open_room(3, 30);
-    layout.place(Cell::new(1, 1), Terrain::Hideout);
-    let mut s = State::new(
-        layout,
-        Cell::new(1, 1),
-        Direction::South,
-        vec![
-            Guard::stationary(fell)
-                .with_station(station)
-                .with_radio_clock(radio::RadioClock::from_period(3)),
-            Guard::patrolling(Cell::new(1, 20)),
-        ],
-        Vec::new(),
-        Cell::new(1, 28),
-    );
-
-    s.step(Input::Step(Direction::South)); // take it down at `fell`
-    assert_eq!(
-        s.bodies()[0].fell_at(),
-        fell,
-        "the body records where it fell"
-    );
-
-    s.step(Input::Wait); // the window
-    let dispatch = s.step(Input::Wait); // the first missed ping
-    assert!(
-        dispatch.contains(&Event::RadioSilence { at: fell }),
-        "the silence names the takedown site, not the station {station:?}",
-    );
-    assert_eq!(s.guards()[0].state(), GuardState::Responding);
-    assert_eq!(
-        s.guards()[0].destination(),
-        Some(fell),
-        "the responder walks to where the guard fell",
-    );
 }
 
 /// §7.3/§8.3: hauling a body away is what makes the dispatch *confused*. The
@@ -873,26 +829,31 @@ fn a_boxed_in_guard_has_nowhere_to_patrol_and_holds() {
 }
 
 /// §7.5: a Calm guard genuinely paces across its territory rather than shuffling
-/// by its spawn — over a patrol it reaches a cell well away from its station.
+/// by its spawn — over a patrol it reaches a cell well away from where it started.
 #[test]
 fn a_calm_guard_paces_across_its_territory() {
-    let station = Cell::new(15, 15);
+    let spawn = Cell::new(15, 15);
+    // A hand-built room has no region graph, so the beat is handed over directly:
+    // the northern half of the room, well clear of the parked player.
+    let beat: Vec<Cell> = (1..16)
+        .flat_map(|y| (1..29).map(move |x| Cell::new(x, y)))
+        .collect();
     let mut s = State::new(
         open_room(30, 30),
         Cell::new(1, 28), // player parked in a far corner, out of the territory
         Direction::North,
-        vec![Guard::patrolling(station)],
+        vec![Guard::patrolling(spawn).with_beat(beat)],
         Vec::new(),
         Cell::new(1, 1),
     );
     let mut farthest = 0;
     for _ in 0..40 {
         s.step(Input::Wait);
-        farthest = farthest.max(station.manhattan_distance(s.guards()[0].pos()));
+        farthest = farthest.max(spawn.manhattan_distance(s.guards()[0].pos()));
     }
     assert!(
-        farthest > PATROL_RADIUS / 2,
-        "the guard paced across its territory (reached {farthest} from station)",
+        farthest > 8,
+        "the guard paced across its territory (reached {farthest} from its spawn)",
     );
     assert_eq!(
         s.outcome(),
@@ -917,7 +878,7 @@ fn a_calm_guard_dwells_through_the_turn_loop_and_the_knob_disables_it() {
             layout,
             Cell::new(1, 1), // hidden in the corner cupboard — never detected
             Direction::North,
-            vec![Guard::patrolling(Cell::new(6, 6))],
+            vec![Guard::patrolling(Cell::new(6, 6)).with_beat(open_beat(12, 12))],
             Vec::new(),
             Cell::new(10, 10),
         )
@@ -971,8 +932,8 @@ fn a_calm_guard_dwells_through_the_turn_loop_and_the_knob_disables_it() {
 #[test]
 fn a_region_beat_carries_the_patrol_across_corridors_and_rooms() {
     let layout = region_strip();
-    let station = Cell::new(2, 2);
-    let beat = crate::beat::beat_cells(layout.regions(), station, 3);
+    let anchor = Cell::new(2, 2);
+    let beat = crate::beat::beat_cells(layout.regions(), anchor, 3);
     let door_a = layout.regions().door_at(Cell::new(4, 2)).unwrap();
     let door_b = layout.regions().door_at(Cell::new(7, 2)).unwrap();
     let door_d = layout.regions().door_at(Cell::new(11, 2)).unwrap();
@@ -980,7 +941,7 @@ fn a_region_beat_carries_the_patrol_across_corridors_and_rooms() {
         layout,
         Cell::new(13, 4), // parked in corridor D, outside the beat
         Direction::North,
-        vec![Guard::patrolling(station).with_beat(beat.clone())],
+        vec![Guard::patrolling(anchor).with_beat(beat.clone())],
         Vec::new(),
         Cell::new(13, 1),
     );

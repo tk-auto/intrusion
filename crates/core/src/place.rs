@@ -152,11 +152,13 @@ impl Placement {
 
     /// The guards as the live actors a real run spawns — the patrolling §7.5
     /// sweepers (§7.4's reactive states ride on the same seam), each carrying its
-    /// region **beat** (§10.5, [`crate::beat`]): the station's region grown across
-    /// `layout`'s door edges, so a territory is rooms plus the corridors joining
-    /// them and never straddles a wall. The beats are grown **cooperatively**
-    /// ([`coordinated_beat_cells`]) so guards stationed near each other fan out to
-    /// cover distinct wings rather than grinding the same ground (§7.5). Placement
+    /// region **beat** (§10.5, [`crate::beat`]): the region the guard stands in,
+    /// grown across `layout`'s door edges, so a territory is rooms plus the
+    /// corridors joining them and never straddles a wall. The beats are grown
+    /// **cooperatively** ([`coordinated_beat_cells`]) so guards spawned near each
+    /// other fan out to cover distinct wings rather than grinding the same ground
+    /// (§7.5). At placement a guard's spawn cell *is* its live position, which is
+    /// what [`coordinated_beat_cells`] anchors on. Placement
     /// records guard *cells* because the §10.6 guarantees are about where a guard
     /// *stands*; turning a spawn into a behaving guard is a single decision, and it
     /// lives here so every caller — the web build, the sim — spawns the same
@@ -692,13 +694,13 @@ mod tests {
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             let regions = layout.regions();
-            let stations = p.guard_cells();
+            let anchors = p.guard_cells();
 
-            let independent: Vec<Vec<RegionId>> = stations
+            let independent: Vec<Vec<RegionId>> = anchors
                 .iter()
                 .map(|&s| beat_regions(regions, s, BEAT_REGIONS))
                 .collect();
-            let coordinated = coordinated_beats(regions, stations, BEAT_REGIONS);
+            let coordinated = coordinated_beats(regions, anchors, BEAT_REGIONS);
 
             // Same size per guard (only the composition moves), and no starved beat.
             for (indep, coord) in independent.iter().zip(&coordinated) {
