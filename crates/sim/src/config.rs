@@ -264,7 +264,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 5] = [
+const MODIFIERS: [(&str, SetModifier); 6] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -278,6 +278,9 @@ const MODIFIERS: [(&str, SetModifier); 5] = [
         m.always_show_vision_cones = true
     }),
     ("full-layout-known", |m| m.full_layout_known = true),
+    ("guards-detect-only-their-cone", |m| {
+        m.guards_detect_only_their_cone = true
+    }),
 ];
 
 /// The `--alert` vocabulary (§7.3/#376): each threshold paired with the field it
@@ -557,6 +560,7 @@ mod tests {
             body_found_calls_two_guards,
             always_show_vision_cones,
             full_layout_known,
+            guards_detect_only_their_cone,
             intel_to_exit,
         } = all.modifiers;
         assert!(guards_always_search_hideouts);
@@ -564,6 +568,7 @@ mod tests {
         assert!(body_found_calls_two_guards);
         assert!(always_show_vision_cones);
         assert!(full_layout_known);
+        assert!(guards_detect_only_their_cone);
         assert_eq!(
             intel_to_exit,
             RunConfig::sim().modifiers.intel_to_exit,

@@ -1045,3 +1045,92 @@ takedowns are *supposed* to scale badly — but it is a live balance change, and
 `ALERT_DURATION`, `SEARCH_DURATION` and the ping interval are all **[START]** numbers
 that may want to move once the sim has the new picture. Retuning them in the same
 change would have been indistinguishable from the fix.
+
+---
+
+## Appendix 28 — The flank experiment: what it measured, and why it is a knob
+
+*(§6.1, §6.2, §7.2, §12.6. The experiment is **not adopted** — this is its record.)*
+
+§155 carved the three cells at a guard's back out of its detection set, so a takedown
+can be lined up from directly behind. Its *sides* — §6.2 tier 3 — still detect, and
+§6.1/§6.2/§7.2 all say so: *"you can never stand beside or in front of a guard
+undetected."* Two things follow, and #410 asked whether they should:
+
+- **A takedown must come from directly behind or rear-diagonal.** Step to a guard's
+  flank and you are seen, though it is looking the other way.
+- **You cannot tail a guard.** Walk in its blind spot and the moment it turns 90° at a
+  corner you are at its side, tier 3, detected — so the one manoeuvre that should be
+  the reward for reading a patrol is impossible.
+
+**The experiment.** Carve tiers 3–5 instead of 4–5, so a guard detects exactly what its
+cone covers and the free touching ring becomes player-only. A 180° turn still catches
+you: that lands you at tier 1, dead ahead.
+
+**Why it is a knob and not a constant.** It bends a **[SETTLED]** sentence, so it ships
+as `guards_detect_only_their_cone` (§12.6) and both arms run from one build. Two
+properties make the comparison exact, and both are asserted:
+
+- **The cone's silhouette is identical in both arms.** The carved cells stay §6.2
+  artificial cone-carving walls; only their membership in the *detection* set changes.
+  Anything else would change what walls shadow, which is a different experiment.
+- **The two arms generate the same facility.** Spawn safety (`place.rs`) uses the same
+  fov, so a narrower carve would pass more cells and shift where guards spawn. It is
+  pinned to the shipped rear carve instead — the conservative rule, since a cell safe
+  under it is safe under any wider blind spot — so **generation is not part of the
+  diff** and a shifted seed's geometry can never be mistaken for a result.
+
+### What it measured
+
+Paired A/B, 150 seeds × four profiles × two arms, one build, `sim --bot`:
+
+| | balanced | cautious | aggressive | careless |
+|---|---|---|---|---|
+| win rate | .360 → **.433** | .527 → **.573** | .387 → **.460** | .367 → **.520** |
+| detections | 1352 → 1336 | 1684 → **1260** | 1206 → **959** | 1675 → **1222** |
+| takedowns | 0 → 16 | 0 → 5 | 28 → **80** | 13 → **98** |
+| bodies found | 0 → 14 | 0 → 4 | 12 → 27 | 12 → **72** |
+| turns to win | 148 → 159 | 250 → 268 | 120 → 127 | 119 → **138** |
+| diversity | .653 → .641 | .436 → .414 | .586 → .586 | .514 → **.582** |
+| alert peak | .76 → .94 | .77 → .82 | .99 → 1.17 | 1.08 → **1.45** |
+| reinforcements | 19 → **62** | 29 → 46 | 54 → **93** | 60 → **153** |
+
+**The bot does exercise the new geometry (#260's gate), and in two different ways.**
+The striking temperaments reach for it deliberately: `strike` opens on the core's own
+`guard_detects_now`, which is exactly what the flank opens, and takedowns go 28 → 80
+and 13 → 98. The avoidance-first ones have `takedown_reach: 0` and never *walk* to a
+takedown at all — yet `balanced` goes 0 → 16, which can only be a takedown that fell
+in its lap: it walked into a guard it could not perceive, from a side that is now
+blind. The result is not inconclusive.
+
+### Reading it against what was pre-registered
+
+**"The striking profiles' win rate jumping while `detections` collapses means the flank
+is simply cheaper stealth with no new decision."** The *surface* of this fired — win
+rate up 7.3 and 15.3 points, detections down 20% and 27% — and it must be reported as
+having fired. Its stated *reason* did not: takedowns tripled and septupled, bodies
+found rose with them, alert peak rose on every profile and reinforcements went up 1.5–
+2.5×. That is a new decision being taken and paid for in a markedly louder facility,
+not a quieter run of the same game. The criterion was ambiguous as written; both halves
+are recorded rather than picking the flattering reading.
+
+**"`diversity` falling means the game gained a dominant line rather than an option."**
+Did not fire. The moves are small and mixed (−.022 to +.007), and the profile that
+changed most, `careless`, went **up** (+.068).
+
+**The finding the pre-registration did not anticipate, and the reason to hesitate: the
+win rate rises on temperaments that never strike at all.** `cautious` gains 4.7 points
+with 5 takedowns across 150 runs and a 25% fall in detections — that is almost pure
+free safety, an un-priced gift rather than a new option. The experiment is doing two
+separable things: opening a genuine new play (the flank takedown and the tail, paid for
+in noise) and quietly making a guard's side a safe place to stand. The first is what
+#410 wanted; the second is what §7.2 means when it says the takedown's constraints
+*are* the cost.
+
+**Not adopted on these numbers.** A narrower variant is the interesting next question —
+the flank blind only while a guard is **Calm**, say, so reading a patrol is rewarded but
+a hunt still sweeps its sides. That is its own ticket; the knob stays, off, so the
+question can be re-measured without rebuilding any of this.
+
+**What did not change.** The default arm is byte-identical to before: all four
+committed baseline profiles match exactly, over 400 runs.

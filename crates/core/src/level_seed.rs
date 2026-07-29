@@ -644,6 +644,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         body_found_calls_two_guards,
         always_show_vision_cones,
         full_layout_known,
+        guards_detect_only_their_cone,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -653,6 +654,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         body_found_calls_two_guards,
         always_show_vision_cones,
         full_layout_known,
+        guards_detect_only_their_cone,
     ]
     .into_iter()
     .enumerate()
@@ -673,7 +675,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, guards_detect_only_their_cone] =
         active;
     Some(LevelModifiers {
         guards_always_search_hideouts,
@@ -681,6 +683,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         body_found_calls_two_guards,
         always_show_vision_cones,
         full_layout_known,
+        guards_detect_only_their_cone,
         intel_to_exit: gate,
     })
 }
@@ -688,7 +691,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// How many modifier toggles this build actually has — the live count, against which
 /// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
 /// the format.
-const MODIFIER_FIELDS: usize = 5;
+const MODIFIER_FIELDS: usize = 6;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1015,25 +1018,49 @@ mod tests {
                 for sighting in [false, true] {
                     for body in [false, true] {
                         for layout in [false, true] {
-                            for gate in gates {
-                                for abilities in loadouts {
-                                    let level = LevelSeed {
-                                        seed: 12345,
-                                        modifiers: LevelModifiers {
+                            for cone_only in [false, true] {
+                                for gate in gates {
+                                    for abilities in loadouts {
+                                        let modifiers = LevelModifiers {
                                             guards_always_search_hideouts: search,
                                             sighting_lost_calls_a_guard: sighting,
                                             body_found_calls_two_guards: body,
                                             always_show_vision_cones: cones,
                                             full_layout_known: layout,
+                                            guards_detect_only_their_cone: cone_only,
                                             intel_to_exit: gate,
-                                        },
-                                        abilities,
-                                    };
-                                    assert_eq!(
-                                        LevelSeed::decode(&token(level)),
-                                        Some(level),
-                                        "round-trip failed for {level:?}",
-                                    );
+                                        };
+                                        let level = LevelSeed {
+                                            seed: 12345,
+                                            modifiers,
+                                            abilities,
+                                        };
+                                        // With more modifier fields than
+                                        // [`MODIFIER_CAP`], the space now has a corner
+                                        // the format deliberately refuses (see
+                                        // [`modifier_slots`]) — the codec is total over
+                                        // the configs a run *can hold*, which is the
+                                        // claim, and refusing the rest **exactly** is
+                                        // the other half of it.
+                                        let active =
+                                            [search, sighting, body, cones, layout, cone_only]
+                                                .into_iter()
+                                                .filter(|&on| on)
+                                                .count();
+                                        if active > MODIFIER_CAP {
+                                            assert_eq!(
+                                                level.encode(),
+                                                None,
+                                                "over the cap must be refused, not truncated: {level:?}",
+                                            );
+                                            continue;
+                                        }
+                                        assert_eq!(
+                                            LevelSeed::decode(&token(level)),
+                                            Some(level),
+                                            "round-trip failed for {level:?}",
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -1129,6 +1156,7 @@ mod tests {
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: false,
                 full_layout_known: false,
+                guards_detect_only_their_cone: false,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1249,12 +1277,17 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 3])
             .with(AbilityId::TECH[AbilityId::TECH.len() - 2])
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
+        // The widest set the format admits is [`MODIFIER_CAP`] toggles, and the widest
+        // *payload* takes the highest slots — so this is every modifier but slot 0,
+        // which now reaches the newest slot (#410). Turning all six on is over the cap
+        // and is refused outright, asserted in `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
-            guards_always_search_hideouts: true,
+            guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: true,
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
             full_layout_known: true,
+            guards_detect_only_their_cone: true,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {

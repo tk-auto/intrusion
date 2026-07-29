@@ -118,9 +118,12 @@ What is left at that mouth is not a hazard but a **choice**, so it is a profile 
 avoidance-first temperaments byte-identical; anything else lets the strike run:
 
 - **At arm's length** — a perceived guard is adjacent and core's own gate is open, so
-  bump it. That covers both legal angles without naming either: the rear blind spot
+  bump it. That covers every legal angle without naming any: the rear blind spot
   (§155 carves the three cells at a guard's back out of its cone) and concealment
-  (§7.2 — a hidden or crouched player is concealed from every viewer).
+  (§7.2 — a hidden or crouched player is concealed from every viewer). Asking the
+  core's gate rather than naming the angles is what let the #410 flank experiment be
+  measured without touching the bot at all: widen the blind spot and the same cue
+  reaches for the flank, because the gate it consults is the one that moved.
 - **Otherwise** — walk to a guard's back, if one is within the profile's budget. Only
   a **seen** guard offers one: a sensed guard's facing is unknown (§9.2), so where its
   back is, is unknown too, and guessing would mean walking into cones the bot cannot
