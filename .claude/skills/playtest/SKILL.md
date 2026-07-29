@@ -50,7 +50,7 @@ The flags (full table in [`crates/sim/README.md`](../../../crates/sim/README.md)
 | Flag | Meaning | Default |
 |---|---|---|
 | `--bot` | play each run with the baseline stealth bot — **the balance-signal mode** | off |
-| `--profile NAME` | which **playstyle temperament** the bot plays: `baseline`, `cautious`, `aggressive`, `careless` (needs `--bot`) | `baseline` |
+| `--profile NAME` | which **playstyle temperament** the bot plays: `balanced`, `cautious`, `aggressive`, `careless` (needs `--bot`) | `balanced` |
 | `--runs N` | how many runs; seeds are `S, S+1, … S+N-1` | 100 |
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
@@ -72,14 +72,14 @@ The flags (full table in [`crates/sim/README.md`](../../../crates/sim/README.md)
   collapse onto the same line is a puzzle with one answer.
 
   It also takes all four to cover §7.2's takedown chain, because no single
-  temperament can: `baseline` and `cautious` decline the verb, `aggressive` strikes
+  temperament can: `balanced` and `cautious` decline the verb, `aggressive` strikes
   and **stows** the body (covering the drag and the §10.3 deposit-and-lock), and
   `careless` strikes and **leaves** it (covering `bodies_found` and §7.3's radio
   clock). A stowed body is beyond every cone, so a batch of tidy profiles alone
   reports `bodies_found: 0` and says nothing about whether discovery works.
 
   ```
-  for p in baseline cautious aggressive careless; do
+  for p in balanced cautious aggressive careless; do
     cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 \
       > /tmp/playtest-$p.jsonl
     tail -1 /tmp/playtest-$p.jsonl
@@ -126,7 +126,7 @@ never a `null` any more) plus `alert_escalations`, the run's climb: one
 > that actually raised the rung — so a zero means either the bot never did the thing
 > **or** something louder always reached that rung first. Report it as **never
 > exercised** and say which reading you think it is. Two known ones: `body-found` and
-> the ping triggers are structurally zero under `baseline`/`cautious` (they land no
+> the ping triggers are structurally zero under `balanced`/`cautious` (they land no
 > takedowns, by design), and `second-post-silent` reads zero even under `careless`
 > because a found body has already taken the facility to rung 3 before a second post
 > can.
@@ -143,7 +143,7 @@ curve is a shell loop.
 
 ```
 for c in 1 2 3 5 8; do
-  cargo run --release -p intrusion-sim -- --bot --profile baseline --runs 100 --seed 0 \
+  cargo run --release -p intrusion-sim -- --bot --profile balanced --runs 100 --seed 0 \
     --cap 1000 --alert sighting-contact-turns=$c | tail -1
 done
 ```
@@ -342,7 +342,7 @@ Run the three temperaments over the same seeds and read each against its own
 baseline block:
 
 ```
-for p in baseline cautious aggressive; do
+for p in balanced cautious aggressive; do
   cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 \
     > /tmp/playtest-$p.jsonl
   tail -1 /tmp/playtest-$p.jsonl
@@ -352,7 +352,7 @@ done
 **Batch vs. baseline** (`--runs 100 --seed 0 --cap 1000`, commit `802c372+profiles`),
 each profile against its own block — **not** against each other:
 
-| Metric | baseline | cautious | aggressive |
+| Metric | balanced | cautious | aggressive |
 |---|---|---|---|
 | win_rate | 0.4400 (Δ0) | 0.4800 (Δ0) | 0.3300 (Δ0) |
 | timeouts | 2 (Δ0) | 2 (Δ0) | 0 (Δ0) |

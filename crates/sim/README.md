@@ -25,7 +25,7 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] \
 | `--seed S` | the first seed | 0 |
 | `--cap N` | inputs issued per run before it is ruled a `timeout` | 1000 |
 | `--bot` | play each run with the baseline stealth bot instead of a script | off |
-| `--profile NAME` | which **playstyle profile** the bot plays (below); needs `--bot` | `baseline` |
+| `--profile NAME` | which **playstyle profile** the bot plays (below); needs `--bot` | `balanced` |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
 | `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed token (#245) — instead of the metrics batch | off |
 
@@ -303,7 +303,7 @@ a second bot:
 
 | Profile | Its temperament |
 |---|---|
-| `baseline` | today's bot, unchanged — the numbers the policy carried as constants, so metrics stay comparable across the seam |
+| `balanced` | the middle temperament: steers wide of a patrol, takes cover when one closes and waits it out for a while, but pushes on rather than sit in a cupboard all run. The default, and the numbers the policy carried as constants before the seam, so metrics stay comparable across it |
 | `cautious` | gives patrols a wide berth, ducks into cover early and waits long; even bolting, it would rather round a patrol than brush past one. Trades speed for not being seen |
 | `aggressive` | pushes toward the objective, **tolerates a cone to save turns** (it walks a watched cell rather than waiting the sweep out), hides late and briefly — and clears a patrol out of its way when the route offers the angle, then **stows the body** in a nearby cupboard |
 | `careless` | `aggressive` carried further: **strikes more readily and never tidies up**, so the bodies it leaves stay on the floor to be found |
@@ -312,7 +312,7 @@ Two of the four take takedowns, and they differ in what they do afterwards for a
 reason. A stowed body is *gone* — no cone will ever find it (§10.3) — so a bot
 that always tidies up drives `bodies_found` to zero and leaves §7.3's radio clock
 untested. `aggressive` covers the drag/stow chain and `careless` covers body
-discovery; only together do they cover §7.2's cost end to end. `baseline` and
+discovery; only together do they cover §7.2's cost end to end. `balanced` and
 `cautious` carry a `takedown_reach` of **zero**, which declines the verb outright:
 their flat takedown row is the temperament working, not an opportunity that never
 came (§13.3).
@@ -349,13 +349,13 @@ it is a deliberate, visible break.
 ### Run row
 
 ```json
-{"seed":17,"profile":"baseline","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0,"crouch":3,"stow":1},"alert_peak":2,"alert_escalations":[{"turn":9,"rung":1,"trigger":"sighting"},{"turn":31,"rung":2,"trigger":"repeat-sightings"}],"reinforcements":1}
+{"seed":17,"profile":"balanced","outcome":"win","turns":214,"detections":2,"takedowns":1,"bodies_found":0,"usage":{"wait":90,"run":6,"camouflage":2,"decoy":0,"dephase":1,"autodoors":0,"confusion":0,"takedown":1,"drag":1,"pierce_wall":0,"lockdown":0,"crouch":3,"stow":1},"alert_peak":2,"alert_escalations":[{"turn":9,"rung":1,"trigger":"sighting"},{"turn":31,"rung":2,"trigger":"repeat-sightings"}],"reinforcements":1}
 ```
 
 | Field | Meaning |
 |---|---|
 | `seed` | the run's seed — with the script, the whole replay |
-| `profile` | the **playstyle profile** that played the run (above), so a batch's rows are attributable. `null` under `--script`: a script has no temperament, and naming `"baseline"` there would claim a bot played it |
+| `profile` | the **playstyle profile** that played the run (above), so a batch's rows are attributable. `null` under `--script`: a script has no temperament, and naming `"balanced"` there would claim a bot played it |
 | `outcome` | `"win"` \| `"capture"` \| `"entombed"` \| `"timeout"` |
 | `turns` | spent turns at the end of the run (free actions excluded) |
 | `detections` | fresh detections (`Event::Detected`): how often stealth broke — a held chase counts once, not once per turn |
@@ -369,7 +369,7 @@ it is a deliberate, visible break.
 ### Summary row
 
 ```json
-{"summary":{"profile":"baseline","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0,"crouch":18,"stow":9},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000,"crouch":0.0017,"stow":0.0009},"diversity":0.1837,"alert_peak_mean":1.8700,"alert_rungs":{"0":4,"1":31,"2":22,"3":43},"alert_triggers":{"sighting":96,"missed-ping":12,"repeat-sightings":22,"console-tampered":9,"body-found":12,"second-post-silent":3},"reinforcements":58}}
+{"summary":{"profile":"balanced","runs":100,"wins":3,"captures":90,"entombed":0,"timeouts":7,"win_rate":0.0300,"turns_to_win_mean":211.5,"turns_to_win_median":208.0,"detections":312,"takedowns":45,"bodies_found":12,"usage":{"wait":9000,"run":600,"camouflage":120,"decoy":20,"dephase":80,"autodoors":0,"confusion":0,"takedown":45,"drag":40,"pierce_wall":0,"lockdown":0,"crouch":18,"stow":9},"usage_share":{"wait":0.8500,"run":0.0567,"camouflage":0.0113,"decoy":0.0019,"dephase":0.0076,"autodoors":0.0000,"confusion":0.0000,"takedown":0.0043,"drag":0.0038,"pierce_wall":0.0000,"lockdown":0.0000,"crouch":0.0017,"stow":0.0009},"diversity":0.1837,"alert_peak_mean":1.8700,"alert_rungs":{"0":4,"1":31,"2":22,"3":43},"alert_triggers":{"sighting":96,"missed-ping":12,"repeat-sightings":22,"console-tampered":9,"body-found":12,"second-post-silent":3},"reinforcements":58}}
 ```
 
 `win_rate` is over all runs; `turns_to_win_mean`/`_median` are over the
@@ -382,7 +382,7 @@ Comparing temperaments is therefore one batch per profile, each summary
 self-describing:
 
 ```
-for p in baseline cautious aggressive; do
+for p in balanced cautious aggressive; do
   cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 | tail -1
 done
 ```

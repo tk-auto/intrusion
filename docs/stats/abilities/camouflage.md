@@ -31,7 +31,7 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities camou
 Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
 **its own** control, never against another's (§13.4).
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.38 → **0.34** | 0.60 → **0.60** | 0.50 → **0.48** | 0.49 → **0.51** |
 | `turns_to_win_median` | 117.5 → **113.0** | 183.5 → **172.0** | 111.0 → **113.5** | 116.0 → **106.0** |
@@ -43,7 +43,7 @@ Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each p
 
 Disjoint block, `--seed 100 --runs 100`:
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.44 → **0.42** | 0.63 → **0.61** | 0.37 → **0.36** | 0.46 → **0.47** |
 | `turns_to_win_median` | 117.5 → **118.5** | 204.0 → **204.0** | 92.0 → **98.5** | 110.0 → **127.0** |
@@ -63,13 +63,13 @@ Disjoint block, `--seed 100 --runs 100`:
 - **Detections per turn fall sharply for the striking temperaments** — `aggressive`
   0.0432 → 0.0368 and `careless` 0.0704 → 0.0406 at seed 0, both reproduced at seed
   100 — and barely move for the careful ones, which were already hiding in cupboards.
-- **Win rate does not follow.** `baseline` goes *down* in both blocks (−0.04, −0.02),
+- **Win rate does not follow.** `balanced` goes *down* in both blocks (−0.04, −0.02),
   the only ability here that does. Being seen less while winning no more is a
   plausible signature of the pin: the cue commits to holding still for the cloak's
   full ten turns, and ten turns of not moving is ten turns of not making progress.
   Worth a human's eye rather than a conclusion.
 - **`diversity` falls under the careful temperaments** (`cautious` −0.08 and −0.07,
-  `baseline` −0.08 and −0.03) and is mixed under the striking ones. Same direction as
+  `balanced` −0.08 and −0.03) and is mixed under the striking ones. Same direction as
   Confusion, opposite to Dephase.
 - **Not dominant** — 0.21%–0.87% of spent turns.
 
@@ -78,7 +78,7 @@ Disjoint block, `--seed 100 --runs 100`:
 - `6cce986+stats-family-347` (#347) — first measurement of a cue that shipped with
   #366: the slot's zero was the sim never granting the tech, not a dead cue. 44–91
   presses per 100-run batch; detections down sharply for the striking temperaments,
-  `baseline` win rate down in both blocks, `diversity` down for the careful ones.
+  `balanced` win rate down in both blocks, `diversity` down for the careful ones.
 - `7d5dc01+cues-347-remeasured` (#347) — **re-measured on the post-crouch bot**
   (#382 landed while this branch was open, changing the policy and refreshing the
   innate baseline, so every control column above moved). Presses and shares are essentially unchanged; the `diversity` fall under the careful temperaments is smaller than first measured but still in the same direction.

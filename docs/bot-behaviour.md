@@ -297,7 +297,7 @@ whether an ability gets a look-in at all.
 
 Every threshold the bot weighs its options by — how wide a berth it gives a patrol,
 how early it ducks into cover, how long it waits there, how keen a cue must be —
-lives in a `Profile`. Four ship: `baseline`, `cautious`, `aggressive`, `careless`.
+lives in a `Profile`. Four ship: `balanced`, `cautious`, `aggressive`, `careless`.
 
 A profile is **one row of numbers over the same policy**, never a second bot. This
 is a constraint, not a convenience: if a temperament ever wants a different
@@ -396,7 +396,7 @@ Stated so they read as decisions rather than oversights:
 - **Ducts.** The bot has no crawl policy (§10.7): climbing in is a mode change into
   the crawlspace with degraded perception, not a step a floor route can take, so duct
   entries are simply not routable for it.
-- **The avoidance-first profiles land no takedowns, and that is correct.** `baseline`
+- **The avoidance-first profiles land no takedowns, and that is correct.** `balanced`
   and `cautious` carry `takedown_reach: 0`: they steer wide of guards rather than
   hunting them, so a flat zero in their takedown row is the temperament working, not
   a defect (§13.3). Read the §7.2 chain off `aggressive` and `careless` instead.

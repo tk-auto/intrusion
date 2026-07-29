@@ -37,7 +37,7 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities confu
 Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
 **its own** control, never against another's (§13.4).
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.38 → **0.45** | 0.60 → **0.70** | 0.50 → **0.55** | 0.49 → **0.51** |
 | `turns_to_win_median` | 117.5 → **137.0** | 183.5 → **211.5** | 111.0 → **116.0** | 116.0 → **115.0** |
@@ -49,7 +49,7 @@ Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each p
 
 Disjoint block, `--seed 100 --runs 100`:
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.44 → **0.50** | 0.63 → **0.68** | 0.37 → **0.46** | 0.46 → **0.54** |
 | `turns_to_win_median` | 117.5 → **118.5** | 204.0 → **228.0** | 92.0 → **109.0** | 110.0 → **117.0** |
@@ -69,7 +69,7 @@ moved two things in opposite directions.
   everywhere too, by as much as a third under `aggressive` on the seed-100 block. That is a coherent,
   ability-shaped effect and not noise.
 - **`diversity` falls, and that is the flag.** **All eight** profile-blocks drop, and
-  `baseline` loses 0.10 and 0.04. §13.2
+  `balanced` loses 0.10 and 0.04. §13.2
   calls diversity the boredom metric: runs are becoming *more alike*. An escape that
   always works makes every hunt end the same way, which is exactly the shape of "a
   puzzle with one answer" — and it is worth more attention than the win rate that
@@ -85,7 +85,7 @@ moved two things in opposite directions.
 ### Suspicious seeds — go play these (§13.3)
 
 Confusion turns some captures into **timeouts**: the bot buys six turns, again and
-again, and rides out the input cap instead of ever finishing. Three under `baseline`
+again, and rides out the input cap instead of ever finishing. Three under `balanced`
 at seed 0:
 
 | Seed | Confusion presses | Outcome without → with |
@@ -95,13 +95,13 @@ at seed 0:
 | 50 | 16 | capture → timeout |
 
 ```
-cargo run --release -p intrusion-sim -- --bot --profile baseline --runs 1 --seed 40 --abilities confusion
+cargo run --release -p intrusion-sim -- --bot --profile balanced --runs 1 --seed 40 --abilities confusion
 ```
 
 Seed 40 is the one to play first: it *won* without the ability and stalls out with
 it. Whether that is the ability, the cue, or the bot's inability to convert bought
 time into progress is a human call (§13.4) — the sim only says it is worth looking
-at. 31 of 100 seeds changed outcome under `baseline`, so there is no shortage of
+at. 31 of 100 seeds changed outcome under `balanced`, so there is no shortage of
 material.
 
 ## History
