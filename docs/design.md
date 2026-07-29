@@ -315,7 +315,7 @@ it trivialises the hiding game.
   exception, the guard rear blind spot below. For the **player** this is
   unqualified and **[SETTLED]**: you can never stand adjacent to the player
   undetected, in any direction including directly behind.
-- **Guard rear blind spot (§155).** A guard does **not** detect the three cells
+- **Guard rear blind spot (#155).** A guard does **not** detect the three cells
   at its back — the two rear diagonals (tier 4) and directly behind (tier 5) of
   §6.2. Its *forward* and *side* (tier 3) cells still detect, so you can never
   stand **beside or in front of** a guard undetected — but you *can* slip
@@ -344,7 +344,7 @@ cast the shadows that carve the cone. Because artificial walls are still marked
 seen — exactly like real ones — you get the 360° touching ring for free.
 
 For a **guard**, the three rear ring cells (tiers 4–5) are then dropped from the
-detection set — the §6.1 rear blind spot (§155). They still act as artificial
+detection set — the §6.1 rear blind spot (#155). They still act as artificial
 walls during the cast, so the wedge silhouette is untouched; they are only
 unmarked afterwards, so the guard simply does not *notice* what is at its back.
 The player keeps the full ring.
@@ -405,7 +405,7 @@ on, and the old one was free, unlimited-range and therefore the game.
 
 Because of the touching ring (§6.1), **an aware guard can always see you when you
 are adjacent to it — beside it or in front.** The one gap is its **rear blind
-spot** (§6.1/§155): the three cells directly behind and rear-diagonal do not
+spot** (§6.1/#155): the three cells directly behind and rear-diagonal do not
 detect. So a takedown is possible either against a guard made unaware in front —
 arranging to be adjacent without ever having been in its cone, a puzzle of
 geometry, timing, doors and distraction — or by reaching the cell **directly
@@ -669,11 +669,11 @@ it has not recently looked at.
   across distances instead of shuffling locally, and it is why the emergent
   patrols read as purposeful. Keep it.
 - When no uninspected cell remains, it wipes its memory and starts over.
-- **Dwell (§153).** On reaching a patrol target, a Calm guard **holds in place for
+- **Dwell (#153).** On reaching a patrol target, a Calm guard **holds in place for
   3–7 turns** before picking the next — facing unchanged, no free re-aim (§5).
   This is what makes a Takedown (§7.2) approachable: a guard that walks every
   single turn can never be lined up on, so the pause is the *window to act*,
-  paired with the rear blind spot (§6.1/§155) for the behind-the-back strike.
+  paired with the rear blind spot (§6.1/#155) for the behind-the-back strike.
   **Calm only** — a Chasing/Investigating/Alerted/Responding guard never dwells
   and a detection cancels an in-progress dwell the same turn (a hunt never slows,
   the mirror of §7.1's "guards never accelerate"). The dwell length is drawn from
@@ -1672,17 +1672,11 @@ companion render ticket #134; §10.7 owns the model.)*
 
 **Fog (§11.5a).** An **entry** (`=`) is **contents**: a mouth recessed into a wall
 run, so it reads as plain schematic fabric until you have seen it, and then it is
-remembered. *(This drops the earlier "visible from turn one like a door" rule —
-another stated change, and the same one doors themselves took: the plans carry the
-building's bones, and a crawlspace mouth is something you find. A duct you scouted
-is worth more than one you didn't, exactly as with a cupboard.)* The **interior
-path** is **not on the base map at all** — it carries no tell, so it can cross a room's floor without giving the
-shortcut away — and lives in **its own layer, shown only while you are crawling it**.
-It is **not remembered**: climb out and the path is hidden again. *(This drops the
-earlier "the interior reads as plain wall, remembered once crawled" rule — a stated
-change, not drift: now that the path can overlie floor, "reads as plain wall" is no
-longer even true, and a remembered overlay would paint a tell on the room floor a duct
-crosses. The `=` you plan around is the entry alone.)*
+remembered. The **interior path** is **not on the base map at all** — it carries no
+tell, so it can cross a room's floor without giving the shortcut away — and lives in
+**its own layer, shown only while you are crawling it**. It is **not remembered**:
+climb out and the path is hidden again. *(Both rules replaced earlier ones — the entry
+was to be visible from turn one, the interior remembered once crawled. Appendix 18.)*
 
 **Generation.** Place a small number of ducts, each connecting two regions **far
 apart on the region graph** (a duct that shortcuts nothing is noise), routed as the
@@ -1777,16 +1771,13 @@ and **how long it lives**:
   neither expires while its reader is still held down nor lingers into the frame they
   choose a real move from.
 
-The two places also sit differently in the §11.5 precedence, because they make different
-claims. A **cell** mark is a wash and the weakest background there is: a door cue, a
-sensed guard and a danger cone all paint over it. A mark on a **thing** is a *recolour of
-a cue that thing already draws* rather than a competing claim — on a guard felt through a
-wall, cyan replaces the Sensed orange to say "exactly here, **and** it cannot move" — so
-it outranks Sensed and still yields to Danger. Net: **Danger > a mark on a thing > Sensed
-> the wash.** A mark on a thing only ever recolours something the player is already
-shown, so it can never reveal what the fog is hiding — it inherits that thing's own
-visibility rule rather than adding one, which for a decoy (§11.5a's second exception)
-means it is drawn out of the FOV exactly as the `@` under it is.
+The two places sit at different heights in the §11.5 precedence, which owns that
+ordering: a **cell** mark is a wash and the weakest background there is, while a mark on
+a **thing** refines a cue that thing already draws and so outranks Sensed. One
+consequence belongs here rather than there: a mark on a thing **inherits that thing's
+own visibility rule** and adds none, so it can never reveal what the fog is hiding —
+which for a decoy (§11.5a's second exception) means it is drawn out of the FOV exactly
+as the `@` under it is.
 
 If an effect background ever reads badly under the glyph standing on it, **shift the
 Effect colour** — the channel is not negotiable, the hue is.
@@ -2030,17 +2021,23 @@ throughout. Neither substitutes for the other, which is why a mark is keyed by i
 lifetime as well as its place: an ability may hold a momentary and a standing mark at
 the same time, over the same kind of place, without one quietly replacing the other.
 
-The precedence is fixed — **Danger > a mark on a thing > Sensed > the wash** — so an
-advisory layer can never masquerade as the detection set, nor hide it; the wash yields
-to the sense channel, while a mark on a thing merely refines the cue that thing already
-draws. Every mark carries the geometry the mechanic resolved against, by value, so the
-picture cannot disagree with the rule — and it stays where it happened rather than
-following the player, because that is what the effect did. A **refusal** marks nothing:
-a press that changed nothing is a message (§11.7), not an effect.
+**The precedence is fixed: Danger > a mark on a thing > Sensed > the wash.** An advisory
+layer can never masquerade as the detection set, nor hide it — the wash yields to the
+sense channel, while a mark on a thing merely refines the cue that thing already draws.
+Every mark carries the geometry the mechanic resolved against, by value, so the picture
+cannot disagree with the rule, and it stays where it happened rather than following the
+player, because that is what the effect did. A **refusal** marks nothing: a press that
+changed nothing is a message (§11.7), not an effect.
 
 Two rules the old version's failures leave behind (appendix 1): **a watched cell must
 never render safer than an unwatched one**, and **floor renders as dots** so the FOV
 boundary is visible across open ground at all.
+
+> **What each background resolves to, row by row** — which cue means what, and the two
+> guarantees that must not regress (the overlay covers watched cells outside your own
+> FOV; cones of guards you cannot see paint nothing) — is
+> [`docs/render-reference.md`](render-reference.md) §5. This section owns the rules; the
+> reference records the board they produce.
 ### 11.5a Fog: the layout is visible, the contents are hidden
 
 **[SETTLED]**

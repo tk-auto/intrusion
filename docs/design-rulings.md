@@ -299,7 +299,7 @@ told about) is a coherent rule somebody may prefer.
 
 ## Appendix 8 — The patrol dwell: why it is unconditional, and why the window grew
 
-*(§7.5, §153.)*
+*(§7.5, #153.)*
 
 The dwell was a 50% roll over 3–5 turns, and at that rate it was not the thing a player
 saw. Measured over twelve seeded runs, **92% of every stationary spell a patrolling guard
