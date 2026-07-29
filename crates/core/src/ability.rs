@@ -433,7 +433,7 @@ impl AbilityId {
             AbilityId::Run => "Run",
             AbilityId::Camouflage => "Camouflage",
             AbilityId::Decoy => "Decoy",
-            AbilityId::Dephase => "Dephase",
+            AbilityId::Dephase => "Phase Out",
             AbilityId::Autodoors => "Autodoors",
             AbilityId::Confusion => "Confusion",
             AbilityId::Vision => "Vision",
@@ -1434,6 +1434,35 @@ mod tests {
             assert_ne!(
                 AbilityState::Passive,
                 AbilityState::Cooling { remaining: n }
+            );
+        }
+    }
+
+    /// **A bar name may shorten its full name, never negate it** (§11.4/§11.8/#415).
+    ///
+    /// The bar draws `Phase` and the help panel draws **Phase Out**, and the pair is
+    /// only legible because the short one is a plain truncation of the long one. It
+    /// was not always: while the §8.3 word *Dephase* was also the screen's word,
+    /// `Phase` read as its **opposite**, so a player who learned the bar name learned
+    /// the wrong verb. The rename fixed that, and this pins it — the prefix is the
+    /// property, so the pair cannot drift back into naming opposites.
+    ///
+    /// Only where the bar name is a *shortening* at all: `Daze`, `Bore` and `Sight`
+    /// are deliberately different words (§11.4 — a plain word a player can say, not an
+    /// abbreviation to decode), and a different word cannot be read as a negation of
+    /// the one it stands in for.
+    #[test]
+    fn a_shortened_bar_name_is_a_prefix_of_the_full_one() {
+        assert_eq!(AbilityId::Dephase.name(), "Phase Out");
+        assert_eq!(AbilityId::Dephase.bar_name(), "Phase");
+        for id in AbilityId::ALL {
+            let (name, bar) = (id.name(), id.bar_name());
+            let shares_a_start = name.chars().next() == bar.chars().next();
+            assert!(
+                name.starts_with(bar) || !shares_a_start,
+                "{bar:?} begins like {name:?} but is not its prefix — a bar name that \
+                 starts the same way and then diverges reads as a *different* word, \
+                 which is the misread §11.8 records for this pair",
             );
         }
     }

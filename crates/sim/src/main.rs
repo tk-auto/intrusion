@@ -592,7 +592,7 @@ mod tests {
         let error = args(&["--abilities", "smoke-grenade"]).expect_err("no such ability");
         assert!(error.contains("--abilities"), "{error}");
         assert!(error.contains("camouflage"), "{error}");
-        let error = args(&["--abilities", "camouflage,decoy,vision,dephase"])
+        let error = args(&["--abilities", "camouflage,decoy,vision,phase-out"])
             .expect_err("over the §8.3 cap");
         assert!(error.contains("at most 3"), "{error}");
         let error = args(&["--without", "run"]).expect_err("Run is innate");

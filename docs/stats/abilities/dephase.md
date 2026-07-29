@@ -1,5 +1,10 @@
 # Dephase
 
+> Named **Phase Out** on screen since #415 (§11.8); the code, the design and this page
+> keep the word *Dephase*. The `--abilities` vocabulary is derived from the display
+> name, so the flag now spells it `phase-out` — the batches below were measured before
+> the rename, under the identical ability.
+
 **Salvaged tech (§8.3)** — 1 turn to press, duration 3, cooldown 30. Fill → 0:
 *"walk through walls, doors, guards. **Does not conceal you.**"* A duration that
 expires inside a solid costs a safety eject plus a stun as long as the throw it had
@@ -33,7 +38,7 @@ plan**, ahead of fleeing, because the eject is worse than being seen.
 
 ```
 cargo run --release -p intrusion-sim -- --bot --profile <NAME> --runs 100 --seed 0 --cap 1000
-cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities dephase --runs 100 --seed 0 --cap 1000
+cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities phase-out --runs 100 --seed 0 --cap 1000
 ```
 
 Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
