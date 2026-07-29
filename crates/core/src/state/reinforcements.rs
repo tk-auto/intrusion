@@ -200,6 +200,13 @@ impl State {
     /// of the guard's beat is dropped at the next
     /// [`repick_patrol_target`](crate::Guard), not here.
     pub(super) fn recut_beats(&mut self) {
+        // **A dead net has no partition to recut** (§7.3). With the comms console
+        // bumped there is no coordination left to divide the building, and every Calm
+        // guard already takes the whole level ([`PatrolStyle::Wander`]) — so cutting
+        // beats would be computing an assignment nobody reads.
+        if self.radio_silenced {
+            return;
+        }
         if !self
             .guards
             .iter()

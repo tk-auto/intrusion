@@ -415,6 +415,10 @@ impl State {
         // shortens the pause from rung 1 up (§7.3), and every guard this turn holds
         // to the same rule.
         let dwell = self.dwell_rule();
+        // The §7.3 patrol style, likewise a fact about the *level* rather than about
+        // any one guard: with the comms console bumped there is no coordination left to
+        // divide the building, so every Calm guard wanders the whole of it.
+        let style = self.patrol_style();
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;
@@ -443,7 +447,7 @@ impl State {
             // zone (§7.6) — an Investigating guard only ever had a glimpse and
             // reports nothing — and `decide` is the one place a chase can run out.
             let was_chasing = self.guards[i].state() == GuardState::Chasing;
-            let step = self.guards[i].decide(facility, &blocked, &mut self.rng, dwell);
+            let step = self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style);
             if was_chasing {
                 self.call_in_lost_sighting(i, events);
             }

@@ -58,7 +58,7 @@ use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
 use crate::guard::{
-    Dwell, Guard, GuardState, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT,
+    Dwell, Guard, GuardState, PatrolStyle, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT,
 };
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{DebugModifiers, LevelModifiers};
@@ -1812,6 +1812,23 @@ impl State {
         Dwell {
             chance: self.dwell_chance,
             turns: self.alert.dwell_turns(),
+        }
+    }
+
+    /// How Calm patrol chooses its next target this turn (§7.5/§7.3) — the whole of
+    /// what a **silenced radio** does to a patrol.
+    ///
+    /// With the net live, guards are coordinated and each sweeps its own slice of the
+    /// §7.5 partition. Bumping the comms console kills that (§7.3): with nobody
+    /// dispatching and nobody calling anyone in, there is no coordination left to
+    /// divide the building between them, so every Calm guard takes the whole level and
+    /// draws its next target at random. Silencing is one-way for the level, so the
+    /// style never changes back.
+    fn patrol_style(&self) -> PatrolStyle {
+        if self.radio_silenced {
+            PatrolStyle::Wander
+        } else {
+            PatrolStyle::Beat
         }
     }
 
