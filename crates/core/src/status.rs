@@ -188,9 +188,9 @@ pub fn message_for(event: Event) -> Option<Message> {
         // The facility alert climbed a rung (§7.3): the loudest radio event, a
         // facility-wide escalation — above a found body, below being caught. What the
         // rung *does* to the player is the Level info tab's job (#375); the near line
-        // states the fact, in the same words the tab does ([`alert_line`]) — and **why**
-        // it climbed follows underneath as this event's subordinate message
-        // ([`alert_reason`]), which is the half the player could have acted on.
+        // states the fact, in the same words the tab does ([`alert_line`]) — and, where
+        // nothing else on the turn says it, **why** it climbed follows underneath as
+        // this event's subordinate message ([`alert_reason`]).
         Event::AlertRaised { rung, .. } => (alert_line(rung), 5),
         // Guards walking in on rung 2 or 3 (§7.3/#374) say **nothing** here, and that
         // is deliberate. The escalation itself already speaks — the `AlertRaised` above
@@ -294,7 +294,7 @@ pub fn message_for(event: Event) -> Option<Message> {
 /// events — or, at an equal priority, flipped *above* it by the later-first reversal.
 fn subordinate_for(event: Event, headline: &Message) -> Option<Message> {
     let text = match event {
-        Event::AlertRaised { trigger, .. } => alert_reason(trigger).to_string(),
+        Event::AlertRaised { trigger, .. } => alert_reason(trigger)?.to_string(),
         _ => return None,
     };
     Some(Message {
@@ -305,28 +305,52 @@ fn subordinate_for(event: Event, headline: &Message) -> Option<Message> {
 }
 
 /// **Why** the facility climbed (§7.3/§11.7, #418) — the §7.3 trigger table in the
-/// player's own words, one line per [`AlertTrigger`](crate::alert::AlertTrigger).
+/// player's own words, or `None` where the turn's own events already say it.
 ///
-/// The raise tells the player the building got worse; this tells them what did it,
-/// which is the only half of the news they could have acted on. It is **total over the
-/// enum**, so a seventh trigger cannot ship unnamed — it fails the build instead.
+/// The raise tells the player the building got worse; a reason tells them what did it,
+/// which is the only half of the news they could have acted on. **But half the ladder's
+/// triggers fire on the same turn as the very event that reports them**, and there a
+/// reason line is that message said twice, one row apart:
 ///
-/// §11.8 holds here as everywhere: these lines name the *world* — a post, a body, a
-/// sighting — and never the mechanism.
-fn alert_reason(trigger: crate::alert::AlertTrigger) -> &'static str {
+/// ```text
+/// security condition 3 of 3
+/// a guard found a body        ← the reason
+/// a body has been found       ← Event::BodyFound, the same turn
+/// ```
+///
+/// So a trigger says why **only when nothing else does**. The three that keep a line
+/// are the ones the loop reports through the raise alone: a sighting window closing and
+/// a console tampered with raise no event of their own that mentions the facility
+/// noticing. The three that stay silent are each pushed into the same event vector as
+/// their own report, one statement earlier — named in the arms below, so the
+/// substitution is checkable rather than asserted.
+///
+/// It is **total over the enum**, so a seventh trigger cannot ship without an answer
+/// either way — it fails the build instead. §11.8 holds as everywhere: these lines name
+/// the *world*, never the mechanism.
+fn alert_reason(trigger: crate::alert::AlertTrigger) -> Option<&'static str> {
     use crate::alert::AlertTrigger;
     match trigger {
-        AlertTrigger::Sighting => "you were seen",
-        AlertTrigger::MissedPing => "a post stopped answering",
+        // The window closing is not a fresh look: the guard has been aware for the
+        // whole of it, so `Event::Detected` fired turns ago and cleared (§7.6). What is
+        // new is that *control* now knows, and only the raise says so.
+        AlertTrigger::Sighting => Some("you were seen"),
         // The count is the shipped **[START]** threshold
         // (`alert::SIGHTINGS_FOR_SECOND_RUNG`), spelled as a word because a bare
         // numeral reads as a tally the player was supposed to have been keeping. A
         // §13.2 sweep may move that threshold; the sim never reads the near line, so
         // the wording follows the shipped ladder.
-        AlertTrigger::RepeatSightings => "seen three times now",
-        AlertTrigger::ConsoleTampered => "they know the intel was touched",
-        AlertTrigger::BodyFound => "a guard found a body",
-        AlertTrigger::SecondPostSilent => "a second post stopped answering",
+        AlertTrigger::RepeatSightings => Some("seen three times now"),
+        // The take speaks the same turn — but about the *intel*, not about being
+        // noticed for it ("intel in hand — 2 more to go"). Two different facts, so this
+        // one still needs saying.
+        AlertTrigger::ConsoleTampered => Some("they know the intel was touched"),
+        // `Event::RadioSilence` — *"a guard has gone silent"* — is pushed immediately
+        // before this raise, for the first quiet post and the second alike.
+        AlertTrigger::MissedPing | AlertTrigger::SecondPostSilent => None,
+        // `Event::BodyFound` — *"a body has been found"* — likewise, one statement
+        // earlier in the same vector.
+        AlertTrigger::BodyFound => None,
     }
 }
 
@@ -880,8 +904,8 @@ mod tests {
         // the same fact, and a mechanism word smuggled in underneath the headline is no
         // better than one in it. `trigger` is the design's word too, and so is the
         // ladder's own name.
-        for trigger in AlertTrigger::ALL {
-            let reason = alert_reason(trigger).to_lowercase();
+        for reason in AlertTrigger::ALL.into_iter().filter_map(alert_reason) {
+            let reason = reason.to_lowercase();
             for word in ["rung", "trigger", "ladder", "alert level"] {
                 assert!(
                     !reason.contains(word),
@@ -1070,16 +1094,12 @@ mod tests {
         let live = live_messages(&s);
         assert_eq!(
             live.iter().map(|m| m.priority).collect::<Vec<_>>(),
-            vec![5, 5, 4, 0],
-            "loudest first: the escalation and its reason, the found body, the narration",
+            vec![5, 4, 0],
+            "loudest first: the escalation, then the found body, then the narration",
         );
         assert_eq!(live[0].text, "security condition 3 of 3");
-        assert_eq!(
-            live[1].text, "a guard found a body",
-            "the reason, riding under it"
-        );
-        assert_eq!(live[2].text, "a body has been found");
-        assert_eq!(live[3].text, "the guard drops — a body is left");
+        assert_eq!(live[1].text, "a body has been found");
+        assert_eq!(live[2].text, "the guard drops — a body is left");
         assert_eq!(
             live.first().cloned(),
             Some(near_line(&s)),
@@ -1087,34 +1107,129 @@ mod tests {
         );
     }
 
-    /// §7.3/§11.7/#418: **every** trigger names itself. Walked over
-    /// [`AlertTrigger::ALL`], so a seventh trigger shipping without a reason fails here
-    /// — and the reason follows its own headline immediately, at the same priority and
-    /// in the same category, because the two are one fact.
+    /// §7.3/§11.7/#418: a trigger that keeps a reason says it under its own headline,
+    /// at the same priority and in the same category, because the two are one fact.
+    /// Walked over [`AlertTrigger::ALL`], so a seventh trigger cannot ship without the
+    /// question being answered one way or the other.
     #[test]
-    fn every_alert_trigger_says_what_raised_it() {
+    fn a_trigger_that_speaks_says_it_under_its_own_headline() {
+        let mut spoken = Vec::new();
         for trigger in AlertTrigger::ALL {
             let rung = trigger.rung();
-            let pair = loudest_first(&[Event::AlertRaised { rung, trigger }]);
+            let raised = loudest_first(&[Event::AlertRaised { rung, trigger }]);
+            assert_eq!(raised[0].text, alert_line(rung), "{trigger:?}");
+
+            let Some(reason) = alert_reason(trigger) else {
+                assert_eq!(
+                    raised.len(),
+                    1,
+                    "{trigger:?} says nothing of its own, so the raise stands alone",
+                );
+                continue;
+            };
+            assert_eq!(raised.len(), 2, "{trigger:?}");
+            assert_eq!(raised[1].text, reason, "{trigger:?}");
+            assert!(!reason.is_empty(), "{trigger:?} has an empty reason line");
             assert_eq!(
-                pair.len(),
-                2,
-                "{trigger:?} raised a headline with no reason under it",
+                raised[1].category, raised[0].category,
+                "{trigger:?}: one fact"
             );
-            assert_eq!(pair[0].text, alert_line(rung), "{trigger:?}");
-            assert_eq!(pair[1].text, alert_reason(trigger), "{trigger:?}");
-            assert!(
-                !pair[1].text.is_empty(),
-                "{trigger:?} has an empty reason line",
+            assert_eq!(
+                raised[1].priority, raised[0].priority,
+                "{trigger:?}: one fact"
             );
-            assert_eq!(pair[1].category, pair[0].category, "{trigger:?}: one fact");
-            assert_eq!(pair[1].priority, pair[0].priority, "{trigger:?}: one fact");
+            spoken.push(reason);
         }
-        // The six of them are six *different* lines: a reason shared by two triggers
+        // Every line that is kept is a *different* line: a reason shared by two triggers
         // would tell the player the wrong thing about one of them.
-        let reasons: std::collections::BTreeSet<&str> =
-            AlertTrigger::ALL.iter().map(|&t| alert_reason(t)).collect();
-        assert_eq!(reasons.len(), AlertTrigger::ALL.len(), "{reasons:?}");
+        let distinct: std::collections::BTreeSet<&str> = spoken.iter().copied().collect();
+        assert_eq!(distinct.len(), spoken.len(), "{spoken:?}");
+        assert!(!spoken.is_empty(), "the ladder explains itself somewhere");
+    }
+
+    /// #418, corrected: **a trigger stays silent only because something else speaks.**
+    ///
+    /// Three of the six fire on the same turn as the very event that reports them, and
+    /// a reason line there was that message said twice, one row apart — `a guard found a
+    /// body` sitting directly above `a body has been found`. This pins the substitution
+    /// that justifies each silence: the stand-in event must exist, must raise a message
+    /// of its own, and must already say the thing the dropped line would have said.
+    ///
+    /// So a future change that silenced one of those events (§11.7 is free to) would
+    /// fail here, rather than quietly leaving an escalation with no explanation
+    /// anywhere.
+    #[test]
+    fn a_silent_trigger_has_another_event_speaking_for_it() {
+        let at = Cell::new(3, 3);
+        // The event the loop pushes into the *same* vector as the raise, one statement
+        // earlier — `find_bodies` and `miss_ping` respectively.
+        let stands_in_for = |trigger| match trigger {
+            AlertTrigger::BodyFound => Some(Event::BodyFound { at }),
+            AlertTrigger::MissedPing | AlertTrigger::SecondPostSilent => {
+                Some(Event::RadioSilence { at })
+            }
+            AlertTrigger::Sighting
+            | AlertTrigger::RepeatSightings
+            | AlertTrigger::ConsoleTampered => None,
+        };
+
+        for trigger in AlertTrigger::ALL {
+            match (alert_reason(trigger), stands_in_for(trigger)) {
+                (None, Some(event)) => {
+                    let spoken = message_for(event)
+                        .unwrap_or_else(|| panic!("{trigger:?}'s stand-in is silent"));
+                    // Both halves of a raise turn, in the order the near line lists
+                    // them: the escalation leads and the stand-in follows, so what the
+                    // dropped reason would have said is read one row later anyway.
+                    let turn = loudest_first(&[
+                        event,
+                        Event::AlertRaised {
+                            rung: trigger.rung(),
+                            trigger,
+                        },
+                    ]);
+                    assert_eq!(turn.len(), 2, "{trigger:?}: no third row, no duplicate");
+                    assert_eq!(turn[0].text, alert_line(trigger.rung()));
+                    assert_eq!(turn[1].text, spoken.text, "{trigger:?}");
+                }
+                (Some(_), None) => {}
+                (reason, event) => panic!(
+                    "{trigger:?} must either say why or have an event that does \
+                     (reason {reason:?}, stand-in {event:?})",
+                ),
+            }
+        }
+    }
+
+    /// The bug this correction is for (#418): the raise turn is **two rows, not three**.
+    /// A witnessed takedown is the exact case the screenshot caught — the body find, the
+    /// escalation it causes, and formerly a reason restating the find.
+    #[test]
+    fn a_found_body_does_not_report_itself_twice() {
+        let at = Cell::new(4, 4);
+        let texts: Vec<String> = loudest_first(&[
+            Event::TakenDown { at },
+            Event::BodyFound { at },
+            Event::AlertRaised {
+                rung: 3,
+                trigger: AlertTrigger::BodyFound,
+            },
+        ])
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+        assert_eq!(
+            texts,
+            vec![
+                "security condition 3 of 3".to_string(),
+                "a body has been found".to_string(),
+                "the guard drops — a body is left".to_string(),
+            ],
+        );
+        assert!(
+            !texts.iter().any(|t| t == "a guard found a body"),
+            "the find is reported once: {texts:?}",
+        );
     }
 
     /// #418's whole reason for the splice: **nothing gets between a fact and its
@@ -1130,8 +1245,8 @@ mod tests {
             Event::TakenDown { at },
             Event::BodyFound { at },
             Event::AlertRaised {
-                rung: 3,
-                trigger: AlertTrigger::BodyFound,
+                rung: 2,
+                trigger: AlertTrigger::ConsoleTampered,
             },
             Event::BodyCalledIn { at },
             Event::Ejected {
@@ -1144,11 +1259,11 @@ mod tests {
         let texts: Vec<String> = loudest_first(&events).into_iter().map(|m| m.text).collect();
         let headline = texts
             .iter()
-            .position(|t| t == "security condition 3 of 3")
+            .position(|t| t == "security condition 2 of 3")
             .expect("the raise speaks");
         assert_eq!(
             texts.get(headline + 1).map(String::as_str),
-            Some("a guard found a body"),
+            Some("they know the intel was touched"),
             "the reason follows its headline immediately: {texts:?}",
         );
 
@@ -1163,11 +1278,11 @@ mod tests {
                 .collect();
             let i = texts
                 .iter()
-                .position(|t| t == "security condition 3 of 3")
+                .position(|t| t == "security condition 2 of 3")
                 .expect("the raise speaks");
             assert_eq!(
                 texts.get(i + 1).map(String::as_str),
-                Some("a guard found a body"),
+                Some("they know the intel was touched"),
                 "rotation {shift}: {texts:?}",
             );
         }
@@ -1201,10 +1316,10 @@ mod tests {
     fn the_reason_follows_its_headline_into_the_history() {
         let at = Cell::new(4, 4);
         let events = [
-            Event::BodyFound { at },
+            Event::Detected { by: at },
             Event::AlertRaised {
-                rung: 3,
-                trigger: AlertTrigger::BodyFound,
+                rung: 1,
+                trigger: AlertTrigger::Sighting,
             },
         ];
         let mut history = MessageHistory::default();
@@ -1222,9 +1337,9 @@ mod tests {
         assert_eq!(
             filed,
             vec![
-                "security condition 3 of 3".to_string(),
-                "a guard found a body".to_string(),
-                "a body has been found".to_string(),
+                "security condition 1 of 3".to_string(),
+                "you were seen".to_string(),
+                "a guard has seen you".to_string(),
             ],
         );
     }
