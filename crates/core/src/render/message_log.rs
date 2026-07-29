@@ -17,12 +17,14 @@
 //! player wants to read back what set the facility off, and the near line — correctly
 //! — kept only the last of them.
 //!
-//! That is also where an alert raise's **reason** shows up (#418): the raise's
-//! subordinate message follows its headline through
+//! That is also where an alert raise's **reason** shows up when it has one (#418): the
+//! raise's subordinate message follows its headline through
 //! [`loudest_first`](crate::status::live_messages), so when the near line speaks
-//! *"security condition 2 of 3"* the row directly beneath the band says what did it.
-//! The near line is one row and keeps the condition alone (§11.4); the *why* is what
-//! the player finds on deploying, which is where they go to ask what just happened.
+//! *"security condition 2 of 3"* the row directly beneath the band can say what did it.
+//! The near line is one row and keeps the condition alone (§11.4); the *why* is what the
+//! player finds on deploying. Half the ladder's triggers say nothing here, because the
+//! turn's own events already report them and a reason would be that message twice over,
+//! one row apart.
 //!
 //! So the near line and the panel partition the turn instead of overlapping on it: the
 //! band speaks the loudest, the block holds the rest, and the corner control says which
@@ -425,13 +427,13 @@ mod tests {
         s
     }
 
-    /// That fixture with its one loud action already taken: four live messages, an
-    /// empty history behind them — the escalation, the reason riding under it (#418),
-    /// the found body and the takedown.
+    /// That fixture with its one loud action already taken: three live messages, an
+    /// empty history behind them. The escalation it raises is a **found body**, whose
+    /// own event already reports it, so no reason rides under the headline (#418).
     fn loud_step() -> State {
         let mut s = witnessed_takedown();
         s.step(Input::Step(Direction::North));
-        assert_eq!(live_messages(&s).len(), 4, "four messages land at once");
+        assert_eq!(live_messages(&s).len(), 3, "three messages land at once");
         s
     }
 
@@ -491,31 +493,32 @@ mod tests {
             "deployed, the control is the chevron back: nothing is unread now"
         );
         // The block is the *rest* of the turn: the near line's own message is not
-        // repeated, so the `!` the corner showed resolves to exactly three rows —
-        // led by **why** the condition the band is speaking climbed (#418).
+        // repeated, so the `!` the corner showed resolves to exactly two rows.
         assert!(
-            row_text(&g, LOG_TOP_ROW).contains("a guard found a body"),
-            "the band's own reason leads the block"
+            row_text(&g, LOG_TOP_ROW).contains("a body has been found"),
+            "the loudest message the near line did not say leads the block"
         );
         assert!(
-            row_text(&g, LOG_TOP_ROW + 1).contains("a body has been found"),
-            "then the loudest message the near line did not say"
-        );
-        assert!(
-            row_text(&g, LOG_TOP_ROW + 2).contains("the guard drops — a body is left"),
+            row_text(&g, LOG_TOP_ROW + 1).contains("the guard drops — a body is left"),
             "down to the quietest"
         );
         assert!(
-            !row_text(&g, LOG_TOP_ROW + 3).contains("security condition"),
+            !row_text(&g, LOG_TOP_ROW + 2).contains("security condition"),
             "and the near line's own message is nowhere in the block"
+        );
+        // The find reports itself **once** (#418): the escalation it caused says no
+        // reason, because the row below the band already is the reason.
+        assert!(
+            !row_text(&g, LOG_TOP_ROW + 1).contains("a guard found a body"),
+            "no reason line restating the find"
         );
         assert_eq!(
             message_log_rows(&s, ui) + (TOP_ROWS - LOG_TOP_ROW),
-            4,
-            "three rows for the three the near line did not say, plus the closing rule"
+            3,
+            "two rows for the two the near line did not say, plus the closing rule"
         );
         assert!(
-            row_text(&g, LOG_TOP_ROW + 3)
+            row_text(&g, LOG_TOP_ROW + 2)
                 .chars()
                 .all(|c| c == SEPARATOR_GLYPH),
             "and the block closes on a rule, giving it an edge against the map"
@@ -537,16 +540,16 @@ mod tests {
             message_log_open: true,
             ..ScreenUi::default()
         };
-        assert_eq!(live_messages(&s).len(), 4, "four messages are live");
+        assert_eq!(live_messages(&s).len(), 3, "three messages are live");
         assert!(
             s.message_history().is_empty(),
             "and nothing behind them yet"
         );
         assert_eq!(
             message_log_rows(&s, deployed),
-            3,
-            "three rows — the near line keeps the headline — plus the closing rule, of \
-             which the first sits on the usable line, so three are board"
+            2,
+            "two rows — the near line keeps the third — plus the closing rule, of which \
+             the first sits on the usable line, so two are board"
         );
         assert_eq!(
             message_log_rows(&s, ScreenUi::default()),
@@ -618,14 +621,18 @@ mod tests {
         );
     }
 
-    /// #418: an alert raise **alone** still has something to deploy — its reason. The
-    /// near line speaks the condition and nothing else (§11.4, one row), so the block
-    /// is exactly the one row saying what did it, plus the rule that closes it.
+    /// #418: an alert raise **that keeps a reason** still has something to deploy on its
+    /// own. The near line speaks the condition and nothing else (§11.4, one row), so the
+    /// block is exactly the one row saying what did it, plus the rule that closes it.
+    ///
+    /// A raise whose trigger stays silent — because the turn's own events report it —
+    /// deploys nothing of its own, which is the other half of the same rule and is what
+    /// the closing assertion checks.
     #[test]
     fn a_raise_on_its_own_still_deploys_its_reason() {
         let live = crate::status::loudest_first(&[Event::AlertRaised {
             rung: 1,
-            trigger: AlertTrigger::MissedPing,
+            trigger: AlertTrigger::Sighting,
         }]);
         assert_eq!(live.len(), 2, "the headline and its reason");
 
@@ -644,8 +651,15 @@ mod tests {
         );
 
         // A lone message with **no** reason under it is still nothing to deploy: the
-        // near line says the whole of it (§11.7).
+        // near line says the whole of it (§11.7). A body find's raise is exactly that
+        // case, since `Event::BodyFound` is the reason (#418).
         assert!(assemble(live[..1].to_vec(), &MessageHistory::default()).is_empty());
+        let silent = crate::status::loudest_first(&[Event::AlertRaised {
+            rung: 3,
+            trigger: AlertTrigger::BodyFound,
+        }]);
+        assert_eq!(silent.len(), 1, "the raise stands alone");
+        assert!(assemble(silent, &MessageHistory::default()).is_empty());
     }
 
     /// **The golden block across two turns** (#300): the deployed log lists this
@@ -656,12 +670,12 @@ mod tests {
     #[test]
     fn the_deployed_log_stacks_past_turns_behind_a_rule() {
         // Action 1: a bump into the west wall — one quiet message, which becomes the
-        // history. Action 2: the takedown-with-witness step — four messages, of which
-        // the near line speaks the loudest and the block gets the other three.
+        // history. Action 2: the takedown-with-witness step — three messages, of which
+        // the near line speaks the loudest and the block gets the other two.
         let mut s = witnessed_takedown();
         s.step(Input::Step(Direction::West));
         s.step(Input::Step(Direction::North));
-        assert_eq!(live_messages(&s).len(), 4, "four messages live");
+        assert_eq!(live_messages(&s).len(), 3, "three messages live");
         assert!(
             !s.message_history().is_empty(),
             "and the bump is remembered behind them"
@@ -673,67 +687,55 @@ mod tests {
         };
         let g = render_screen(&s, deployed);
 
-        // The near line speaks the loudest, and counts the three the block will show.
+        // The near line speaks the loudest, and counts the two the block will show.
         let near = row_text(&g, NEAR_ROW);
         assert!(near.contains("security condition"), "the band: {near:?}");
         assert!(near.ends_with("[▴]"), "deployed, and foldable: {near:?}");
 
-        // The block: this action's three *unsaid* messages — led by the band's own
-        // reason (#418) — a rule, then the remembered action, and the near line's own
-        // headline nowhere in it.
-        assert!(row_text(&g, LOG_TOP_ROW).contains("a guard found a body"));
-        assert!(row_text(&g, LOG_TOP_ROW + 1).contains("a body has been found"));
-        assert!(row_text(&g, LOG_TOP_ROW + 2).contains("the guard drops"));
+        // The block: this action's two *unsaid* messages, a rule, then the remembered
+        // action — and the near line's own message nowhere in it.
+        assert!(row_text(&g, LOG_TOP_ROW).contains("a body has been found"));
+        assert!(row_text(&g, LOG_TOP_ROW + 1).contains("the guard drops"));
         // The rule spans the whole row, edge to edge, like the near line above it.
-        let rule = row_text(&g, LOG_TOP_ROW + 3);
+        let rule = row_text(&g, LOG_TOP_ROW + 2);
         assert!(
             rule.chars().all(|c| c == SEPARATOR_GLYPH),
             "a rule across the whole row: {rule:?}"
         );
         assert_eq!(
-            g.get(0, LOG_TOP_ROW + 3).fg,
+            g.get(0, LOG_TOP_ROW + 2).fg,
             Category::System,
             "the rule is chrome, not a message category"
         );
         assert_eq!(
-            g.get(0, LOG_TOP_ROW + 3).vis,
+            g.get(0, LOG_TOP_ROW + 2).vis,
             PAST,
             "and it draws dim — everything from the rule down is past"
         );
-        assert!(row_text(&g, LOG_TOP_ROW + 4).contains("blocked"));
-        for dy in 0..5 {
+        assert!(row_text(&g, LOG_TOP_ROW + 3).contains("blocked"));
+        for dy in 0..4 {
             assert!(
                 !row_text(&g, LOG_TOP_ROW + dy).contains("security condition"),
                 "the near line's own message is never repeated (row {dy})"
             );
         }
 
-        // Each message keeps its own §11.2 colour across the rule — the reason wearing
-        // its headline's, because the two are one fact.
-        assert_eq!(
-            g.get(1, LOG_TOP_ROW).fg,
-            Category::Warning,
-            "the escalation's reason"
-        );
+        // Each message keeps its own §11.2 colour across the rule.
+        assert_eq!(g.get(1, LOG_TOP_ROW).fg, Category::Warning, "the body find");
         assert_eq!(
             g.get(1, LOG_TOP_ROW + 1).fg,
-            Category::Warning,
-            "the body find"
-        );
-        assert_eq!(
-            g.get(1, LOG_TOP_ROW + 2).fg,
             Category::Owned,
             "the takedown"
         );
         assert_eq!(
-            g.get(1, LOG_TOP_ROW + 4).fg,
+            g.get(1, LOG_TOP_ROW + 3).fg,
             Category::Neutral,
             "the remembered bump"
         );
 
         // **Now reads louder than then**: this action's rows are at full strength and
         // every remembered row is dimmed, category intact.
-        for dy in 0..=2 {
+        for dy in 0..=1 {
             assert_eq!(
                 g.get(1, LOG_TOP_ROW + dy).vis,
                 Visibility::Live,
@@ -741,22 +743,22 @@ mod tests {
             );
         }
         assert_eq!(
-            g.get(1, LOG_TOP_ROW + 4).vis,
+            g.get(1, LOG_TOP_ROW + 3).vis,
             PAST,
             "and the remembered row recedes"
         );
 
-        // One rule between the blocks and one closing the whole thing: six rows in
-        // all, of which the first sits on the usable line and five are board.
-        assert_eq!(message_log_rows(&s, deployed), 5);
+        // One rule between the blocks and one closing the whole thing: five rows in
+        // all, of which the first sits on the usable line and four are board.
+        assert_eq!(message_log_rows(&s, deployed), 4);
         assert!(
-            row_text(&g, LOG_TOP_ROW + 5)
+            row_text(&g, LOG_TOP_ROW + 4)
                 .chars()
                 .all(|c| c == SEPARATOR_GLYPH),
             "the closing rule under the oldest block"
         );
         assert!(
-            !row_text(&g, LOG_TOP_ROW + 6)
+            !row_text(&g, LOG_TOP_ROW + 5)
                 .chars()
                 .any(|c| c == SEPARATOR_GLYPH),
             "and the map resumes immediately below it"
@@ -876,8 +878,8 @@ mod tests {
             message_log_open: true,
             ..ScreenUi::default()
         };
-        assert_eq!(message_log_rows(&fresh, deployed), 3);
-        assert_eq!(message_log_rows(&carried, deployed), 5);
+        assert_eq!(message_log_rows(&fresh, deployed), 2);
+        assert_eq!(message_log_rows(&carried, deployed), 4);
     }
 
     /// The block is **clamped, never asserted** (§11.7): on a board too short to hold

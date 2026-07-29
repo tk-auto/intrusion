@@ -2391,13 +2391,30 @@ system — it is derived from adjacency every frame and carries no state.
   is what the player finds on deploying the log, live or remembered — which is where
   they go to ask *what just happened*. The alert raise is the first event to use the
   shape, and any later event with a *why* reuses it.
-  - **Why the facility climbed** (§7.3), one line per trigger, exhaustive so a
-    seventh trigger cannot ship unnamed: a confirmed sighting → *"you were seen"*; a
-    missed ping → *"a post stopped answering"*; repeat sightings → *"seen three times
-    now"*; a console tampered with → *"they know the intel was touched"*; a body found
-    → *"a guard found a body"*; a second post silent → *"a second post stopped
-    answering"*. §11.8 applies to them as to any player-facing string: they name the
-    world, never the mechanism.
+  - **A subordinate line is added only where nothing else on the turn says it.**
+    Half the alert ladder's triggers fire on the *same turn* as the very event that
+    reports them — a body found raises the ladder in the same event vector as
+    `BodyFound`, a quiet post in the same one as `RadioSilence` — and there a reason
+    is that message said twice, one row apart:
+
+    ```
+    security condition 3 of 3
+    a guard found a body        ← the reason
+    a body has been found       ← the event, the same turn
+    ```
+
+    So the rule is *explain what is otherwise unexplained*, not *always explain*.
+    A trigger may stay silent **only** because a named sibling event speaks for it,
+    which is a pairing the tests pin: if that event were ever silenced, the silence
+    here fails rather than leaving an escalation unexplained anywhere.
+  - **Why the facility climbed** (§7.3), exhaustive so a seventh trigger cannot ship
+    without the question being answered either way: a confirmed sighting → *"you were
+    seen"*; repeat sightings → *"seen three times now"*; a console tampered with →
+    *"they know the intel was touched"* (the take message speaks the same turn, but
+    about the intel, not about being noticed for it). A missed ping, a second post
+    silent and a body found say **nothing** — `RadioSilence` and `BodyFound` already
+    have. §11.8 applies to the lines that remain as to any player-facing string: they
+    name the world, never the mechanism.
 - **Messages clear on the player's next action** — a status line, not a
   scrollback — falling back to the ambient status of §11.4, never to an empty
   row. **[SETTLED]** for the **near line**: one row, one live message, wiped by
