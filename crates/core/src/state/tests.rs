@@ -4,7 +4,8 @@
 //! [`turn`] for the loop itself, [`guards`] for phase 3, [`doors`] for
 //! [`super::doors`], [`view`] for [`super::view`]'s read surface, [`abilities`] for
 //! [`super::abilities`], [`activation`] for [`super::activation`]'s precondition
-//! ladder, [`alert`] for the §7.3 facility alert ladder and [`reinforcements`] for the
+//! ladder, [`effects`] for [`super::effects`]'s marks and areas, [`alert`] for the
+//! §7.3 facility alert ladder and [`reinforcements`] for the
 //! guards its top two rungs send in, [`bore`] for [`super::bore`], [`lockdown`] for
 //! [`super::lockdown`], [`traversal`] for
 //! [`super::traversal`], [`ducts`] for
@@ -19,6 +20,7 @@ mod bore;
 mod comms;
 mod doors;
 mod ducts;
+mod effects;
 mod guards;
 mod lockdown;
 mod reinforcements;
