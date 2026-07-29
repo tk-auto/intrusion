@@ -464,7 +464,12 @@ fn the_peek_is_the_players_alone_a_guard_never_peeks() {
     layout.place(Cell::new(4, 4), Terrain::Wall); // the corner block
     let mut guard = Guard::stationary(Cell::new(6, 3));
     // Face the guard straight at the corner — the worst case for the player.
-    guard.advance_to(Cell::new(6, 3), Direction::West, layout.facility());
+    guard.advance_to(
+        Cell::new(6, 3),
+        Direction::West,
+        layout.facility(),
+        BlindTier::REAR,
+    );
     let s = State::new(
         layout,
         Cell::new(3, 4), // one short of the corner, facing along it
