@@ -9,11 +9,17 @@
 //!
 //! # What the block shows (#300)
 //!
-//! The current action's messages, loudest first, then a **separator rule** and the
-//! previous message-bearing action's block, and so on back through
-//! [`MessageHistory`]. A radio silence, a call-in and a body find on three
-//! consecutive turns is the moment a player wants to read back what set the facility
-//! off, and the near line — correctly — kept only the last of them.
+//! The current action's messages **the near line did not say** — its loudest is
+//! already the band an inch above, and printing it twice spends a row to tell the
+//! player something they are looking at — then a **separator rule** and the previous
+//! message-bearing action's block, and so on back through [`MessageHistory`]. A radio
+//! silence, a call-in and a body find on three consecutive turns is the moment a
+//! player wants to read back what set the facility off, and the near line — correctly
+//! — kept only the last of them.
+//!
+//! So the block is exactly what the counter promises: `[+2 ▾]` deploys **two** rows of
+//! this action, not three with the first one repeated. The near line and the panel
+//! partition the turn instead of overlapping on it.
 //!
 //! It is **not** a scrollback the player pages through: there is no camera and no
 //! scrolling (§11.4 **[SETTLED]**). The block is bounded twice over — by
@@ -98,9 +104,9 @@ const PAST: Visibility = Visibility::Explored;
 const LOG_TOP_ROW: u32 = super::hud::USABLE_ROW;
 
 /// Every row the deployed log would draw, top to bottom (§11.7/#300) — the current
-/// action's messages loudest first, then a [`LogRow::Separator`] and the previous
-/// message-bearing action's block, and so on back through [`MessageHistory`], capped
-/// at [`MAX_LOG_ROWS`].
+/// action's messages **below** the one the near line is already speaking, then a
+/// [`LogRow::Separator`] and the previous message-bearing action's block, and so on
+/// back through [`MessageHistory`], capped at [`MAX_LOG_ROWS`].
 ///
 /// **The one source of truth for the whole log**: the drawing
 /// ([`overlay_message_log`]), the geometry a shell taps against
@@ -109,9 +115,9 @@ const LOG_TOP_ROW: u32 = super::hud::USABLE_ROW;
 /// panel that draws nothing and a tap can never read the board through a row the log
 /// covered.
 ///
-/// Empty when there is nothing the near line has not already said: a lone live
-/// message with no history is simply the band, and deploying it would show the player
-/// the row they are already reading (§11.7).
+/// Empty when there is nothing the near line has not already said: a lone live message
+/// with no history is simply the band, and there is nothing left over to deploy
+/// (§11.7).
 fn log_rows(state: &State) -> Vec<LogRow> {
     assemble(live_messages(state), state.message_history())
 }
@@ -124,7 +130,13 @@ fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
         return Vec::new();
     }
 
-    let mut rows: Vec<LogRow> = live.into_iter().map(LogRow::live).collect();
+    // Skip the loudest live message: it *is* the near line, drawn as a full category
+    // band one row above the block's first row (§11.7). Repeating it would spend the
+    // panel's most valuable row saying what the player is already reading, and would
+    // make the counter a lie — `[+2 ▾]` promises two further messages, so two is what
+    // deploying shows. An action whose only message is on the near line therefore
+    // contributes no rows at all, and no rule with them.
+    let mut rows: Vec<LogRow> = live.into_iter().skip(1).map(LogRow::live).collect();
     for block in history.blocks() {
         // A block only earns its rule by having a row to follow it — and a block with
         // no messages was never filed (`MessageHistory::record`), so there is no empty
@@ -278,8 +290,9 @@ pub fn message_log_rows(state: &State, ui: ScreenUi) -> u32 {
 
 /// Overlay the deployed message log onto the finished screen `grid` (§11.7/#267/#300):
 /// the [`log_rows`] one per row, **hanging from the near line** — the current action's
-/// loudest message on [`LOG_TOP_ROW`], the row directly below its own near-line band,
-/// each quieter message one row lower, then a rule and the previous action's block.
+/// loudest *unsaid* message on [`LOG_TOP_ROW`], the row directly below the band that
+/// is already speaking its loudest, each quieter message one row lower, then a rule
+/// and the previous action's block.
 ///
 /// Every row is cleared **end to end**: the block is the screen's full width, like the
 /// near line it grows out of, so the rules run edge to edge and no board shows through
@@ -443,17 +456,24 @@ mod tests {
             row_text(&g, NEAR_ROW).contains("[+2 ▴]"),
             "the deployed counter points up"
         );
+        // The block is the *rest* of the turn: the near line's own message is not
+        // repeated, so `[+2 ▴]` deploys exactly two rows, loudest first.
         assert!(
-            row_text(&g, LOG_TOP_ROW).contains("security condition"),
-            "the loudest sits directly under the band, over the usable line"
+            row_text(&g, LOG_TOP_ROW).contains("a body has been found"),
+            "the loudest message the near line did not say leads the block"
         );
         assert!(
-            row_text(&g, LOG_TOP_ROW + 1).contains("a body has been found"),
-            "the rest stack below it, loudest first"
-        );
-        assert!(
-            row_text(&g, LOG_TOP_ROW + 2).contains("the guard drops — a body is left"),
+            row_text(&g, LOG_TOP_ROW + 1).contains("the guard drops — a body is left"),
             "down to the quietest"
+        );
+        assert!(
+            !row_text(&g, LOG_TOP_ROW + 2).contains("security condition"),
+            "and the near line's own message is nowhere in the block"
+        );
+        assert_eq!(
+            message_log_rows(&s, ui) + (TOP_ROWS - LOG_TOP_ROW),
+            2,
+            "two rows deployed for two extras — the counter and the block agree"
         );
         assert!(
             !row_text(&g, LOG_TOP_ROW).contains("move"),
@@ -479,8 +499,9 @@ mod tests {
         );
         assert_eq!(
             message_log_rows(&s, deployed),
-            2,
-            "three rows deployed, the first of them over the usable line — two are board"
+            1,
+            "two rows deployed — the near line keeps the third — and the first of them \
+             sits on the usable line, so one is board"
         );
         assert_eq!(
             message_log_rows(&s, ScreenUi::default()),
@@ -555,20 +576,16 @@ mod tests {
     /// said nothing.
     #[test]
     fn the_deployed_log_stacks_past_turns_behind_a_rule() {
-        // Action 1: the takedown-with-witness step — three messages.
-        let mut s = loud_step();
-        // Action 2: a bump into the west wall — one quiet message, so the near line
-        // now has a single live message and the loud action behind it in history.
+        // Action 1: a bump into the west wall — one quiet message, which becomes the
+        // history. Action 2: the takedown-with-witness step — three messages, of which
+        // the near line speaks the loudest and the block gets the other two.
+        let mut s = witnessed_takedown();
         s.step(Input::Step(Direction::West));
-        assert_eq!(
-            live_messages(&s).len(),
-            1,
-            "one live message: {:?}",
-            live_messages(&s)
-        );
+        s.step(Input::Step(Direction::North));
+        assert_eq!(live_messages(&s).len(), 3, "three messages live");
         assert!(
             !s.message_history().is_empty(),
-            "and the loud turn is remembered behind it"
+            "and the bump is remembered behind them"
         );
 
         let deployed = ScreenUi {
@@ -577,68 +594,72 @@ mod tests {
         };
         let g = render_screen(&s, deployed);
 
-        // The corner still offers the control, and with no *live* extras it is the
-        // bare chevron — history does not inflate the counter.
+        // The near line speaks the loudest, and counts the two the block will show.
         let near = row_text(&g, NEAR_ROW);
-        assert!(
-            near.contains("[▴][?]"),
-            "the bare deployed chevron: {near:?}"
-        );
+        assert!(near.contains("security condition"), "the band: {near:?}");
+        assert!(near.contains("[+2 ▴]"), "counting two extras: {near:?}");
 
-        // The block's first row (over the usable line): this action's only message.
-        // Then the rule, then the loud turn's block, still loudest first.
-        assert!(row_text(&g, LOG_TOP_ROW).contains("blocked"));
+        // The block: this action's two *unsaid* messages, a rule, then the remembered
+        // action — and the near line's own message nowhere in it.
+        assert!(row_text(&g, LOG_TOP_ROW).contains("a body has been found"));
+        assert!(row_text(&g, LOG_TOP_ROW + 1).contains("the guard drops"));
         // The rule spans the whole row, edge to edge, like the near line above it.
-        let rule = row_text(&g, LOG_TOP_ROW + 1);
+        let rule = row_text(&g, LOG_TOP_ROW + 2);
         assert!(
             rule.chars().all(|c| c == SEPARATOR_GLYPH),
             "a rule across the whole row: {rule:?}"
         );
         assert_eq!(
-            g.get(0, LOG_TOP_ROW + 1).fg,
+            g.get(0, LOG_TOP_ROW + 2).fg,
             Category::System,
             "the rule is chrome, not a message category"
         );
         assert_eq!(
-            g.get(0, LOG_TOP_ROW + 1).vis,
+            g.get(0, LOG_TOP_ROW + 2).vis,
             PAST,
             "and it draws dim — everything from the rule down is past"
         );
-        assert!(row_text(&g, LOG_TOP_ROW + 2).contains("security condition"));
-        assert!(row_text(&g, LOG_TOP_ROW + 3).contains("a body has been found"));
-        assert!(row_text(&g, LOG_TOP_ROW + 4).contains("the guard drops"));
-        // Each message keeps its own §11.2 colour across the rule.
-        assert_eq!(
-            g.get(1, TOP_ROWS + 2).fg,
-            Category::Warning,
-            "the alert step"
-        );
-        assert_eq!(
-            g.get(1, LOG_TOP_ROW + 4).fg,
-            Category::Owned,
-            "the takedown"
-        );
-
-        // **Now reads louder than then**: this action's row is at full strength and
-        // every remembered row is dimmed, category intact.
-        assert_eq!(
-            g.get(1, LOG_TOP_ROW).vis,
-            Visibility::Live,
-            "the current action draws at full strength"
-        );
-        for dy in 2..=4 {
-            assert_eq!(
-                g.get(1, LOG_TOP_ROW + dy).vis,
-                PAST,
-                "row {dy} is a past action's, so it recedes"
+        assert!(row_text(&g, LOG_TOP_ROW + 3).contains("blocked"));
+        for dy in 0..4 {
+            assert!(
+                !row_text(&g, LOG_TOP_ROW + dy).contains("security condition"),
+                "the near line's own message is never repeated (row {dy})"
             );
         }
 
-        // Exactly one rule, and none trailing: five rows in all, of which the first
-        // sits on the usable line and four are board.
-        assert_eq!(message_log_rows(&s, deployed), 4);
+        // Each message keeps its own §11.2 colour across the rule.
+        assert_eq!(g.get(1, LOG_TOP_ROW).fg, Category::Warning, "the body find");
+        assert_eq!(
+            g.get(1, LOG_TOP_ROW + 1).fg,
+            Category::Owned,
+            "the takedown"
+        );
+        assert_eq!(
+            g.get(1, LOG_TOP_ROW + 3).fg,
+            Category::Neutral,
+            "the remembered bump"
+        );
+
+        // **Now reads louder than then**: this action's rows are at full strength and
+        // every remembered row is dimmed, category intact.
+        for dy in 0..=1 {
+            assert_eq!(
+                g.get(1, LOG_TOP_ROW + dy).vis,
+                Visibility::Live,
+                "row {dy} is this action's, so it draws at full strength"
+            );
+        }
+        assert_eq!(
+            g.get(1, LOG_TOP_ROW + 3).vis,
+            PAST,
+            "and the remembered row recedes"
+        );
+
+        // Exactly one rule, and none trailing: four rows in all, of which the first
+        // sits on the usable line and three are board.
+        assert_eq!(message_log_rows(&s, deployed), 3);
         assert!(
-            !row_text(&g, LOG_TOP_ROW + 5)
+            !row_text(&g, LOG_TOP_ROW + 4)
                 .chars()
                 .any(|c| c == SEPARATOR_GLYPH),
             "no trailing rule under the oldest block"
@@ -688,8 +709,8 @@ mod tests {
             message_log_open: true,
             ..ScreenUi::default()
         };
-        assert_eq!(message_log_rows(&fresh, deployed), 2);
-        assert_eq!(message_log_rows(&carried, deployed), 4);
+        assert_eq!(message_log_rows(&fresh, deployed), 1);
+        assert_eq!(message_log_rows(&carried, deployed), 3);
     }
 
     /// The block is **clamped, never asserted** (§11.7): on a board too short to hold

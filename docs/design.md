@@ -2619,10 +2619,12 @@ system — it is derived from adjacency every frame and carries no state.
   you are provably not doing while you have the log open to read what already
   happened, so it is the cheapest row on the screen to spend; it is back the moment
   the log folds, and folding costs no turn either way (§4.4). The block never
-  reaches the ability bar — the bar is always worth reading. It
-  lists the current action's messages loudest-first, then a **separator rule** in
-  the System chrome colour, then the previous message-bearing action's block, and
-  so on. That is where "with radio pings (§7.3) there is more to say" is answered:
+  reaches the ability bar — the bar is always worth reading. It lists the current
+  action's messages **the near line did not say** — its loudest is already the band
+  an inch above, so the panel shows exactly what the counter promised and the two
+  surfaces partition the turn instead of overlapping on it — then a **separator
+  rule** in the System chrome colour, then the previous message-bearing action's
+  block, and so on. That is where "with radio pings (§7.3) there is more to say" is answered:
   a silence, a call-in and a body find on three consecutive turns can be read back
   after the near line has moved on. Bounded twice — a cap on remembered actions and
   a cap on total rows, both **[START]** — and then clamped to the board, because it
