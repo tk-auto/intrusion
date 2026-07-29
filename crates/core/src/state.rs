@@ -65,6 +65,7 @@ use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::radio;
 use crate::region::{DoorCell, DoorId, RegionId};
 use crate::rng::Rng;
+use crate::status::MessageHistory;
 use crate::targeting::Targeting;
 use crate::vision::{
     field_of_view_with_peek, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC, PLAYER_SIGHT_ARC,
@@ -572,6 +573,12 @@ pub struct State {
     /// exactly one action's events *is* the clearing rule). Empty before the
     /// first input; frozen once the run ends, so the final message stays.
     last_events: Vec<Event>,
+    /// What the near line said **before** the current action (§11.7/#300) — a bounded
+    /// ring of the last few message-bearing actions, newest first, filled in
+    /// [`step`](Self::step) as each action's events stop being live. The deployed log
+    /// stacks it under the current block; the near line never reads it. Empty on a
+    /// fresh [`State`], so a level starts with no memory of the last one (§12.6).
+    message_history: MessageHistory,
     /// The live door-change cues (§9.4/§10.4): doors that opened or shut away from
     /// the player, each fading over [`DOOR_CUE_DECAY_TURNS`] turns. Placed in
     /// [`record_door_cues`](Self::record_door_cues) for the door events the player did
@@ -736,6 +743,7 @@ impl State {
             pending_reinforcements: Vec::new(),
             outcome: Outcome::Playing,
             last_events: Vec::new(),
+            message_history: MessageHistory::default(),
             door_cues: Vec::new(),
             effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
@@ -1026,6 +1034,11 @@ impl State {
 
         // Every action replaces the near line's source, free bumps included —
         // this assignment is §11.7's "messages clear on the next action".
+        //
+        // The outgoing set is filed first (#300): what the near line stops showing is
+        // exactly what the deployed log remembers, so the two can never disagree about
+        // what a past turn said. Silent actions file nothing.
+        self.message_history.record(&self.last_events);
         self.last_events = events.clone();
         events
     }

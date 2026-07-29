@@ -2610,8 +2610,20 @@ system — it is derived from adjacency every frame and carries no state.
 - The near line shows only the **highest-priority** live message.
 - **Messages clear on the player's next action** — a status line, not a
   scrollback — falling back to the ambient status of §11.4, never to an empty
-  row. **[START]** — the old TODO wanted an expandable log, and with radio pings
-  (§7.3) there is more to say, so this probably needs to grow.
+  row. **[SETTLED]** for the **near line**: one row, one live message, wiped by
+  the next action.
+- **The deployed log behind the chevron keeps the last few actions** (#300). It
+  lists the current action's messages loudest-first, then a **separator rule** in
+  the System chrome colour, then the previous message-bearing action's block, and
+  so on. That is where "with radio pings (§7.3) there is more to say" is answered:
+  a silence, a call-in and a body find on three consecutive turns can be read back
+  after the near line has moved on. Bounded twice — a cap on remembered actions and
+  a cap on total rows, both **[START]** — and then clamped to the board, because it
+  is drawn *over* the map and burying the §11.5 danger overlay is the failure mode.
+  An action that said nothing contributes no block and no rule. Still **no camera
+  and no scrolling** (§11.4): if it feels short, move the bound, not the surface.
+  The corner counter keeps counting **live** extras only — history never inflates
+  it — and with nothing extra live it is the bare chevron.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
 - **Objective messaging derives from the gate, never from a fixed intel count**

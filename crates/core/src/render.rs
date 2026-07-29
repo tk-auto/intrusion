@@ -704,14 +704,15 @@ mod alert;
 mod help;
 mod hud;
 mod menu;
+mod message_log;
 mod usable;
 pub use help::{help_hit, HelpHit, HelpTab, SeedCopy};
 pub use hud::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, is_help_button,
-    is_message_button, message_log_rows, render_screen, InputModality, ScreenUi, BOTTOM_ROWS,
-    TOP_ROWS,
+    render_screen, InputModality, ScreenUi, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use menu::{menu_hit, MenuEntry, MenuHit, MenuUi};
+pub use message_log::{is_message_button, message_log_rows};
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row
 /// (§11.1) — no entities. This is the generator's debug view: generation works on a

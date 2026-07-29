@@ -610,6 +610,14 @@ impl State {
         &self.last_events
     }
 
+    /// What the near line said **before** the current action (§11.7/#300) — the
+    /// bounded ring the deployed log stacks under the live block, newest first. Empty
+    /// before the second action, and empty again on a fresh level. The near line does
+    /// not read it: its clear-on-action rule is untouched.
+    pub fn message_history(&self) -> &MessageHistory {
+        &self.message_history
+    }
+
     /// The state of ability `id` as the bar draws it (§11.4): the §8.2 economy —
     /// `Ready`, `Active` with the duration left, `Cooling` with the cooldown left,
     /// `Limited` with the uses left, the exact number the player gets (§8.2 timing) —

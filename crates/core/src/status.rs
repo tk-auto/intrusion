@@ -10,6 +10,11 @@
 //! does not sit empty: it falls back to [`ambient`] status — the quiet floor
 //! below every message — so the row always says something true about now.
 //!
+//! What the near line has *finished* saying is not thrown away: [`MessageHistory`]
+//! keeps the last few message-bearing actions so the **deployed** log can show them
+//! under a separator rule (#300). The clear-on-action rule is the near line's, not
+//! the panel's.
+//!
 //! The **usable line** below it is deliberately *not* here: it is no message at
 //! all but a pure derived view of adjacency
 //! ([`State::affordances`](crate::State::affordances)), recomputed every frame
@@ -17,6 +22,9 @@
 
 use crate::category::Category;
 use crate::state::{Event, State};
+
+mod history;
+pub use history::{MessageHistory, HISTORY_ACTIONS};
 
 /// One §11.7 message: what the near line says, the §11.2 category that colours
 /// its band, and its rung on the priority ladder. (A source cell joins when
@@ -258,11 +266,18 @@ pub fn message_for(event: Event) -> Option<Message> {
 /// does — the later event leads — so the first entry is exactly the band the near
 /// line paints, and the two can never disagree.
 pub fn live_messages(state: &State) -> Vec<Message> {
-    let mut messages: Vec<Message> = state
-        .last_events()
-        .iter()
-        .filter_map(|&e| message_for(e))
-        .collect();
+    loudest_first(state.last_events())
+}
+
+/// One action's events resolved to its messages, **loudest first** — the §11.7
+/// ordering itself, with no opinion about *which* action it is given.
+///
+/// Shared by [`live_messages`] and the [`MessageHistory`] ring behind the deployed
+/// log (#300), so a block that has scrolled into the history reads in exactly the
+/// order it read in while it was live. Two orderings would have been two chances to
+/// disagree about which message is the loudest.
+pub(crate) fn loudest_first(events: &[Event]) -> Vec<Message> {
+    let mut messages: Vec<Message> = events.iter().filter_map(|&e| message_for(e)).collect();
     // The near line shows the *last* of the top-priority events (`max_by_key`
     // keeps the later of equal keys). Lead the list with that same message:
     // reverse to later-first, then a **stable** descending sort by priority keeps

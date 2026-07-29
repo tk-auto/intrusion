@@ -1,0 +1,726 @@
+//! The near line's **deployed message log** (§11.7/#267/#300) — the panel behind
+//! the chevron, and the corner control that deploys it.
+//!
+//! The near line itself is one row and stays one row: it speaks the loudest **live**
+//! message and is wiped by the player's next action (§11.4/§11.7). Everything that
+//! does not fit in that row is here — the counter beside the `[?]`, the block that
+//! hangs from the band over the board when it is deployed, and the geometry a shell
+//! reads to know which map rows are the log's rather than the board's (#306).
+//!
+//! # What the block shows (#300)
+//!
+//! The current action's messages, loudest first, then a **separator rule** and the
+//! previous message-bearing action's block, and so on back through
+//! [`MessageHistory`]. A radio silence, a call-in and a body find on three
+//! consecutive turns is the moment a player wants to read back what set the facility
+//! off, and the near line — correctly — kept only the last of them.
+//!
+//! It is **not** a scrollback the player pages through: there is no camera and no
+//! scrolling (§11.4 **[SETTLED]**). The block is bounded twice over — by
+//! [`HISTORY_ACTIONS`](crate::status::HISTORY_ACTIONS) and by [`MAX_LOG_ROWS`] — and
+//! then clamped to whatever the board can hold, so it either fits or shows what fits
+//! from the top. If it ever
+//! feels too short, the answer is the **[START]** bound, not a scrollbar.
+
+use super::hud::{help_button_start, ScreenUi, NEAR_ROW};
+use super::*;
+use crate::status::{live_messages, Message, MessageHistory};
+
+/// The most **rows** the deployed block may ever cover, separators included
+/// (§11.7/#300). **[START]** — the panel is drawn over the map, and burying the
+/// danger overlay (§11.5) behind a wall of text is the failure mode to avoid, so the
+/// history's own bound ([`HISTORY_ACTIONS`](crate::status::HISTORY_ACTIONS)) is backed
+/// by a hard row budget for the rare action that raises five messages at once.
+///
+/// A quarter of the v1 board's 40 rows (§10.2): enough that the deployed look is
+/// worth taking, little enough that three quarters of the facility is still visible
+/// underneath it.
+pub const MAX_LOG_ROWS: usize = 10;
+
+/// The **separator rule** between two actions' blocks (§11.7/#300): a run of this
+/// glyph across the block's band, drawn in [`Category::System`] — the HUD control
+/// colour every piece of chrome wears.
+///
+/// It is chrome, not content, and the colour is the whole reason it can be: the
+/// message categories are the §11.2 meaning ladder, and a rule in any of them would
+/// read as a threat flash that happened to be one cell tall. System says *"this is
+/// the frame talking"*, which is exactly what a rule between turns is.
+const SEPARATOR_GLYPH: char = '─';
+
+/// One row of the deployed block: a message, or the rule that divides two actions.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum LogRow {
+    /// A message, drawn in its own §11.2 category.
+    Message(Message),
+    /// The chrome rule between one action's block and the older one beneath it.
+    Separator,
+}
+
+/// Every row the deployed log would draw, top to bottom (§11.7/#300) — the current
+/// action's messages loudest first, then a [`LogRow::Separator`] and the previous
+/// message-bearing action's block, and so on back through [`MessageHistory`], capped
+/// at [`MAX_LOG_ROWS`].
+///
+/// **The one source of truth for the whole log**: the drawing
+/// ([`overlay_message_log`]), the geometry a shell taps against
+/// ([`message_log_rows`]) and the very existence of the deploy control
+/// ([`is_message_button`]) are all this list's length, so a control can never offer a
+/// panel that draws nothing and a tap can never read the board through a row the log
+/// covered.
+///
+/// Empty when there is nothing the near line has not already said: a lone live
+/// message with no history is simply the band, and deploying it would show the player
+/// the row they are already reading (§11.7).
+fn log_rows(state: &State) -> Vec<LogRow> {
+    assemble(live_messages(state), state.message_history())
+}
+
+/// [`log_rows`]' whole rule, over its two inputs and nothing else — the live block and
+/// the remembered ones — so the stacking, the bounds and the no-stray-rule guarantees
+/// are testable without staging a run that happens to produce them.
+fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
+    if live.len() < 2 && history.is_empty() {
+        return Vec::new();
+    }
+
+    let mut rows: Vec<LogRow> = live.into_iter().map(LogRow::Message).collect();
+    for block in history.blocks() {
+        // A block only earns its rule by having a row to follow it — and a block with
+        // no messages was never filed (`MessageHistory::record`), so there is no empty
+        // band to guard against here either. No leading rule when the current action
+        // was silent, and no trailing one when the budget runs out below.
+        if !rows.is_empty() {
+            rows.push(LogRow::Separator);
+        }
+        rows.extend(block.iter().cloned().map(LogRow::Message));
+        if rows.len() >= MAX_LOG_ROWS {
+            break;
+        }
+    }
+    rows.truncate(MAX_LOG_ROWS);
+    // The budget must never leave the block ending on a rule: a rule with nothing
+    // under it promises an older turn that was cut, which is worse than not showing
+    // it. Cheaper than fitting each block before pushing it, and exact.
+    if rows.last() == Some(&LogRow::Separator) {
+        rows.pop();
+    }
+    rows
+}
+
+/// The near line's message-log toggle label (§11.7): when `extra` further messages
+/// are stacked behind the loudest, the count and a chevron — down to deploy the
+/// list, up to fold it back. Both chevrons are one cell, so the label's width
+/// tracks the digit count alone; the drawing ([`draw_message_button`]) and the
+/// hit-test ([`is_message_button`]) share it so a tap lands on exactly what is
+/// drawn.
+///
+/// **The count is of *live* extras only** (#300). With nothing extra live but a
+/// non-empty history the label is the bare chevron: there is something behind it, and
+/// `[+0 ▾]` would answer a question nobody asked with a number that reads as a bug.
+fn message_button_label(extra: usize, open: bool) -> String {
+    let chevron = if open { '▴' } else { '▾' };
+    if extra == 0 {
+        return format!("[{chevron}]");
+    }
+    format!("[+{extra} {chevron}]")
+}
+
+/// The column the message-log toggle starts at on a screen `width` wide:
+/// immediately left of the near line's help button, so the top-right corner reads
+/// as one control cluster `[+2 ▾][?]`.
+fn message_button_start(width: u32, label_len: u32) -> u32 {
+    help_button_start(width).saturating_sub(label_len)
+}
+
+/// Where the near line's **words** must stop on a screen `width` wide (§11.7): one
+/// cell short of the widest the corner cluster gets in practice — the deploy control
+/// carrying a single-digit count, with the `[?]` beyond it. The §11.4 row-fits bound
+/// is measured against this, so it can never drift from the layout it describes.
+#[cfg(test)]
+pub(super) fn near_line_text_max(width: u32) -> usize {
+    let label = message_button_label(1, false).chars().count() as u32;
+    message_button_start(width, label).saturating_sub(1) as usize
+}
+
+/// The toggle's label and its starting column on a screen `width` wide, or `None`
+/// when there is nothing to deploy — the single answer the near line's layout, its
+/// drawing and its hit-test all ask, so the three cannot disagree about whether the
+/// corner holds one control or two.
+pub(super) fn message_button(state: &State, width: u32, open: bool) -> Option<(String, u32)> {
+    if log_rows(state).is_empty() {
+        return None;
+    }
+    let extra = live_messages(state).len().saturating_sub(1);
+    let label = message_button_label(extra, open);
+    let start = message_button_start(width, label.chars().count() as u32);
+    Some((label, start))
+}
+
+/// Whether screen cell `(x, y)` is the near line's message-log toggle (§11.7) —
+/// the counter left of the `[?]` that deploys and folds the message log. A shell
+/// maps a click to a screen cell and asks this; a hit flips
+/// [`ScreenUi::message_log_open`] instead of stepping.
+///
+/// There is no button unless the log has something the near line has not already
+/// said — more than one live message, **or** a non-empty history (#300) — so a lone
+/// message on a quiet first turn yields `false`. The geometry is read from `state`,
+/// so a click can never miss the toggle the frame drew.
+pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
+    let width = state.layout().facility().width();
+    // The closed label is the widest the control gets (both chevrons are one cell),
+    // so which of the two is drawn cannot change where it starts.
+    let Some((label, start)) = message_button(state, width, false) else {
+        return false;
+    };
+    let len = label.chars().count() as u32;
+    y == NEAR_ROW && x >= start && x < start + len
+}
+
+/// Draw the message-log toggle over the already-built near line `row` (§11.7):
+/// the [`message_button_label`] right-aligned, its glyphs in System — the HUD
+/// control colour, like the ability line's deploy button — over the loudest
+/// message's own category band, which keeps painting behind it.
+pub(super) fn draw_message_button(row: &mut [GlyphCell], width: u32, band: Category, label: &str) {
+    let start = message_button_start(width, label.chars().count() as u32);
+    for (i, glyph) in label.chars().enumerate() {
+        let x = start + i as u32;
+        if x < width {
+            row[x as usize] = GlyphCell {
+                glyph,
+                fg: Category::System,
+                bg: Some(band),
+                vis: Visibility::Live,
+            };
+        }
+    }
+}
+
+/// How many **map rows** the deployed message log covers right now (§11.7), or `0`
+/// when nothing of it is on the board — the geometry half of
+/// [`overlay_message_log`], read by a shell that must know which rows are the log's
+/// rather than the board's (#306: a tap on the list you opened to read must never
+/// burn a turn).
+///
+/// Mirrors the drawing exactly: the log earns the board only when it is deployed
+/// **and** it has something to show ([`log_rows`]), it hangs from the top of the map,
+/// and it is clamped to the map's height on a board too short to hold every row. `0`
+/// while a modal screen is up ([`ScreenUi::menu`] / [`ScreenUi::help_open`]) because
+/// then no board is drawn at all.
+pub fn message_log_rows(state: &State, ui: ScreenUi) -> u32 {
+    if ui.menu.is_some() || ui.help_open || !ui.message_log_open {
+        return 0;
+    }
+    (log_rows(state).len() as u32).min(state.layout().facility().height())
+}
+
+/// Overlay the deployed message log onto the map `grid` (§11.7/#267/#300): the
+/// [`log_rows`] one per row, **hanging from the near line** — at the map's top-left,
+/// the current action's loudest message on the first row directly below its own
+/// near-line band, each quieter message one row lower, then a rule and the previous
+/// action's block. Every row is cleared to a uniform band — a one-cell margin, the
+/// longest message, a cell of pad — then the words drawn in the message's own §11.2
+/// category, so the list reads as a solid block over the board and each entry keeps
+/// its threat colour, aligned with the band above.
+///
+/// Bounds are clamped, never asserted: on a board too short to hold every row
+/// (only hand-built test states get that small — the v1 board is 40×40, §10.2)
+/// the block shows as many as fit from the top and drops the rest.
+pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
+    let rows = log_rows(state);
+    let (width, map_h) = (grid.width, grid.height);
+    let band = (rows
+        .iter()
+        .map(|row| match row {
+            LogRow::Message(m) => m.text.chars().count(),
+            // A rule claims no width of its own — it spans whatever the messages
+            // beside it earned, so a block of one short line is not given a rule
+            // three times its length.
+            LogRow::Separator => 0,
+        })
+        .max()
+        .unwrap_or(0) as u32
+        + 2)
+    .min(width);
+    let blank = GlyphCell {
+        glyph: ' ',
+        fg: Category::Neutral,
+        bg: None,
+        vis: Visibility::Live,
+    };
+    for (y, row) in rows.iter().enumerate() {
+        let y = y as u32;
+        if y >= map_h {
+            break; // out the bottom of a tiny board — show what fits from the top
+        }
+        for dx in 0..band {
+            grid.cells[(y * width + dx) as usize] = blank;
+        }
+        match row {
+            // A one-cell left margin, matching the near line, so the list lines up
+            // under the band it hangs from.
+            LogRow::Message(message) => {
+                for (dx, glyph) in message.text.chars().enumerate() {
+                    let x = 1 + dx as u32;
+                    if x >= band {
+                        break;
+                    }
+                    grid.cells[(y * width + x) as usize] = GlyphCell {
+                        glyph,
+                        fg: message.category,
+                        ..blank
+                    };
+                }
+            }
+            // The rule runs the band's whole width, margins included: a divider that
+            // stopped short of the edge would read as another line of text.
+            LogRow::Separator => {
+                for dx in 0..band {
+                    grid.cells[(y * width + dx) as usize] = GlyphCell {
+                        glyph: SEPARATOR_GLYPH,
+                        fg: Category::System,
+                        ..blank
+                    };
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::alert::AlertTrigger;
+    use crate::cell::{Cell, Direction};
+    use crate::facility::Terrain;
+    use crate::guard::Guard;
+    use crate::render::hud::{render_screen, TOP_ROWS};
+    use crate::render::MenuUi;
+    use crate::state::{Event, Input};
+    use crate::status::HISTORY_ACTIONS;
+    use crate::test_support::open_room;
+
+    /// The board every deployed-log test is built on: a takedown-with-witness set up
+    /// one cell from the west wall, so the same fixture can raise a **loud** action
+    /// (step north: the guard drops, the second guard finds the body, and the find
+    /// sends the §7.3 ladder up — three messages at once) and a **quiet** one (step
+    /// west into the wall: one "blocked", a free bump that spends no turn). Wide
+    /// enough that no message is truncated.
+    fn witnessed_takedown() -> State {
+        let mut layout = open_room(40, 14);
+        layout.place(Cell::new(1, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(1, 4)),
+                Guard::stationary(Cell::new(1, 2)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        // A wall bump must stay a wall bump: with the §10.1 auto-slide on, walking
+        // west into the edge would round the corner instead of saying "blocked", and
+        // these tests are about what the near line *says*.
+        s.set_auto_slide(false);
+        s
+    }
+
+    /// That fixture with its one loud action already taken: three live messages, an
+    /// empty history behind them.
+    fn loud_step() -> State {
+        let mut s = witnessed_takedown();
+        s.step(Input::Step(Direction::North));
+        assert_eq!(live_messages(&s).len(), 3, "three messages land at once");
+        s
+    }
+
+    /// Every glyph of screen row `y`, as a string.
+    fn row_text(g: &Grid, y: u32) -> String {
+        (0..g.width).map(|x| g.get(x, y).glyph).collect()
+    }
+
+    /// §11.7: when one step raises more than one message the near line speaks the
+    /// loudest as its band and shows a right-aligned counter of the rest; deploying
+    /// the list ([`ScreenUi::message_log_open`]) stacks every message over the
+    /// board, loudest on the row directly above the band.
+    #[test]
+    fn the_near_line_counts_extra_messages_and_deploys_the_list() {
+        let s = loud_step();
+        let width = s.layout().facility().width();
+
+        // Collapsed: the band speaks the loudest message and the closed counter of
+        // the one further message (a down chevron) sits at the right.
+        let g = render_screen(&s, ScreenUi::default());
+        let near = row_text(&g, NEAR_ROW);
+        assert!(
+            near.contains("security condition"),
+            "the band speaks the loudest message: {near:?}"
+        );
+        assert!(
+            near.contains("[+2 ▾][?]"),
+            "a closed counter of the rest, beside the help toggle: {near:?}"
+        );
+
+        // The hit-test agrees with the drawn counter, and there is no button off it.
+        let label_len = "[+2 ▾]".chars().count() as u32;
+        let start = help_button_start(width) - label_len;
+        assert!(
+            is_message_button(&s, start, NEAR_ROW),
+            "the counter is hittable"
+        );
+        assert!(
+            !is_message_button(&s, start - 1, NEAR_ROW),
+            "nothing just left of it"
+        );
+        assert!(
+            !is_message_button(&s, start, NEAR_ROW + 1),
+            "and nothing a row down"
+        );
+
+        // Deployed: the chevron flips up and the whole list stacks over the board —
+        // the loudest directly above the near line, the quieter one above that.
+        let ui = ScreenUi {
+            message_log_open: true,
+            ..ScreenUi::default()
+        };
+        let g = render_screen(&s, ui);
+        assert!(
+            row_text(&g, NEAR_ROW).contains("[+2 ▴]"),
+            "the deployed counter points up"
+        );
+        assert!(
+            row_text(&g, TOP_ROWS).contains("security condition"),
+            "the loudest sits nearest the band"
+        );
+        assert!(
+            row_text(&g, TOP_ROWS + 1).contains("a body has been found"),
+            "the rest stack below it, loudest first"
+        );
+        assert!(
+            row_text(&g, TOP_ROWS + 2).contains("the guard drops — a body is left"),
+            "down to the quietest"
+        );
+    }
+
+    /// [`message_log_rows`] tells a shell exactly which map rows the deployed list
+    /// covers (#306), and it must agree with the drawing: nothing while folded,
+    /// nothing while a modal screen is up, one row per live message once deployed —
+    /// the rows a tap must never read as the board underneath.
+    #[test]
+    fn the_message_log_reports_the_rows_it_covers() {
+        let s = loud_step();
+        let deployed = ScreenUi {
+            message_log_open: true,
+            ..ScreenUi::default()
+        };
+        assert_eq!(live_messages(&s).len(), 3, "three messages are live");
+        assert!(
+            s.message_history().is_empty(),
+            "and nothing behind them yet"
+        );
+        assert_eq!(
+            message_log_rows(&s, deployed),
+            3,
+            "deployed, the list covers one map row per live message"
+        );
+        assert_eq!(
+            message_log_rows(&s, ScreenUi::default()),
+            0,
+            "folded, the list covers nothing"
+        );
+        // A modal screen replaces the whole frame, so no board rows are the log's.
+        for ui in [
+            ScreenUi {
+                help_open: true,
+                ..deployed
+            },
+            ScreenUi {
+                menu: Some(MenuUi::default()),
+                ..deployed
+            },
+        ] {
+            assert_eq!(message_log_rows(&s, ui), 0, "no board, no log rows");
+        }
+
+        // One message and nothing remembered earns no list at all — the near line
+        // simply speaks it (§11.7).
+        let quiet = State::new(
+            open_room(40, 14),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(live_messages(&quiet).len() < 2);
+        assert!(quiet.message_history().is_empty());
+        assert_eq!(message_log_rows(&quiet, deployed), 0);
+    }
+
+    /// §11.7: a single live message with nothing behind it shows no counter — the
+    /// near line is the plain band it has always been, and the toggle is not a button.
+    #[test]
+    fn a_lone_message_shows_no_counter() {
+        // Taking the intel is one loud message and nothing else this step — and it is
+        // the run's *first* action, so there is no history behind it either.
+        let mut s = State::new(
+            open_room(20, 10),
+            Cell::new(5, 6),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(5, 5)],
+            Cell::new(18, 8),
+        );
+        s.step(Input::Step(Direction::North)); // bump the console: intel taken
+
+        let width = s.layout().facility().width();
+        let near = row_text(&render_screen(&s, ScreenUi::default()), NEAR_ROW);
+        assert!(
+            !near.contains("[+"),
+            "no counter for a lone message: {near:?}"
+        );
+        assert!(
+            near.trim_end().ends_with("[?]"),
+            "the help toggle keeps the corner: {near:?}"
+        );
+        assert!(
+            (0..width).all(|x| !is_message_button(&s, x, NEAR_ROW)),
+            "and nothing to click"
+        );
+    }
+
+    /// **The golden block across two turns** (#300): the deployed log lists this
+    /// action's messages loudest-first, then a separator rule, then the previous
+    /// message-bearing action's block — each message in its own §11.2 category, the
+    /// rule in the System chrome colour, and no rule where a turn said nothing.
+    #[test]
+    fn the_deployed_log_stacks_past_turns_behind_a_rule() {
+        // Action 1: the takedown-with-witness step — three messages.
+        let mut s = loud_step();
+        // Action 2: a bump into the west wall — one quiet message, so the near line
+        // now has a single live message and the loud action behind it in history.
+        s.step(Input::Step(Direction::West));
+        assert_eq!(
+            live_messages(&s).len(),
+            1,
+            "one live message: {:?}",
+            live_messages(&s)
+        );
+        assert!(
+            !s.message_history().is_empty(),
+            "and the loud turn is remembered behind it"
+        );
+
+        let deployed = ScreenUi {
+            message_log_open: true,
+            ..ScreenUi::default()
+        };
+        let g = render_screen(&s, deployed);
+
+        // The corner still offers the control, and with no *live* extras it is the
+        // bare chevron — history does not inflate the counter.
+        let near = row_text(&g, NEAR_ROW);
+        assert!(
+            near.contains("[▴][?]"),
+            "the bare deployed chevron: {near:?}"
+        );
+
+        // Row 0 of the map: this action's only message. Row 1: the rule. Row 2 on:
+        // the loud turn's block, still loudest first.
+        assert!(row_text(&g, TOP_ROWS).contains("blocked"));
+        // The rule spans the block's band — the longest message plus its two cells of
+        // margin — and stops there, leaving the board beyond it untouched.
+        let rule = row_text(&g, TOP_ROWS + 1);
+        let band = log_rows(&s)
+            .iter()
+            .filter_map(|r| match r {
+                LogRow::Message(m) => Some(m.text.chars().count()),
+                LogRow::Separator => None,
+            })
+            .max()
+            .unwrap()
+            + 2;
+        assert_eq!(
+            rule.chars().take_while(|&c| c == SEPARATOR_GLYPH).count(),
+            band,
+            "a rule across the block's band, and no further: {rule:?}"
+        );
+        assert_eq!(
+            g.get(0, TOP_ROWS + 1).fg,
+            Category::System,
+            "the rule is chrome, not a message category"
+        );
+        assert!(row_text(&g, TOP_ROWS + 2).contains("security condition"));
+        assert!(row_text(&g, TOP_ROWS + 3).contains("a body has been found"));
+        assert!(row_text(&g, TOP_ROWS + 4).contains("the guard drops"));
+        // Each message keeps its own §11.2 colour across the rule.
+        assert_eq!(
+            g.get(1, TOP_ROWS + 2).fg,
+            Category::Warning,
+            "the alert step"
+        );
+        assert_eq!(g.get(1, TOP_ROWS + 4).fg, Category::Owned, "the takedown");
+
+        // Exactly one rule, and none trailing: five rows in all.
+        assert_eq!(message_log_rows(&s, deployed), 5);
+        assert!(
+            !row_text(&g, TOP_ROWS + 5)
+                .chars()
+                .any(|c| c == SEPARATOR_GLYPH),
+            "no trailing rule under the oldest block"
+        );
+    }
+
+    /// The near line is **untouched** by a non-empty history (#300): the same words,
+    /// the same category band, and a counter that still counts only what is *live*.
+    #[test]
+    fn a_history_does_not_change_the_near_line() {
+        // The same loud action, once with nothing behind it and once with a quiet bump
+        // already filed — identical live sets, different histories.
+        let fresh = loud_step();
+        let mut carried = witnessed_takedown();
+        carried.step(Input::Step(Direction::West)); // "blocked" — files a history block
+        carried.step(Input::Step(Direction::North)); // the same loud action
+
+        assert!(fresh.message_history().is_empty());
+        assert!(!carried.message_history().is_empty());
+        // The near line's own source is untouched: `live_messages` never reads history.
+        assert_eq!(live_messages(&carried), live_messages(&fresh));
+
+        let width = fresh.layout().facility().width();
+        let before = render_screen(&fresh, ScreenUi::default());
+        let g = render_screen(&carried, ScreenUi::default());
+        assert_eq!(
+            row_text(&g, NEAR_ROW),
+            row_text(&before, NEAR_ROW),
+            "the same near line, verbatim"
+        );
+        assert_eq!(
+            g.get(0, NEAR_ROW).bg,
+            before.get(0, NEAR_ROW).bg,
+            "the same category band"
+        );
+        assert!(
+            row_text(&g, NEAR_ROW).contains("[+2 ▾]"),
+            "the counter still counts the two live extras, not the history"
+        );
+        // And the button is in the same place, so a tap lands where it always did.
+        let start = help_button_start(width) - "[+2 ▾]".chars().count() as u32;
+        assert!(is_message_button(&carried, start, NEAR_ROW));
+
+        // Deployed, though, the block is the live three, a rule, and the remembered
+        // one — the history shows only behind the chevron.
+        let deployed = ScreenUi {
+            message_log_open: true,
+            ..ScreenUi::default()
+        };
+        assert_eq!(message_log_rows(&fresh, deployed), 3);
+        assert_eq!(message_log_rows(&carried, deployed), 5);
+    }
+
+    /// The block is **clamped, never asserted** (§11.7): on a board too short to hold
+    /// a full history it shows what fits from the top and drops the rest — no panic,
+    /// no assertion, and never a row past the map.
+    #[test]
+    fn the_block_clamps_on_a_board_too_short_to_hold_it() {
+        // A four-row facility with a full history stacked behind a live message: the
+        // player sits against the north wall and bumps it, a free action that says
+        // "blocked" and spends no turn.
+        let mut s = State::new(
+            open_room(30, 4),
+            Cell::new(5, 1),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(28, 2),
+        );
+        s.set_auto_slide(false);
+        for _ in 0..HISTORY_ACTIONS + 2 {
+            s.step(Input::Step(Direction::North));
+        }
+        assert_eq!(
+            s.message_history().blocks().count(),
+            HISTORY_ACTIONS,
+            "the ring is full"
+        );
+
+        let deployed = ScreenUi {
+            message_log_open: true,
+            ..ScreenUi::default()
+        };
+        let rows = message_log_rows(&s, deployed);
+        assert_eq!(rows, 4, "clamped to the board's height");
+        assert!(
+            log_rows(&s).len() > rows as usize,
+            "and there was genuinely more to show"
+        );
+
+        // The frame still draws, whole and in bounds.
+        let g = render_screen(&s, deployed);
+        assert_eq!(g.cells.len() as u32, g.width * g.height);
+        assert!(row_text(&g, TOP_ROWS).contains("blocked"));
+    }
+
+    /// Both **[START]** bounds hold whatever the run does (#300): the history keeps at
+    /// most [`HISTORY_ACTIONS`](crate::status::HISTORY_ACTIONS) blocks, and the block never draws more than
+    /// [`MAX_LOG_ROWS`] rows — nor ever ends on a rule that promises a turn it cut.
+    #[test]
+    fn the_block_is_bounded_and_never_ends_on_a_rule() {
+        // A worst case no real turn reaches: four loud actions of four messages each,
+        // which would want 4 × 4 + 3 rules = 19 rows if nothing bounded it.
+        let loud = |n: u32| {
+            (0..4)
+                .map(|i| Message {
+                    text: format!("message {n}.{i}"),
+                    category: Category::Warning,
+                    priority: 0,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut history = MessageHistory::default();
+        for n in 0..4 {
+            history.record(&[
+                Event::Bumped {
+                    into: Cell::new(n, 1),
+                },
+                Event::AlertRaised {
+                    rung: 1,
+                    trigger: AlertTrigger::Sighting,
+                },
+            ]);
+        }
+        assert_eq!(
+            history.blocks().count(),
+            HISTORY_ACTIONS,
+            "the ring is bounded"
+        );
+
+        let rows = assemble(loud(0), &history);
+        assert!(rows.len() <= MAX_LOG_ROWS, "the row budget holds: {rows:?}");
+        assert_ne!(rows.last(), Some(&LogRow::Separator), "no trailing rule");
+        assert_ne!(rows.first(), Some(&LogRow::Separator), "no leading rule");
+        // No two rules in a row: a silent action files nothing, so it can never put an
+        // empty band — or a doubled rule — between two blocks.
+        assert!(
+            !rows
+                .windows(2)
+                .any(|w| w[0] == LogRow::Separator && w[1] == LogRow::Separator),
+            "no doubled rules: {rows:?}"
+        );
+
+        // A silent current action is no reason for a leading rule: the oldest blocks
+        // simply stack from the top.
+        let rows = assemble(Vec::new(), &history);
+        assert_eq!(
+            rows.first(),
+            Some(&LogRow::Message(
+                history.blocks().next().unwrap()[0].clone()
+            ))
+        );
+
+        // And nothing at all to say is no log — never a bare rule over the board.
+        assert!(assemble(Vec::new(), &MessageHistory::default()).is_empty());
+        assert!(assemble(loud(0)[..1].to_vec(), &MessageHistory::default()).is_empty());
+    }
+}
