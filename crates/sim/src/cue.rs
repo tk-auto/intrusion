@@ -89,6 +89,12 @@ pub const BORE_MARGIN: u64 = 3 * crate::bot::CROSSING_MARGIN;
 /// whatever the floor is set to — a zero urge is the same as declining to bid.
 pub const URGE_NONE: u8 = 0;
 
+/// How much room a Dephase crossing wants from the nearest perceived guard
+/// (**[START] = 3**): one cell for each turn the phase lasts (§8.3), so a guard
+/// walking at the §7.1 one cell per turn cannot reach the landing cell before the bot
+/// is out of it.
+pub const CROSSING_CLEARANCE: u32 = 3;
+
 /// **A faint fit**: it might help. A step is probably worth more, and by default
 /// the bot takes the step (the floor sits above this).
 pub const URGE_FAINT: u8 = 25;
@@ -432,6 +438,17 @@ impl Moment<'_> {
         // pay for the three turns the crossing costs. No crossing, no bid — "there is
         // a wall here" is not a reason.
         let (_, saving) = self.crossing?;
+        // **Not with company.** The crossing takes three turns and the bot is committed
+        // for all of them; a guard near the far side can be standing on the exit cell
+        // when the duration runs out, and a phase that expires inside a solid costs the
+        // safety eject and a stun (§8.3). The shortcut is never worth that, so the cue
+        // only speaks when nobody perceived is close enough to wander into the landing.
+        if self
+            .nearest_guard
+            .is_some_and(|gap| gap <= CROSSING_CLEARANCE)
+        {
+            return None;
+        }
         // Plain by default and strong for a crossing that saves a lot: the ability is
         // a shortcut, and a shortcut is worth exactly what it saves. Nothing here is
         // ever decisive — no crossing is worth losing the run over, which is the

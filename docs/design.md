@@ -711,14 +711,29 @@ See §15.
 **Routes are not authored, and they are not random.** Each guard sweeps for cells
 it has not recently looked at.
 
-- Each guard has a **territory**: its region **beat** (§10.5), grown across door
-  edges from the region it stands in when the beat is cut. There is no spawn cell
-  and no patrol radius — a guard with no beat has no territory and holds, rather
-  than sweeping a box drawn round a cell it has long since walked away from.
-- **A beat is anchored on a live position, and cut rarely.** At placement that is
-  the spawn cell; for a guard that arrives mid-level (§7.3) it is where its errand
-  finished. Growth is called at placement and when the guard set changes — never
-  per turn, because an anchor that moves every turn would make patrols churn.
+- Each guard has a **territory**: one part of a **partition of the level** into as
+  many connected pieces as there are guards (§10.5). There is no spawn cell and no
+  patrol radius — a guard with no beat has no territory and holds, rather than
+  sweeping a box drawn round a cell it has long since walked away from.
+- **The partition comes from the building, the assignment from the guards.** The
+  split is a pure function of the region graph and the walls: the same facility
+  divides the same way however the guards happen to be arranged. Only *who patrols
+  which part* reads where they stand, and only so nobody is handed a wing on the far
+  side of the facility. Two regions count as joined when a guard can walk between
+  them without crossing a third — a door, a shared edge, or a doorway's own cells —
+  because door edges alone under-describe the building badly enough to leave whole
+  wings unclaimed.
+- **Every region belongs to exactly one guard.** No wing goes uncovered and no two
+  guards grind the same ground. There is no per-beat size ceiling: a beat is "the
+  level, split *N* ways", so **territory size falls as headcount rises** and a
+  reinforcement (§7.3) raises coverage *density* rather than only adding a body.
+  Balance is best-effort — a facility is hub-shaped and only a few rooms across, so
+  the largest part is large because the building has a large wing.
+- **The partition is recut when the guard set changes**, and only then: when a
+  reinforcement's errand ends and it needs ground of its own. Never per turn — the
+  assignment reads live positions, so a per-turn recut would make patrols churn. A
+  guard's inspected memory survives a recut; a destination the recut moved out of its
+  beat is dropped at the next repick.
 - It keeps a private memory of inspected cells.
 - With no destination, it walks to the **farthest** uninspected, currently-empty
   cell in its territory. *Farthest*, not nearest — this is what makes guards pace
@@ -754,15 +769,40 @@ it has not recently looked at.
   for a reversal, so a 3–7 dwell reads as 3–9 turns of held ground. The dwell is
   the part with the facing pinned, which is the part a Takedown needs.
 
-**Known weakness, worth fixing.** This was once *"territories are boxes around spawn
-points, which have no relationship to the building"* — they straddled walls, spilled
-into unreachable rooms, and overlapped arbitrarily. §10.5's region graph fixed the
-*shape* (a beat is rooms and the corridors joining them, all of it walkable), and
-dropping the spawn anchor fixed the *tether*. What survives is the **overlap**: two
-guards near each other still grind over the same ground while a wing goes uncovered,
-because beats are grown as a cover that merely *steers* away from claimed regions
-rather than as a partition of them. Headcount does not shrink a territory, so
-reinforcements add a body without adding density.
+**The weakness this replaced.** Territories were once *"boxes around spawn points,
+which have no relationship to the building"* — they straddled walls, spilled into
+unreachable rooms, and overlapped arbitrarily. §10.5's region graph fixed the *shape*
+(a beat is rooms and the corridors joining them, all of it walkable); dropping the
+spawn anchor fixed the *tether*; and the partition above fixed the last of it, the
+**overlap and the gaps** — two guards grinding one wing while another had nobody,
+which a per-beat ceiling of four regions on a seventeen-region level guaranteed.
+
+**What it costs, measured — and it is not small.** Covering the whole facility is a
+real difficulty increase, not a tidy-up. Over 100 seeded bot runs per playstyle:
+
+| profile | win rate | diversity |
+|---|---|---|
+| baseline | 0.36 → **0.34** | 0.670 → 0.672 |
+| cautious | 0.57 → **0.55** | 0.493 → **0.413** |
+| aggressive | 0.50 → **0.37** | 0.602 → 0.584 |
+| careless | 0.47 → **0.30** | 0.592 → **0.514** |
+
+**The bold profiles are the finding.** A careful player loses 2 points of win rate; a
+bold one loses 13–17, because the ground a bold plan crosses is now patrolled ground.
+Takedowns fall with it (careless 14 → 8), so the striking line is *harder to run*, not
+merely riskier. Alert peaks rise across the board and quiet runs nearly halve (careless
+rung-0 37 → 21). Turns to win rise for the careful profiles (baseline 129 → 154) and
+barely move for the bold ones — they are not playing longer, they are being caught.
+The single sharpest illustration is the sim's pinned seed 42: a 111-turn win with
+**zero** detections through ground nobody patrolled, now a capture at 216 with seven.
+
+**Strategy diversity falling is the part to watch** (§13.2: *win rate tells you if the
+game is hard, strategy diversity tells you if it is interesting*). Two profiles lose
+~8 points of it, which is the smell of a level admitting fewer distinct answers. If
+this proves too harsh the lever is the **guard count** (§10.2, ~9 points of win rate
+per guard): four guards now genuinely cover the facility where they used to cover
+something under two-thirds of it. It is not a reason to go back to leaving wings
+empty.
 
 ### 7.6 The chase and the hiding game — read this before touching guard AI
 

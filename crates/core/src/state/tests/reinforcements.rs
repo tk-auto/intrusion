@@ -446,52 +446,61 @@ fn long_region_strip(regions: u32) -> Layout {
     Layout::from_parts(f, g)
 }
 
-/// §7.5/§7.3/#374 — the defect this ticket exists for. A reinforcement walks in at the
-/// far end of the facility and used to be tethered there for the rest of the run: its
-/// beat was grown around the **arrival** cell, so once the post-errand watch expired it
-/// walked the whole building back to the room it entered by. And because the arrival
-/// region is the one furthest from the player — an answer that barely moves over a run
-/// — *every* reinforcement was anchored to the same room.
+/// §7.5/§7.3/#374 — the defect #398 removed, still held under #399's partition. A
+/// reinforcement walks in at the far end of the facility and used to be tethered there
+/// for the rest of the run: its beat was grown around the **arrival** cell, so once the
+/// post-errand watch expired it walked the whole building back to the room it entered
+/// by. And because the arrival region is the one furthest from the player — an answer
+/// that barely moves over a run — *every* reinforcement was anchored to the same room.
 ///
-/// Six rooms in a row, the player shut in the first, the errand in the second: the
-/// newcomer comes in at the sixth, walks the length of the strip, searches, and settles.
-/// A beat is four regions ([`BEAT_REGIONS`]), so a beat cut around the errand cannot
-/// reach the arrival room and one cut around the arrival cannot reach the errand — the
-/// two answers are cleanly distinguishable, which is the point of the long strip.
+/// Six rooms in a row with an incumbent guard held in the last of them, the player in
+/// the first, the errand in the second. The newcomer comes in at the far end, walks the
+/// length of the strip, searches, and settles — and the recut then matches it to the
+/// half of the strip it is standing in rather than the half it arrived in.
+///
+/// **Two guards is the minimum that makes the claim falsifiable.** A lone guard owns
+/// the whole level under a partition (§7.5), so "its beat holds the errand and not the
+/// arrival" would be true and false at once. The incumbent is held in place rather than
+/// patrolling because a patrolling one would own the whole strip until the newcomer
+/// arrived and could have wandered anywhere by then — deciding the matching itself,
+/// rather than the newcomer's own position deciding it.
 #[test]
 fn a_reinforcement_patrols_where_it_finished_not_where_it_landed() {
     let mut layout = long_region_strip(6);
     layout.place(Cell::new(1, 2), Terrain::Hideout);
     let errand = Cell::new(6, 2); // room 1, next door to the player
+    let incumbent = Cell::new(21, 2); // room 5, the far end
     let mut s = State::new(
         layout,
         Cell::new(1, 2),
         Direction::North,
-        Vec::new(),
+        vec![Guard::stationary(incumbent)],
         Vec::new(),
         Cell::new(2, 4),
     )
     .with_rng(Rng::new(7));
     s.step(Input::Wait);
 
+    let before = s.guards().len();
     s.queue_reinforcements(1, 2, errand);
     let mut events = Vec::new();
     s.land_reinforcements(&mut events);
     let arrived_at = *arrivals(&events).first().expect("the ladder sent somebody");
+    assert_eq!(s.guards().len(), before + 1);
     assert!(
-        arrived_at.x > 16,
+        arrived_at.x > 12,
         "it came in at the far end of the strip, not beside the errand ({arrived_at:?})",
     );
 
     // Run the errand out: walk the strip, search, release to Calm — and be cut a beat.
-    for _ in 0..300 {
-        if s.outcome() != Outcome::Playing || s.guards()[0].has_beat() {
+    for _ in 0..400 {
+        if s.outcome() != Outcome::Playing || s.guards()[before].has_beat() {
             break;
         }
         s.step(Input::Wait);
     }
 
-    let settled = &s.guards()[0];
+    let settled = &s.guards()[before];
     assert_eq!(settled.state(), GuardState::Calm, "the errand ended");
     let beat = settled.beat();
     assert!(!beat.is_empty(), "…and it was cut a beat to patrol (§7.5)");

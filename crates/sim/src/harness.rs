@@ -286,14 +286,17 @@ mod tests {
     /// against a freshly computed one, because the failure this guards against is
     /// precisely a default that quietly moved — a self-comparison would agree with
     /// itself all the way to a changed baseline.
+    ///
+    /// The row is the *game's* output, so a change to the game moves it and the refresh
+    /// belongs in that PR with the delta read. It last moved when the guards began
+    /// **partitioning the whole level** (§7.5): seed 42 was a 111-turn win with zero
+    /// detections through ground nobody patrolled, and is now a capture at 216 with
+    /// seven. That is the change doing exactly what it says — there is no longer a
+    /// wing with nobody on it — and it is the single sharpest illustration of the cost
+    /// in the suite.
     #[test]
     fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
-        const PINNED: &str = "{\"seed\":42,\"profile\":\"baseline\",\"outcome\":\"win\",\
-            \"turns\":111,\"detections\":0,\"takedowns\":0,\"bodies_found\":0,\
-            \"usage\":{\"wait\":0,\"run\":0,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\
-            \"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\
-            \"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":0,\"alert_escalations\":[],\
-            \"reinforcements\":0}";
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"baseline\",\"outcome\":\"capture\",\"turns\":216,\"detections\":7,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":39,\"run\":3,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":109,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":154,\"rung\":2,\"trigger\":\"console-tampered\"}],\"reinforcements\":1}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.
@@ -420,10 +423,16 @@ mod tests {
     /// A tuning that makes one turn of contact a confirmed sighting escalates strictly
     /// more often than the shipped ladder over the same seeds — the property a sweep
     /// rests on, and the one that fails if the knob is exposed but never read.
+    ///
+    /// **Forty seeds, not twelve.** Once the guards partitioned the whole level (§7.5)
+    /// rather than covering part of it, the careless bot's contacts got long enough
+    /// that the two ladders confirmed the same sightings on all twelve — 16 against 16,
+    /// equal rather than reversed. The knob still bites; twelve seeds had simply stopped
+    /// being a wide enough sample to see it.
     #[test]
     fn a_swept_alert_threshold_moves_the_measured_ladder() {
         let batch = |config: &RunConfig| -> u32 {
-            run_batch_with(config, 0..12, 400, |_| {
+            run_batch_with(config, 0..40, 400, |_| {
                 StealthBot::with_profile(Profile::CARELESS)
             })
             .expect("generates")
