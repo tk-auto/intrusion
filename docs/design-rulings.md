@@ -636,20 +636,16 @@ then being quietly dropped, so you asked for 5 and got 4 with a log line nobody 
 
 ---
 
-## Appendix 18 — Fog: the schematic, and what counts as contents
+## Appendix 18 — Fog: what became "contents"
 
 *(§11.5a, §10.7.)*
 
-**Why the unseen building draws as a schematic rather than a darker shade.** A fourth rung on
-the §11.5 dimming ladder has nowhere to go below Ground's already-quiet dim, and geometry too
-dark to read is fog by another name — which §11.5a settles against. So it is a **shape**
-distinction: `≈` for load-bearing fabric, `~` for the floor space and everything standing in
-it.
-
-**Why a doorway is `~` and not `≈`.** It bears no load, so a plan would show it as the gap in
-the wall line. An unexplored wing reads `≈≈≈~≈≈≈`, which is what keeps the ways between its
-rooms plannable and the *"you can plan your escape route before you're spotted"* promise
-intact.
+> **The shape-versus-shade argument is in the render reference, not here.** *Why unseen geometry
+> draws as a schematic (`≈` fabric, `~` floor space) rather than as a fourth rung on the §11.5
+> dimming ladder*, *why a doorway is `~` and its frame `≈`*, and the A/B against a denser `▒` mark
+> on a real 40×40 board that was built and rejected, are
+> [`docs/render-reference.md`](render-reference.md) §2.3–§2.4. That is the authority on what the
+> schematic draws and why; this appendix covers only what the fog decided to *hide*.
 
 **A stated change, not drift.** §10.7 originally promised a duct entry visible from turn one
 "like a door", and furniture counted as geometry too, on the grounds that being surprised by a
@@ -806,37 +802,28 @@ behave alike.
 
 ---
 
-## Appendix 22 — A number is not a token
+## Appendix 22 — Determinism, and what the old version paid for lacking it
 
-*(§12.4, §12.6, #333 superseding #328.)*
+*(§12.4.)*
 
-A bare `?seed=8371` named *this build's quick-play preset applied to 8371* — not a run — so every
-shared link silently re-resolved whenever the preset moved. **It did move**: when the Vision
-passive joined the tech pool (#286) the seeded draw re-ran over a changed pool, and every link
-shared before it began booting a different loadout with nothing saying so.
+Nothing in the old version was seeded. Every generator built its own fresh unseeded source, and the
+in-level random source handed out **a brand new generator on every single call** — so there was no
+sense in which a run could be named, let alone reproduced.
 
-The bare form is gone as an **input** too, which is the cost worth stating: "try seed 8371" no
-longer works, and pre-#333 links stop decoding. They were already booting the wrong run; failing
-loudly is the better of the two. Numeric seeds remain a *programmatic* concept — `LevelSeed::sim(n)`
-and the sim's sweeps never touch the string.
+"Play again" was therefore bought the expensive way: by serialising a byte-for-byte **snapshot of
+the entire level** at run start and restoring it. That is a heavier, more fragile way to buy less
+than `(seed, inputs)` gives for free — it reproduces one level rather than any level, it breaks on
+every change to the level's shape, and it cannot be shared, replayed, diffed or bisected. Every row
+of §12.4's table (bug repro, seed sharing, bot metrics, golden tests, regression detection, rewind)
+was unavailable, and §13's whole experiment loop with it.
 
-**Why the format is sized for a roster it does not have yet.** Abilities and modifiers are carried
-as combination indexes over **256 permanent slots**, not over the entries that exist today, so the
-roster can grow to a hundred entries without a single shared link breaking — adding one fills the
-next slot and changes no radix. That is the property the previous carrier lacked, and #286 is what
-its absence cost. It buys a discipline in exchange: **slot numbers are permanent**, a retired entry
-leaves a tombstone, and nothing may ever be renumbered.
-
-**Why the sizing is [START].** Eighteen characters, a 17-bit seed (131,072 facilities), and the
-~1-in-3,000 rejection that the leftover space provides. The two trade one-for-one — every bit spent
-on the seed is a bit taken from integrity — and a character is worth 26× of whichever you want more
-of.
-
-**What the old version paid for getting determinism by accident.** Nothing was seeded — every
-generator built its own fresh unseeded source, and the in-level random source handed out **a brand
-new generator on every single call**. "Play again" worked only by serialising a byte-for-byte
-snapshot of the entire level at run start and restoring it. That's a heavier, more fragile way to
-buy less.
+> **The token half of this ruling lives in the spec, not here.** *Why a bare `?seed=8371` is not a
+> run*, *why abilities and modifiers are carried over 256 permanent slots*, *why slot numbers may
+> never be renumbered and a retired entry leaves a tombstone*, and *how the eighteen characters
+> trade seed space against integrity* are all specified — with the #286 Vision-passive incident that
+> forced them, and the tests that pin them — in
+> [`docs/level-seed-token.md`](level-seed-token.md) §3, §7 and §8. That document is the authority;
+> this appendix deliberately does not restate it.
 
 ---
 

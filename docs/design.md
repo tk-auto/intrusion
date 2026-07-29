@@ -1806,37 +1806,25 @@ no true white (appendix 1).
 
 ### 11.3 Glyphs
 
-| Glyph | Entity | Category |
-|---|---|---|
-| `@` | Player | Owned |
-| `@` | Decoy | Owned |
-| `g` | Guard, **seen** | Caution / Warning / Danger, by state — plus facing + cone (§9.2) |
-| *(none)* | Guard, **sensed** (through a wall, §9.2) | **Sensed** — an orange **background** highlight on its exact cell (no glyph of its own), no cone; blooms to the state-coloured `g` once seen |
-| `z` | Body | Caution |
-| `#` | Wall | Neutral |
-| `·` | Floor | Ground — recessive by design; blank until the §11.5 floor dots gave it a glyph |
-| `+` | Door panel | System |
-| `×` | Door hinge | System |
-| `}` | Hideout (empty) | System |
-| `}` | Hideout (occupied) | **Owned** — you are in it, so it recolours to Owned (blue) like the rest of "things you made"; the colour shift is how you see which cell hides you (§10.3) |
-| `=` | Duct entry | System — a player-only crawlspace mouth (§10.7); wall-like to guards, and **contents**, so it is hidden until seen (§11.5a) |
-| `π` | Partial cover (table) | System |
-| `π` | Partial cover, concealing you | **Owned** — the same convention as the occupied cupboard: while you are crouched behind it, the covering run recolours to Owned, every table of it, so the blue `@`-`π` pair reads as one hidden unit as long as the furniture (§10.3) |
-| `$` | Intel | Interest |
-| `E` | Exit | Interest |
-| `≈` | Building fabric not yet seen — the §11.5a schematic | Neutral |
-| `~` | Floor space not yet seen — the §11.5a schematic | Ground |
+> **The glyph table itself is [`docs/render-reference.md`](render-reference.md)
+> §2** — every mark, its category, and the reasoning behind it, in one place. This
+> section owns the *rules* a glyph has to obey; the reference records what they
+> resolve to, and the values live in code (`Terrain::glyph`, the entity constants in
+> `render.rs`), from which the in-game legend also derives. Do not keep a second copy
+> of the table here: one drifted for a whole release — §11.3 still called a duct entry
+> geometry visible from turn one after §11.5a had made it contents.
 
-**Overlapping glyphs need a priority order** — define it. Last-writer-wins renders a
-guard in a doorway arbitrarily (appendix 1).
+Four rules the glyphs answer to, all **[SETTLED]**:
 
-> **The complete table, with the reasoning behind each mark and each colour, is
-> [`docs/render-reference.md`](render-reference.md).** This section and §11.2 own
-> the *rules*; the reference records what they resolve to, in one place, so a
-> question like *"what does `≈` mean?"* has one answer rather than four. The values
-> themselves live in code (`Terrain::glyph`, the shell's one palette table) and the
-> in-game glyph legend (the help panel's **Help** tab) derives from those same
-> sources, so neither can drift from the board.
+- **A glyph says what is there; the colour says what it means to you now.** So a
+  shifting meaning **recolours rather than changes shape** — a spent console, a
+  cupboard holding *you*, the run of tables concealing you (§10.3, §11.2).
+- **A seen guard's colour is the state machine, read directly** — Caution → Warning →
+  Danger, plus its facing and cone (§9.2).
+- **A sensed guard has no glyph at all** — only the Sensed background on its cell
+  (§9.2). A glyph would imply a readable mind, and the player has position only.
+- **Overlapping glyphs need a priority order** — define it. Last-writer-wins renders a
+  guard in a doorway arbitrarily (appendix 1).
 
 ### 11.4 Layout
 
@@ -2070,16 +2058,12 @@ boundary is visible across open ground at all.
 > the recesses and openings cut into them — and the **floor space** (`~`) between
 > it. Walking somewhere resolves it into the real thing, permanently. It is a
 > **shape** distinction, not a darker shade, because geometry too dark to read is fog
-> by another name (appendix 18). See
-> [`docs/render-reference.md`](render-reference.md) §2.3.
->
-> **The line is load-bearing structure.** `≈` is what holds the building up — a
-> wall run, a door's frame, and the recesses cut back into a run. `~` is everything
-> that is not: a room's floor, the furniture and equipment standing in it, and a
-> **doorway**, which bears no load and so draws as the **gap in the wall line** a
-> plan would show. An unexplored wing reads `≈≈≈~≈≈≈`, so the ways between its
-> rooms are still plannable and the *"you can plan your escape route before you're
-> spotted"* promise above survives intact.
+> by another name. **The line is load-bearing structure**: `≈` is what holds the
+> building up, `~` is everything that does not — a room's floor, the furniture standing
+> in it, and a **doorway**, which draws as the gap in the wall line a plan would show,
+> so the ways between an unexplored wing's rooms stay plannable. Which mark each thing
+> takes, and the denser alternative that was built and rejected, are
+> [`docs/render-reference.md`](render-reference.md) §2.3–§2.4.
 >
 > **Duct mouths and furniture are contents, not geometry** — a stated change from
 > §10.7's earlier "visible from turn one like a door", on the grounds that a duct
@@ -2521,20 +2505,21 @@ the replay Artifact build (#197 slice C) share so they cannot diverge.
 
 **A number is not a token** (#333, superseding #328). A bare `?seed=8371` names *this
 build's quick-play preset applied to 8371* — not a run — so a shared link silently
-re-resolves whenever the preset moves, and it did (appendix 22). The bare form is gone
-as an **input** too: "try seed 8371" no longer works, and pre-#333 links stop decoding.
-Numeric seeds remain a *programmatic* concept — `LevelSeed::sim(n)` and §13.2's sweeps
-never touch the string.
+re-resolves whenever the preset moves, and it did ([token spec](level-seed-token.md)
+§7). The bare form is gone as an **input** too: "try seed 8371" no longer works, and
+pre-#333 links stop decoding. Numeric seeds remain a *programmatic* concept —
+`LevelSeed::sim(n)` and §13.2's sweeps never touch the string.
 
 **The format is sized for the roster it does not have yet.** Abilities and modifiers
 are carried as combination indexes over **256 permanent slots**, not over the entries
 that exist today, so the roster can grow to a hundred entries without a single shared
 link breaking. It buys a discipline in exchange: **slot numbers are permanent**, a
-retired entry leaves a tombstone, and nothing may ever be renumbered.
+retired entry leaves a tombstone, and nothing may ever be renumbered ([token
+spec](level-seed-token.md) §3).
 
 **[START]** on the sizing: eighteen characters, a 17-bit seed (131,072 facilities), and
 the ~1-in-3,000 rejection that the leftover space provides. Seed space and integrity
-trade one-for-one (appendix 22).
+trade one-for-one ([token spec](level-seed-token.md) §8).
 
 **Debug modifiers are not level modifiers.** A separate `DebugModifiers` value
 carries playtest-only switches over **what the player perceives** — today one: *"see
