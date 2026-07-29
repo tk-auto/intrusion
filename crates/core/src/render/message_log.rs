@@ -222,7 +222,7 @@ fn deploy_glyph(unread_this_action: bool, open: bool) -> char {
 /// control at the right and the cell of air before it. The §11.4 row-fits bound is
 /// measured against this, so it can never drift from the layout it describes.
 #[cfg(test)]
-pub(super) fn near_line_text_max(width: u32) -> usize {
+pub(crate) fn near_line_text_max(width: u32) -> usize {
     width.saturating_sub(super::hud::NEAR_LINE_CONTROL_CELLS) as usize
 }
 

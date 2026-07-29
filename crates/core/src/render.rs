@@ -763,6 +763,8 @@ pub use hud::{
     render_screen, InputModality, ScreenUi, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use menu::{menu_hit, MenuEntry, MenuHit, MenuUi};
+#[cfg(test)]
+pub(crate) use message_log::near_line_text_max;
 pub use message_log::{is_message_button, message_log_rows};
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row

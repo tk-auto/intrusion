@@ -1096,7 +1096,7 @@ mod tests {
         assert_eq!(
             text,
             vec![
-                "[?] 1 more intel to leave               ".to_string(),
+                "[?] objectives: 0/1                     ".to_string(),
                 // The console is east of the player, so its entry is flush right
                 // with the arrow trailing — the row aims where it points (#384).
                 "                  console: take intel → ".to_string(),

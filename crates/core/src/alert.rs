@@ -48,6 +48,8 @@
 //! part of the [`LevelSeed`](crate::LevelSeed): no shared token can carry it, so a
 //! swept batch is a measuring instrument rather than a game anyone is handed.
 
+use crate::category::Category;
+
 /// How many turns of certain-zone contact make one **confirmed sighting** (§7.6,
 /// **[START] = 3**), inside [`SIGHTING_WINDOW_TURNS`]. Any turn in which **any**
 /// guard has the player in the certain zone counts one — the tally is facility-wide,
@@ -281,6 +283,40 @@ impl AlertTrigger {
             Self::RepeatSightings | Self::ConsoleTampered => 2,
             Self::BodyFound | Self::SecondPostSilent => TOP_RUNG,
         }
+    }
+}
+
+/// The §11.2 category a rung reads in — the ladder mapped onto the **standing threat
+/// ladder**, and no new colour vocabulary (§11.2 **[SETTLED]**: a system declares a
+/// meaning, never a colour, and never invents a category).
+///
+/// | Rung | Category | Why |
+/// |---|---|---|
+/// | 0 | System | Not a threat statement at all — the furniture tan, so an unnoticed raid claims nothing |
+/// | 1 | Caution | *A threat that is unaware.* The facility knows somebody is in it and does not know where |
+/// | 2 | Warning | *A threat that is hunting.* Three sightings, or it knows what you came for |
+/// | 3 | Danger | *A threat that has you.* The top of the ladder, and the same red a guard with eyes on you wears |
+///
+/// The yellow → orange → red run is the one the player already reads off a guard's
+/// glyph (§11.2), which is exactly why it is reused: the facility's mind escalates in
+/// the same colours one guard's does, so there is nothing new to learn. It is also the
+/// ladder the palette's tests separate by luminance as well as hue — at background
+/// strength since #419, which is what lets a *band* in these colours be read as a rung
+/// rather than as a dark warm shade (see `docs/render-reference.md` §4.5).
+///
+/// It lives with the **ladder** rather than with either surface that draws it, the way
+/// a guard state declares its own category (§11.2): what a rung means is the ladder's to
+/// say, and both readers — the help panel's condition line and the near line's own band
+/// (#421) — are then reading one declaration rather than agreeing by hand.
+///
+/// Total over the rungs rather than a table lookup: a rung 4 would have to say what it
+/// means here before it could be drawn.
+pub fn rung_category(rung: u32) -> Category {
+    match rung {
+        0 => Category::System,
+        1 => Category::Caution,
+        2 => Category::Warning,
+        _ => Category::Danger,
     }
 }
 

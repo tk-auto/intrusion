@@ -5,11 +5,11 @@
 //! escalation on the turn it happens and is then overwritten by anything louder
 //! (§11.7), so a player who blinked never learned the facility had changed its mind
 //! about them. An escalation the player cannot perceive is inert in a second way
-//! (§2.2), so the ladder needs a place the standing state can be *read* and a colour
-//! that says which rung it is. This module owns both:
+//! (§2.2), so the ladder needs a place the standing state can be *read*, and a colour
+//! that says which rung it is — [`rung_category`](crate::alert::rung_category), which
+//! lives with the ladder itself because a rung's §11.2 meaning is the ladder's to
+//! declare, the way a guard state declares its own. This module owns the surface:
 //!
-//! - [`rung_category`] — the rung as a colour, on the §11.2 threat ladder the player
-//!   already reads off a guard's glyph.
 //! - [`draw_alert`] — the surface. The **ALERT** section of the help panel's Level info
 //!   tab, beside the seed and the modifiers: what is bending the rules right now
 //!   (see [`help`](super::help)).
@@ -31,7 +31,7 @@
 //! panel without anything here changing.
 
 use super::{draw, Grid};
-use crate::alert::{AlertReadout, NO_ALERT, TOP_RUNG};
+use crate::alert::{rung_category, AlertReadout, NO_ALERT, TOP_RUNG};
 use crate::category::Category;
 use crate::modifiers::CAPTION_SEPARATOR;
 
@@ -60,35 +60,6 @@ const HEADING_INDENT: u32 = 2;
 /// so the row the test measures is the row that is drawn.
 pub(super) fn condition_line(rung: u32) -> String {
     format!("Condition {rung} of {TOP_RUNG}")
-}
-
-/// The §11.2 category a rung reads in — the ladder mapped onto the **standing threat
-/// ladder**, and no new colour vocabulary (§11.2 **[SETTLED]**: a system declares a
-/// meaning, never a colour, and never invents a category).
-///
-/// | Rung | Category | Why |
-/// |---|---|---|
-/// | 0 | System | Not a threat statement at all — the furniture tan, so an unnoticed raid claims nothing |
-/// | 1 | Caution | *A threat that is unaware.* The facility knows somebody is in it and does not know where |
-/// | 2 | Warning | *A threat that is hunting.* Three sightings, or it knows what you came for |
-/// | 3 | Danger | *A threat that has you.* The top of the ladder, and the same red a guard with eyes on you wears |
-///
-/// The yellow → orange → red run is the one the player already reads off a guard's
-/// glyph (§11.2), which is exactly why it is reused: the facility's mind escalates in
-/// the same colours one guard's does, so there is nothing new to learn. It is also the
-/// ladder the palette's tests separate by luminance as well as hue — at background
-/// strength since #419, which is what lets a *band* in these colours be read as a rung
-/// rather than as a dark warm shade (see `docs/render-reference.md` §4.5).
-///
-/// Total over the rungs rather than a table lookup: a rung 4 would have to say what it
-/// means here before it could be drawn.
-pub(super) fn rung_category(rung: u32) -> Category {
-    match rung {
-        0 => Category::System,
-        1 => Category::Caution,
-        2 => Category::Warning,
-        _ => Category::Danger,
-    }
 }
 
 /// Draw the Level info tab's **ALERT** section at row `y`, returning the row after it.
