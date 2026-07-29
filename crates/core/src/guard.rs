@@ -355,6 +355,30 @@ const _: () = assert!(GUARD_DWELL_TURNS_MIN >= 1 && GUARD_DWELL_TURNS_MIN <= GUA
 /// rung 1 up (§7.3), so a guard's pause is a fact about the level's current state,
 /// not about the guard. The chance stays the playtest knob it was
 /// (`State::set_guard_dwell_chance`).
+/// How a Calm guard chooses where to walk (§7.5/§7.3) — the shape of patrol, as one
+/// plain value rather than a flag queried in several places (§12.3).
+///
+/// The facility's radio net is what decides it. With the net live, guards are
+/// coordinated: each sweeps its own slice of the §7.5 partition, farthest-uninspected
+/// first, and a player can learn a beat. With the net dead they are not coordinated at
+/// all, and there is nothing left to divide the building between them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PatrolStyle {
+    /// **A live net.** The guard sweeps its own beat, pacing to the farthest cell it
+    /// has not looked at — deterministic, and therefore learnable.
+    Beat,
+    /// **A silenced net** (§7.3): no partition, so the territory is the whole level the
+    /// guard can reach, and the next target is drawn **at random** from the part of it
+    /// the guard has not inspected.
+    ///
+    /// This is what the comms console buys and what it costs. Killing the net stops
+    /// both §7.7 call-ins and every dispatch, and in exchange the patrols stop being
+    /// predictable: you can no longer stand somewhere and know a guard will not come.
+    /// Nothing here touches what a guard *sees* or how fast it moves — a silenced
+    /// facility is lonelier, never blinder (§7.3).
+    Wander,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Dwell {
     /// The percentage chance an arrival pauses at all ([`GUARD_DWELL_CHANCE_PERCENT`]).
@@ -937,6 +961,7 @@ impl Guard {
         blocked: &[Cell],
         rng: &mut Rng,
         dwell: Dwell,
+        style: PatrolStyle,
     ) -> Option<Direction> {
         if !self.patrols {
             return None;
@@ -1032,7 +1057,7 @@ impl Guard {
             }
         }
 
-        self.repick_patrol_target(facility);
+        self.repick_patrol_target(facility, style, rng);
         let step = self.step_toward_destination(facility, blocked);
         self.commit_step(step, facility)
     }
@@ -1181,8 +1206,8 @@ impl Guard {
     /// guard that walked to it anyway would spend the trip patrolling a colleague's
     /// wing. It is dropped here rather than at the recut so the guard finishes the turn
     /// it is in and picks again on its own schedule.
-    fn repick_patrol_target(&mut self, facility: &Facility) {
-        let territory = self.territory(facility);
+    fn repick_patrol_target(&mut self, facility: &Facility, style: PatrolStyle, rng: &mut Rng) {
+        let territory = self.territory(facility, style);
         if let Some(dest) = self.destination {
             // A guard with no beat has no territory for a destination to be *outside*
             // of, so the ground check is vacuous there and skipped — otherwise it would
@@ -1192,22 +1217,37 @@ impl Guard {
                 return;
             }
         }
-        self.destination = self.farthest_uninspected_in(&territory);
+        self.destination = self.next_target_in(&territory, style, rng);
     }
 
-    /// The farthest cell in territory the guard has not looked at (§7.5) — *farthest*,
-    /// so patrols pace across distances instead of shuffling locally. When every
-    /// reachable cell has been inspected the memory is wiped and the sweep starts
-    /// over, so a Calm guard never runs out of ground to cover.
+    /// The next cell to walk to in `territory` (§7.5): the **farthest** one the guard
+    /// has not looked at on a live net, or a **random** uninspected one on a dead one
+    /// ([`PatrolStyle`]).
     ///
-    /// Takes the territory the caller has already drawn, so the per-turn repick reads
-    /// it once rather than once to test the live destination and again to replace it.
-    fn farthest_uninspected_in(&mut self, territory: &[Cell]) -> Option<Cell> {
-        if let Some(cell) = pick_farthest(territory, &self.inspected, self.pos) {
+    /// *Farthest* is what makes an ordinary patrol pace across distances instead of
+    /// shuffling locally, and it is why the emergent patrols read as purposeful — keep
+    /// it. Random is not an improvement on it; it is the predictability the comms
+    /// console spends (§7.3).
+    ///
+    /// When every reachable cell has been inspected the memory is wiped and the sweep
+    /// starts over, so a Calm guard never runs out of ground to cover. Takes the
+    /// territory the caller has already drawn, so the per-turn repick reads it once
+    /// rather than once to test the live destination and again to replace it.
+    fn next_target_in(
+        &mut self,
+        territory: &[Cell],
+        style: PatrolStyle,
+        rng: &mut Rng,
+    ) -> Option<Cell> {
+        let pick = |guard: &Self, inspected: &VisibleSet, rng: &mut Rng| match style {
+            PatrolStyle::Beat => pick_farthest(territory, inspected, guard.pos),
+            PatrolStyle::Wander => pick_random(territory, inspected, guard.pos, rng),
+        };
+        if let Some(cell) = pick(self, &self.inspected.clone(), rng) {
             return Some(cell);
         }
         self.inspected = VisibleSet::default();
-        pick_farthest(territory, &self.inspected, self.pos)
+        pick(self, &VisibleSet::default(), rng)
     }
 
     /// The guard's patrol territory (§7.5): the patrollable cells of its region
@@ -1222,7 +1262,7 @@ impl Guard {
     /// ("territories are boxes around spawn points, which have no relationship to the
     /// building"), and an anchor a guard has since walked away from is the half of it
     /// that survived the region beat. Better to stand still than to sweep a phantom.
-    fn territory(&self, facility: &Facility) -> Vec<Cell> {
+    fn territory(&self, facility: &Facility, style: PatrolStyle) -> Vec<Cell> {
         // While a released search still watches the region (§7.6), the sweep draws its
         // territory around the searched area with the tighter [`WATCH_RADIUS`], so
         // coverage there stays raised; otherwise it is the full Calm territory.
@@ -1232,6 +1272,18 @@ impl Guard {
                     patrollable(facility, cell)
                 });
             }
+        }
+        // A dead net leaves nothing dividing the building (§7.3): there is no beat to
+        // sweep, so the territory is simply everywhere the guard can walk. Flooded from
+        // where it stands rather than taken as the whole grid, so a guard still never
+        // heads for ground it cannot reach.
+        if style == PatrolStyle::Wander {
+            return path::flood_from(self.pos, facility.width(), facility.height(), |cell| {
+                routable(facility, cell)
+            })
+            .into_iter()
+            .filter(|&cell| patrollable(facility, cell))
+            .collect();
         }
         // Filtered at sweep time, not at placement: a console stamped in later,
         // furniture, or a cupboard is never picked as a target.
@@ -1290,6 +1342,36 @@ fn routable(facility: &Facility, cell: Cell) -> bool {
 /// cell has been looked at (§7.5). Ties are broken deterministically — nearest the
 /// north-west (smallest `y`, then `x`) — so the same board always yields the same
 /// sweep (§12.4). The guard's own cell is never a target.
+/// A uniformly random uninspected cell of `territory`, or `None` when every cell has
+/// been looked at (§7.5/§7.3) — the dead-net counterpart to [`pick_farthest`].
+///
+/// Drawn from the run's own seeded stream (§12.4), never a fresh source, so a silenced
+/// facility reproduces exactly like any other. The guard's own cell is never a target.
+///
+/// **Why random rather than farthest-over-the-whole-level.** Handing every guard the
+/// whole map while keeping `pick_farthest`'s deterministic tie-break would make
+/// clustering *worse*: the attractors become the map's extreme corners, drawn from one
+/// shared candidate set, and the per-guard `inspected` memory that would otherwise
+/// separate two guards converges the moment their cones overlap — which they will,
+/// since everyone is walking to the same corners. Random removes the determinism
+/// causing the lockstep instead of patching around it.
+fn pick_random(
+    territory: &[Cell],
+    inspected: &VisibleSet,
+    origin: Cell,
+    rng: &mut Rng,
+) -> Option<Cell> {
+    let candidates: Vec<Cell> = territory
+        .iter()
+        .copied()
+        .filter(|&cell| cell != origin && !inspected.contains(cell))
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    Some(candidates[rng.below(candidates.len() as u32) as usize])
+}
+
 fn pick_farthest(territory: &[Cell], inspected: &VisibleSet, origin: Cell) -> Option<Cell> {
     territory
         .iter()
@@ -1323,11 +1405,15 @@ mod tests {
 
         assert!(!guard.has_beat());
         assert!(
-            guard.territory(&facility).is_empty(),
+            guard.territory(&facility, PatrolStyle::Beat).is_empty(),
             "no beat, no territory",
         );
         assert_eq!(
-            guard.farthest_uninspected_in(&guard.territory(&facility)),
+            guard.next_target_in(
+                &guard.territory(&facility, PatrolStyle::Beat),
+                PatrolStyle::Beat,
+                &mut Rng::new(0),
+            ),
             None,
             "and so nothing to walk to — the guard holds",
         );
@@ -1347,7 +1433,7 @@ mod tests {
         let beat = vec![anchor, Cell::new(2, 1), Cell::new(20, 1), far];
         let territory = Guard::patrolling(anchor)
             .with_beat(beat)
-            .territory(&facility);
+            .territory(&facility, PatrolStyle::Beat);
         assert!(territory.contains(&far), "the beat bounds the territory");
         assert!(
             !territory.contains(&Cell::new(20, 1)),
@@ -1377,7 +1463,7 @@ mod tests {
                 generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("v1 generates");
             let facility = layout.facility();
             for guard in placement.guards(&layout) {
-                let territory = guard.territory(facility);
+                let territory = guard.territory(facility, PatrolStyle::Beat);
                 assert!(!territory.is_empty(), "seed {seed}: an empty beat");
 
                 let reached: HashSet<Cell> =
@@ -1417,7 +1503,7 @@ mod tests {
         guard.focus = Some(focus);
         guard.watch = 1;
 
-        let watched = guard.territory(&facility);
+        let watched = guard.territory(&facility, PatrolStyle::Beat);
         assert!(
             watched
                 .iter()
@@ -1428,7 +1514,7 @@ mod tests {
 
         guard.watch = 0;
         assert_eq!(
-            guard.territory(&facility),
+            guard.territory(&facility, PatrolStyle::Beat),
             vec![Cell::new(5, 5), Cell::new(6, 5)],
             "the beat returns once the watch cools",
         );
@@ -1473,7 +1559,7 @@ mod tests {
         );
         guard.inspected.absorb(&whole_room);
 
-        let territory = guard.territory(&facility);
+        let territory = guard.territory(&facility, PatrolStyle::Beat);
         assert!(
             pick_farthest(&territory, &guard.inspected, guard.pos()).is_none(),
             "precondition: nothing is left uninspected",
@@ -1482,13 +1568,20 @@ mod tests {
         // Asking for the next target wipes the exhausted memory and finds one again.
         assert!(
             {
-                let territory = guard.territory(&facility);
-                guard.farthest_uninspected_in(&territory).is_some()
+                let territory = guard.territory(&facility, PatrolStyle::Beat);
+                guard
+                    .next_target_in(&territory, PatrolStyle::Beat, &mut Rng::new(0))
+                    .is_some()
             },
             "the sweep restarts instead of stalling",
         );
         assert!(
-            pick_farthest(&guard.territory(&facility), &guard.inspected, guard.pos()).is_some(),
+            pick_farthest(
+                &guard.territory(&facility, PatrolStyle::Beat),
+                &guard.inspected,
+                guard.pos()
+            )
+            .is_some(),
             "memory was wiped — cells read as uninspected again",
         );
     }
@@ -1512,7 +1605,7 @@ mod tests {
 
         // On arrival, with the chance forced to 100, it begins a dwell rather than
         // immediately picking the next target.
-        let first = guard.decide(&facility, &[], &mut rng, Dwell::CALM);
+        let first = guard.decide(&facility, &[], &mut rng, Dwell::CALM, PatrolStyle::Beat);
         assert!(
             first.is_none() && guard.is_dwelling(),
             "reaching a target begins a dwell",
@@ -1522,7 +1615,7 @@ mod tests {
         // un-re-aimed, until the dwell elapses and the guard steps off.
         let mut holds = 1;
         loop {
-            let step = guard.decide(&facility, &[], &mut rng, Dwell::CALM);
+            let step = guard.decide(&facility, &[], &mut rng, Dwell::CALM, PatrolStyle::Beat);
             if !guard.is_dwelling() {
                 // The dwell has ended and the sweep resumes: the guard is active
                 // again. It may first spend a turn or two rotating toward its new
@@ -1534,7 +1627,7 @@ mod tests {
                         break;
                     }
                     resumed = guard
-                        .decide(&facility, &[], &mut rng, Dwell::CALM)
+                        .decide(&facility, &[], &mut rng, Dwell::CALM, PatrolStyle::Beat)
                         .is_some();
                 }
                 assert!(resumed, "the sweep resumes once the dwell ends");
@@ -1581,7 +1674,13 @@ mod tests {
             let mut rng = Rng::new(seed);
             let chance = GUARD_DWELL_CHANCE_PERCENT;
 
-            let first = guard.decide(&facility, &[], &mut rng, Dwell::with_chance(chance));
+            let first = guard.decide(
+                &facility,
+                &[],
+                &mut rng,
+                Dwell::with_chance(chance),
+                PatrolStyle::Beat,
+            );
             assert!(
                 first.is_none() && guard.is_dwelling(),
                 "seed {seed}: an arrival must pause, not pick the next target and walk",
@@ -1589,7 +1688,13 @@ mod tests {
 
             let mut holds = 1;
             loop {
-                let step = guard.decide(&facility, &[], &mut rng, Dwell::with_chance(chance));
+                let step = guard.decide(
+                    &facility,
+                    &[],
+                    &mut rng,
+                    Dwell::with_chance(chance),
+                    PatrolStyle::Beat,
+                );
                 if !guard.is_dwelling() {
                     break; // the window elapsed and the sweep resumed this turn
                 }
@@ -1618,7 +1723,7 @@ mod tests {
         guard.look(&facility);
         let mut rng = Rng::new(3);
 
-        guard.decide(&facility, &[], &mut rng, Dwell::CALM);
+        guard.decide(&facility, &[], &mut rng, Dwell::CALM, PatrolStyle::Beat);
         assert!(guard.is_dwelling(), "precondition: dwelling");
 
         // A player appears down the cone (certain zone): the guard turns reactive.
@@ -1628,7 +1733,7 @@ mod tests {
         assert_eq!(guard.state(), GuardState::Chasing);
 
         // The next decision clears the dwell and steps toward the player.
-        let step = guard.decide(&facility, &[], &mut rng, Dwell::CALM);
+        let step = guard.decide(&facility, &[], &mut rng, Dwell::CALM, PatrolStyle::Beat);
         assert!(!guard.is_dwelling(), "going reactive cancels the dwell");
         assert!(step.is_some(), "a chasing guard moves, it does not dwell");
     }
@@ -1651,7 +1756,13 @@ mod tests {
 
         // Turn one: rotate in place. No step, unmoved, but the cone now faces east —
         // the overlay a frame paints is honest about the mid-turn facing (§11.5).
-        let first = guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
+        let first = guard.decide(
+            &facility,
+            &[],
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+        );
         assert_eq!(first, None, "the quarter-turn spends the whole turn");
         assert_eq!(
             guard.pos(),
@@ -1665,7 +1776,13 @@ mod tests {
         );
 
         // Turn two: now aligned, it steps — straight ahead costs nothing.
-        let second = guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
+        let second = guard.decide(
+            &facility,
+            &[],
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+        );
         assert_eq!(
             second,
             Some(Direction::East),
@@ -1682,7 +1799,13 @@ mod tests {
         let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 9));
         guard.look(&facility);
         assert_eq!(
-            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            guard.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             Some(Direction::South),
             "a guard already facing its heading steps at once",
         );
@@ -1701,7 +1824,13 @@ mod tests {
         let mut calm = Guard::patrolling_to(Cell::new(5, 5), post);
         calm.look(&facility);
         assert_eq!(
-            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            calm.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             None,
             "the Calm guard spends the turn rotating",
         );
@@ -1711,7 +1840,13 @@ mod tests {
         reactive.look(&facility);
         reactive.respond_to(post); // Responding, walking to the post, lead warm
         assert_eq!(
-            reactive.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            reactive.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             Some(Direction::East),
             "a reactive guard turns fast and steps the same turn",
         );
@@ -1737,7 +1872,13 @@ mod tests {
                 break;
             }
             let step = guard
-                .decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER)
+                .decide(
+                    &facility,
+                    &[],
+                    &mut Rng::new(0),
+                    Dwell::NEVER,
+                    PatrolStyle::Beat,
+                )
                 .expect("the responder is still walking");
             let next = guard.pos.step(step).expect("in bounds");
             guard.advance_to(next, step, &facility);
@@ -1750,7 +1891,13 @@ mod tests {
         );
 
         // The turn it has nowhere further to walk, the errand becomes a search.
-        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
+        guard.decide(
+            &facility,
+            &[],
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+        );
         assert_eq!(guard.state, GuardState::Alerted, "arrival opens a search");
         assert_eq!(guard.search, SEARCH_DURATION);
         assert_eq!(
@@ -1781,12 +1928,24 @@ mod tests {
                 break;
             }
             let step = guard
-                .decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER)
+                .decide(
+                    &facility,
+                    &[],
+                    &mut Rng::new(0),
+                    Dwell::NEVER,
+                    PatrolStyle::Beat,
+                )
                 .expect("walking");
             let next = guard.pos.step(step).expect("in bounds");
             guard.advance_to(next, step, &facility);
         }
-        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER); // arrive → search
+        guard.decide(
+            &facility,
+            &[],
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+        ); // arrive → search
         assert_eq!(
             guard.focus,
             Some(called_to),
@@ -1809,7 +1968,13 @@ mod tests {
         reactive.look(&facility);
         reactive.respond_to(Cell::new(5, 1)); // due north — a 180° reversal
         assert_eq!(
-            reactive.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            reactive.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             None,
             "a reactive guard cannot half-turn in one move",
         );
@@ -1819,7 +1984,13 @@ mod tests {
             "it rotated through the fixed clockwise quarter, not straight about",
         );
         assert_eq!(
-            reactive.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            reactive.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             Some(Direction::North),
             "now a quarter off, the fast turn steps north",
         );
@@ -1830,7 +2001,13 @@ mod tests {
         let mut calm = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 1));
         calm.look(&facility);
         assert_eq!(
-            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            calm.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             None
         );
         assert_eq!(
@@ -1839,12 +2016,24 @@ mod tests {
             "first the clockwise quarter"
         );
         assert_eq!(
-            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            calm.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             None
         );
         assert_eq!(calm.facing(), Direction::North, "then the second quarter");
         assert_eq!(
-            calm.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            calm.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             Some(Direction::North),
             "aligned at last, it steps",
         );
@@ -1862,7 +2051,13 @@ mod tests {
         let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(8, 5));
         guard.look(&facility);
         assert_eq!(
-            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            guard.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             None
         );
         assert_eq!(guard.facing(), Direction::East, "mid-corner, facing east");
@@ -1871,7 +2066,13 @@ mod tests {
         // would spend another turn rotating; going reactive drops the tax and steps.
         guard.respond_to(Cell::new(5, 1));
         assert_eq!(
-            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER),
+            guard.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat
+            ),
             Some(Direction::North),
             "the reactive dispatch steps at once — no pending rotation to wait out",
         );
@@ -1893,7 +2094,13 @@ mod tests {
             if guard.pos() == target {
                 break;
             }
-            match guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER) {
+            match guard.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat,
+            ) {
                 Some(dir) => {
                     let dest = guard.pos().step(dir).expect("interior step");
                     guard.advance_to(dest, dir, &facility);
@@ -1929,7 +2136,13 @@ mod tests {
 
         // Arrive at the lead with nothing more seen: the search begins, not patrol.
         guard.advance_to(glimpse, Direction::South, &facility);
-        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
+        guard.decide(
+            &facility,
+            &[],
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+        );
         assert_eq!(
             guard.state(),
             GuardState::Alerted,
@@ -1944,7 +2157,13 @@ mod tests {
             if guard.state() == GuardState::Alerted {
                 alerted_turns += 1;
             }
-            guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
+            guard.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::Beat,
+            );
         }
         assert_eq!(
             alerted_turns, SEARCH_DURATION,
@@ -2165,7 +2384,13 @@ mod tests {
         }
 
         // With the lead cold, deciding stands the guard down to patrol.
-        guard.decide(&facility, &[], &mut Rng::new(0), Dwell::NEVER);
+        guard.decide(
+            &facility,
+            &[],
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+        );
         assert_eq!(guard.state(), GuardState::Calm, "a cold lead is given up");
     }
 

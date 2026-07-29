@@ -364,3 +364,163 @@ fn silencing_is_deterministic() {
     };
     assert_eq!(run(), run(), "same seed, same inputs, same radio state");
 }
+
+/// §7.3/§7.5 — **what a silenced net costs the player.** With the radio dead there is
+/// no coordination left to divide the building, so a Calm guard's territory stops being
+/// its own slice of the §7.5 partition and becomes the whole level: it walks ground it
+/// would never have been assigned.
+///
+/// Measured as *reach*. A guard's beat is a corner of the room; the far corner is
+/// somewhere the partition would never send it. On a live net it stays home; on a dead
+/// one it gets out there. The player is shut in a cupboard so the patrol is never
+/// disturbed and the only difference between the two runs is the console.
+#[test]
+fn a_silenced_net_sends_a_patrol_over_the_whole_level() {
+    let reach = |silence: bool| -> u32 {
+        let mut layout = open_room(20, 20);
+        layout.place(Cell::new(1, 1), Terrain::Hideout);
+        layout.place(Cell::new(5, 6), Terrain::CommsConsole);
+        // A beat of the north-west corner only — nothing beyond x or y of 6.
+        let beat: Vec<Cell> = (1..7)
+            .flat_map(|y| (1..7).map(move |x| Cell::new(x, y)))
+            .collect();
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 1),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(3, 3)).with_beat(beat)],
+            Vec::new(),
+            Cell::new(18, 18),
+        )
+        .with_rng(Rng::new(11));
+        if silence {
+            s.silence_radio_for_test();
+        }
+        let mut farthest = 0;
+        for _ in 0..120 {
+            s.step(Input::Wait);
+            farthest = farthest.max(s.guards()[0].pos().manhattan_distance(Cell::new(3, 3)));
+        }
+        farthest
+    };
+
+    let (live, dead) = (reach(false), reach(true));
+    assert!(
+        live <= 10,
+        "a coordinated guard stays on its own beat (reached {live})",
+    );
+    assert!(
+        dead > live,
+        "a silenced net sends it further than its beat ever would ({dead} vs {live})",
+    );
+}
+
+/// §7.3/§7.5: the loss of **predictability** is the price, and it is the whole price.
+/// Two runs of the same silenced scene from *different* run seeds diverge, where two
+/// runs on a live net are identical — a patrol you can no longer learn.
+#[test]
+fn a_silenced_patrol_is_no_longer_learnable() {
+    let walk = |seed: u64, silence: bool| -> Vec<Cell> {
+        let mut layout = open_room(20, 20);
+        layout.place(Cell::new(1, 1), Terrain::Hideout);
+        let beat: Vec<Cell> = (1..19)
+            .flat_map(|y| (1..19).map(move |x| Cell::new(x, y)))
+            .collect();
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 1),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(10, 10)).with_beat(beat)],
+            Vec::new(),
+            Cell::new(18, 18),
+        )
+        .with_rng(Rng::new(seed));
+        if silence {
+            s.silence_radio_for_test();
+        }
+        (0..60)
+            .map(|_| {
+                s.step(Input::Wait);
+                s.guards()[0].pos()
+            })
+            .collect()
+    };
+
+    assert_eq!(
+        walk(1, false),
+        walk(2, false),
+        "a coordinated sweep is a function of the board, not the seed — learnable",
+    );
+    assert_ne!(
+        walk(1, true),
+        walk(2, true),
+        "a silenced sweep is drawn from the run's own stream — not learnable",
+    );
+}
+
+/// §12.4 **[SETTLED]**: the wander draws from the run's own seeded stream, so a
+/// silenced facility reproduces exactly like any other — same seed and inputs, same
+/// walk, every time.
+#[test]
+fn a_silenced_patrol_is_still_deterministic() {
+    let walk = || -> Vec<Cell> {
+        let mut layout = open_room(20, 20);
+        layout.place(Cell::new(1, 1), Terrain::Hideout);
+        let beat: Vec<Cell> = (1..19)
+            .flat_map(|y| (1..19).map(move |x| Cell::new(x, y)))
+            .collect();
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 1),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(10, 10)).with_beat(beat)],
+            Vec::new(),
+            Cell::new(18, 18),
+        )
+        .with_rng(Rng::new(7));
+        s.silence_radio_for_test();
+        (0..40)
+            .map(|_| {
+                s.step(Input::Wait);
+                s.guards()[0].pos()
+            })
+            .collect()
+    };
+    assert_eq!(walk(), walk(), "same seed, same silenced run (§12.4)");
+}
+
+/// §7.3's restraint, pinned: *"a silenced facility is lonelier, never blinder."* The
+/// wander changes where a Calm guard chooses to walk and **nothing else** — a guard
+/// that sees the player still chases at the same speed, and a reactive guard's
+/// destination is its lead, never a random cell.
+#[test]
+fn a_silenced_net_changes_where_a_guard_walks_and_nothing_else() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 6), Terrain::CommsConsole);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::South,
+        vec![Guard::stationary(Cell::new(5, 2)).with_state(GuardState::Calm)],
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_rng(Rng::new(3));
+    s.step(Input::Step(Direction::South)); // bump the console
+    assert!(s.radio_silenced());
+
+    // The watcher above is looking south down the column at the player, who is stood
+    // in the open: it detects, and chases the cell it saw them in — not a random one.
+    for _ in 0..3 {
+        s.step(Input::Wait);
+        if s.outcome() != Outcome::Playing {
+            break;
+        }
+    }
+    let guard = &s.guards()[0];
+    assert_ne!(
+        guard.state(),
+        GuardState::Calm,
+        "a silenced facility is lonelier, never blinder — it still sees you",
+    );
+}

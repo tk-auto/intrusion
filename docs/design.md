@@ -549,8 +549,8 @@ their own radio clock drawn from the run seed (§12.4), takedown-able, and a bod
 behind that runs its own §7.3 clock — a loop the ceiling above is what caps.
 
 **A silenced radio does not stop them.** The comms console's effects are the
-enumerated ones — no pings, no dispatch, no §7.7 call-ins — and the ladder's rungs are
-not among them: a found body still reaches rung 3, and rung 3 still walks guards in.
+enumerated ones — no pings, no dispatch, no §7.7 call-ins, and calm patrols that wander
+instead of sweeping their beats — and the ladder's rungs are not among them: a found body still reaches rung 3, and rung 3 still walks guards in.
 Silencing the net buys you the *internal* net, not the escalation. **[OPEN]** whether
 that is the right reading; it is the literal one, and the alternative (control cannot
 send what it cannot be told about) is a coherent rule somebody may prefer.
@@ -670,6 +670,7 @@ level, **bumped** like everything else (§4.3's one interaction verb). Bumping i
 | Interaction | **Bump** (§4.3); the usable line reads `comms: silence radio` (§11.4) |
 | Cost | **1 turn**, plus the detour that got you there |
 | Effect | Control stops pinging (no dispatch, no alert step from a missed ping), and **both** §7.7 cooperation call-ins stop firing |
+| Cost, beyond the turn | **Patrols stop being predictable.** With no coordination left to divide the building, every Calm guard's territory becomes the whole level and its next target is drawn **at random** from the ground it has not inspected, rather than by the deterministic farthest-first sweep (§7.5) |
 | Guards already sent | **Finish the errand** — silencing stops the next wave, it never recalls a search already under way |
 | Permanence | **One-way**, for the whole level; the console then reads as spent (Neutral, §11.2) |
 | Placement | A non-start room, at least **16** cells (Manhattan) from the spawn **[START]**, reachable by a bump (§10.6), hidden until seen (§11.5a) |
@@ -691,7 +692,22 @@ Why it is shaped this way:
 - **A silenced facility is lonelier, never blind.** Nothing here touches what a
   guard does with its *own* eyes: the one that loses you still searches, the one
   that finds a body still hunts it (§7.6/§7.2). Only the *calling of others*
-  stops.
+  stops — and, now, where a *calm* one chooses to walk.
+- **The trade is coordination for predictability.** The console used to be one bump
+  and all upside, which is exactly the §2.3 failure it exists to answer: cost is the
+  load-bearing property of every ability, and this one had none beyond the detour. So
+  a dead net buys the loss of guard cooperation and pays with the loss of a learnable
+  patrol. You can no longer stand somewhere and *know* a guard will not come.
+  **Wandering is not an upgrade to the sweep** — farthest-first is what makes patrols
+  read as purposeful (§7.5) and it is deliberately given up here.
+- **Random, not farthest-over-the-whole-level.** Handing every guard the map while
+  keeping the deterministic tie-break would make clustering *worse*: the attractors
+  become the map's extreme corners, drawn from one shared candidate set, and the
+  per-guard inspected memory that would otherwise separate two guards converges the
+  moment their cones overlap — which they will, since everyone is walking to the same
+  corners. Random removes the determinism causing the lockstep rather than patching
+  round it. The draw comes off the run's own seeded stream, so a silenced run
+  reproduces like any other (§12.4).
 
 **[OPEN]** — whether a run **score** exists, and whether takedowns cost score.
 See §15.
@@ -734,6 +750,11 @@ it has not recently looked at.
   assignment reads live positions, so a per-turn recut would make patrols churn. A
   guard's inspected memory survives a recut; a destination the recut moved out of its
   beat is dropped at the next repick.
+- **All of this is conditional on a live radio net.** Beats are what *coordination*
+  produces, so killing the net (§7.3) leaves nothing to divide the building with: no
+  partition is computed or recut, every Calm guard's territory becomes the whole level,
+  and its next target is drawn at random rather than farthest-first. That is the price
+  the comms console charges — see §7.3.
 - It keeps a private memory of inspected cells.
 - With no destination, it walks to the **farthest** uninspected, currently-empty
   cell in its territory. *Farthest*, not nearest — this is what makes guards pace
