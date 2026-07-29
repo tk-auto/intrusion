@@ -2543,3 +2543,81 @@ fn a_body_is_called_in_once_not_every_turn() {
     }
     assert_eq!(calls, 1, "exactly one call for the one body");
 }
+
+/// §7.6/§7.7 end to end — the clustering a player sees **during** a hunt, measured.
+///
+/// Two guards are called to one cell, search it together, and are released to watch.
+/// Handed the same disc they are handed the same *territory*, and the §7.6 standing
+/// warning is about what that looks like: guards converging into a single moving clump
+/// rather than covering an area between them.
+///
+/// **Separation is what is asserted, because it is the symptom.** Two other candidates
+/// were tried and are worthless here: the two never stand on the same cell whatever the
+/// rule says (guards are solid, §7.8), and they rarely pick the same *destination*
+/// either, since `pick_farthest` measures from each guard's own position. What actually
+/// changes is how close together they end up — over this scene's watch window, mean
+/// separation 4.2 cells on the shared disc against 7.9 on clipped territory, and a
+/// closest approach of 1 cell (shoulder to shoulder) against 3.
+#[test]
+fn two_released_watchers_do_not_clump() {
+    let mut layout = open_room(24, 10);
+    layout.place(Cell::new(1, 1), Terrain::Hideout);
+    // Two guards with disjoint beats meeting in the middle, both in call range of it.
+    let half = |xs: std::ops::Range<u32>| -> Vec<Cell> {
+        xs.flat_map(|x| (1..9).map(move |y| Cell::new(x, y)))
+            .collect::<Vec<_>>()
+    };
+    let focus = Cell::new(12, 4);
+    let mut s = State::new(
+        layout,
+        Cell::new(1, 1), // shut in a cupboard: the watch is never disturbed
+        Direction::North,
+        vec![
+            Guard::patrolling(Cell::new(8, 4)).with_beat(half(1..13)),
+            Guard::patrolling(Cell::new(16, 4)).with_beat(half(13..23)),
+        ],
+        Vec::new(),
+        Cell::new(22, 8),
+    )
+    .with_rng(Rng::new(5));
+    s.set_guard_close_chance(0);
+
+    assert!(
+        s.call_guards_to_for_test(focus, 2),
+        "the call reached both guards",
+    );
+
+    let (mut total, mut turns, mut closest) = (0u32, 0u32, u32::MAX);
+    for _ in 0..200 {
+        if s.outcome() != Outcome::Playing {
+            break;
+        }
+        s.step(Input::Wait);
+        let guards = s.guards();
+        // Only while both are actually in the post-search watch (§7.6 Released).
+        if !guards
+            .iter()
+            .all(|g| g.state() == GuardState::Calm && g.watching())
+        {
+            continue;
+        }
+        let gap = guards[0].pos().manhattan_distance(guards[1].pos());
+        total += gap;
+        turns += 1;
+        closest = closest.min(gap);
+    }
+
+    assert!(
+        turns > 5,
+        "the scene never got both guards into the watch (only {turns} turns)",
+    );
+    let mean = f64::from(total) / f64::from(turns);
+    assert!(
+        mean > 6.0,
+        "the two watchers clumped: mean separation {mean:.2} over {turns} turns",
+    );
+    assert!(
+        closest >= 3,
+        "the two watchers came within {closest} cells of each other",
+    );
+}

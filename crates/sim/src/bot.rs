@@ -1749,7 +1749,18 @@ mod tests {
     /// 2 and 3 began **walking guards into the facility** (§7.3/#374). Then #398 took
     /// the spawn-cell anchor off patrol territory, moving two rows.
     ///
-    /// Then #399 moved nearly all of them, and that is the point rather than a problem:
+    /// Then #401 clipped the §7.6 post-search watch to each guard's own territory
+    /// instead of replacing it, and **12 of 48 rows moved, 5 changing outcome** — a net
+    /// three wins lost *here*. Read that against the committed baseline rather than on
+    /// its own: over 100 seeds the same change moves win rate the other way (baseline
+    /// 0.34 → 0.38, careless 0.30 → 0.35), because two responders splitting one area
+    /// into halves watch it *less* densely than two pacing all of it. Twelve seeds are
+    /// a pin, not a balance signal (§13.4), and this is the sharpest illustration of
+    /// that in the suite: the two disagree on the sign. `careless 10` joins
+    /// `baseline 2` in reaching the input cap still playing.
+    ///
+    /// Before that, #399 moved nearly all of them, and that is the point rather than a
+    /// problem:
     /// the guards stopped covering part of the level and started **partitioning all of
     /// it** (§7.5). There is no longer a wing with nobody on it, so a route the bot used
     /// to take unseen now meets a patrol, and 12 wins become losses while 5 losses
@@ -1771,48 +1782,48 @@ mod tests {
             "baseline 2 playing 1000 rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
             "baseline 3 lost 108 rdr",
             "baseline 4 lost 64 rdr",
-            "baseline 5 lost 338 rrrrdrdrr",
-            "baseline 6 lost 197 rrdrrrrc",
+            "baseline 5 lost 152 rdr",
+            "baseline 6 won 165 r",
             "baseline 7 won 94 r",
             "baseline 8 won 121 c",
             "baseline 9 won 84 ",
             "baseline 10 lost 207 rrdr",
-            "baseline 11 lost 170 cdrrdrcr",
+            "baseline 11 lost 253 cdrrrrdrc",
             "cautious 0 won 107 rc",
             "cautious 1 lost 55 crdc",
-            "cautious 2 won 196 rd",
-            "cautious 3 won 423 rrdcrd",
+            "cautious 2 lost 131 rd",
+            "cautious 3 lost 326 rrdrdr",
             "cautious 4 lost 47 r",
             "cautious 5 won 217 ",
             "cautious 6 won 137 ",
-            "cautious 7 won 353 rdrrdr",
+            "cautious 7 won 547 rdrrdrdcrrdrdr",
             "cautious 8 won 115 rd",
             "cautious 9 won 96 ",
             "cautious 10 lost 306 rdrc",
             "cautious 11 won 118 crd",
             "aggressive 0 lost 77 rcrr",
             "aggressive 1 won 73 ",
-            "aggressive 2 lost 279 rrr",
+            "aggressive 2 lost 317 rrdcrd",
             "aggressive 3 won 224 crc",
-            "aggressive 4 lost 76 rcr",
+            "aggressive 4 lost 75 rc",
             "aggressive 5 lost 89 r",
-            "aggressive 6 won 186 rcrrcd",
+            "aggressive 6 lost 287 rcrcrdrcrdr",
             "aggressive 7 lost 65 r",
             "aggressive 8 lost 156 rrr",
             "aggressive 9 won 84 ",
             "aggressive 10 lost 110 r",
-            "aggressive 11 lost 147 rrr",
+            "aggressive 11 lost 251 rrrrrrr",
             "careless 0 lost 77 rcrr",
             "careless 1 won 88 ",
             "careless 2 lost 182 rcrrcd",
             "careless 3 won 213 crc",
-            "careless 4 lost 78 rcr",
+            "careless 4 lost 75 rc",
             "careless 5 lost 89 r",
             "careless 6 lost 54 rcd",
             "careless 7 lost 65 r",
             "careless 8 won 117 rc",
             "careless 9 won 84 ",
-            "careless 10 lost 182 rcr",
+            "careless 10 playing 364 rcrcrcrc",
             "careless 11 lost 159 rrrcr",
         ];
 
