@@ -2097,8 +2097,7 @@ is the case this serves.
   condition 2 of 3"* on screen, §11.8 — an active ability's remaining turns) instead
   of sitting empty. Its two view toggles sit at **opposite ends** of the row: the
   `[?]` help button in the screen's **top-left corner**, the message log's deploy
-  control hard against the frame's one-cell **right** margin, and the message
-  between them. They do different jobs and belong at different ends — `[?]` is the
+  control flush against the row's **last column**, and the message between them. They do different jobs and belong at different ends — `[?]` is the
   fixed landmark a lost player reaches for, and column 0 makes it the one control
   whose position depends on nothing at all (not the screen width, not what else is
   up), while the deploy control comes and goes with what there is to read, so it
@@ -2113,8 +2112,10 @@ is the case this serves.
   to be `[+2 ▾]`, a chevron plus a count of the further messages: six cells on
   every frame it was up, spent on a number the player gets for free by deploying
   it. The near line's words are the scarcest space on the screen, and merging the
-  two won three cells back (28 → 31) — enough that one message which had been
-  clipping since before the bound existed now fits, with no wording changed. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
+  two — then reclaiming the blank cell that had sat beyond the control, which was
+  band rather than air and separated it from nothing but the edge of the screen —
+  took the budget from 28 glyphs to 32. Three messages that had been clipping since
+  before the bound existed now fit, with no wording changed. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
   standing state lives on the help panel's Level info tab, and the tint is what
   says there is something new to read behind the control (see
   [`docs/render-reference.md`](render-reference.md) §4.5).
@@ -2129,8 +2130,7 @@ is the case this serves.
   > **A new near-line message must fit that budget**, and a new control must take
   > its width from the same layout rather than assume the old one. The budget is the
   > row minus the `[?]`, its cell of air, the cell of air before the deploy control,
-  > the control, and the frame's margin — **31 cells** on the 40-wide v1 board
-  > (§10.2). Count it in **cells of message**, never as the column the words stop
+  > and the control — **32 cells** on the 40-wide v1 board (§10.2). Count it in **cells of message**, never as the column the words stop
   > at: those differ by one, and the bound spent its whole life as the column,
   > quietly passing messages one cell too long. A control that has to say more
   > belongs in a **fixed** width with a glyph that varies, not a width that grows
@@ -2666,7 +2666,12 @@ system — it is derived from adjacency every frame and carries no state.
   included** — so when this action has nothing left to show, the block opens on a
   rule rather than on a past message pretending to be current. The rule's job is to
   say *what follows is not this turn*, and that claim is needed most at the top,
-  directly under the near line's band. That is where "with radio pings (§7.3) there is more to say" is answered:
+  directly under the near line's band. The block also **closes on a rule**, so it
+  has a lower edge against the map: without one the oldest message just stops and
+  the terrain resumes, leaving the eye to find the boundary. Rules top and bottom
+  make the block read as one surface laid over the board rather than as text
+  spilled onto it — and a frame too short to hold the whole block still gets its
+  closing rule, on whatever row it truly ends at. That is where "with radio pings (§7.3) there is more to say" is answered:
   a silence, a call-in and a body find on three consecutive turns can be read back
   after the near line has moved on. Bounded twice — a cap on remembered actions and
   a cap on total rows, both **[START]** — and then clamped to the board, because it

@@ -180,14 +180,19 @@ pub(super) const HELP_BUTTON_LEN: u32 = 3;
 
 /// How many of the near line's cells are **not** the message's, worst case
 /// (§11.4/§11.7), counted out: the `[?]`, its cell of air, the cell of air before the
-/// deploy control, the control itself, and the frame's right margin.
+/// deploy control, and the control itself.
+///
+/// There is no margin beyond the deploy control — it sits flush against the row's last
+/// column. A blank cell out there bought nothing: the near line is a solid category
+/// band edge to edge (§11.4), so the "margin" was band, not air, and the only thing it
+/// separated the control from was the end of the screen.
 ///
 /// `width` minus this is the message's true **capacity in glyphs** — not a column
 /// index, which is the off-by-one this constant exists to stop anyone making again. It
 /// is derived from the controls rather than written down, so tightening one gives the
 /// cells back to the words on its own.
 pub(super) const NEAR_LINE_CONTROL_CELLS: u32 =
-    HELP_BUTTON_LEN + 1 + 1 + super::message_log::DEPLOY_LEN + 1;
+    HELP_BUTTON_LEN + 1 + 1 + super::message_log::DEPLOY_LEN;
 
 /// The near line's **controls** (§11.4/§11.7/#267), laid out once — where each one
 /// sits, and the span of row the words are therefore left with.
@@ -202,8 +207,8 @@ pub(super) struct NearLineControls {
     /// never unavailable (§11.6).
     pub(super) help_start: u32,
     /// The message-log deploy control when there is anything to deploy (§11.7): its
-    /// label and its start column, hard against the frame's one-cell right margin.
-    /// `None` leaves the row's right end to the message.
+    /// label and its start column, flush against the row's last column. `None` leaves
+    /// the row's right end to the message.
     pub(super) log: Option<(String, u32)>,
     /// The first column the near line's message may use — clear of the `[?]` and a cell
     /// of air after it.
@@ -245,16 +250,18 @@ pub(super) fn near_line_controls(state: &State, width: u32, log_open: bool) -> N
             .is_none_or(|l| l.chars().count() as u32 == super::message_log::DEPLOY_LEN),
         "the deploy control is a fixed three cells (§11.7): the layout budgets for it",
     );
-    let log_start = width.saturating_sub(1 + super::message_log::DEPLOY_LEN);
+    let log_start = width.saturating_sub(super::message_log::DEPLOY_LEN);
 
     let controls = NearLineControls {
         help_start: 0,
         // A cell of air after the `[?]`, so the words never touch the control.
         text_start: HELP_BUTTON_LEN + 1,
+        // A cell of air before the deploy control so the words never touch it; with no
+        // control up the words may run to the row's last column.
         text_max: if label.is_some() {
             log_start.saturating_sub(1)
         } else {
-            width.saturating_sub(1)
+            width
         },
         log: label.map(|label| (label, log_start)),
     };
@@ -746,25 +753,27 @@ mod tests {
     /// explicitly so the bound still bites for every *new* message: adding one here
     /// is a deliberate act, and the list only ever shrinks.
     ///
+    /// Both survivors overrun the 40-wide board itself — 42 and 45 cells (§10.2) —
+    /// and have nothing to do with the row's controls.
+    ///
     /// The exit's refusal left this list in #310: naming the gate's real requirement
     /// ("the exit needs 2 more intel") is shorter than the fixed rule it replaced.
     /// **The alert line left it in #375**: the one message about escalation was the one
     /// the player could not read, at 34 cells in a 29-cell row, and #375 is where the
     /// ladder's legibility was owed. Naming it the way the help panel does — "security
-    /// condition 3 of 3" — is both shorter and the same words twice. **"you slip away —
-    /// the run is won" left it in #300**, without a word being rewritten: merging the
-    /// deploy chevron and its `+N` counter into one three-cell control gave the row
-    /// three cells back (28 → 31), and at 30 it now fits. Which is the argument for
-    /// deriving the budget from the layout rather than writing it down — tightening the
-    /// chrome un-clipped a message on its own.
+    /// condition 3 of 3" — is both shorter and the same words twice. **Three left it in
+    /// #300 with no word rewritten**, as the chrome was tightened around them: merging
+    /// the deploy chevron and its `+N` counter into one three-cell control, then
+    /// reclaiming the blank cell beyond it, took the budget from 28 glyphs to 32, and
+    /// "all the intel — the exit is open", "the guard drops — a body is left" and "you
+    /// slip away — the run is won" all fit it.
     ///
-    /// The two at 32 came within one cell of joining it and are the reason
-    /// [`NEAR_LINE_CONTROL_CELLS`] counts *cells of message* rather than a column: the
-    /// bound used to be the exclusive limit `status_row` stops at, which is one more
-    /// than the row can hold, so it had always passed messages one cell too long.
-    const PRE_EXISTING_OVERFLOW: [&str; 4] = [
-        "all the intel — the exit is open",
-        "the guard drops — a body is left",
+    /// That is the argument for [`NEAR_LINE_CONTROL_CELLS`] being derived from the
+    /// layout rather than written down — and for it counting *cells of message* rather
+    /// than the column the words stop at, which is one more and is what it used to be:
+    /// two of those three had been clipping by a single cell while the bound said they
+    /// were fine.
+    const PRE_EXISTING_OVERFLOW: [&str; 2] = [
         "you stow the body — the cupboard is sealed",
         "intel in hand — the exit is open (9 more out)",
     ];

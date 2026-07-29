@@ -48,6 +48,10 @@ use crate::status::{live_messages, Message, MessageHistory};
 /// underneath it.
 pub const MAX_LOG_ROWS: usize = 10;
 
+/// How many of those rows the block's **content** may use: all but the closing rule
+/// ([`SEPARATOR_GLYPH`]), which every block ends on.
+const CONTENT_ROWS: usize = MAX_LOG_ROWS - 1;
+
 /// The **separator rule** between two actions' blocks (§11.7/#300): a run of this
 /// glyph across the block's band, drawn in [`Category::System`] — the HUD control
 /// colour every piece of chrome wears.
@@ -106,7 +110,8 @@ const LOG_TOP_ROW: u32 = super::hud::USABLE_ROW;
 /// Every row the deployed log would draw, top to bottom (§11.7/#300) — the current
 /// action's messages **below** the one the near line is already speaking, then a
 /// [`LogRow::Separator`] and the previous message-bearing action's block, and so on
-/// back through [`MessageHistory`], capped at [`MAX_LOG_ROWS`].
+/// back through [`MessageHistory`], closed by a final rule, capped at
+/// [`MAX_LOG_ROWS`].
 ///
 /// **The one source of truth for the whole log**: the drawing
 /// ([`overlay_message_log`]), the geometry a shell taps against
@@ -153,17 +158,23 @@ fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
             message,
             past: true,
         }));
-        if rows.len() >= MAX_LOG_ROWS {
+        if rows.len() >= CONTENT_ROWS {
             break;
         }
     }
-    rows.truncate(MAX_LOG_ROWS);
-    // The budget must never leave the block ending on a rule: a rule with nothing
-    // under it promises an older turn that was cut, which is worse than not showing
-    // it. Cheaper than fitting each block before pushing it, and exact.
+    // The **closing rule** (§11.7/#300): the block ends on one, always. It is what
+    // gives the panel a lower edge against the map — without it the oldest message
+    // just stops and the board resumes, and the eye has to find the boundary by
+    // noticing the terrain start. Rules top and bottom make the whole thing read as
+    // one surface laid over the board rather than as text spilled onto it.
+    //
+    // Popping a trailing rule first keeps that to exactly one: the loop leaves a bare
+    // rule behind whenever the row budget cut the block it introduced.
+    rows.truncate(CONTENT_ROWS);
     if rows.last() == Some(&LogRow::Separator) {
         rows.pop();
     }
+    rows.push(LogRow::Separator);
     rows
 }
 
@@ -194,8 +205,8 @@ fn deploy_glyph(unread_this_action: bool, open: bool) -> char {
 
 /// How many cells the near line leaves the **words** on a screen `width` wide (§11.7):
 /// the row minus the `[?]` at its left end and its cell of air, and minus the deploy
-/// control at the right and the frame's margin. The §11.4 row-fits bound is measured
-/// against this, so it can never drift from the layout it describes.
+/// control at the right and the cell of air before it. The §11.4 row-fits bound is
+/// measured against this, so it can never drift from the layout it describes.
 #[cfg(test)]
 pub(super) fn near_line_text_max(width: u32) -> usize {
     width.saturating_sub(super::hud::NEAR_LINE_CONTROL_CELLS) as usize
@@ -318,6 +329,14 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
     };
     for (i, row) in rows.iter().take(drawn).enumerate() {
         let y = LOG_TOP_ROW + i as u32;
+        // A frame too short to hold the block still gets its closing rule: the block
+        // genuinely ends at this row, and saying so is what keeps the lower edge
+        // readable against the map on any board.
+        let row = if i + 1 == drawn && drawn < rows.len() {
+            &LogRow::Separator
+        } else {
+            row
+        };
         for dx in 0..width {
             grid.cells[(y * width + dx) as usize] = blank;
         }
@@ -427,14 +446,14 @@ mod tests {
             "the band speaks the loudest message: {near:?}"
         );
         assert!(
-            near.starts_with("[?]") && near.trim_end().ends_with("[!]"),
+            near.starts_with("[?]") && near.ends_with("[!]"),
             "the [?] at the left end, the unread mark at the right: {near:?}"
         );
 
         // The hit-test agrees with the drawn counter, and there is no button off it.
-        // The deploy control is the outermost of the pair, hard against the margin,
-        // and three cells whatever it has to say.
-        let start = width - 1 - DEPLOY_LEN;
+        // The deploy control sits flush against the row's last column, three cells
+        // whatever it has to say.
+        let start = width - DEPLOY_LEN;
         assert!(
             is_message_button(&s, start, NEAR_ROW),
             "the counter is hittable"
@@ -456,7 +475,7 @@ mod tests {
         };
         let g = render_screen(&s, ui);
         assert!(
-            row_text(&g, NEAR_ROW).trim_end().ends_with("[▴]"),
+            row_text(&g, NEAR_ROW).ends_with("[▴]"),
             "deployed, the control is the chevron back: nothing is unread now"
         );
         // The block is the *rest* of the turn: the near line's own message is not
@@ -475,8 +494,14 @@ mod tests {
         );
         assert_eq!(
             message_log_rows(&s, ui) + (TOP_ROWS - LOG_TOP_ROW),
-            2,
-            "two rows deployed for the two the near line did not say"
+            3,
+            "two rows for the two the near line did not say, plus the closing rule"
+        );
+        assert!(
+            row_text(&g, LOG_TOP_ROW + 2)
+                .chars()
+                .all(|c| c == SEPARATOR_GLYPH),
+            "and the block closes on a rule, giving it an edge against the map"
         );
         assert!(
             !row_text(&g, LOG_TOP_ROW).contains("move"),
@@ -502,9 +527,9 @@ mod tests {
         );
         assert_eq!(
             message_log_rows(&s, deployed),
-            1,
-            "two rows deployed — the near line keeps the third — and the first of them \
-             sits on the usable line, so one is board"
+            2,
+            "two rows — the near line keeps the third — plus the closing rule, of which \
+             the first sits on the usable line, so two are board"
         );
         assert_eq!(
             message_log_rows(&s, ScreenUi::default()),
@@ -604,10 +629,7 @@ mod tests {
         // The near line speaks the loudest, and counts the two the block will show.
         let near = row_text(&g, NEAR_ROW);
         assert!(near.contains("security condition"), "the band: {near:?}");
-        assert!(
-            near.trim_end().ends_with("[▴]"),
-            "deployed, and foldable: {near:?}"
-        );
+        assert!(near.ends_with("[▴]"), "deployed, and foldable: {near:?}");
 
         // The block: this action's two *unsaid* messages, a rule, then the remembered
         // action — and the near line's own message nowhere in it.
@@ -665,14 +687,20 @@ mod tests {
             "and the remembered row recedes"
         );
 
-        // Exactly one rule, and none trailing: four rows in all, of which the first
-        // sits on the usable line and three are board.
-        assert_eq!(message_log_rows(&s, deployed), 3);
+        // One rule between the blocks and one closing the whole thing: five rows in
+        // all, of which the first sits on the usable line and four are board.
+        assert_eq!(message_log_rows(&s, deployed), 4);
         assert!(
-            !row_text(&g, LOG_TOP_ROW + 4)
+            row_text(&g, LOG_TOP_ROW + 4)
+                .chars()
+                .all(|c| c == SEPARATOR_GLYPH),
+            "the closing rule under the oldest block"
+        );
+        assert!(
+            !row_text(&g, LOG_TOP_ROW + 5)
                 .chars()
                 .any(|c| c == SEPARATOR_GLYPH),
-            "no trailing rule under the oldest block"
+            "and the map resumes immediately below it"
         );
     }
 
@@ -776,11 +804,11 @@ mod tests {
             "the same category band"
         );
         assert!(
-            row_text(&g, NEAR_ROW).trim_end().ends_with("[!]"),
+            row_text(&g, NEAR_ROW).ends_with("[!]"),
             "the mark is raised by this turn's own extras, not by the history"
         );
         // And the button is in the same place, so a tap lands where it always did.
-        let start = width - 1 - DEPLOY_LEN;
+        let start = width - DEPLOY_LEN;
         assert!(is_message_button(&carried, start, NEAR_ROW));
 
         // Deployed, though, the block is the live three, a rule, and the remembered
@@ -789,8 +817,8 @@ mod tests {
             message_log_open: true,
             ..ScreenUi::default()
         };
-        assert_eq!(message_log_rows(&fresh, deployed), 1);
-        assert_eq!(message_log_rows(&carried, deployed), 3);
+        assert_eq!(message_log_rows(&fresh, deployed), 2);
+        assert_eq!(message_log_rows(&carried, deployed), 4);
     }
 
     /// The block is **clamped, never asserted** (§11.7): on a board too short to hold
@@ -887,7 +915,11 @@ mod tests {
 
         let rows = assemble(loud(0), &history);
         assert!(rows.len() <= MAX_LOG_ROWS, "the row budget holds: {rows:?}");
-        assert_ne!(rows.last(), Some(&LogRow::Separator), "no trailing rule");
+        assert_eq!(
+            rows.last(),
+            Some(&LogRow::Separator),
+            "the block closes on a rule, so it has a lower edge against the map"
+        );
         assert_ne!(
             rows.first(),
             Some(&LogRow::Separator),
