@@ -1879,9 +1879,8 @@ is the case this serves.
   collected — drawn as a **solid band in the message's category colour**. Threat
   reads as a colour flash across the top of the screen, legible without reading
   the words; that's a nice piece of design — keep it. When no message is live,
-  the line falls back to quiet **ambient status** (the alert rung — *"security
-  condition 2 of 3"* on screen, §11.8 — an active ability's remaining turns) instead
-  of sitting empty. Its two view toggles sit at **opposite ends** of the row: the
+  the line falls back to quiet **ambient status** instead of sitting empty. Its
+  two view toggles sit at **opposite ends** of the row: the
   `[?]` help button in the screen's **top-left corner**, the message log's deploy
   control flush against the row's **last column**, and the message between them. They do different jobs and belong at different ends — `[?]` is the
   fixed landmark a lost player reaches for, and column 0 makes it the one control
@@ -1957,6 +1956,41 @@ is the case this serves.
   **whole** row falls back to the packed left-to-right list with every arrow
   leading — one rule, no half-aligned hybrid, and never a clipped word. The
   innate-verb floor is never aimed: it describes the keys, not the geometry.
+
+**The ambient floor carries the two standing facts together** (#421). The momentary
+states come first and own the row while they last — stunned, hidden, crouched,
+dragging — because each is a state you are *in* rather than a fact about the run, and
+each ends. Underneath them the floor states both of the facts that never expire:
+
+```
+objectives: 1/3                    a quiet facility        15 of 32 glyphs
+objectives: 1/3 - security: 2      once the ladder steps   29 of 32 glyphs
+```
+
+It used to **choose**: at rung ≥ 1 it said the condition and the objective vanished;
+at rung 0 it said the objective and the facility went unmentioned. The player needs
+both, and the row has space for both — `objectives: 10/12 - security: 3` is 31 of the
+32 the near line leaves beside its controls, so it fits at two digits. The band
+follows the rung (Interest at 0, the §7.3 ladder's colour above it), which is what
+makes this row the **always-visible alert indicator** and is why the `[?]` no longer
+needs to be one.
+
+The security half is a **label**, not the raise's own phrase. *"Security condition 2
+of 3"* is 24 cells and cannot share the row; the ceiling it drops is still stated
+where it changes — the raise announces itself in full, and says why (§11.7) — and the
+help panel carries the effects. What a standing row owes the player is the number,
+every turn, without spending the row on it.
+
+**Why the bare fraction is honest here, and where it would stop being.** §11.7 forbids
+reporting the tally of consoles still out as if it were the requirement: under
+`IntelGate::AtLeastOne` three can be out while exactly one is needed, so a tally implies
+the wrong goal (#310). That gate is the **sim's** baseline (§13.3), and the sim never
+reads the near line. Quick play sets `IntelGate::All` (§12.6), where the tally and the
+requirement are the same number said differently and `3/3` *is* the exit-open signal;
+the campaign sets `IntelGate::None` (§14 v3), where intel is currency (§2.2) and a
+progress fraction is exactly right. **If a human-facing mode ever ships on
+`AtLeastOne`, this line reverts** — that is the condition under which it stays truthful,
+and it is the one thing to check before changing a mode's gate.
 
 **Neither status row is ever blank.** The near line falls back to ambient status;
 the usable line falls back to **how to move and how to wait** (#323), in the input

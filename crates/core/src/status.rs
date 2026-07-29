@@ -410,15 +410,63 @@ fn alert_line(rung: u32) -> String {
     format!("security condition {rung} of {}", crate::alert::TOP_RUNG)
 }
 
+/// How many objectives the facility holds in all — taken plus still out. The
+/// denominator of the ambient line's fraction (#421).
+fn objectives(state: &State) -> usize {
+    state.intel_in_hand() + state.objectives_remaining()
+}
+
+/// The ambient floor's standing line (§11.4/#421): what you have of what there is, and
+/// — once the facility has noticed you — how bad it has got.
+///
+/// ```text
+/// objectives: 1/3                 a quiet facility
+/// objectives: 1/3 - security: 2   once the ladder has stepped
+/// ```
+///
+/// **Why a bare tally is honest here, and why #310 does not bite.** #310 forbade the
+/// near line reporting the count of consoles still out, on the ground that *what is
+/// still out is not what is still needed*: under [`IntelGate::AtLeastOne`] three consoles
+/// can be out while exactly one is needed, so a tally implies the wrong goal. But
+/// `AtLeastOne` is the **sim's** baseline (§13.3) and the sim never reads the near line.
+/// Quick play sets [`IntelGate::All`] (#244), where the tally and the requirement are the
+/// same number said differently and `3/3` *is* the exit-open signal; the campaign sets
+/// [`IntelGate::None`] (§14 v3), where intel is currency (§2.2) and a progress fraction
+/// is exactly the right thing to show. **If a human-facing mode ever ships on
+/// `AtLeastOne`, this line reverts** — that is the condition it stays truthful under,
+/// and it is written into §11.4 beside it.
+///
+/// The security half is a **label**, not the [`alert_line`] phrase: *"security condition
+/// 2 of 3"* is 24 cells and cannot share a 32-cell row with the objectives. The ceiling
+/// it drops is still stated where it changes — the raise announces itself in full, and
+/// says why (#418) — and the help panel carries the effects. What a standing row owes
+/// the player is the number, every turn, without spending the row on it.
+///
+/// [`IntelGate::All`]: crate::IntelGate::All
+/// [`IntelGate::None`]: crate::IntelGate::None
+/// [`IntelGate::AtLeastOne`]: crate::IntelGate::AtLeastOne
+fn objective_and_security(taken: usize, total: usize, alert: u32) -> String {
+    let objectives = format!("objectives: {taken}/{total}");
+    if alert == 0 {
+        objectives
+    } else {
+        format!("{objectives} - security: {alert}")
+    }
+}
+
 /// The ambient floor (§11.4): the quiet status the near line rests on between
-/// messages, so it never sits empty. Concealment first — while hidden, crouched
-/// or dragging, *that* is the fact shaping the player's next decision (and the
-/// Owned band matches the recoloured cupboard or table, §10.3). Otherwise, when
-/// the facility is on alert (§7.3), the standing alert rung — a raised alert is
-/// the thing reshaping every choice out in the open, and this is where it stays
-/// *visible* rather than written-but-unseen (§2.3). Failing all that, the objective:
-/// what the run's intel gate still wants, or — once it is met — the exit (§4.5/#310).
-/// Never a bare tally of consoles: what is still *out* is not what is still *needed*.
+/// messages, so it never sits empty.
+///
+/// **The momentary states come first** — stunned, hidden, crouched, dragging. Each is a
+/// state the player is *in* rather than a fact about the run, each ends, and while one
+/// lasts it is the thing shaping the next decision (and the Owned band matches the
+/// recoloured cupboard or table, §10.3). They own the line for as long as they hold.
+///
+/// **Underneath them is the standing pair** ([`objective_and_security`], #421): what you
+/// have of what there is, and how bad the facility has got. Neither expires and the
+/// player needs both, so the floor carries them together rather than choosing — which is
+/// what it used to do, dropping the objective the moment the ladder stepped and never
+/// mentioning the facility before it did.
 fn ambient(state: &State) -> Message {
     let (text, category) = if state.stunned() > 0 {
         // Stunned (§8.3/#329) outranks every other ambient fact, because it is the
@@ -447,35 +495,24 @@ fn ambient(state: &State) -> Message {
             "dragging the body — half speed".to_string(),
             Category::Owned,
         )
-    } else if state.alert() > 0 {
-        // The alert indicator (§7.3/§11.4): the rung the ladder has reached, read
-        // here whenever no louder message is live — a Warning-band fact, not a
-        // threat that has you (Danger). It never falls, so once it is up this is the
-        // standing ambient line of the level.
-        (alert_line(state.alert()), Category::Warning)
-    } else if !state.exit_ready() {
-        // The gate is not met: state the **requirement**, not the tally. Under
-        // `AtLeastOne` with three consoles out, three are remaining but only one is
-        // needed, and a bare "intel remaining: 3" implies the wrong goal (#310).
-        (
-            format!("{} more intel to leave", state.intel_needed_to_exit()),
-            Category::Interest,
-        )
-    } else if state.intel_in_hand() == 0 {
-        // The gate is met with nothing in hand — [`IntelGate::None`] (§14 v3's campaign,
-        // where intel is currency, §2.2) or a facility with no consoles at all. Say the
-        // exit is open and claim nothing about what is held (#310).
-        ("the exit is open".to_string(), Category::Interest)
-    } else if state.objectives_remaining() == 0 {
-        (
-            "all intel in hand — reach the exit".to_string(),
-            Category::Interest,
-        )
     } else {
-        // The gate is met; anything still out is optional extra.
+        // **Both standing facts, in one row** (§11.4/#421). Neither of them expires and
+        // the player needs both, so the line no longer chooses between them: it used to
+        // state the alert and drop the objective at rung ≥ 1, and state the objective
+        // and leave the facility unmentioned at rung 0.
+        //
+        // The band follows the rung — Interest while the facility has not noticed you,
+        // the §7.3 ladder's own colour once it has — which is what makes this row the
+        // always-visible alert indicator (#420: an ambient band paints the quiet fill,
+        // so a standing condition-3 row never spends the danger overlay's own shade).
+        let alert = state.alert();
         (
-            "intel in hand — reach the exit".to_string(),
-            Category::Interest,
+            objective_and_security(state.intel_in_hand(), objectives(state), alert),
+            if alert > 0 {
+                crate::alert::rung_category(alert)
+            } else {
+                Category::Interest
+            },
         )
     };
     Message {
@@ -531,14 +568,14 @@ mod tests {
         let mut s = state(Cell::new(5, 6), Cell::new(3, 3));
         s.step(Input::Step(Direction::West)); // a plain move: narrates nothing
         assert_eq!(near_line(&s).priority, i32::MIN, "a move narrates nothing");
-        assert_eq!(near_line(&s).text, "1 more intel to leave");
+        assert_eq!(near_line(&s).text, "objectives: 0/1");
 
         let mut s = state(Cell::new(3, 4), Cell::new(3, 3));
         s.step(Input::Step(Direction::North)); // take the intel: a loud message
         assert_eq!(near_line(&s).priority, 20);
         s.step(Input::Step(Direction::South)); // next action: the message clears
         let line = near_line(&s);
-        assert_eq!(line.text, "all intel in hand — reach the exit");
+        assert_eq!(line.text, "objectives: 1/1");
         assert_eq!(line.category, Category::Interest);
     }
 
@@ -573,10 +610,10 @@ mod tests {
             Cell::new(10, 10),
         );
         // No cover adjacent, so waiting narrates nothing and the floor shows. This
-        // facility has no consoles: the exit is open with nothing in hand, and the line
-        // says exactly that rather than claiming intel the player never took (#310).
+        // facility has no consoles at all, so the fraction is honest about that too
+        // rather than claiming intel the player never took (#310).
         s.step(Input::Wait);
-        assert_eq!(near_line(&s).text, "the exit is open");
+        assert_eq!(near_line(&s).text, "objectives: 0/0");
     }
 
     /// A crouch engaging is a message (Owned, §10.3); holding the crouch on the
@@ -639,6 +676,102 @@ mod tests {
         assert_eq!(msg.text, "a guard has seen you");
         assert_eq!(msg.category, Category::Danger);
         assert_eq!(msg.priority, 2);
+    }
+
+    /// #421, the whole point of the row: **both standing facts, together.** At rung 0
+    /// the objective alone; once the ladder has stepped, the objective *and* the
+    /// condition — neither expires, and the player needs both.
+    #[test]
+    fn the_ambient_floor_carries_the_objective_and_the_security_together() {
+        assert_eq!(objective_and_security(1, 3, 0), "objectives: 1/3");
+        assert_eq!(
+            objective_and_security(1, 3, 2),
+            "objectives: 1/3 - security: 2",
+        );
+        // Every objective taken: the fraction *is* the exit-open signal under the gate
+        // quick play ships on (§4.5/#244), so the case is not silently lost.
+        assert_eq!(objective_and_security(3, 3, 0), "objectives: 3/3");
+        assert_eq!(
+            objective_and_security(3, 3, crate::alert::TOP_RUNG),
+            "objectives: 3/3 - security: 3",
+        );
+        // A facility with no consoles at all still says something true.
+        assert_eq!(objective_and_security(0, 0, 0), "objectives: 0/0");
+    }
+
+    /// #421: the band **is** the alert indicator. Interest while the facility has not
+    /// noticed you, and the §7.3 ladder's own colour once it has — read off
+    /// [`rung_category`](crate::alert::rung_category), the same declaration the help
+    /// panel's condition line reads, so the row and the panel can never disagree.
+    #[test]
+    fn the_ambient_band_follows_the_rung() {
+        let mut s = state(Cell::new(5, 6), Cell::new(3, 3));
+        s.step(Input::Wait);
+        assert_eq!(s.alert(), 0);
+        assert_eq!(near_line(&s).category, Category::Interest);
+
+        // The mapping itself, over every rung the ladder can reach — the arm this row
+        // takes is `rung_category` and nothing hand-written beside it.
+        for rung in 1..=crate::alert::TOP_RUNG {
+            assert_ne!(
+                crate::alert::rung_category(rung),
+                Category::Interest,
+                "a raised facility never wears the quiet objective colour",
+            );
+        }
+    }
+
+    /// §11.4/#421: **both forms fit the row**, measured against the capacity the layout
+    /// computes rather than a number written down beside it — worst case, with the
+    /// deploy control up, which it can be while the ambient floor shows (the history
+    /// outlives the action that cleared the near line).
+    ///
+    /// Walked over two-digit counts as well, since `objectives: 10/12 - security: 3` is
+    /// the longest the line can get and is the one that would clip first.
+    #[test]
+    fn both_ambient_forms_fit_the_near_line() {
+        let max = crate::render::near_line_text_max(crate::LevelConfig::V1.width);
+        for total in [0, 3, 9, 12, 99] {
+            for taken in [0, total] {
+                for alert in 0..=crate::alert::TOP_RUNG {
+                    let line = objective_and_security(taken, total, alert);
+                    let len = line.chars().count();
+                    assert!(
+                        len <= max,
+                        "{line:?} is {len} cells, over the {max} the near line leaves \
+                         beside its controls (§11.4)",
+                    );
+                }
+            }
+        }
+    }
+
+    /// §11.4/#421: the momentary states still **pre-empt** the standing pair, and every
+    /// live message still pre-empts all of them. The floor gained a second fact; it did
+    /// not gain a claim on the row.
+    #[test]
+    fn the_momentary_states_still_pre_empt_the_standing_pair() {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 6),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(8, 8)],
+            Cell::new(10, 10),
+        );
+        s.step(Input::Step(Direction::North)); // into the cupboard
+        s.step(Input::Wait); // the entry message clears: hidden is the floor's arm
+        assert_eq!(near_line(&s).text, "hidden — the cupboard conceals you");
+        assert!(
+            !near_line(&s).text.contains("objectives"),
+            "a momentary state owns the row while it lasts",
+        );
+
+        // And a live message outranks even that — the floor is the floor (§11.7).
+        s.step(Input::Step(Direction::South)); // out of the cupboard
+        assert!(!near_line(&s).is_ambient() || near_line(&s).text.contains("objectives"));
     }
 
     /// §7.3/§11.7: the radio events read as Warning-band threat messages — a
@@ -759,8 +892,9 @@ mod tests {
     }
 
     /// §7.3/§11.4: once the radio has stepped the facility alert, the value is
-    /// *readable* — with no louder message live, the ambient floor surfaces it in
-    /// the Warning band, never written-but-invisible (§2.3).
+    /// *readable* — with no louder message live, the ambient floor surfaces it beside
+    /// the objectives, never written-but-invisible (§2.3), and the band takes the rung's
+    /// own colour (#421), which is what makes this row the standing alert indicator.
     #[test]
     fn ambient_surfaces_the_facility_alert() {
         use crate::radio::RadioClock;
@@ -787,13 +921,13 @@ mod tests {
             "out of the cupboard, so the alert is the ambient fact"
         );
 
-        // No message is live after the quiet waits: the near line rests on the alert.
-        // In the same words the step message and the help panel use (#375) — one fact,
-        // one phrase, wherever the player meets it.
+        // No message is live after the quiet waits: the near line rests on both standing
+        // facts, and the band is the rung's own colour — the same mapping the help
+        // panel's condition line reads (#375), so the two can never disagree.
         let line = near_line(&s);
-        assert_eq!(line.text, alert_line(s.alert()));
-        assert_eq!(line.text, "security condition 1 of 3");
-        assert_eq!(line.category, Category::Warning);
+        assert_eq!(line.text, "objectives: 0/0 - security: 1");
+        assert_eq!(line.category, crate::alert::rung_category(s.alert()));
+        assert_eq!(line.category, Category::Caution, "rung 1 is the low rung");
         assert_eq!(
             line.priority,
             i32::MIN,
@@ -1198,15 +1332,20 @@ mod tests {
         assert!(s.exit_ready());
     }
 
-    /// Under [`IntelGate::AtLeastOne`] the take message is **unchanged** — one intel
-    /// does open the exit, and the two still out are optional extra — but the ambient
-    /// floor no longer reports the tally as the requirement: three consoles are out,
-    /// one is needed, and that is what the line says (#310).
+    /// Under [`IntelGate::AtLeastOne`] the **take message** is unchanged — one intel does
+    /// open the exit, and the two still out are optional extra. This is the gate the
+    /// ambient fraction would misread (#310/#421): it says `objectives: 1/3` while the
+    /// exit is already open, because the fraction reports progress and not the gate.
+    ///
+    /// That is why the line is only truthful under the gates a **human** actually plays:
+    /// `AtLeastOne` is the sim's baseline (§13.3) and the sim never reads the near line.
+    /// Pinned here so the day a human-facing mode ships on this gate, the mismatch is
+    /// already written down rather than discovered on screen.
     #[test]
-    fn the_at_least_one_gate_states_the_requirement_not_the_tally() {
+    fn the_at_least_one_gate_is_the_one_the_ambient_fraction_cannot_speak_for() {
         let mut s = gated(IntelGate::AtLeastOne);
         s.step(Input::Wait); // a quiet turn: the near line rests on the floor
-        assert_eq!(near_line(&s).text, "1 more intel to leave");
+        assert_eq!(near_line(&s).text, "objectives: 0/3");
         assert_eq!(
             s.objectives_remaining(),
             3,
@@ -1217,6 +1356,14 @@ mod tests {
         assert_eq!(
             near_line(&s).text,
             "intel in hand — the exit is open (2 more out)",
+            "the take still says the gate's own answer",
+        );
+        s.step(Input::Wait); // the message clears back to the floor
+        assert!(s.exit_ready(), "one intel opened the exit under this gate");
+        assert_eq!(
+            near_line(&s).text,
+            "objectives: 1/3",
+            "…and the floor reports progress, which under this gate is not the gate",
         );
     }
 
@@ -1227,7 +1374,9 @@ mod tests {
     fn the_none_gate_never_asks_for_intel() {
         let mut s = gated(IntelGate::None);
         s.step(Input::Wait);
-        assert_eq!(near_line(&s).text, "the exit is open");
+        // Intel is currency here (§2.2), never an exit key, so a progress fraction is
+        // exactly the right thing for the floor to show (#421).
+        assert_eq!(near_line(&s).text, "objectives: 0/3");
 
         let events = s.step(Input::Step(Direction::South));
         assert!(
