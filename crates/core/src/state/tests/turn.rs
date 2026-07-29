@@ -468,7 +468,7 @@ fn the_peek_is_the_players_alone_a_guard_never_peeks() {
         Cell::new(6, 3),
         Direction::West,
         layout.facility(),
-        BlindTier::REAR,
+        BlindPolicy::Rear,
     );
     let s = State::new(
         layout,

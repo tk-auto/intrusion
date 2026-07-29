@@ -68,7 +68,7 @@ use crate::rng::Rng;
 use crate::status::MessageHistory;
 use crate::targeting::Targeting;
 use crate::vision::{
-    field_of_view_with_peek, BlindTier, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC,
+    field_of_view_with_peek, BlindPolicy, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC,
     PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE,
 };
 use crate::DoorAction;
@@ -857,7 +857,7 @@ impl State {
     pub fn with_modifiers(mut self, modifiers: LevelModifiers) -> Self {
         self.modifiers = modifiers;
         // The startup turn (§4.2) has already run its sight phase by the time a
-        // builder is called, so re-run it here — `guards_detect_only_their_cone`
+        // builder is called, so re-run it here — `calm_guards_detect_only_their_cone`
         // (#410) is a **sight** rule, and without this the opening frame would carry
         // turn-zero cones cast under the other arm: the danger overlay would lie
         // about the flank, and a first-turn flank takedown would be refused by a
@@ -1896,18 +1896,18 @@ impl State {
 
     /// How much of a guard's touching ring is blind this level (§6.1/§6.2/#410) —
     /// [`BlindTier::REAR`] by default (§155's three cells at its back), or
-    /// [`BlindTier::FLANK`] with `guards_detect_only_their_cone` on, where a guard
+    /// [`BlindTier::FLANK`] with `calm_guards_detect_only_their_cone` on, where a guard
     /// detects exactly its cone.
     ///
     /// Derived from the resolved modifiers on every read rather than cached (§12.3),
     /// exactly like [`patrol_style`](Self::patrol_style): one truth, so a guard's
     /// cone and the danger overlay drawn over it can never disagree about which arm
     /// the level is playing.
-    pub(crate) fn guard_blind_tier(&self) -> BlindTier {
-        if self.modifiers.guards_detect_only_their_cone {
-            BlindTier::FLANK
+    pub(crate) fn guard_blind_policy(&self) -> BlindPolicy {
+        if self.modifiers.calm_guards_detect_only_their_cone {
+            BlindPolicy::FlankWhileCalm
         } else {
-            BlindTier::REAR
+            BlindPolicy::Rear
         }
     }
 
@@ -1922,7 +1922,7 @@ impl State {
     /// read still breaks the guard's line (§7.6).
     fn recompute_sight(&mut self) {
         let facility = self.layout.facility();
-        let blind = self.guard_blind_tier();
+        let blind = self.guard_blind_policy();
         // Inside a duct the normal cone is off (§10.7): the player perceives only
         // their memory of the building and the shortened guard sense, with one live
         // window — the mouth peek from an entry cell (§6.1). Mid-duct there is no

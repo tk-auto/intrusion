@@ -165,18 +165,29 @@ pub struct LevelModifiers {
     /// the difficulty draw it spends budget that must be found by taking a harder
     /// rule elsewhere. A modifier that only ever gave would not be a modifier.
     pub full_layout_known: bool,
-    /// **Easier.** A guard detects **exactly its ~90° cone** (§6.1/§6.2/#410): the
-    /// two cells at its *flank* (§6.2 tier 3) drop out of its detection set along
-    /// with the three at its back, so the free touching ring becomes player-only.
+    /// **Easier.** A **Calm** guard detects **exactly its ~90° cone**
+    /// (§6.1/§6.2/#410): while it is patrolling, the two cells at its *flank* (§6.2
+    /// tier 3) drop out of its detection set along with the three at its back, so the
+    /// free touching ring becomes player-only. **A guard that is not Calm watches its
+    /// sides again** — chasing, investigating, searching or answering a call, tier 3
+    /// detects exactly as it always did.
     ///
-    /// Baseline, tier 3 still detects — "you can never stand **beside or in front
+    /// Baseline, tier 3 always detects — "you can never stand **beside or in front
     /// of** a guard undetected" (§6.1/§7.2) — and two things follow from that which
-    /// this modifier undoes. A **takedown** must come from directly behind or
-    /// rear-diagonal: step to a guard's side and you are seen, even though it is
-    /// looking the other way. And you **cannot tail a guard**: walk in its blind spot
-    /// and the moment it turns 90° at a corner you are at its side, tier 3, detected
-    /// — so the one manoeuvre that should be the reward for reading a patrol is
-    /// impossible.
+    /// this modifier undoes, but only against a patrol. A **takedown** must come from
+    /// directly behind or rear-diagonal: step to a guard's side and you are seen,
+    /// though it is looking the other way. And you **cannot tail a guard**: walk in
+    /// its blind spot and the moment it turns 90° at a corner you are at its side,
+    /// tier 3, detected — so the one manoeuvre that should be the reward for reading a
+    /// patrol is impossible.
+    ///
+    /// **The Calm condition is what prices it.** The unconditional form measured as a
+    /// win-rate rise on temperaments that never strike at all — un-priced safety
+    /// rather than a new option, which is precisely what §7.2 means when it says the
+    /// takedown's constraints *are* the cost. Conditioning on the mood buys the
+    /// manoeuvre and nothing else: reading a patrol is rewarded, and being **hunted**
+    /// is not, because a guard that is looking for you sweeps its own sides. The flank
+    /// becomes somewhere to work from, never somewhere to hide.
     ///
     /// **It buys a stealth window, never immunity.** Capture is contact (§4.5
     /// **[SETTLED]**), not detection: a guard that steps onto the player still
@@ -190,12 +201,14 @@ pub struct LevelModifiers {
     /// already unnoticed), and splitting detection from body-finding would mean two
     /// fovs per guard and a second meaning for "the cone". The overlay following
     /// automatically is what keeps the player's information honest — the narrowed
-    /// cone is **drawn**, not hidden (§11.5).
+    /// cone is **drawn**, not hidden (§11.5) — and because it is drawn per guard, a
+    /// patrol and a searcher standing side by side paint differently, which is the
+    /// rule made visible.
     ///
     /// **An experiment, off by default** (#410). It bends a **[SETTLED]** sentence in
     /// §6.1/§6.2/§7.2, so it ships as a knob to measure rather than as the rule; the
     /// numbers decide whether those sections move.
-    pub guards_detect_only_their_cone: bool,
+    pub calm_guards_detect_only_their_cone: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -305,9 +318,9 @@ const KNOWS_FULL_LAYOUT: ActiveModifier = ActiveModifier {
 };
 
 const BLIND_FLANKS: ActiveModifier = ActiveModifier {
-    name: "Guards blind at the flank",
+    name: "Calm guards: cone only",
     direction: ModifierDirection::Easier,
-    detail: Some("cone only"),
+    detail: Some("flanks blind"),
 };
 
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
@@ -344,7 +357,7 @@ impl LevelModifiers {
             body_found_calls_two_guards,
             always_show_vision_cones,
             full_layout_known,
-            guards_detect_only_their_cone,
+            calm_guards_detect_only_their_cone,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -365,7 +378,7 @@ impl LevelModifiers {
         if full_layout_known {
             active.push(KNOWS_FULL_LAYOUT);
         }
-        if guards_detect_only_their_cone {
+        if calm_guards_detect_only_their_cone {
             active.push(BLIND_FLANKS);
         }
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
@@ -395,8 +408,8 @@ impl LevelModifiers {
             always_show_vision_cones: self.always_show_vision_cones
                 || other.always_show_vision_cones,
             full_layout_known: self.full_layout_known || other.full_layout_known,
-            guards_detect_only_their_cone: self.guards_detect_only_their_cone
-                || other.guards_detect_only_their_cone,
+            calm_guards_detect_only_their_cone: self.calm_guards_detect_only_their_cone
+                || other.calm_guards_detect_only_their_cone,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
             // in its documented direction, so sources add pressure, never cancel.
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
@@ -622,7 +635,7 @@ mod tests {
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
             full_layout_known: true,
-            guards_detect_only_their_cone: true,
+            calm_guards_detect_only_their_cone: true,
             intel_to_exit: IntelGate::All,
         };
         assert_eq!(stacked.active().len(), 7);
@@ -636,7 +649,7 @@ mod tests {
             body_found_calls_two_guards: true,
             always_show_vision_cones: false,
             full_layout_known: false,
-            guards_detect_only_their_cone: false,
+            calm_guards_detect_only_their_cone: false,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -645,7 +658,7 @@ mod tests {
             body_found_calls_two_guards: false,
             always_show_vision_cones: true,
             full_layout_known: true,
-            guards_detect_only_their_cone: true,
+            calm_guards_detect_only_their_cone: true,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);

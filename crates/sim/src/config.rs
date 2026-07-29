@@ -278,8 +278,8 @@ const MODIFIERS: [(&str, SetModifier); 6] = [
         m.always_show_vision_cones = true
     }),
     ("full-layout-known", |m| m.full_layout_known = true),
-    ("guards-detect-only-their-cone", |m| {
-        m.guards_detect_only_their_cone = true
+    ("calm-guards-detect-only-their-cone", |m| {
+        m.calm_guards_detect_only_their_cone = true
     }),
 ];
 
@@ -560,7 +560,7 @@ mod tests {
             body_found_calls_two_guards,
             always_show_vision_cones,
             full_layout_known,
-            guards_detect_only_their_cone,
+            calm_guards_detect_only_their_cone,
             intel_to_exit,
         } = all.modifiers;
         assert!(guards_always_search_hideouts);
@@ -568,7 +568,7 @@ mod tests {
         assert!(body_found_calls_two_guards);
         assert!(always_show_vision_cones);
         assert!(full_layout_known);
-        assert!(guards_detect_only_their_cone);
+        assert!(calm_guards_detect_only_their_cone);
         assert_eq!(
             intel_to_exit,
             RunConfig::sim().modifiers.intel_to_exit,

@@ -1048,9 +1048,9 @@ change would have been indistinguishable from the fix.
 
 ---
 
-## Appendix 28 — The flank experiment: what it measured, and why it is a knob
+## Appendix 28 — The flank experiment, and why it is conditional on the guard's mood
 
-*(§6.1, §6.2, §7.2, §12.6. The experiment is **not adopted** — this is its record.)*
+*(§6.1, §6.2, §7.2, §12.6. The knob ships **off**; this is what it measured.)*
 
 §155 carved the three cells at a guard's back out of its detection set, so a takedown
 can be lined up from directly behind. Its *sides* — §6.2 tier 3 — still detect, and
@@ -1063,12 +1063,12 @@ undetected."* Two things follow, and #410 asked whether they should:
   corner you are at its side, tier 3, detected — so the one manoeuvre that should be
   the reward for reading a patrol is impossible.
 
-**The experiment.** Carve tiers 3–5 instead of 4–5, so a guard detects exactly what its
+**The experiment.** Carve tiers 3-5 instead of 4-5, so a guard detects exactly what its
 cone covers and the free touching ring becomes player-only. A 180° turn still catches
 you: that lands you at tier 1, dead ahead.
 
 **Why it is a knob and not a constant.** It bends a **[SETTLED]** sentence, so it ships
-as `guards_detect_only_their_cone` (§12.6) and both arms run from one build. Two
+as `calm_guards_detect_only_their_cone` (§12.6) and both arms run from one build. Two
 properties make the comparison exact, and both are asserted:
 
 - **The cone's silhouette is identical in both arms.** The carved cells stay §6.2
@@ -1080,57 +1080,75 @@ properties make the comparison exact, and both are asserted:
   under it is safe under any wider blind spot — so **generation is not part of the
   diff** and a shifted seed's geometry can never be mistaken for a result.
 
-### What it measured
+### The unconditional form, and why it failed
 
-Paired A/B, 150 seeds × four profiles × two arms, one build, `sim --bot`:
+Measured first without any condition: every guard, in every mood, blind at its flanks.
+Paired A/B, 150 seeds x four profiles x two arms.
 
 | | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | win rate | .360 → **.433** | .527 → **.573** | .387 → **.460** | .367 → **.520** |
 | detections | 1352 → 1336 | 1684 → **1260** | 1206 → **959** | 1675 → **1222** |
 | takedowns | 0 → 16 | 0 → 5 | 28 → **80** | 13 → **98** |
-| bodies found | 0 → 14 | 0 → 4 | 12 → 27 | 12 → **72** |
-| turns to win | 148 → 159 | 250 → 268 | 120 → 127 | 119 → **138** |
-| diversity | .653 → .641 | .436 → .414 | .586 → .586 | .514 → **.582** |
 | alert peak | .76 → .94 | .77 → .82 | .99 → 1.17 | 1.08 → **1.45** |
-| reinforcements | 19 → **62** | 29 → 46 | 54 → **93** | 60 → **153** |
 
-**The bot does exercise the new geometry (#260's gate), and in two different ways.**
-The striking temperaments reach for it deliberately: `strike` opens on the core's own
-`guard_detects_now`, which is exactly what the flank opens, and takedowns go 28 → 80
-and 13 → 98. The avoidance-first ones have `takedown_reach: 0` and never *walk* to a
-takedown at all — yet `balanced` goes 0 → 16, which can only be a takedown that fell
-in its lap: it walked into a guard it could not perceive, from a side that is now
-blind. The result is not inconclusive.
+The pre-registered sink was *"the striking profiles' win rate jumping while `detections`
+collapses means the flank is simply cheaper stealth with no new decision"*. Its
+**surface fired** — win rate up 7.3 and 15.3 points, detections down 20% and 27%. Its
+stated *reason* did not: takedowns tripled and septupled and the facility got markedly
+louder, so a new decision *was* being taken and paid for.
 
-### Reading it against what was pre-registered
+What sank it was something the pre-registration had not anticipated: **the win rate rose
+on temperaments that never strike at all.** `cautious` gained 4.7 points on 5 takedowns
+across 150 runs with a 25% fall in detections — almost pure free safety. The
+unconditional form was doing two separable things: opening a genuine new play, and
+quietly making a guard's side a safe place to stand. The second is exactly what §7.2
+means when it says the takedown's constraints *are* the cost.
 
-**"The striking profiles' win rate jumping while `detections` collapses means the flank
-is simply cheaper stealth with no new decision."** The *surface* of this fired — win
-rate up 7.3 and 15.3 points, detections down 20% and 27% — and it must be reported as
-having fired. Its stated *reason* did not: takedowns tripled and septupled, bodies
-found rose with them, alert peak rose on every profile and reinforcements went up 1.5–
-2.5×. That is a new decision being taken and paid for in a markedly louder facility,
-not a quieter run of the same game. The criterion was ambiguous as written; both halves
-are recorded rather than picking the flattering reading.
+### The conditional form: blind at the flank **only while Calm**
 
-**"`diversity` falling means the game gained a dominant line rather than an option."**
-Did not fire. The moves are small and mixed (−.022 to +.007), and the profile that
-changed most, `careless`, went **up** (+.068).
+A guard that is not Calm — chasing, investigating, searching, answering a call —
+watches its sides exactly as it always did. Same seeds, same build:
 
-**The finding the pre-registration did not anticipate, and the reason to hesitate: the
-win rate rises on temperaments that never strike at all.** `cautious` gains 4.7 points
-with 5 takedowns across 150 runs and a 25% fall in detections — that is almost pure
-free safety, an un-priced gift rather than a new option. The experiment is doing two
-separable things: opening a genuine new play (the flank takedown and the tail, paid for
-in noise) and quietly making a guard's side a safe place to stand. The first is what
-#410 wanted; the second is what §7.2 means when it says the takedown's constraints
-*are* the cost.
+| | balanced | cautious | aggressive | careless |
+|---|---|---|---|---|
+| win rate | .360 → .380 | .527 → **.567** | .387 → .393 | .367 → **.367** |
+| detections | 1352 → 1372 | 1684 → 1735 | 1206 → 1170 | 1675 → 1297 |
+| takedowns | 0 → **0** | 0 → **0** | 28 → **36** | 13 → **28** |
+| bodies found | 0 → 0 | 0 → 0 | 12 → 9 | 12 → **21** |
+| diversity | .653 → .639 | .436 → .434 | .586 → .584 | .514 → .533 |
+| alert peak | .76 → .77 | .77 → .77 | .99 → .99 | 1.08 → 1.15 |
+| reinforcements | 19 → 21 | 29 → 33 | 54 → **47** | 60 → **82** |
 
-**Not adopted on these numbers.** A narrower variant is the interesting next question —
-the flank blind only while a guard is **Calm**, say, so reading a patrol is rewarded but
-a hunt still sweeps its sides. That is its own ticket; the knob stays, off, so the
-question can be re-measured without rebuilding any of this.
+**Both pre-registered criteria are now clean.** No striking profile's win rate jumps —
+`aggressive` +0.7 points, `careless` **exactly flat** — so the first does not fire, on
+its surface or in its reason. Diversity moves −.014 to +.019, so the second does not
+fire either.
 
-**What did not change.** The default arm is byte-identical to before: all four
-committed baseline profiles match exactly, over 400 runs.
+**The free safety is gone, and the option is not.** The profiles that never strike are
+back to baseline: `balanced` +2.0 points with **zero** takedowns, and its detections
+actually rise. Meanwhile the striking ones take the new play — `careless` doubles its
+takedowns (13 → 28) and its bodies found (12 → 21), pays for it in reinforcements
+(60 → 82), and **wins exactly as often as before**. That is the shape an option is
+supposed to have: it changes how a run is played without changing how often it is won.
+
+`cautious` keeps +4.0 points, on zero takedowns and *more* detections than baseline.
+That is the reward landing where it was aimed — it is the temperament built to read and
+avoid patrols, and reading a patrol is what the rule pays for.
+
+**Why the condition is the whole design and not a tuning fudge.** It says: a patrol you
+have read is predictable, and a guard that is hunting you is not. The flank becomes
+somewhere to **work from** and never somewhere to **hide**. It needs no new state and no
+new timer — the mood is already on the guard, and the cone is already recomputed every
+sight phase, so a guard's sides come back the turn it stops being calm. Because the
+§11.5 overlay is drawn from the same one cone, a patrol and a searcher standing side by
+side paint differently: the rule is legible on screen rather than remembered.
+
+**Interaction with #430** (a guard cannot act on the turn it first spots you). The two
+compose in the same direction and neither needs the other: #430 makes a first sighting
+cost the guard its turn, and this makes a calm guard's flank not a sighting at all. Both
+say the same thing — a patrol you have read is a patrol you can act against.
+
+**Still a knob, still off.** Adopting it is a design-doc edit to §6.1, §6.2 and §7.2,
+which is a human judgement about *feel* (§13.4) — tailing a guard through a corner is
+not something these metrics can score. The numbers no longer argue against it.

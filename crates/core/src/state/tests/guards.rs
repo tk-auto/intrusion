@@ -509,31 +509,45 @@ fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
     );
 }
 
-/// #410 (§6.1/§7.2): the **flank takedown** the experiment opens up. The same scene
-/// in both arms — a south-facing guard with the player standing at its side, on open
-/// floor, no cupboard and no decoy.
+/// #410 (§6.1/§7.2): the **flank takedown** the experiment opens up, against a guard
+/// that is **Calm**. The same scene in both arms — a south-facing stationary patrol
+/// with the player walking up to its side, on open floor, no cupboard and no decoy.
 ///
 /// Baseline the side cell detects, so the bump is refused and the usable line offers
 /// nothing (§11.4): a takedown must come from directly behind or rear-diagonal. With
-/// `guards_detect_only_their_cone` the guard detects exactly its cone, the flank goes
-/// blind, and the takedown lands — widening the approach surface from three cells to
-/// five, which is the real loosening of §7.2's price this experiment is for.
+/// `calm_guards_detect_only_their_cone` a calm guard detects exactly its cone, the
+/// flank goes blind, and the takedown lands — widening the approach surface against a
+/// patrol from three cells to five, which is the real loosening of §7.2's price this
+/// experiment is for.
+///
+/// The player **walks in** rather than starting at the flank: the §4.2 startup world
+/// phase runs before a builder can set the arm, so a player placed at the flank would
+/// be detected once under the shipped rule and the guard would never be Calm again.
 #[test]
 fn a_flank_takedown_lands_only_in_the_experimental_arm() {
-    let scene = || {
-        State::new(
+    let scene = |experimental: bool| {
+        let mut s = State::new(
             open_room(10, 10),
-            Cell::new(4, 5), // due west of the guard — its flank, exposed
+            Cell::new(2, 5), // clear of the guard to start
             Direction::East,
-            vec![Guard::stationary(Cell::new(5, 5))], // facing south (§7.1)
+            vec![Guard::stationary(Cell::new(5, 5))], // faces south (§7.1), holds
             Vec::new(),
             Cell::new(8, 8),
         )
+        .with_modifiers(LevelModifiers {
+            calm_guards_detect_only_their_cone: experimental,
+            ..LevelModifiers::default()
+        });
+        // Up to the guard's western flank.
+        s.step(Input::Step(Direction::East));
+        s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), Cell::new(4, 5), "at the guard's side");
+        assert!(!s.hidden(), "on open floor, not concealed");
+        s
     };
 
     // Control: the flank detects, so there is no takedown to offer.
-    let control = scene();
-    assert!(!control.hidden(), "precondition: on open floor");
+    let control = scene(false);
     assert!(
         control.guard_detects_now(&control.guards()[0]),
         "control: standing beside a guard is detected (§6.1/§7.2)",
@@ -546,17 +560,16 @@ fn a_flank_takedown_lands_only_in_the_experimental_arm() {
         "control: a detecting guard refuses the takedown",
     );
 
-    // Experiment: the flank is blind, so the same bump takes the guard down.
-    let mut experiment = scene().with_modifiers(LevelModifiers {
-        guards_detect_only_their_cone: true,
-        ..LevelModifiers::default()
-    });
-    // The **live** cone, which is what the takedown gate reads (§7.2) — not the
-    // per-turn latch, which the startup world phase (§4.2) left behind before this
-    // builder set the arm.
+    // Experiment: the calm guard's flank is blind, so the same bump takes it down.
+    let mut experiment = scene(true);
+    assert_eq!(
+        experiment.guards()[0].state(),
+        GuardState::Calm,
+        "it never noticed, so it is still a patrol",
+    );
     assert!(
         !experiment.guard_detects_now(&experiment.guards()[0]),
-        "experiment: a guard detects exactly its cone, so its flank is blind",
+        "experiment: a calm guard detects exactly its cone, so its flank is blind",
     );
     assert_eq!(
         experiment.affordances(),
@@ -604,7 +617,7 @@ fn contact_still_captures_at_a_blind_flank() {
             Cell::new(1, 1),
         )
         .with_modifiers(LevelModifiers {
-            guards_detect_only_their_cone: experimental,
+            calm_guards_detect_only_their_cone: experimental,
             ..LevelModifiers::default()
         });
         s.set_guard_close_chance(0);
@@ -629,6 +642,14 @@ fn contact_still_captures_at_a_blind_flank() {
             assert!(
                 s.call_guards_to_for_test(Cell::new(1, 1), 1),
                 "the blind guard was free to answer",
+            );
+            // **The narrowing, seen from the player's side.** Answering the call makes
+            // it Responding, so on its next look its flanks are live again — the
+            // player is standing in a blind spot that has just closed under them.
+            s.step(Input::Wait);
+            assert!(
+                s.guard_detects_now(&s.guards()[0]),
+                "a guard that stops being calm watches its sides again (#410)",
             );
         }
         for _ in 0..16 {
@@ -663,7 +684,7 @@ fn the_players_touching_ring_survives_both_arms() {
                 Cell::new(9, 9),
             )
             .with_modifiers(LevelModifiers {
-                guards_detect_only_their_cone: experimental,
+                calm_guards_detect_only_their_cone: experimental,
                 ..LevelModifiers::default()
             });
             for dy in -1i64..=1 {

@@ -425,7 +425,7 @@ impl State {
         // any one guard: with the comms console bumped there is no coordination left to
         // divide the building, so every Calm guard wanders the whole of it.
         let style = self.patrol_style();
-        let blind = self.guard_blind_tier();
+        let blind = self.guard_blind_policy();
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
                 return;

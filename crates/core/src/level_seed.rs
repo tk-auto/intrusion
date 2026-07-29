@@ -644,7 +644,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         body_found_calls_two_guards,
         always_show_vision_cones,
         full_layout_known,
-        guards_detect_only_their_cone,
+        calm_guards_detect_only_their_cone,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -654,7 +654,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         body_found_calls_two_guards,
         always_show_vision_cones,
         full_layout_known,
-        guards_detect_only_their_cone,
+        calm_guards_detect_only_their_cone,
     ]
     .into_iter()
     .enumerate()
@@ -675,7 +675,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, guards_detect_only_their_cone] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone] =
         active;
     Some(LevelModifiers {
         guards_always_search_hideouts,
@@ -683,7 +683,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         body_found_calls_two_guards,
         always_show_vision_cones,
         full_layout_known,
-        guards_detect_only_their_cone,
+        calm_guards_detect_only_their_cone,
         intel_to_exit: gate,
     })
 }
@@ -1027,7 +1027,7 @@ mod tests {
                                             body_found_calls_two_guards: body,
                                             always_show_vision_cones: cones,
                                             full_layout_known: layout,
-                                            guards_detect_only_their_cone: cone_only,
+                                            calm_guards_detect_only_their_cone: cone_only,
                                             intel_to_exit: gate,
                                         };
                                         let level = LevelSeed {
@@ -1156,7 +1156,7 @@ mod tests {
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: false,
                 full_layout_known: false,
-                guards_detect_only_their_cone: false,
+                calm_guards_detect_only_their_cone: false,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1287,7 +1287,7 @@ mod tests {
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
             full_layout_known: true,
-            guards_detect_only_their_cone: true,
+            calm_guards_detect_only_their_cone: true,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {
