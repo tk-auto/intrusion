@@ -400,9 +400,108 @@ fn a_reinforcement_walks_to_the_trigger_and_searches_it() {
         GuardState::Calm,
         "the errand ended and the guard stood back down (§7.4)",
     );
+    // This hall is hand-built and so has no region graph to cut a beat out of; that
+    // the beat is anchored on where the errand *finished* is pinned on a fixture that
+    // does have one, in `a_reinforcement_patrols_where_it_finished_not_where_it_landed`.
     assert!(
-        !settled.beat().is_empty() || settled.station() == arrived_at,
-        "…with somewhere to patrol from (§7.5)",
+        settled.pos().manhattan_distance(errand) < arrived_at.manhattan_distance(errand),
+        "it came to rest near the cell it was sent to, not back at {arrived_at:?}",
+    );
+}
+
+/// A row of `regions` three-cell rooms, each joined to the next by a closed door — the
+/// [`crate::test_support::region_strip`] shape, long enough that a four-region beat
+/// cannot span the whole level. Long strips are what make "the beat is around where the
+/// guard finished" a *falsifiable* claim: on a short one every beat covers everything.
+fn long_region_strip(regions: u32) -> Layout {
+    use crate::region::{DoorKind, RegionGraph, RegionKind};
+    let width = regions * 4 + 1;
+    let mut f = Facility::walled_box(width, 6);
+    let mut g = RegionGraph::new(width, 6);
+    let ids: Vec<_> = (0..regions)
+        .map(|i| {
+            let x0 = i * 4 + 1;
+            g.add_region(
+                RegionKind::Room,
+                (1..5).flat_map(move |y| (x0..x0 + 3).map(move |x| Cell::new(x, y))),
+            )
+        })
+        .collect();
+    for (i, pair) in ids.windows(2).enumerate() {
+        let x = i as u32 * 4 + 4;
+        for y in 1..5 {
+            f.set_terrain(x, y, Terrain::Wall);
+        }
+        f.set_terrain(x, 1, Terrain::DoorHinge);
+        f.set_terrain(x, 2, Terrain::DoorPanelClosed);
+        f.set_terrain(x, 3, Terrain::DoorHinge);
+        g.add_door(
+            pair[0],
+            pair[1],
+            [Cell::new(x, 1), Cell::new(x, 3)],
+            [Cell::new(x, 2)],
+            DoorKind::Manual,
+        );
+    }
+    Layout::from_parts(f, g)
+}
+
+/// §7.5/§7.3/#374 — the defect this ticket exists for. A reinforcement walks in at the
+/// far end of the facility and used to be tethered there for the rest of the run: its
+/// beat was grown around the **arrival** cell, so once the post-errand watch expired it
+/// walked the whole building back to the room it entered by. And because the arrival
+/// region is the one furthest from the player — an answer that barely moves over a run
+/// — *every* reinforcement was anchored to the same room.
+///
+/// Six rooms in a row, the player shut in the first, the errand in the second: the
+/// newcomer comes in at the sixth, walks the length of the strip, searches, and settles.
+/// A beat is four regions ([`BEAT_REGIONS`]), so a beat cut around the errand cannot
+/// reach the arrival room and one cut around the arrival cannot reach the errand — the
+/// two answers are cleanly distinguishable, which is the point of the long strip.
+#[test]
+fn a_reinforcement_patrols_where_it_finished_not_where_it_landed() {
+    let mut layout = long_region_strip(6);
+    layout.place(Cell::new(1, 2), Terrain::Hideout);
+    let errand = Cell::new(6, 2); // room 1, next door to the player
+    let mut s = State::new(
+        layout,
+        Cell::new(1, 2),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(2, 4),
+    )
+    .with_rng(Rng::new(7));
+    s.step(Input::Wait);
+
+    s.queue_reinforcements(1, 2, errand);
+    let mut events = Vec::new();
+    s.land_reinforcements(&mut events);
+    let arrived_at = *arrivals(&events).first().expect("the ladder sent somebody");
+    assert!(
+        arrived_at.x > 16,
+        "it came in at the far end of the strip, not beside the errand ({arrived_at:?})",
+    );
+
+    // Run the errand out: walk the strip, search, release to Calm — and be cut a beat.
+    for _ in 0..300 {
+        if s.outcome() != Outcome::Playing || s.guards()[0].has_beat() {
+            break;
+        }
+        s.step(Input::Wait);
+    }
+
+    let settled = &s.guards()[0];
+    assert_eq!(settled.state(), GuardState::Calm, "the errand ended");
+    let beat = settled.beat();
+    assert!(!beat.is_empty(), "…and it was cut a beat to patrol (§7.5)");
+    assert!(
+        beat.contains(&errand),
+        "the beat covers the area the errand finished in",
+    );
+    assert!(
+        !beat.contains(&arrived_at),
+        "…and not the room it walked in by — the defect (§7.3/#374)",
     );
 }
 
@@ -452,14 +551,10 @@ fn a_reinforcement_arrives_on_an_errand_not_on_the_player() {
             Some(errand),
             "seed {seed}: it walks to the cell that called it, not to the player",
         );
-        assert_eq!(
-            newcomer.station(),
-            newcomer.pos(),
-            "seed {seed}: it is stationed where it walked in, so it has somewhere to patrol from",
-        );
         assert!(
-            !newcomer.beat().is_empty(),
-            "seed {seed}: a reinforcement with no beat would stand around forever (§7.5)",
+            newcomer.beat().is_empty(),
+            "seed {seed}: the beat is cut when the errand *ends*, around where the \
+             guard finished — not around the room it walked in by (§7.5/§7.3)",
         );
     }
 }

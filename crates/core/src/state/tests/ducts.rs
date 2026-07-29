@@ -272,7 +272,8 @@ fn a_guard_walks_over_a_crawler_on_a_floor_duct_cell() {
         layout,
         Cell::new(2, 3),
         Direction::North,
-        vec![Guard::patrolling_to(Cell::new(5, 3), Cell::new(1, 3))],
+        vec![Guard::patrolling_to(Cell::new(5, 3), Cell::new(1, 3))
+            .with_beat((1..8).map(|x| Cell::new(x, 3)).collect())],
         Vec::new(),
         Cell::new(7, 7),
     );

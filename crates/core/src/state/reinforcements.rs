@@ -41,10 +41,19 @@
 //! player's live position is the un-fun chase (§7.6's trap). **Reinforcements search,
 //! they do not hunt.**
 //!
-//! When the errand ends they patrol from wherever they finished, with a station and a
-//! region beat like any guard (§7.5/§10.5) — the beat grown **after** the incumbents'
-//! stations, so the newcomer fans out into ground they do not already hold rather than
-//! grinding the same wing.
+//! When the errand ends they patrol from wherever they finished, with a region beat
+//! like any guard (§7.5/§10.5) — the beat grown **after** the incumbents', so the
+//! newcomer fans out into ground they do not already hold rather than grinding the
+//! same wing.
+//!
+//! **The beat is cut when the errand ends, not when the guard lands.** A reinforcement
+//! arrives at the far end of the map ([`arrival_cell`](State::arrival_cell) picks the
+//! region furthest from the player, and that answer is stable across a run), so a beat
+//! grown at landing would tether every reinforcement of the run to the same arrival
+//! room — it would walk the whole facility back to it the moment its watch expired.
+//! Growing it at the release instead anchors it on where it actually finished, which
+//! is what §7.3 has always claimed happens. Until then the newcomer carries no beat and
+//! has no Calm territory, which costs nothing: it is on an errand the whole time.
 //!
 //! # Why arrivals are queued rather than spawned where they are decided
 //!
@@ -146,17 +155,10 @@ impl State {
             // placement draws — never a fresh source — so a seed reproduces not only
             // *that* a reinforcement arrived but the whole schedule it arrived with.
             let clock = RadioClock::draw(&mut self.rng);
-            // The beat is grown with the incumbents' stations seeded first and the
-            // newcomer's last, so it claims ground they do not already hold (§7.5's
-            // cooperative growth) instead of doubling up on a wing.
-            let mut stations: Vec<Cell> = self.guards.iter().map(Guard::station).collect();
-            stations.push(cell);
-            let beat = coordinated_beat_cells(self.layout.regions(), &stations, BEAT_REGIONS)
-                .pop()
-                .unwrap_or_default();
-            let mut guard = Guard::patrolling(cell)
-                .with_beat(beat)
-                .with_radio_clock(clock);
+            // No beat yet — it is cut when the errand ends, around wherever the guard
+            // finished ([`settle_new_beats`]). See the module header for why landing is
+            // the wrong moment.
+            let mut guard = Guard::patrolling(cell).with_radio_clock(clock);
             // The errand: walk to the trigger cell and search it (§7.6), exactly as a
             // dispatch does. It searches — it does not hunt (§7.6's trap) — and its
             // lead is sized to the trip, or §7.1's cold-lead backstop would strand it
@@ -164,6 +166,47 @@ impl State {
             guard.respond_across(errand, errand_lead(cell, errand));
             self.guards.push(guard);
             events.push(Event::ReinforcementArrived { at: cell });
+        }
+    }
+
+    /// Cut a §7.5 beat for every guard that has come to rest without one — a
+    /// reinforcement whose errand has just ended (§7.3/#374).
+    ///
+    /// The beat is grown around the guard's **live position**, with the incumbents'
+    /// positions seeded first and the newcomer's last, so it claims ground they do not
+    /// already hold (§7.5's cooperative growth) instead of doubling up on a wing.
+    ///
+    /// Called once per turn but it does work only while a guard is beatless and Calm,
+    /// which is the single turn its errand releases — beat growth must stay a rare
+    /// call, because the anchor it reads moves every turn and a per-turn regrow would
+    /// make every patrol churn (§7.5/[`crate::beat`]). A guard still Responding or
+    /// Alerted is left alone: its errand is where it belongs, and cutting a beat around
+    /// a cell it is walking through would anchor it on nothing.
+    pub(super) fn settle_new_beats(&mut self) {
+        if !self
+            .guards
+            .iter()
+            .any(|g| !g.has_beat() && g.state() == GuardState::Calm)
+        {
+            return;
+        }
+        // Every guard's live position, incumbents first: the newcomer grows last and so
+        // sees the ground the rest already hold.
+        let mut anchors: Vec<Cell> = Vec::with_capacity(self.guards.len());
+        let mut settling: Vec<usize> = Vec::new();
+        for (index, guard) in self.guards.iter().enumerate() {
+            if guard.has_beat() || guard.state() != GuardState::Calm {
+                anchors.push(guard.pos());
+            } else {
+                settling.push(index);
+            }
+        }
+        let held = anchors.len();
+        anchors.extend(settling.iter().map(|&index| self.guards[index].pos()));
+
+        let beats = coordinated_beat_cells(self.layout.regions(), &anchors, BEAT_REGIONS);
+        for (&index, beat) in settling.iter().zip(beats.into_iter().skip(held)) {
+            self.guards[index].set_beat(beat);
         }
     }
 

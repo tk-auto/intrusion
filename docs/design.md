@@ -528,7 +528,11 @@ Gating on it would also be unworkable — a turn spent waiting widens the sense 
 **What they do.** They head for the **trigger cell** — the body that was found, the
 console that was tampered with, the player's last known cell — and **search** it
 (§7.6), exactly as a radio dispatch does; then they patrol from where they finished,
-with a station and a region beat like any guard (§7.5/§10.5). *Reinforcements search,
+with a region beat like any guard (§7.5/§10.5) — **cut when the errand ends, around
+where they came to rest**, never around the room they walked in by. A beat grown at
+the arrival cell would tether every reinforcement of a run to the same far-end room,
+since the arrival region is chosen for its distance from the player and that answer
+barely moves. *Reinforcements search,
 they do not hunt.* More guards converging on a stale cell is **the net closing**, which
 is what §7.6 asks for; more guards tracking the player's live position is the un-fun
 chase §7.6 exists to prevent.
@@ -707,8 +711,14 @@ See §15.
 **Routes are not authored, and they are not random.** Each guard sweeps for cells
 it has not recently looked at.
 
-- Each guard has a **station** (spawn cell) and a **patrol radius** (**15**
-  **[START]**).
+- Each guard has a **territory**: its region **beat** (§10.5), grown across door
+  edges from the region it stands in when the beat is cut. There is no spawn cell
+  and no patrol radius — a guard with no beat has no territory and holds, rather
+  than sweeping a box drawn round a cell it has long since walked away from.
+- **A beat is anchored on a live position, and cut rarely.** At placement that is
+  the spawn cell; for a guard that arrives mid-level (§7.3) it is where its errand
+  finished. Growth is called at placement and when the guard set changes — never
+  per turn, because an anchor that moves every turn would make patrols churn.
 - It keeps a private memory of inspected cells.
 - With no destination, it walks to the **farthest** uninspected, currently-empty
   cell in its territory. *Farthest*, not nearest — this is what makes guards pace
@@ -744,12 +754,15 @@ it has not recently looked at.
   for a reversal, so a 3–7 dwell reads as 3–9 turns of held ground. The dwell is
   the part with the facing pinned, which is the part a Takedown needs.
 
-**Known weakness, worth fixing: territories are boxes around spawn points, which
-have no relationship to the building.** They straddle walls, spill into
-unreachable rooms, and overlap arbitrarily. Two guards spawned near each other
-grind over the same ground while a wing goes uncovered. **This is downstream of
-§10.5 — you cannot assign "cover the east wing" if nothing knows what the east
-wing is.** Fix the spatial model and this fixes itself.
+**Known weakness, worth fixing.** This was once *"territories are boxes around spawn
+points, which have no relationship to the building"* — they straddled walls, spilled
+into unreachable rooms, and overlapped arbitrarily. §10.5's region graph fixed the
+*shape* (a beat is rooms and the corridors joining them, all of it walkable), and
+dropping the spawn anchor fixed the *tether*. What survives is the **overlap**: two
+guards near each other still grind over the same ground while a wing goes uncovered,
+because beats are grown as a cover that merely *steers* away from claimed regions
+rather than as a partition of them. Headcount does not shrink a territory, so
+reinforcements add a body without adding density.
 
 ### 7.6 The chase and the hiding game — read this before touching guard AI
 

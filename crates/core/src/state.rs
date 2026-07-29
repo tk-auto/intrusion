@@ -1700,6 +1700,11 @@ impl State {
         // acts from the next one — it has not looked yet, and its cone is recomputed
         // with everybody else's at the head of it.
         self.land_reinforcements(&mut events);
+        // A reinforcement whose errand ended this turn is cut its §7.5 beat here,
+        // around where it finished rather than where it walked in (§7.3/#374). It sits
+        // after the arrivals so a guard that lands and stands down on the same turn is
+        // still settled on that turn, and it is a no-op on every other turn.
+        self.settle_new_beats();
         self.door_phase(&mut events);
         // Autodoors shuts the doors the player passed through this run once their
         // throats clear (§8.3/§7.6) — after the guards move, so a pursuer stepping

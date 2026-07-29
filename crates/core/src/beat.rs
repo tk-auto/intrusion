@@ -3,20 +3,28 @@
 //! The old territory was a box around the spawn cell — §7.5's named weakness: it
 //! straddled walls, spilled into rooms the guard could not walk to, and had no
 //! relationship to the building. The §10.5 region graph is the fix: a beat is a
-//! **connected set of regions** — the station's own region grown outward across
-//! door edges — so every cell of it is genuinely walkable from the station, and
+//! **connected set of regions** — the anchor's own region grown outward across
+//! door edges — so every cell of it is genuinely walkable from the anchor, and
 //! the corridors joining a guard's rooms are first-class parts of its ground, not
 //! space crossed incidentally. The farthest-uninspected sweep (§7.5 — keep it)
 //! then drives the guard room → corridor → room through them.
 //!
+//! **An anchor is a guard's live position, not the cell it spawned at.** That is the
+//! other half of §7.5's weakness: a remembered spawn point is as unrelated to where
+//! a guard has got to as a box is to the building. It matters most for a
+//! reinforcement (§7.3/#374), which walks in at the far end of the map and would
+//! otherwise be tethered to the arrival room for the rest of the level. The price is
+//! that growth must be *called* rarely — at placement, and when the guard set changes
+//! — because an anchor that moves every turn would make patrols churn.
+//!
 //! Growth prefers the unclaimed neighbour whose connecting door is **nearest the
-//! station**: the beat hugs the guard's own wing of the building, and — the
-//! best-effort spread §7.5 wants — guards stationed apart in the same room grow
+//! anchor**: the beat hugs the guard's own wing of the building, and — the
+//! best-effort spread §7.5 wants — guards anchored apart in the same room grow
 //! toward their own nearest doors first, so their beats diverge where the level
-//! allows. Everything is a deterministic function of the graph and the station
+//! allows. Everything is a deterministic function of the graph and the anchor
 //! cell (§12.4): no randomness, ties broken by scan order.
 //!
-//! Grown *independently*, that spread is only best-effort: two guards stationed
+//! Grown *independently*, that spread is only best-effort: two guards anchored
 //! near the same door still claim the same wing, the §7.5 "grind the same ground
 //! while a wing goes uncovered" weakness. [`coordinated_beats`] closes it — it
 //! grows every guard's beat with knowledge of the others, preferring a region **no
@@ -31,33 +39,33 @@ use std::collections::HashMap;
 
 /// How many regions a guard's beat claims (§7.5 **[START] = 4**) — the named
 /// knob replacing the old `PATROL_RADIUS` box for Calm patrol on generated
-/// levels. Four is a wing: typically the station's room, the corridor outside
+/// levels. Four is a wing: typically the anchor's room, the corridor outside
 /// it, and the neighbouring room or two — comparable ground to the old
 /// 15-step disc, but shaped like the building.
 pub(crate) const BEAT_REGIONS: usize = 4;
 
-/// Manhattan distance from `station` to the door's nearest panel — how a beat
+/// Manhattan distance from `anchor` to the door's nearest panel — how a beat
 /// measures "which neighbour is closest to my corner of the level" (§7.5).
-fn door_distance(regions: &RegionGraph, door: DoorId, station: Cell) -> u32 {
+fn door_distance(regions: &RegionGraph, door: DoorId, anchor: Cell) -> u32 {
     regions
         .door(door)
         .panels()
         .iter()
-        .map(|&panel| station.manhattan_distance(panel))
+        .map(|&panel| anchor.manhattan_distance(panel))
         .min()
         .expect("a door has at least one panel")
 }
 
-/// The regions of a *single* guard's beat grown from `station`'s region — the
+/// The regions of a *single* guard's beat grown from `anchor`'s region — the
 /// independent-growth result, i.e. [`coordinated_beats`] for one guard, which has
 /// no other beats to spread away from. Up to `limit` regions, connected across
-/// door edges, in claim order; empty when `station` lies in no region. This is the
+/// door edges, in claim order; empty when `anchor` lies in no region. This is the
 /// baseline the coordinated grower is measured against and the shape the per-guard
 /// §7.5 tests pin — production grows all guards' beats together via
 /// [`coordinated_beats`], so this is a test-only convenience.
 #[cfg(test)]
-pub(crate) fn beat_regions(regions: &RegionGraph, station: Cell, limit: usize) -> Vec<RegionId> {
-    coordinated_beats(regions, &[station], limit)
+pub(crate) fn beat_regions(regions: &RegionGraph, anchor: Cell, limit: usize) -> Vec<RegionId> {
+    coordinated_beats(regions, &[anchor], limit)
         .pop()
         .unwrap_or_default()
 }
@@ -65,8 +73,8 @@ pub(crate) fn beat_regions(regions: &RegionGraph, station: Cell, limit: usize) -
 /// The cells of a single guard's [`beat_regions`], flattened in claim order — the
 /// territory a lone placed guard carries (§7.5). Test-only, like [`beat_regions`].
 #[cfg(test)]
-pub(crate) fn beat_cells(regions: &RegionGraph, station: Cell, limit: usize) -> Vec<Cell> {
-    beat_regions(regions, station, limit)
+pub(crate) fn beat_cells(regions: &RegionGraph, anchor: Cell, limit: usize) -> Vec<Cell> {
+    beat_regions(regions, anchor, limit)
         .into_iter()
         .flat_map(|id| regions.region(id).cells().iter().copied())
         .collect()
@@ -75,9 +83,9 @@ pub(crate) fn beat_cells(regions: &RegionGraph, station: Cell, limit: usize) -> 
 /// The region beats of a whole set of guards, grown **cooperatively** so their
 /// territories cover distinct regions instead of doubling up (§7.5/§7.7 coverage,
 /// the "fixes itself" step §7.5 promises once §10.5's spatial model exists). One
-/// beat per station, in `stations` order.
+/// beat per anchor, in `anchors` order.
 ///
-/// Every beat is seeded with its guard's own station region, then grown in
+/// Every beat is seeded with its guard's own anchor region, then grown in
 /// **round-robin** — one region per guard per round — so each guard's next claim
 /// sees the ground every other guard has taken so far. The growth step prefers,
 /// among a beat's unclaimed neighbours, the region **covered by the fewest other
@@ -89,21 +97,29 @@ pub(crate) fn beat_cells(regions: &RegionGraph, station: Cell, limit: usize) -> 
 /// never how many.
 ///
 /// With more guards than regions the beats share (they cannot each own a distinct
-/// wing), but every guard still gets a non-empty, station-connected beat. Fully
-/// deterministic (§12.4): stations order and the graph's scan order decide every
+/// wing), but every guard still gets a non-empty, anchor-connected beat. Fully
+/// deterministic (§12.4): anchors order and the graph's scan order decide every
 /// tie; no randomness.
+///
+/// **Call this rarely.** The anchors are guards' *live positions*, so this is a
+/// function of a value that changes every turn — fine only because the callers are
+/// placement ([`Placement::guards`](crate::Placement)) and the settle pass a
+/// reinforcement's errand ends in
+/// ([`State::settle_new_beats`](crate::State)). Called from the per-turn path it
+/// would re-cut every territory under every guard each turn, and patrols would
+/// visibly churn.
 pub(crate) fn coordinated_beats(
     regions: &RegionGraph,
-    stations: &[Cell],
+    anchors: &[Cell],
     limit: usize,
 ) -> Vec<Vec<RegionId>> {
-    // Seed each beat with its station's region — a placed guard always stands in
-    // one, so every beat is non-empty, connected, and walkable from the station by
-    // construction. A station in no region (a wall/doorway cell — no placed guard)
+    // Seed each beat with its anchor's region — a placed guard always stands in
+    // one, so every beat is non-empty, connected, and walkable from the anchor by
+    // construction. An anchor in no region (a wall/doorway cell — no placed guard)
     // yields an empty beat, matching independent single-guard growth.
-    let mut beats: Vec<Vec<RegionId>> = stations
+    let mut beats: Vec<Vec<RegionId>> = anchors
         .iter()
-        .map(|&station| regions.region_at(station).into_iter().collect())
+        .map(|&anchor| regions.region_at(anchor).into_iter().collect())
         .collect();
 
     // How many beats already claim each region — the overlap coordination minimises
@@ -120,12 +136,12 @@ pub(crate) fn coordinated_beats(
     // guard's claims and peel off to its own wing.
     loop {
         let mut grew = false;
-        for (beat_idx, &station) in stations.iter().enumerate() {
+        for (beat_idx, &anchor) in anchors.iter().enumerate() {
             if beats[beat_idx].len() >= limit {
                 continue;
             }
             if let Some(region) =
-                least_covered_neighbour(regions, &beats[beat_idx], station, &coverage)
+                least_covered_neighbour(regions, &beats[beat_idx], anchor, &coverage)
             {
                 beats[beat_idx].push(region);
                 *coverage.entry(region).or_default() += 1;
@@ -141,13 +157,13 @@ pub(crate) fn coordinated_beats(
 
 /// The cells of [`coordinated_beats`], each beat's claimed regions flattened in
 /// claim order — the territory each placed guard carries (§7.5), one list per
-/// station in `stations` order.
+/// anchor in `anchors` order.
 pub(crate) fn coordinated_beat_cells(
     regions: &RegionGraph,
-    stations: &[Cell],
+    anchors: &[Cell],
     limit: usize,
 ) -> Vec<Vec<Cell>> {
-    coordinated_beats(regions, stations, limit)
+    coordinated_beats(regions, anchors, limit)
         .into_iter()
         .map(|beat| {
             beat.into_iter()
@@ -157,9 +173,9 @@ pub(crate) fn coordinated_beat_cells(
         .collect()
 }
 
-/// The next region to grow `beat` (a guard stationed at `station`) into: an
+/// The next region to grow `beat` (a guard anchored at `anchor`) into: an
 /// unclaimed neighbour of the beat, chosen to first minimise how many other beats
-/// already `coverage` it — spreading the guards — then, on a tie, hug the station
+/// already `coverage` it — spreading the guards — then, on a tie, hug the anchor
 /// nearest-door first (§7.5). `None` when the beat holds its whole reachable
 /// component. Coverage steers but never gates: a free neighbour is always
 /// returned if one exists, so the beat grows to the same size the independent
@@ -168,7 +184,7 @@ pub(crate) fn coordinated_beat_cells(
 fn least_covered_neighbour(
     regions: &RegionGraph,
     beat: &[RegionId],
-    station: Cell,
+    anchor: Cell,
     coverage: &HashMap<RegionId, usize>,
 ) -> Option<RegionId> {
     let mut best: Option<(usize, u32, RegionId)> = None;
@@ -178,7 +194,7 @@ fn least_covered_neighbour(
                 continue;
             }
             let cover = coverage.get(&neighbour).copied().unwrap_or(0);
-            let distance = door_distance(regions, door_id, station);
+            let distance = door_distance(regions, door_id, anchor);
             if best.is_none_or(|(c, d, _)| (cover, distance) < (c, d)) {
                 best = Some((cover, distance, neighbour));
             }
@@ -218,21 +234,21 @@ mod tests {
         (g, a, c, b)
     }
 
-    /// §7.5: the beat starts at the station's region and grows across door
+    /// §7.5: the beat starts at the anchor's region and grows across door
     /// edges, one region per step of `limit` — and never past what connects.
     #[test]
-    fn a_beat_grows_from_the_station_region_across_doors() {
+    fn a_beat_grows_from_the_anchor_region_across_doors() {
         let (g, a, c, b) = strip();
-        let station = Cell::new(2, 2); // in room A
+        let anchor = Cell::new(2, 2); // in room A
 
-        assert_eq!(beat_regions(&g, station, 1), vec![a]);
-        assert_eq!(beat_regions(&g, station, 2), vec![a, c]);
-        assert_eq!(beat_regions(&g, station, 3), vec![a, c, b]);
+        assert_eq!(beat_regions(&g, anchor, 1), vec![a]);
+        assert_eq!(beat_regions(&g, anchor, 2), vec![a, c]);
+        assert_eq!(beat_regions(&g, anchor, 3), vec![a, c, b]);
         // A limit past the level's regions claims what exists and stops.
-        assert_eq!(beat_regions(&g, station, 10), vec![a, c, b]);
+        assert_eq!(beat_regions(&g, anchor, 10), vec![a, c, b]);
 
         // The cells are the claimed regions', flattened in claim order.
-        let cells = beat_cells(&g, station, 2);
+        let cells = beat_cells(&g, anchor, 2);
         assert_eq!(
             cells.len(),
             g.region(a).cells().len() + g.region(c).cells().len()
@@ -240,11 +256,11 @@ mod tests {
         assert!(g.region(c).cells().iter().all(|c| cells.contains(c)));
     }
 
-    /// §7.5 best-effort spread: two guards stationed apart in the same room
+    /// §7.5 best-effort spread: two guards anchored apart in the same room
     /// grow toward their own nearest doors first, so their beats diverge where
-    /// the level allows — deterministically, from the station cell alone.
+    /// the level allows — deterministically, from the anchor cell alone.
     #[test]
-    fn guards_stationed_apart_grow_different_beats() {
+    fn guards_anchored_apart_grow_different_beats() {
         // One room flanked by two corridors, a door to each side.
         let mut g = RegionGraph::new(12, 7);
         let west = g.add_region(RegionKind::Corridor, rect(1, 3, 1, 5));
@@ -261,13 +277,13 @@ mod tests {
         assert_eq!(by_east_door, vec![room, east]);
         assert_ne!(by_west_door, by_east_door, "the beats diverge");
 
-        // Deterministic: the same station always grows the same beat (§12.4).
+        // Deterministic: the same anchor always grows the same beat (§12.4).
         assert_eq!(by_west_door, beat_regions(&g, Cell::new(4, 2), 2));
     }
 
-    /// A station in no region — a wall or doorway cell — has no beat to grow.
+    /// An anchor in no region — a wall or doorway cell — has no beat to grow.
     #[test]
-    fn a_station_outside_any_region_has_no_beat() {
+    fn an_anchor_outside_any_region_has_no_beat() {
         let (g, _, _, _) = strip();
         assert!(beat_regions(&g, Cell::new(0, 0), 3).is_empty(), "wall");
         assert!(beat_cells(&g, Cell::new(4, 2), 3).is_empty(), "doorway");
@@ -281,7 +297,7 @@ mod tests {
     }
 
     /// A hub room flanked by a west and an east corridor, a door to each — the
-    /// shape where two guards stationed on the *same* side would grind the same
+    /// shape where two guards anchored on the *same* side would grind the same
     /// wing under independent growth.
     fn hub() -> (RegionGraph, RegionId, RegionId, RegionId) {
         let mut g = RegionGraph::new(12, 7);
@@ -295,16 +311,16 @@ mod tests {
         (g, west, room, east)
     }
 
-    /// §7.5 coverage: two guards stationed in the same room on the same side of it
+    /// §7.5 coverage: two guards anchored in the same room on the same side of it
     /// — where *independent* growth would send both down the nearer corridor —
     /// fan out to different wings when their beats are grown cooperatively.
     #[test]
     fn coordination_spreads_beats_that_independent_growth_would_overlap() {
         let (g, west, room, east) = hub();
-        // Both stations are nearer the west door than the east one, so independent
+        // Both anchors are nearer the west door than the east one, so independent
         // growth grabs the west corridor for each (the §7.5 grind).
-        let stations = [Cell::new(4, 2), Cell::new(5, 2)];
-        for &s in &stations {
+        let anchors = [Cell::new(4, 2), Cell::new(5, 2)];
+        for &s in &anchors {
             assert_eq!(
                 beat_regions(&g, s, 2),
                 vec![room, west],
@@ -314,7 +330,7 @@ mod tests {
 
         // Coordinated: the first guard takes the west wing, the second — seeing it
         // covered — peels off to the east.
-        let beats = coordinated_beats(&g, &stations, 2);
+        let beats = coordinated_beats(&g, &anchors, 2);
         assert_eq!(beats[0], vec![room, west]);
         assert_eq!(
             beats[1],
@@ -332,7 +348,7 @@ mod tests {
                 .collect::<std::collections::HashSet<_>>()
         };
         let independent: Vec<Vec<RegionId>> =
-            stations.iter().map(|&s| beat_regions(&g, s, 2)).collect();
+            anchors.iter().map(|&s| beat_regions(&g, s, 2)).collect();
         assert_eq!(
             union(&beats).len(),
             3,
@@ -351,33 +367,33 @@ mod tests {
     #[test]
     fn coordination_leaves_an_already_spread_pair_alone() {
         let (g, west, room, east) = hub();
-        let stations = [Cell::new(4, 2), Cell::new(7, 2)]; // by the west, by the east
-        let beats = coordinated_beats(&g, &stations, 2);
+        let anchors = [Cell::new(4, 2), Cell::new(7, 2)]; // by the west, by the east
+        let beats = coordinated_beats(&g, &anchors, 2);
         assert_eq!(beats[0], vec![room, west]);
         assert_eq!(beats[1], vec![room, east]);
     }
 
     /// Graceful degradation (§7.5): with more guards than regions to divide, every
-    /// guard still gets a non-empty beat that starts at its own station region and
+    /// guard still gets a non-empty beat that starts at its own anchor region and
     /// stays connected across doors — coverage overlaps, but no guard is starved.
     #[test]
     fn more_guards_than_regions_still_gives_each_a_connected_beat() {
         let (g, a, c, b) = strip(); // three regions
                                     // Four guards, two sharing room A.
-        let stations = [
+        let anchors = [
             Cell::new(2, 2),
             Cell::new(3, 4),
             Cell::new(6, 2),
             Cell::new(9, 2),
         ];
-        let beats = coordinated_beats(&g, &stations, BEAT_REGIONS);
-        assert_eq!(beats.len(), stations.len());
-        for (beat, &station) in beats.iter().zip(&stations) {
+        let beats = coordinated_beats(&g, &anchors, BEAT_REGIONS);
+        assert_eq!(beats.len(), anchors.len());
+        for (beat, &anchor) in beats.iter().zip(&anchors) {
             assert!(!beat.is_empty(), "every guard gets a beat");
             assert_eq!(
                 beat[0],
-                g.region_at(station).unwrap(),
-                "a beat starts at its own station region"
+                g.region_at(anchor).unwrap(),
+                "a beat starts at its own anchor region"
             );
             assert!(
                 beat_is_connected(&g, beat),
@@ -394,36 +410,36 @@ mod tests {
 
     /// Coordination never changes a beat's *size*, only its composition: each
     /// coordinated beat holds exactly as many regions as the independent grower
-    /// would give the same station (its reachable component, capped at the limit).
+    /// would give the same anchor (its reachable component, capped at the limit).
     #[test]
     fn coordination_preserves_each_beats_size() {
         let (g, ..) = hub();
-        let stations = [Cell::new(4, 2), Cell::new(5, 2)];
+        let anchors = [Cell::new(4, 2), Cell::new(5, 2)];
         for limit in 1..=4 {
-            let coordinated = coordinated_beats(&g, &stations, limit);
-            for (&station, beat) in stations.iter().zip(&coordinated) {
+            let coordinated = coordinated_beats(&g, &anchors, limit);
+            for (&anchor, beat) in anchors.iter().zip(&coordinated) {
                 assert_eq!(
                     beat.len(),
-                    beat_regions(&g, station, limit).len(),
-                    "limit {limit}: size changed for station {station:?}"
+                    beat_regions(&g, anchor, limit).len(),
+                    "limit {limit}: size changed for anchor {anchor:?}"
                 );
             }
         }
     }
 
     /// §12.4: the coordinated assignment is a pure function of the graph and the
-    /// stations — the same inputs always grow the same beats.
+    /// anchors — the same inputs always grow the same beats.
     #[test]
     fn coordinated_beats_are_deterministic() {
         let (g, ..) = hub();
-        let stations = [Cell::new(4, 2), Cell::new(5, 2), Cell::new(7, 2)];
+        let anchors = [Cell::new(4, 2), Cell::new(5, 2), Cell::new(7, 2)];
         assert_eq!(
-            coordinated_beats(&g, &stations, BEAT_REGIONS),
-            coordinated_beats(&g, &stations, BEAT_REGIONS)
+            coordinated_beats(&g, &anchors, BEAT_REGIONS),
+            coordinated_beats(&g, &anchors, BEAT_REGIONS)
         );
         // And the cell view agrees with the region view.
-        let by_cells = coordinated_beat_cells(&g, &stations, BEAT_REGIONS);
-        let by_regions = coordinated_beats(&g, &stations, BEAT_REGIONS);
+        let by_cells = coordinated_beat_cells(&g, &anchors, BEAT_REGIONS);
+        let by_regions = coordinated_beats(&g, &anchors, BEAT_REGIONS);
         for (cells, regions) in by_cells.iter().zip(&by_regions) {
             let expected: Vec<Cell> = regions
                 .iter()
@@ -435,7 +451,7 @@ mod tests {
 
     /// Whether a beat's regions form one component connected across door edges —
     /// the §10.5 invariant every beat must keep, so a guard can actually walk its
-    /// whole territory from its station.
+    /// whole territory from its anchor.
     fn beat_is_connected(g: &RegionGraph, beat: &[RegionId]) -> bool {
         if beat.is_empty() {
             return true;

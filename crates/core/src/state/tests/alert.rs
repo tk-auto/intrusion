@@ -289,7 +289,13 @@ fn rung_one_shortens_the_patrol_dwell_without_removing_it() {
             Direction::North,
             vec![
                 Guard::stationary(Cell::new(5, 2)),
-                Guard::patrolling(Cell::new(30, 6)),
+                // The east half of the room is its beat: a fixture guard is handed
+                // one explicitly, since a hand-built room has no region graph.
+                Guard::patrolling(Cell::new(30, 6)).with_beat(
+                    (1..11)
+                        .flat_map(|y| (21..39).map(move |x| Cell::new(x, y)))
+                        .collect(),
+                ),
             ],
             Vec::new(),
             Cell::new(1, 10),
