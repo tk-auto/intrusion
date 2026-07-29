@@ -30,7 +30,7 @@ fn usage_counts_json(usage: &UsageHistogram) -> String {
 }
 
 /// A profile name as a JSON string, or `null` when the policy had no temperament
-/// (a script). The `null` says "no profile"; naming `"baseline"` there would claim
+/// (a script). The `null` says "no profile"; naming `"balanced"` there would claim
 /// a bot played the run.
 fn profile_json(profile: Option<&'static str>) -> String {
     profile.map_or_else(|| "null".to_string(), |name| format!("\"{name}\""))
@@ -237,7 +237,7 @@ mod tests {
         alert.record(31, 2, AlertTrigger::RepeatSightings);
         RunRecord {
             seed,
-            profile: Some("baseline"),
+            profile: Some("balanced"),
             outcome,
             turns,
             detections: 2,
@@ -258,7 +258,7 @@ mod tests {
     fn the_run_row_schema_is_pinned() {
         assert_eq!(
             record(17, RunOutcome::Win, 214).to_json_line(),
-            "{\"seed\":17,\"profile\":\"baseline\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}],\"reinforcements\":2}"
+            "{\"seed\":17,\"profile\":\"balanced\",\"outcome\":\"win\",\"turns\":214,\"detections\":2,\"takedowns\":1,\"bodies_found\":0,\"usage\":{\"wait\":2,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":9,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":31,\"rung\":2,\"trigger\":\"repeat-sightings\"}],\"reinforcements\":2}"
         );
     }
 
@@ -276,7 +276,7 @@ mod tests {
         let summary = Summary::of(&records);
         assert_eq!(
             summary.to_json_line(),
-            "{\"summary\":{\"profile\":\"baseline\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000,\"stow\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0},\"reinforcements\":8}}"
+            "{\"summary\":{\"profile\":\"balanced\",\"runs\":4,\"wins\":2,\"captures\":1,\"entombed\":0,\"timeouts\":1,\"win_rate\":0.5000,\"turns_to_win_mean\":105.5,\"turns_to_win_median\":105.5,\"detections\":8,\"takedowns\":4,\"bodies_found\":0,\"usage\":{\"wait\":8,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"usage_share\":{\"wait\":0.0107,\"run\":0.0053,\"camouflage\":0.0000,\"decoy\":0.0000,\"dephase\":0.0000,\"autodoors\":0.0000,\"confusion\":0.0000,\"takedown\":0.0000,\"drag\":0.0000,\"pierce_wall\":0.0000,\"lockdown\":0.0000,\"crouch\":0.0000,\"stow\":0.0000},\"diversity\":0.0000,\"alert_peak_mean\":2.0000,\"alert_rungs\":{\"0\":0,\"1\":0,\"2\":4,\"3\":0},\"alert_triggers\":{\"sighting\":4,\"missed-ping\":0,\"repeat-sightings\":4,\"console-tampered\":0,\"body-found\":0,\"second-post-silent\":0},\"reinforcements\":8}}"
         );
     }
 
@@ -300,7 +300,7 @@ mod tests {
 
     /// #198: a row's `profile` is what makes a batch attributable, so the summary
     /// claims a name **only** when every run agrees on one. A scripted batch has
-    /// no temperament (`null`, never a fake `"baseline"`), and a batch whose rows
+    /// no temperament (`null`, never a fake `"balanced"`), and a batch whose rows
     /// disagree refuses to pick one rather than borrowing the first row's label.
     #[test]
     fn a_summary_only_claims_a_profile_every_run_agrees_on() {
@@ -308,10 +308,10 @@ mod tests {
             record(1, RunOutcome::Win, 100),
             record(2, RunOutcome::Capture, 40),
         ]);
-        assert_eq!(one_profile.profile, Some("baseline"));
+        assert_eq!(one_profile.profile, Some("balanced"));
         assert!(one_profile
             .to_json_line()
-            .starts_with("{\"summary\":{\"profile\":\"baseline\","));
+            .starts_with("{\"summary\":{\"profile\":\"balanced\","));
 
         let mut cautious = record(3, RunOutcome::Win, 90);
         cautious.profile = Some("cautious");

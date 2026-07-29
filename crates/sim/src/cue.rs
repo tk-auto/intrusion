@@ -842,15 +842,15 @@ mod tests {
             route: None,
             crossing: None,
         };
-        let baseline = Profile::BASELINE;
+        let balanced = Profile::BALANCED;
         assert_eq!(
-            moment.best(&baseline).map(|b| b.input),
+            moment.best(&balanced).map(|b| b.input),
             Some(Input::Activate(AbilityId::Run)),
         );
 
         // Silence Run alone and the cloak takes the moment — per-ability floors,
         // not one shared threshold.
-        let quiet_run = baseline.with_cue_floor(AbilityId::Run, URGE_DECISIVE + 1);
+        let quiet_run = balanced.with_cue_floor(AbilityId::Run, URGE_DECISIVE + 1);
         assert_eq!(
             moment.best(&quiet_run).map(|b| b.input),
             Some(Input::Activate(AbilityId::Camouflage)),
@@ -871,7 +871,7 @@ mod tests {
             route: None,
             crossing: None,
         };
-        let keen = baseline.with_cue_floor(AbilityId::Camouflage, URGE_NONE);
+        let keen = balanced.with_cue_floor(AbilityId::Camouflage, URGE_NONE);
         assert_eq!(
             moment.best(&keen).map(|b| b.input),
             Some(Input::Activate(AbilityId::Run)),

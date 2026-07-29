@@ -138,7 +138,7 @@ pub struct StealthBot {
 }
 
 impl StealthBot {
-    /// A fresh bot with nothing taken yet, playing the [`Profile::BASELINE`]
+    /// A fresh bot with nothing taken yet, playing the [`Profile::BALANCED`]
     /// temperament — today's bot, so metrics stay comparable across the seam.
     pub fn new() -> Self {
         Self::default()
@@ -417,7 +417,7 @@ impl StealthBot {
     /// behind the table at your elbow when a patrol walks in is what anybody does,
     /// careful or impatient. So among the profiles that spend turns on cover at all
     /// there is nothing left to dial, and the profiles that crouch still do it at very
-    /// different rates (`baseline` 8, `cautious` 13, `aggressive` 2 over 100 seeds) on
+    /// different rates (`balanced` 8, `cautious` 13, `aggressive` 2 over 100 seeds) on
     /// the numbers they already carry: how near a patrol has to be before cover is
     /// worth a turn ([`threat_radius`](Profile::threat_radius)), and how far a
     /// *cupboard* is worth walking to instead ([`cover_reach`](Profile::cover_reach)).
@@ -1627,7 +1627,7 @@ mod tests {
     /// §12.4: the same `(seed, profile)` under the bot produces byte-identical
     /// rows, twice. The bot carries its own state (taken consoles, cover timers),
     /// so this pins that none of it leaks non-determinism into the run — and it
-    /// sweeps **every** shipped profile (#198), not just the baseline, since a
+    /// sweeps **every** shipped profile (#198), not just the default one, since a
     /// temperament is only a regression instrument if it reproduces.
     #[test]
     fn the_bot_is_deterministic_per_seed_and_profile() {
@@ -1653,24 +1653,24 @@ mod tests {
         }
     }
 
-    /// #198's behaviour-preservation clause: the [`Profile::BASELINE`] row of
+    /// #198's behaviour-preservation clause: the [`Profile::BALANCED`] row of
     /// numbers **is** the constants the bot carried before the seam existed, so
     /// every metric captured under it stays comparable with the batches that came
     /// before. Asserted as byte-identical rows between the default bot and one
-    /// explicitly given the baseline profile, over a spread of seeds — the numbers
+    /// explicitly given the balanced profile, over a spread of seeds — the numbers
     /// are pinned by the profile literal, and this pins that the policy actually
     /// reads them rather than a stray leftover constant.
     #[test]
-    fn the_baseline_profile_is_the_default_bot() {
-        assert_eq!(StealthBot::new().profile(), Profile::BASELINE);
+    fn the_balanced_profile_is_the_default_bot() {
+        assert_eq!(StealthBot::new().profile(), Profile::BALANCED);
         for seed in 30..40 {
             let default = run_one(seed, &mut StealthBot::new(), 300).expect("generates");
-            let explicit = run_one(seed, &mut StealthBot::with_profile(Profile::BASELINE), 300)
+            let explicit = run_one(seed, &mut StealthBot::with_profile(Profile::BALANCED), 300)
                 .expect("generates");
             assert_eq!(
                 default.to_json_line(),
                 explicit.to_json_line(),
-                "seed {seed}: the baseline profile must reproduce today's bot",
+                "seed {seed}: the balanced profile must reproduce today's bot",
             );
         }
     }
@@ -1706,7 +1706,7 @@ mod tests {
     /// **#347 moved every profile**, and that is the ticket landing rather than a
     /// regression: the batch grants Decoy, so writing its cue is *supposed* to show
     /// up here as `d` presses and the runs they change. Read the diff as the cue's
-    /// first evidence — `baseline 3` was the batch's lone stall (`playing 1000`) and
+    /// first evidence — `balanced 3` was the batch's lone stall (`playing 1000`) and
     /// now finishes, while several runs that won now lose. Neither is a verdict:
     /// twelve seeds are a pin, not a balance signal (§13.4), and the measurement that
     /// carries the ticket is the 100-seed with/without batch recorded in
@@ -1730,15 +1730,15 @@ mod tests {
     /// rhythm from that turn on. The bot's policy is untouched — it does not read the
     /// rung at all (#198) — so these are the same decisions meeting a facility that
     /// reacts. Net one win fewer (28 → 27), with the movement in both directions:
-    /// `baseline 11` turns a 648-turn loss into a 253-turn win, while `cautious 11`
+    /// `balanced 11` turns a 648-turn loss into a 253-turn win, while `cautious 11`
     /// and `aggressive 9` lose runs they used to win. Twelve seeds are a pin, not a
     /// balance signal (§13.4); the 100-seed batch is what judges the ladder.
     ///
     /// **#316 moved the striking half and left the rest alone**, which is the whole
     /// point of putting the takedown behind [`Profile::takedown_reach`]. The
-    /// `baseline` and `cautious` blocks below are **byte-for-byte what they were
-    /// before that ticket** — the strongest form of its "the cautious baseline is
-    /// unchanged" criterion, since a profile with a reach of zero declines the verb
+    /// `balanced` and `cautious` blocks below are **byte-for-byte what they were
+    /// before that ticket** — the strongest form of its "the avoidance-first
+    /// temperaments are unchanged" criterion, since a profile with a reach of zero declines the verb
     /// and never reaches a line of the new code. `aggressive` moved because it now
     /// takes the strikes it walks past, and `careless` is new. Note the script letters
     /// spell *activations* only: a takedown, a grab and a stow are steps (§7.2/§8.3),
@@ -1752,19 +1752,19 @@ mod tests {
     /// Then #401 clipped the §7.6 post-search watch to each guard's own territory
     /// instead of replacing it, and **12 of 48 rows moved, 5 changing outcome** — a net
     /// three wins lost *here*. Read that against the committed baseline rather than on
-    /// its own: over 100 seeds the same change moves win rate the other way (baseline
+    /// its own: over 100 seeds the same change moves win rate the other way (balanced
     /// 0.34 → 0.38, careless 0.30 → 0.35), because two responders splitting one area
     /// into halves watch it *less* densely than two pacing all of it. Twelve seeds are
     /// a pin, not a balance signal (§13.4), and this is the sharpest illustration of
     /// that in the suite: the two disagree on the sign. `careless 10` joins
-    /// `baseline 2` in reaching the input cap still playing.
+    /// `balanced 2` in reaching the input cap still playing.
     ///
     /// Before that, #399 moved nearly all of them, and that is the point rather than a
     /// problem:
     /// the guards stopped covering part of the level and started **partitioning all of
     /// it** (§7.5). There is no longer a wing with nobody on it, so a route the bot used
     /// to take unseen now meets a patrol, and 12 wins become losses while 5 losses
-    /// become wins. One run (`baseline 2`) now reaches the input cap still playing —
+    /// become wins. One run (`balanced 2`) now reaches the input cap still playing —
     /// the first `playing` row this pin has ever carried, and worth watching rather
     /// than waving through: the 100-seed batch puts timeouts at 4 in 100 against 3
     /// before, so it is a tail, not a trend.
@@ -1777,18 +1777,18 @@ mod tests {
     #[test]
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 48] = [
-            "baseline 0 won 78 rcd",
-            "baseline 1 lost 56 crd",
-            "baseline 2 playing 1000 rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
-            "baseline 3 lost 108 rdr",
-            "baseline 4 lost 64 rdr",
-            "baseline 5 lost 152 rdr",
-            "baseline 6 won 165 r",
-            "baseline 7 won 94 r",
-            "baseline 8 won 121 c",
-            "baseline 9 won 84 ",
-            "baseline 10 lost 207 rrdr",
-            "baseline 11 lost 253 cdrrrrdrc",
+            "balanced 0 won 78 rcd",
+            "balanced 1 lost 56 crd",
+            "balanced 2 playing 1000 rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "balanced 3 lost 108 rdr",
+            "balanced 4 lost 64 rdr",
+            "balanced 5 lost 152 rdr",
+            "balanced 6 won 165 r",
+            "balanced 7 won 94 r",
+            "balanced 8 won 121 c",
+            "balanced 9 won 84 ",
+            "balanced 10 lost 207 rrdr",
+            "balanced 11 lost 253 cdrrrrdrc",
             "cautious 0 won 107 rc",
             "cautious 1 lost 55 crdc",
             "cautious 2 lost 131 rd",
@@ -1913,7 +1913,7 @@ mod tests {
         for seed in 0..40 {
             let (state, _) = boot(seed);
             let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Decoy));
-            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            let mut bot = StealthBot::with_profile(Profile::BALANCED);
             for _ in 0..DEFAULT_INPUT_CAP {
                 if state.outcome() != Outcome::Playing {
                     break;
@@ -1960,7 +1960,7 @@ mod tests {
         for seed in 0..40 {
             let (state, _) = boot(seed);
             let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Autodoors));
-            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            let mut bot = StealthBot::with_profile(Profile::BALANCED);
             for _ in 0..DEFAULT_INPUT_CAP {
                 if state.outcome() != Outcome::Playing {
                     break;
@@ -2010,7 +2010,7 @@ mod tests {
         for seed in 0..40 {
             let (state, _) = boot(seed);
             let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Confusion));
-            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            let mut bot = StealthBot::with_profile(Profile::BALANCED);
             for _ in 0..DEFAULT_INPUT_CAP {
                 if state.outcome() != Outcome::Playing {
                     break;
@@ -2157,7 +2157,7 @@ mod tests {
         for seed in 0..40 {
             let (state, _) = boot(seed);
             let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Lockdown));
-            let mut bot = StealthBot::with_profile(Profile::BASELINE);
+            let mut bot = StealthBot::with_profile(Profile::BALANCED);
             for _ in 0..DEFAULT_INPUT_CAP {
                 if state.outcome() != Outcome::Playing {
                     break;
@@ -2293,7 +2293,7 @@ mod tests {
             (takedowns, found, usage)
         };
 
-        for profile in [Profile::BASELINE, Profile::CAUTIOUS] {
+        for profile in [Profile::BALANCED, Profile::CAUTIOUS] {
             let (takedowns, found, usage) = batch(profile);
             assert_eq!(
                 (
@@ -2487,7 +2487,7 @@ mod tests {
     #[test]
     fn the_bot_crouch_walks_along_the_bench() {
         let mut walks = 0;
-        for profile in [Profile::CAUTIOUS, Profile::BASELINE] {
+        for profile in [Profile::CAUTIOUS, Profile::BALANCED] {
             for seed in 0..60 {
                 let (mut state, _) = boot(seed);
                 let mut bot = StealthBot::with_profile(profile);
@@ -2569,10 +2569,10 @@ mod tests {
     }
 
     /// Every shipped profile still **plays the game** (§13.4), not just the
-    /// baseline: over a batch each one reaches real endings rather than stalling
+    /// default one: over a batch each one reaches real endings rather than stalling
     /// out en masse. A temperament whose numbers livelock the bot would quietly
     /// turn its rows into a measurement of the bot instead of the game (§13.3),
-    /// which is exactly what this catches. Loose, like the baseline's own
+    /// which is exactly what this catches. Loose, like the balanced profile's own
     /// mixed-outcome test: the exact counts are free to move.
     #[test]
     fn every_profile_finishes_its_runs() {
@@ -2616,7 +2616,7 @@ mod tests {
     ///
     /// The second stall could no longer happen either way: #187 made a loose body
     /// non-solid, so a body across a mouth stops nobody (#316). The seeds are kept
-    /// under the **baseline**, which still declines the strike, so this stays a
+    /// under **`balanced`**, which still declines the strike, so this stays a
     /// regression test for the stalls rather than becoming a test of the new play.
     ///
     /// Each seed must reach a real end (win or capture), never the input cap.
@@ -2695,7 +2695,7 @@ mod tests {
     ///
     /// The **takedown** is deliberately not required either, and under this profile
     /// it must read exactly zero. It lands only from a guard's rear blind spot or
-    /// under concealment (§7.2/§155, gated live since #183), and the baseline is an
+    /// under concealment (§7.2/§155, gated live since #183), and `balanced` is an
     /// avoidance-first temperament that declines the verb outright
     /// ([`Profile::takedown_reach`] of zero, #316) — mandating it here would measure a
     /// contrived hunt rather than the game (§13.3). Deliberate rear-takedown play now

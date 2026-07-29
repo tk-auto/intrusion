@@ -179,11 +179,17 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// **Today's bot, unchanged.** The numbers the policy carried as constants
-    /// before they were data, so every metric captured under it stays comparable
-    /// with the batches that came before the profile seam existed.
-    pub const BASELINE: Profile = Profile {
-        name: "baseline",
+    /// **The middle temperament: steers wide of a patrol, takes cover when one
+    /// closes, and waits it out for a while — but pushes on rather than sit in a
+    /// cupboard all run.** It sits between [`CAUTIOUS`](Profile::CAUTIOUS) and
+    /// [`AGGRESSIVE`](Profile::AGGRESSIVE) on every number they disagree about,
+    /// which is what makes it the default and the one a single-profile batch runs.
+    ///
+    /// It is also, historically, the numbers the policy carried as constants before
+    /// they were data, so every metric captured under it stays comparable with the
+    /// batches that came before the profile seam existed.
+    pub const BALANCED: Profile = Profile {
+        name: "balanced",
         watched_penalty: 1_000_000,
         proximity_radius: 5,
         proximity_unit: 1_000,
@@ -207,7 +213,7 @@ impl Profile {
         body_stow_reach: 0,
         // It *does* duck behind a table when a patrol walks in on it and there is no
         // cupboard to reach — survival, not a plan, and never a detour (#379). Unlike
-        // the strike, this moves the baseline's numbers rather than leaving them
+        // the strike, this moves this profile's numbers rather than leaving them
         // byte-identical, because the crouch is an innate reflex rather than a
         // temperament's appetite: declining it outright would have been a claim about
         // *this bot* rather than about avoidance-first play.
@@ -238,7 +244,7 @@ impl Profile {
             keep_clear: true,
             hold_watched: false,
         },
-        ..Profile::BASELINE
+        ..Profile::BALANCED
     };
 
     /// **Pushes toward the objective, tolerates a cone to save turns, hides late
@@ -263,7 +269,7 @@ impl Profile {
     /// `cautious` ducks early and holds for a dozen.
     pub const AGGRESSIVE: Profile = Profile {
         name: "aggressive",
-        // A quarter of the baseline weight over a radius of 3: a patrol still
+        // A quarter of the balanced weight over a radius of 3: a patrol still
         // bends the route, but no longer sends it the long way round.
         proximity_radius: 3,
         proximity_unit: 250,
@@ -285,7 +291,7 @@ impl Profile {
         // half speed (§8.3) a six-step carry is a dozen turns, which is exactly the
         // price §7.2 means the body to be.
         body_stow_reach: 6,
-        ..Profile::BASELINE
+        ..Profile::BALANCED
     };
 
     /// **Strikes readily, never hides, never tidies up.**
@@ -343,7 +349,7 @@ impl Profile {
     /// Every profile that ships, in a fixed order — the `--profile` vocabulary,
     /// and the order a multi-profile report walks.
     pub const ALL: [Profile; 4] = [
-        Profile::BASELINE,
+        Profile::BALANCED,
         Profile::CAUTIOUS,
         Profile::AGGRESSIVE,
         Profile::CARELESS,
@@ -351,7 +357,7 @@ impl Profile {
 
     /// The profile called `name`, or `None` when nothing is. Lookup is exact:
     /// a near-miss is an error the caller reports with the vocabulary, never a
-    /// silent fall back to the baseline (which would make a batch's rows lie
+    /// silent fall back to the default (which would make a batch's rows lie
     /// about what produced them).
     pub fn by_name(name: &str) -> Option<Profile> {
         Profile::ALL.into_iter().find(|p| p.name == name)
@@ -389,7 +395,7 @@ impl Profile {
 
 impl Default for Profile {
     fn default() -> Self {
-        Profile::BASELINE
+        Profile::BALANCED
     }
 }
 
@@ -398,7 +404,7 @@ mod tests {
     use super::*;
 
     /// The `--profile` vocabulary round-trips, and an unknown name is an error
-    /// rather than a quiet baseline — a row that claims a profile it did not run
+    /// rather than a quiet default — a row that claims a profile it did not run
     /// under is worse than a refused batch (§13.2: output must be attributable).
     #[test]
     fn every_profile_is_reachable_by_its_own_name() {
@@ -410,9 +416,9 @@ mod tests {
                 profile.name,
             );
         }
-        assert_eq!(Profile::by_name("Baseline"), None, "lookup is exact");
+        assert_eq!(Profile::by_name("Balanced"), None, "lookup is exact");
         assert_eq!(Profile::by_name("reckless"), None);
-        assert_eq!(Profile::names(), "baseline, cautious, aggressive, careless");
+        assert_eq!(Profile::names(), "balanced, cautious, aggressive, careless");
     }
 
     /// Names are unique, or `--profile` would be ambiguous and a row's
@@ -448,7 +454,8 @@ mod tests {
     /// everybody (#316). Two claims worth pinning, because both are load-bearing:
     ///
     /// - the avoidance-first profiles decline the verb outright, which is what makes
-    ///   "the cautious baseline is unchanged" true by construction rather than by
+    ///   "the avoidance-first temperaments are unchanged" true by construction rather
+    ///   than by
     ///   measurement — a reach of zero never reaches a line of the strike code;
     /// - a profile that never strikes has no body to deal with, so a stow reach on one
     ///   would be a number that could never do anything.
@@ -464,7 +471,7 @@ mod tests {
 
         assert_eq!(
             declines.iter().map(|p| p.name).collect::<Vec<_>>(),
-            ["baseline", "cautious"],
+            ["balanced", "cautious"],
             "exactly the avoidance-first temperaments decline the verb",
         );
         for p in &declines {
@@ -523,7 +530,7 @@ mod tests {
         // Named rather than only derived, so the shipped vocabulary is the assertion.
         let by = |name: &str| Profile::by_name(name).expect("a shipped profile");
         assert!(!by("careless").crouches, "careless declines the pose");
-        for name in ["baseline", "cautious", "aggressive"] {
+        for name in ["balanced", "cautious", "aggressive"] {
             assert!(by(name).crouches, "{name} takes cover, so it crouches");
         }
     }

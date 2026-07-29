@@ -164,7 +164,7 @@ seeds each (`--seed 0 --cap 1000`), repeated on a disjoint block:
 
 | `sighting-contact-turns` | 1 | 2 | **3** | 5 | 8 |
 |---|---|---|---|---|---|
-| Mean peak rung (baseline profile) | 0.98 | 0.88 | **0.70** | 0.45 | 0.15 |
+| Mean peak rung (balanced profile) | 0.98 | 0.88 | **0.70** | 0.45 | 0.15 |
 | Runs never noticed (rung 0) | 25% | 28% | **42%** | 63% | 88% |
 | Win rate | 0.38 | 0.34 | **0.35** | 0.36 | 0.38 |
 
@@ -175,7 +175,7 @@ Three findings, and the third is the one that matters:
   does: 8, 10, 14 and 20 all read a mean peak of 0.69–0.70, because widening it makes
   one sighting easier and three *separate* sightings harder, and the two cancel. So
   the **10** is not load-bearing and does not need agonising over; the **3** is.
-- **Rung 3 is unreachable without takedowns.** Over 200 baseline-profile seeds, at
+- **Rung 3 is unreachable without takedowns.** Over 200 balanced-profile seeds, at
   every threshold swept, **no run reached rung 3** — its triggers are a found body and
   a second quiet post, and a player who strikes nobody produces neither. The profiles
   that leave bodies reach it in ~8–9% of runs. The top of the ladder is a *takedown
@@ -344,7 +344,7 @@ difficulty increase, not a tidy-up. Over 100 seeded bot runs per playstyle:
 one loses 13–17, because the ground a bold plan crosses is now patrolled ground. Takedowns
 fall with it (careless 14 → 8), so the striking line is *harder to run*, not merely riskier.
 Alert peaks rise across the board and quiet runs nearly halve (careless rung-0 37 → 21).
-Turns to win rise for the careful profiles (baseline 129 → 154) and barely move for the bold
+Turns to win rise for the careful profiles (balanced 129 → 154) and barely move for the bold
 ones — they are not playing longer, they are being caught. The single sharpest illustration
 is the sim's pinned seed 42: a 111-turn win with **zero** detections through ground nobody
 patrolled, now a capture at 216 with seven.
@@ -413,7 +413,7 @@ apart. Sharing a focus is right; sharing a *territory* is the accident.
 
 **It also makes the watch slightly kinder, which was not the aim.** Two responders splitting
 one area into halves cover it *less densely* than two pacing all of it, so over 100 seeded
-bot runs the win rate rises — baseline 0.34 → 0.38, careless 0.30 → 0.35, cautious 0.55 →
+bot runs the win rate rises — balanced 0.34 → 0.38, careless 0.30 → 0.35, cautious 0.55 →
 0.53 — clawing back part of what the appendix 9 partition cost. The goal was legibility
 rather than difficulty, and the honest reading is that a clump is both uglier *and* harder
 than coverage. If the watch wants its bite back, the knobs are `WATCH_RADIUS` and

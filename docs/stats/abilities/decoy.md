@@ -43,7 +43,7 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities decoy
 Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
 **its own** control, never against another's (§13.4).
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.38 → **0.35** | 0.60 → **0.64** | 0.50 → **0.52** | 0.49 → **0.53** |
 | `turns_to_win_median` | 117.5 → **116.0** | 183.5 → **206.0** | 111.0 → **111.0** | 116.0 → **133.0** |
@@ -55,7 +55,7 @@ Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each p
 
 Disjoint block, `--seed 100 --runs 100`:
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.44 → **0.44** | 0.63 → **0.65** | 0.37 → **0.35** | 0.46 → **0.43** |
 | `turns_to_win_median` | 117.5 → **118.0** | 204.0 → **225.0** | 92.0 → **90.0** | 110.0 → **107.0** |

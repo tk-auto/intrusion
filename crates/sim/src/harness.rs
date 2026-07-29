@@ -296,7 +296,7 @@ mod tests {
     /// in the suite.
     #[test]
     fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
-        const PINNED: &str = "{\"seed\":42,\"profile\":\"baseline\",\"outcome\":\"capture\",\"turns\":216,\"detections\":7,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":39,\"run\":3,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":109,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":154,\"rung\":2,\"trigger\":\"console-tampered\"}],\"reinforcements\":1}";
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"capture\",\"turns\":216,\"detections\":7,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":39,\"run\":3,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":109,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":154,\"rung\":2,\"trigger\":\"console-tampered\"}],\"reinforcements\":1}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.
