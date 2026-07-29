@@ -1869,11 +1869,49 @@ is the case this serves.
   the words; that's a nice piece of design — keep it. When no message is live,
   the line falls back to quiet **ambient status** (the alert rung — *"security
   condition 2 of 3"* on screen, §11.8 — an active ability's remaining turns) instead
-  of sitting empty. Its right-hand corner carries the two view toggles: the
-  live-message counter and the `[?]` help button, the latter **tinted by the alert
-  rung** (§7.3) — the ladder's standing state lives on the help panel's Level info
-  tab, and the tint is what says there is something new to read behind the control
-  (see [`docs/render-reference.md`](render-reference.md) §4.5).
+  of sitting empty. Its two view toggles sit at **opposite ends** of the row: the
+  `[?]` help button in the screen's **top-left corner**, the message log's deploy
+  control flush against the row's **last column**, and the message between them. They do different jobs and belong at different ends — `[?]` is the
+  fixed landmark a lost player reaches for, and column 0 makes it the one control
+  whose position depends on nothing at all (not the screen width, not what else is
+  up), while the deploy control comes and goes with what there is to read, so it
+  takes the end that is allowed to change. Splitting them also stops the pair from
+  taking one contiguous bite out of the row's right-hand side, which is where a
+  long message ran out of room.
+
+  **The deploy control is three cells, always**, and one glyph carries its whole
+  state: `!` when this action raised more than the near line is showing (the one
+  state worth interrupting for — it is new, and the next action clears it), `▾`
+  when only the remembered turns are behind it, `▴` while it is deployed. It used
+  to be `[+2 ▾]`, a chevron plus a count of the further messages: six cells on
+  every frame it was up, spent on a number the player gets for free by deploying
+  it. The near line's words are the scarcest space on the screen, and merging the
+  two — then reclaiming the blank cell that had sat beyond the control, which was
+  band rather than air and separated it from nothing but the edge of the screen —
+  took the budget from 28 glyphs to 32. Three messages that had been clipping since
+  before the bound existed now fit, with no wording changed. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
+  standing state lives on the help panel's Level info tab, and the tint is what
+  says there is something new to read behind the control (see
+  [`docs/render-reference.md`](render-reference.md) §4.5).
+
+  > **The row is laid out once, and the message's width comes *from* it.**
+  > **[SETTLED]** Both controls, both hit-tests and the words' span are read off a
+  > single layout: the message starts clear of the `[?]` and stops a cell short of
+  > the deploy control. Deriving each position separately and letting the budget
+  > follow whichever control happened to be nearest is exactly the arrangement
+  > where adding a control silently runs the words underneath it.
+  >
+  > **A new near-line message must fit that budget**, and a new control must take
+  > its width from the same layout rather than assume the old one. The budget is the
+  > row minus the `[?]`, its cell of air, the cell of air before the deploy control,
+  > and the control — **32 cells** on the 40-wide v1 board (§10.2). Count it in **cells of message**, never as the column the words stop
+  > at: those differ by one, and the bound spent its whole life as the column,
+  > quietly passing messages one cell too long. A control that has to say more
+  > belongs in a **fixed** width with a glyph that varies, not a width that grows
+  > with what it says: widening the chrome takes the cells straight off the message. It is pinned by a test that walks every message
+  > `message_for` can build, with an explicit, only-ever-shrinking list of the few
+  > that predate the bound; an over-long message clips silently on a real screen,
+  > which is why the check is a test and not a hope.
 - **Usable line** — *what you can act on*: the bump affordances adjacent to the
   player right now, each **with an arrow giving the bump's direction** (`↑
   console: take intel`, `← table: crouch`, `↓ cupboard: hide`, `door: open →`).
@@ -2284,8 +2322,43 @@ system — it is derived from adjacency every frame and carries no state.
 - The near line shows only the **highest-priority** live message.
 - **Messages clear on the player's next action** — a status line, not a
   scrollback — falling back to the ambient status of §11.4, never to an empty
-  row. **[START]** — the old TODO wanted an expandable log, and with radio pings
-  (§7.3) there is more to say, so this probably needs to grow.
+  row. **[SETTLED]** for the **near line**: one row, one live message, wiped by
+  the next action.
+- **The deployed log behind the chevron keeps the last few actions** (#300). It is
+  the screen's **full width**, like the near line it grows out of, and hangs from
+  the row directly beneath it — **covering the usable line** rather than starting
+  below it. That row lists what you could bump into *next*, which is the one thing
+  you are provably not doing while you have the log open to read what already
+  happened, so it is the cheapest row on the screen to spend; it is back the moment
+  the log folds, and folding costs no turn either way (§4.4). The block never
+  reaches the ability bar — the bar is always worth reading. It lists the current
+  action's messages **the near line did not say** — its loudest is already the band
+  an inch above, so the panel shows exactly what the counter promised and the two
+  surfaces partition the turn instead of overlapping on it — then a **separator
+  rule** in the System chrome colour, then the previous message-bearing action's
+  block, and so on. **Every remembered block gets its rule, the first one
+  included** — so when this action has nothing left to show, the block opens on a
+  rule rather than on a past message pretending to be current. The rule's job is to
+  say *what follows is not this turn*, and that claim is needed most at the top,
+  directly under the near line's band. The block also **closes on a rule**, so it
+  has a lower edge against the map: without one the oldest message just stops and
+  the terrain resumes, leaving the eye to find the boundary. Rules top and bottom
+  make the block read as one surface laid over the board rather than as text
+  spilled onto it — and a frame too short to hold the whole block still gets its
+  closing rule, on whatever row it truly ends at. That is where "with radio pings (§7.3) there is more to say" is answered:
+  a silence, a call-in and a body find on three consecutive turns can be read back
+  after the near line has moved on. Bounded twice — a cap on remembered actions
+  (**5**) and a cap on total rows (**20**, half the v1 board), both **[START]** —
+  and then clamped to the board, because it
+  is drawn *over* the map and burying the §11.5 danger overlay is the failure mode.
+  An action that said nothing contributes no block and no rule. **Now reads louder
+  than then**: the current action's rows draw at full strength and every remembered
+  row — and every rule — draws in its category's *dim* shade (§11.5's fog channel,
+  reused as chrome), so a message keeps its §11.2 meaning and simply recedes. Still
+  **no camera and no scrolling** (§11.4): if it feels short, move the bound, not the
+  surface.
+  The corner counter keeps counting **live** extras only — history never inflates
+  it — and with nothing extra live it is the bare chevron.
 - Modal messages anchor **near their source cell**, positioned so they never cover
   what they're talking about. That's a nice touch; keep it.
 - **Objective messaging derives from the gate, never from a fixed intel count**

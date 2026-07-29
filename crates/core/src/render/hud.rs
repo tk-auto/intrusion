@@ -31,7 +31,7 @@ use super::*;
 use crate::ability::{AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::mnemonic;
 use crate::place::LevelConfig;
-use crate::status::{live_messages, near_line, Message};
+use crate::status::near_line;
 
 /// The rows the screen adds **above** the map (§11.4): the near line and the
 /// usable line — read-only status, kept clear of the thumb (#267). A shell
@@ -45,12 +45,12 @@ pub const BOTTOM_ROWS: u32 = 1;
 
 /// The near line's row (§11.4/§11.7): the top of the screen, where the message
 /// band's colour flash reads without competing with the thumb (#267).
-const NEAR_ROW: u32 = 0;
+pub(super) const NEAR_ROW: u32 = 0;
 
 /// The usable line's row (§11.4): directly under the near line, still above the
 /// map. Never blank — with nothing adjacent to offer it teaches the innate verbs
 /// instead ([`usable_row`](super::usable::usable_row), #323).
-const USABLE_ROW: u32 = 1;
+pub(super) const USABLE_ROW: u32 = 1;
 
 /// The screen row the ability bar occupies, on a map `map_h` tall: the last row
 /// of the frame. Shared by the drawing ([`render_screen`]) and the hit-test
@@ -176,60 +176,110 @@ pub enum InputModality {
 /// and carries its own `[x]` — the pair is always escapable, the touch path that
 /// never traps (§11.6).
 const HELP_BUTTON: &str = "[?]";
-const HELP_BUTTON_LEN: u32 = 3;
+pub(super) const HELP_BUTTON_LEN: u32 = 3;
 
-/// The column the help button starts at: right-aligned on the near line with a
-/// one-cell margin (#267). Shared by the drawing and the hit-test
-/// ([`is_help_button`]) so a tap lands on exactly the button drawn.
-fn help_button_start(width: u32) -> u32 {
-    width.saturating_sub(1 + HELP_BUTTON_LEN)
+/// How many of the near line's cells are **not** the message's, worst case
+/// (§11.4/§11.7), counted out: the `[?]`, its cell of air, the cell of air before the
+/// deploy control, and the control itself.
+///
+/// There is no margin beyond the deploy control — it sits flush against the row's last
+/// column. A blank cell out there bought nothing: the near line is a solid category
+/// band edge to edge (§11.4), so the "margin" was band, not air, and the only thing it
+/// separated the control from was the end of the screen.
+///
+/// `width` minus this is the message's true **capacity in glyphs** — not a column
+/// index, which is the off-by-one this constant exists to stop anyone making again. It
+/// is derived from the controls rather than written down, so tightening one gives the
+/// cells back to the words on its own.
+pub(super) const NEAR_LINE_CONTROL_CELLS: u32 =
+    HELP_BUTTON_LEN + 1 + 1 + super::message_log::DEPLOY_LEN;
+
+/// The near line's **controls** (§11.4/§11.7/#267), laid out once — where each one
+/// sits, and the span of row the words are therefore left with.
+///
+/// One layout, four readers: the drawing of each button, both hit-tests, and the
+/// message's own width budget. That is the point of computing it in one place. The old
+/// code derived each start separately and let the text budget follow whichever control
+/// happened to be leftmost, which is exactly the arrangement where adding a control
+/// silently runs the words underneath it.
+pub(super) struct NearLineControls {
+    /// Where the `[?]` starts — the screen's **top-left corner**. Always drawn: help is
+    /// never unavailable (§11.6).
+    pub(super) help_start: u32,
+    /// The message-log deploy control when there is anything to deploy (§11.7): its
+    /// label and its start column, flush against the row's last column. `None` leaves
+    /// the row's right end to the message.
+    pub(super) log: Option<(String, u32)>,
+    /// The first column the near line's message may use — clear of the `[?]` and a cell
+    /// of air after it.
+    pub(super) text_start: u32,
+    /// **The column the message must stop before.** A cell short of the deploy control
+    /// when it is up, the frame's margin otherwise — so a long message can never run
+    /// under a control, and a *new* control cannot make it start doing so.
+    pub(super) text_max: u32,
+}
+
+impl NearLineControls {
+    /// How many glyphs of message the row can actually hold — the span between the
+    /// controls, in cells. A *count*, never a column: the near line's words run
+    /// `text_start .. text_max`.
+    pub(super) fn capacity(&self) -> u32 {
+        self.text_max.saturating_sub(self.text_start)
+    }
+}
+
+/// Lay the near line's controls out on a screen `width` wide (§11.4/§11.7).
+///
+/// **The `[?]` owns the top-left corner and the deploy control the top-right**, with
+/// the message between them. The two controls do different jobs and belong at
+/// different ends: `[?]` is the fixed landmark a lost player reaches for, and putting
+/// it at column 0 makes it the one control whose position never depends on anything —
+/// not the screen width, not what else is up. The deploy control is the one that comes
+/// and goes with what there is to read, so it takes the end that is allowed to change.
+/// Splitting them also stops the pair from eating one contiguous bite out of the
+/// row's right-hand side, which is where a long message ran out of room.
+///
+/// `log_open` picks the deploy glyph, never the width — the control is
+/// [`DEPLOY_LEN`](super::message_log::DEPLOY_LEN) cells whatever it says — so a
+/// hit-test may ask with either and land on the button the frame drew.
+pub(super) fn near_line_controls(state: &State, width: u32, log_open: bool) -> NearLineControls {
+    let label = super::message_log::deploy_label(state, log_open);
+    debug_assert!(
+        label
+            .as_ref()
+            .is_none_or(|l| l.chars().count() as u32 == super::message_log::DEPLOY_LEN),
+        "the deploy control is a fixed three cells (§11.7): the layout budgets for it",
+    );
+    let log_start = width.saturating_sub(super::message_log::DEPLOY_LEN);
+
+    let controls = NearLineControls {
+        help_start: 0,
+        // A cell of air after the `[?]`, so the words never touch the control.
+        text_start: HELP_BUTTON_LEN + 1,
+        // A cell of air before the deploy control so the words never touch it; with no
+        // control up the words may run to the row's last column.
+        text_max: if label.is_some() {
+            log_start.saturating_sub(1)
+        } else {
+            width
+        },
+        log: label.map(|label| (label, log_start)),
+    };
+    debug_assert!(
+        controls.log.is_none()
+            || controls.capacity() == width.saturating_sub(NEAR_LINE_CONTROL_CELLS),
+        "with both controls up the message's capacity is the row less exactly \
+         NEAR_LINE_CONTROL_CELLS (§11.4)",
+    );
+    controls
 }
 
 /// Whether screen cell `(x, y)` is the near line's help button (§14 v2/#139) — the
-/// `[?]` toggle in the screen's top-right corner (#267). A shell maps a click to a
-/// screen cell and asks this; a hit flips [`ScreenUi::help_open`] instead of
-/// stepping. Kept beside the drawing so the button a tap lands on is exactly the
-/// one drawn.
-pub fn is_help_button(width: u32, x: u32, y: u32) -> bool {
-    let start = help_button_start(width);
-    y == NEAR_ROW && x >= start && x < start + HELP_BUTTON_LEN
-}
-
-/// The near line's message-log toggle label (§11.7): when `extra` further messages
-/// are stacked behind the loudest, the count and a chevron — down to deploy the
-/// list, up to fold it back. Both chevrons are one cell, so the label's width
-/// tracks the digit count alone; the drawing ([`draw_message_button`]) and the
-/// hit-test ([`is_message_button`]) share it so a tap lands on exactly what is
-/// drawn.
-fn message_button_label(extra: usize, open: bool) -> String {
-    let chevron = if open { '▴' } else { '▾' };
-    format!("[+{extra} {chevron}]")
-}
-
-/// The column the message-log toggle starts at on a screen `width` wide:
-/// immediately left of the near line's help button, so the top-right corner reads
-/// as one control cluster `[+2 ▾][?]`.
-fn message_button_start(width: u32, label_len: u32) -> u32 {
-    help_button_start(width).saturating_sub(label_len)
-}
-
-/// Whether screen cell `(x, y)` is the near line's message-log toggle (§11.7) —
-/// the counter left of the `[?]` that deploys and folds the full live-message
-/// list. A shell maps a click to a screen cell and asks this; a hit flips
-/// [`ScreenUi::message_log_open`] instead of stepping. There is no button unless
-/// **more than one** message is live, so a lone or absent message yields `false`.
-/// The geometry is read from `state` — the count sets the label width, and the
-/// near line is the screen's first row (#267) — so a click can never miss the
-/// toggle the frame drew.
-pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
-    let extra = live_messages(state).len().saturating_sub(1);
-    if extra == 0 {
-        return false;
-    }
-    let width = state.layout().facility().width();
-    let label_len = message_button_label(extra, false).chars().count() as u32;
-    let start = message_button_start(width, label_len);
-    y == NEAR_ROW && x >= start && x < start + label_len
+/// `[?]` toggle in the screen's **top-left** corner. A shell maps a click to a screen
+/// cell and asks this; a hit flips [`ScreenUi::help_open`] instead of stepping. Kept
+/// beside the drawing so the button a tap lands on is exactly the one drawn.
+pub fn is_help_button(x: u32, y: u32) -> bool {
+    y == NEAR_ROW && x < HELP_BUTTON_LEN
 }
 
 /// Render the full §11.4 **screen**: the two status lines, the map ([`render`]),
@@ -302,44 +352,25 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
 
     let statuses = state.ability_statuses();
 
-    // The map layer, with the near line's message log hanging from the top if it is
-    // deployed. Nothing else overlays the board any more: the ability bar names its
-    // whole set on its own row (#287), so the board stays whole while you read it.
-    let mut map = render(state);
-    let messages = live_messages(state);
-    // The step's live messages (§11.7), loudest first: the near line speaks the
-    // first, counts the rest, and deploys the whole list over the board here. The
-    // list only earns the board when more than one message is live.
-    if ui.message_log_open && messages.len() > 1 {
-        overlay_message_log(&mut map, &messages);
-    }
+    let map = render(state);
 
     // The near line (§11.4/§11.7): the loudest live message as a category band —
     // or the ambient floor when nothing is live — plus the right-aligned help
-    // toggle and, when more than one message is live, the counter beside it.
-    let top = messages
-        .first()
-        .cloned()
-        .unwrap_or_else(|| near_line(state));
-    let extra = messages.len().saturating_sub(1);
-    // The words stop a cell short of the corner cluster — the counter when there is
-    // one, the `[?]` otherwise — so a long message never runs under the controls.
-    let controls = if extra > 0 {
-        let label_len = message_button_label(extra, ui.message_log_open)
-            .chars()
-            .count() as u32;
-        message_button_start(width, label_len)
-    } else {
-        help_button_start(width)
-    };
+    // toggle and, when the log has more to show, its deploy control beside it.
+    let top = near_line(state);
+    // One layout for both controls: where each goes, and the span of row that leaves
+    // the message. The budget comes *from* the layout, so a row can never run under a
+    // control that is up (§11.4).
+    let controls = near_line_controls(state, width, ui.message_log_open);
     let mut near = status_row(
         width,
-        controls.saturating_sub(1),
+        controls.text_start,
+        controls.text_max,
         &[(top.text, Category::Neutral)],
         Some(top.category),
     );
-    if extra > 0 {
-        draw_message_button(&mut near, width, top.category, extra, ui.message_log_open);
+    if let Some((label, start)) = &controls.log {
+        super::message_log::draw_message_button(&mut near, width, *start, top.category, label);
     }
     // The help toggle, tinted by the facility alert rung (§7.3/#375): the ladder's
     // glance-level tell. The panel behind this button is where the standing alert state
@@ -349,6 +380,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     draw_help_button(
         &mut near,
         width,
+        controls.help_start,
         top.category,
         super::alert::rung_category(state.alert()),
     );
@@ -373,11 +405,21 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     cells.extend(map.cells);
     cells.extend(ability_bar(width, &statuses));
 
-    Grid {
+    let mut screen = Grid {
         width,
         height,
         cells,
+    };
+    // The deployed message log is laid over the finished frame (§11.7/#300), not over
+    // the map alone: it hangs from the near line's band across the **whole** row,
+    // covering the usable line and as much board as it needs. Nothing else overlays
+    // the frame any more — the ability bar names its whole set on its own row (#287),
+    // so the board stays whole while you are not reading the log. The log owns the
+    // question of what it holds and whether it holds anything at all.
+    if ui.message_log_open {
+        super::message_log::overlay_message_log(&mut screen, state);
     }
+    screen
 }
 
 /// Lay the ability bar out (§11.4/#267/#287): the start column of each ability's
@@ -531,8 +573,7 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
 /// **The button is the only thing that moves.** Guard presentation is deliberately
 /// untouched by the rung (#311): a never-calm guard still reads as Calm, because its
 /// colour is its own state (§11.2) and not the facility's mood.
-fn draw_help_button(row: &mut [GlyphCell], width: u32, band: Category, tint: Category) {
-    let start = help_button_start(width);
+fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32, band: Category, tint: Category) {
     for (i, glyph) in HELP_BUTTON.chars().enumerate() {
         let x = start + i as u32;
         if x < width {
@@ -617,14 +658,14 @@ fn bar_category(state: AbilityState) -> Category {
     }
 }
 
-/// Lay one status row out as grid cells: segments left to right from a one-cell
-/// margin, two spaces between segments, stopping at column `limit`; `band` paints
-/// every cell's background (the §11.4 message band) or none. The row is `width`
-/// cells wide either way — `limit` only bounds the *words*, so the near line's
-/// corner controls (#267) keep their cells instead of being written over by a long
-/// message.
+/// Lay one status row out as grid cells: segments left to right from column `start`,
+/// two spaces between segments, stopping at column `limit`; `band` paints every cell's
+/// background (the §11.4 message band) or none. The row is `width` cells wide either
+/// way — `start` and `limit` bound only the *words*, so the near line's controls (#267)
+/// keep their cells at both ends instead of being written over by a long message.
 pub(super) fn status_row(
     width: u32,
+    start: u32,
     limit: u32,
     segments: &[(String, Category)],
     band: Option<Category>,
@@ -637,7 +678,7 @@ pub(super) fn status_row(
     };
     let mut cells = vec![blank; width as usize];
     let limit = (limit as usize).min(cells.len());
-    let mut x = 1; // the one-cell left margin
+    let mut x = start as usize;
     for (i, (text, category)) in segments.iter().enumerate() {
         if i > 0 {
             x += 2;
@@ -655,105 +696,6 @@ pub(super) fn status_row(
         }
     }
     cells
-}
-
-/// Draw the message-log toggle over the already-built near line `row` (§11.7):
-/// the [`message_button_label`] right-aligned, its glyphs in System — the HUD
-/// control colour, like the ability line's deploy button — over the loudest
-/// message's own category band, which keeps painting behind it.
-fn draw_message_button(
-    row: &mut [GlyphCell],
-    width: u32,
-    band: Category,
-    extra: usize,
-    open: bool,
-) {
-    let label = message_button_label(extra, open);
-    let start = message_button_start(width, label.chars().count() as u32);
-    for (i, glyph) in label.chars().enumerate() {
-        let x = start + i as u32;
-        if x < width {
-            row[x as usize] = GlyphCell {
-                glyph,
-                fg: Category::System,
-                bg: Some(band),
-                vis: Visibility::Live,
-            };
-        }
-    }
-}
-
-/// How many **map rows** the deployed message log covers right now (§11.7), or `0`
-/// when nothing of it is on the board — the geometry half of
-/// [`overlay_message_log`], read by a shell that must know which rows are the log's
-/// rather than the board's (#306: a tap on the list you opened to read must never
-/// burn a turn).
-///
-/// Mirrors the drawing exactly: the log earns the board only when it is deployed
-/// **and** more than one message is live, it hangs from the top of the map, and it is
-/// clamped to the map's height on a board too short to hold every row. `0` while a
-/// modal screen is up ([`ScreenUi::menu`] / [`ScreenUi::help_open`]) because then no
-/// board is drawn at all.
-pub fn message_log_rows(state: &State, ui: ScreenUi) -> u32 {
-    if ui.menu.is_some() || ui.help_open || !ui.message_log_open {
-        return 0;
-    }
-    let live = live_messages(state).len() as u32;
-    if live < 2 {
-        return 0;
-    }
-    live.min(state.layout().facility().height())
-}
-
-/// Overlay the deployed message log onto the map `grid` (§11.7/#267): the step's
-/// live messages ([`live_messages`]), one per row, **hanging from the near line** —
-/// at the map's top-left, the loudest on the first row directly below its own
-/// near-line band, each quieter message one row lower. Every row is cleared to a
-/// uniform band — a one-cell margin, the longest message, a cell of pad — then the
-/// words drawn in the message's own §11.2 category, so the list reads as a solid
-/// block over the board and each entry keeps its threat colour, aligned with the
-/// band above.
-///
-/// Bounds are clamped, never asserted: on a board too short to hold every row
-/// (only hand-built test states get that small — the v1 board is 40×40, §10.2)
-/// the block shows as many as fit from the top and drops the rest.
-fn overlay_message_log(grid: &mut Grid, messages: &[Message]) {
-    let (width, map_h) = (grid.width, grid.height);
-    let band = (messages
-        .iter()
-        .map(|m| m.text.chars().count())
-        .max()
-        .unwrap_or(0) as u32
-        + 2)
-    .min(width);
-    let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: None,
-        vis: Visibility::Live,
-    };
-    for (y, message) in messages.iter().enumerate() {
-        let y = y as u32;
-        if y >= map_h {
-            break; // out the bottom of a tiny board — show what fits from the top
-        }
-        for dx in 0..band {
-            grid.cells[(y * width + dx) as usize] = blank;
-        }
-        // A one-cell left margin, matching the near line, so the list lines up
-        // under the band it hangs from.
-        for (dx, glyph) in message.text.chars().enumerate() {
-            let x = 1 + dx as u32;
-            if x >= band {
-                break;
-            }
-            grid.cells[(y * width + x) as usize] = GlyphCell {
-                glyph,
-                fg: message.category,
-                ..blank
-            };
-        }
-    }
 }
 
 #[cfg(test)]
@@ -801,9 +743,7 @@ mod tests {
     /// reported — guards are converging" was 49 cells and reached a screenshot cut
     /// at "…reported —".)
     fn near_line_text_max() -> usize {
-        let width = LevelConfig::V1.width;
-        let label = message_button_label(1, false).chars().count() as u32;
-        message_button_start(width, label).saturating_sub(1) as usize
+        super::super::message_log::near_line_text_max(LevelConfig::V1.width)
     }
 
     /// Near-line messages that were **already** over the bound before
@@ -813,20 +753,27 @@ mod tests {
     /// explicitly so the bound still bites for every *new* message: adding one here
     /// is a deliberate act, and the list only ever shrinks.
     ///
-    /// Two of these clip even with no message counter beside them ("you stow the
-    /// body…" at 42, "intel in hand… (n more out)" at 45); the rest fit alone and
-    /// clip only when a second message stacks the counter into the row.
+    /// Both survivors overrun the 40-wide board itself — 42 and 45 cells (§10.2) —
+    /// and have nothing to do with the row's controls.
     ///
     /// The exit's refusal left this list in #310: naming the gate's real requirement
     /// ("the exit needs 2 more intel") is shorter than the fixed rule it replaced.
     /// **The alert line left it in #375**: the one message about escalation was the one
     /// the player could not read, at 34 cells in a 29-cell row, and #375 is where the
     /// ladder's legibility was owed. Naming it the way the help panel does — "security
-    /// condition 3 of 3" — is both shorter and the same words twice.
-    const PRE_EXISTING_OVERFLOW: [&str; 5] = [
-        "all the intel — the exit is open",
-        "the guard drops — a body is left",
-        "you slip away — the run is won",
+    /// condition 3 of 3" — is both shorter and the same words twice. **Three left it in
+    /// #300 with no word rewritten**, as the chrome was tightened around them: merging
+    /// the deploy chevron and its `+N` counter into one three-cell control, then
+    /// reclaiming the blank cell beyond it, took the budget from 28 glyphs to 32, and
+    /// "all the intel — the exit is open", "the guard drops — a body is left" and "you
+    /// slip away — the run is won" all fit it.
+    ///
+    /// That is the argument for [`NEAR_LINE_CONTROL_CELLS`] being derived from the
+    /// layout rather than written down — and for it counting *cells of message* rather
+    /// than the column the words stop at, which is one more and is what it used to be:
+    /// two of those three had been clipping by a single cell while the bound said they
+    /// were fine.
+    const PRE_EXISTING_OVERFLOW: [&str; 2] = [
         "you stow the body — the cupboard is sealed",
         "intel in hand — the exit is open (9 more out)",
     ];
@@ -968,190 +915,6 @@ mod tests {
         }
     }
 
-    /// §11.7: when one step raises more than one message the near line speaks the
-    /// loudest as its band and shows a right-aligned counter of the rest; deploying
-    /// the list ([`ScreenUi::message_log_open`]) stacks every message over the
-    /// board, loudest on the row directly above the band. A board wide enough that
-    /// the messages are not truncated.
-    #[test]
-    fn the_near_line_counts_extra_messages_and_deploys_the_list() {
-        // The takedown-seen-by-a-witness step: `TakenDown` (priority 0), `BodyFound`
-        // (4) and the `AlertRaised` (5) the find sends up the §7.3 ladder all land the
-        // same turn — three live messages.
-        let mut layout = open_room(40, 14);
-        layout.place(Cell::new(5, 5), Terrain::Hideout);
-        let mut s = State::new(
-            layout,
-            Cell::new(5, 5),
-            Direction::North,
-            vec![
-                Guard::stationary(Cell::new(5, 4)),
-                Guard::stationary(Cell::new(5, 2)),
-            ],
-            Vec::new(),
-            Cell::new(8, 8),
-        );
-        s.step(Input::Step(Direction::North));
-
-        let width = s.layout().facility().width();
-        let row_text = |g: &Grid, y: u32| (0..width).map(|x| g.get(x, y).glyph).collect::<String>();
-
-        // Collapsed: the band speaks the loudest message and the closed counter of
-        // the one further message (a down chevron) sits at the right.
-        let g = render_screen(&s, ScreenUi::default());
-        let near = row_text(&g, NEAR_ROW);
-        assert!(
-            near.contains("security condition"),
-            "the band speaks the loudest message: {near:?}"
-        );
-        assert!(
-            near.contains("[+2 ▾][?]"),
-            "a closed counter of the rest, beside the help toggle: {near:?}"
-        );
-
-        // The hit-test agrees with the drawn counter, and there is no button off it.
-        let label_len = "[+2 ▾]".chars().count() as u32;
-        let start = help_button_start(width) - label_len;
-        assert!(
-            is_message_button(&s, start, NEAR_ROW),
-            "the counter is hittable"
-        );
-        assert!(
-            !is_message_button(&s, start - 1, NEAR_ROW),
-            "nothing just left of it"
-        );
-        assert!(
-            !is_message_button(&s, start, NEAR_ROW + 1),
-            "and nothing a row down"
-        );
-
-        // Deployed: the chevron flips up and the whole list stacks over the board —
-        // the loudest directly above the near line, the quieter one above that.
-        let ui = ScreenUi {
-            message_log_open: true,
-            ..ScreenUi::default()
-        };
-        let g = render_screen(&s, ui);
-        assert!(
-            row_text(&g, NEAR_ROW).contains("[+2 ▴]"),
-            "the deployed counter points up"
-        );
-        assert!(
-            row_text(&g, TOP_ROWS).contains("security condition"),
-            "the loudest sits nearest the band"
-        );
-        assert!(
-            row_text(&g, TOP_ROWS + 1).contains("a body has been found"),
-            "the rest stack below it, loudest first"
-        );
-        assert!(
-            row_text(&g, TOP_ROWS + 2).contains("the guard drops — a body is left"),
-            "down to the quietest"
-        );
-    }
-
-    /// [`message_log_rows`] tells a shell exactly which map rows the deployed list
-    /// covers (#306), and it must agree with the drawing: nothing while folded,
-    /// nothing while a modal screen is up, one row per live message once deployed —
-    /// the rows a tap must never read as the board underneath.
-    #[test]
-    fn the_message_log_reports_the_rows_it_covers() {
-        // The same three-message step as above: `TakenDown`, `BodyFound`, and the
-        // alert rung the find steps (§7.3).
-        let mut layout = open_room(40, 14);
-        layout.place(Cell::new(5, 5), Terrain::Hideout);
-        let mut s = State::new(
-            layout,
-            Cell::new(5, 5),
-            Direction::North,
-            vec![
-                Guard::stationary(Cell::new(5, 4)),
-                Guard::stationary(Cell::new(5, 2)),
-            ],
-            Vec::new(),
-            Cell::new(8, 8),
-        );
-        s.step(Input::Step(Direction::North));
-
-        let deployed = ScreenUi {
-            message_log_open: true,
-            ..ScreenUi::default()
-        };
-        assert_eq!(live_messages(&s).len(), 3, "three messages are live");
-        assert_eq!(
-            message_log_rows(&s, deployed),
-            3,
-            "deployed, the list covers one map row per live message"
-        );
-        assert_eq!(
-            message_log_rows(&s, ScreenUi::default()),
-            0,
-            "folded, the list covers nothing"
-        );
-        // A modal screen replaces the whole frame, so no board rows are the log's.
-        for ui in [
-            ScreenUi {
-                help_open: true,
-                ..deployed
-            },
-            ScreenUi {
-                menu: Some(MenuUi::default()),
-                ..deployed
-            },
-        ] {
-            assert_eq!(message_log_rows(&s, ui), 0, "no board, no log rows");
-        }
-
-        // One message earns no list at all — the near line simply speaks it (§11.7).
-        let quiet = State::new(
-            open_room(40, 14),
-            Cell::new(5, 5),
-            Direction::North,
-            Vec::new(),
-            Vec::new(),
-            Cell::new(8, 8),
-        );
-        assert!(live_messages(&quiet).len() < 2);
-        assert_eq!(message_log_rows(&quiet, deployed), 0);
-    }
-
-    /// §11.7: a single live message shows no counter — the near line is the plain
-    /// band it has always been, and the message-log toggle is not a button.
-    #[test]
-    fn a_lone_message_shows_no_counter() {
-        // Taking the intel is one loud message and nothing else this step.
-        let mut s = State::new(
-            open_room(20, 10),
-            Cell::new(5, 6),
-            Direction::North,
-            Vec::new(),
-            [Cell::new(5, 5)],
-            Cell::new(18, 8),
-        );
-        s.step(Input::Step(Direction::North)); // bump the console: intel taken
-
-        let width = s.layout().facility().width();
-        let near: String = (0..width)
-            .map(|x| {
-                render_screen(&s, ScreenUi::default())
-                    .get(x, NEAR_ROW)
-                    .glyph
-            })
-            .collect();
-        assert!(
-            !near.contains("[+"),
-            "no counter for a lone message: {near:?}"
-        );
-        assert!(
-            near.trim_end().ends_with("[?]"),
-            "the help toggle keeps the corner: {near:?}"
-        );
-        assert!(
-            (0..width).all(|x| !is_message_button(&s, x, NEAR_ROW)),
-            "and nothing to click"
-        );
-    }
-
     /// #375/§2.2: the `[?]` toggle is **tinted by the facility alert rung** — the
     /// ladder's always-visible half. The near line states a step on the turn it happens
     /// and is overwritten by the next louder message (§11.7), so without a standing tell
@@ -1176,12 +939,8 @@ mod tests {
             Vec::new(),
             Cell::new(8, 8),
         );
-        let width = s.layout().facility().width();
-        let toggle = |s: &State| {
-            render_screen(s, ScreenUi::default())
-                .get(help_button_start(width), NEAR_ROW)
-                .fg
-        };
+        // The `[?]` owns the row's first cell (#267/#300).
+        let toggle = |s: &State| render_screen(s, ScreenUi::default()).get(0, NEAR_ROW).fg;
 
         assert_eq!(s.alert(), 0, "a fresh raid is unnoticed");
         assert_eq!(
@@ -1233,7 +992,7 @@ mod tests {
         assert_eq!(
             text,
             vec![
-                " 1 more intel to leave              [?] ".to_string(),
+                "[?] 1 more intel to leave               ".to_string(),
                 // The console is east of the player, so its entry is flush right
                 // with the arrow trailing — the row aims where it points (#384).
                 "                  console: take intel → ".to_string(),
@@ -1349,19 +1108,20 @@ mod tests {
         assert_eq!(g.height(), TOP_ROWS + map.height() + BOTTOM_ROWS);
 
         let (near_y, usable_y) = (NEAR_ROW, USABLE_ROW);
-        let help = help_button_start(g.width());
+        let controls = near_line_controls(&s, g.width(), false);
         for x in 0..g.width() {
             let cell = g.get(x, near_y);
             assert_eq!(cell.bg, Some(Category::Interest), "the band spans the row");
             assert_eq!(cell.vis, Visibility::Live);
-            if cell.glyph != ' ' && x < help {
+            if cell.glyph != ' ' && x >= controls.text_start && x < controls.text_max {
                 assert_eq!(cell.fg, Category::Neutral, "words read Neutral on the band");
             }
             assert_eq!(g.get(x, usable_y).bg, None, "the usable line has no band");
         }
-        // The `[?]` rides the band in the HUD control colour, not the words' Neutral.
-        assert_eq!(g.get(help, near_y).glyph, '[');
-        assert_eq!(g.get(help, near_y).fg, Category::System);
+        // The `[?]` rides the band in the HUD control colour, not the words' Neutral,
+        // and it owns the row's left end (#267).
+        assert_eq!(g.get(0, near_y).glyph, '[');
+        assert_eq!(g.get(0, near_y).fg, Category::System);
         // The affordance names its bump direction and speaks its own category:
         // `console: take intel →` is Interest (§11.2 — goals and rewards). The
         // console is east of the player, so the entry is flush right behind a
@@ -1387,7 +1147,8 @@ mod tests {
         s.step(Input::Wait); // the guard steps south into the player: caught
         let g = render_screen(&s, ScreenUi::default());
         assert_eq!(g.get(0, NEAR_ROW).bg, Some(Category::Danger));
-        assert_eq!(g.get(1, NEAR_ROW).glyph, 'c'); // "caught"
+        // The words start clear of the `[?]` at the row's left end (#300).
+        assert_eq!(g.get(HELP_BUTTON_LEN + 1, NEAR_ROW).glyph, 'c'); // "caught"
     }
 
     /// The permanent home of ability state (§11.4/#267/#287): the **always-on
@@ -2151,10 +1912,13 @@ mod tests {
         let near: String = (0..g.width()).map(|x| g.get(x, NEAR_ROW).glyph).collect();
         assert_eq!(near.chars().count(), 12, "exactly one grid row wide");
         assert!(
-            near.starts_with(" all th "),
-            "the words stop a cell short of the corner control: {near:?}"
+            near.starts_with("[?] "),
+            "the [?] owns the row's left end, then a cell of air: {near:?}"
         );
-        assert!(near.ends_with("[?] "), "…which keeps its cells: {near:?}");
+        assert!(
+            near.ends_with(" "),
+            "…and the frame's right margin survives the words: {near:?}"
+        );
     }
 
     // --- Help panel (§14 v2/#139/#248) ---------------------------------------
@@ -2276,11 +2040,7 @@ mod tests {
 
         // Closed: the near line's `[?]` opens the panel (its hit-test, and it is
         // drawn).
-        let start = help_button_start(width);
-        assert!(
-            is_help_button(width, start, NEAR_ROW),
-            "the [?] cell hit-tests"
-        );
+        assert!(is_help_button(0, NEAR_ROW), "the [?] cell hit-tests");
         let closed = render_screen(&s, ScreenUi::default());
         let near: String = (0..width).map(|x| closed.get(x, NEAR_ROW).glyph).collect();
         assert!(
@@ -2306,14 +2066,11 @@ mod tests {
     /// bottom-right, nor the other way round.
     #[test]
     fn the_help_toggle_belongs_to_the_near_line_only() {
-        let (width, height) = (40, 43); // TOP_ROWS + 40 + BOTTOM_ROWS
+        let height = TOP_ROWS + 40 + BOTTOM_ROWS;
         let bar = height - BOTTOM_ROWS;
-        for x in help_button_start(width)..help_button_start(width) + HELP_BUTTON_LEN {
-            assert!(is_help_button(width, x, NEAR_ROW));
-            assert!(
-                !is_help_button(width, x, bar),
-                "not on the bar's row at {x}"
-            );
+        for x in 0..HELP_BUTTON_LEN {
+            assert!(is_help_button(x, NEAR_ROW));
+            assert!(!is_help_button(x, bar), "not on the bar's row at {x}");
         }
     }
 

@@ -114,7 +114,7 @@ pub use state::{
     State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS, LOCKDOWN_RADIUS,
     PHASE_EJECT_STUN_BASE, PLAYER_SENSE_RANGE, PLAYER_SENSE_RANGE_WAITING,
 };
-pub use status::{live_messages, message_for, near_line, Message};
+pub use status::{live_messages, message_for, near_line, Message, MessageHistory, HISTORY_ACTIONS};
 pub use targeting::{within_range, Target, Targeting, TileCursor};
 pub use vision::{
     field_of_view, field_of_view_with_peek, field_of_view_with_rear_blind_spot, VisibleSet,
