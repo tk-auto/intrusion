@@ -251,7 +251,7 @@ impl Game {
             )
             .map(Control::Help);
         }
-        if is_help_button(width, col, row) {
+        if is_help_button(&self.state, col, row) {
             return Some(Control::HelpToggle);
         }
         if is_message_button(&self.state, col, row) {
@@ -794,10 +794,12 @@ mod tests {
         let g = geometry_for(&state);
         let route = |col, row| {
             tap_route(g, Some((col, row)), |c, r| {
-                is_help_button(width, c, r).then_some(Control::HelpToggle)
+                is_help_button(&state, c, r).then_some(Control::HelpToggle)
             })
         };
-        let start = width - 4; // `[?]`, right-aligned with a one-cell margin
+        // A fresh run has nothing to deploy, so the `[?]` has the corner to itself,
+        // right-aligned with a one-cell margin (#267).
+        let start = width - 4;
         for col in start..start + 3 {
             assert_eq!(
                 route(col, 0),

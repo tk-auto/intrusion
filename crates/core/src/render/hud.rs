@@ -176,13 +176,47 @@ pub enum InputModality {
 /// and carries its own `[x]` — the pair is always escapable, the touch path that
 /// never traps (§11.6).
 const HELP_BUTTON: &str = "[?]";
-const HELP_BUTTON_LEN: u32 = 3;
+pub(super) const HELP_BUTTON_LEN: u32 = 3;
 
-/// The column the help button starts at: right-aligned on the near line with a
-/// one-cell margin (#267). Shared by the drawing and the hit-test
-/// ([`is_help_button`]) so a tap lands on exactly the button drawn.
-pub(super) fn help_button_start(width: u32) -> u32 {
-    width.saturating_sub(1 + HELP_BUTTON_LEN)
+/// The near line's top-right **control cluster** (§11.4/§11.7/#267), laid out once —
+/// where each control starts, and where the row's words must therefore stop.
+///
+/// One layout, four readers: the drawing of each button, both hit-tests, and the
+/// message's own width budget. That is the point of computing it in one place. The
+/// old code derived each start separately and let the text budget follow whichever
+/// control happened to be leftmost, which is exactly the arrangement where adding a
+/// control silently runs the words underneath it.
+pub(super) struct CornerControls {
+    /// Where the `[?]` starts. Always drawn — help is never unavailable (§11.6).
+    pub(super) help_start: u32,
+    /// The message-log toggle when there is anything to deploy (§11.7): its label and
+    /// its start column. `None` leaves the corner to the `[?]` alone.
+    pub(super) log: Option<(String, u32)>,
+    /// **How many cells the near line's message may use.** The words stop a cell short
+    /// of the leftmost control, whichever controls are up — so a long message can never
+    /// run under the cluster, and a *new* control cannot make it start doing so.
+    pub(super) text_max: u32,
+}
+
+/// Lay the near line's corner cluster out on a screen `width` wide (§11.4/§11.7).
+///
+/// **Reading order is `[?][+2 ▾]`**: help on the left, the log's deploy control on the
+/// right, hard against the frame's one-cell margin. The deploy control is the one that
+/// comes and goes, so putting it outermost keeps the `[?]` — the control that is always
+/// there, and the one a lost player reaches for — at a column that moves by less.
+///
+/// `log_open` picks the chevron, never the width: both chevrons are one cell, so a
+/// hit-test may ask with either and land on the button the frame drew.
+pub(super) fn corner_controls(state: &State, width: u32, log_open: bool) -> CornerControls {
+    let label = super::message_log::deploy_label(state, log_open);
+    let log_len = label.as_ref().map_or(0, |l| l.chars().count() as u32);
+    let log_start = width.saturating_sub(1 + log_len);
+    let help_start = log_start.saturating_sub(HELP_BUTTON_LEN);
+    CornerControls {
+        help_start,
+        log: label.map(|label| (label, log_start)),
+        text_max: help_start.saturating_sub(1),
+    }
 }
 
 /// Whether screen cell `(x, y)` is the near line's help button (§14 v2/#139) — the
@@ -190,8 +224,13 @@ pub(super) fn help_button_start(width: u32) -> u32 {
 /// screen cell and asks this; a hit flips [`ScreenUi::help_open`] instead of
 /// stepping. Kept beside the drawing so the button a tap lands on is exactly the
 /// one drawn.
-pub fn is_help_button(width: u32, x: u32, y: u32) -> bool {
-    let start = help_button_start(width);
+///
+/// Read from `state`, not from the width alone: the deploy control sits to its right
+/// and comes and goes with what there is to deploy (§11.7), so where the `[?]` starts
+/// is a question about the frame rather than about the screen size.
+pub fn is_help_button(state: &State, x: u32, y: u32) -> bool {
+    let width = state.layout().facility().width();
+    let start = corner_controls(state, width, false).help_start;
     y == NEAR_ROW && x >= start && x < start + HELP_BUTTON_LEN
 }
 
@@ -271,20 +310,18 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // or the ambient floor when nothing is live — plus the right-aligned help
     // toggle and, when the log has more to show, its deploy control beside it.
     let top = near_line(state);
-    let button = super::message_log::message_button(state, width, ui.message_log_open);
-    // The words stop a cell short of the corner cluster — the deploy control when
-    // there is one, the `[?]` otherwise — so a long message never runs under them.
-    let controls = button
-        .as_ref()
-        .map_or_else(|| help_button_start(width), |&(_, start)| start);
+    // One layout for the whole corner: where each control goes, and how many cells that
+    // leaves the message. The budget comes *from* the cluster, so a row can never run
+    // under a control that is up (§11.4).
+    let corner = corner_controls(state, width, ui.message_log_open);
     let mut near = status_row(
         width,
-        controls.saturating_sub(1),
+        corner.text_max,
         &[(top.text, Category::Neutral)],
         Some(top.category),
     );
-    if let Some((label, _)) = &button {
-        super::message_log::draw_message_button(&mut near, width, top.category, label);
+    if let Some((label, start)) = &corner.log {
+        super::message_log::draw_message_button(&mut near, width, *start, top.category, label);
     }
     // The help toggle, tinted by the facility alert rung (§7.3/#375): the ladder's
     // glance-level tell. The panel behind this button is where the standing alert state
@@ -294,6 +331,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     draw_help_button(
         &mut near,
         width,
+        corner.help_start,
         top.category,
         super::alert::rung_category(state.alert()),
     );
@@ -486,8 +524,7 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
 /// **The button is the only thing that moves.** Guard presentation is deliberately
 /// untouched by the rung (#311): a never-calm guard still reads as Calm, because its
 /// colour is its own state (§11.2) and not the facility's mood.
-fn draw_help_button(row: &mut [GlyphCell], width: u32, band: Category, tint: Category) {
-    let start = help_button_start(width);
+fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32, band: Category, tint: Category) {
     for (i, glyph) in HELP_BUTTON.chars().enumerate() {
         let x = start + i as u32;
         if x < width {
@@ -848,8 +885,9 @@ mod tests {
         );
         let width = s.layout().facility().width();
         let toggle = |s: &State| {
+            let start = corner_controls(s, width, false).help_start;
             render_screen(s, ScreenUi::default())
-                .get(help_button_start(width), NEAR_ROW)
+                .get(start, NEAR_ROW)
                 .fg
         };
 
@@ -1019,7 +1057,7 @@ mod tests {
         assert_eq!(g.height(), TOP_ROWS + map.height() + BOTTOM_ROWS);
 
         let (near_y, usable_y) = (NEAR_ROW, USABLE_ROW);
-        let help = help_button_start(g.width());
+        let help = corner_controls(&s, g.width(), false).help_start;
         for x in 0..g.width() {
             let cell = g.get(x, near_y);
             assert_eq!(cell.bg, Some(Category::Interest), "the band spans the row");
@@ -1946,9 +1984,9 @@ mod tests {
 
         // Closed: the near line's `[?]` opens the panel (its hit-test, and it is
         // drawn).
-        let start = help_button_start(width);
+        let start = corner_controls(&s, width, false).help_start;
         assert!(
-            is_help_button(width, start, NEAR_ROW),
+            is_help_button(&s, start, NEAR_ROW),
             "the [?] cell hit-tests"
         );
         let closed = render_screen(&s, ScreenUi::default());
@@ -1976,14 +2014,20 @@ mod tests {
     /// bottom-right, nor the other way round.
     #[test]
     fn the_help_toggle_belongs_to_the_near_line_only() {
+        let s = State::new(
+            open_room(40, 40),
+            Cell::new(5, 5),
+            Direction::North,
+            Vec::new(),
+            Vec::new(),
+            Cell::new(30, 30),
+        );
         let (width, height) = (40, 43); // TOP_ROWS + 40 + BOTTOM_ROWS
         let bar = height - BOTTOM_ROWS;
-        for x in help_button_start(width)..help_button_start(width) + HELP_BUTTON_LEN {
-            assert!(is_help_button(width, x, NEAR_ROW));
-            assert!(
-                !is_help_button(width, x, bar),
-                "not on the bar's row at {x}"
-            );
+        let start = corner_controls(&s, width, false).help_start;
+        for x in start..start + HELP_BUTTON_LEN {
+            assert!(is_help_button(&s, x, NEAR_ROW));
+            assert!(!is_help_button(&s, x, bar), "not on the bar's row at {x}");
         }
     }
 

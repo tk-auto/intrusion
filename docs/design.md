@@ -2095,11 +2095,30 @@ is the case this serves.
   the words; that's a nice piece of design — keep it. When no message is live,
   the line falls back to quiet **ambient status** (the alert rung — *"security
   condition 2 of 3"* on screen, §11.8 — an active ability's remaining turns) instead
-  of sitting empty. Its right-hand corner carries the two view toggles: the
-  live-message counter and the `[?]` help button, the latter **tinted by the alert
-  rung** (§7.3) — the ladder's standing state lives on the help panel's Level info
-  tab, and the tint is what says there is something new to read behind the control
-  (see [`docs/render-reference.md`](render-reference.md) §4.5).
+  of sitting empty. Its right-hand corner carries the two view toggles, in this
+  order: the `[?]` help button and then, outermost against the frame's one-cell
+  margin, the message-log deploy counter — `[?][+2 ▾]`. The deploy control is the
+  one that comes and goes, so putting it outside keeps the `[?]` — the control
+  that is always there, and the one a lost player reaches for — at a column that
+  moves by less. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
+  standing state lives on the help panel's Level info tab, and the tint is what
+  says there is something new to read behind the control (see
+  [`docs/render-reference.md`](render-reference.md) §4.5).
+
+  > **The corner is laid out once, and the message's width comes *from* it.**
+  > **[SETTLED]** The cluster's controls, both hit-tests and the row's text budget
+  > are all read off a single layout, and the words stop one cell short of the
+  > **leftmost** control that is currently up. Deriving each start separately and
+  > letting the budget follow whichever control happened to be leftmost is exactly
+  > the arrangement where adding a control silently runs the words underneath it.
+  >
+  > **A new near-line message must fit that budget**, and a new corner control must
+  > take its width from the same layout rather than assume the old one. The budget
+  > is the row minus the margin, the widest deploy label and the `[?]` — 29 cells on
+  > the 40-wide v1 board (§10.2). It is pinned by a test that walks every message
+  > `message_for` can build, with an explicit, only-ever-shrinking list of the few
+  > that predate the bound; an over-long message clips silently on a real screen,
+  > which is why the check is a test and not a hope.
 - **Usable line** — *what you can act on*: the bump affordances adjacent to the
   player right now, each **with an arrow giving the bump's direction** (`↑
   console: take intel`, `← table: crouch`, `↓ cupboard: hide`, `door: open →`).
@@ -2624,7 +2643,11 @@ system — it is derived from adjacency every frame and carries no state.
   an inch above, so the panel shows exactly what the counter promised and the two
   surfaces partition the turn instead of overlapping on it — then a **separator
   rule** in the System chrome colour, then the previous message-bearing action's
-  block, and so on. That is where "with radio pings (§7.3) there is more to say" is answered:
+  block, and so on. **Every remembered block gets its rule, the first one
+  included** — so when this action has nothing left to show, the block opens on a
+  rule rather than on a past message pretending to be current. The rule's job is to
+  say *what follows is not this turn*, and that claim is needed most at the top,
+  directly under the near line's band. That is where "with radio pings (§7.3) there is more to say" is answered:
   a silence, a call-in and a body find on three consecutive turns can be read back
   after the near line has moved on. Bounded twice — a cap on remembered actions and
   a cap on total rows, both **[START]** — and then clamped to the board, because it

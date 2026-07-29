@@ -33,7 +33,7 @@
 //! so a glance separates what just happened from what is merely on the record, without
 //! having to count rules.
 
-use super::hud::{help_button_start, ScreenUi, BOTTOM_ROWS, NEAR_ROW, TOP_ROWS};
+use super::hud::{ScreenUi, BOTTOM_ROWS, NEAR_ROW, TOP_ROWS};
 use super::*;
 use crate::status::{live_messages, Message, MessageHistory};
 
@@ -138,13 +138,14 @@ fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
     // contributes no rows at all, and no rule with them.
     let mut rows: Vec<LogRow> = live.into_iter().skip(1).map(LogRow::live).collect();
     for block in history.blocks() {
-        // A block only earns its rule by having a row to follow it — and a block with
-        // no messages was never filed (`MessageHistory::record`), so there is no empty
-        // band to guard against here either. No leading rule when the current action
-        // was silent, and no trailing one when the budget runs out below.
-        if !rows.is_empty() {
-            rows.push(LogRow::Separator);
-        }
+        // **Every** remembered block gets its rule, the first one included — so when
+        // this action contributed no rows the block opens with a rule rather than with
+        // a past message pretending to be current. The rule's job is to say "what
+        // follows is not this turn", and that claim is needed most at the top, right
+        // under the near line's band. A block with no messages was never filed
+        // (`MessageHistory::record`), so no rule can ever land on an empty band, and
+        // the trailing one is popped below if the budget cuts its block away.
+        rows.push(LogRow::Separator);
         // Every remembered block is dim, including the first one under a silent
         // current action — what makes a row quiet is *which turn it is from*, not
         // whether a rule happens to sit above it.
@@ -184,35 +185,27 @@ fn message_button_label(extra: usize, open: bool) -> String {
     format!("[+{extra} {chevron}]")
 }
 
-/// The column the message-log toggle starts at on a screen `width` wide:
-/// immediately left of the near line's help button, so the top-right corner reads
-/// as one control cluster `[+2 ▾][?]`.
-fn message_button_start(width: u32, label_len: u32) -> u32 {
-    help_button_start(width).saturating_sub(label_len)
-}
-
 /// Where the near line's **words** must stop on a screen `width` wide (§11.7): one
-/// cell short of the widest the corner cluster gets in practice — the deploy control
-/// carrying a single-digit count, with the `[?]` beyond it. The §11.4 row-fits bound
-/// is measured against this, so it can never drift from the layout it describes.
+/// cell short of the corner cluster at the widest it gets in practice — both controls
+/// up, the deploy control carrying a single-digit count. The §11.4 row-fits bound is
+/// measured against this, so it can never drift from the layout it describes.
 #[cfg(test)]
 pub(super) fn near_line_text_max(width: u32) -> usize {
-    let label = message_button_label(1, false).chars().count() as u32;
-    message_button_start(width, label).saturating_sub(1) as usize
+    let log = message_button_label(1, false).chars().count() as u32;
+    width.saturating_sub(1 + log + super::hud::HELP_BUTTON_LEN + 1) as usize
 }
 
-/// The toggle's label and its starting column on a screen `width` wide, or `None`
-/// when there is nothing to deploy — the single answer the near line's layout, its
-/// drawing and its hit-test all ask, so the three cannot disagree about whether the
-/// corner holds one control or two.
-pub(super) fn message_button(state: &State, width: u32, open: bool) -> Option<(String, u32)> {
+/// The deploy control's label, or `None` when there is nothing to deploy — *what* the
+/// corner shows, leaving *where* to [`corner_controls`](super::hud::corner_controls),
+/// which is the one place the near line's layout lives.
+pub(super) fn deploy_label(state: &State, open: bool) -> Option<String> {
     if log_rows(state).is_empty() {
         return None;
     }
-    let extra = live_messages(state).len().saturating_sub(1);
-    let label = message_button_label(extra, open);
-    let start = message_button_start(width, label.chars().count() as u32);
-    Some((label, start))
+    Some(message_button_label(
+        live_messages(state).len().saturating_sub(1),
+        open,
+    ))
 }
 
 /// Whether screen cell `(x, y)` is the near line's message-log toggle (§11.7) —
@@ -226,9 +219,8 @@ pub(super) fn message_button(state: &State, width: u32, open: bool) -> Option<(S
 /// so a click can never miss the toggle the frame drew.
 pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
     let width = state.layout().facility().width();
-    // The closed label is the widest the control gets (both chevrons are one cell),
-    // so which of the two is drawn cannot change where it starts.
-    let Some((label, start)) = message_button(state, width, false) else {
+    // Either chevron is one cell, so which of the two is drawn cannot move the button.
+    let Some((label, start)) = super::hud::corner_controls(state, width, false).log else {
         return false;
     };
     let len = label.chars().count() as u32;
@@ -239,8 +231,13 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 /// the [`message_button_label`] right-aligned, its glyphs in System — the HUD
 /// control colour, like the ability line's deploy button — over the loudest
 /// message's own category band, which keeps painting behind it.
-pub(super) fn draw_message_button(row: &mut [GlyphCell], width: u32, band: Category, label: &str) {
-    let start = message_button_start(width, label.chars().count() as u32);
+pub(super) fn draw_message_button(
+    row: &mut [GlyphCell],
+    width: u32,
+    start: u32,
+    band: Category,
+    label: &str,
+) {
     for (i, glyph) in label.chars().enumerate() {
         let x = start + i as u32;
         if x < width {
@@ -363,6 +360,7 @@ mod tests {
     use crate::render::hud::{render_screen, TOP_ROWS};
     use crate::render::MenuUi;
     use crate::state::{Event, Input};
+    use crate::status::near_line;
     use crate::status::HISTORY_ACTIONS;
     use crate::test_support::open_room;
 
@@ -425,13 +423,14 @@ mod tests {
             "the band speaks the loudest message: {near:?}"
         );
         assert!(
-            near.contains("[+2 ▾][?]"),
-            "a closed counter of the rest, beside the help toggle: {near:?}"
+            near.contains("[?][+2 ▾]"),
+            "the help toggle, then the closed counter of the rest: {near:?}"
         );
 
         // The hit-test agrees with the drawn counter, and there is no button off it.
+        // The deploy control is the outermost of the pair, hard against the margin.
         let label_len = "[+2 ▾]".chars().count() as u32;
-        let start = help_button_start(width) - label_len;
+        let start = width - 1 - label_len;
         assert!(
             is_message_button(&s, start, NEAR_ROW),
             "the counter is hittable"
@@ -561,7 +560,7 @@ mod tests {
         );
         assert!(
             near.trim_end().ends_with("[?]"),
-            "the help toggle keeps the corner: {near:?}"
+            "with nothing to deploy the help toggle has the corner: {near:?}"
         );
         assert!(
             (0..width).all(|x| !is_message_button(&s, x, NEAR_ROW)),
@@ -666,6 +665,68 @@ mod tests {
         );
     }
 
+    /// **The words never run under the controls** (§11.4/§11.7/#300). The near line's
+    /// text budget is computed *from* the corner cluster
+    /// ([`CornerControls::text_max`](super::hud::CornerControls)), so with **both**
+    /// controls up — the `[?]` and the deploy toggle beside it — a message too long for
+    /// what is left is clipped rather than overdrawn by them.
+    ///
+    /// Measured on a deliberately narrow board, because that is the only way to make a
+    /// real message overrun a real budget: the v1 row is 40 wide (§10.2) and leaves 29
+    /// cells beside the pair, which every current message but the listed few fits.
+    #[test]
+    fn a_long_message_stops_short_of_both_corner_controls() {
+        let mut layout = open_room(24, 14);
+        layout.place(Cell::new(1, 5), Terrain::Hideout);
+        let mut s = State::new(
+            layout,
+            Cell::new(1, 5),
+            Direction::North,
+            vec![
+                Guard::stationary(Cell::new(1, 4)),
+                Guard::stationary(Cell::new(1, 2)),
+            ],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        s.set_auto_slide(false);
+        s.step(Input::Step(Direction::North));
+
+        let width = s.layout().facility().width();
+        let corner = super::hud::corner_controls(&s, width, false);
+        let (label, log_start) = corner.log.clone().expect("three live messages deploy");
+        assert_eq!(
+            corner.text_max,
+            corner.help_start - 1,
+            "the budget stops a cell short of the leftmost control"
+        );
+        assert!(
+            near_line(&s).text.chars().count() > corner.text_max as usize,
+            "the fixture's message genuinely overruns the budget"
+        );
+
+        let g = render_screen(&s, ScreenUi::default());
+        let row = row_text(&g, NEAR_ROW);
+        assert!(row.contains("[?]"), "the help toggle is drawn: {row:?}");
+        for (i, glyph) in label.chars().enumerate() {
+            assert_eq!(
+                g.get(log_start + i as u32, NEAR_ROW).glyph,
+                glyph,
+                "the deploy control is drawn where the layout put it: {row:?}"
+            );
+        }
+        // And no glyph of the *message* reaches them: the words read Neutral on the
+        // band (§11.4), the controls read System and the alert tint, so a Neutral
+        // glyph at or past the cluster is the overflow this budget exists to stop.
+        for x in corner.help_start..width {
+            let cell = g.get(x, NEAR_ROW);
+            assert!(
+                cell.glyph == ' ' || cell.fg != Category::Neutral,
+                "a message glyph at column {x}, under the corner cluster: {row:?}"
+            );
+        }
+    }
+
     /// The near line is **untouched** by a non-empty history (#300): the same words,
     /// the same category band, and a counter that still counts only what is *live*.
     #[test]
@@ -700,7 +761,7 @@ mod tests {
             "the counter still counts the two live extras, not the history"
         );
         // And the button is in the same place, so a tap lands where it always did.
-        let start = help_button_start(width) - "[+2 ▾]".chars().count() as u32;
+        let start = width - 1 - "[+2 ▾]".chars().count() as u32;
         assert!(is_message_button(&carried, start, NEAR_ROW));
 
         // Deployed, though, the block is the live three, a rule, and the remembered
@@ -754,7 +815,15 @@ mod tests {
         // whatever the history wanted.
         let g = render_screen(&s, deployed);
         assert_eq!(g.cells.len() as u32, g.width * g.height);
-        assert!(row_text(&g, LOG_TOP_ROW).contains("blocked"));
+        // This action's only message is on the near line, so the block is history
+        // alone — and it opens with a rule saying exactly that (#300).
+        assert!(
+            row_text(&g, LOG_TOP_ROW)
+                .chars()
+                .all(|c| c == SEPARATOR_GLYPH),
+            "a leading rule: the first row below the band is already a past turn"
+        );
+        assert!(row_text(&g, LOG_TOP_ROW + 1).contains("blocked"));
         assert!(
             !row_text(&g, g.height - BOTTOM_ROWS)
                 .chars()
@@ -800,7 +869,11 @@ mod tests {
         let rows = assemble(loud(0), &history);
         assert!(rows.len() <= MAX_LOG_ROWS, "the row budget holds: {rows:?}");
         assert_ne!(rows.last(), Some(&LogRow::Separator), "no trailing rule");
-        assert_ne!(rows.first(), Some(&LogRow::Separator), "no leading rule");
+        assert_ne!(
+            rows.first(),
+            Some(&LogRow::Separator),
+            "no leading rule while this action still has rows of its own"
+        );
         // No two rules in a row: a silent action files nothing, so it can never put an
         // empty band — or a doubled rule — between two blocks.
         assert!(
@@ -810,16 +883,22 @@ mod tests {
             "no doubled rules: {rows:?}"
         );
 
-        // A silent current action is no reason for a leading rule: the oldest blocks
-        // simply stack from the top.
+        // A current action with nothing left to show *is* a reason for a leading rule
+        // (#300): the first row below the near line's band is already a past turn, and
+        // the rule is what says so before the player reads it as current.
         let rows = assemble(Vec::new(), &history);
         assert_eq!(
             rows.first(),
+            Some(&LogRow::Separator),
+            "a block that opens on history opens on a rule"
+        );
+        assert_eq!(
+            rows.get(1),
             Some(&LogRow::Message {
                 message: history.blocks().next().unwrap()[0].clone(),
                 past: true,
             }),
-            "the newest remembered block leads, and is still drawn as past"
+            "and the newest remembered block follows it, drawn as past"
         );
 
         // And nothing at all to say is no log — never a bare rule over the board.
