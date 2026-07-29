@@ -50,7 +50,7 @@ pub(super) const NEAR_ROW: u32 = 0;
 /// The usable line's row (§11.4): directly under the near line, still above the
 /// map. Never blank — with nothing adjacent to offer it teaches the innate verbs
 /// instead ([`usable_row`](super::usable::usable_row), #323).
-const USABLE_ROW: u32 = 1;
+pub(super) const USABLE_ROW: u32 = 1;
 
 /// The screen row the ability bar occupies, on a map `map_h` tall: the last row
 /// of the frame. Shared by the drawing ([`render_screen`]) and the hit-test
@@ -265,15 +265,7 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
 
     let statuses = state.ability_statuses();
 
-    // The map layer, with the near line's message log hanging from the top if it is
-    // deployed. Nothing else overlays the board any more: the ability bar names its
-    // whole set on its own row (#287), so the board stays whole while you read it.
-    // The log owns the whole question of what it holds and whether it holds anything
-    // (§11.7/#300) — this turn's messages, and the last few turns' behind a rule.
-    let mut map = render(state);
-    if ui.message_log_open {
-        super::message_log::overlay_message_log(&mut map, state);
-    }
+    let map = render(state);
 
     // The near line (§11.4/§11.7): the loudest live message as a category band —
     // or the ambient floor when nothing is live — plus the right-aligned help
@@ -326,11 +318,21 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     cells.extend(map.cells);
     cells.extend(ability_bar(width, &statuses));
 
-    Grid {
+    let mut screen = Grid {
         width,
         height,
         cells,
+    };
+    // The deployed message log is laid over the finished frame (§11.7/#300), not over
+    // the map alone: it hangs from the near line's band across the **whole** row,
+    // covering the usable line and as much board as it needs. Nothing else overlays
+    // the frame any more — the ability bar names its whole set on its own row (#287),
+    // so the board stays whole while you are not reading the log. The log owns the
+    // question of what it holds and whether it holds anything at all.
+    if ui.message_log_open {
+        super::message_log::overlay_message_log(&mut screen, state);
     }
+    screen
 }
 
 /// Lay the ability bar out (§11.4/#267/#287): the start column of each ability's

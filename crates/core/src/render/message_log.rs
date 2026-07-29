@@ -27,7 +27,7 @@
 //! so a glance separates what just happened from what is merely on the record, without
 //! having to count rules.
 
-use super::hud::{help_button_start, ScreenUi, NEAR_ROW};
+use super::hud::{help_button_start, ScreenUi, BOTTOM_ROWS, NEAR_ROW, TOP_ROWS};
 use super::*;
 use crate::status::{live_messages, Message, MessageHistory};
 
@@ -85,6 +85,17 @@ impl LogRow {
 /// here is exactly the one [`Visibility`] already names: *how certain and how present
 /// is this*, answered per glyph, resolved to a colour by the shell alone (§11.1).
 const PAST: Visibility = Visibility::Explored;
+
+/// The **screen** row the deployed block hangs from (§11.7/#300): the usable line's
+/// own row, directly under the near line's band, so the block reads as one surface
+/// growing out of the line it belongs to rather than a panel floating a row below it.
+///
+/// It covers the usable line rather than starting under it. That row lists what you
+/// could bump into *next* (§11.4/#323) — the one thing you are provably not doing
+/// while you have the log open to read what already happened — so it is the cheapest
+/// row on the screen to spend, and spending it buys a whole turn of history back. It
+/// returns the instant the log folds, and folding costs no turn either way (§4.4).
+const LOG_TOP_ROW: u32 = super::hud::USABLE_ROW;
 
 /// Every row the deployed log would draw, top to bottom (§11.7/#300) — the current
 /// action's messages loudest first, then a [`LogRow::Separator`] and the previous
@@ -231,6 +242,20 @@ pub(super) fn draw_message_button(row: &mut [GlyphCell], width: u32, band: Categ
     }
 }
 
+/// How many rows the deployed block draws in total (§11.7/#300), clamped to what the
+/// frame can hold: it starts at [`LOG_TOP_ROW`] and may reach down to the map's last
+/// row, never over the ability bar. `0` when it is drawing nothing.
+///
+/// Shared by the drawing ([`overlay_message_log`]) and the geometry
+/// ([`message_log_rows`]) so a shell can never disagree with the frame about where the
+/// block ends.
+fn drawn_rows(state: &State, map_h: u32) -> u32 {
+    // From LOG_TOP_ROW down to the map's last row inclusive: the usable line's row
+    // plus the whole board.
+    let budget = map_h + (TOP_ROWS - LOG_TOP_ROW);
+    (log_rows(state).len() as u32).min(budget)
+}
+
 /// How many **map rows** the deployed message log covers right now (§11.7), or `0`
 /// when nothing of it is on the board — the geometry half of
 /// [`overlay_message_log`], read by a shell that must know which rows are the log's
@@ -238,57 +263,48 @@ pub(super) fn draw_message_button(row: &mut [GlyphCell], width: u32, band: Categ
 /// burn a turn).
 ///
 /// Mirrors the drawing exactly: the log earns the board only when it is deployed
-/// **and** it has something to show ([`log_rows`]), it hangs from the top of the map,
-/// and it is clamped to the map's height on a board too short to hold every row. `0`
-/// while a modal screen is up ([`ScreenUi::menu`] / [`ScreenUi::help_open`]) because
-/// then no board is drawn at all.
+/// **and** it has something to show ([`log_rows`]), it hangs from [`LOG_TOP_ROW`], and
+/// it is clamped on a frame too short to hold every row. Its **first** row falls on the
+/// usable line, which is chrome already, so only what reaches past it is board — a
+/// one-row block covers no map row at all. `0` while a modal screen is up
+/// ([`ScreenUi::menu`] / [`ScreenUi::help_open`]) because then no board is drawn.
 pub fn message_log_rows(state: &State, ui: ScreenUi) -> u32 {
     if ui.menu.is_some() || ui.help_open || !ui.message_log_open {
         return 0;
     }
-    (log_rows(state).len() as u32).min(state.layout().facility().height())
+    let map_h = state.layout().facility().height();
+    drawn_rows(state, map_h).saturating_sub(TOP_ROWS - LOG_TOP_ROW)
 }
 
-/// Overlay the deployed message log onto the map `grid` (§11.7/#267/#300): the
-/// [`log_rows`] one per row, **hanging from the near line** — at the map's top-left,
-/// the current action's loudest message on the first row directly below its own
-/// near-line band, each quieter message one row lower, then a rule and the previous
-/// action's block. Every row is cleared to a uniform band — a one-cell margin, the
-/// longest message, a cell of pad — then the words drawn in the message's own §11.2
-/// category, so the list reads as a solid block over the board and each entry keeps
-/// its threat colour, aligned with the band above.
+/// Overlay the deployed message log onto the finished screen `grid` (§11.7/#267/#300):
+/// the [`log_rows`] one per row, **hanging from the near line** — the current action's
+/// loudest message on [`LOG_TOP_ROW`], the row directly below its own near-line band,
+/// each quieter message one row lower, then a rule and the previous action's block.
 ///
-/// Bounds are clamped, never asserted: on a board too short to hold every row
-/// (only hand-built test states get that small — the v1 board is 40×40, §10.2)
-/// the block shows as many as fit from the top and drops the rest.
+/// Every row is cleared **end to end**: the block is the screen's full width, like the
+/// near line it grows out of, so the rules run edge to edge and no board shows through
+/// between the words and the frame. A one-cell left margin lines the words up under
+/// the band, and each message keeps its own §11.2 category — at full strength for the
+/// current action, [`PAST`] for a remembered one.
+///
+/// Bounds are clamped, never asserted: on a frame too short to hold every row (only
+/// hand-built test states get that small — the v1 board is 40×40, §10.2) the block
+/// shows as many as fit from the top and drops the rest. It never reaches the ability
+/// bar: the bar is the one surface always worth reading, log or no log.
 pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
+    let width = grid.width;
+    let map_h = grid.height.saturating_sub(TOP_ROWS + BOTTOM_ROWS);
     let rows = log_rows(state);
-    let (width, map_h) = (grid.width, grid.height);
-    let band = (rows
-        .iter()
-        .map(|row| match row {
-            LogRow::Message { message, .. } => message.text.chars().count(),
-            // A rule claims no width of its own — it spans whatever the messages
-            // beside it earned, so a block of one short line is not given a rule
-            // three times its length.
-            LogRow::Separator => 0,
-        })
-        .max()
-        .unwrap_or(0) as u32
-        + 2)
-    .min(width);
+    let drawn = drawn_rows(state, map_h) as usize;
     let blank = GlyphCell {
         glyph: ' ',
         fg: Category::Neutral,
         bg: None,
         vis: Visibility::Live,
     };
-    for (y, row) in rows.iter().enumerate() {
-        let y = y as u32;
-        if y >= map_h {
-            break; // out the bottom of a tiny board — show what fits from the top
-        }
-        for dx in 0..band {
+    for (i, row) in rows.iter().take(drawn).enumerate() {
+        let y = LOG_TOP_ROW + i as u32;
+        for dx in 0..width {
             grid.cells[(y * width + dx) as usize] = blank;
         }
         match row {
@@ -297,7 +313,7 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
             LogRow::Message { message, past } => {
                 for (dx, glyph) in message.text.chars().enumerate() {
                     let x = 1 + dx as u32;
-                    if x >= band {
+                    if x >= width {
                         break;
                     }
                     grid.cells[(y * width + x) as usize] = GlyphCell {
@@ -308,10 +324,10 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
                     };
                 }
             }
-            // The rule runs the band's whole width, margins included: a divider that
-            // stopped short of the edge would read as another line of text.
+            // The rule runs the whole row: a divider that stopped short of the edge
+            // would read as another line of text rather than as the frame speaking.
             LogRow::Separator => {
-                for dx in 0..band {
+                for dx in 0..width {
                     grid.cells[(y * width + dx) as usize] = GlyphCell {
                         glyph: SEPARATOR_GLYPH,
                         fg: Category::System,
@@ -428,16 +444,20 @@ mod tests {
             "the deployed counter points up"
         );
         assert!(
-            row_text(&g, TOP_ROWS).contains("security condition"),
-            "the loudest sits nearest the band"
+            row_text(&g, LOG_TOP_ROW).contains("security condition"),
+            "the loudest sits directly under the band, over the usable line"
         );
         assert!(
-            row_text(&g, TOP_ROWS + 1).contains("a body has been found"),
+            row_text(&g, LOG_TOP_ROW + 1).contains("a body has been found"),
             "the rest stack below it, loudest first"
         );
         assert!(
-            row_text(&g, TOP_ROWS + 2).contains("the guard drops — a body is left"),
+            row_text(&g, LOG_TOP_ROW + 2).contains("the guard drops — a body is left"),
             "down to the quietest"
+        );
+        assert!(
+            !row_text(&g, LOG_TOP_ROW).contains("move"),
+            "and the usable line's hint is covered, not pushed down"
         );
     }
 
@@ -459,8 +479,8 @@ mod tests {
         );
         assert_eq!(
             message_log_rows(&s, deployed),
-            3,
-            "deployed, the list covers one map row per live message"
+            2,
+            "three rows deployed, the first of them over the usable line — two are board"
         );
         assert_eq!(
             message_log_rows(&s, ScreenUi::default()),
@@ -565,66 +585,60 @@ mod tests {
             "the bare deployed chevron: {near:?}"
         );
 
-        // Row 0 of the map: this action's only message. Row 1: the rule. Row 2 on:
-        // the loud turn's block, still loudest first.
-        assert!(row_text(&g, TOP_ROWS).contains("blocked"));
-        // The rule spans the block's band — the longest message plus its two cells of
-        // margin — and stops there, leaving the board beyond it untouched.
-        let rule = row_text(&g, TOP_ROWS + 1);
-        let band = log_rows(&s)
-            .iter()
-            .filter_map(|r| match r {
-                LogRow::Message { message, .. } => Some(message.text.chars().count()),
-                LogRow::Separator => None,
-            })
-            .max()
-            .unwrap()
-            + 2;
-        assert_eq!(
-            rule.chars().take_while(|&c| c == SEPARATOR_GLYPH).count(),
-            band,
-            "a rule across the block's band, and no further: {rule:?}"
+        // The block's first row (over the usable line): this action's only message.
+        // Then the rule, then the loud turn's block, still loudest first.
+        assert!(row_text(&g, LOG_TOP_ROW).contains("blocked"));
+        // The rule spans the whole row, edge to edge, like the near line above it.
+        let rule = row_text(&g, LOG_TOP_ROW + 1);
+        assert!(
+            rule.chars().all(|c| c == SEPARATOR_GLYPH),
+            "a rule across the whole row: {rule:?}"
         );
         assert_eq!(
-            g.get(0, TOP_ROWS + 1).fg,
+            g.get(0, LOG_TOP_ROW + 1).fg,
             Category::System,
             "the rule is chrome, not a message category"
         );
         assert_eq!(
-            g.get(0, TOP_ROWS + 1).vis,
+            g.get(0, LOG_TOP_ROW + 1).vis,
             PAST,
             "and it draws dim — everything from the rule down is past"
         );
-        assert!(row_text(&g, TOP_ROWS + 2).contains("security condition"));
-        assert!(row_text(&g, TOP_ROWS + 3).contains("a body has been found"));
-        assert!(row_text(&g, TOP_ROWS + 4).contains("the guard drops"));
+        assert!(row_text(&g, LOG_TOP_ROW + 2).contains("security condition"));
+        assert!(row_text(&g, LOG_TOP_ROW + 3).contains("a body has been found"));
+        assert!(row_text(&g, LOG_TOP_ROW + 4).contains("the guard drops"));
         // Each message keeps its own §11.2 colour across the rule.
         assert_eq!(
             g.get(1, TOP_ROWS + 2).fg,
             Category::Warning,
             "the alert step"
         );
-        assert_eq!(g.get(1, TOP_ROWS + 4).fg, Category::Owned, "the takedown");
+        assert_eq!(
+            g.get(1, LOG_TOP_ROW + 4).fg,
+            Category::Owned,
+            "the takedown"
+        );
 
         // **Now reads louder than then**: this action's row is at full strength and
         // every remembered row is dimmed, category intact.
         assert_eq!(
-            g.get(1, TOP_ROWS).vis,
+            g.get(1, LOG_TOP_ROW).vis,
             Visibility::Live,
             "the current action draws at full strength"
         );
         for dy in 2..=4 {
             assert_eq!(
-                g.get(1, TOP_ROWS + dy).vis,
+                g.get(1, LOG_TOP_ROW + dy).vis,
                 PAST,
                 "row {dy} is a past action's, so it recedes"
             );
         }
 
-        // Exactly one rule, and none trailing: five rows in all.
-        assert_eq!(message_log_rows(&s, deployed), 5);
+        // Exactly one rule, and none trailing: five rows in all, of which the first
+        // sits on the usable line and four are board.
+        assert_eq!(message_log_rows(&s, deployed), 4);
         assert!(
-            !row_text(&g, TOP_ROWS + 5)
+            !row_text(&g, LOG_TOP_ROW + 5)
                 .chars()
                 .any(|c| c == SEPARATOR_GLYPH),
             "no trailing rule under the oldest block"
@@ -674,8 +688,8 @@ mod tests {
             message_log_open: true,
             ..ScreenUi::default()
         };
-        assert_eq!(message_log_rows(&fresh, deployed), 3);
-        assert_eq!(message_log_rows(&carried, deployed), 5);
+        assert_eq!(message_log_rows(&fresh, deployed), 2);
+        assert_eq!(message_log_rows(&carried, deployed), 4);
     }
 
     /// The block is **clamped, never asserted** (§11.7): on a board too short to hold
@@ -715,10 +729,17 @@ mod tests {
             "and there was genuinely more to show"
         );
 
-        // The frame still draws, whole and in bounds.
+        // The frame still draws, whole and in bounds — and never over the ability bar,
+        // whatever the history wanted.
         let g = render_screen(&s, deployed);
         assert_eq!(g.cells.len() as u32, g.width * g.height);
-        assert!(row_text(&g, TOP_ROWS).contains("blocked"));
+        assert!(row_text(&g, LOG_TOP_ROW).contains("blocked"));
+        assert!(
+            !row_text(&g, g.height - BOTTOM_ROWS)
+                .chars()
+                .any(|c| c == SEPARATOR_GLYPH),
+            "the ability bar keeps its row"
+        );
     }
 
     /// Both **[START]** bounds hold whatever the run does (#300): the history keeps at

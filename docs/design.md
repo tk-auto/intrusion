@@ -2612,7 +2612,14 @@ system — it is derived from adjacency every frame and carries no state.
   scrollback — falling back to the ambient status of §11.4, never to an empty
   row. **[SETTLED]** for the **near line**: one row, one live message, wiped by
   the next action.
-- **The deployed log behind the chevron keeps the last few actions** (#300). It
+- **The deployed log behind the chevron keeps the last few actions** (#300). It is
+  the screen's **full width**, like the near line it grows out of, and hangs from
+  the row directly beneath it — **covering the usable line** rather than starting
+  below it. That row lists what you could bump into *next*, which is the one thing
+  you are provably not doing while you have the log open to read what already
+  happened, so it is the cheapest row on the screen to spend; it is back the moment
+  the log folds, and folding costs no turn either way (§4.4). The block never
+  reaches the ability bar — the bar is always worth reading. It
   lists the current action's messages loudest-first, then a **separator rule** in
   the System chrome colour, then the previous message-bearing action's block, and
   so on. That is where "with radio pings (§7.3) there is more to say" is answered:
