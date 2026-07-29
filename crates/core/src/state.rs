@@ -682,6 +682,13 @@ impl State {
     ///
     /// One full turn — sight, then guards — runs before this returns, so the first
     /// [`step`](Self::step) already faces settled guards (§4.2).
+    ///
+    /// That opening frame is computed **as if the previous turn had been a Wait**
+    /// (§5/§8.3/§9.1, #383): the full 360° arc and the waiting sense range, so the
+    /// entry room behind the spawn facing is live and remembered from the start. It
+    /// costs no turn — the counter, the guard phase, the ability clocks and the alert
+    /// are exactly what they were before the posture existed — and the first spent
+    /// non-Wait action clears it.
     pub fn new(
         mut layout: Layout,
         player: Cell,
@@ -716,7 +723,16 @@ impl State {
             player_fov: VisibleSet::default(),
             memory: VisibleSet::default(),
             in_duct: None,
-            waited: false,
+            // **The opening look** (§5/§8.3/§9.1, #383): the run starts *as if* the
+            // previous turn had been a Wait, so the startup turn below computes sight
+            // over the full 360° and the whole entry room lands in memory on frame
+            // one. You dug the tunnel and climbed out of it; you looked around before
+            // stepping off it, and the game should not open by asking you to spend a
+            // turn on the room you are standing in. No turn is spent — this is the
+            // run's starting posture, not a queued action — and the first spent
+            // non-Wait action clears it, after which sight is the ordinary half-disc.
+            // Do not "fix" this back to `false`.
+            waited: true,
             moved_this_turn: false,
             stunned: 0,
             crouched_behind: None,
@@ -763,6 +779,29 @@ impl State {
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
         state
+    }
+
+    /// The scene as it stands once the run's **opening look has been spent**
+    /// (§5/§8.3/#383): the ordinary half-disc and the plain sense box, remembering
+    /// only what that lights.
+    ///
+    /// A test seam, and a narrow one. A fixture assembled to say something about the
+    /// schematic layer ("unexplored, a table is indistinguishable from the floor") or
+    /// about the guard sense is a scene **mid-run**, not one at the mouth of the
+    /// tunnel; without this it would have to be staged in a room big enough to put its
+    /// subject beyond sight range, which is a fixture about arithmetic rather than
+    /// about the thing under test. The tests that *are* about the opening posture say
+    /// so by not calling this.
+    ///
+    /// It spends no turn — no guard steps, no clock ticks, no event — so everything
+    /// but the player's perception is exactly as [`new`](Self::new) left it.
+    #[cfg(test)]
+    pub(crate) fn without_the_opening_look(mut self) -> Self {
+        self.waited = false;
+        self.player_fov = VisibleSet::default();
+        self.memory = VisibleSet::default();
+        self.recompute_sight();
+        self
     }
 
     /// Kill the radio net directly (§7.3/§7.7) — the seam a test uses to reach the

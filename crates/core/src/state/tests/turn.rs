@@ -796,12 +796,15 @@ fn a_crouched_player_is_still_captured_by_contact() {
 }
 
 /// §4.2: the startup turn establishes sight before the first input. A freshly
-/// built [`State`] already carries the player's half-disc and every guard's cone
-/// — and a guard that has not moved is looking **south**, its initial facing
-/// (§7.1).
+/// built [`State`] already carries the player's sight and every guard's cone — and a
+/// guard that has not moved is looking **south**, its initial facing (§7.1).
+///
+/// That opening sight is the **wait's**, not the half-disc (#383): behind the spawn
+/// facing is lit too. The half-disc is what the *next* frame draws, which the second
+/// half of this test pins — so the posture is legible here as a thing that ends.
 #[test]
 fn the_startup_turn_establishes_sight() {
-    let s = State::new(
+    let mut s = State::new(
         open_room(12, 12),
         Cell::new(5, 5),
         Direction::North,
@@ -810,9 +813,12 @@ fn the_startup_turn_establishes_sight() {
         Cell::new(10, 10),
     );
 
-    // The player faces north: two ahead is lit, two directly behind is not (§6.2).
+    // The opening look is 360° (§5/§8.3/§9.1): two ahead *and* two behind are lit.
     assert!(s.player_fov().contains(Cell::new(5, 3)));
-    assert!(!s.player_fov().contains(Cell::new(5, 7)));
+    assert!(
+        s.player_fov().contains(Cell::new(5, 7)),
+        "the run opens looking all round the entry room",
+    );
 
     // The stationary guard looks south from spawn (§7.1): its wedge covers two
     // south, not two north.
@@ -820,6 +826,15 @@ fn the_startup_turn_establishes_sight() {
     assert_eq!(g.facing(), Direction::South);
     assert!(g.fov().contains(Cell::new(8, 10)));
     assert!(!g.fov().contains(Cell::new(8, 6)));
+
+    // One spent step and sight is the ordinary half-disc again: from (5,4) facing
+    // north, two ahead is lit and two behind is dark.
+    s.step(Input::Step(Direction::North));
+    assert!(s.player_fov().contains(Cell::new(5, 2)));
+    assert!(
+        !s.player_fov().contains(Cell::new(5, 6)),
+        "the first spent action ends the opening posture",
+    );
 }
 
 /// §8.3: **Wait grants 360° vision for that turn** — the only way to see behind
