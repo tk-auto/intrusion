@@ -830,9 +830,16 @@ impl StealthBot {
     ///
     /// The whole cost of Dephase lives here (§8.3): the walk-through is free while the
     /// duration lasts and brutal the moment it does not, so a bot standing in a wall
-    /// has exactly one plan. It leaves by the nearest **walkable** neighbour, which is
-    /// the far side it phased in for, or the side it came from if the far side has
-    /// gone — either beats the eject.
+    /// has exactly one plan. It leaves by the nearest **walkable and empty** neighbour
+    /// — the far side it phased in for, or the side it came from if the far side has
+    /// gone. Either beats the eject.
+    ///
+    /// **Empty matters as much as walkable.** A guard is solid (§4.3), so a step into
+    /// the cell one is standing in is refused and the turn is spent still inside the
+    /// wall; do that until the duration runs out and the eject fires anyway. Terrain
+    /// alone was enough to keep the bot safe while patrols covered part of the level,
+    /// and stopped being enough once they covered all of it (§7.5) — a guard parked on
+    /// the landing cell is simply a likelier event now.
     fn leave_the_wall(&self, state: &State) -> Option<Input> {
         let player = state.player();
         let facility = state.layout().facility();
@@ -844,14 +851,25 @@ impl StealthBot {
         {
             return None;
         }
+        let walkable = |dir: &&Direction| {
+            player
+                .step(**dir)
+                .and_then(|cell| facility.terrain(cell))
+                .is_some_and(|t| !t.blocks_movement())
+        };
+        let empty = |dir: &&Direction| {
+            player.step(**dir).is_some_and(|cell| {
+                !state.guards().iter().any(|guard| guard.pos() == cell)
+                    && !state.bodies().iter().any(|body| body.cell() == cell)
+            })
+        };
         Direction::ALL
             .iter()
-            .find(|&&dir| {
-                player
-                    .step(dir)
-                    .and_then(|cell| facility.terrain(cell))
-                    .is_some_and(|t| !t.blocks_movement())
-            })
+            .find(|dir| walkable(dir) && empty(dir))
+            // Every way out is blocked by somebody. Take a walkable one anyway: the
+            // step is refused, but next turn they may have moved, and standing still
+            // by choice is strictly worse.
+            .or_else(|| Direction::ALL.iter().find(walkable))
             .map(|&dir| Input::Step(dir))
     }
 
@@ -993,6 +1011,10 @@ impl StealthBot {
         avoid: &[Cell],
     ) -> Option<Direction> {
         let player = state.player();
+        let phased = matches!(
+            state.ability_state(AbilityId::Dephase),
+            AbilityState::Active { .. }
+        );
         let mut best: Option<(u64, bool, Direction)> = None;
         for dir in Direction::ALL {
             let Some(next) = player.step(dir) else {
@@ -1008,6 +1030,22 @@ impl StealthBot {
             let Some(&cost) = field.get(&next) else {
                 continue;
             };
+            // **Never walk into a solid on the ordinary route while phased.** The field
+            // seeds its goals whether or not they can be stood on — a console and the
+            // exit are solid (§4.3) — and a bump into one is normally the *take*. While
+            // Dephase is up it is not a bump: the step moves the player inside, and a
+            // duration that expires in there costs the safety eject and a stun (§8.3).
+            // Entering a solid is the crossing's business alone, and the crossing
+            // checks it has the window to come out again.
+            if phased
+                && state
+                    .layout()
+                    .facility()
+                    .terrain(next)
+                    .is_some_and(|t| t.blocks_movement())
+            {
+                continue;
+            }
             let watched = danger.contains(&next);
             // Strict `<` keeps the first direction in `Direction::ALL` order on a
             // tie, so the choice is deterministic (§12.4).
@@ -1707,14 +1745,18 @@ mod tests {
     /// so they leave no letter here and are asserted in
     /// [`the_striking_profiles_work_the_body_chain`] instead.
     ///
-    /// The pin has moved twice since, and for reasons worth naming. First, rungs 2 and
-    /// 3 began **walking guards into the facility** (§7.3/#374). Then #398 took the
-    /// spawn-cell anchor off patrol territory, so a reinforcement is cut its beat
-    /// around where its errand **finished** rather than around the room it walked in
-    /// by — two rows moved, both keeping their outcome: `cautious 11` still wins, four
-    /// turns later, and `careless 3` still loses at turn 181 having pressed one cloak
-    /// fewer. Only runs that saw a reinforcement stand down could move at all, which is
-    /// why 46 of 48 rows are untouched.
+    /// The pin has moved three times since, and for reasons worth naming. First, rungs
+    /// 2 and 3 began **walking guards into the facility** (§7.3/#374). Then #398 took
+    /// the spawn-cell anchor off patrol territory, moving two rows.
+    ///
+    /// Then #399 moved nearly all of them, and that is the point rather than a problem:
+    /// the guards stopped covering part of the level and started **partitioning all of
+    /// it** (§7.5). There is no longer a wing with nobody on it, so a route the bot used
+    /// to take unseen now meets a patrol, and 12 wins become losses while 5 losses
+    /// become wins. One run (`baseline 2`) now reaches the input cap still playing —
+    /// the first `playing` row this pin has ever carried, and worth watching rather
+    /// than waving through: the 100-seed batch puts timeouts at 4 in 100 against 3
+    /// before, so it is a tail, not a trend.
     ///
     /// This list is the bot's play against a fixed game, so a change to the *game*
     /// moves it exactly as a change to the cue seam would — which is why the refresh
@@ -1724,54 +1766,54 @@ mod tests {
     #[test]
     fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         const PINNED: [&str; 48] = [
-            "baseline 0 won 63 ",
-            "baseline 1 won 355 rrrrdcr",
-            "baseline 2 lost 220 r",
-            "baseline 3 won 241 rdr",
-            "baseline 4 won 56 ",
-            "baseline 5 lost 119 rd",
-            "baseline 6 won 137 ",
-            "baseline 7 won 96 ",
-            "baseline 8 lost 51 ",
-            "baseline 9 lost 61 rdr",
-            "baseline 10 lost 40 rc",
-            "baseline 11 lost 165 crrcrd",
-            "cautious 0 won 67 ",
-            "cautious 1 lost 165 rdrdr",
-            "cautious 2 lost 529 rrrrdrdr",
-            "cautious 3 lost 50 r",
-            "cautious 4 won 154 rdcrd",
-            "cautious 5 won 363 crdrr",
-            "cautious 6 won 157 ",
-            "cautious 7 won 96 ",
-            "cautious 8 lost 88 r",
-            "cautious 9 lost 242 rdrrd",
-            "cautious 10 lost 94 rd",
-            "cautious 11 won 543 crdrrdrdrd",
-            "aggressive 0 won 63 c",
-            "aggressive 1 won 179 rrdc",
-            "aggressive 2 won 224 ",
-            "aggressive 3 lost 118 rdr",
-            "aggressive 4 won 60 ",
-            "aggressive 5 won 240 rrcrdrr",
-            "aggressive 6 lost 77 r",
-            "aggressive 7 won 100 ",
-            "aggressive 8 won 99 ",
-            "aggressive 9 lost 249 rdrrdrrr",
-            "aggressive 10 lost 33 rc",
-            "aggressive 11 lost 28 rdc",
-            "careless 0 won 66 c",
-            "careless 1 won 179 rrdc",
-            "careless 2 won 215 c",
-            "careless 3 lost 181 rdrcrcrdr",
-            "careless 4 lost 91 crcrd",
-            "careless 5 won 242 rrcrdrrcr",
-            "careless 6 lost 77 r",
-            "careless 7 won 100 ",
-            "careless 8 won 99 ",
-            "careless 9 lost 88 rdcrcdr",
-            "careless 10 lost 33 rc",
-            "careless 11 lost 273 rcrdcrrr",
+            "baseline 0 won 78 rcd",
+            "baseline 1 lost 56 crd",
+            "baseline 2 playing 1000 rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "baseline 3 lost 108 rdr",
+            "baseline 4 lost 64 rdr",
+            "baseline 5 lost 338 rrrrdrdrr",
+            "baseline 6 lost 197 rrdrrrrc",
+            "baseline 7 won 94 r",
+            "baseline 8 won 121 c",
+            "baseline 9 won 84 ",
+            "baseline 10 lost 207 rrdr",
+            "baseline 11 lost 170 cdrrdrcr",
+            "cautious 0 won 107 rc",
+            "cautious 1 lost 55 crdc",
+            "cautious 2 won 196 rd",
+            "cautious 3 won 423 rrdcrd",
+            "cautious 4 lost 47 r",
+            "cautious 5 won 217 ",
+            "cautious 6 won 137 ",
+            "cautious 7 won 353 rdrrdr",
+            "cautious 8 won 115 rd",
+            "cautious 9 won 96 ",
+            "cautious 10 lost 306 rdrc",
+            "cautious 11 won 118 crd",
+            "aggressive 0 lost 77 rcrr",
+            "aggressive 1 won 73 ",
+            "aggressive 2 lost 279 rrr",
+            "aggressive 3 won 224 crc",
+            "aggressive 4 lost 76 rcr",
+            "aggressive 5 lost 89 r",
+            "aggressive 6 won 186 rcrrcd",
+            "aggressive 7 lost 65 r",
+            "aggressive 8 lost 156 rrr",
+            "aggressive 9 won 84 ",
+            "aggressive 10 lost 110 r",
+            "aggressive 11 lost 147 rrr",
+            "careless 0 lost 77 rcrr",
+            "careless 1 won 88 ",
+            "careless 2 lost 182 rcrrcd",
+            "careless 3 won 213 crc",
+            "careless 4 lost 78 rcr",
+            "careless 5 lost 89 r",
+            "careless 6 lost 54 rcd",
+            "careless 7 lost 65 r",
+            "careless 8 won 117 rc",
+            "careless 9 won 84 ",
+            "careless 10 lost 182 rcr",
+            "careless 11 lost 159 rrrcr",
         ];
 
         let mut played = Vec::new();

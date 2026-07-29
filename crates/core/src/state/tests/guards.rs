@@ -933,7 +933,14 @@ fn a_calm_guard_dwells_through_the_turn_loop_and_the_knob_disables_it() {
 fn a_region_beat_carries_the_patrol_across_corridors_and_rooms() {
     let layout = region_strip();
     let anchor = Cell::new(2, 2);
-    let beat = crate::beat::beat_cells(layout.regions(), anchor, 3);
+    // Room A, corridor C and room B, handed over directly: this test is about what a
+    // guard does *with* a beat, not about how the level is partitioned into them, and
+    // a lone guard on a partitioned level would own corridor D as well.
+    let beat: Vec<Cell> = [Cell::new(2, 2), Cell::new(5, 2), Cell::new(9, 2)]
+        .iter()
+        .filter_map(|&c| layout.regions().region_at(c))
+        .flat_map(|id| layout.regions().region(id).cells().iter().copied())
+        .collect();
     let door_a = layout.regions().door_at(Cell::new(4, 2)).unwrap();
     let door_b = layout.regions().door_at(Cell::new(7, 2)).unwrap();
     let door_d = layout.regions().door_at(Cell::new(11, 2)).unwrap();

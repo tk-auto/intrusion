@@ -1171,29 +1171,43 @@ impl Guard {
     }
 
     /// Keep the current patrol destination while it is still worth walking to;
-    /// otherwise choose the next one (§7.5). "Still worth it" means not yet reached
-    /// and still a cell the guard could stand on — a destination it has arrived at,
-    /// or that has become solid, is done, and the sweep picks again.
+    /// otherwise choose the next one (§7.5). "Still worth it" means not yet reached,
+    /// still a cell the guard could stand on, and **still its own ground** — a
+    /// destination it has arrived at, that has become solid, or that a recut has moved
+    /// into somebody else's beat, is done, and the sweep picks again.
+    ///
+    /// That last clause is what stops a recut ([`State::recut_beats`](crate::State))
+    /// stranding a guard: a beat can shrink out from under a live destination, and a
+    /// guard that walked to it anyway would spend the trip patrolling a colleague's
+    /// wing. It is dropped here rather than at the recut so the guard finishes the turn
+    /// it is in and picks again on its own schedule.
     fn repick_patrol_target(&mut self, facility: &Facility) {
+        let territory = self.territory(facility);
         if let Some(dest) = self.destination {
-            if dest != self.pos && facility.can_enter(dest, ACTOR_FILL) {
+            // A guard with no beat has no territory for a destination to be *outside*
+            // of, so the ground check is vacuous there and skipped — otherwise it would
+            // drop the target a beatless fixture was handed on the turn it was built.
+            let ours = territory.is_empty() || territory.contains(&dest);
+            if dest != self.pos && facility.can_enter(dest, ACTOR_FILL) && ours {
                 return;
             }
         }
-        self.destination = self.farthest_uninspected(facility);
+        self.destination = self.farthest_uninspected_in(&territory);
     }
 
     /// The farthest cell in territory the guard has not looked at (§7.5) — *farthest*,
     /// so patrols pace across distances instead of shuffling locally. When every
     /// reachable cell has been inspected the memory is wiped and the sweep starts
     /// over, so a Calm guard never runs out of ground to cover.
-    fn farthest_uninspected(&mut self, facility: &Facility) -> Option<Cell> {
-        let territory = self.territory(facility);
-        if let Some(cell) = pick_farthest(&territory, &self.inspected, self.pos) {
+    ///
+    /// Takes the territory the caller has already drawn, so the per-turn repick reads
+    /// it once rather than once to test the live destination and again to replace it.
+    fn farthest_uninspected_in(&mut self, territory: &[Cell]) -> Option<Cell> {
+        if let Some(cell) = pick_farthest(territory, &self.inspected, self.pos) {
             return Some(cell);
         }
         self.inspected = VisibleSet::default();
-        pick_farthest(&territory, &self.inspected, self.pos)
+        pick_farthest(territory, &self.inspected, self.pos)
     }
 
     /// The guard's patrol territory (§7.5): the patrollable cells of its region
@@ -1313,7 +1327,7 @@ mod tests {
             "no beat, no territory",
         );
         assert_eq!(
-            guard.farthest_uninspected(&facility),
+            guard.farthest_uninspected_in(&guard.territory(&facility)),
             None,
             "and so nothing to walk to — the guard holds",
         );
@@ -1354,7 +1368,6 @@ mod tests {
     fn placed_guard_territories_are_reachable_and_cover_corridors() {
         use crate::generate::generate_level;
         use crate::place::LevelConfig;
-        use crate::region::RegionKind;
         use crate::rng::Rng;
         use crate::test_support::seed_sweep;
         use std::collections::HashSet;
@@ -1382,15 +1395,11 @@ mod tests {
                     );
                 }
 
-                assert!(
-                    territory.iter().any(|&c| {
-                        layout
-                            .regions()
-                            .region_at(c)
-                            .is_some_and(|id| layout.regions().kind(id) == RegionKind::Corridor)
-                    }),
-                    "seed {seed}: a beat with no corridor coverage",
-                );
+                // Corridors are patrolled ground, not space crossed incidentally — but
+                // under a partition (§7.5) that is a property of the *level*, not of
+                // every beat: a part can legitimately be two rooms joined by a door.
+                // The level-wide form is asserted in `place`'s partition test, which
+                // pins that every region — corridors included — is in some beat.
             }
         }
     }
@@ -1472,7 +1481,10 @@ mod tests {
 
         // Asking for the next target wipes the exhausted memory and finds one again.
         assert!(
-            guard.farthest_uninspected(&facility).is_some(),
+            {
+                let territory = guard.territory(&facility);
+                guard.farthest_uninspected_in(&territory).is_some()
+            },
             "the sweep restarts instead of stalling",
         );
         assert!(

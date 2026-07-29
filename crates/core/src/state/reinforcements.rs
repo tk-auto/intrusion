@@ -70,7 +70,7 @@
 //! every turn — never carried — so there is no backlog to reason about.
 
 use super::*;
-use crate::beat::{coordinated_beat_cells, BEAT_REGIONS};
+use crate::beat::coordinated_beat_cells;
 use crate::generate::shuffle;
 use crate::radio::RadioClock;
 
@@ -169,20 +169,37 @@ impl State {
         }
     }
 
-    /// Cut a §7.5 beat for every guard that has come to rest without one — a
-    /// reinforcement whose errand has just ended (§7.3/#374).
+    /// **Recut the level's partition** (§7.5/§10.5) when the guard set has changed —
+    /// which, in a run, means a reinforcement has come to rest and needs ground of its
+    /// own (§7.3/#374).
     ///
-    /// The beat is grown around the guard's **live position**, with the incumbents'
-    /// positions seeded first and the newcomer's last, so it claims ground they do not
-    /// already hold (§7.5's cooperative growth) instead of doubling up on a wing.
+    /// Every beat is regrown together from every guard's **live position**, so the
+    /// incumbents' territories give way to make room rather than the newcomer
+    /// squeezing into whatever is left. That is the half of §7.3's escalation that was
+    /// missing: with beats a partition rather than a cover ([`crate::beat`]), a guard
+    /// walking in raises coverage **density** — the same ground, watched by more
+    /// people, each with less of it — instead of merely adding a body to a level whose
+    /// territories never noticed.
     ///
-    /// Called once per turn but it does work only while a guard is beatless and Calm,
-    /// which is the single turn its errand releases — beat growth must stay a rare
-    /// call, because the anchor it reads moves every turn and a per-turn regrow would
-    /// make every patrol churn (§7.5/[`crate::beat`]). A guard still Responding or
-    /// Alerted is left alone: its errand is where it belongs, and cutting a beat around
-    /// a cell it is walking through would anchor it on nothing.
-    pub(super) fn settle_new_beats(&mut self) {
+    /// **Why the recut happens when the newcomer settles, not when it lands.** Its
+    /// beat is anchored where it stands, and while it is on its errand it is standing
+    /// wherever the walk has got to — the arrival room, or a corridor between. Cutting
+    /// then would tether it to a cell it is only passing through, which is the defect
+    /// #398 removed. So a guard still Responding or Alerted is left out of the anchor
+    /// set entirely and keeps whatever beat it had.
+    ///
+    /// Called once per turn, but it does work only while a Calm guard has no beat —
+    /// the single turn an errand releases. Beat growth must stay a rare call: the
+    /// anchors move every turn, so a per-turn regrow would re-cut every territory under
+    /// every guard and patrols would visibly churn (§7.5/[`crate::beat`]).
+    ///
+    /// A guard's `inspected` memory is deliberately **carried across** the recut. Ground
+    /// it kept is ground it has genuinely looked at, and the new ground reads as
+    /// uninspected and gets swept first — which is exactly the behaviour wanted from a
+    /// territory that just changed shape. A live `destination` that the recut moved out
+    /// of the guard's beat is dropped at the next
+    /// [`repick_patrol_target`](crate::Guard), not here.
+    pub(super) fn recut_beats(&mut self) {
         if !self
             .guards
             .iter()
@@ -190,22 +207,19 @@ impl State {
         {
             return;
         }
-        // Every guard's live position, incumbents first: the newcomer grows last and so
-        // sees the ground the rest already hold.
-        let mut anchors: Vec<Cell> = Vec::with_capacity(self.guards.len());
-        let mut settling: Vec<usize> = Vec::new();
-        for (index, guard) in self.guards.iter().enumerate() {
-            if guard.has_beat() || guard.state() != GuardState::Calm {
-                anchors.push(guard.pos());
-            } else {
-                settling.push(index);
-            }
-        }
-        let held = anchors.len();
-        anchors.extend(settling.iter().map(|&index| self.guards[index].pos()));
+        // Only guards that are actually patrolling take part: a guard mid-errand is
+        // somewhere incidental, so anchoring on it would cut a beat around a corridor.
+        let settling: Vec<usize> = self
+            .guards
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.state() == GuardState::Calm)
+            .map(|(index, _)| index)
+            .collect();
+        let anchors: Vec<Cell> = settling.iter().map(|&i| self.guards[i].pos()).collect();
 
-        let beats = coordinated_beat_cells(self.layout.regions(), &anchors, BEAT_REGIONS);
-        for (&index, beat) in settling.iter().zip(beats.into_iter().skip(held)) {
+        let beats = coordinated_beat_cells(self.layout.regions(), self.layout.facility(), &anchors);
+        for (&index, beat) in settling.iter().zip(beats) {
             self.guards[index].set_beat(beat);
         }
     }

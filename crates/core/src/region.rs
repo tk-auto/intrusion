@@ -23,7 +23,9 @@ use crate::cell::Cell;
 
 /// A handle to a region in a [`RegionGraph`]. Opaque and stable for the life of
 /// the graph; compare handles, don't compute with them.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// Ordered by creation index, which is the graph's own scan order — the
+/// deterministic tie-break the §7.5 partition breaks ties with (§12.4).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct RegionId(u32);
 
 /// A handle to a door edge in a [`RegionGraph`].

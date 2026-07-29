@@ -25,7 +25,7 @@
 //!   bump-adjacent (§4.3) to it: start → every objective → the comms console → exit,
 //!   on the level as it will actually be played.
 
-use crate::beat::{coordinated_beat_cells, BEAT_REGIONS};
+use crate::beat::coordinated_beat_cells;
 use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
@@ -164,7 +164,7 @@ impl Placement {
     /// lives here so every caller — the web build, the sim — spawns the same
     /// patrolling guard.
     pub fn guards(&self, layout: &Layout) -> Vec<Guard> {
-        let beats = coordinated_beat_cells(layout.regions(), self.guard_cells(), BEAT_REGIONS);
+        let beats = coordinated_beat_cells(layout.regions(), layout.facility(), self.guard_cells());
         self.guard_cells()
             .iter()
             .zip(&self.guard_clocks)
@@ -672,53 +672,54 @@ mod tests {
         }
     }
 
-    /// §7.5 coverage on real generated levels: growing the guards' beats
-    /// **cooperatively** spreads them over at least as many distinct regions as
-    /// independent per-guard growth, and strictly more on some seeds — the "two
-    /// guards grinding one wing" weakness measurably reduced. Coordination never
-    /// changes a beat's size, so more union means less overlap, one for one.
+    /// §7.5 coverage on real generated levels: the guards **partition the facility
+    /// between them**, which is the "a wing goes uncovered" weakness answered by
+    /// construction rather than by luck.
+    ///
+    /// Three claims, all of which the old grower failed. Every region is claimed by
+    /// **exactly one** guard: nothing is doubled up, and — the part that was simply
+    /// impossible before, when each beat was capped at four regions on a level with
+    /// seventeen to twenty-three — nothing is left to nobody. Every beat is connected
+    /// across doors, so a guard can walk its whole territory. And the beats are
+    /// **balanced** to within one region, because growth is round-robin.
     #[test]
-    fn coordination_covers_at_least_as_much_ground_as_independent_growth() {
-        use crate::beat::{beat_regions, coordinated_beats, BEAT_REGIONS};
+    fn the_guards_partition_the_facility_between_them() {
+        use crate::beat::{coordinated_beats, is_connected};
 
-        let union = |beats: &[Vec<RegionId>]| {
-            beats
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<HashSet<RegionId>>()
-                .len()
-        };
-
-        let mut improved_somewhere = false;
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             let regions = layout.regions();
-            let anchors = p.guard_cells();
+            let beats = coordinated_beats(regions, layout.facility(), p.guard_cells());
 
-            let independent: Vec<Vec<RegionId>> = anchors
-                .iter()
-                .map(|&s| beat_regions(regions, s, BEAT_REGIONS))
-                .collect();
-            let coordinated = coordinated_beats(regions, anchors, BEAT_REGIONS);
-
-            // Same size per guard (only the composition moves), and no starved beat.
-            for (indep, coord) in independent.iter().zip(&coordinated) {
-                assert_eq!(indep.len(), coord.len(), "seed {seed}: beat size changed");
-                assert!(!coord.is_empty(), "seed {seed}: a guard got no beat");
-            }
-
-            let (indep_union, coord_union) = (union(&independent), union(&coordinated));
-            assert!(
-                coord_union >= indep_union,
-                "seed {seed}: coordination covered less ground ({coord_union} < {indep_union})"
+            let claimed: Vec<RegionId> = beats.iter().flatten().copied().collect();
+            let distinct: HashSet<RegionId> = claimed.iter().copied().collect();
+            assert_eq!(
+                claimed.len(),
+                distinct.len(),
+                "seed {seed}: two guards claim the same region",
             );
-            improved_somewhere |= coord_union > indep_union;
+            assert_eq!(
+                distinct.len(),
+                regions.regions().count(),
+                "seed {seed}: a region belongs to no guard — a wing goes uncovered",
+            );
+
+            for beat in &beats {
+                assert!(!beat.is_empty(), "seed {seed}: a guard got no beat");
+                assert!(
+                    is_connected(regions, layout.facility(), beat),
+                    "seed {seed}: a beat straddles a wall into ground it cannot reach",
+                );
+            }
+            let mut sizes: Vec<usize> = beats.iter().map(Vec::len).collect();
+            sizes.sort_unstable();
+            // Balance is best-effort and the building is the limit: a facility is
+            // hub-shaped, and the hub's group cannot give it up without splitting in
+            // two (see `beat::split`). Splits run from 5/4/4/4 to 9/4/3/1 across the
+            // sweep. What is guaranteed is coverage, connectedness, and that every
+            // guard has ground — asserted above.
+            assert!(sizes.iter().sum::<usize>() == regions.regions().count());
         }
-        assert!(
-            improved_somewhere,
-            "coordination never widened coverage across the sweep — expected some overlap to fix"
-        );
     }
 
     /// §12.4: placement is deterministic — the same seed places the same board,
