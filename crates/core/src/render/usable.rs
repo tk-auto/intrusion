@@ -250,7 +250,7 @@ pub(super) fn usable_row(
     modality: InputModality,
 ) -> Vec<GlyphCell> {
     if affordances.is_empty() {
-        return status_row(width, width, &usable_hint(modality), None);
+        return status_row(width, 1, width, &usable_hint(modality), None);
     }
 
     // The three groups, each keeping the `Direction::ALL` order `affordances`
@@ -272,7 +272,7 @@ pub(super) fn usable_row(
             .iter()
             .map(|&(dir, a)| (format!("{} {}", arrow(dir), a.label()), a.category()))
             .collect();
-        return status_row(width, width, &packed, None);
+        return status_row(width, 1, width, &packed, None);
     };
 
     let blank = GlyphCell {

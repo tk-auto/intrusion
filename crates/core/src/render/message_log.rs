@@ -192,13 +192,13 @@ fn deploy_glyph(unread_this_action: bool, open: bool) -> char {
     }
 }
 
-/// Where the near line's **words** must stop on a screen `width` wide (§11.7): one
-/// cell short of the corner cluster at the widest it gets in practice — both controls
-/// up, the deploy control carrying a single-digit count. The §11.4 row-fits bound is
-/// measured against this, so it can never drift from the layout it describes.
+/// How many cells the near line leaves the **words** on a screen `width` wide (§11.7):
+/// the row minus the `[?]` at its left end and its cell of air, and minus the deploy
+/// control at the right and the frame's margin. The §11.4 row-fits bound is measured
+/// against this, so it can never drift from the layout it describes.
 #[cfg(test)]
 pub(super) fn near_line_text_max(width: u32) -> usize {
-    width.saturating_sub(1 + DEPLOY_LEN + super::hud::HELP_BUTTON_LEN + 1) as usize
+    width.saturating_sub(super::hud::NEAR_LINE_CONTROL_CELLS) as usize
 }
 
 /// The deploy control's label, or `None` when there is nothing to deploy — *what* the
@@ -224,7 +224,7 @@ pub(super) fn deploy_label(state: &State, open: bool) -> Option<String> {
 pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
     let width = state.layout().facility().width();
     // Either chevron is one cell, so which of the two is drawn cannot move the button.
-    let Some((label, start)) = super::hud::corner_controls(state, width, false).log else {
+    let Some((label, start)) = super::hud::near_line_controls(state, width, false).log else {
         return false;
     };
     let len = label.chars().count() as u32;
@@ -427,8 +427,8 @@ mod tests {
             "the band speaks the loudest message: {near:?}"
         );
         assert!(
-            near.contains("[?][!]"),
-            "the help toggle, then the unread mark for the rest of the turn: {near:?}"
+            near.starts_with("[?]") && near.trim_end().ends_with("[!]"),
+            "the [?] at the left end, the unread mark at the right: {near:?}"
         );
 
         // The hit-test agrees with the drawn counter, and there is no button off it.
@@ -456,7 +456,7 @@ mod tests {
         };
         let g = render_screen(&s, ui);
         assert!(
-            row_text(&g, NEAR_ROW).contains("[?][▴]"),
+            row_text(&g, NEAR_ROW).trim_end().ends_with("[▴]"),
             "deployed, the control is the chevron back: nothing is unread now"
         );
         // The block is the *rest* of the turn: the near line's own message is not
@@ -563,8 +563,12 @@ mod tests {
             "no counter for a lone message: {near:?}"
         );
         assert!(
-            near.trim_end().ends_with("[?]"),
-            "with nothing to deploy the help toggle has the corner: {near:?}"
+            near.starts_with("[?]"),
+            "the help toggle keeps the row's left end: {near:?}"
+        );
+        assert!(
+            !near.contains('▾') && !near.contains('!'),
+            "and nothing to deploy leaves the right end to the words: {near:?}"
         );
         assert!(
             (0..width).all(|x| !is_message_button(&s, x, NEAR_ROW)),
@@ -600,7 +604,10 @@ mod tests {
         // The near line speaks the loudest, and counts the two the block will show.
         let near = row_text(&g, NEAR_ROW);
         assert!(near.contains("security condition"), "the band: {near:?}");
-        assert!(near.contains("[?][▴]"), "deployed, and foldable: {near:?}");
+        assert!(
+            near.trim_end().ends_with("[▴]"),
+            "deployed, and foldable: {near:?}"
+        );
 
         // The block: this action's two *unsaid* messages, a rule, then the remembered
         // action — and the near line's own message nowhere in it.
@@ -697,15 +704,20 @@ mod tests {
         s.step(Input::Step(Direction::North));
 
         let width = s.layout().facility().width();
-        let corner = super::hud::corner_controls(&s, width, false);
-        let (label, log_start) = corner.log.clone().expect("three live messages deploy");
+        let controls = super::hud::near_line_controls(&s, width, false);
+        let (label, log_start) = controls.log.clone().expect("three live messages deploy");
         assert_eq!(
-            corner.text_max,
-            corner.help_start - 1,
-            "the budget stops a cell short of the leftmost control"
+            controls.text_max,
+            log_start - 1,
+            "the words stop a cell short of the deploy control"
+        );
+        assert_eq!(
+            controls.text_start,
+            super::hud::HELP_BUTTON_LEN + 1,
+            "and start clear of the [?] and its cell of air"
         );
         assert!(
-            near_line(&s).text.chars().count() > corner.text_max as usize,
+            near_line(&s).text.chars().count() > (controls.text_max - controls.text_start) as usize,
             "the fixture's message genuinely overruns the budget"
         );
 
@@ -722,11 +734,14 @@ mod tests {
         // And no glyph of the *message* reaches them: the words read Neutral on the
         // band (§11.4), the controls read System and the alert tint, so a Neutral
         // glyph at or past the cluster is the overflow this budget exists to stop.
-        for x in corner.help_start..width {
+        for x in 0..width {
+            if x >= controls.text_start && x < controls.text_max {
+                continue; // the message's own span
+            }
             let cell = g.get(x, NEAR_ROW);
             assert!(
                 cell.glyph == ' ' || cell.fg != Category::Neutral,
-                "a message glyph at column {x}, under the corner cluster: {row:?}"
+                "a message glyph at column {x}, outside the words' span: {row:?}"
             );
         }
     }
@@ -761,7 +776,7 @@ mod tests {
             "the same category band"
         );
         assert!(
-            row_text(&g, NEAR_ROW).contains("[?][!]"),
+            row_text(&g, NEAR_ROW).trim_end().ends_with("[!]"),
             "the mark is raised by this turn's own extras, not by the history"
         );
         // And the button is in the same place, so a tap lands where it always did.

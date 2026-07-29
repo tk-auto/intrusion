@@ -251,7 +251,7 @@ impl Game {
             )
             .map(Control::Help);
         }
-        if is_help_button(&self.state, col, row) {
+        if is_help_button(col, row) {
             return Some(Control::HelpToggle);
         }
         if is_message_button(&self.state, col, row) {
@@ -794,21 +794,20 @@ mod tests {
         let g = geometry_for(&state);
         let route = |col, row| {
             tap_route(g, Some((col, row)), |c, r| {
-                is_help_button(&state, c, r).then_some(Control::HelpToggle)
+                is_help_button(c, r).then_some(Control::HelpToggle)
             })
         };
-        // A fresh run has nothing to deploy, so the `[?]` has the corner to itself,
-        // right-aligned with a one-cell margin (#267).
-        let start = width - 4;
-        for col in start..start + 3 {
+        // The `[?]` owns the screen's top-left corner (#267/#300) — there is no
+        // "just left of it" to miss into any more, so the near-miss is the cell after.
+        for col in 0..3 {
             assert_eq!(
                 route(col, 0),
                 Tap::Control(Control::HelpToggle),
                 "col {col}"
             );
         }
-        assert_eq!(route(start - 1, 0), Tap::Nothing, "just left of the button");
-        assert_eq!(route(width - 1, 0), Tap::Nothing, "the margin beyond it");
-        assert_eq!(route(start, 1), Tap::Nothing, "the usable line below it");
+        assert_eq!(route(3, 0), Tap::Nothing, "just right of the button");
+        assert_eq!(route(width - 1, 0), Tap::Nothing, "the row's far margin");
+        assert_eq!(route(0, 1), Tap::Nothing, "the usable line below it");
     }
 }

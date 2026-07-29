@@ -2095,12 +2095,16 @@ is the case this serves.
   the words; that's a nice piece of design — keep it. When no message is live,
   the line falls back to quiet **ambient status** (the alert rung — *"security
   condition 2 of 3"* on screen, §11.8 — an active ability's remaining turns) instead
-  of sitting empty. Its right-hand corner carries the two view toggles, in this
-  order: the `[?]` help button and then, outermost against the frame's one-cell
-  margin, the message log's deploy control — `[?][!]`. The deploy control is the
-  one that comes and goes, so putting it outside keeps the `[?]` — the control
-  that is always there, and the one a lost player reaches for — at a column that
-  moves by less.
+  of sitting empty. Its two view toggles sit at **opposite ends** of the row: the
+  `[?]` help button in the screen's **top-left corner**, the message log's deploy
+  control hard against the frame's one-cell **right** margin, and the message
+  between them. They do different jobs and belong at different ends — `[?]` is the
+  fixed landmark a lost player reaches for, and column 0 makes it the one control
+  whose position depends on nothing at all (not the screen width, not what else is
+  up), while the deploy control comes and goes with what there is to read, so it
+  takes the end that is allowed to change. Splitting them also stops the pair from
+  taking one contiguous bite out of the row's right-hand side, which is where a
+  long message ran out of room.
 
   **The deploy control is three cells, always**, and one glyph carries its whole
   state: `!` when this action raised more than the near line is showing (the one
@@ -2109,25 +2113,28 @@ is the case this serves.
   to be `[+2 ▾]`, a chevron plus a count of the further messages: six cells on
   every frame it was up, spent on a number the player gets for free by deploying
   it. The near line's words are the scarcest space on the screen, and merging the
-  two won three cells back — enough that three messages which had been clipping
-  since before the bound existed now fit, with no wording changed. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
+  two won three cells back (28 → 31) — enough that one message which had been
+  clipping since before the bound existed now fits, with no wording changed. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
   standing state lives on the help panel's Level info tab, and the tint is what
   says there is something new to read behind the control (see
   [`docs/render-reference.md`](render-reference.md) §4.5).
 
-  > **The corner is laid out once, and the message's width comes *from* it.**
-  > **[SETTLED]** The cluster's controls, both hit-tests and the row's text budget
-  > are all read off a single layout, and the words stop one cell short of the
-  > **leftmost** control that is currently up. Deriving each start separately and
-  > letting the budget follow whichever control happened to be leftmost is exactly
-  > the arrangement where adding a control silently runs the words underneath it.
+  > **The row is laid out once, and the message's width comes *from* it.**
+  > **[SETTLED]** Both controls, both hit-tests and the words' span are read off a
+  > single layout: the message starts clear of the `[?]` and stops a cell short of
+  > the deploy control. Deriving each position separately and letting the budget
+  > follow whichever control happened to be nearest is exactly the arrangement
+  > where adding a control silently runs the words underneath it.
   >
-  > **A new near-line message must fit that budget**, and a new corner control must
-  > take its width from the same layout rather than assume the old one. The budget
-  > is the row minus the margin, the deploy control and the `[?]` — 32 cells on the
-  > 40-wide v1 board (§10.2). A control that has to say more belongs in a **fixed**
-  > width with a glyph that varies, not a width that grows with what it says:
-  > widening the chrome takes the cells straight off the message. It is pinned by a test that walks every message
+  > **A new near-line message must fit that budget**, and a new control must take
+  > its width from the same layout rather than assume the old one. The budget is the
+  > row minus the `[?]`, its cell of air, the cell of air before the deploy control,
+  > the control, and the frame's margin — **31 cells** on the 40-wide v1 board
+  > (§10.2). Count it in **cells of message**, never as the column the words stop
+  > at: those differ by one, and the bound spent its whole life as the column,
+  > quietly passing messages one cell too long. A control that has to say more
+  > belongs in a **fixed** width with a glyph that varies, not a width that grows
+  > with what it says: widening the chrome takes the cells straight off the message. It is pinned by a test that walks every message
   > `message_for` can build, with an explicit, only-ever-shrinking list of the few
   > that predate the bound; an over-long message clips silently on a real screen,
   > which is why the check is a test and not a hope.
