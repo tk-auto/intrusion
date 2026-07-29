@@ -133,7 +133,11 @@ mod tests {
                 "block {i} leads with its own loudest message"
             );
             assert_eq!(block[0].category, Category::Warning);
-            assert_eq!(block.len(), 2, "and keeps the quiet half beneath it");
+            assert_eq!(
+                block[1].text, "you were seen",
+                "block {i} remembers why it climbed, right under the headline (#418)"
+            );
+            assert_eq!(block.len(), 3, "and keeps the quiet half beneath them");
         }
     }
 }

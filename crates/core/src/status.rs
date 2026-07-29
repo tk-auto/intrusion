@@ -2,8 +2,10 @@
 //!
 //! The loop reports facts as [`Event`]s; this module turns them into the
 //! messages the **near line** (§11.4) shows: each event becomes at most one
-//! [`Message`] carrying its §11.2 category and its rung on the §11.7 priority
-//! ladder. [`live_messages`] is the whole set from the *last* step, loudest
+//! headline [`Message`] carrying its §11.2 category and its rung on the §11.7
+//! priority ladder — and, where the fact has a *why* worth carrying, a
+//! **subordinate** message spliced directly under it that never sorts on its own
+//! ([`loudest_first`]). [`live_messages`] is the whole set from the *last* step, loudest
 //! first — what the near line deploys when more than one is live (§11.7) — and
 //! [`near_line`] speaks only its loudest. Messages clear on the player's next
 //! action (§11.7), a status line, not a scrollback. When none is live the line
@@ -38,6 +40,11 @@ pub struct Message {
     /// The §11.7 ladder: routine self-narration ≤ 0, threat 2 → 4 → 10,
     /// objective feedback 20. Ambient status sits below everything at
     /// `i32::MIN` — it is the floor, not a message.
+    ///
+    /// A **subordinate** message ([`subordinate_for`]) wears its headline's priority
+    /// and is never sorted by it: [`loudest_first`] orders headlines and splices the
+    /// subordinate back underneath, so the two carry the same number because they are
+    /// the same fact, not because the ladder has an entry for reasons.
     pub priority: i32,
 }
 
@@ -169,7 +176,9 @@ pub fn message_for(event: Event) -> Option<Message> {
         // The facility alert climbed a rung (§7.3): the loudest radio event, a
         // facility-wide escalation — above a found body, below being caught. What the
         // rung *does* to the player is the Level info tab's job (#375); the near line
-        // states the fact, in the same words the tab does ([`alert_line`]).
+        // states the fact, in the same words the tab does ([`alert_line`]) — and **why**
+        // it climbed follows underneath as this event's subordinate message
+        // ([`alert_reason`]), which is the half the player could have acted on.
         Event::AlertRaised { rung, .. } => (alert_line(rung), 5),
         // Guards walking in on rung 2 or 3 (§7.3/#374) say **nothing** here, and that
         // is deliberate. The escalation itself already speaks — the `AlertRaised` above
@@ -259,6 +268,56 @@ pub fn message_for(event: Event) -> Option<Message> {
     })
 }
 
+/// The **subordinate message** an event adds under its headline (§11.7/#418), or
+/// `None` for the events whose headline says the whole fact — which is nearly all of
+/// them, so this stays out of [`message_for`]'s table rather than making every arm
+/// carry a `None`.
+///
+/// It is a second [`Message`], not a second *event*: it wears its headline's category
+/// and priority, and [`loudest_first`] splices it back underneath after the ordering is
+/// done. That is what makes the pair inseparable. A reason emitted as a free-floating
+/// message and left to sort with the rest would be pulled away from its headline —
+/// below it by anything at an intermediate priority (a `BodyCalledIn` at 5, a
+/// `BodyFound` at 4), and the turn an alert climbs is exactly a turn with other loud
+/// events — or, at an equal priority, flipped *above* it by the later-first reversal.
+fn subordinate_for(event: Event, headline: &Message) -> Option<Message> {
+    let text = match event {
+        Event::AlertRaised { trigger, .. } => alert_reason(trigger).to_string(),
+        _ => return None,
+    };
+    Some(Message {
+        text,
+        category: headline.category,
+        priority: headline.priority,
+    })
+}
+
+/// **Why** the facility climbed (§7.3/§11.7, #418) — the §7.3 trigger table in the
+/// player's own words, one line per [`AlertTrigger`](crate::alert::AlertTrigger).
+///
+/// The raise tells the player the building got worse; this tells them what did it,
+/// which is the only half of the news they could have acted on. It is **total over the
+/// enum**, so a seventh trigger cannot ship unnamed — it fails the build instead.
+///
+/// §11.8 holds here as everywhere: these lines name the *world* — a post, a body, a
+/// sighting — and never the mechanism.
+fn alert_reason(trigger: crate::alert::AlertTrigger) -> &'static str {
+    use crate::alert::AlertTrigger;
+    match trigger {
+        AlertTrigger::Sighting => "you were seen",
+        AlertTrigger::MissedPing => "a post stopped answering",
+        // The count is the shipped **[START]** threshold
+        // (`alert::SIGHTINGS_FOR_SECOND_RUNG`), spelled as a word because a bare
+        // numeral reads as a tally the player was supposed to have been keeping. A
+        // §13.2 sweep may move that threshold; the sim never reads the near line, so
+        // the wording follows the shipped ladder.
+        AlertTrigger::RepeatSightings => "seen three times now",
+        AlertTrigger::ConsoleTampered => "they know the intel was touched",
+        AlertTrigger::BodyFound => "a guard found a body",
+        AlertTrigger::SecondPostSilent => "a second post stopped answering",
+    }
+}
+
 /// Every live message from the player's last action (§11.7), **loudest first** —
 /// the full set the deployable near line lists, of which [`near_line`] speaks
 /// only the first. Empty when the last action said nothing: the ambient floor is
@@ -276,15 +335,31 @@ pub fn live_messages(state: &State) -> Vec<Message> {
 /// log (#300), so a block that has scrolled into the history reads in exactly the
 /// order it read in while it was live. Two orderings would have been two chances to
 /// disagree about which message is the loudest.
+///
+/// **Only headlines are ordered.** An event's subordinate message
+/// ([`subordinate_for`]) travels with its headline through the sort and is spliced back
+/// directly beneath it, so no event landing on the same turn can come between a fact
+/// and its reason however loud that event is (#418). The first entry is therefore
+/// always a headline, which is what lets [`near_line`] simply take it.
 pub(crate) fn loudest_first(events: &[Event]) -> Vec<Message> {
-    let mut messages: Vec<Message> = events.iter().filter_map(|&e| message_for(e)).collect();
+    let mut blocks: Vec<(Message, Option<Message>)> = events
+        .iter()
+        .filter_map(|&event| {
+            let headline = message_for(event)?;
+            let subordinate = subordinate_for(event, &headline);
+            Some((headline, subordinate))
+        })
+        .collect();
     // The near line shows the *last* of the top-priority events (`max_by_key`
     // keeps the later of equal keys). Lead the list with that same message:
     // reverse to later-first, then a **stable** descending sort by priority keeps
     // later-first order within each rung.
-    messages.reverse();
-    messages.sort_by_key(|m| std::cmp::Reverse(m.priority));
-    messages
+    blocks.reverse();
+    blocks.sort_by_key(|(headline, _)| std::cmp::Reverse(headline.priority));
+    blocks
+        .into_iter()
+        .flat_map(|(headline, subordinate)| std::iter::once(headline).chain(subordinate))
+        .collect()
 }
 
 /// What the near line shows right now (§11.4/§11.7): the highest-priority
@@ -656,6 +731,19 @@ mod tests {
             );
             assert_eq!(line, format!("security condition {rung} of 3"));
         }
+        // The same trip-wire over the reason lines (#418): they are the other half of
+        // the same fact, and a mechanism word smuggled in underneath the headline is no
+        // better than one in it. `trigger` is the design's word too, and so is the
+        // ladder's own name.
+        for trigger in AlertTrigger::ALL {
+            let reason = alert_reason(trigger).to_lowercase();
+            for word in ["rung", "trigger", "ladder", "alert level"] {
+                assert!(
+                    !reason.contains(word),
+                    "{reason:?} says {word:?} — the design's word, not the player's (§11.8)",
+                );
+            }
+        }
     }
 
     /// §7.3/§11.4: once the radio has stepped the facility alert, the value is
@@ -836,16 +924,162 @@ mod tests {
         let live = live_messages(&s);
         assert_eq!(
             live.iter().map(|m| m.priority).collect::<Vec<_>>(),
-            vec![5, 4, 0],
-            "loudest first: the escalation, then the found body, then the narration",
+            vec![5, 5, 4, 0],
+            "loudest first: the escalation and its reason, the found body, the narration",
         );
         assert_eq!(live[0].text, "security condition 3 of 3");
-        assert_eq!(live[1].text, "a body has been found");
-        assert_eq!(live[2].text, "the guard drops — a body is left");
+        assert_eq!(
+            live[1].text, "a guard found a body",
+            "the reason, riding under it"
+        );
+        assert_eq!(live[2].text, "a body has been found");
+        assert_eq!(live[3].text, "the guard drops — a body is left");
         assert_eq!(
             live.first().cloned(),
             Some(near_line(&s)),
             "the list leads with exactly the near line's band",
+        );
+    }
+
+    /// §7.3/§11.7/#418: **every** trigger names itself. Walked over
+    /// [`AlertTrigger::ALL`], so a seventh trigger shipping without a reason fails here
+    /// — and the reason follows its own headline immediately, at the same priority and
+    /// in the same category, because the two are one fact.
+    #[test]
+    fn every_alert_trigger_says_what_raised_it() {
+        for trigger in AlertTrigger::ALL {
+            let rung = trigger.rung();
+            let pair = loudest_first(&[Event::AlertRaised { rung, trigger }]);
+            assert_eq!(
+                pair.len(),
+                2,
+                "{trigger:?} raised a headline with no reason under it",
+            );
+            assert_eq!(pair[0].text, alert_line(rung), "{trigger:?}");
+            assert_eq!(pair[1].text, alert_reason(trigger), "{trigger:?}");
+            assert!(
+                !pair[1].text.is_empty(),
+                "{trigger:?} has an empty reason line",
+            );
+            assert_eq!(pair[1].category, pair[0].category, "{trigger:?}: one fact");
+            assert_eq!(pair[1].priority, pair[0].priority, "{trigger:?}: one fact");
+        }
+        // The six of them are six *different* lines: a reason shared by two triggers
+        // would tell the player the wrong thing about one of them.
+        let reasons: std::collections::BTreeSet<&str> =
+            AlertTrigger::ALL.iter().map(|&t| alert_reason(t)).collect();
+        assert_eq!(reasons.len(), AlertTrigger::ALL.len(), "{reasons:?}");
+    }
+
+    /// #418's whole reason for the splice: **nothing gets between a fact and its
+    /// reason**. The turn an alert climbs is exactly a turn with other loud events, and
+    /// they sort around the pair — never through it — however loud they are.
+    #[test]
+    fn no_event_can_come_between_the_raise_and_its_reason() {
+        let at = Cell::new(3, 3);
+        // Everything the same turn could plausibly raise, on both sides of the raise's
+        // own rung: the capture (10), the eject (6), a body call (5, the raise's equal),
+        // a found body (4) and the takedown's self-narration (0).
+        let events = [
+            Event::TakenDown { at },
+            Event::BodyFound { at },
+            Event::AlertRaised {
+                rung: 3,
+                trigger: AlertTrigger::BodyFound,
+            },
+            Event::BodyCalledIn { at },
+            Event::Ejected {
+                from: at,
+                to: Cell::new(3, 4),
+                stunned: crate::phase_eject_stun(1),
+            },
+            Event::Captured { by: at },
+        ];
+        let texts: Vec<String> = loudest_first(&events).into_iter().map(|m| m.text).collect();
+        let headline = texts
+            .iter()
+            .position(|t| t == "security condition 3 of 3")
+            .expect("the raise speaks");
+        assert_eq!(
+            texts.get(headline + 1).map(String::as_str),
+            Some("a guard found a body"),
+            "the reason follows its headline immediately: {texts:?}",
+        );
+
+        // …and it holds for every rotation of the same turn's events, so the guarantee
+        // is the splice and not the order the loop happened to report them in.
+        for shift in 0..events.len() {
+            let mut rotated = events;
+            rotated.rotate_left(shift);
+            let texts: Vec<String> = loudest_first(&rotated)
+                .into_iter()
+                .map(|m| m.text)
+                .collect();
+            let i = texts
+                .iter()
+                .position(|t| t == "security condition 3 of 3")
+                .expect("the raise speaks");
+            assert_eq!(
+                texts.get(i + 1).map(String::as_str),
+                Some("a guard found a body"),
+                "rotation {shift}: {texts:?}",
+            );
+        }
+    }
+
+    /// §11.4/#418: the **near line is unchanged** by the reason. It is one grid row and
+    /// it speaks the loudest message only — the condition, in the words it always used.
+    #[test]
+    fn the_near_line_still_speaks_the_condition_alone() {
+        let mut s = state(Cell::new(5, 6), Cell::new(3, 3));
+        s.step(Input::Wait);
+        let quiet = near_line(&s).text;
+
+        for trigger in AlertTrigger::ALL {
+            let rung = trigger.rung();
+            let line = loudest_first(&[Event::AlertRaised { rung, trigger }])
+                .into_iter()
+                .next()
+                .expect("the raise speaks");
+            assert_eq!(line.text, alert_line(rung), "{trigger:?}");
+            assert_eq!(line.category, Category::Warning);
+            assert_eq!(line.priority, 5);
+        }
+        assert_eq!(near_line(&s).text, quiet, "and a quiet turn is untouched");
+    }
+
+    /// #418: the pair survives into [`MessageHistory`] and reads there in the order it
+    /// read live — the record and the near line cannot tell different stories about the
+    /// same turn.
+    #[test]
+    fn the_reason_follows_its_headline_into_the_history() {
+        let at = Cell::new(4, 4);
+        let events = [
+            Event::BodyFound { at },
+            Event::AlertRaised {
+                rung: 3,
+                trigger: AlertTrigger::BodyFound,
+            },
+        ];
+        let mut history = MessageHistory::default();
+        history.record(&events);
+
+        let filed: Vec<String> = history
+            .blocks()
+            .next()
+            .expect("a loud action is filed")
+            .iter()
+            .map(|m| m.text.clone())
+            .collect();
+        let live: Vec<String> = loudest_first(&events).into_iter().map(|m| m.text).collect();
+        assert_eq!(filed, live, "remembered exactly as it read live");
+        assert_eq!(
+            filed,
+            vec![
+                "security condition 3 of 3".to_string(),
+                "a guard found a body".to_string(),
+                "a body has been found".to_string(),
+            ],
         );
     }
 
