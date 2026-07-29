@@ -22,7 +22,7 @@ pub trait PlayerPolicy {
     /// attributable to the temperament that produced it.
     ///
     /// A scripted policy plays no temperament, so it answers `None` and its rows
-    /// emit `null`: "no profile", never a fake `"baseline"` that would claim a
+    /// emit `null`: "no profile", never a fake `"balanced"` that would claim a
     /// bot ran the batch. Defaulted, so a new policy is honest by omission.
     fn profile_name(&self) -> Option<&'static str> {
         None

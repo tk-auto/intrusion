@@ -37,7 +37,7 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities lockd
 Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
 **its own** control, never against another's (§13.4).
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.38 → **0.36** | 0.60 → **0.59** | 0.50 → **0.49** | 0.49 → **0.46** |
 | `turns_to_win_median` | 117.5 → **115.0** | 183.5 → **172.0** | 111.0 → **111.0** | 116.0 → **101.0** |
@@ -49,7 +49,7 @@ Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each p
 
 Disjoint block, `--seed 100 --runs 100`:
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.44 → **0.36** | 0.63 → **0.61** | 0.37 → **0.41** | 0.46 → **0.49** |
 | `turns_to_win_median` | 117.5 → **115.5** | 204.0 → **195.0** | 92.0 → **97.0** | 110.0 → **117.0** |
@@ -66,14 +66,14 @@ Disjoint block, `--seed 100 --runs 100`:
   against Dephase and Pierce Wall which move it up. The pattern across all seven cued
   verbs is now hard to miss: the abilities that **answer a hunt** make runs more
   alike, and the abilities that **change the geometry** make them less alike.
-- **Win rate leans down** — five of eight profile-blocks, and `baseline` loses 0.02 and
+- **Win rate leans down** — five of eight profile-blocks, and `balanced` loses 0.02 and
   0.08. It is the only cue here whose win rate leans negative on both blocks, and the
   §8.3 row predicts exactly that: your own lock is never refused but it *is* paid for,
   a turn at a time, and a bot that seals the ground it is fleeing across will meet its
   own handiwork. Whether this cue is spending the ability badly, or the ability is
   genuinely double-edged, is precisely the shy-cue ambiguity #349's floor sweep exists
   to settle.
-- **Wins get faster when they happen** (`baseline` median 117.5 → 115, `careless` 116 →
+- **Wins get faster when they happen** (`balanced` median 117.5 → 115, `careless` 116 →
   101 at seed 0) and every temperament times out less at seed 0. Fewer wins, quicker
   ones — a real §13.3 flag rather than a verdict.
 - **Not dominant** — 0.56%–0.92% of spent turns.

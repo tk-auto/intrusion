@@ -46,8 +46,8 @@ summary row (schema: crates/sim/README.md).
   --without L    tech to drop from the loadout                 (default: none)
   --bot          play each run with the baseline stealth bot
                  instead of a script (design §13.2)           (default: off)
-  --profile NAME the bot's playstyle temperament (§13.2): baseline, cautious,
-                 aggressive or careless; needs --bot        (default: baseline)
+  --profile NAME the bot's playstyle temperament (§13.2): balanced, cautious,
+                 aggressive or careless; needs --bot        (default: balanced)
   --script MOVES inputs replayed from the start of every run:
                  N/E/S/W step, `.` waits, +/- an ability key
                  (e.g. +r) activates/deactivates; after the
@@ -282,13 +282,13 @@ fn parse_number<T: std::str::FromStr>(text: &str, flag: &str) -> Result<T, Strin
         .map_err(|_| format!("{flag}: not a number: {text}"))
 }
 
-/// Resolve `--profile NAME` to the temperament it names, defaulting to the
-/// baseline when the flag is absent. An unknown name is refused with the whole
+/// Resolve `--profile NAME` to the temperament it names, defaulting to
+/// `balanced` when the flag is absent. An unknown name is refused with the whole
 /// vocabulary rather than falling back: a batch whose rows claim a profile that
 /// never ran is worse than a batch that did not start (§13.2 attribution).
 fn resolve_profile(name: Option<&str>) -> Result<Profile, String> {
     match name {
-        None => Ok(Profile::BASELINE),
+        None => Ok(Profile::BALANCED),
         Some(name) => Profile::by_name(name).ok_or_else(|| {
             format!(
                 "--profile: unknown profile {name}; known profiles: {}",
@@ -381,10 +381,10 @@ mod tests {
         parse_args(&argv.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
     }
 
-    /// `--profile` selects the temperament, and defaults to the baseline so an
+    /// `--profile` selects the temperament, and defaults to `balanced` so an
     /// existing `--bot` command line keeps meaning exactly what it did (#198).
     #[test]
-    fn the_profile_flag_picks_a_temperament_and_defaults_to_baseline() {
+    fn the_profile_flag_picks_a_temperament_and_defaults_to_balanced() {
         for name in Profile::ALL.map(|p| p.name) {
             let parsed = args(&["--bot", "--profile", name]).expect("a known profile parses");
             let Policy::Bot(profile) = parsed.policy else {
@@ -399,11 +399,11 @@ mod tests {
         else {
             panic!("a bare --bot must yield the bot policy");
         };
-        assert_eq!(profile, Profile::BASELINE, "the default is today's bot");
+        assert_eq!(profile, Profile::BALANCED, "the default is today's bot");
     }
 
     /// An unknown profile is refused **with the vocabulary**, never run as the
-    /// baseline: rows attributed to a temperament that never played would be worse
+    /// default: rows attributed to a temperament that never played would be worse
     /// than a batch that did not start (§13.2).
     #[test]
     fn an_unknown_profile_is_refused_with_the_known_names() {

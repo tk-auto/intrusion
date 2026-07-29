@@ -45,7 +45,7 @@ cargo run --release -p intrusion-sim -- --bot --profile <NAME> --abilities pierc
 Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each profile against
 **its own** control, never against another's (§13.4).
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.38 → **0.42** | 0.60 → **0.62** | 0.50 → **0.52** | 0.49 → **0.49** |
 | `turns_to_win_median` | 117.5 → **118.5** | 183.5 → **183.5** | 111.0 → **111.0** | 116.0 → **106.0** |
@@ -57,7 +57,7 @@ Measured at `7d5dc01+cues-347-remeasured`, on the post-crouch bot (#382). Each p
 
 Disjoint block, `--seed 100 --runs 100`:
 
-| Metric | baseline | cautious | aggressive | careless |
+| Metric | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
 | `win_rate` | 0.44 → **0.42** | 0.63 → **0.62** | 0.37 → **0.37** | 0.46 → **0.48** |
 | `turns_to_win_median` | 117.5 → **115.0** | 204.0 → **198.0** | 92.0 → **92.0** | 110.0 → **113.5** |
@@ -72,7 +72,7 @@ Disjoint block, `--seed 100 --runs 100`:
 - **The slot is non-zero, and that is most of what this measurement proves.** 7–21
   bores per 100-run batch, 0.05%–0.14% of spent turns — the smallest share of the
   six cues by some way.
-- **The cue is shy, and it is worth saying so plainly.** Only 8 of 100 `baseline`
+- **The cue is shy, and it is worth saying so plainly.** Only 8 of 100 `balanced`
   runs bored at all, and **no run spent more than one** of its three uses. So
   the honest statement is not "Pierce Wall is a small ability" but *"this cue asks a
   high price and the facility rarely offers it"* — the exact "weak ability **or** shy
@@ -105,4 +105,4 @@ long as the throw. The crossing now requires the far side to be walkable floor, 
   tuned away.
 - `7d5dc01+cues-347-remeasured` (#347) — **re-measured on the post-crouch bot**
   (#382 landed while this branch was open, changing the policy and refreshing the
-  innate baseline, so every control column above moved). The cue reads **shyer** than before: 8 of 100 `baseline` runs bore, and no run now spends more than one of its three uses.
+  innate baseline, so every control column above moved). The cue reads **shyer** than before: 8 of 100 `balanced` runs bore, and no run now spends more than one of its three uses.
