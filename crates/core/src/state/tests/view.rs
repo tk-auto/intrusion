@@ -332,7 +332,8 @@ fn guards_classify_as_seen_sensed_or_neither() {
         ],
         Vec::new(),
         Cell::new(38, 38),
-    );
+    )
+    .without_the_opening_look();
 
     assert!(
         s.player_fov().contains(seen),
@@ -412,7 +413,8 @@ fn an_unseen_guards_cone_is_not_visible_danger() {
         vec![Guard::stationary(guard)],
         Vec::new(),
         Cell::new(18, 18),
-    );
+    )
+    .without_the_opening_look();
     assert!(
         !s.player_fov().contains(guard),
         "precondition: the guard is unseen"
@@ -456,7 +458,8 @@ fn a_fresh_spot_from_an_unseen_guard_is_visible_danger() {
         vec![Guard::stationary(Cell::new(10, 5))],
         Vec::new(),
         Cell::new(18, 18),
-    );
+    )
+    .without_the_opening_look();
     assert!(
         !s.player_fov().contains(Cell::new(10, 5)),
         "precondition: the spotter is behind the player, unseen",
@@ -515,6 +518,11 @@ fn the_sense_passes_through_walls() {
 /// player spent waiting. Both are pinned so a later change is visible. A walled-off
 /// guard 11 cells away — just outside the box, no line of sight — is *not* sensed;
 /// the same guard becomes Sensed the turn the player waits (10 → 20).
+///
+/// The run **opens** on the widened box, because it opens as if the previous turn had
+/// been a Wait (#383): the guard is sensed from frame one, the first spent step
+/// narrows the box to 10 and drops it, and a Wait pulls it back. All three readings
+/// come off the same walled-off guard, so the widening is the only thing that moves.
 #[test]
 fn the_sense_range_is_ten_and_twenty_on_wait() {
     assert_eq!(PLAYER_SENSE_RANGE, 10, "the [START] sense range");
@@ -539,11 +547,22 @@ fn the_sense_range_is_ten_and_twenty_on_wait() {
         Cell::new(38, 38),
     );
 
-    assert_eq!(s.sense_range(), 10, "no wait yet: the base box");
+    // The opening look is the wait's, both halves of it (#383).
+    assert_eq!(s.sense_range(), 20, "the run opens on the widened box");
+    assert_eq!(
+        s.perceive_guard(&s.guards()[0]),
+        Some(GuardPerception::Sensed),
+        "11 cells away is inside the opening 20-box",
+    );
+
+    // A spent step south clears the posture — and takes the guard a cell further off,
+    // so it is outside the plain box twice over.
+    s.step(Input::Step(Direction::South));
+    assert_eq!(s.sense_range(), 10, "the first spent turn: the base box");
     assert_eq!(
         s.perceive_guard(&s.guards()[0]),
         None,
-        "11 cells away is just outside the 10-box",
+        "12 cells away is outside the 10-box",
     );
 
     s.step(Input::Wait);
@@ -842,6 +861,7 @@ fn the_debug_reveal_makes_the_players_sight_the_whole_level() {
             Vec::new(),
             Cell::new(38, 38),
         )
+        .without_the_opening_look()
     };
     let fogged = build();
     assert_eq!(fogged.perceive_guard(&fogged.guards()[0]), None);
@@ -994,4 +1014,115 @@ fn the_gate_says_how_much_intel_is_needed_not_how_much_is_out() {
         assert_eq!(s.intel_needed_to_exit(), 0, "{gate:?}: nothing to gate on");
         assert!(s.exit_ready());
     }
+}
+
+/// **The run opens with the wait's look** (§5/§8.3/§9.1, #383): the opening frame is
+/// computed as if the previous turn had been a Wait, so the entry room *behind* the
+/// spawn facing is live on frame one and goes into memory with the rest of it.
+///
+/// You dug the tunnel and climbed out of it — you looked around before stepping off.
+/// The alternative opens the game by teaching the player that they have to spend a
+/// turn on the room they are standing in, which is the wrong first beat.
+///
+/// The first spent action ends the posture and sight is the ordinary half-disc from
+/// then on; what the look already lit stays **remembered**, because memory is
+/// monotonic (§11.5a).
+#[test]
+fn the_run_opens_looking_all_round_the_entry_room() {
+    let behind = Cell::new(5, 7); // two south of a north-facing spawn
+    let mut s = State::new(
+        open_room(12, 12),
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+
+    assert!(
+        s.player_fov().contains(behind),
+        "the opening look is 360°, so behind the spawn facing is live",
+    );
+    assert!(s.memory().contains(behind), "and it enters memory with it");
+
+    // A spent step north: the arc narrows, and the cell it lit is remembered rather
+    // than lost.
+    s.step(Input::Step(Direction::North));
+    assert!(
+        !s.player_fov().contains(behind),
+        "the first spent action ends the posture",
+    );
+    assert!(
+        s.memory().contains(behind),
+        "what the opening look saw stays seen (§11.5a)",
+    );
+}
+
+/// The opening look reaches the **usable line** too (§11.4/#383): `affordances` is
+/// FOV-gated, so before this the console you came up beside was not offered until you
+/// turned to look at it — a bump you could make but were not told about.
+#[test]
+fn the_opening_look_offers_the_console_behind_you() {
+    let mut s = State::new(
+        open_room(12, 12),
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(5, 6)], // a console directly *behind* the spawn facing
+        Cell::new(10, 10),
+    );
+    assert_eq!(
+        s.affordances(),
+        vec![(Direction::South, Affordance::TakeIntel)],
+        "the opening look offers the bump behind you",
+    );
+
+    // And the gate is genuinely the look: spend the posture on a step and the same
+    // console, now behind again, drops off the line.
+    s.step(Input::Step(Direction::North));
+    assert_eq!(s.affordances(), Vec::new());
+}
+
+/// **The opening look costs no turn** (#383): it is the run's starting posture, not a
+/// queued action. Everything but perception on the opening frame is what it was before
+/// the posture existed — the turn counter, the guards where placement put them and
+/// facing their §7.1 spawn direction, a quiet alert, and every ability ready.
+///
+/// The perception half is pinned on both sides: the sense reads §9.1's **waiting**
+/// box, while an ability fired *now* still measures off the plain one (#325/#345) —
+/// an action taken on turn one is not that look.
+#[test]
+fn the_opening_look_spends_no_turn() {
+    let guard = Cell::new(8, 8);
+    let s = State::new(
+        open_room(12, 12),
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::stationary(guard)],
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
+
+    assert_eq!(s.turn(), 0, "no turn is spent");
+    assert_eq!(s.alert(), 0);
+    assert_eq!(s.guards()[0].pos(), guard, "no guard has moved");
+    assert_eq!(
+        s.guards()[0].facing(),
+        Direction::South,
+        "§7.1 spawn facing"
+    );
+    assert_eq!(s.ability_state(AbilityId::Confusion), AbilityState::Ready);
+    assert_eq!(s.outcome(), Outcome::Playing);
+
+    assert_eq!(
+        s.sense_range(),
+        PLAYER_SENSE_RANGE_WAITING,
+        "the wait is one posture with two halves (§9.1)",
+    );
+    assert_eq!(
+        s.acting_sense_range(),
+        PLAYER_SENSE_RANGE,
+        "but a blast fired on turn one measures off the plain box (#325/#345)",
+    );
 }

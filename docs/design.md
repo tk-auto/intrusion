@@ -293,6 +293,15 @@ sight, though its *cone* stays hidden until you can actually see it. This
 asymmetry is the foundation of the whole game: **avoidance is viable because you
 see them first.** Do not erode it casually.
 
+**The run opens with the wait's look** (#383). The first frame is computed as if the
+previous turn had been a *Wait* (§8.3/§9.1) — the full 360° arc and the widened
+guard sense — so the entry room you have just climbed into is live and remembered
+before you move. It costs **no turn**: it is the run's starting posture, not a queued
+action, and the first spent non-Wait action ends it. You dug the tunnel and came up
+through it; opening the game by making the player spend a turn on the room they are
+standing in is the wrong first beat, and §10.6's "the starting area should be safe" is
+better confirmed by looking than taken on faith.
+
 One thing erodes it **on purpose**: the **Vision** passive (§8.3/#265) lifts the
 held player's arc to 360° and their range to 20, removing the "can't see behind
 you" constraint that makes Wait and corners tense. That is not casual — it is a

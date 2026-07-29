@@ -1532,7 +1532,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         let cell = render(&s).get(10, 14);
         assert_eq!(
             (cell.glyph, cell.fg, cell.vis),
@@ -1575,7 +1576,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         // A stretch of the south wall, behind the north-facing player.
         let behind = Cell::new(10, 19);
         let cell = render(&s).get(behind.x, behind.y);
@@ -1630,7 +1632,8 @@ mod tests {
             Vec::new(),
             [Cell::new(14, 16)], // an intel console too
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         let g = render(&s);
 
         let mut seen: Vec<(char, Category)> = Vec::new();
@@ -1707,7 +1710,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         let g = render(&s);
 
         let run: String = (6..=12).map(|x| g.get(x, 15).glyph).collect();
@@ -1748,6 +1752,7 @@ mod tests {
                 [Cell::new(14, 16)],
                 Cell::new(18, 18),
             )
+            .without_the_opening_look()
             .with_modifiers(LevelModifiers {
                 full_layout_known: layout_known,
                 ..LevelModifiers::default()
@@ -1860,7 +1865,8 @@ mod tests {
             vec![Guard::stationary(guard)],
             [Cell::new(10, 14)],
             Cell::new(38, 38),
-        );
+        )
+        .without_the_opening_look();
 
         // Never seen and out of sense range: the intel masks as the schematic floor
         // of the unexplored room it stands in, and the guard is not drawn at all.
@@ -2020,7 +2026,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
 
         // A cupboard is an alcove recessed into a wall run, so on the plans it is
         // fabric: schematic wall, exactly like the run it sits in (#307). Both the
@@ -2068,7 +2075,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
 
         // Never explored: the opening shows, the pose does not.
         let cell = render(&s).get(10, 14);
@@ -2108,7 +2116,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         let g = render(&s);
 
         let lit = g.get(10, 8); // ahead: floor in the FOV
@@ -2179,7 +2188,8 @@ mod tests {
             vec![Guard::stationary(Cell::new(9, 9))],
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         let watched_unseen = Cell::new(9, 13);
         assert!(s.guards()[0].fov().contains(watched_unseen), "in the cone");
         assert!(!s.player_fov().contains(watched_unseen), "not in the FOV");
@@ -2214,7 +2224,8 @@ mod tests {
             vec![Guard::stationary(guard)],
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         assert!(!s.player_fov().contains(guard));
 
         let g = render(&s);
@@ -2249,6 +2260,7 @@ mod tests {
                 Vec::new(),
                 Cell::new(18, 18),
             )
+            .without_the_opening_look()
         };
         let danger_cells = |g: &Grid| -> Vec<(u32, u32)> {
             let mut cells = Vec::new();
@@ -2319,7 +2331,8 @@ mod tests {
             vec![Guard::stationary(Cell::new(10, 5))],
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         // Precondition: the spotter is *not* seen (it is behind the player). Within
         // sense range, so it is Sensed — its orange dot is the position channel the
         // flash draws a line up to (§9.2), not over.
@@ -2439,7 +2452,8 @@ mod tests {
             vec![Guard::stationary(Cell::new(10, 14))],
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
         assert!(
             !s.player_fov().contains(Cell::new(10, 14)),
             "not in the FOV"
@@ -2494,7 +2508,8 @@ mod tests {
             vec![Guard::stationary(guard)],
             Vec::new(),
             Cell::new(18, 18),
-        );
+        )
+        .without_the_opening_look();
 
         // North-facing: the guard is behind, only sensed — an orange cell, no `g`, no
         // danger overlay anywhere.
@@ -2540,7 +2555,8 @@ mod tests {
             vec![Guard::stationary(guard)],
             Vec::new(),
             Cell::new(22, 22),
-        );
+        )
+        .without_the_opening_look();
         assert_eq!(
             s.perceive_guard(&s.guards()[0]),
             None,
@@ -2817,7 +2833,8 @@ mod tests {
             vec![Guard::stationary(guard)],
             [Cell::new(10, 14)],
             Cell::new(38, 38),
-        );
+        )
+        .without_the_opening_look();
         let g = render(&fogged);
         assert_eq!(
             g.get(10, 14).glyph,
