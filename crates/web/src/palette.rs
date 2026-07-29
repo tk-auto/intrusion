@@ -7,7 +7,7 @@
 //! shell knows about colour is in this file, and `lib.rs` is left with the boot, the
 //! fit and the paint loop.
 
-use intrusion_core::{Category, Theme, Visibility};
+use intrusion_core::{Category, Fill, Theme};
 
 /// One row of the base palette (§11.2): a full-strength **foreground**, the
 /// **dim** shade the same glyph draws in outside the player's FOV (§11.5 — "the
@@ -266,7 +266,7 @@ pub(crate) fn swatch(theme: Theme, category: Category) -> Swatch {
 /// so Sensed paints at full strength (the bright [`Swatch::bg`]) regardless of `vis`,
 /// an eye-catching fill rather than sinking into the dim shade the fog would otherwise
 /// pick.
-pub(crate) fn bg_color(theme: Theme, bg: Category, vis: Visibility) -> &'static str {
+pub(crate) fn bg_color(theme: Theme, bg: Category, fill: Fill) -> &'static str {
     let swatch = swatch(theme, bg);
     // Sensed is certain, position-only knowledge painted through walls (§9.2/§9.4) —
     // both a guard and a door change — never fogged, so it paints at full strength
@@ -281,14 +281,14 @@ pub(crate) fn bg_color(theme: Theme, bg: Category, vis: Visibility) -> &'static 
     if matches!(bg, Category::Sensed | Category::Effect) {
         return swatch.bg;
     }
-    match vis {
+    match fill {
         // Threat outranks knowledge (§11.5 **[SETTLED]**): a watched cell in a wing
         // the player has never entered still paints the red overlay, exactly as an
         // explored one does. The schematic changes what the *glyph* claims, never
         // what the detection set says — fix #1 (watched must never look safe) holds
         // over unexplored ground too.
-        Visibility::Live => swatch.bg,
-        Visibility::Explored | Visibility::Unexplored | Visibility::Remembered => swatch.bg_dim,
+        Fill::Full => swatch.bg,
+        Fill::Quiet => swatch.bg_dim,
     }
 }
 
@@ -405,8 +405,8 @@ mod tests {
     /// something about a shade the screen never shows.
     fn bg_shades(theme: Theme, c: Category) -> [&'static str; 2] {
         [
-            bg_color(theme, c, Visibility::Live),
-            bg_color(theme, c, Visibility::Explored),
+            bg_color(theme, c, Fill::Full),
+            bg_color(theme, c, Fill::Quiet),
         ]
     }
 
@@ -582,10 +582,10 @@ mod tests {
     #[test]
     fn the_effect_layer_is_distinct_from_danger_and_sensed() {
         for theme in THEMES {
-            let effect = bg_color(theme, Category::Effect, Visibility::Explored);
+            let effect = bg_color(theme, Category::Effect, Fill::Quiet);
             assert_eq!(
                 effect,
-                bg_color(theme, Category::Effect, Visibility::Live),
+                bg_color(theme, Category::Effect, Fill::Full),
                 "{theme:?}: the effect wash is full-strength in and out of the FOV alike",
             );
 
@@ -603,9 +603,9 @@ mod tests {
             );
 
             for other in [
-                bg_color(theme, Category::Danger, Visibility::Live),
-                bg_color(theme, Category::Danger, Visibility::Explored),
-                bg_color(theme, Category::Sensed, Visibility::Live),
+                bg_color(theme, Category::Danger, Fill::Full),
+                bg_color(theme, Category::Danger, Fill::Quiet),
+                bg_color(theme, Category::Sensed, Fill::Full),
             ] {
                 let d = dist2(rgb(effect), rgb(other));
                 assert!(
@@ -642,8 +642,8 @@ mod tests {
     #[test]
     fn danger_overlay_shades_read_on_the_backdrop() {
         for theme in THEMES {
-            let live = bg_color(theme, Category::Danger, Visibility::Live);
-            let dimmed = bg_color(theme, Category::Danger, Visibility::Explored);
+            let live = bg_color(theme, Category::Danger, Fill::Full);
+            let dimmed = bg_color(theme, Category::Danger, Fill::Quiet);
             for shade in [live, dimmed] {
                 let d = dist2(rgb(shade), rgb(page(theme)));
                 assert!(
@@ -672,10 +672,10 @@ mod tests {
     #[test]
     fn the_sensed_background_is_orange_and_distinct_from_danger() {
         for theme in THEMES {
-            let sensed = bg_color(theme, Category::Sensed, Visibility::Explored);
+            let sensed = bg_color(theme, Category::Sensed, Fill::Quiet);
             assert_eq!(
                 sensed,
-                bg_color(theme, Category::Sensed, Visibility::Live),
+                bg_color(theme, Category::Sensed, Fill::Full),
                 "{theme:?}: the sensed fill is full-strength in and out of the FOV alike",
             );
 
@@ -694,8 +694,8 @@ mod tests {
             // Clearly apart from the danger red, both shades — a sensed cell and a
             // watched cell must never look alike.
             for danger in [
-                bg_color(theme, Category::Danger, Visibility::Live),
-                bg_color(theme, Category::Danger, Visibility::Explored),
+                bg_color(theme, Category::Danger, Fill::Full),
+                bg_color(theme, Category::Danger, Fill::Quiet),
             ] {
                 let d = dist2(rgb(sensed), rgb(danger));
                 assert!(

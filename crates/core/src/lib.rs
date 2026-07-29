@@ -103,7 +103,7 @@ pub use region::{
 };
 pub use render::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid, help_hit,
-    is_help_button, is_message_button, menu_hit, message_log_rows, render, render_screen,
+    is_help_button, is_message_button, menu_hit, message_log_rows, render, render_screen, Fill,
     GlyphCell, Grid, HelpHit, HelpTab, InputModality, MenuEntry, MenuHit, MenuUi, ScreenUi,
     SeedCopy, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };

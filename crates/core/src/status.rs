@@ -48,6 +48,18 @@ pub struct Message {
     pub priority: i32,
 }
 
+impl Message {
+    /// Whether this is the [`ambient`] floor rather than a live message
+    /// (§11.4/§11.7) — the one distinction the near line's *band* turns on (#420): an
+    /// ambient band paints the quiet fill, a message band the full one.
+    ///
+    /// Sitting below every message at `i32::MIN` **is** what makes the floor the floor,
+    /// so this reads that rather than adding a second way to say the same thing.
+    pub fn is_ambient(&self) -> bool {
+        self.priority == i32::MIN
+    }
+}
+
 /// The message an event shows on the near line, if it shows one at all.
 ///
 /// [`Event::Moved`] is the one silent event: narrating every step would bury

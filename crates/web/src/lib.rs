@@ -416,7 +416,7 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics, theme: Theme)
             // The danger overlay (§11.5) first: a background paints even under a
             // blank glyph — a watched open doorway is still watched.
             if let Some(bg) = cell.bg {
-                ctx.set_fill_style_str(bg_color(theme, bg, cell.vis));
+                ctx.set_fill_style_str(bg_color(theme, bg, cell.fill));
                 ctx.fill_rect(x as f64 * m.cell_w, y as f64 * m.cell_h, m.cell_w, m.cell_h);
             }
             if cell.glyph == ' ' {

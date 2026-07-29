@@ -265,6 +265,7 @@ pub(super) fn draw_message_button(
     width: u32,
     start: u32,
     band: Category,
+    fill: Fill,
     label: &str,
 ) {
     for (i, glyph) in label.chars().enumerate() {
@@ -274,7 +275,8 @@ pub(super) fn draw_message_button(
                 glyph,
                 fg: Category::System,
                 bg: Some(band),
-                vis: Visibility::Live,
+                fill,
+                ..GlyphCell::blank()
             };
         }
     }
@@ -335,12 +337,7 @@ pub(super) fn overlay_message_log(grid: &mut Grid, state: &State) {
     let map_h = grid.height.saturating_sub(TOP_ROWS + BOTTOM_ROWS);
     let rows = log_rows(state);
     let drawn = drawn_rows(state, map_h) as usize;
-    let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: None,
-        vis: Visibility::Live,
-    };
+    let blank = GlyphCell::blank();
     for (i, row) in rows.iter().take(drawn).enumerate() {
         let y = LOG_TOP_ROW + i as u32;
         // A frame too short to hold the block still gets its closing rule: the block

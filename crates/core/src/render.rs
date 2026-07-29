@@ -103,8 +103,46 @@ pub enum Visibility {
     Remembered,
 }
 
+/// How strongly a cell's **background** paints (§11.4/§11.5/#420) — which of the two
+/// fills every palette row carries this cell is asking for.
+///
+/// Two surfaces ask the question and they answer it from different facts. The **map**
+/// answers from fog: a cell inside the FOV paints the full fill, a cell beyond it the
+/// quiet one ([`Fill::fogged`]). The **HUD** has no fog to consult and answers from
+/// what the row is: a band announcing something that just happened paints full, and
+/// the ambient floor — a standing fact, permanently on screen — paints quiet, so the
+/// row's colour distinguishes *the facility's mood* from *something that just
+/// happened*.
+///
+/// Carrying the answer rather than the reason is the point. Reaching for
+/// [`Visibility::Explored`] on a HUD row would pick the quiet fill for free and would
+/// be a lie: `Visibility` means fog knowledge and a status row has none, so every
+/// later reader of that row would have to know the lie in order to read the code.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Fill {
+    /// The full-strength fill: a watched cell in view, a band announcing an event.
+    #[default]
+    Full,
+    /// The quieter fill the same row carries: a watched cell beyond the FOV (§11.5
+    /// fix #1 — still visibly watched, never safe-looking), an ambient HUD band.
+    Quiet,
+}
+
+impl Fill {
+    /// The **map's** rule (§11.5): full inside the field of view, quiet beyond it.
+    /// Every cell of the board is built through this, so the fog and the fill can
+    /// never drift apart.
+    pub fn fogged(vis: Visibility) -> Self {
+        match vis {
+            Visibility::Live => Self::Full,
+            Visibility::Explored | Visibility::Unexplored | Visibility::Remembered => Self::Quiet,
+        }
+    }
+}
+
 /// One rendered cell: a glyph, its foreground category, an optional background
-/// category (§11.1), and the knowledge state it is drawn in (§11.5a).
+/// category (§11.1), the knowledge state it is drawn in (§11.5a), and how strongly
+/// that background paints (§11.4/#420).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GlyphCell {
     /// The character to draw; a space is empty, painted as background only.
@@ -116,7 +154,44 @@ pub struct GlyphCell {
     pub bg: Option<Category>,
     /// The knowledge state this cell is drawn in (§11.5a): live, explored
     /// geometry, or remembered content. The shell styles the three distinctly.
+    ///
+    /// It styles the **glyph** and nothing else. Which of the row's two background
+    /// fills paints is [`fill`](Self::fill)'s question (#420).
     pub vis: Visibility,
+    /// Which fill [`bg`](Self::bg) paints in (§11.4/§11.5). Meaningless — and
+    /// ignored — when `bg` is `None`.
+    pub fill: Fill,
+}
+
+impl GlyphCell {
+    /// A **board** cell (§11.5): a glyph in its category, at a knowledge state, with
+    /// no background of its own yet.
+    ///
+    /// Its fill follows its fog by construction ([`Fill::fogged`]), so an overlay that
+    /// later paints a background on it — the §11.5 danger red, the §9.2 sensed orange —
+    /// gets the right strength without having to ask, and the two can never drift apart.
+    pub(crate) fn on_board(glyph: char, fg: Category, vis: Visibility) -> Self {
+        Self {
+            glyph,
+            fg,
+            bg: None,
+            vis,
+            fill: Fill::fogged(vis),
+        }
+    }
+
+    /// An empty, live, uncoloured cell — the starting point of every **chrome** surface
+    /// (a status row, a panel, the deployed log), which has no fog to consult and paints
+    /// its own bands (§11.4).
+    pub(crate) fn blank() -> Self {
+        Self {
+            glyph: ' ',
+            fg: Category::Neutral,
+            bg: None,
+            vis: Visibility::Live,
+            fill: Fill::Full,
+        }
+    }
 }
 
 /// A rendered frame: a `width × height` grid of [`GlyphCell`]s in row-major order —
@@ -271,12 +346,7 @@ pub fn render(state: &State) -> Grid {
                 (_, Terrain::Floor) => FLOOR_DOT,
                 _ => shown.glyph(),
             };
-            GlyphCell {
-                glyph,
-                fg: shown.category(),
-                bg: None,
-                vis,
-            }
+            GlyphCell::on_board(glyph, shown.category(), vis)
         })
         .collect();
 
@@ -308,12 +378,8 @@ pub fn render(state: &State) -> Grid {
     // to draw an unoccupied duct at all.
     if let Some(duct) = state.occupied_duct() {
         for &c in duct.cells() {
-            cells[(c.y * width + c.x) as usize] = GlyphCell {
-                glyph: '=',
-                fg: Category::System,
-                bg: None,
-                vis: Visibility::Live,
-            };
+            cells[(c.y * width + c.x) as usize] =
+                GlyphCell::on_board('=', Category::System, Visibility::Live);
         }
     }
 
@@ -333,26 +399,21 @@ pub fn render(state: &State) -> Grid {
     // marker persists at full Owned colour while the three-state discipline
     // (§11.5a) keeps telling the truth about what is actually being seen.
     if let Some(decoy) = state.decoy() {
-        cells[(decoy.y * width + decoy.x) as usize] = GlyphCell {
-            glyph: PLAYER_GLYPH,
-            fg: Category::Owned,
-            bg: None,
-            vis: if fov.contains(decoy) {
+        cells[(decoy.y * width + decoy.x) as usize] = GlyphCell::on_board(
+            PLAYER_GLYPH,
+            Category::Owned,
+            if fov.contains(decoy) {
                 Visibility::Live
             } else {
                 Visibility::Remembered
             },
-        };
+        );
     }
 
     // Entities are live state: whatever is drawn here is being seen right now.
     let mut put = |cell: Cell, glyph: char, fg: Category| {
-        cells[(cell.y * width + cell.x) as usize] = GlyphCell {
-            glyph,
-            fg,
-            bg: None,
-            vis: Visibility::Live,
-        };
+        cells[(cell.y * width + cell.x) as usize] =
+            GlyphCell::on_board(glyph, fg, Visibility::Live);
     };
     // A body (§7.2) is live state like any entity — drawn inside the FOV as the `z`
     // a downed guard reads as (§10.3), in Caution: an unaware threat's colour,
@@ -423,12 +484,8 @@ pub fn render(state: &State) -> Grid {
             continue;
         }
         if facility.terrain(cell) == Some(Terrain::Hideout) && memory.contains(cell) {
-            cells[(cell.y * width + cell.x) as usize] = GlyphCell {
-                glyph: BODY_GLYPH,
-                fg: Category::Owned,
-                bg: None,
-                vis: Visibility::Remembered,
-            };
+            cells[(cell.y * width + cell.x) as usize] =
+                GlyphCell::on_board(BODY_GLYPH, Category::Owned, Visibility::Remembered);
         }
     }
 
@@ -666,12 +723,7 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
 /// replaces the game frame entirely rather than overlaying it, so it begins from
 /// nothing and draws its own rows.
 pub(super) fn blank_grid(width: u32, height: u32) -> Grid {
-    let blank = GlyphCell {
-        glyph: ' ',
-        fg: Category::Neutral,
-        bg: None,
-        vis: Visibility::Live,
-    };
+    let blank = GlyphCell::blank();
     Grid {
         width,
         height,
@@ -694,8 +746,7 @@ pub(super) fn draw(grid: &mut Grid, x: u32, y: u32, text: &str, category: Catego
         grid.cells[(y * grid.width + cx) as usize] = GlyphCell {
             glyph,
             fg: category,
-            bg: None,
-            vis: Visibility::Live,
+            ..GlyphCell::blank()
         };
     }
 }

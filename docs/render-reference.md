@@ -289,6 +289,20 @@ glyph draws in outside your field of view, and two **background** variants — o
 cell you can see, one for a cell beyond it. Both recede *toward the page* (§4.4), which
 is a darkening on the dark theme and a lightening on the light one.
 
+**Two surfaces choose between the background pair, and they choose on different
+grounds** (#420). The **map** chooses by fog: in view, the full fill; beyond it, the
+quiet one. The **HUD** has no fog to consult and chooses by what a row *is* — **an
+ambient band paints the quiet fill, a message band the full one** — so the near line's
+colour separates the facility's standing mood, permanently on screen and therefore not
+news, from something that has just happened and flashes. It also keeps a standing
+Danger row from spending the §5 danger overlay's own fill, which means *a threat has
+you right now*; a permanent row wearing it would dilute the one place that is true.
+
+A cell carries the answer, not the reason: `GlyphCell.fill`, alongside the knowledge
+state that styles its glyph. The alternative — handing a HUD row `Visibility::Explored`
+to get the quiet shade for free — would pick the right colour by telling a lie, since
+`Visibility` means fog knowledge and a status row has none.
+
 They are **placed by luminance, and they sit well off the page** (#419). Each rung of
 the threat ladder is a real step below the last, in the same direction the foregrounds
 take, so a fill reads as *which* rung rather than as "a dark warm colour". Where two
@@ -368,17 +382,14 @@ there as an `[n]` footer button for touch. It is the one key the modal help pane
 forwards rather than swallows, because the panel is where the option lives until v2
 grows an options screen. Nothing persists it yet: a reload comes back dark.
 
-### 4.5 The alert rung's tint
+### 4.5 The alert rung's colour
 
-The facility alert ladder (§7.3) has three rungs and no way back down, and the near
-line can only state a step on the turn it happens — anything louder overwrites it
-(§11.7). So the standing state lives on the help panel's **Level info** tab, and the
-`[?]` toggle that opens the panel is **tinted by the rung**: the always-visible half,
-saying there is something new to read behind the control the player already knows.
+The facility alert ladder (§7.3) has three rungs and no way back down, and each maps to
+a §4.1 category:
 
 | Rung | Category | Why that one |
 |---|---|---|
-| **0** | System | Not a threat statement. The `[?]` is furniture, the same tan every HUD control wears — an unnoticed raid changes nothing about the screen |
+| **0** | System | Not a threat statement — an unnoticed raid claims nothing |
 | **1** | Caution | *A threat that is unaware* — the facility knows somebody is in it and not where |
 | **2** | Warning | *A threat that is hunting* — three sightings, or it knows what you came for |
 | **3** | Danger | *A threat that has you* — the top of the ladder |
@@ -386,25 +397,31 @@ saying there is something new to read behind the control the player already know
 **It invents no colour vocabulary.** 1–3 are the standing threat ladder, the same
 yellow → orange → red the player already reads off a guard's glyph, so the facility's
 mind escalates in the colours one guard's does and there is nothing new to learn. It
-inherits §4.1's luminance separation for free, so the tint survives a red-green
-deficiency, and it inherits §4.4's second column, so it works on both themes.
+inherits §4.1's luminance separation for free, so it survives a red-green deficiency,
+and it inherits §4.4's second column, so it works on both themes. The mapping is
+written once, in `render::alert`, and every surface that shows the rung reads it —
+which is what stops a colour saying *danger* over a line saying *condition 1*.
 
-The condition line inside the panel (`Condition 2 of 3`) wears the **same** category,
-because a tint saying *danger* over a panel saying *condition 1* would be worse than no
-tint. The mapping is written once, in `render::alert`, and both halves read it.
-
-*(**Rung** is the design and code word for the ladder's steps; the screen says
-**condition** — see §11.8 of the design doc for the whole design↔player glossary. This
-table is a developer reference, so it says rung.)*
+**The `[?]` toggle used to wear this colour, and no longer does** (#375, reverted by
+#420). The argument for tinting it was sound while it held: the near line could state a
+step only on the turn it happened, anything louder overwrote it (§11.7), and the panel
+behind the button was the only place the standing state could be read — so the control
+changed colour to say there was something new there. Once the near line began carrying
+the standing alert itself, in words and in the colour of its band, the tint became a
+second and quieter statement of what the row directly beneath it already said: at the
+top rung, a red `[?]` sitting on a red band. The `[?]` is furniture again — the one
+System tan every HUD control wears — and the ladder's always-visible half is the row,
+not the button. The panel's ALERT section still carries the effects, so nothing was
+lost but the duplicate.
 
 **Guard presentation is deliberately unchanged.** A guard the ladder has made never-calm
 still draws as Calm: a guard's colour is *its own state* (§11.2), not the facility's
 mood, and folding one into the other would break the "the colour of `g` is the AI state
-machine" rule the whole scheme rests on. The tint is the only new colour the ladder gets.
+machine" rule the whole scheme rests on.
 
-The tinted button is flagged **experimental**. If it reads as noise beside the
-categories already in play, the tab alone is the fallback — the panel is the load-bearing
-half.
+*(**Rung** is the design and code word for the ladder's steps; the screen says
+**condition** — see §11.8 of the design doc for the whole design↔player glossary. This
+table is a developer reference, so it says rung.)*
 
 ---
 
