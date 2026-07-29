@@ -2097,10 +2097,20 @@ is the case this serves.
   condition 2 of 3"* on screen, §11.8 — an active ability's remaining turns) instead
   of sitting empty. Its right-hand corner carries the two view toggles, in this
   order: the `[?]` help button and then, outermost against the frame's one-cell
-  margin, the message-log deploy counter — `[?][+2 ▾]`. The deploy control is the
+  margin, the message log's deploy control — `[?][!]`. The deploy control is the
   one that comes and goes, so putting it outside keeps the `[?]` — the control
   that is always there, and the one a lost player reaches for — at a column that
-  moves by less. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
+  moves by less.
+
+  **The deploy control is three cells, always**, and one glyph carries its whole
+  state: `!` when this action raised more than the near line is showing (the one
+  state worth interrupting for — it is new, and the next action clears it), `▾`
+  when only the remembered turns are behind it, `▴` while it is deployed. It used
+  to be `[+2 ▾]`, a chevron plus a count of the further messages: six cells on
+  every frame it was up, spent on a number the player gets for free by deploying
+  it. The near line's words are the scarcest space on the screen, and merging the
+  two won three cells back — enough that three messages which had been clipping
+  since before the bound existed now fit, with no wording changed. The `[?]` is **tinted by the alert rung** (§7.3): the ladder's
   standing state lives on the help panel's Level info tab, and the tint is what
   says there is something new to read behind the control (see
   [`docs/render-reference.md`](render-reference.md) §4.5).
@@ -2114,8 +2124,10 @@ is the case this serves.
   >
   > **A new near-line message must fit that budget**, and a new corner control must
   > take its width from the same layout rather than assume the old one. The budget
-  > is the row minus the margin, the widest deploy label and the `[?]` — 29 cells on
-  > the 40-wide v1 board (§10.2). It is pinned by a test that walks every message
+  > is the row minus the margin, the deploy control and the `[?]` — 32 cells on the
+  > 40-wide v1 board (§10.2). A control that has to say more belongs in a **fixed**
+  > width with a glyph that varies, not a width that grows with what it says:
+  > widening the chrome takes the cells straight off the message. It is pinned by a test that walks every message
   > `message_for` can build, with an explicit, only-ever-shrinking list of the few
   > that predate the bound; an over-long message clips silently on a real screen,
   > which is why the check is a test and not a hope.

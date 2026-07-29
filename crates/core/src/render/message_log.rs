@@ -17,9 +17,9 @@
 //! player wants to read back what set the facility off, and the near line — correctly
 //! — kept only the last of them.
 //!
-//! So the block is exactly what the counter promises: `[+2 ▾]` deploys **two** rows of
-//! this action, not three with the first one repeated. The near line and the panel
-//! partition the turn instead of overlapping on it.
+//! So the near line and the panel partition the turn instead of overlapping on it: the
+//! band speaks the loudest, the block holds the rest, and the corner control says which
+//! of those two states you are in with a single glyph ([`deploy_glyph`]).
 //!
 //! It is **not** a scrollback the player pages through: there is no camera and no
 //! scrolling (§11.4 **[SETTLED]**). The block is bounded twice over — by
@@ -133,9 +133,9 @@ fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
     // Skip the loudest live message: it *is* the near line, drawn as a full category
     // band one row above the block's first row (§11.7). Repeating it would spend the
     // panel's most valuable row saying what the player is already reading, and would
-    // make the counter a lie — `[+2 ▾]` promises two further messages, so two is what
-    // deploying shows. An action whose only message is on the near line therefore
-    // contributes no rows at all, and no rule with them.
+    // leave the corner's `!` promising something the block would not deliver. An action
+    // whose only message is on the near line therefore contributes no rows at all, and
+    // no rule with them.
     let mut rows: Vec<LogRow> = live.into_iter().skip(1).map(LogRow::live).collect();
     for block in history.blocks() {
         // **Every** remembered block gets its rule, the first one included — so when
@@ -167,22 +167,29 @@ fn assemble(live: Vec<Message>, history: &MessageHistory) -> Vec<LogRow> {
     rows
 }
 
-/// The near line's message-log toggle label (§11.7): when `extra` further messages
-/// are stacked behind the loudest, the count and a chevron — down to deploy the
-/// list, up to fold it back. Both chevrons are one cell, so the label's width
-/// tracks the digit count alone; the drawing ([`draw_message_button`]) and the
-/// hit-test ([`is_message_button`]) share it so a tap lands on exactly what is
-/// drawn.
+/// The near line's deploy control — **three cells, always** (§11.7/#300).
 ///
-/// **The count is of *live* extras only** (#300). With nothing extra live but a
-/// non-empty history the label is the bare chevron: there is something behind it, and
-/// `[+0 ▾]` would answer a question nobody asked with a number that reads as a bug.
-fn message_button_label(extra: usize, open: bool) -> String {
-    let chevron = if open { '▴' } else { '▾' };
-    if extra == 0 {
-        return format!("[{chevron}]");
+/// It used to be `[+2 ▾]`: a chevron and a count of the further live messages. Six
+/// cells on every frame the control was up, spent on a number the player gets for free
+/// by deploying it — and the near line's words are the scarcest space on the screen
+/// (§11.4's row-fits bound). The count is gone and the glyph carries the whole state.
+pub(super) const DEPLOY_LEN: u32 = 3;
+
+/// What that one glyph says (§11.7/#300):
+///
+/// - **`!`** — this action raised more than the near line is showing. The one state
+///   worth interrupting for: it is *new*, and the next action clears it (§11.7), so a
+///   player who does not look now cannot look later.
+/// - **`▾`** — nothing of this turn is unread; what is behind the control is the
+///   remembered turns. An invitation, not a nudge.
+/// - **`▴`** — deployed. The block is on screen, so nothing is unread by definition and
+///   the control's only job is the way back.
+fn deploy_glyph(unread_this_action: bool, open: bool) -> char {
+    match (open, unread_this_action) {
+        (true, _) => '▴',
+        (false, true) => '!',
+        (false, false) => '▾',
     }
-    format!("[+{extra} {chevron}]")
 }
 
 /// Where the near line's **words** must stop on a screen `width` wide (§11.7): one
@@ -191,8 +198,7 @@ fn message_button_label(extra: usize, open: bool) -> String {
 /// measured against this, so it can never drift from the layout it describes.
 #[cfg(test)]
 pub(super) fn near_line_text_max(width: u32) -> usize {
-    let log = message_button_label(1, false).chars().count() as u32;
-    width.saturating_sub(1 + log + super::hud::HELP_BUTTON_LEN + 1) as usize
+    width.saturating_sub(1 + DEPLOY_LEN + super::hud::HELP_BUTTON_LEN + 1) as usize
 }
 
 /// The deploy control's label, or `None` when there is nothing to deploy — *what* the
@@ -202,10 +208,8 @@ pub(super) fn deploy_label(state: &State, open: bool) -> Option<String> {
     if log_rows(state).is_empty() {
         return None;
     }
-    Some(message_button_label(
-        live_messages(state).len().saturating_sub(1),
-        open,
-    ))
+    let unread = live_messages(state).len() > 1;
+    Some(format!("[{}]", deploy_glyph(unread, open)))
 }
 
 /// Whether screen cell `(x, y)` is the near line's message-log toggle (§11.7) —
@@ -228,7 +232,7 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 }
 
 /// Draw the message-log toggle over the already-built near line `row` (§11.7):
-/// the [`message_button_label`] right-aligned, its glyphs in System — the HUD
+/// the [`deploy_label`] right-aligned, its glyphs in System — the HUD
 /// control colour, like the ability line's deploy button — over the loudest
 /// message's own category band, which keeps painting behind it.
 pub(super) fn draw_message_button(
@@ -423,14 +427,14 @@ mod tests {
             "the band speaks the loudest message: {near:?}"
         );
         assert!(
-            near.contains("[?][+2 ▾]"),
-            "the help toggle, then the closed counter of the rest: {near:?}"
+            near.contains("[?][!]"),
+            "the help toggle, then the unread mark for the rest of the turn: {near:?}"
         );
 
         // The hit-test agrees with the drawn counter, and there is no button off it.
-        // The deploy control is the outermost of the pair, hard against the margin.
-        let label_len = "[+2 ▾]".chars().count() as u32;
-        let start = width - 1 - label_len;
+        // The deploy control is the outermost of the pair, hard against the margin,
+        // and three cells whatever it has to say.
+        let start = width - 1 - DEPLOY_LEN;
         assert!(
             is_message_button(&s, start, NEAR_ROW),
             "the counter is hittable"
@@ -452,11 +456,11 @@ mod tests {
         };
         let g = render_screen(&s, ui);
         assert!(
-            row_text(&g, NEAR_ROW).contains("[+2 ▴]"),
-            "the deployed counter points up"
+            row_text(&g, NEAR_ROW).contains("[?][▴]"),
+            "deployed, the control is the chevron back: nothing is unread now"
         );
         // The block is the *rest* of the turn: the near line's own message is not
-        // repeated, so `[+2 ▴]` deploys exactly two rows, loudest first.
+        // repeated, so the `!` the corner showed resolves to exactly two rows.
         assert!(
             row_text(&g, LOG_TOP_ROW).contains("a body has been found"),
             "the loudest message the near line did not say leads the block"
@@ -472,7 +476,7 @@ mod tests {
         assert_eq!(
             message_log_rows(&s, ui) + (TOP_ROWS - LOG_TOP_ROW),
             2,
-            "two rows deployed for two extras — the counter and the block agree"
+            "two rows deployed for the two the near line did not say"
         );
         assert!(
             !row_text(&g, LOG_TOP_ROW).contains("move"),
@@ -596,7 +600,7 @@ mod tests {
         // The near line speaks the loudest, and counts the two the block will show.
         let near = row_text(&g, NEAR_ROW);
         assert!(near.contains("security condition"), "the band: {near:?}");
-        assert!(near.contains("[+2 ▴]"), "counting two extras: {near:?}");
+        assert!(near.contains("[?][▴]"), "deployed, and foldable: {near:?}");
 
         // The block: this action's two *unsaid* messages, a rule, then the remembered
         // action — and the near line's own message nowhere in it.
@@ -757,11 +761,11 @@ mod tests {
             "the same category band"
         );
         assert!(
-            row_text(&g, NEAR_ROW).contains("[+2 ▾]"),
-            "the counter still counts the two live extras, not the history"
+            row_text(&g, NEAR_ROW).contains("[?][!]"),
+            "the mark is raised by this turn's own extras, not by the history"
         );
         // And the button is in the same place, so a tap lands where it always did.
-        let start = width - 1 - "[+2 ▾]".chars().count() as u32;
+        let start = width - 1 - DEPLOY_LEN;
         assert!(is_message_button(&carried, start, NEAR_ROW));
 
         // Deployed, though, the block is the live three, a rule, and the remembered

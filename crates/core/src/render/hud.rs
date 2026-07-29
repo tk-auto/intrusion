@@ -209,7 +209,15 @@ pub(super) struct CornerControls {
 /// hit-test may ask with either and land on the button the frame drew.
 pub(super) fn corner_controls(state: &State, width: u32, log_open: bool) -> CornerControls {
     let label = super::message_log::deploy_label(state, log_open);
-    let log_len = label.as_ref().map_or(0, |l| l.chars().count() as u32);
+    debug_assert!(
+        label
+            .as_ref()
+            .is_none_or(|l| l.chars().count() as u32 == super::message_log::DEPLOY_LEN),
+        "the deploy control is a fixed three cells (§11.7): the layout budgets for it",
+    );
+    // A fixed width, so the `[?]` beside it only ever moves when the control itself
+    // comes or goes — never because what it has to say got longer.
+    let log_len = label.as_ref().map_or(0, |_| super::message_log::DEPLOY_LEN);
     let log_start = width.saturating_sub(1 + log_len);
     let help_start = log_start.saturating_sub(HELP_BUTTON_LEN);
     CornerControls {
@@ -704,20 +712,23 @@ mod tests {
     /// explicitly so the bound still bites for every *new* message: adding one here
     /// is a deliberate act, and the list only ever shrinks.
     ///
-    /// Two of these clip even with no message counter beside them ("you stow the
-    /// body…" at 42, "intel in hand… (n more out)" at 45); the rest fit alone and
-    /// clip only when a second message stacks the counter into the row.
+    /// Both of the survivors clip on the row's own width, with nothing to do with the
+    /// corner: "you stow the body…" is 42 cells and "intel in hand… (n more out)" 45,
+    /// against a 40-wide board (§10.2).
     ///
     /// The exit's refusal left this list in #310: naming the gate's real requirement
     /// ("the exit needs 2 more intel") is shorter than the fixed rule it replaced.
     /// **The alert line left it in #375**: the one message about escalation was the one
     /// the player could not read, at 34 cells in a 29-cell row, and #375 is where the
     /// ladder's legibility was owed. Naming it the way the help panel does — "security
-    /// condition 3 of 3" — is both shorter and the same words twice.
-    const PRE_EXISTING_OVERFLOW: [&str; 5] = [
-        "all the intel — the exit is open",
-        "the guard drops — a body is left",
-        "you slip away — the run is won",
+    /// condition 3 of 3" — is both shorter and the same words twice. **Three more left
+    /// it in #300**, without a word being rewritten: merging the deploy chevron and its
+    /// `+N` counter into one three-cell control gave the row three cells back, and
+    /// "all the intel — the exit is open", "the guard drops — a body is left" and "you
+    /// slip away — the run is won" all fit in 32. Which is the argument for keeping the
+    /// budget derived from the layout rather than written down: tightening the chrome
+    /// un-clipped three messages on its own.
+    const PRE_EXISTING_OVERFLOW: [&str; 2] = [
         "you stow the body — the cupboard is sealed",
         "intel in hand — the exit is open (9 more out)",
     ];
