@@ -1,6 +1,6 @@
 {
   "_note": "Baseline metrics snapshot the playtest skill diffs against (§13.2, #140). It is a snapshot of the --bot batch below on the commit named, one block PER PLAYSTYLE PROFILE (#198): a profile is a temperament, so each has its own numbers and they are never compared against each other as a leaderboard. It is SUPPOSED to drift: after any change expected to move the numbers (a tuning [START] knob, guard/vision/ability behaviour, generation, the bot policy itself, a profile's numbers), refresh it in the same PR with `./scripts/baseline.py --refresh` — never by hand, so every block moves together. That script also runs as a check on every PR (CI's `simbot baseline` job), re-running each block's own `command` and failing when a summary no longer matches: a stale baseline compared silently is the anti-pattern this file exists to avoid, and it is invisible unless something re-runs it. The per-profile `command` strings are what the check executes, so they are the authoritative description of what was measured; `config` below is the human-readable summary of them.",
-  "captured_at_commit": "6db6cdc+opening-look-383",
+  "captured_at_commit": "8d78d65+responder-arrives-409",
   "command": "for p in balanced cautious aggressive careless; do cargo run --release -p intrusion-sim -- --bot --profile $p --runs 100 --seed 0 --cap 1000 | tail -1; done",
   "config": {
     "policy": "bot",
@@ -78,19 +78,19 @@
       "summary": {
         "profile": "cautious",
         "runs": 100,
-        "wins": 52,
-        "captures": 46,
+        "wins": 54,
+        "captures": 42,
         "entombed": 0,
-        "timeouts": 2,
-        "win_rate": 0.52,
-        "turns_to_win_mean": 228.0,
-        "turns_to_win_median": 185.5,
-        "detections": 1012,
+        "timeouts": 4,
+        "win_rate": 0.54,
+        "turns_to_win_mean": 239.1,
+        "turns_to_win_median": 188.5,
+        "detections": 1074,
         "takedowns": 0,
         "bodies_found": 0,
         "usage": {
-          "wait": 5973,
-          "run": 229,
+          "wait": 6278,
+          "run": 230,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -104,8 +104,8 @@
           "stow": 0
         },
         "usage_share": {
-          "wait": 0.2581,
-          "run": 0.0099,
+          "wait": 0.2562,
+          "run": 0.0094,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -115,10 +115,10 @@
           "drag": 0.0,
           "pierce_wall": 0.0,
           "lockdown": 0.0,
-          "crouch": 0.0009,
+          "crouch": 0.0008,
           "stow": 0.0
         },
-        "diversity": 0.4358,
+        "diversity": 0.4361,
         "alert_peak_mean": 0.79,
         "alert_rungs": {
           "0": 43,
@@ -147,14 +147,14 @@
         "entombed": 0,
         "timeouts": 1,
         "win_rate": 0.43,
-        "turns_to_win_mean": 127.1,
+        "turns_to_win_mean": 125.4,
         "turns_to_win_median": 122.0,
-        "detections": 685,
+        "detections": 693,
         "takedowns": 19,
         "bodies_found": 6,
         "usage": {
           "wait": 182,
-          "run": 166,
+          "run": 168,
           "camouflage": 0,
           "decoy": 0,
           "dephase": 0,
@@ -165,11 +165,11 @@
           "pierce_wall": 0,
           "lockdown": 0,
           "crouch": 0,
-          "stow": 13
+          "stow": 12
         },
         "usage_share": {
-          "wait": 0.0151,
-          "run": 0.0138,
+          "wait": 0.0152,
+          "run": 0.014,
           "camouflage": 0.0,
           "decoy": 0.0,
           "dephase": 0.0,
@@ -180,25 +180,25 @@
           "pierce_wall": 0.0,
           "lockdown": 0.0,
           "crouch": 0.0,
-          "stow": 0.0011
+          "stow": 0.001
         },
-        "diversity": 0.6001,
-        "alert_peak_mean": 0.93,
+        "diversity": 0.5989,
+        "alert_peak_mean": 0.92,
         "alert_rungs": {
           "0": 32,
-          "1": 50,
-          "2": 11,
+          "1": 51,
+          "2": 10,
           "3": 7
         },
         "alert_triggers": {
           "sighting": 61,
           "missed-ping": 7,
           "repeat-sightings": 1,
-          "console-tampered": 14,
+          "console-tampered": 13,
           "body-found": 6,
           "second-post-silent": 1
         },
-        "reinforcements": 32
+        "reinforcements": 31
       }
     },
     "careless": {
@@ -215,7 +215,7 @@
         "turns_to_win_median": 114.0,
         "detections": 933,
         "takedowns": 6,
-        "bodies_found": 4,
+        "bodies_found": 5,
         "usage": {
           "wait": 130,
           "run": 194,
@@ -247,22 +247,22 @@
           "stow": 0.0
         },
         "diversity": 0.4999,
-        "alert_peak_mean": 1.03,
+        "alert_peak_mean": 1.05,
         "alert_rungs": {
           "0": 26,
-          "1": 49,
+          "1": 48,
           "2": 21,
-          "3": 4
+          "3": 5
         },
         "alert_triggers": {
           "sighting": 72,
           "missed-ping": 2,
           "repeat-sightings": 5,
           "console-tampered": 17,
-          "body-found": 4,
+          "body-found": 5,
           "second-post-silent": 0
         },
-        "reinforcements": 33
+        "reinforcements": 36
       }
     }
   }

@@ -21,7 +21,9 @@
 
 use crate::category::Category;
 use crate::cell::Cell;
-use crate::guard::Guard;
+use crate::facility::Facility;
+use crate::guard::{self, Guard};
+use crate::path;
 use crate::rng::Rng;
 
 /// The nominal radio ping interval (§7.3, **[START] = 20**): control pings each
@@ -125,7 +127,7 @@ impl Default for RadioClock {
 }
 
 /// The indices of the `count` guards control would send to `at`, nearest first
-/// (§7.3/§7.7): the **nearest active** guards by Manhattan distance, ties broken by
+/// (§7.3/§7.7): the **nearest active** guards by **route distance**, ties broken by
 /// spawn order so the choice is deterministic (§12.4). "Active" here means a guard
 /// not already locked onto the live player — its state is not [`Category::Danger`]
 /// (Chasing/Investigating), because a guard that has *you* does not break off to
@@ -142,19 +144,42 @@ impl Default for RadioClock {
 /// takedown site sends one, and the §7.7 cooperation call-ins send one on a lost
 /// sighting and two on a found body — the same selection, a different `count`.
 ///
-/// Distance is Manhattan **[START]**, not path length: cheap and deterministic,
-/// and the dispatched guard routes there properly regardless — refining the
-/// *choice* to true path distance is a later tune, pinned by no rule today.
-pub(crate) fn nearest_respondable(guards: &[Guard], at: Cell, count: usize) -> Vec<usize> {
+/// Distance is the **route** the guard would actually walk (§7.3/#409), not the
+/// straight line it used to be. Manhattan distance made "the nearest active guard"
+/// the one that merely *looks* closest: a guard on the far side of a wall with a
+/// sixty-step way round outranked one two rooms down the corridor, so the dispatch
+/// went to whoever would take longest to arrive. One flood from `at`
+/// ([`path::route_lengths_from`]) prices every guard's journey in a single pass —
+/// cheap enough on a 40×40 board (§10.2) to run per call, and as deterministic as
+/// the walk itself.
+///
+/// A guard with **no route at all** sorts behind every guard that has one, ordered
+/// among its peers by straight-line distance. It is still sent when nobody better is
+/// free: §7.7's rule is that whoever is free answers, and control cannot know the
+/// route is severed — the responder walks nowhere, cools out and stands down, which
+/// is the backstop working rather than a case to special-case away.
+pub(crate) fn nearest_respondable(
+    guards: &[Guard],
+    at: Cell,
+    count: usize,
+    facility: &Facility,
+) -> Vec<usize> {
+    let routes = path::route_lengths_from(at, |cell| guard::routable(facility, cell));
     let mut free: Vec<usize> = guards
         .iter()
         .enumerate()
         .filter(|(_, g)| g.state().category() != Category::Danger)
         .map(|(i, _)| i)
         .collect();
-    // Sort by distance, then by spawn order — the same total order the old
-    // single-pick `min_by_key` used, so taking the first is taking the nearest.
-    free.sort_by_key(|&i| (guards[i].pos().manhattan_distance(at), i));
+    // Sort by journey, then by spawn order — the same shape of total order the
+    // Manhattan version had, so taking the first is still taking the nearest; only
+    // what "nearest" measures has changed. An absent route is `u32::MAX`, which puts
+    // the stranded behind every reachable guard, with the line as their tie-break.
+    free.sort_by_key(|&i| {
+        let pos = guards[i].pos();
+        let route = routes.get(&pos).copied().unwrap_or(u32::MAX);
+        (route, pos.manhattan_distance(at), i)
+    });
     free.truncate(count);
     free
 }
@@ -162,7 +187,16 @@ pub(crate) fn nearest_respondable(guards: &[Guard], at: Cell, count: usize) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::facility::Terrain;
     use crate::guard::{Guard, GuardState};
+
+    /// The bare board the selection tests measure over: an open walled box, where a
+    /// route is the straight walk and the route order therefore matches the old
+    /// Manhattan one — so these pin the *selection* rule, and the wall test below
+    /// pins what changed.
+    fn room() -> Facility {
+        Facility::walled_box(20, 20)
+    }
 
     /// The §7.3 timing knobs are **[START]** values a later tune must move
     /// deliberately — pinned here so the edit is visible. The jitter must keep the
@@ -209,7 +243,7 @@ mod tests {
             Guard::stationary(Cell::new(10, 6)), // 4 away — nearest
             Guard::stationary(Cell::new(2, 10)), // 8 away — ties with 0, later spawn
         ];
-        assert_eq!(nearest_respondable(&guards, post, 1), vec![1]);
+        assert_eq!(nearest_respondable(&guards, post, 1, &room()), vec![1]);
     }
 
     /// §7.7: the same selection serves a call for **more than one** guard — nearest
@@ -227,23 +261,96 @@ mod tests {
         ];
 
         assert_eq!(
-            nearest_respondable(&guards, at, 2),
+            nearest_respondable(&guards, at, 2, &room()),
             vec![1, 0],
             "nearest first"
         );
         assert_eq!(
-            nearest_respondable(&guards, at, 3),
+            nearest_respondable(&guards, at, 3, &room()),
             vec![1, 0, 2],
             "the tie at 8 goes to the earlier spawn (§12.4)",
         );
         assert_eq!(
-            nearest_respondable(&guards, at, 9),
+            nearest_respondable(&guards, at, 9, &room()),
             vec![1, 0, 2],
             "asking for more than are free sends everyone free",
         );
         assert!(
-            nearest_respondable(&guards, at, 0).is_empty(),
+            nearest_respondable(&guards, at, 0, &room()).is_empty(),
             "a call for nobody sends nobody",
+        );
+    }
+
+    /// §7.3/#409: "the nearest active guard" is the one with the shortest **walk**,
+    /// not the shortest straight line. A wall with a single gap at its foot puts a
+    /// guard four cells away by line sixteen cells away by road, and the dispatch
+    /// goes to the one that can actually get there — which under Manhattan it did
+    /// not.
+    #[test]
+    fn dispatch_measures_the_road_not_the_line() {
+        // A wall column at x=10 across the room, its one gap at y=18.
+        let mut facility = Facility::walled_box(20, 20);
+        for y in 1..18 {
+            facility.set_terrain(10, y, Terrain::Wall);
+        }
+        let post = Cell::new(12, 2);
+        let guards = vec![
+            // Four cells west by line — but the far side of the wall, so the walk is
+            // down to the gap at y=18, across and back up: 16 + 2 + 16 = 34.
+            Guard::stationary(Cell::new(8, 2)),
+            // Eight cells south by line, same side of the wall: an eight-step walk.
+            Guard::stationary(Cell::new(12, 10)),
+        ];
+
+        assert_eq!(
+            guards[0].pos().manhattan_distance(post),
+            4,
+            "the walled-off guard is the nearest by line",
+        );
+        assert!(guards[1].pos().manhattan_distance(post) > 4);
+        assert_eq!(
+            nearest_respondable(&guards, post, 1, &facility),
+            vec![1],
+            "and the one down the corridor is the nearest by road",
+        );
+        assert_eq!(
+            nearest_respondable(&guards, post, 2, &facility),
+            vec![1, 0],
+            "the long way round still answers, just second",
+        );
+    }
+
+    /// §7.7: a guard with **no route at all** sorts behind everyone who has one, and
+    /// is still sent when nobody better is free — a call is answered by whoever is
+    /// free, and control cannot know the way is severed. It walks nowhere, cools out
+    /// and stands down, which is §7.6's backstop doing its job.
+    #[test]
+    fn a_guard_with_no_route_answers_last_but_still_answers() {
+        // A sealed 3x3 cell in the north-west corner, one guard inside it.
+        let mut facility = Facility::walled_box(20, 20);
+        for i in 0..4 {
+            facility.set_terrain(4, i, Terrain::Wall);
+            facility.set_terrain(i, 4, Terrain::Wall);
+        }
+        let post = Cell::new(10, 10);
+        let guards = vec![
+            Guard::stationary(Cell::new(3, 3)),   // sealed in — no route
+            Guard::stationary(Cell::new(18, 18)), // right across the room, but routable
+        ];
+
+        assert!(
+            guards[0].pos().manhattan_distance(post) < guards[1].pos().manhattan_distance(post),
+            "the stranded guard is nearer by line",
+        );
+        assert_eq!(
+            nearest_respondable(&guards, post, 1, &facility),
+            vec![1],
+            "a guard that can get there outranks one that cannot",
+        );
+        assert_eq!(
+            nearest_respondable(&guards, post, 2, &facility),
+            vec![1, 0],
+            "but the stranded one is still free, so it is still sent",
         );
     }
 
@@ -260,7 +367,7 @@ mod tests {
             Guard::stationary(Cell::new(9, 9)).with_state(GuardState::Calm),
         ];
         assert_eq!(
-            nearest_respondable(&guards, post, 1),
+            nearest_respondable(&guards, post, 1, &room()),
             vec![1],
             "skip the chaser"
         );
@@ -270,7 +377,7 @@ mod tests {
             Guard::stationary(Cell::new(3, 1)).with_state(GuardState::Investigating),
         ];
         assert!(
-            nearest_respondable(&all_hunting, post, 2).is_empty(),
+            nearest_respondable(&all_hunting, post, 2, &room()).is_empty(),
             "nobody free to send",
         );
     }

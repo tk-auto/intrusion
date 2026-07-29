@@ -390,11 +390,12 @@ impl State {
         if self.radio_silenced {
             return false;
         }
-        let sent: Vec<usize> = radio::nearest_respondable(&self.guards, at, self.guards.len())
-            .into_iter()
-            .filter(|g| !exclude.contains(g))
-            .take(count)
-            .collect();
+        let sent: Vec<usize> =
+            radio::nearest_respondable(&self.guards, at, self.guards.len(), self.layout.facility())
+                .into_iter()
+                .filter(|g| !exclude.contains(g))
+                .take(count)
+                .collect();
         for g in &sent {
             self.guards[*g].respond_to(at);
         }

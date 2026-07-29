@@ -776,29 +776,21 @@ impl Guard {
     /// on arrival ([`decide`](Self::decide)) centres there rather than on wherever
     /// this guard last happened to glimpse the player. A call carries its own cell;
     /// it does not inherit anybody's memory (§7.7 — no shared field of view).
+    ///
+    /// The lead does **not** have to cover the journey (§7.3/#409): a travelling
+    /// responder does not spend it
+    /// ([`keep_lead_for_the_road`](Self::keep_lead_for_the_road)), so
+    /// [`ALERT_DURATION`] is the budget for what happens *at* the cell, however far
+    /// away the cell is. That is what lets one constant serve a dispatch from next
+    /// door, a §7.7 call-in across two rooms and a reinforcement walking in from the
+    /// far edge of the facility (§7.3/#374) alike — the errand-sized lead each of
+    /// those used to need was only ever paying for the commute.
     pub(crate) fn respond_to(&mut self, at: Cell) {
         self.state = GuardState::Responding;
         self.destination = Some(at);
         self.alert = ALERT_DURATION;
         self.last_seen = None;
         self.end_search_and_watch();
-    }
-
-    /// Answer a call from **across the facility** (§7.3/#374) — [`respond_to`] with a
-    /// lead long enough to survive the walk.
-    ///
-    /// A radio dispatch picks the *nearest* respondable guard, so [`ALERT_DURATION`]
-    /// always covers its journey and §7.1's cold-lead backstop only ever fires on a
-    /// lead that genuinely went stale. A **reinforcement** starts at the far end of the
-    /// facility by construction (it may not arrive in view), so the same constant would
-    /// have it give up somewhere in the middle of the map and drift into patrol having
-    /// never looked at what it was sent for. Sizing the lead to the trip keeps the
-    /// behaviour identical to a dispatch's — walk, search, stand down — rather than
-    /// changing it; the backstop still applies, just at the far end of the errand
-    /// instead of halfway along it.
-    pub(crate) fn respond_across(&mut self, at: Cell, lead: u32) {
-        self.respond_to(at);
-        self.alert = self.alert.max(lead);
     }
 
     /// React to finding a body (§7.2) — the loudest event in the game. The lead
@@ -1016,9 +1008,24 @@ impl Guard {
         // rather than a hunt. If the route is only blocked this turn it holds and
         // retries. A cold lead — it never got there — gives up cleanly, the same
         // anti-tracking backstop (§7.6).
+        //
+        // **A responder does not burn its lead while it is still on its way**
+        // (§7.3/#409). The lead bounds the *investigation*, not the commute: spending
+        // it on the walk meant the further from the patrols you struck, the less the
+        // radio cost you, and a dot that visibly peeled off toward the site would
+        // wander halfway and turn yellow again — teaching a rule that is not the rule.
+        // So a responder that is genuinely travelling refunds the turn `sense` cooled.
+        // Scoping it to `Responding` is what keeps §7.6's anti-tracking-turret backstop
+        // intact: a call carries a **fixed** cell that never updates (`respond_to`
+        // drops the stale sighting), so a responder cannot follow the player, while a
+        // *chase*, whose destination tracks you, still cools every turn above.
+        // The refund is conditioned on a route existing this turn, not on the state:
+        // a guard held up by a colleague (§7.8) or with nowhere to route still cools
+        // and still stands down, so nothing paces forever.
         if self.state == GuardState::Responding {
             if self.alert > 0 {
                 if let Some(step) = self.step_toward_destination(facility, blocked) {
+                    self.keep_lead_for_the_road();
                     return self.commit_step(Some(step), facility);
                 }
                 if self.destination == Some(self.pos) {
@@ -1120,6 +1127,27 @@ impl Guard {
     fn turn_in_place(&mut self, facing: Direction, facility: &Facility) {
         self.facing = facing;
         self.look(facility);
+    }
+
+    /// Give back the turn of lead [`sense`](Self::sense) cooled, because this turn was
+    /// spent **travelling** rather than investigating (§7.3/#409).
+    ///
+    /// Every reactive timer cools once per turn at the top of the guard's turn, before
+    /// anything knows whether the guard has a route to walk; a responder only learns it
+    /// is still on its way when [`decide`](Self::decide) finds a step. So the rule is
+    /// expressed as a refund rather than a skipped decrement — the arithmetic is exact
+    /// either way, since sensing and deciding are gated on the same daze check and so
+    /// happen exactly once each per turn (§8.3).
+    ///
+    /// The refund can never *grow* a lead past what the call granted. In the turn loop
+    /// that clamp is a no-op — a responder's lead is only ever set by
+    /// [`respond_to`](Self::respond_to), and `decide` only reaches here with `alert > 0`,
+    /// so the refund restores exactly what the same turn took. It is stated anyway so
+    /// the rule holds for a fixture that drives `decide` without a sense pass, and so
+    /// "a responder does not spend its lead travelling" can never quietly become "a
+    /// responder earns lead by travelling".
+    fn keep_lead_for_the_road(&mut self) {
+        self.alert = (self.alert + 1).min(ALERT_DURATION);
     }
 
     /// Begin the §7.6 search: enter [`Alerted`](GuardState::Alerted) for
@@ -1372,7 +1400,12 @@ fn patrollable(facility: &Facility, cell: Cell) -> bool {
 /// traffic monotonically opens the facility up over a level. Kept apart from
 /// [`patrollable`] so a panel is walked *through*, never chosen as a sweep or
 /// search target the guard could not stand on.
-fn routable(facility: &Facility, cell: Cell) -> bool {
+///
+/// Shared with the radio (§7.3): control prices a dispatch by the route the guard
+/// would actually walk ([`nearest_respondable`](crate::radio::nearest_respondable)),
+/// and it must measure that walk with the same predicate the walk itself uses, or
+/// the pick and the journey would disagree.
+pub(crate) fn routable(facility: &Facility, cell: Cell) -> bool {
     patrollable(facility, cell) || facility.terrain(cell) == Some(Terrain::DoorPanelClosed)
 }
 
@@ -2064,6 +2097,156 @@ mod tests {
             guard.focus,
             Some(called_to),
             "the sweep centres on the called cell",
+        );
+    }
+
+    /// One whole guard turn against a player it cannot possibly see: the §4.2 phase-3
+    /// sense pass (which cools every reactive timer) followed by the decision, with any
+    /// step applied as the turn loop would. Returns the direction the guard committed
+    /// to, so a caller can tell a step from a hold.
+    ///
+    /// The lead tests **must** go through this rather than calling `decide` alone: the
+    /// cooling they are about happens in [`sense`](Guard::sense), so a fixture that
+    /// skips it is measuring nothing.
+    fn take_turn(guard: &mut Guard, facility: &Facility, blocked: &[Cell]) -> Option<Direction> {
+        // Concealed from everyone, so no sighting can refresh the lead under the test.
+        guard.sense(Cell::new(0, 0), true);
+        let step = guard.decide(
+            facility,
+            blocked,
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+        );
+        if let Some(dir) = step {
+            if let Some(next) = guard.pos.step(dir) {
+                guard.advance_to(next, dir, facility);
+            }
+        }
+        step
+    }
+
+    /// §7.3/#409 — **the fix**: a dispatch to a cell far beyond [`ALERT_DURATION`]
+    /// steps still *arrives* and opens its §7.6 search there. The lead bounds the
+    /// investigation, not the commute; before this, the further from the patrols you
+    /// struck, the less the radio cost you, because the responder's lead ran out on the
+    /// road and it stood down having looked at nothing.
+    #[test]
+    fn a_responder_arrives_however_far_the_call_is() {
+        let facility = Facility::walled_box(40, 40);
+        let called_to = Cell::new(38, 38);
+        let mut guard = Guard::patrolling(Cell::new(1, 1));
+        guard.look(&facility);
+        guard.respond_to(called_to);
+
+        let journey = guard.pos.manhattan_distance(called_to);
+        assert!(
+            journey > ALERT_DURATION,
+            "the fixture must out-walk the lead, or it tests nothing: \
+             {journey} steps against a lead of {ALERT_DURATION}",
+        );
+
+        // Generous cap: the walk plus the turns spent rotating onto each heading.
+        for _ in 0..journey * 2 {
+            if guard.pos == called_to {
+                break;
+            }
+            take_turn(&mut guard, &facility, &[]);
+            assert_eq!(
+                guard.state,
+                GuardState::Responding,
+                "it must not stand down on the road (§7.3)",
+            );
+        }
+        assert_eq!(guard.pos, called_to, "it walked the whole way");
+
+        take_turn(&mut guard, &facility, &[]);
+        assert_eq!(
+            guard.state,
+            GuardState::Alerted,
+            "arrival opens the §7.6 search the call was always for",
+        );
+        assert_eq!(guard.focus, Some(called_to), "centred on the called cell");
+        assert_eq!(guard.search, SEARCH_DURATION);
+    }
+
+    /// §7.6/§7.8: the backstops survive the freeze. A responder that cannot get there
+    /// — the destination is sealed off, or a colleague holds the only way through —
+    /// **does** burn its lead and stands down cleanly. The freeze is conditioned on a
+    /// route existing this turn, not on the state, so nothing paces forever.
+    #[test]
+    fn a_responder_that_cannot_travel_still_cools_out() {
+        // A room split by a solid wall, with the call on the far side of it.
+        let mut facility = Facility::walled_box(12, 12);
+        for y in 0..12 {
+            facility.set_terrain(6, y, Terrain::Wall);
+        }
+        let mut stranded = Guard::patrolling(Cell::new(2, 2));
+        stranded.look(&facility);
+        stranded.respond_to(Cell::new(9, 9));
+        for _ in 0..ALERT_DURATION {
+            assert_eq!(stranded.state, GuardState::Responding, "still trying");
+            take_turn(&mut stranded, &facility, &[]);
+        }
+        assert_eq!(
+            stranded.state,
+            GuardState::Calm,
+            "an unreachable call is given up, not paced forever (§7.6)",
+        );
+
+        // A one-cell corridor with a colleague standing in it: the route exists on the
+        // board but is blocked every turn (§7.8), so the lead cools just the same.
+        let mut facility = Facility::walled_box(5, 12);
+        for x in 1..4 {
+            facility.set_terrain(x, 6, Terrain::Wall);
+        }
+        facility.set_terrain(2, 6, Terrain::Floor); // the one gap
+        let colleague = Cell::new(2, 6);
+        let mut held = Guard::patrolling(Cell::new(2, 4));
+        held.look(&facility);
+        held.respond_to(Cell::new(2, 9));
+        for _ in 0..ALERT_DURATION {
+            let step = take_turn(&mut held, &facility, &[colleague]);
+            assert_eq!(step, None, "the gap is sealed, so it holds (§7.8)");
+        }
+        assert_eq!(
+            held.state,
+            GuardState::Calm,
+            "a permanently blocked responder cools out rather than holding forever",
+        );
+    }
+
+    /// §7.6 — the **anti-tracking-turret backstop is untouched**. A chase's
+    /// destination follows the player, so freezing *its* lead would rebuild the
+    /// un-outrunnable pursuer the design exists to avoid. Only the `Responding` arm
+    /// changed: a chasing guard's lead cools every turn it steps, exactly as before,
+    /// and runs out on schedule.
+    #[test]
+    fn a_chase_still_burns_its_lead_while_it_steps() {
+        let facility = Facility::walled_box(40, 40);
+        let mut guard = Guard::patrolling(Cell::new(1, 1));
+        guard.look(&facility);
+        guard.state = GuardState::Chasing;
+        guard.destination = Some(Cell::new(38, 38));
+        guard.alert = ALERT_DURATION;
+        guard.last_seen = Some(Cell::new(38, 38));
+
+        let mut stepped = 0;
+        for _ in 0..ALERT_DURATION {
+            assert_eq!(guard.state, GuardState::Chasing, "still on the lead");
+            if take_turn(&mut guard, &facility, &[]).is_some() {
+                stepped += 1;
+            }
+        }
+        assert!(stepped > 0, "the chaser really was walking, not stuck");
+        assert_eq!(
+            guard.state,
+            GuardState::Calm,
+            "the lead went cold on the road and the chase was given up (§7.6)",
+        );
+        assert!(
+            guard.pos.manhattan_distance(Cell::new(38, 38)) > 0,
+            "it never got there — which is the point of the backstop",
         );
     }
 
