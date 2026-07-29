@@ -41,12 +41,15 @@ use crate::status::{live_messages, Message, MessageHistory};
 /// (§11.7/#300). **[START]** — the panel is drawn over the map, and burying the
 /// danger overlay (§11.5) behind a wall of text is the failure mode to avoid, so the
 /// history's own bound ([`HISTORY_ACTIONS`](crate::status::HISTORY_ACTIONS)) is backed
-/// by a hard row budget for the rare action that raises five messages at once.
+/// by a hard row budget for the run of loud actions that would otherwise fill the
+/// screen between them.
 ///
-/// A quarter of the v1 board's 40 rows (§10.2): enough that the deployed look is
-/// worth taking, little enough that three quarters of the facility is still visible
-/// underneath it.
-pub const MAX_LOG_ROWS: usize = 10;
+/// Half the v1 board's 40 rows (§10.2). The deployed look is a deliberate, momentary
+/// one — you take it, read it and fold it — so it can afford to cover more than a
+/// glanceable overlay could, and half the facility stays visible underneath while it
+/// is up. Below this the bound was doing the cutting rather than the history, which
+/// made [`HISTORY_ACTIONS`](crate::status::HISTORY_ACTIONS) the wrong knob to reach for.
+pub const MAX_LOG_ROWS: usize = 20;
 
 /// How many of those rows the block's **content** may use: all but the closing rule
 /// ([`SEPARATOR_GLYPH`]), which every block ends on.
@@ -884,10 +887,12 @@ mod tests {
     /// [`MAX_LOG_ROWS`] rows — nor ever ends on a rule that promises a turn it cut.
     #[test]
     fn the_block_is_bounded_and_never_ends_on_a_rule() {
-        // A worst case no real turn reaches: four loud actions of four messages each,
-        // which would want 4 × 4 + 3 rules = 19 rows if nothing bounded it.
+        // A worst case no real turn reaches: a full ring of loud actions, each raising
+        // as many messages as the whole block is allowed rows, so the row budget is
+        // certain to bite however the two bounds are retuned.
+        let per_action = MAX_LOG_ROWS;
         let loud = |n: u32| {
-            (0..4)
+            (0..per_action)
                 .map(|i| Message {
                     text: format!("message {n}.{i}"),
                     category: Category::Warning,
@@ -896,7 +901,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let mut history = MessageHistory::default();
-        for n in 0..4 {
+        for n in 0..HISTORY_ACTIONS as u32 + 1 {
             history.record(&[
                 Event::Bumped {
                     into: Cell::new(n, 1),

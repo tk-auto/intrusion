@@ -32,15 +32,20 @@ use crate::state::Event;
 use std::collections::VecDeque;
 
 /// How many past **message-bearing** actions the deployed log keeps (§11.7).
-/// **[START]** — enough to read back the two or three turns that set the facility
-/// off, which is the case the scrollback exists for, and short enough that the
-/// block stays a momentary look over the board rather than a wall of text burying
-/// the danger overlay (§11.5).
+/// **[START]** — enough to read back the run of turns that set the facility off,
+/// which is the case the scrollback exists for. Three was the first guess and it
+/// proved short: a silence, a call-in and a body find is already three, so the turn
+/// you actually want context for was the one falling off the back.
+///
+/// The block it feeds is bounded separately by `MAX_LOG_ROWS` (§11.7, in `render`)
+/// and clamped to the board besides, so a loud run cannot turn this into a wall of text over the danger
+/// overlay (§11.5) — this bound sets how far *back* the record goes, not how much of
+/// the screen it may take.
 ///
 /// Actions, not turns: a free bump raises messages and a plain step raises none, so
 /// counting *turns* would let a corridor sprint quietly flush the history that
 /// matters. An action that said nothing costs no slot.
-pub const HISTORY_ACTIONS: usize = 3;
+pub const HISTORY_ACTIONS: usize = 5;
 
 /// The last few actions' messages, newest first (§11.7/#300) — the scrollback the
 /// deployed log shows under the current action's block, each older block behind its
@@ -102,8 +107,10 @@ mod tests {
         }]);
         assert!(history.is_empty(), "a silent action files nothing");
 
-        // Four loud actions, oldest first — the alert step is the loudest of its own.
-        for rung in 1..=4 {
+        // One more loud action than the ring can hold, oldest first — the alert step is
+        // the loudest of each. Driven off the bound, so retuning it retunes the test.
+        let filed = HISTORY_ACTIONS as u32 + 1;
+        for rung in 1..=filed {
             history.record(&[
                 Event::TakenDown {
                     at: Cell::new(rung, 1),
@@ -117,9 +124,9 @@ mod tests {
 
         let blocks: Vec<Vec<Message>> = history.blocks().map(<[Message]>::to_vec).collect();
         assert_eq!(blocks.len(), HISTORY_ACTIONS, "the ring is bounded");
-        // Newest first: the last action filed leads, and rung 1 has fallen off.
+        // Newest first: the last action filed leads, and the oldest has fallen off.
         for (i, block) in blocks.iter().enumerate() {
-            let rung = 4 - i as u32;
+            let rung = filed - i as u32;
             assert_eq!(
                 block[0].text,
                 format!("security condition {rung} of {}", crate::alert::TOP_RUNG),

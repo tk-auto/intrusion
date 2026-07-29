@@ -2673,8 +2673,9 @@ system — it is derived from adjacency every frame and carries no state.
   spilled onto it — and a frame too short to hold the whole block still gets its
   closing rule, on whatever row it truly ends at. That is where "with radio pings (§7.3) there is more to say" is answered:
   a silence, a call-in and a body find on three consecutive turns can be read back
-  after the near line has moved on. Bounded twice — a cap on remembered actions and
-  a cap on total rows, both **[START]** — and then clamped to the board, because it
+  after the near line has moved on. Bounded twice — a cap on remembered actions
+  (**5**) and a cap on total rows (**20**, half the v1 board), both **[START]** —
+  and then clamped to the board, because it
   is drawn *over* the map and burying the §11.5 danger overlay is the failure mode.
   An action that said nothing contributes no block and no rule. **Now reads louder
   than then**: the current action's rows draw at full strength and every remembered
