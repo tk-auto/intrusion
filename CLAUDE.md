@@ -17,7 +17,17 @@ truth. It is a from-scratch rebuild, self-contained, and every number in it is a
 starting value, not a law. Read it before changing behaviour; cite its sections
 (e.g. §7, §13.2) when the design bears on the work. Status markers: **[SETTLED]**
 (don't relitigate without a reason), **[START]** (a tuned starting value,
-expected to move), **[OPEN]** (genuinely undecided, listed in §15).
+expected to move), **[OPEN]** (genuinely undecided, listed in §15). It states **how
+the game is supposed to be** — the rules and their consequences, plus a short *why*
+where a decision was contentious. The long *why* is not in it.
+
+**Rulings: [`docs/design-rulings.md`](docs/design-rulings.md)** — the long "why" for
+decisions that cost a lengthy discussion, a sim measurement or a rework: the
+alternatives tried, the evidence, the reworks. Numbered appendices, **appended in
+creation order and never renumbered**, so the design doc cites them by number
+(*appendix 12*) and you grep the heading to find one. Read the appendix before
+relitigating anything it covers; when a new decision here is hard-won, append the next
+number rather than growing the design doc.
 
 **Reference: [`docs/render-reference.md`](docs/render-reference.md)** — every glyph
 and every palette choice in one table, with the reasoning. A companion to §11.2/

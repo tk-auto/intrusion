@@ -1,0 +1,983 @@
+# Intrusion — Design rulings
+
+The long "why" behind decisions in [`docs/design.md`](design.md).
+
+The design doc says **how the game is supposed to be**. It states each rule, and —
+where a decision was controversial or hard to shape — one short sentence of why.
+This document holds the rest: the argument, the alternatives that were tried, the
+reworks, and the sim evidence. A ruling lands here when the decision cost a long
+discussion, a measurement or a rewrite; a decision that was obvious the first time
+needs no appendix.
+
+**Nothing here is a rule.** Where this document and the design doc disagree, the
+design doc wins and this one is out of date.
+
+## How this file is organised
+
+It isn't, and that is deliberate. Appendices are **appended in the order they were
+written**, never sorted, never renumbered. The heading is the index: grep for
+`Appendix 18`, or for a word in its title.
+
+- A design-doc section links to a ruling by number — *(appendix 12)*.
+- A new ruling takes the **next free number** and goes at the **end**.
+- **Numbers are permanent.** A ruling that is superseded is rewritten in place, or
+  marked superseded and left where it is. Nothing is renumbered and nothing is
+  deleted, because the links in the design doc are by number.
+- Each appendix names the design-doc sections it belongs to, so the trail runs both
+  ways.
+
+---
+
+## Appendix 1 — Why the previous version was not fun
+
+*(§2.3, and the origin of nearly everything else in this file.)*
+
+The previous version was not fun. It is tempting to blame the design. The evidence
+says otherwise: **every system that would have created pressure was inert, and the
+one ability that resolved pressure was free.**
+
+| System | Intended | What actually happened |
+|---|---|---|
+| Neutralise ability | A costed tactical option | Unlimited range, no cooldown, **and it did not consume a turn**. You could neutralise every guard in sight, for free, without ending your turn. |
+| Sound | Noise draws guards | **Guards were deaf.** A full propagation model existed and was never given a single sound source. |
+| Alert | Detection makes things harder | **Never written to, never read.** |
+| Run | An escape option | 2 cells/turn against guards hard-capped at 1 → an *unconditional* escape. Being seen was never fatal. |
+| Guards | Patrol, cooperate, search | No communication. No reaction to a downed colleague. No search at the last known position — arrive, find nothing, wander off. |
+| Fog of war | — | None at all. The whole floor plan was legible from turn one. |
+
+**The lesson is not "the design was wrong". It is that the design was never actually
+running.** The version that got playtested was this design with all of its tension
+removed and a free win button added.
+
+Two consequences carry forward into the design doc itself, which is why they are
+stated there rather than only here: **cost is the load-bearing property of every
+ability**, and **this class of failure is invisible to a human playtester and obvious
+to a bot** — a human plays 5 levels and vaguely feels the game is flat; a bot playing
+500 reports "the neutralise ability is used 94% of turns and win rate is 99%" on the
+first run.
+
+Smaller faults from the same audit, each recorded with its own system:
+
+- No targeting system at all — every ability was self-targeted or auto-targeted at
+  the nearest valid thing, because building a targeting UI kept getting deferred.
+  That is the *direct* cause of the free unlimited-range neutralise: auto-target-
+  nearest-visible was the path of least resistance (§8.4).
+- Watched-but-unseen cells rendered dark gray on dark gray, so the danger overlay's
+  red downgraded to grey and **the safest-looking cells on the map were the watched
+  ones you could not see into** (§11.5).
+- FOV was invisible on open floor: floor is a space, a space has no foreground, so
+  the dimming that encodes the FOV boundary was undetectable across open ground
+  (§11.5).
+- The palette pushed every colour through a gamma curve that compressed everything
+  into 0.1–0.9, so there was no true black and no true white and the whole image sat
+  in a washed, low-contrast band. Six of the sixteen colours were never used at all
+  (§11.2).
+- Overlapping glyphs were last-writer-wins, so a guard in a doorway rendered
+  arbitrarily (§11.3).
+- There was never a legend. Nothing ever explained what `$`, `E`, `}` or `z` meant,
+  and the game-over screen did not distinguish victory from defeat (§14 v2).
+
+---
+
+## Appendix 2 — "No killing" is fiction, not a mechanic
+
+*(§2.1, §7.2.)*
+
+The original pillar read *"no permanent guard incapacitate (no killing)"*. That
+bundles two constraints which do not have to travel together:
+
+- **The fiction constraint**: the protagonist doesn't kill. *Keep this.* It costs
+  nothing and it is the character.
+- **The mechanical constraint**: threats are never permanently removed. *Drop this.*
+
+The mechanical half also directly contradicts the *"thorough exploration is
+rewarded"* pillar. Explore-thoroughly plus threats-rearm is a treadmill: you are
+asked to own the space and denied the means. Games that do make guards wake up
+(Invisible Inc, most obviously) pair it with an escalating alarm that shoves you out
+the door — you are never meant to own the space. Intrusion wants both. Pick one, and
+this design picks *ownership*.
+
+The cost that replaces the timer is the body and the radio clock it runs (§7.2,
+§7.3), which is what keeps permanence from being free.
+
+---
+
+## Appendix 3 — Permadeath: the cost, and the safety valve not built
+
+*(§2.2.)*
+
+**A 2–3 hour permadeath run means a capture at hour 2.5 costs 2.5 hours.** That is a
+real cost and it is deliberate; it's what makes the last facility frightening. It is
+also what puts enormous weight on the fairness promise in §2.2: permadeath is a
+promise that the game is fair, and unfair permadeath is just a bad game.
+
+**The old version was not permadeath in any sense** — it offered unlimited "play the
+same level again" from a run-start snapshot, so a run could be retried forever. Half
+the point of writing the pillar down this precisely is that the previous version's
+behaviour did not resemble it at all.
+
+**The prison level** — capture drops you into a cell with a chance to break out and
+rejoin the run, instead of ending it outright — would soften the 2.5-hour cliff
+without adding meta-progression, and it is thematically perfect. It is parked in the
+§14 backlog rather than built, because **it is a safety valve for a pressure that has
+to be shown to exist first.** Build the cliff, feel it, then decide whether it wants
+relieving.
+
+> **Development tension, stated plainly.** Permadeath and "iterate fast to find the
+> fun" pull hard against each other: you cannot playtest hour 3 of a run fifty times.
+> Expect a debug/practice mode that starts anywhere with anything. It is *not* the
+> real game, must never be reachable by accident, and must never be confused with a
+> roguelite. (The shipped shape of this is §12.6's `DebugModifiers`.)
+
+---
+
+## Appendix 4 — The body is non-solid
+
+*(§7.2.)*
+
+An earlier rule made a body a solid obstacle (fill 1.0). It read well — the body as a
+thing in the way — but it manufactured two soft-locks:
+
+- a body dropped on a chokepoint could permanently freeze a guard pathing past it
+  (#182), and
+- a takedown from a cupboard could drop the body onto the cupboard's only mouth and
+  trap the *player* inside (#170).
+
+Both are the same failure — an unmovable body becomes a wall nobody can pass — and
+§2.2 forbids a run ending to a dead end rather than a decision.
+
+Making the body non-solid deletes the whole class at the root. The cost stays real
+(it is loud evidence, it must be dragged and hidden, and it runs the §7.3 clock); it
+is just no longer a wall you can build against yourself.
+
+---
+
+## Appendix 5 — The alert ladder: what the sim measured
+
+*(§7.3, #376 and #374.)*
+
+Every threshold in the ladder is a knob the headless sim turns without a rebuild
+(`--alert`, §13.2), and the ladder is measured: each run records the **rung it
+reached, the turn it reached it, and the trigger that got it there**, so a batch
+reports the *path* up the ladder rather than a single number. The first sweeps, 100
+seeds each (`--seed 0 --cap 1000`), repeated on a disjoint block:
+
+| `sighting-contact-turns` | 1 | 2 | **3** | 5 | 8 |
+|---|---|---|---|---|---|
+| Mean peak rung (baseline profile) | 0.98 | 0.88 | **0.70** | 0.45 | 0.15 |
+| Runs never noticed (rung 0) | 25% | 28% | **42%** | 63% | 88% |
+| Win rate | 0.38 | 0.34 | **0.35** | 0.36 | 0.38 |
+
+Three findings, and the third is the one that matters:
+
+- **The contact threshold is the ladder's real reach knob.** It moves the mean peak
+  rung across nearly the whole range the ladder has. The **window** length barely
+  does: 8, 10, 14 and 20 all read a mean peak of 0.69–0.70, because widening it makes
+  one sighting easier and three *separate* sightings harder, and the two cancel. So
+  the **10** is not load-bearing and does not need agonising over; the **3** is.
+- **Rung 3 is unreachable without takedowns.** Over 200 baseline-profile seeds, at
+  every threshold swept, **no run reached rung 3** — its triggers are a found body and
+  a second quiet post, and a player who strikes nobody produces neither. The profiles
+  that leave bodies reach it in ~8–9% of runs. The top of the ladder is a *takedown
+  player's* rung, which is coherent with §7.2 but worth knowing.
+- **Reach is tunable; consequence was not yet measurable.** Across every sweep the win
+  rate stayed flat — 0.34–0.38 on one seed block and 0.41–0.44 on a disjoint one —
+  while the mean peak rung moved from 0.15 to 0.98. Sweeping the rung-1 dwell cut
+  itself, from *no cut at all* (3–7) to the harshest (1–1), moved the win rate by
+  about three points, which is inside a 100-seed batch's own wobble.
+
+**What the reinforcements then did** (#374, the same 100-seed batches, one per
+playstyle profile):
+
+| Profile | Win rate before → after | Reinforcements faced (100 runs) |
+|---|---|---|
+| baseline | 0.35 → 0.36 | 14 |
+| cautious | 0.61 → 0.58 | 12 |
+| aggressive | 0.53 → 0.51 | 42 |
+| careless | 0.51 → 0.46 | 40 |
+
+The ladder now has a consequence, and it is **proportional to how loudly you play**.
+The avoidance-first temperaments barely reach rung 2, face about one arrival per seven
+runs, and are unmoved. The two that leave bodies reach rung 3, face four times as many
+guards, and pay 2 and 5 points for it — which is what §10.2's ~8–10 points per guard
+predicts for ~0.4 extra guards a run. That is the flat curve above finally bending, and
+it bends for the runs that earned it.
+
+So **the [START] thresholds stay where they are.** The curve that would justify moving
+one is the outcome curve, and it was flat: retuning a threshold against a flat curve is
+tuning noise, not evidence (§13.3). What the flat curve actually says is that **rung 1's
+teeth are its only teeth** — shortening a patrol dwell changes how a facility *feels*
+without changing how often the raid succeeds.
+
+Two caveats the numbers carry (§13.4): the bot has **no rung-aware policy** — it does
+not play differently when the facility is loud, so this measures *pressure*, not *play*
+— and a trigger reading zero is **inconclusive**, not harmless. `second-post-silent`
+fires in no batch measured, and the honest reading is not "the trigger does nothing" but
+that a found body has already taken the facility to rung 3 before a second post can, so
+the escalation belongs to the louder event.
+
+---
+
+## Appendix 6 — Reinforcements walk in
+
+*(§7.3.)*
+
+**New guards entering mid-level reverses an earlier explicit "out"** (*"spawning new
+guards mid-level — nothing in the design supports it; the guard count is a generation
+knob"*), and the reversal is deliberate: rungs 2 and 3 announced an escalation and did
+nothing, which is appendix 1's worst row. The three-rung ceiling is what keeps it from
+spiralling — however loud a run gets, the facility gains **at most three**.
+
+**Why never in view.** An arrival the player witnesses is a guard materialising out of
+nothing, which no amount of fiction repairs. So the arrival cell is outside the player's
+field of view and never adjacent to them, diagonals included — and if the facility
+offers no cell that honours it (a small room a waiting player can see all of, since
+waiting buys 360°), **nobody arrives**. Breaking the rule is worse than missing the
+reinforcement.
+
+**Why the guard sense is not gated with it.** A reinforcement arriving inside the sense
+box reads as a new dot, which is position-only information the player earned rather than
+a witnessed materialisation. Gating on it would also be unworkable — a turn spent waiting
+widens the sense to a 41×41 box, the whole v1 footprint.
+
+**Why their beat is cut where the errand ends, not where they arrived.** A beat grown at
+the arrival cell would tether every reinforcement of a run to the same far-end room, since
+the arrival region is chosen for its distance from the player and that answer barely
+moves.
+
+**Why they search rather than hunt.** More guards converging on a stale cell is *the net
+closing*, which is what §7.6 asks for; more guards tracking the player's live position is
+the un-fun chase §7.6 exists to prevent.
+
+**Why their lead is sized to the journey.** A radio dispatch picks the *nearest* guard, so
+the ordinary §7.4 duration always covers its walk. A reinforcement starts at the far end by
+construction, and the same constant would strand it halfway across the map having looked at
+nothing.
+
+**Why a silenced radio does not stop them.** The comms console's effects are the enumerated
+ones, and the ladder's rungs are not among them: silencing the net buys you the *internal*
+net, not the escalation. This is the literal reading and it is what ships; **[OPEN]**
+whether it is the right one, since the alternative (control cannot send what it cannot be
+told about) is a coherent rule somebody may prefer.
+
+---
+
+## Appendix 7 — The comms console's price
+
+*(§7.3.)*
+
+- **The cost is the route, not the switch.** One bump is cheap; getting to it is not.
+  Placement distance is therefore the balance knob (**[START]**; the sim sweeps it), and
+  the reason the console is not simply free: a console found in the first few turns would
+  make every later takedown free, which is exactly the collapse §7.3 exists to prevent.
+- **It is findable, not given.** Contents are fogged (§11.5a), so the console has to be
+  *scouted*; the map never advertises it. And it is asserted reachable like an objective
+  (§10.6) — **counterplay the player cannot reach is not counterplay**, so a seed that
+  seals it away is a generation reject.
+- **Errands are not recalled**, which keeps it counterplay rather than a panic button. It
+  also follows §7.7's own rule that a call, once made, is never queued or retried — there
+  is no channel to un-send one down either.
+- **A silenced facility is lonelier, never blind.** Nothing touches what a guard does with
+  its *own* eyes: the one that loses you still searches, the one that finds a body still
+  hunts it. Only the *calling of others* stops — and where a *calm* one chooses to walk.
+- **The trade is coordination for predictability.** The console used to be one bump and all
+  upside, which is exactly the appendix 1 failure it exists to answer: cost is the
+  load-bearing property of every ability, and this one had none beyond the detour. So a
+  dead net buys the loss of guard cooperation and pays with the loss of a learnable patrol.
+  You can no longer stand somewhere and *know* a guard will not come. **Wandering is not an
+  upgrade to the sweep** — farthest-first is what makes patrols read as purposeful (§7.5)
+  and it is deliberately given up here.
+- **Random, not farthest-over-the-whole-level.** Handing every guard the map while keeping
+  the deterministic tie-break would make clustering *worse*: the attractors become the map's
+  extreme corners, drawn from one shared candidate set, and the per-guard inspected memory
+  that would otherwise separate two guards converges the moment their cones overlap — which
+  they will, since everyone is walking to the same corners. Random removes the determinism
+  causing the lockstep rather than patching round it. The draw comes off the run's own
+  seeded stream, so a silenced run reproduces like any other (§12.4).
+
+---
+
+## Appendix 8 — The patrol dwell: why it is unconditional, and why the window grew
+
+*(§7.5, §153.)*
+
+The dwell was a 50% roll over 3–5 turns, and at that rate it was not the thing a player
+saw. Measured over twelve seeded runs, **92% of every stationary spell a patrolling guard
+took lasted one or two turns** — not a dwell at all, but the slow 90° turn and the
+two-rotation 180° about-face. 42% of the two-turn stops were immediately followed by the
+guard walking back the way it came, so *reach the end, spin, come straight back* read as
+the patrol's actual rhythm, and the real pause — under 8% of stops — was lost inside it.
+
+**A pause that fires half the time is not a rhythm a player can plan against; it is a thing
+that sometimes happens.** So it became unconditional (every arrival) over a longer 3–7.
+
+Note that the **stop the player sees** runs a little longer than the dwell: a guard turning
+to leave spends one more turn rotating for a 90° heading, or two for a reversal, so a 3–7
+dwell reads as 3–9 turns of held ground. The dwell is the part with the facing pinned,
+which is the part a Takedown needs.
+
+---
+
+## Appendix 9 — Partitioning the level between the guards
+
+*(§7.5, §10.5.)*
+
+**The weakness this replaced.** Territories were once *"boxes around spawn points, which
+have no relationship to the building"* — they straddled walls, spilled into unreachable
+rooms, and overlapped arbitrarily. §10.5's region graph fixed the *shape* (a beat is rooms
+and the corridors joining them, all of it walkable); dropping the spawn anchor fixed the
+*tether*; and the partition fixed the last of it, the **overlap and the gaps** — two guards
+grinding one wing while another had nobody, which a per-beat ceiling of four regions on a
+seventeen-region level guaranteed.
+
+**What it costs, measured — and it is not small.** Covering the whole facility is a real
+difficulty increase, not a tidy-up. Over 100 seeded bot runs per playstyle:
+
+| profile | win rate | diversity |
+|---|---|---|
+| baseline | 0.36 → **0.34** | 0.670 → 0.672 |
+| cautious | 0.57 → **0.55** | 0.493 → **0.413** |
+| aggressive | 0.50 → **0.37** | 0.602 → 0.584 |
+| careless | 0.47 → **0.30** | 0.592 → **0.514** |
+
+**The bold profiles are the finding.** A careful player loses 2 points of win rate; a bold
+one loses 13–17, because the ground a bold plan crosses is now patrolled ground. Takedowns
+fall with it (careless 14 → 8), so the striking line is *harder to run*, not merely riskier.
+Alert peaks rise across the board and quiet runs nearly halve (careless rung-0 37 → 21).
+Turns to win rise for the careful profiles (baseline 129 → 154) and barely move for the bold
+ones — they are not playing longer, they are being caught. The single sharpest illustration
+is the sim's pinned seed 42: a 111-turn win with **zero** detections through ground nobody
+patrolled, now a capture at 216 with seven.
+
+**Strategy diversity falling is the part to watch** (§13.2: *win rate tells you if the game
+is hard, strategy diversity tells you if it is interesting*). Two profiles lose ~8 points of
+it, which is the smell of a level admitting fewer distinct answers. If this proves too harsh
+the lever is the **guard count** (§10.2, ~9 points of win rate per guard): four guards now
+genuinely cover the facility where they used to cover something under two-thirds of it. It
+is not a reason to go back to leaving wings empty.
+
+---
+
+## Appendix 10 — The chase had no exit
+
+*(§7.6 — read this before touching guard AI.)*
+
+**This is the known reason the game was not fun, from direct play:** *guards that saw you
+tailed you relentlessly; breaking out of sight was neither easy nor fun, even with Run.*
+
+That is not a tuning problem. **Four rules combined into a tracking turret.**
+
+1. **Facing follows movement, and a chasing guard moves toward you.** So **its cone is
+   re-aimed at you every single turn, for free.** You cannot leave a chasing guard's cone
+   by moving. It is a turret that never needs to traverse.
+2. **Detection is binary at a flat range of 10, with no falloff.** A guard tracks you
+   exactly as perfectly at 10 cells as at 1. **Distance buys nothing.**
+3. **Run gains 5 cells against a range of 10.** 2 cells/turn for 5 turns = a 5-cell gap,
+   into a 10-cell range. **Run cannot break contact — it arithmetically cannot.** Then 12
+   turns of cooldown at parity speed, cone still locked. The player does the obviously
+   correct thing and the maths forbids it from working.
+4. **Corridors are full-span straight sightlines, by construction.** The primary structure
+   of every level runs the *entire span of its region* — up to 38 cells, dead straight, 2–4
+   wide — and **cover is only ever placed in rooms**. The space you flee through is a
+   shooting gallery.
+
+Cone tracks free + distance irrelevant + escape tool can't outrange + nowhere to break sight
+= **the chase had no exit.**
+
+And on the rare occasion sight *was* broken, the guard walked to the last known cell, found
+nothing, and resumed patrol immediately. So the chase was **binary: glued, or gone. Never
+hunted.**
+
+> **The hunted phase is the entire game.** Break sight, slip into an alcove, hold still,
+> watch the red cone sweep past, breathe out, move. **That experience did not exist in any
+> form.** Everything in §7.6 and §7.7 exists to create it.
+
+**The ordering of the fixes matters.** The old problem was *never* that guards gave up too
+fast — it was that **you could never reach the giving-up phase**. Make the chase able to end
+first. Making guards search harder while the chase is still inescapable makes the game
+*worse*, not better. And the geometry fix (§10.1a) is probably the single biggest
+contributor, while being invisible if you only look at the AI.
+
+---
+
+## Appendix 11 — Clipping the post-search watch to the guard's own territory
+
+*(§7.6.)*
+
+Every guard that answered one call carries the same `focus` — a call carries its own cell and
+inherits nobody's memory (§7.7). Handed the same *disc*, two responders spend the whole
+window pacing one region and converge into the single moving clump §7.6 exists to prevent:
+measured on a two-guard scene, mean separation over the watch runs **4.2 cells on a shared
+disc against 7.9 on clipped territory**, closing to shoulder-to-shoulder against three cells
+apart. Sharing a focus is right; sharing a *territory* is the accident.
+
+**It also makes the watch slightly kinder, which was not the aim.** Two responders splitting
+one area into halves cover it *less densely* than two pacing all of it, so over 100 seeded
+bot runs the win rate rises — baseline 0.34 → 0.38, careless 0.30 → 0.35, cautious 0.55 →
+0.53 — clawing back part of what the appendix 9 partition cost. The goal was legibility
+rather than difficulty, and the honest reading is that a clump is both uglier *and* harder
+than coverage. If the watch wants its bite back, the knobs are `WATCH_RADIUS` and
+`WATCH_DURATION`, not un-splitting the responders.
+
+---
+
+## Appendix 12 — Dephase's safety eject: the third answer
+
+*(§8.3.)*
+
+This is the third answer to a question that has now been asked twice — what happens when a
+Dephase duration expires while the player is inside something solid.
+
+- It was **free**, which made phasing consequence-free.
+- Then it was **lethal**, which made it the one death §2.2 forbids: the timer is on screen
+  but the *lethal half* never is (`can_rematerialize` is invisible, and while phased you
+  cannot bump, so you cannot even probe the cell you stand in), and §4.5 is **[SETTLED]**
+  that a guard's touch is the only loss condition.
+
+So the cost stays and the death goes: **turns spent helpless on a cell you did not choose,
+in a facility where contact captures**, are a price a player can see coming and choose to
+pay.
+
+**The stun is as long as the throw**, because that is what prices recklessness. Clipping the
+corner of a table strands you one cell from open floor and costs the smallest stun there is;
+burying yourself a ring deeper into a wall block costs more, because the eject had to reach
+further to find you anywhere to stand. A flat rate charged the near miss and the deep dive
+the same, which made the worst case as cheap as the safest. In practice the ability caps its
+own damage: Dephase runs three turns counting its activation, so a phase begun outside buys
+two steps in and the stun tops out at three turns — the arithmetic goes further, the ability
+does not.
+
+**The randomness is load-bearing.** A predictable eject would make phasing into a wall a
+reliable way *through* one, and you may well be dropped back on the side you came from.
+
+**Why the near line names the tech, not the terrain.** It is *any* solid — a shut door, a
+table, a cupboard, a console — so a message that said "the wall" would be untrue in most of
+the cases it covers. Naming the tech ("safety eject — stunned") also gives the fiction for
+why this is survivable at all: the salvaged rig throws you out rather than letting you set
+inside the furniture.
+
+**Why the early toggle-off is not extended the same way** (#304/#329): pressing the key
+inside a wall is still refused, because a free press that teleported you clear would be
+exactly the escape tool this is designed not to be.
+
+---
+
+## Appendix 13 — Sound was dropped for the guard sense
+
+*(§9, and the old §15 Q3.)*
+
+Sound was meant to be the channel that let the player steer guard attention and track
+threats around corners — *"a second information channel that works around corners"*. It was
+the most-built and most-praised idea in the old design, and it was tried in this rebuild: a
+full cell-to-cell propagation field, guards that hear, a loudness ladder, a "how far you were
+heard" overlay.
+
+**It came out obscure and not fun.** An invisible field, tuned by numbers with no on-screen
+consequence, doing its work behind the UI. *"How is sound presented?"* was never answered
+because the honest answer is *it wasn't*, and **an invisible sound system is a missing one.**
+The complexity was real; the fun was not.
+
+So the rebuild drops sound entirely and keeps only the thing sound was actually *for*: the
+player knowing, around corners, where the threats are. That channel is now **direct**, and it
+is the inverse of sound's failure — sound was a hidden model with a visible-nowhere
+presentation; the sense is a **visible model with an obvious presentation.**
+
+Why the sense is the better trade:
+
+- **It is visible.** Sound's fatal flaw was that it had no good presentation. The sense's is
+  trivial and obvious: **draw the dot.** There is nothing left to solve.
+- **It is legible without being omniscient.** You get *position*, not *attention*. The
+  dangerous unknown — *is it looking at me?* — is preserved and tied to line of sight, which
+  is where the whole game already lives.
+- **It rewards Wait**, the game's one "spend a turn to know more" verb, instead of bolting on
+  a parallel system.
+- **It deletes a large, obscure subsystem** — propagation, emission, the loudness ladder, the
+  hearing check, the noise overlay — in favour of a range check and a render state. Less
+  code, less tuning surface, more clarity. That trade is the point of §3's "honest pressure
+  systems": a system that isn't fun doesn't earn its complexity.
+
+**What the removal cost elsewhere, and how it was paid.** Guard cooperation (§7.7) and the
+radio (§7.3) both leaned on sound for legibility — the player was meant to *hear* a ping.
+With sound gone, every call and every radio event needs a **visual / near-line** cue instead.
+The sense helps for free: a responder peeling off its patrol toward your last position is
+directly readable as a moving dot on the map. The rule that falls out is that no §7.7 call
+may ever depend on a sound the player has to hear.
+
+---
+
+## Appendix 14 — Bench concealment: the half-plane, after two rewrites
+
+*(§10.3.)*
+
+Concealment behind a bench of tables has been rewritten twice, each time because the shape of
+the protected zone was wrong rather than because the geometry was computed wrongly.
+
+1. It began as the **quarter-plane** behind the single bumped table — which let a guard look
+   down a bench and see you through its other tables, undercutting the exact cover §10.1a
+   places.
+2. That was replaced by a **per-ray** test across the whole run: faithful and exact, but too
+   tight in the other direction. A short bench subtends a narrow wedge, so a guard only a
+   little off the run's axis had a clear line — and, the deciding complaint, **the player
+   cannot compute that wedge at a glance**, which made the crouch a turn spent on protection
+   you could not predict and usually did not get. Since partial cover is the counterplay
+   §10.1a places in every corridor, a coin-flip crouch means that counterplay is not there.
+3. The **half-plane** per arm replaced it. It costs the crouch some precision at the ends of a
+   bench and buys back the one property a counterplay has to have, which is **being readable
+   before you spend the turn.**
+
+It is deliberately the more generous of the two. If bench-hugging turns out to dominate, the
+levers are the ones §10.3 already names — the turn it costs, contact-vulnerability, the
+crouch-walk's requirement to keep hugging — **not** re-narrowing the geometry the player has
+to read.
+
+One older behaviour is gone with it: **waiting beside a table used to crouch automatically.**
+That coupling is removed — Wait is pure (its 360° look and nothing else), and the crouch shows
+its direction in the usable line like every other bump.
+
+---
+
+## Appendix 15 — Corridors had no cover
+
+*(§10.1a.)*
+
+Corridor-first partition is the right structure (§10.1) but it has a severe emergent flaw that
+only shows up in play: **it produces long, dead-straight, full-span corridors with no cover,
+and those corridors are where the player flees.** The rooms got pillars and stubs. The
+corridors — the majority of the map, the connective tissue, the place every chase happens —
+got **nothing**. A 38-cell straight 3-wide corridor with a guard in it has no counterplay. It
+is not a space; it is a sightline.
+
+**How the rule's wording moved.** It was first stated as *"no unbroken sightline"*, and the
+repair pass stamped 1-cell **wall** blockers — which read as floating wall noise, not a
+building. The table restatement replaced them; the cupboard clause came with the
+no-tables-in-corridors rule: same assertion machinery, honest architecture.
+
+**Why the counterplay follows the region.** A lone table read as noise, and a table in a
+corridor read as a barricade in a hallway — so neither is generated, and both are asserted
+away. Rooms get benches of furniture; corridors get architecture (a recessed cupboard, an
+alcove, a structural pillar, a buttress). The flight path stays clear.
+
+**Why the rule constrains the generator and not the player** (#303). Pierce Wall can punch a
+hole into a corridor's long wall from the room side and create exactly the uncovered straight
+run this rule forbids — and that is correct, not a loophole to close. The rule exists so a
+level is never *born* with an unsurvivable sightline; a player who cuts one has made a choice,
+and the danger overlay draws the new cone the moment a guard's line reaches down it, so the
+consequence reads as their own doing rather than as a bug.
+
+**The hiding game had no board.** Hideouts were placed **one attempt per room, stopping at the
+first failure** — so a level could easily have very few, and **never any in corridors**.
+Combined with §7.6, that means during a chase — the exact moment the hiding game is supposed
+to happen — there was nowhere to hide. The original harvest rule (*"a wall cell with exactly 3
+wall neighbours and 1 empty neighbour"*) only ever found the rare natural pockets; the backing
+that makes a recessed cupboard possible is now **manufactured** by the wall-thickening pass and
+the cupboard placed deliberately rather than harvested.
+
+*(**Jogging the corridors** mid-carve — offsetting a corridor a cell or two mid-span — remains
+the unimplemented alternative if §15.2 wants it.)*
+
+---
+
+## Appendix 16 — The spatial model was one rectangle
+
+*(§10.5.)*
+
+The old version had exactly one spatial abstraction: **an axis-aligned rectangle**. It was
+asked to be the level bounds, the partition regions, room identity, guard patrol territory,
+*and* the UI viewport. It was not up to any of it.
+
+The problems, which are worth understanding because they cascade:
+
+- **It cannot describe the spaces the game has.** A room with a pillar isn't a rectangle. An
+  L-shaped nook behind a stub isn't a rectangle.
+- **Corridors are not regions at all.** They're painted into the plan and never recorded. So
+  the connective tissue where most stealth gameplay happens is *spatially unaddressable*.
+  Nothing can ask "which corridor is this?" or "does this corridor reach that room?".
+- **The regions are generation scaffolding that gets thrown away.** Once the level exists it
+  has **no concept of rooms**. No registry, no cell→room lookup.
+- **Therefore everything downstream has to fake it.** Guards patrol a box around wherever they
+  spawned, because there is no vocabulary in which to say "cover the east wing". *That* is why
+  guard cooperation, assigned patrols, in-level lore placement, keys, and circuits all stayed
+  unbuilt — they were all blocked behind this one missing abstraction.
+
+The generator already builds the graph — corridors are nodes, rooms are nodes, doors are edges
+— and then discards it. Keeping it is **the highest-leverage structural decision in the
+document**: nearly every "guards should…" idea depends on it.
+
+---
+
+## Appendix 17 — Solvability, and the one-usable-per-cell preference
+
+*(§10.6.)*
+
+**The old generator never verified solvability.** It relied on a structural argument — every
+room is bounded by corridor walls, which qualify as door candidates — which has a hole: **a
+wall run shorter than 3 cells gets no door.** Punch-throughs fragment wall lines, and if every
+run bounding a room came out < 3, that room seals, with its objectives and guards inside.
+Nothing detected it, nothing repaired it, and no seed was ever rejected. Hence the rule: do not
+rely on a structural argument, assert reachability and reject the seed. It is a flood fill, it
+costs nothing, and it is exactly the kind of property a generator must never merely *believe*.
+
+**Why "one usable beside any floor cell" is a preference and not an assertion.** Two guarantees
+outrank it. Connectivity comes first, and so does the sightline rule (§10.1a), whose repairs
+must land where the run is — a bench beside a room's door span, a repair cupboard close to an
+existing usable — so a doubling with a nearby door is sometimes unavoidable. Forcing the piece
+off-centre to dodge it only shortens the run instead of splitting it, multiplying generation
+cost for a cosmetic win. And structural doors can cluster in a way no carve undoes.
+
+An earlier draft made it a hard guarantee; **measured, it rejected ~85% of carves and stalled
+generation.** The usable line's per-bump arrow already buys the legibility the guarantee was
+chasing, so the honest rule is best-effort placement plus the arrow.
+
+Also inherited from the old generator, all real, all fixed by the §10.6 spacing and
+fail-loudly rules: nothing separated the player from the exit (they could spawn adjacent),
+nothing spread intel out (all 3 could land in one room), nothing kept a guard from spawning
+where it saw you on turn one — and placement failed *silently*, guards getting 10 attempts and
+then being quietly dropped, so you asked for 5 and got 4 with a log line nobody read.
+
+---
+
+## Appendix 18 — Fog: the schematic, and what counts as contents
+
+*(§11.5a, §10.7.)*
+
+**Why the unseen building draws as a schematic rather than a darker shade.** A fourth rung on
+the §11.5 dimming ladder has nowhere to go below Ground's already-quiet dim, and geometry too
+dark to read is fog by another name — which §11.5a settles against. So it is a **shape**
+distinction: `≈` for load-bearing fabric, `~` for the floor space and everything standing in
+it.
+
+**Why a doorway is `~` and not `≈`.** It bears no load, so a plan would show it as the gap in
+the wall line. An unexplored wing reads `≈≈≈~≈≈≈`, which is what keeps the ways between its
+rooms plannable and the *"you can plan your escape route before you're spotted"* promise
+intact.
+
+**A stated change, not drift.** §10.7 originally promised a duct entry visible from turn one
+"like a door", and furniture counted as geometry too, on the grounds that being surprised by a
+table mid-flight is as bad as being surprised by a wall. Both now have to be **found** — a duct
+mouth is a recess backed by structure, and a table is something put in a room, not part of it.
+Cupboards were already hidden on exactly this reasoning (*"the flight paths you scouted are
+worth more than the ones you didn't"*), so ducts join them rather than sitting on the other
+side of an inconsistent line. Room shapes, wall runs and the openings between them still read
+from turn one, so you are still never lost and never mapping.
+
+**A second stated change: a duct's interior path is not remembered.** It used to read as plain
+wall, remembered once crawled. Now that the path can overlie floor, "reads as plain wall" is no
+longer even true, and a remembered overlay would paint a tell on the room floor a duct crosses.
+The `=` you plan around is the entry alone.
+
+**The cost is meant to be payable.** §12.6's `full_layout_known` modifier hands the whole layout
+over as an *easier*-direction modifier — so under the directed difficulty draw it is bought with
+pressure taken on elsewhere, never given away.
+
+---
+
+## Appendix 19 — The decoy is always drawn
+
+*(§11.5a, §8.3.)*
+
+An always-drawn decoy is not a hole in the live-state rule, it is a different layer: a decoy is
+neither the facility's live state nor a content to be discovered, but **the player's own placed
+object** — the same category of knowledge as their own cell or the body in their hands. The
+whole point of a fake is to *walk away from it* and let a guard investigate the wrong cell, so a
+marker you can only see by standing next to it is a marker the ability cannot use, and
+route-planning around your own bait is exactly what its disappearance takes away.
+
+**It leaks nothing new.** A decoy dies the moment anything steps on it, so an always-drawn one
+might seem to announce "a guard just walked here" through a wall. The game already announces it,
+twice, on the turn it happens: the death ends the ability into its full cooldown, so the ability
+bar flips from *active* to *cooling* wherever you are, and it prints *"the decoy is trampled"*
+with no visibility filter. Drawing the `@` only puts that same fact where the player is already
+looking, instead of making them infer a location from a cooldown pip.
+
+**This is the decoy alone.** A body you dropped is not covered: it is the facility's live state
+and the §7.3 clock's evidence, and **being unsure whether it has been found yet is
+load-bearing.**
+
+---
+
+## Appendix 20 — The ability bar
+
+*(§11.4, and the old §15 Q9.)*
+
+**The fixed 14-column list is gone.** It spent a seventh of the screen on information consulted
+once a minute. Ability state must stay *discoverable*, so where it should live was an open
+question, and **three experiments answered it**:
+
+- Showing the list *while waiting* buried the 360° guard-sense the wait exists to reveal (§9.1).
+- A left-aligned header strip put the tap target furthest from the thumb.
+- A compact bottom-right strip of bare hotkeys, with a deploy button unfolding the named panel
+  over the board, put it in the right corner but made every name a second tap away.
+
+**What unlocked the settled answer was capping the held set at four** (§8.3): the names fit, so
+the compression the old strip paid for bought nothing worth its cost.
+
+**Why the names never move.** A bar whose words slide about as numbers come and go is a bar you
+have to *read* every time you look, and the whole case for it being always-on is that you learn
+its shape and then only **glance**. An ability's column is a fact about the run, and since #359
+it *is* its key — position is muscle memory too.
+
+**The width budget, which is what makes the names fit.** Four named slots across a 40-wide board
+is tight, and the arithmetic is exact:
+
+| | cells |
+|---|---|
+| Longest state notation (`/45/` — the catalogue's biggest cooldown, plus delimiters; a passive's `(on)` is deliberately no wider) | 4 |
+| Longest **bar name** (`Decoy` / `Phase` / `Doors` / `Sight`) | 5 |
+| Widest entry, so the slot's content width | **9** |
+| Plus one cell of air → **one slot** | **10** |
+| Four slots | **40** |
+
+That is the whole board width, with nothing spare — which is why each ability carries a short
+**bar name** distinct from its full §8.3 name, and why the notation is tucked hard against it.
+Every input is derived, so renaming an ability, pushing a cooldown past 99, or granting a fourth
+tech fails the *build*, not the frame (#287).
+
+**Why the Help tab shed the catalogue.** It listed the whole eight-ability catalogue when a run
+holds at most four, and **a reference card that changes with the loadout is not a reference
+card** (#296). The per-run pairing moved to the Abilities tab; the Help tab keeps only the
+standing controls.
+
+---
+
+## Appendix 21 — Input: digits, letters, and the touch slack
+
+*(§11.6.)*
+
+**Why digits bind by physical key.** An AZERTY top row is `& é " '`, and a character binding
+would want Shift to fire an ability in the turn things go wrong.
+
+**Why no character binding may name a digit** (#369). The numpad-moves / top-row-fires split only
+holds if nothing downstream can undo it, and a character can't: both blocks produce `"2"`, so a
+table matching on `"2"` is answering a press it cannot identify — and whichever table is asked
+first wins. Without the three rules §11.6 states, a top-row `2` steps south instead of firing slot
+2 — which is worse than nothing happening, because it spends the turn *and* moves you, and it
+hides: slots 1 and 3 work, because no movement key happened to claim those characters.
+
+**Why ability keys are slots rather than identities** (#359). Four keys, forever. A run holds at
+most four abilities while the catalogue keeps growing (salvaged tech — §14 v3), so identity-keyed
+letters meant every new ability needing a free letter it could keep for good, with the best
+mnemonics gone first and the twelfth ability getting whatever was left.
+
+**What that trades away, and why it is safe.** A key is no longer a fact about an *ability*: `c`
+was Camouflage in every run ever played, and `1` is not. That is the cost, and it is real. What
+makes it payable is that the slots are **fixed for the whole run** and drawn on screen at all
+times, so a digit is never ambiguous where it is pressed — and `Run` is innate and always first,
+so the most-pressed key in the game keeps its cross-run constancy anyway. This is *not* the old
+regression coming back: that one let a key change **because another ability's name changed**,
+silently, between one run and the next, with nothing on screen to say so. A bar slot is visible,
+stable within the run, and the same thing your thumb taps.
+
+**Why the reserved tables gave way instead of the letters** (#368). A mnemonic still may not
+shadow a movement or system key — a mis-key ends a run — but that guarantee has to be one the
+claim rule never *notices*, because a skip whose cause is off screen is unreadable: Lockdown
+showed `o` with nothing in the run holding `l`, and no way to find out why. So movement is the
+arrows and the numpad, and the vi keys `h` `j` `k` `l` are gone with it — **a comfort binding is
+not worth a quarter of the alphabet the bar can never use**, and it was costing a shipping
+ability its own name.
+
+**Why the mnemonic is not the derivation this section designed out.** Three things separate them.
+The claim set is the **run's four**, not the catalogue's twelve-and-growing, so a letter can only
+be taken by something you are also holding. It is **not silent** — the letter is drawn, marked, on
+the entry it fires. And the **digit is always underneath**, so a player who never learns a letter
+loses nothing. What remains true, and should not be glossed: **the same ability can carry
+different letters in different runs.** It is a fact about the loadout, like a bar slot.
+
+**Why a press is unbound on the modal screens.** Resolving it to *activate* would let a stray tap
+on empty menu space start a run by accident — the class of bug #306 closed on the board, and worse
+here, because starting a run is not undoable.
+
+**Why the dead band exists, and why the ability bar gets slack anyway** (#306, #386). In a
+permadeath run with no undo a silently spent turn is unrecoverable, so the tap-to-wait boundary is
+*forgiving* rather than merely correct, and a near-miss on the flush-right ability block must cost
+nothing. **The fix is never to move a drawn target, and never to grow one into space that
+answers.** The one row of slack above and below the bar stands on exactly that: nothing drawn
+changes, and the two rows it grows into are silent by construction — the row above is always inside
+the dead band, and below the last row there is only letterbox. Forgiveness may turn silence into a
+hit and may never take a live board tap away from the board. The cost is honest — a tap one row
+above the bar was free and can now spend a turn — and it is the one thing to watch in play: nobody
+can be *aiming* a Wait at a dead-band row, but it is the row a thumb reaching for the board's
+bottom edge brushes. If it misfires by thumb, drop the upper row and keep the lower one rather than
+widening further.
+
+**Why chrome resolves on the lift.** *A turn must never burn on a gesture the player didn't
+finish.* A press arms the control and the lift over that same control fires it, so a mis-press can
+be slid off and abandoned — and it puts both input surfaces' resolution at the same moment so they
+behave alike.
+
+---
+
+## Appendix 22 — A number is not a token
+
+*(§12.4, §12.6, #333 superseding #328.)*
+
+A bare `?seed=8371` named *this build's quick-play preset applied to 8371* — not a run — so every
+shared link silently re-resolved whenever the preset moved. **It did move**: when the Vision
+passive joined the tech pool (#286) the seeded draw re-ran over a changed pool, and every link
+shared before it began booting a different loadout with nothing saying so.
+
+The bare form is gone as an **input** too, which is the cost worth stating: "try seed 8371" no
+longer works, and pre-#333 links stop decoding. They were already booting the wrong run; failing
+loudly is the better of the two. Numeric seeds remain a *programmatic* concept — `LevelSeed::sim(n)`
+and the sim's sweeps never touch the string.
+
+**Why the format is sized for a roster it does not have yet.** Abilities and modifiers are carried
+as combination indexes over **256 permanent slots**, not over the entries that exist today, so the
+roster can grow to a hundred entries without a single shared link breaking — adding one fills the
+next slot and changes no radix. That is the property the previous carrier lacked, and #286 is what
+its absence cost. It buys a discipline in exchange: **slot numbers are permanent**, a retired entry
+leaves a tombstone, and nothing may ever be renumbered.
+
+**Why the sizing is [START].** Eighteen characters, a 17-bit seed (131,072 facilities), and the
+~1-in-3,000 rejection that the leftover space provides. The two trade one-for-one — every bit spent
+on the seed is a bit taken from integrity — and a character is worth 26× of whichever you want more
+of.
+
+**What the old version paid for getting determinism by accident.** Nothing was seeded — every
+generator built its own fresh unseeded source, and the in-level random source handed out **a brand
+new generator on every single call**. "Play again" worked only by serialising a byte-for-byte
+snapshot of the entire level at run start and restoring it. That's a heavier, more fragile way to
+buy less.
+
+---
+
+## Appendix 23 — Two things the time economy could not charge for
+
+*(§8.2, #264 and #302.)*
+
+§8.2 says the economy is **time**: turn cost, duration, cooldown. Two additions cross that
+sentence, and each needed reconciling with it rather than quietly extending it.
+
+**Passives (#264).** A passive is never activated, so there is no turn to charge, no duration to
+run down and no cooldown to set — and appendix 1 is explicit that an ability with no cost is not a
+decision. The reconciliation is that **the loadout slot is the price**: the set is capped at three
+tech (#266), so holding a passive means *not* holding something else for the whole run. That is a
+real cost, paid once, and it is the whole of it.
+
+Why a passive reads as **`(on)`** rather than reusing an existing state: the four clock states all
+mean *"and then it ends"*, and a passive never does, so `Active [N]` would make the number on the
+bar a fiction — which is exactly what §8.2's timing trap forbids. Undecorated it read as one more
+thing you could press, and it is the one entry on the bar you never can.
+
+Why it is still an `Effect` list (§8.1) and not a parallel system: same vocabulary, applied
+continuously instead of for a window. **Held is on** — there is no activation moment, so there is
+nothing for a replay, a save, or a mid-run pickup to get out of step with.
+
+**Uses per level (#302).** "No charges" is the right instinct, and this is the one thing it rules
+out that the game needs: an effect too strong to hand out on a cooldown alone — rewriting the
+level's geometry (#303), say. What makes a use budget a **bound** rather than a **bar** is that
+there is nothing to spend, refill or manage: the number only goes down, it goes down for the whole
+facility, and **no decision anywhere in a run is about getting more of it.**
+
+The fence exists because that distinction is easy to erode a field at a time. No recharge of any
+kind — a fresh facility is the only thing that gives a use, and it gives it by being fresh. Single
+digits, enforced at compile time, because ten uses is an inventory. And both numbers are shown,
+because they are different numbers: the bar shows what is *left* (`Bore(2)`, a count in
+parentheses, since neither it nor `(on)` is a timer) and the help panel shows what a level *grants*
+(`3/level`, #343).
+
+If something later wants uses that refresh, or uses shared between abilities, that is a different
+design conversation — not a quiet extension of this field.
+
+---
+
+## Appendix 24 — The fences on Confusion, Pierce Wall and Lockdown
+
+*(§8.3, #240/#242/#303/#325.)*
+
+Three of the newer tech are strong enough that most of their design is the fence around them. Each
+fence answers the same question: *what stops this becoming the free win button of appendix 1?*
+
+**Confusion — why it has no window.** The blast is fired once, from the cell you press it in, and
+after the flash **distance stops mattering**: a guard you run away from stays dazed, and one that
+walks into the cells the blast covered was never in it and is untouched. That is what keeps it from
+being a no-guard-may-act field you carry around — it has no window, nothing to toggle off, and no
+`[6]` on the bar. A dazed chaser **pauses** rather than resetting, so it is a costed panic-buy of
+time and not a kill.
+
+**Confusion — why the reach is clamped to the sense.** `min(CONFUSION_RADIUS, sense_range())`, read
+off the live guard sense, so **the blast can never freeze what you cannot sense**. It is inert on
+open floor (`min(6, 10)`) and bites only inside a duct, where it shrinks to 5 — degraded information
+being the crawlspace's whole cost (§10.7). It can only ever shrink the blast, never widen it. This
+is also what makes a firing with nothing in reach a *fair* free no-op: the clamp means anything it
+could have caught, you were already shown.
+
+**Pierce Wall — why the precondition is "exactly one adjacent wall".** The target is then unique by
+construction, so there is nothing to aim (§8.4) — and, more importantly, **it rules the panic-bore
+out by construction**, since a corridor and a corner both present two walls. You cannot dig your way
+out of the place a chase has put you; you dig somewhere you chose to stand.
+
+**Pierce Wall — why it does not ask what is behind the wall.** Boring a two-cell-thick run (§10.1.5)
+opens a one-cell **pocket** off the room rather than a route, and that is a use of the tool rather
+than a waste of it: a dead-end alcove out of the through-routes is somewhere to sit a sweep out. It
+conceals nothing — it is not a cupboard — so whether the hole is shelter or a trap is the player's
+judgement, and three walls around you means **you can dig a hole to hide in, never a tunnel**.
+
+**Lockdown — why it is a snapshot, not a travelling bubble.** If a door unsealed because you walked
+away from it, the wall you raised behind you would dissolve exactly as you fled down it.
+
+**Lockdown — why the player is never refused.** It is your lock, so a sealed door bumps open for you
+exactly as any closed door does, which is what stops a lockdown ever boxing its owner in. But that
+costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to
+travel is a real mistake, and unmaking it is paid in the very turns the ability was bought to save.
+
+**Lockdown — why every seal ends with the window.** The duration is the only clock any seal has,
+which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. The same
+representation carries the key-gated doors of the locked-doors modifier, so there is one lock on the
+door rather than a second system (§10.4).
+
+---
+
+## Appendix 25 — The innate-verb floor
+
+*(§11.4, #323.)*
+
+**Wait is the least discoverable thing in the game and one of the most important** — the only 360°
+look (§9.1), the way a crouch is held (§10.3), the way a cone is let past (§7.6) — and it
+deliberately has no ability-bar entry, because the bar is the ability *economy* (§8.3). Without the
+floor, the two verbs every run is built out of appear nowhere on screen.
+
+The fence is what keeps it a hint rather than a control legend:
+
+- **A floor, never a competitor.** The instant anything is adjacent, the affordances take the whole
+  row back. No fade-out after N turns and no first-run-only flag either — the row stays a pure
+  derived function of state, and it costs nothing either way.
+- **Exactly the two verbs with no other home.** Takedown and Drag already appear there as real
+  affordances (§7.2/§8.3) and the tech abilities have the bar; the full control set is the help
+  panel's job.
+- **Read-only.** A hint that could be pressed would be a second, undiscoverable control surface at
+  the top of the screen, against §11.6's touch rule.
+- **Owned, not Ground.** Ground was tried first and lost on screen: its meaning is **absence**,
+  drawn to recede so everything else pops against it, which is exactly the wrong instruction for a
+  row whose whole job is to be read. Owned is the blue the ability bar's ready entries use, so the
+  two surfaces answering *what can I do right now* answer in one colour.
+- **The wording follows the hands, not the hardware.** The modality is seeded from `pointer: coarse`
+  at boot and then corrected to whichever modality was **last actually used**, so a laptop with a
+  touchscreen and a tablet with a keyboard each get the hint that matches what the player is doing.
+  The keyboard wording says `w`, not `5`, because the wait digit is the *numpad*'s and a floor hint
+  has no room to say so.
+
+---
+
+## Appendix 26 — Where the guard count came from
+
+*(§10.2.)*
+
+The `--guards` sweep (`sim --bot`, 300 seeds each, **bare loadout**) traced the whole curve:
+
+| Guards | 1 | 2 | 3 | **4** | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| Bare win rate | 80% | 61% | 48% | **37%** | 29% | 21% | 16% |
+| Captures | 58 | 116 | 155 | **189** | 213 | 234 | 251 |
+| Timeouts | 2 | 2 | 2 | **0** | 1 | 3 | 2 |
+
+Roughly linear, about 8–10 points of win rate per guard — **no cliff**, so the number is a taste
+call rather than a threshold. **4** is the forgiving-but-real end: a bare run wins better than one
+in three, and it is the only row where *every* seed resolved to a win or a capture rather than
+stalling.
+
+Read it against §13.4. The bot has perfect information and no fear, but plays greedily and badly, so
+a human sits well above its number: **this is a floor, not a forecast.** Nudge it back up once
+guard cooperation (§7.7) and the radio net (§7.3) add pressure the bot currently never feels.
+
+The same per-guard slope is the lever appendix 9 points at when the §7.5 partition proves too harsh,
+and the units the appendix 5 reinforcement cost is measured in.
