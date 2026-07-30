@@ -474,6 +474,61 @@ fn the_danger_overlay_spares_a_cloaked_still_player() {
     );
 }
 
+/// §11.2/§11.5 (#416): the Effect layer is **advisory and yields to Danger**. A
+/// player phased into a solid that a guard's cone also covers keeps the red — being
+/// seen outranks every advisory cue, and Dephase does not conceal (§8.3), so there is
+/// nothing here to spare the cell the way Camouflage does above. The phase mark is
+/// real and is asserted on the same cell with the guard taken away, so this pins the
+/// precedence rather than the mark merely failing to light.
+///
+/// A table is the one solid a cone can reach into: solid to movement (so a phased
+/// player standing in one cannot rematerialise) but transparent to sight (§10.1a).
+#[test]
+fn a_watched_cell_keeps_its_red_under_a_phased_player() {
+    use crate::AbilityId;
+
+    // Guard at (5,2) looking south down the column, a table at (5,5), the player
+    // just south of it at (5,6) facing north so the guard is seen and its cone paints.
+    let phased_into_the_table = |guards: Vec<Guard>| {
+        let mut layout = open_room(12, 12);
+        layout.place(Cell::new(5, 5), Terrain::PartialCover);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 6),
+            Direction::North,
+            guards,
+            Vec::new(),
+            Cell::new(10, 10),
+        )
+        .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+        .with_rng(crate::Rng::new(7));
+        s.step(Input::Activate(AbilityId::Dephase));
+        s.step(Input::Step(Direction::North));
+        assert_eq!(
+            s.player(),
+            Cell::new(5, 5),
+            "precondition: inside the table"
+        );
+        s
+    };
+
+    // Alone, the cell carries the phase mark: this is a real Effect background.
+    let alone = phased_into_the_table(Vec::new());
+    assert_eq!(
+        render(&alone).get(5, 5).bg,
+        Some(Category::Effect),
+        "precondition: phased inside a solid, so the mark is lit",
+    );
+
+    // Watched, the same cell is red instead. The advisory layer loses, as it must.
+    let watched = phased_into_the_table(vec![Guard::stationary(Cell::new(5, 2))]);
+    assert_eq!(
+        render(&watched).get(5, 5).bg,
+        Some(Category::Danger),
+        "being seen outranks the effect layer (§11.5)",
+    );
+}
+
 /// §8.3/§11.2: the two `z`s a body can be yours as read **differently**. The one
 /// **in your hands** is Owned — it is really yours and really in play. The one
 /// **stowed in a cupboard** (§7.2/§10.3) is Neutral: a spent object, like the

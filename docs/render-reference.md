@@ -447,7 +447,7 @@ Backgrounds are the threat channel, and there is a fixed precedence:
 | Background | Means |
 |---|---|
 | **Danger** (red) | This cell is watched by a guard **you can see** |
-| **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; or the `@` here is you, hidden by Camouflage *this turn* |
+| **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; the `@` here is you, hidden by Camouflage *this turn*; or the `@` here is you **inside a solid with Phase Out running** — the cell the safety eject would throw you out of if the window ended now |
 | **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
 | **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
 
@@ -458,10 +458,15 @@ cell but a *refinement of the cue that thing already draws* — "exactly here" b
 ability running"; your own `@` becomes "and right now they cannot see you" — so it sits
 above the orange it refines and still below the red that outranks everything.
 
-The mark on the player is the one that **blinks while its ability runs** (#341):
-Camouflage conceals only on the turns you stand still, so the wash goes dark the turn you
-move and returns the next still turn, while the bar reads `Camo[n]` throughout. That is
-deliberate — a mark is worth its ink only when it can disagree with the bar.
+The marks on the player are the ones that **blink while their ability runs**, and both
+are on the board for that reason alone. Camouflage (#341) conceals only on the turns you
+stand still, so the mark goes dark the turn you move and returns the next still turn,
+while the bar reads `Camo[n]` throughout. Phase Out (#416) marks you only while you are
+somewhere a solid body cannot stand — nothing on open floor, lit inside a wall, dark
+again when you step out — while the bar reads `Phase[n]` throughout. That is deliberate:
+a mark is worth its ink only when it can disagree with the bar. Note what neither of them
+says — *the ability is on*. The bar owns that, and a mark that repeated it would earn
+nothing; what these add is the condition the bar has no room to carry.
 
 **The danger overlay is the best idea in the old game, and it is [SETTLED].** It
 paints the *literal* detection set — the same sight data the guard AI queries, not a

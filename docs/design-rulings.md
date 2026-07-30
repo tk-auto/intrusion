@@ -464,6 +464,26 @@ inside the furniture.
 inside a wall is still refused, because a free press that teleported you clear would be
 exactly the escape tool this is designed not to be.
 
+**The mark, and why it was admissible (#416).** The player's cell is now marked while a
+running Dephase has them somewhere a solid body cannot stand. §11.2's rule for marking
+the player is strict — a mark must say what the §11.4 bar cannot — and it named a running
+Dephase as its counter-example, so this needed a reason rather than a preference. The
+reason is in the second bullet above: the case against the *lethal* answer was that
+"`can_rematerialize` is invisible, and while phased you cannot bump, so you cannot even
+probe the cell you stand in". The eject removed the death but left that invisibility
+untouched — the risk was still live or not depending on where you stood, and nothing on
+the board said which. The mark is that predicate made visible, and it is admissible under
+§11.2's own rule rather than as an exception to it: what is conditional is not the
+ability but the **cell**, so the mark blinks off and on as you walk while the bar entry
+never changes. That the eject's landing is random (above) is what makes this worth ink at
+all — a risk you could plan around by eye would need no cue.
+
+It is deliberately gated on `can_rematerialize` itself rather than on a second reading of
+the terrain, so the picture cannot claim a turn the rule would not — the same discipline
+Camouflage's mark follows. **Entombment** — no legal landing cell anywhere, a loss rather
+than an eject — is marked too, and needs no special case: "you are inside a solid" is
+just as true there.
+
 ---
 
 ## Appendix 13 — Sound was dropped for the guard sense

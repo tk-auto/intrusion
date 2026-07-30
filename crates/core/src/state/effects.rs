@@ -63,17 +63,26 @@
 //! That is the rule holding, not an exemption from it — the mark is shown exactly when
 //! the thing is. The player is the same case, trivially: they are always drawn.
 //!
-//! # A mark that blinks (§8.3/#341)
+//! # A mark that blinks (§8.3/#341/#416)
 //!
 //! Camouflage conceals you on any turn you do not move, so the ability being **on** and
 //! concealment actually **holding** are two facts, and the §11.4 bar can only report the
 //! first. So [`MarkPlace::ConcealedPlayer`] is a standing mark whose drawing is gated on
 //! the live rule ([`camouflage_holding`](State::camouflage_holding)): lit once at the
-//! activation, dark on a turn the player moved, back on the next still turn. It is the
-//! one placement whose mark and whose bar entry can **disagree** — and that disagreement
-//! is the whole reason it earns a mark at all. An effect that were simply on for its
-//! window (Run, Autodoors, a running Dephase) would say nothing the bar does not, which
-//! is why the rule is "a conditional effect", not "an effect".
+//! activation, dark on a turn the player moved, back on the next still turn. Its mark
+//! and its bar entry can **disagree** — and that disagreement is the whole reason it
+//! earns a mark at all. An effect that were simply on for its window (Run, Autodoors)
+//! would say nothing the bar does not, which is why the rule is "a **conditional**
+//! effect", not "an effect".
+//!
+//! [`MarkPlace::PhasedPlayer`] is the second one to qualify, and it qualifies on that
+//! same rule rather than by being an ability. A running Dephase is unconditional and
+//! earns nothing; what is conditional is *where you are standing while it runs*. The
+//! safety eject fires only if the window ends somewhere a solid body cannot stand, so
+//! the mark is gated on [`can_rematerialize`](State::can_rematerialize) — the very
+//! predicate the eject rule consumes — and blinks off and on as the player steps out of
+//! a wall and back into one, with the bar entry unchanged throughout. The bar says the
+//! clock is running; the mark says you are inside something while it does.
 //!
 //! # Fired, not carried (#325)
 //!
@@ -182,16 +191,34 @@ pub(super) enum MarkPlace {
     /// has already run — stops being drawn on the very frame it dies.
     LiveDecoy,
     /// The player, on the turns an effect's **condition** is actually met (§8.3/#341) —
-    /// today Camouflage, whose concealment holds only while you stand still.
+    /// Camouflage, whose concealment holds only while you stand still.
     ///
-    /// The only placement whose mark **blinks while its ability runs**, and that is the
-    /// whole of its job: the §11.4 bar can say the window is open and nothing more, so a
-    /// mark that were merely "the ability is on" would repeat it. This one goes dark on
-    /// a turn the player moves and comes back the next still turn, which is the fact the
-    /// bar has no room to carry. A later conditional effect joins for that reason —
-    /// because its mark and its bar entry can **disagree** — and an unconditional one
-    /// (Run, Autodoors, a running Dephase) never does.
+    /// One of the two placements whose mark **blinks while its ability runs**, and that
+    /// is the whole of its job: the §11.4 bar can say the window is open and nothing
+    /// more, so a mark that were merely "the ability is on" would repeat it. This one
+    /// goes dark on a turn the player moves and comes back the next still turn, which is
+    /// the fact the bar has no room to carry. A later conditional effect joins for that
+    /// reason — because its mark and its bar entry can **disagree** — and an
+    /// unconditional one (Run, Autodoors) never does. [`PhasedPlayer`](Self::PhasedPlayer)
+    /// is the second instance, admitted on exactly that ground.
     ConcealedPlayer,
+    /// The player, on the turns a running **Dephase** has them somewhere a solid body
+    /// cannot stand (§8.3/#416) — i.e. exactly while the safety eject would fire if the
+    /// duration ran out now.
+    ///
+    /// The second conditional mark, and it joins on [`ConcealedPlayer`](Self::ConcealedPlayer)'s
+    /// own rule rather than as an exception to it. The mark is **not** "Phase Out is
+    /// running" — the bar says that, and a mark that only restated it would earn
+    /// nothing. It is "you are inside something, and the clock is running", which the
+    /// bar has no room to say and which is the fact that changes what the next turn is
+    /// worth: step onto open floor and the risk is nil, step into a wall and the window
+    /// closing costs a random throw plus a stun as long as it (§8.3/appendix 12). So the
+    /// mark blinks off and on as the player walks wall → floor → wall while the bar
+    /// entry never changes — the disagreement that is the price of admission here.
+    ///
+    /// Read live off [`can_rematerialize`](State::can_rematerialize), the very predicate
+    /// the eject rule consumes, so the mark cannot claim a turn the rule would not.
+    PhasedPlayer,
 }
 
 /// How long an effect mark lives (§11.5/#338). Both arms run on the one decay schedule
@@ -309,9 +336,10 @@ impl State {
             .iter()
             .flat_map(|mark| match &mark.place {
                 MarkPlace::Cells(cells) => cells.as_slice(),
-                MarkPlace::HeldGuards | MarkPlace::LiveDecoy | MarkPlace::ConcealedPlayer => {
-                    NO_CELLS
-                }
+                MarkPlace::HeldGuards
+                | MarkPlace::LiveDecoy
+                | MarkPlace::ConcealedPlayer
+                | MarkPlace::PhasedPlayer => NO_CELLS,
             })
             .copied()
     }
@@ -333,22 +361,30 @@ impl State {
     /// the fake is drawn wherever it stands, in view or out of it, and a mark that
     /// vanished when you walked away would be a mark the ability cannot use.
     ///
-    /// The player is read live too, through the very predicate the concealment rule
-    /// consumes ([`camouflage_holding`](Self::camouflage_holding)), so the mark cannot
-    /// claim a turn the rule does not. It is the one mark that **blinks while its
-    /// ability runs** — dark on a turn the player moved, back on the next still one —
-    /// which is exactly the half of the ability the §11.4 bar has no room to say (#341).
+    /// The player is read live too, through the very predicates the rules themselves
+    /// consume — [`camouflage_holding`](Self::camouflage_holding) for concealment and
+    /// [`can_rematerialize`](Self::can_rematerialize) for a running Dephase — so neither
+    /// mark can claim a turn its rule does not. These are the two marks that **blink
+    /// while their ability runs**: concealment dark on a turn the player moved and back
+    /// on the next still one (#341), the phase mark dark on open floor and lit inside a
+    /// solid (#416). In both cases the blinking half is exactly what the §11.4 bar has
+    /// no room to say. They share a cell and so share one yield — the background is
+    /// painted once either way.
     pub fn effect_thing_marks(&self) -> impl Iterator<Item = Cell> + '_ {
         let riding = |place: MarkPlace| self.effect_marks.iter().any(|mark| mark.place == place);
         let held = riding(MarkPlace::HeldGuards);
         let decoyed = riding(MarkPlace::LiveDecoy);
         let concealed = riding(MarkPlace::ConcealedPlayer) && self.camouflage_holding();
+        // Both player marks land on the one cell, so they are folded into a single
+        // yield: the layer paints a background, and painting it twice would say
+        // nothing the first paint did not.
+        let phased = riding(MarkPlace::PhasedPlayer) && !self.can_rematerialize();
         self.guards
             .iter()
             .filter(move |guard| held && self.guard_under_effect(guard))
             .map(|guard| guard.pos())
             .chain(self.decoy.filter(|_| decoyed))
-            .chain(concealed.then_some(self.player))
+            .chain((concealed || phased).then_some(self.player))
     }
 
     /// Whether Camouflage's concealment is **in force right now** (§8.3): its window is
@@ -590,6 +626,15 @@ impl State {
                 {
                     self.light_mark(ability, MarkPlace::ConcealedPlayer, MarkLife::Standing)
                 }
+                // Dephase's window is the same shape (§8.3/#416): lit once at the
+                // activation and then left to blink, because the placement is a live
+                // read of the eject rule and the turns it goes dark on are the turns
+                // the player is standing somewhere a body can stand. What the bar
+                // cannot say is *where* you are; this says it, and stops saying it the
+                // moment you step out of the wall.
+                Event::AbilityActivated { ability, .. } if declares(ability, Effect::Phase) => {
+                    self.light_mark(ability, MarkPlace::PhasedPlayer, MarkLife::Standing)
+                }
                 _ => {}
             }
         }
@@ -664,15 +709,18 @@ impl State {
     /// not the record has been swept yet. Dropping the record here is what keeps the
     /// layer from carrying a mark that can never paint again.
     ///
-    /// [`MarkPlace::ConcealedPlayer`] is kept for the ability's whole **window**, not
-    /// for the turns its condition holds (#341). The distinction is load-bearing: the
-    /// mark is *drawn* only while concealment is in force, but dropping the record on a
-    /// turn the player moved would delete a mark nothing ever relights, and the
-    /// concealment they walk back into the next still turn would go unreported.
+    /// The two **conditional** placements — [`MarkPlace::ConcealedPlayer`] (#341) and
+    /// [`MarkPlace::PhasedPlayer`] (#416) — are kept for their ability's whole
+    /// **window**, not for the turns their condition holds. The distinction is
+    /// load-bearing: each is *drawn* only while its rule is in force, but dropping the
+    /// record on a turn the condition lapsed would delete a mark nothing ever relights,
+    /// and the concealment (or the wall) the player walks back into next turn would go
+    /// unreported.
     pub(super) fn decay_effect_marks(&mut self) {
         let any_held = self.guards.iter().any(|guard| guard.is_dazed());
         let decoy_alive = self.decoy.is_some();
         let camouflaged = self.abilities.effect_active(Effect::ConcealWhileStill);
+        let phasing = self.abilities.effect_active(Effect::Phase);
         self.effect_marks.retain_mut(|mark| match &mut mark.life {
             MarkLife::Momentary(ttl) => {
                 *ttl -= 1;
@@ -682,6 +730,7 @@ impl State {
                 MarkPlace::HeldGuards => any_held,
                 MarkPlace::LiveDecoy => decoy_alive,
                 MarkPlace::ConcealedPlayer => camouflaged,
+                MarkPlace::PhasedPlayer => phasing,
                 MarkPlace::Cells(_) => true,
             },
         });
