@@ -2157,15 +2157,27 @@ overlay is the thing that matters. What carries a state for every turn after tha
 (§8.3/#242), a live decoy, concealment in force — which costs no ink beyond the place it
 rides.
 
-**A mark earns its place by saying what the bar cannot** (§11.4/#341). The ability bar
-is a projection of state and already reports *the window is open*; a mark that lit
+**A mark earns its place by saying what the bar cannot** (§11.4/#341/#416). The ability
+bar is a projection of state and already reports *the window is open*; a mark that lit
 whenever an entry read `(on)` would carry nothing. So the player's own cell is marked for
-**Camouflage** and for no other effect on them: its concealment holds only on the turns
-they do not move, so the mark and the bar entry can **disagree** — `Camo[7]` while you
-walk across a lit corridor in plain sight — and that disagreement *is* the mechanic.
-Marking a Run, an Autodoors or a running Dephase would just restate the bar. A later
-ability joins this rule when its effect is likewise **conditional**, not because it is an
-ability.
+**Camouflage**: its concealment holds only on the turns they do not move, so the mark and
+the bar entry can **disagree** — `Camo[7]` while you walk across a lit corridor in plain
+sight — and that disagreement *is* the mechanic. Marking a Run or an Autodoors would just
+restate the bar. An ability joins this rule when its effect is likewise **conditional**,
+not because it is an ability.
+
+**Phase Out** is the second to join, on exactly that ground. A *running* Dephase is
+unconditional and earns nothing; what is conditional is **where you are standing while
+it runs**. The safety eject fires only if the window ends somewhere a solid body cannot
+stand, so the player's cell is marked while — and only while — they are inside a solid:
+nothing on open floor, lit the moment they step into a wall, dark again when they step
+out, with the bar entry unchanged throughout. The bar says the clock is running; the
+mark says *you are inside something while it does*, which is the half that changes what
+the next turn is worth (§8.3/appendix 12 — the landing is random and the stun is as long
+as the throw, so the risk cannot be planned around by eye). Being **entombed** — the
+window ending with no legal landing cell anywhere — is a loss rather than an eject, and
+the mark is lit there too: "you are inside a solid" is the truth in that case as well,
+and it needs no special case.
 
 **One firing may wear both**, and the two answer different questions. Confusion washes
 the box it went off in and then rides the guards it froze; Lockdown washes the box it

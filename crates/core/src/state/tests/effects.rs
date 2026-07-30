@@ -779,3 +779,172 @@ fn refiring_replaces_the_mark_it_relights() {
     assert_eq!(s.effect_cell_marks().collect::<Vec<_>>(), cells);
     assert_ne!(first, cells, "precondition: a genuinely different box");
 }
+
+/// §8.3/§11.2 (#416): a running Dephase on **open floor** is exactly the sort of
+/// unconditional "the ability is on" the effect layer refuses to restate — the §11.4
+/// bar already says the clock is running. Nothing is marked until the player is
+/// somewhere the eject would have to fire.
+#[test]
+fn a_phase_over_open_floor_marks_nothing() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 4), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
+    s.step(Input::Activate(AbilityId::Dephase));
+
+    assert!(
+        s.abilities.effect_active(Effect::Phase),
+        "precondition: the window is open — the bar reads Phase[n]",
+    );
+    assert!(
+        s.can_rematerialize(),
+        "precondition: standing where a solid body can stand",
+    );
+    assert!(
+        s.effect_thing_marks().next().is_none(),
+        "a phase you could end safely says nothing the bar does not",
+    );
+}
+
+/// §8.3/§11.2 (#416): the mark **follows the cell**, not the window — the
+/// disagreement §11.2 requires of a marked effect. One unchanged window, two frames,
+/// two different answers: open floor says nothing, the solid lights up.
+///
+/// Only one transition is asserted because only one is reachable. Dephase's duration
+/// is **3 [START]** and the activation itself spends the first of them, so a window
+/// holds exactly two readable frames — the activation and one move. The
+/// wall → floor → wall round trip needs three, and would start passing on its own if
+/// the duration is ever tuned up; the rule-equality test below is what pins the
+/// general case in the meantime.
+#[test]
+fn the_phase_mark_follows_the_cell_and_not_the_window() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 4), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+    .with_rng(crate::Rng::new(7));
+    let marked = |s: &State| s.effect_thing_marks().any(|cell| cell == s.player());
+
+    s.step(Input::Activate(AbilityId::Dephase));
+    assert!(
+        s.abilities.effect_active(Effect::Phase),
+        "precondition: the window is open — the bar reads Phase[n]",
+    );
+    assert!(!marked(&s), "on open floor the mark says nothing");
+
+    s.step(Input::Step(Direction::East)); // into the solid
+    assert_eq!(s.player(), Cell::new(5, 4), "precondition: inside the wall");
+    assert!(
+        s.abilities.effect_active(Effect::Phase),
+        "precondition: the very same window, unchanged — so is the bar entry",
+    );
+    assert!(
+        marked(&s),
+        "…but the board now says the eject would fire if it ended here",
+    );
+}
+
+/// §11.5/#416: the mark is the eject **rule**, not a second derivation of it.
+/// Asserted against [`can_rematerialize`](State::can_rematerialize) — the very
+/// predicate the expiry consumes — over a run of mixed turns, so no later change to
+/// the rule can leave the picture claiming a turn the rule would not.
+#[test]
+fn the_phase_mark_is_exactly_the_rematerialize_rule() {
+    // Both answers are covered: the activation frame stands on floor (the rule says
+    // yes, the mark stays dark) and the step lands in the solid (the rule says no,
+    // the mark lights). Every frame of the window is checked, whichever way it falls.
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 4), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase))
+    .with_rng(crate::Rng::new(7));
+
+    let agrees = |s: &State| {
+        assert_eq!(
+            s.effect_thing_marks().any(|cell| cell == s.player()),
+            !s.can_rematerialize(),
+            "the mark and the eject rule are one fact",
+        );
+    };
+
+    s.step(Input::Activate(AbilityId::Dephase));
+    let mut seen_both = (false, false);
+    for input in [Input::Step(Direction::East), Input::Step(Direction::West)] {
+        if !s.abilities.effect_active(Effect::Phase) {
+            break;
+        }
+        agrees(&s);
+        match s.can_rematerialize() {
+            true => seen_both.0 = true,
+            false => seen_both.1 = true,
+        }
+        s.step(input);
+    }
+    assert_eq!(
+        seen_both,
+        (true, true),
+        "the run must exercise the rule both ways, or it pins nothing",
+    );
+}
+
+/// §8.3/#416/#339: the mark ends with its window — including on the very turn the
+/// window ends inside a solid and the safety eject fires. The eject's own momentary
+/// mark (#339) is a different thing on different cells and is left undisturbed.
+#[test]
+fn the_phase_mark_ends_with_its_window_even_when_the_eject_fires() {
+    let mut s = phased_into_a_wall();
+    assert!(
+        s.effect_thing_marks().any(|cell| cell == s.player()),
+        "precondition: marked while stranded",
+    );
+
+    s.step(Input::Wait); // the duration ends inside the wall — the eject fires
+    let (from, to) = last_throw(&s);
+    assert!(
+        !s.abilities.effect_active(Effect::Phase),
+        "precondition: the window ran out",
+    );
+    assert!(
+        s.effect_thing_marks().next().is_none(),
+        "the phase mark went with its window",
+    );
+
+    // The eject's report is untouched: both ends of the throw, on the cell layer.
+    let cells: Vec<_> = s.effect_cell_marks().collect();
+    assert!(
+        cells.contains(&from) && cells.contains(&to),
+        "the eject still lights both ends of its throw",
+    );
+
+    // Early toggle-off is the other way a window ends — refused inside a solid
+    // (§8.3), so the only place it can be taken is a cell that was never marked.
+    let mut s = phased_into_a_wall();
+    s.step(Input::Step(Direction::West)); // out onto floor, where the toggle is legal
+    s.step(Input::Deactivate(AbilityId::Dephase));
+    assert!(
+        !s.abilities.effect_active(Effect::Phase),
+        "precondition: switched off",
+    );
+    assert!(s.effect_marks.is_empty(), "cleared, not merely quiet");
+}
