@@ -474,12 +474,13 @@ fn the_danger_overlay_spares_a_cloaked_still_player() {
     );
 }
 
-/// §8.3/§11.3: the body speaks the Owned vocabulary when it is yours — an
-/// Owned `z` while in your hands, and an Owned `z` once stowed in a cupboard,
-/// marking the **locked** cupboard (§7.2/§10.3). A stowed body is gone to every
-/// guard, but shown to you so you can read which cupboards you have spent.
+/// §8.3/§11.2: the two `z`s a body can be yours as read **differently**. The one
+/// **in your hands** is Owned — it is really yours and really in play. The one
+/// **stowed in a cupboard** (§7.2/§10.3) is Neutral: a spent object, like the
+/// spent console's `$`. The mark itself survives either way — the `z` is still
+/// what tells you at a glance which cupboards you have used up.
 #[test]
-fn a_dragged_body_and_a_stowed_one_both_read_owned_z() {
+fn a_dragged_body_reads_owned_and_a_stowed_one_reads_neutral() {
     let mut layout = open_room(10, 10);
     layout.place(Cell::new(5, 5), Terrain::Hideout);
     layout.place(Cell::new(3, 4), Terrain::Hideout); // the stow cupboard
@@ -502,20 +503,67 @@ fn a_dragged_body_and_a_stowed_one_both_read_owned_z() {
     assert_eq!(held.glyph, 'z');
     assert_eq!(held.fg, Category::Owned, "the body in your hands is yours");
 
-    // Stow it in the cupboard to the west: the locked cupboard shows an Owned `z`.
+    // Stow it in the cupboard to the west: the locked cupboard shows a Neutral `z`.
     s.step(Input::Step(Direction::West));
     let stowed = render(&s).get(3, 4);
     assert_eq!(
         stowed.glyph, 'z',
         "the locked cupboard shows the stowed body"
     );
-    assert_eq!(stowed.fg, Category::Owned, "stowed and sealed by you");
+    assert_eq!(
+        stowed.fg,
+        Category::Neutral,
+        "a locked cupboard is a spent object, not one working for you",
+    );
+    assert_ne!(
+        stowed.fg, held.fg,
+        "the body in hand and the body stowed must not share a colour",
+    );
+}
+
+/// §10.3/§11.3: Owned on a cupboard means one thing only — **you are concealed
+/// here**. The same cupboard glyph-swaps to `}` in Owned when the player is inside
+/// it, so a spent cupboard staying Owned would put both readings in one colour on
+/// one piece of furniture. Pin the pair: occupied `}` Owned, spent `z` Neutral.
+#[test]
+fn an_occupied_cupboard_is_owned_and_a_spent_one_is_not() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    layout.place(Cell::new(3, 4), Terrain::Hideout); // the stow cupboard
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 4))],
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    // The player starts inside the cupboard at (5,5): concealed, so Owned `}`.
+    let inside = render(&s).get(5, 5);
+    assert_eq!(inside.glyph, '}', "the cupboard keeps its glyph");
+    assert_eq!(
+        inside.fg,
+        Category::Owned,
+        "Owned on a cupboard = you are hidden here",
+    );
+
+    s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+    s.step(Input::Step(Direction::West)); // stow into the cupboard at (3,4)
+    let spent = render(&s).get(3, 4);
+    assert_eq!(
+        spent.fg,
+        Category::Neutral,
+        "a spent cupboard must not wear the concealment colour",
+    );
 }
 
 /// §11.5a/§7.2: the locked-cupboard status persists in memory. Once you have
 /// seen a body stowed in a cupboard, walking away keeps it drawn as a
-/// **remembered** Owned `z` — a spent hideout you can still read — rather than
-/// reverting to the empty `}` the terrain fog would show.
+/// **remembered** Neutral `z` — a spent hideout you can still read — rather than
+/// reverting to the empty `}` the terrain fog would show. The colour matches the
+/// live pass, so leaving the cupboard's view recolours nothing.
 #[test]
 fn a_stowed_cupboard_is_remembered_out_of_view() {
     let mut layout = open_room(10, 10);
@@ -549,7 +597,11 @@ fn a_stowed_cupboard_is_remembered_out_of_view() {
     );
     let remembered = g.get(3, 4);
     assert_eq!(remembered.glyph, 'z', "the locked cupboard is still a z");
-    assert_eq!(remembered.fg, Category::Owned, "and still Owned");
+    assert_eq!(
+        remembered.fg,
+        Category::Neutral,
+        "and still the spent-object colour it wore in view",
+    );
     assert_eq!(
         remembered.vis,
         Visibility::Remembered,

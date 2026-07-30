@@ -50,11 +50,24 @@ outranks knowledge**, always.
 | `@` | A decoy you placed | Owned |
 | `g` | A guard you can see | Caution / Warning / Danger, by its state |
 | *(none)* | A guard you only sense through a wall | Sensed — a background highlight on its cell, no glyph |
-| `z` | A body | Caution; **Owned** while carried, or stowed in a cupboard |
+| `z` | A body | Caution — trouble waiting to be found |
+| `z` | A body in your hands | Owned — yours, and in play |
+| `z` | A body stowed in a cupboard | Neutral — the cupboard is spent |
 
 A seen guard's colour *is* the AI state machine, read directly: yellow → orange →
 red. A sensed guard deliberately has no glyph, because a glyph would imply a
 readable mind and the player has no such information — only a position.
+
+The body's three colours are one question asked once: *what is this doing for me
+right now?* Loose, it is a liability on the §7.3 clock — Caution. In your hands, it
+is yours and in play — Owned. Stowed, the cupboard has swallowed it: you cannot
+climb in, the bump is a no-op, nothing about it is still working for you. That is a
+**spent object**, and it takes the spent object's colour, exactly as the drained
+`$` console does two tables down. The `z` stays put either way, because the mark's
+job — telling you at a glance which cupboards you have used up — never depended on
+the colour. Owned is the tighter word for it: on a cupboard, Owned already means
+*you are hidden in this one* (`}`, §2.2 below), so a spent cupboard wearing it would
+put two opposite readings in one ink on one piece of furniture.
 
 ### 2.2 Terrain
 

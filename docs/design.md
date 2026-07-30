@@ -1556,8 +1556,14 @@ stay a future axis.
 > slides in and is *gone* — no cone will ever find it — and the cupboard is now
 > **locked**. A locked cupboard is no longer a hideout: it holds a body, so you
 > cannot climb in, and bumping it is an inert no-op. It shows the body's **`z`** in
-> the Owned colour (not the empty `}`), so a glance tells you which cupboards you
-> have spent this way — and that status is **remembered** (§11.5a): once seen, a
+> the **Neutral** colour (not the empty `}`), so a glance tells you which cupboards you
+> have spent this way — Neutral because that list of three is *the* definition of a
+> spent object (§11.2, "inert scenery, spent objectives"), the same transition a
+> drained console makes from Interest to Neutral. **Owned is reserved for what is
+> working for you right now** — the body still in your hands is Owned; the cupboard
+> that swallowed it is not. On this furniture especially: Owned on a cupboard already
+> means *you are concealed in this one* (§11.3), and one colour cannot also mean
+> *this one is used up*. That status is **remembered** (§11.5a): once seen, a
 > locked cupboard stays a remembered `z` out of view, like a seen console, rather
 > than reverting to the empty `}`. This is the one place a body
 > vanishes completely; everywhere else it stays visible evidence on the §7.3 clock.

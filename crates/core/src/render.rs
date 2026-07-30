@@ -460,19 +460,27 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
     };
     // A body (§7.2) is live state like any entity — drawn inside the FOV as the `z`
     // a downed guard reads as (§10.3), in Caution: an unaware threat's colour,
-    // because what a loose body *means* is trouble waiting to be found (§11.3). Two
-    // states speak the Owned vocabulary instead: the body **in your hands** (§8.3),
-    // yours while you hold it, and a body **stowed in a cupboard** (§7.2) — gone to
-    // every guard, but shown to *you* as an Owned `z` marking the **locked** cupboard
-    // (no longer a hideout). A **loose** body is never remembered; the locked-cupboard
-    // status **is**, persisted out of view by [`stowed_body_memory`].
+    // because what a loose body *means* is trouble waiting to be found (§11.3). The
+    // body **in your hands** (§8.3) speaks the Owned vocabulary instead — yours while
+    // you hold it, and really in play. A body **stowed in a cupboard** (§7.2) is
+    // neither: it is gone to every guard, you cannot climb in after it and bumping it
+    // is an inert no-op, which is Neutral's own definition (§11.2, "inert scenery,
+    // spent objectives") and the same transition a spent console makes. So the locked
+    // cupboard keeps its `z` — the glance that tells you which cupboards you have
+    // spent (§10.3) — in **Neutral**, leaving Owned to mean only "this is working for
+    // you right now". That matters on this furniture in particular: Owned is also the
+    // "you are concealed here" signal on `}` (§10.3), and one colour cannot say both
+    // *you are hidden in this cupboard* and *this cupboard is spent*. A **loose** body
+    // is never remembered; the locked-cupboard status **is**, persisted out of view by
+    // [`stowed_body_memory`].
     for body in state.bodies() {
         if !fov.contains(body.cell()) {
             continue;
         }
-        let stowed = facility.terrain(body.cell()) == Some(Terrain::Hideout);
-        let fg = if stowed || state.dragging() == Some(body.cell()) {
+        let fg = if state.dragging() == Some(body.cell()) {
             Category::Owned
+        } else if facility.terrain(body.cell()) == Some(Terrain::Hideout) {
+            Category::Neutral
         } else {
             Category::Caution
         };
@@ -520,9 +528,11 @@ fn crouch_signal(state: &State, cells: &mut [GlyphCell]) {
 
 /// The locked-cupboard signal persists in memory (§11.5a/§7.2): a cupboard you
 /// have seen with a body stowed in it is a permanent fact — a spent hideout — so
-/// out of view it is **remembered** as an Owned `z`, the same way a seen console
+/// out of view it is **remembered** as a Neutral `z`, the same way a seen console
 /// is remembered (§11.5a), rather than reverting to the empty
-/// `}`. Only the stowed lock persists; a loose body is live state and is never
+/// `}`. Neutral because a locked cupboard is a spent object, not a thing working
+/// for you (§11.2) — matching the live pass exactly, so walking away recolours
+/// nothing. Only the stowed lock persists; a loose body is live state and is never
 /// remembered, so it is not drawn here. Runs after the entity layer, writing only
 /// out-of-FOV cells (in view they are already the entity pass's live `z`).
 fn stowed_body_memory(state: &State, cells: &mut [GlyphCell]) {
@@ -537,7 +547,7 @@ fn stowed_body_memory(state: &State, cells: &mut [GlyphCell]) {
         }
         if facility.terrain(cell) == Some(Terrain::Hideout) && memory.contains(cell) {
             cells[(cell.y * width + cell.x) as usize] =
-                GlyphCell::on_board(BODY_GLYPH, Category::Owned, Visibility::Remembered);
+                GlyphCell::on_board(BODY_GLYPH, Category::Neutral, Visibility::Remembered);
         }
     }
 }
