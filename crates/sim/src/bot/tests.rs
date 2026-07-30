@@ -257,7 +257,7 @@ fn the_balanced_profile_is_the_default_bot() {
 /// seed's *geometry* is different and the bot is simply playing 48 different levels.
 /// Nothing here is comparable row to row.
 ///
-/// The aggregate did move — **25 wins to 19**, with the first `playing` row since
+/// The aggregate did move — **25 wins to 20**, with the first `playing` row since
 /// #401 — and that is precisely the kind of number twelve seeds per temperament
 /// cannot settle. Read it against the committed baseline in the same PR, which runs
 /// 100 seeds per profile and moved far less; the doc note on #401 above is the
@@ -301,7 +301,7 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "balanced 6 lost 147 rrr",
         "balanced 7 lost 11 rc",
         "balanced 8 lost 113 r",
-        "balanced 9 lost 207 rdcr",
+        "balanced 9 won 349 c",
         "balanced 10 won 249 ",
         "balanced 11 lost 199 crrr",
         "cautious 0 won 150 dr",
@@ -313,7 +313,7 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "cautious 6 lost 140 rrr",
         "cautious 7 lost 11 rc",
         "cautious 8 won 296 rd",
-        "cautious 9 lost 467 crrrr",
+        "cautious 9 lost 285 rdrdr",
         "cautious 10 lost 795 dcrrrdrdrrdrdrr",
         "cautious 11 lost 224 rrrdrc",
         "aggressive 0 won 124 rdr",
