@@ -95,11 +95,7 @@ fn level_from_url() -> Option<LevelSeed> {
 /// so the copy-replay round trip ([`crate::replay`], #411) is asserted against this
 /// real reader rather than a test's re-implementation of it.
 pub(crate) fn level_in(fragment: &str) -> Option<LevelSeed> {
-    fragment
-        .trim_start_matches(['?', '#'])
-        .split('&')
-        .find_map(|pair| pair.strip_prefix("seed="))
-        .and_then(LevelSeed::decode)
+    intrusion_core::field_in(fragment, "seed").and_then(LevelSeed::decode)
 }
 
 /// Reflect the active level into the URL hash, so the address bar is always a

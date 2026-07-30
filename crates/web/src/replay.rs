@@ -20,7 +20,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use intrusion_core::{parse_script, Input, LevelSeed, State};
+use intrusion_core::{field_in, parse_script, replay_fragment, Input, LevelSeed, State};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, KeyboardEvent, PointerEvent};
@@ -144,37 +144,22 @@ fn script_from_url() -> Option<String> {
 }
 
 /// Find an `inputs=<value>` field in a `?a=b&…` query or `#a=b&…` hash fragment.
-/// Tolerates other fields around it (the shared `seed=` among them) and a leading
-/// `?`/`#`.
+/// The splitting itself is the core's ([`field_in`]) — the format has three
+/// consumers now (#411: this boot, the copy control, and the sim's link reader), so
+/// what a field looks like is defined once, there.
 fn inputs_in(fragment: &str) -> Option<String> {
-    fragment
-        .trim_start_matches(['?', '#'])
-        .split('&')
-        .find_map(|pair| pair.strip_prefix("inputs="))
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// The hash fragment a copied replay travels as (§12.4/§13.1/#411):
-/// `seed=<token>&inputs=<script>` — the whole run, in the two carriers the boot
-/// already reads. **No new URL scheme and no second builder**: the `seed=` half is
-/// the very field [`crate::seed`] reflects and reads, the `inputs=` half is what
-/// [`script_from_url`] parses, and both readers tolerate the other field beside
-/// them (asserted below), so appending `&inputs=` needed no parser change. Pure, so
-/// the round trip — record, spell, read back, re-run — is pinned natively.
-///
-/// Both halves are fragment-safe as spelt: a token is lowercase letters and the
-/// script notation is `NESW.`, `+`/`-` and letters — no `&`, no `#`, nothing a
-/// browser rewrites — so the readers' no-percent-decoding stance holds here too.
-pub(crate) fn replay_fragment(token: &str, script: &str) -> String {
-    format!("seed={token}&inputs={script}")
+    field_in(fragment, "inputs").map(str::to_string)
 }
 
 /// The complete copyable replay link (#411): this page's own URL with its fragment
-/// replaced by [`replay_fragment`] — so what the copy control hands over opens the
-/// run wherever the page itself lives (the Pages deploy above all). `None` when the
-/// page has no usable address to build on (a hostless test harness); the platform
-/// half of the pair, thin so everything testable stays in [`replay_fragment`].
+/// replaced by the core's [`replay_fragment`] — so what the copy control hands over
+/// opens the run wherever the page itself lives (the Pages deploy above all).
+/// `None` when the page has no usable address to build on (a hostless test
+/// harness).
+///
+/// Thin on purpose: the *format* is the core's, spelled once beside the notation it
+/// carries, and what is left here is the one platform question — what this page's
+/// own address is.
 pub(crate) fn replay_url(token: &str, script: &str) -> Option<String> {
     let href = web_sys::window()?.location().href().ok()?;
     let base = href.split('#').next().unwrap_or_default();

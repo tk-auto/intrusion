@@ -107,7 +107,10 @@ pub use render::{
     GlyphCell, Grid, HelpHit, HelpTab, InputModality, MenuEntry, MenuHit, MenuUi, ScreenUi,
     SeedCopy, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
-pub use replay::{ability_script_letter, input_token, parse_script, to_script};
+pub use replay::{
+    ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,
+    to_script,
+};
 pub use rng::Rng;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
