@@ -1084,12 +1084,34 @@ impl Guard {
         style: PatrolStyle,
         blind: BlindPolicy,
     ) -> Option<Direction> {
-        let (state, destination) = (self.state, self.destination);
+        let (state, destination, facing) = (self.state, self.destination, self.facing);
         self.state = plan.state;
         self.destination = plan.destination;
         let step = self.decide(facility, blocked, rng, dwell, style, blind);
         self.state = state;
         self.destination = destination;
+        // **The cone is re-aimed against the guard's real mood, never the planned
+        // one** (§6.1/#410). A planned turn that spends itself rotating (§7.5's slow
+        // quarter) re-aims through [`turn_in_place`], which resolves
+        // [`BlindPolicy`] against `self.state` — and that was the *planned* Calm for
+        // the length of the decision above. Left there, a guard that has just
+        // spotted the player would look with a **patrol's** blind flanks, which is
+        // exactly the pricing [`BlindPolicy::FlankWhileCalm`] exists to enforce: the
+        // flank is somewhere to work from against a patrol you have read, never
+        // somewhere to hide from a guard that is hunting you. It would also paint
+        // that patrol's cone on the danger overlay for a guard the player can see
+        // (§11.5), which is the overlay lying about a mood the `g` glyph is
+        // simultaneously colouring Danger.
+        //
+        // So the rotation is the planned turn (it happens, and it is slow, because
+        // that is the turn the guard had decided), while the **sight** it leaves
+        // behind is this turn's. A guard that *stepped* needs nothing here: the
+        // movement pass re-aims it through [`advance_to`] with the live state. Sight
+        // is a pure recompute and draws no RNG (§12.4), so the extra cast costs a
+        // frame's work and cannot perturb the stream.
+        if self.facing != facing {
+            self.look(facility, blind);
+        }
         step
     }
 
