@@ -1727,21 +1727,22 @@ fn detection_is_deterministic() {
 /// The core of #240: a guard the blast catches is **frozen in its tracks** — a chaser
 /// bearing down on the player stops advancing the moment it is dazed, and takes no step
 /// for the whole count. When the count runs out it **resumes cleanly**, stepping toward
-/// the player again on the very next turn. (The level-start world phase, §4.2, already
-/// sent this patroller one step into a chase, so it is caught at (10, 8).)
+/// the player again on the very next turn. (The level-start world phase, §4.2, flips
+/// this patroller to Chasing; its first-spot step is deferred, #430, so it is caught
+/// where it spawned, at (10, 8).)
 #[test]
 fn confusion_freezes_a_hunting_guard_then_it_resumes() {
     let mut s = State::new(
         open_room(20, 20),
         Cell::new(10, 10),
         Direction::North,
-        vec![Guard::patrolling(Cell::new(10, 7))],
+        vec![Guard::patrolling(Cell::new(10, 8))],
         Vec::new(),
         Cell::new(18, 18),
     )
     .with_loadout(Loadout::innate().with(AbilityId::Confusion));
-    // The startup chase has closed the gap by one: the guard is two cells north and
-    // already Chasing — a live threat, well inside the blast.
+    // The startup spot has the guard two cells north and already Chasing — a live
+    // threat, well inside the blast — its held first-spot turn already spent (#430).
     assert_eq!(s.guards()[0].pos(), Cell::new(10, 8));
     assert_eq!(s.guards()[0].state(), GuardState::Chasing);
 
@@ -1788,13 +1789,14 @@ fn confusion_freezes_a_hunting_guard_then_it_resumes() {
 /// adjacent guard takes the player.
 #[test]
 fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
-    // The startup chase (§4.2) walks this patroller from (10, 8) to (10, 9): adjacent
-    // and Chasing. Without Confusion its next step is into the player — a capture.
+    // The startup spot (§4.2) flips this patroller to Chasing where it stands —
+    // adjacent, its first-spot step deferred and spent (#430). Without Confusion its
+    // next step is into the player — a capture.
     let mut s = State::new(
         open_room(20, 20),
         Cell::new(10, 10),
         Direction::North,
-        vec![Guard::patrolling(Cell::new(10, 8))],
+        vec![Guard::patrolling(Cell::new(10, 9))],
         Vec::new(),
         Cell::new(18, 18),
     )
@@ -2019,17 +2021,17 @@ fn one_confusion_reading_governs_every_pass_of_the_phase() {
 /// player who spent the ability early has spent it.
 #[test]
 fn a_guard_that_walks_in_after_the_blast_is_untouched() {
-    // The startup world phase (§4.2) walks this patroller one step toward the player,
-    // to (10, 3) — a sight_distance of 7, one clear of the blast. At that range it is a
-    // §7.6 *glimpse*, so the guard Investigates rather than Chases; either way it
-    // closes, which is all this test needs. The fixture at (14, 10) is what the blast
-    // does catch, so the firing is not refused for want of a target.
+    // The startup world phase (§4.2) glimpses the player from (10, 3) — a
+    // sight_distance of 7, one clear of the blast — so the guard Investigates rather
+    // than Chases; either way it closes from the next turn (its first-alert step is
+    // deferred, #430), which is all this test needs. The fixture at (14, 10) is what
+    // the blast does catch, so the firing is not refused for want of a target.
     let mut s = State::new(
         open_room(20, 20),
         Cell::new(10, 10),
         Direction::North,
         vec![
-            Guard::patrolling(Cell::new(10, 2)),
+            Guard::patrolling(Cell::new(10, 3)),
             Guard::stationary(Cell::new(14, 10)),
         ],
         Vec::new(),
@@ -2870,4 +2872,254 @@ fn two_released_watchers_do_not_clump() {
         closest >= 3,
         "the two watchers came within {closest} cells of each other",
     );
+}
+
+/// #430 pins its own blast radius: the first-spot rule must touch **only**
+/// freshly-alerted guards, so a seeded run in which every guard stays Calm walks
+/// exactly the patrol — every step, dwell and RNG draw — it walked before the
+/// rule landed. The fingerprint below was captured on the pre-#430 loop; any
+/// change that moves a Calm guard's walk shows up as a different fold.
+#[test]
+fn calm_guards_walk_the_same_patrol_as_before_the_first_spot_rule() {
+    let mut layout = open_room(14, 14);
+    layout.place(Cell::new(1, 1), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(1, 1), // concealed for the whole run, so nobody is ever alerted
+        Direction::South,
+        vec![
+            Guard::patrolling(Cell::new(10, 3)).with_beat(open_beat(14, 14)),
+            Guard::patrolling(Cell::new(3, 10)).with_beat(open_beat(14, 14)),
+        ],
+        Vec::new(),
+        Cell::new(12, 12),
+    )
+    .with_rng(Rng::new(0xDECAF));
+    assert!(
+        s.hidden(),
+        "precondition: the player rides the run out concealed"
+    );
+
+    let mut fold: u64 = 0;
+    for _ in 0..80 {
+        s.step(Input::Wait);
+        for g in s.guards() {
+            assert_eq!(
+                g.state(),
+                GuardState::Calm,
+                "the pin is only meaningful while nobody is alerted",
+            );
+            fold = fold
+                .wrapping_mul(0x0000_0100_0000_01B3)
+                .wrapping_add((u64::from(g.pos().x) << 32) | u64::from(g.pos().y));
+        }
+    }
+    assert_eq!(
+        fold, 14_111_564_392_247_783_089,
+        "a Calm guard that stays Calm moves identically to before #430",
+    );
+}
+
+/// §4.2/#430 — the reported case, cut to its bone: **a guard's first spot does not
+/// capture.** A Calm guard that has just arrived beside a cupboard plans its §7.5
+/// arrival dwell; the player climbs out adjacent, in plain view. The guard's look
+/// flips it to Chasing and fires [`Event::Detected`] — the mind updates — but it
+/// spends the turn on the dwell it had planned rather than stepping into the
+/// player. The following turn the chase is live and contact captures as ever
+/// (§4.5): the rule buys one readable beat, not invulnerability.
+#[test]
+fn a_calm_guards_fresh_spot_does_not_capture_on_the_spot_turn() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5), // hidden two cells in front of the guard's stop
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(5, 2), Cell::new(5, 3))],
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+    // Startup (§4.2): the guard walks its last patrol step and arrives at (5,3),
+    // facing south — the cupboard two cells in front, the player concealed.
+    assert_eq!(s.guards()[0].pos(), Cell::new(5, 3));
+    assert_eq!(s.guards()[0].state(), GuardState::Calm);
+
+    // The player climbs out to the cell between them: front-adjacent, exposed. The
+    // guard freshly spots — and finishes the turn it had planned (its dwell).
+    let events = s.step(Input::Step(Direction::North));
+    assert!(
+        events.contains(&Event::Detected {
+            by: Cell::new(5, 3)
+        }),
+        "the mind updates on the spot turn: {events:?}",
+    );
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Captured { .. })),
+        "the first spot is not a step: {events:?}",
+    );
+    assert_eq!(s.outcome(), Outcome::Playing);
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(5, 3),
+        "the planned turn was the arrival dwell — it holds",
+    );
+    assert_eq!(
+        s.guards()[0].state(),
+        GuardState::Chasing,
+        "what is deferred is the action, not the knowledge",
+    );
+
+    // From the next turn the chase is live: adjacent contact is capture (§4.5).
+    let events = s.step(Input::Wait);
+    assert!(
+        events.contains(&Event::Captured {
+            by: Cell::new(5, 4)
+        }),
+        "one turn later the guard turns for the player: {events:?}",
+    );
+    assert_eq!(s.outcome(), Outcome::Lost);
+}
+
+/// §4.2/#430 — **not a freeze**: a walking guard that freshly spots the player off
+/// its line completes the step it had planned, exactly as the player read it, and
+/// turns for them from the next decision. The cost of the first spot is paid by
+/// the geometry — the guard has walked on and must come back — not by an invented
+/// pause.
+#[test]
+fn a_freshly_spotted_guard_completes_its_planned_step() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(3, 6), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(3, 6), // hidden beside the guard's patrol line
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(5, 3), Cell::new(5, 9))],
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+    // Startup (§4.2): one step down the line, to (5,4), facing south.
+    assert_eq!(s.guards()[0].pos(), Cell::new(5, 4));
+
+    // The player climbs out into the cone at range two, off the guard's line. The
+    // guard spots — and walks its planned step south anyway.
+    let events = s.step(Input::Step(Direction::East));
+    assert!(
+        events.contains(&Event::Detected {
+            by: Cell::new(5, 4)
+        }),
+        "the climb-out is spotted: {events:?}",
+    );
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(5, 5),
+        "the guard completes the step it had planned",
+    );
+    assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+    assert_eq!(s.outcome(), Outcome::Playing);
+
+    // From the next turn it comes for the player — and, adjacent, takes them.
+    let before = s.guards()[0].pos().manhattan_distance(s.player());
+    let events = s.step(Input::Wait);
+    assert!(
+        s.guards()[0].pos().manhattan_distance(s.player()) < before,
+        "the following decision routes on the fresh sighting",
+    );
+    assert!(!events.iter().any(|e| matches!(e, Event::Captured { .. })));
+    let events = s.step(Input::Wait);
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Captured { .. })),
+        "the chase is otherwise unchanged: {events:?}",
+    );
+}
+
+/// §4.2/#430 keeps §4.5 honest: **a planned step that lands on the player's cell
+/// is still a capture.** The player climbs out of a cupboard into the very cell
+/// the guard was already walking to; the guard freshly spots them the same turn,
+/// and its deferred, pre-look plan walks it straight into them — contact. It
+/// walked into you; it did not react to seeing you. Anything else would quietly
+/// invent a turn of invulnerability.
+#[test]
+fn a_planned_step_onto_the_player_still_captures() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(4, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(4, 5), // hidden beside the guard's patrol line
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(5, 3), Cell::new(5, 9))],
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+    assert_eq!(s.guards()[0].pos(), Cell::new(5, 4), "startup step taken");
+
+    // The player climbs out east — onto (5,5), the guard's next planned cell.
+    let events = s.step(Input::Step(Direction::East));
+    assert!(
+        events.contains(&Event::Detected {
+            by: Cell::new(5, 4)
+        }),
+        "the spot still happens: {events:?}",
+    );
+    assert!(
+        events.contains(&Event::Captured {
+            by: Cell::new(5, 5)
+        }),
+        "the planned step is §4.5 contact: {events:?}",
+    );
+    assert_eq!(s.outcome(), Outcome::Lost);
+}
+
+/// §4.2/#430 — the exploit the gate is chosen against: **only the first spot
+/// defers, and "first" is the guard's mood, not the `detected_player()`
+/// transition.** Awareness is re-earned every look, so a player bobbing in and
+/// out of cover hands a chaser a fresh false→true transition every other turn;
+/// keyed on that, each re-acquire would freeze the guard again, for ever. Keyed
+/// on the pre-look state, a chase that has you stays hot: the guard closes on the
+/// turn it re-acquires, with no second delay.
+#[test]
+fn a_chaser_that_reacquires_after_broken_sight_gets_no_second_delay() {
+    let mut layout = open_room(16, 12);
+    layout.place(Cell::new(4, 5), Terrain::Hideout); // a cupboard beside the player
+    layout.place(Cell::new(4, 4), Terrain::Wall); // recessed into the guard's shadow
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::patrolling(Cell::new(5, 1))],
+        Vec::new(),
+        Cell::new(14, 10),
+    );
+    // Startup: the spawn spot is the *first* spot — deferred, so the guard is
+    // Chasing but has not moved.
+    assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(5, 1),
+        "the first spot holds it"
+    );
+
+    // The player dives into the recessed cupboard: contact breaks (the dive is in
+    // the wall's sight-shadow, unwitnessed), but the chase stays warm.
+    s.step(Input::Step(Direction::West));
+    assert!(s.hidden());
+    assert!(!s.guards()[0].detected_player(), "contact broken");
+    assert_eq!(s.guards()[0].witnessed_hideout(), None);
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(5, 2),
+        "an already-hot chase walks its lead the same turn",
+    );
+    assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+
+    // The player climbs back out into the open: a fresh false→true transition —
+    // and no fresh delay. The chaser re-acquires and closes the same turn.
+    s.step(Input::Step(Direction::East));
+    assert!(s.guards()[0].detected_player(), "re-acquired");
+    assert_eq!(
+        s.guards()[0].pos(),
+        Cell::new(5, 3),
+        "no second delay: the re-acquire is acted on at once",
+    );
+    assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+    assert_eq!(s.outcome(), Outcome::Playing);
 }

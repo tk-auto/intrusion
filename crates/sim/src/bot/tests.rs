@@ -165,6 +165,18 @@ fn the_balanced_profile_is_the_default_bot() {
 /// moves them — that is what makes them useful. Update them *with* the change
 /// and say what moved, never to make a red test green.
 ///
+/// **#430 moved 12 of the 48 rows, 3 changing outcome.** A guard's first alert no
+/// longer moves it (§4.2): it finishes the turn it had planned and turns for the
+/// player from the next decision, so every run in which a Calm guard freshly
+/// spotted the bot diverges from that turn on. The mix drifts up one win
+/// (19 → 20), with the movement in both directions: `cautious 1` converts a loss
+/// into a win, `careless 10` — the pin's only run at the input cap — resolves
+/// into a 346-turn win, and `cautious 7` loses late a run it used to win late,
+/// because the deferred first step re-times every patrol the bot meets
+/// afterwards. One beat of tempo cuts both ways. Twelve seeds are a pin, not a
+/// balance signal (§13.4); the 100-seed baseline comparison recorded in the PR is
+/// what judges the rule against §8.3's "being seen must stay expensive".
+///
 /// **A change to *generation* moves them too**, and #361 did: a cupboard now
 /// needs solid back diagonals, so these twelve seeds build different facilities
 /// and the bot's identical policy meets different levels in them. Rows were
@@ -258,7 +270,7 @@ fn the_balanced_profile_is_the_default_bot() {
 fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
     const PINNED: [&str; 48] = [
         "balanced 0 won 78 rcd",
-        "balanced 1 lost 83 crcd",
+        "balanced 1 lost 137 crrd",
         "balanced 2 lost 47 c",
         "balanced 3 lost 108 rdr",
         "balanced 4 lost 57 rr",
@@ -267,43 +279,43 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "balanced 7 won 94 r",
         "balanced 8 won 121 c",
         "balanced 9 won 84 ",
-        "balanced 10 lost 325 rrdrrrd",
+        "balanced 10 lost 346 rrdrdrc",
         "balanced 11 lost 323 rrcrrdcr",
         "cautious 0 won 107 rc",
-        "cautious 1 lost 124 crd",
-        "cautious 2 lost 131 rd",
+        "cautious 1 won 233 crdr",
+        "cautious 2 lost 209 rdrrrr",
         "cautious 3 lost 326 rrdrdr",
         "cautious 4 won 91 rd",
         "cautious 5 won 217 ",
-        "cautious 6 lost 166 rd",
-        "cautious 7 won 547 rdrrdrdcrrdrdr",
+        "cautious 6 lost 270 rrr",
+        "cautious 7 lost 321 rrrdrrd",
         "cautious 8 won 115 rd",
         "cautious 9 won 96 ",
-        "cautious 10 lost 745 rdrddrrdrr",
+        "cautious 10 lost 756 rdrddrrdrrr",
         "cautious 11 lost 35 cr",
         "aggressive 0 lost 77 rcrr",
         "aggressive 1 won 73 ",
         "aggressive 2 lost 219 rcrc",
-        "aggressive 3 won 224 crc",
+        "aggressive 3 won 225 crdc",
         "aggressive 4 lost 48 r",
         "aggressive 5 lost 89 r",
-        "aggressive 6 lost 287 rcrcrdrcrdr",
+        "aggressive 6 lost 135 rcrrdrcd",
         "aggressive 7 lost 65 r",
         "aggressive 8 lost 156 rrr",
         "aggressive 9 won 84 ",
         "aggressive 10 lost 110 r",
-        "aggressive 11 lost 263 rrrdr",
+        "aggressive 11 lost 273 rrrrrr",
         "careless 0 lost 77 rcrr",
         "careless 1 won 88 ",
         "careless 2 lost 117 rcrc",
-        "careless 3 won 213 crc",
+        "careless 3 won 214 crdc",
         "careless 4 won 78 rc",
         "careless 5 lost 89 r",
         "careless 6 lost 54 rcd",
         "careless 7 lost 65 r",
         "careless 8 won 117 rc",
         "careless 9 won 84 ",
-        "careless 10 playing 364 rcrcrcrc",
+        "careless 10 won 346 rcrrcc",
         "careless 11 lost 220 rrcr",
     ];
 

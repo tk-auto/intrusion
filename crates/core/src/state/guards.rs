@@ -60,6 +60,12 @@ struct GuardSenses {
     /// clock. Read through [`acts`](Self::acts), never directly, so no pass can forget
     /// the skip.
     suppressed: Vec<bool>,
+    /// Per guard: its **pre-look plan** (§4.2/#430) — the state and destination it
+    /// entered the phase with, before this turn's look is folded in. The movement
+    /// pass routes a guard that was Calm here, and is not by the time it moves, on
+    /// this plan rather than on the fresh alert: a first spot updates the guard's
+    /// mind this turn and its feet the next.
+    plans: Vec<Plan>,
     /// The `guards_always_search_hideouts` modifier (§12.6), read once off the one
     /// resolved config value (§12.3) and handed to each guard's own check.
     always_search: bool,
@@ -89,6 +95,7 @@ impl GuardSenses {
                 .iter()
                 .map(|guard| state.guard_confused(guard))
                 .collect(),
+            plans: state.guards.iter().map(Guard::plan).collect(),
             always_search: state.modifiers.guards_always_search_hideouts,
         }
     }
@@ -405,7 +412,8 @@ impl State {
     /// Pass 6 — each guard `decide`s a step (§7.5) and takes it. A guard moving into
     /// the player's cell is a capture and ends the run (§4.5). Otherwise it moves onto
     /// any cell that admits it and holds no other actor; a guard with nowhere to go, or
-    /// whose step is blocked, simply holds.
+    /// whose step is blocked, simply holds. A guard whose first alert arrived *this*
+    /// phase decides on its pre-look plan instead (§4.2/#430 — see the gate below).
     fn move_guards(&mut self, senses: &GuardSenses, events: &mut Vec<Event>) {
         // A **sealed** door is solid to every guard's route (§8.3/§7.6/#242): the guard
         // cannot work a locked handle, so it plans the long way round rather than
@@ -454,8 +462,34 @@ impl State {
             // zone (§7.6) — an Investigating guard only ever had a glimpse and
             // reports nothing — and `decide` is the one place a chase can run out.
             let was_chasing = self.guards[i].state() == GuardState::Chasing;
-            let step =
-                self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style, blind);
+            // §4.2/#430: **a guard's first alert does not move it.** A guard that
+            // entered the phase Calm and has been alerted by one of the passes
+            // above — a spot, a glimpse, a found body, a decoy, a colleague's call
+            // — finishes the turn it had already planned, routed on its pre-look
+            // plan; the fresh state takes over from the next turn's decision.
+            // Everything the guard *learned* this turn stands (the state flip, the
+            // sighting tally, the flash, the call-ins — all fired above): what is
+            // deferred is the action, not the knowledge. The gate is the mood at
+            // the head of the phase, deliberately not the `detected_player()`
+            // false→true transition: awareness is re-earned every look, so a
+            // player bobbing in and out of cover would otherwise hand a chaser a
+            // fresh "first spot" — and a free freeze — every other turn.
+            let plan = senses.plans[i];
+            let fresh_alert =
+                plan.state == GuardState::Calm && self.guards[i].state() != GuardState::Calm;
+            let step = if fresh_alert {
+                self.guards[i].decide_planned(
+                    plan,
+                    facility,
+                    &blocked,
+                    &mut self.rng,
+                    dwell,
+                    style,
+                    blind,
+                )
+            } else {
+                self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style, blind)
+            };
             if was_chasing {
                 self.call_in_lost_sighting(i, events);
             }

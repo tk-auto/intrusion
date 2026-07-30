@@ -58,7 +58,8 @@ use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
 use crate::guard::{
-    Dwell, Guard, GuardState, PatrolStyle, GUARD_CLOSE_CHANCE_PERCENT, GUARD_DWELL_CHANCE_PERCENT,
+    Dwell, Guard, GuardState, PatrolStyle, Plan, GUARD_CLOSE_CHANCE_PERCENT,
+    GUARD_DWELL_CHANCE_PERCENT,
 };
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{DebugModifiers, LevelModifiers};
