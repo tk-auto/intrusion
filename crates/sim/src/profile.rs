@@ -135,6 +135,32 @@ pub struct Profile {
     /// goes back to being untested. Splitting the two across temperaments is how one
     /// batch covers the drag/stow chain and another covers body discovery (#316).
     pub body_stow_reach: u32,
+    /// How far this temperament will go out of its way to throw the **comms console's**
+    /// switch (§7.7/#405) — one bump, and no guard calls another for the rest of the
+    /// level.
+    ///
+    /// **`0` declines the verb outright**; **`1` is adjacent-only** — the opportunistic
+    /// bump, taken when the console is already under your hand and never walked to.
+    /// Nothing larger is implemented, and that is the point rather than an omission:
+    /// §7.7 puts the balance on the *route*, not the switch ("**The cost is the route,
+    /// not the switch.** One bump is cheap; getting to it is not. Placement distance is
+    /// therefore the balance knob"). A bot that routed to the console would price the
+    /// switch instead of the route and make the placement knob measure the bot's
+    /// pathfinding; a bot that takes it when it stumbles over one leaves the knob
+    /// measuring what §7.7 says it should — how likely a wandering intruder is to find
+    /// the thing.
+    ///
+    /// A number rather than a bool so §7.7's own follow-up ("would a temperament walk
+    /// three cells for it?") is one row of data rather than a policy fork. That
+    /// experiment is not this ticket: a value above `1` would need routing that does not
+    /// exist, so [`no_profile_walks_to_the_comms_console`] pins every shipped profile at
+    /// `0` or `1` and the day someone wants `3` they will find the assertion waiting.
+    ///
+    /// **`aggressive` and `careless` decline, deliberately and provisionally.** There is
+    /// a real argument that the striking temperaments want it *most* — their bodies are
+    /// what trigger the calls in the first place — but that is a sweep worth running now
+    /// that the verb exists, not a guess to ship inside the change that creates it.
+    pub comms_reach: u32,
     /// Whether this temperament will **duck behind a bench** at all (§10.3/#379).
     ///
     /// A flag rather than a reach, and the shape is the finding. The obvious sibling
@@ -211,6 +237,14 @@ impl Profile {
         // still true after #316 added the play.
         takedown_reach: 0,
         body_stow_reach: 0,
+        // But it *does* throw the comms switch when it walks past one (§7.7/#405).
+        // Opportunism, not a plan — the same shape as the crouch below: adjacent-only,
+        // never a detour, so the placement distance stays the balance knob §7.7 says it
+        // is. Unlike the strike this moves the profile's numbers rather than leaving
+        // them byte-identical, and it should: one bump ends guard-to-guard call-ins for
+        // the level, which is exactly the counterplay `bodies_found` and the alert rows
+        // have never once been measured against.
+        comms_reach: 1,
         // It *does* duck behind a table when a patrol walks in on it and there is no
         // cupboard to reach — survival, not a plan, and never a detour (#379). Unlike
         // the strike, this moves this profile's numbers rather than leaving them
@@ -291,6 +325,13 @@ impl Profile {
         // half speed (§8.3) a six-step carry is a dozen turns, which is exactly the
         // price §7.2 means the body to be.
         body_stow_reach: 6,
+        // **It declines the comms switch** (§7.7/#405) — provisionally, and against the
+        // obvious argument. The striking temperaments are the ones whose bodies trigger
+        // the call-ins, so they plausibly want the silence *most*. But that is a claim
+        // to measure, not to ship inside the change that builds the verb: leaving the
+        // two striking profiles declining keeps a clean pair to sweep against, and
+        // keeps their rows byte-identical to today while the opting-in pair moves.
+        comms_reach: 0,
         ..Profile::BALANCED
     };
 
@@ -501,6 +542,42 @@ mod tests {
             0,
             "careless never does — that is what gives `bodies_found` a source",
         );
+    }
+
+    /// #405: the comms switch splits the temperaments the **other** way from the
+    /// takedown — the careful pair takes it, the striking pair declines — and that
+    /// crossing is the point rather than an accident. It leaves a clean declining pair
+    /// to compare against when §7.7's follow-up asks whether the strikers, whose bodies
+    /// trigger the call-ins, actually want the silence most.
+    ///
+    /// Also pins the field's **implemented** range. `0` declines and `1` is the
+    /// adjacent-only bump; anything larger would mean *routing to* the console, which
+    /// does not exist and which §7.7 deliberately does not want — it would price the
+    /// switch instead of the route. The day someone wants `3` for the placement sweep,
+    /// this assertion is what tells them there is work to do first.
+    #[test]
+    fn no_profile_walks_to_the_comms_console() {
+        let (declines, opts_in): (Vec<Profile>, Vec<Profile>) =
+            Profile::ALL.into_iter().partition(|p| p.comms_reach == 0);
+
+        assert_eq!(
+            opts_in.iter().map(|p| p.name).collect::<Vec<_>>(),
+            ["balanced", "cautious"],
+            "the careful temperaments take the switch when it is under their hand",
+        );
+        assert_eq!(
+            declines.iter().map(|p| p.name).collect::<Vec<_>>(),
+            ["aggressive", "careless"],
+            "the striking ones decline it — provisionally, and on purpose",
+        );
+        for p in &opts_in {
+            assert_eq!(
+                p.comms_reach, 1,
+                "{}: only adjacent-only is implemented — a larger reach would have to \
+                 route to the console, which §7.7 says is the wrong thing to price",
+                p.name,
+            );
+        }
     }
 
     /// **Concealment is one decision, not two** (#379). `careless` refuses the

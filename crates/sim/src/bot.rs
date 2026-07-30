@@ -39,6 +39,11 @@
 //!    seen cell bordering the unseen — which sweeps the facility until the consoles
 //!    reveal themselves.
 //!
+//! Between cover and the objective sits one **opportunistic** step with no plan of its
+//! own: a comms console already adjacent is bumped, silencing guard-to-guard call-ins
+//! for the rest of the level (§7.7/#405). It never detours to one — that would price
+//! §7.7's switch instead of its route.
+//!
 //! It uses abilities only where they earn their place (Run to flee, a takedown to
 //! clear a guard blocking the route), never a rehearsed optimal line — so the
 //! histogram has something real to measure without one verb drowning the rest.
@@ -58,8 +63,8 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use intrusion_core::{
-    AbilityId, AbilityState, Cell, Direction, Facility, GuardPerception, GuardState, Input, State,
-    Terrain,
+    AbilityId, AbilityState, Affordance, Cell, Direction, Facility, GuardPerception, GuardState,
+    Input, State, Terrain,
 };
 
 use crate::cue::{Bid, Intent, Moment};
@@ -224,6 +229,14 @@ impl PlayerPolicy for StealthBot {
         // where most detections are avoided — the player senses a guard as far out as
         // it could see them (both range 10, §9.1), so there is time to take cover.
         if let Some(input) = self.take_cover(state, &danger, &blocked) {
+            return input;
+        }
+
+        // 4.5. A comms console already under the bot's hand (§7.7/#405). Below cover
+        // deliberately: silencing while a patrol is closing spends the turn that was
+        // the escape. Above the objective just as deliberately — the bot is walking
+        // anyway, and one bump buys the rest of the level.
+        if let Some(input) = self.silence_radio(state) {
             return input;
         }
 
@@ -722,6 +735,38 @@ impl StealthBot {
             .into_iter()
             .find(|&dir| state.player().step(dir) == Some(body))
             .map(Input::Step)
+    }
+
+    /// Throw the comms console's switch when it is **already adjacent** (§7.7/#405):
+    /// one bump, and no guard calls another for the rest of the level.
+    ///
+    /// **Opportunistic, never a goal.** There is no cost-field term for the console, no
+    /// frontier bias toward it and no route that prefers it — a seed where the bot ends
+    /// up beside one got there on the route it was already walking. That restraint is
+    /// §7.7's own: "**The cost is the route, not the switch.** One bump is cheap;
+    /// getting to it is not. Placement distance is therefore the balance knob." A bot
+    /// that *routed* here would price the switch instead of the route and make that knob
+    /// measure the bot's pathfinding (§13.4: a profile is a temperament, not a solver).
+    ///
+    /// The trigger is core's own [`Affordance::SilenceRadio`] rather than a private scan
+    /// of the four neighbours (`docs/bot-behaviour.md` §2: rules asked of core, never
+    /// re-implemented). Core already answers "is this console still live, is it in view,
+    /// would the bump land" — and being FOV-gated, going through it satisfies §11.5a for
+    /// free: the console has to have been *seen*, which is the whole reason §7.7 calls
+    /// it findable rather than given.
+    ///
+    /// It has no [`Intent`] and no cue, and belongs with the takedown rather than with
+    /// the plans: a physical commitment on the cell you are standing beside, not a
+    /// route.
+    fn silence_radio(&self, state: &State) -> Option<Input> {
+        if self.profile.comms_reach == 0 {
+            return None;
+        }
+        state
+            .affordances()
+            .into_iter()
+            .find(|&(_, a)| a == Affordance::SilenceRadio)
+            .map(|(dir, _)| Input::Step(dir))
     }
 
     /// Pursue the objective — nearest known untaken console, then the exit — or, when
