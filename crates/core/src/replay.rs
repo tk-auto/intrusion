@@ -20,9 +20,18 @@
 //! §11.6 hotkeys until the keys moved to the ability bar's slots; a script needs a
 //! spelling that is a fact about the *ability* rather than about one run's loadout,
 //! so the identity map came here, to the consumer it still has.
+//!
+//! **The link is here for the same reason the notation is** (#411). A replay travels
+//! as `seed=<token>&inputs=<script>` — the level's token paired with this notation —
+//! and that pairing now has three consumers: the web shell *writes* it from the help
+//! panel's copy control and *reads* it at boot, and the sim *reads* it back to
+//! narrate a run someone pasted. Spelled in one crate and re-derived in another it
+//! would be a format that can drift; spelled here, [`replay_fragment`] and
+//! [`parse_replay_link`] are the only two definitions of it.
 
 use crate::ability::AbilityId;
 use crate::cell::Direction;
+use crate::level_seed::LevelSeed;
 use crate::state::Input;
 
 /// The script letter of a §8.3 ability, by name — the notation's identity-keyed
@@ -128,6 +137,72 @@ pub fn parse_script(text: &str) -> Result<Vec<Input>, String> {
     Ok(inputs)
 }
 
+/// The fragment a replay travels as (§12.4/§13.1/#411): `seed=<token>&inputs=<script>`
+/// — the level-seed token paired with the input stream, the two carriers a boot
+/// already reads, and the string the help panel's copy control puts on the clipboard.
+///
+/// Both halves are fragment-safe as spelt — a token is lowercase letters and the
+/// notation is `NESW.`, `+`/`-` and letters, so neither carries an `&`, a `#` or
+/// anything a browser rewrites — which is what lets the whole thing ride in a URL
+/// hash with no percent-encoding in the loop.
+pub fn replay_fragment(token: &str, script: &str) -> String {
+    format!("seed={token}&inputs={script}")
+}
+
+/// Read one `name=<value>` field out of a `?a=b&…` / `#a=b&…` fragment, tolerating a
+/// leading `?`/`#` and any other fields around it. The single splitter every reader
+/// of the pair shares, so no consumer re-derives what a field looks like.
+pub fn field_in<'a>(fragment: &'a str, name: &str) -> Option<&'a str> {
+    fragment
+        .trim_start_matches(['?', '#'])
+        .split('&')
+        .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+        .filter(|value| !value.is_empty())
+}
+
+/// Parse a **pasted replay link** back into the run it names (#411) — the read half
+/// of [`replay_fragment`], and the inverse of what the help panel copies.
+///
+/// It takes the link as pasted, not a hand-split pair: a whole URL, the fragment
+/// alone, with `#` or `?`, in either field order, with unrelated fields alongside.
+/// That tolerance is the point — the URL a player copies out of a hosted build
+/// carries a query of the host's own (`?__frame_t=…#seed=…`), and requiring a human
+/// to cut the fragment off it by eye is precisely the step that gets done wrong.
+/// **The hash wins** where both are present, because that is where the copy control
+/// puts the pair and what a static host passes through untouched.
+///
+/// The `inputs=` field may be **absent**, which is a link naming a *level* and no
+/// run — a perfectly ordinary thing to be handed. It reads as a replay of length
+/// zero, so the caller shows the opening facility; the caller is told how many
+/// inputs there were and can say so. A missing or undecodable `seed=` is a hard
+/// error, as is a malformed script: a link that cannot be reproduced exactly must
+/// not resolve to a plausible near-miss (§12.4).
+pub fn parse_replay_link(text: &str) -> Result<(LevelSeed, Vec<Input>), String> {
+    let fragment = link_fragment(text.trim());
+    let token = field_in(fragment, "seed")
+        .ok_or_else(|| "replay link: no `seed=<token>` field in it".to_string())?;
+    let level = LevelSeed::decode(token)
+        .ok_or_else(|| format!("replay link: not a level-seed token: {token}"))?;
+    let inputs = match field_in(fragment, "inputs") {
+        Some(script) => parse_script(script)?,
+        None => Vec::new(),
+    };
+    Ok((level, inputs))
+}
+
+/// The part of a pasted link the fields live in: everything after the first `#` if
+/// there is one, else after the first `?`, else the whole string. Splitting on the
+/// **first** of each is what keeps a host's own query out of the answer.
+fn link_fragment(text: &str) -> &str {
+    if let Some((_, hash)) = text.split_once('#') {
+        return hash;
+    }
+    match text.split_once('?') {
+        Some((_, query)) => query,
+        None => text,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +304,95 @@ mod tests {
             None,
             "not in the catalogue"
         );
+    }
+
+    /// The link round-trips: what the copy control writes is what a paste reads
+    /// back, level and inputs both (§12.4/#411).
+    #[test]
+    fn a_replay_link_round_trips() {
+        let level = LevelSeed::quick_play(8371);
+        let inputs = parse_script("NN+rE.-rSS").expect("a legal script");
+        let token = level.encode().expect("a config a run can hold");
+        let fragment = replay_fragment(&token, &to_script(&inputs));
+        assert_eq!(
+            parse_replay_link(&fragment),
+            Ok((level, inputs)),
+            "the pair survives its own spelling",
+        );
+    }
+
+    /// **A link is read as pasted** (#411): a whole URL — hash, and a host's own
+    /// query in front of it — the fragment alone, either field order, and companions
+    /// alongside. This is the tolerance that means nobody has to cut a fragment off a
+    /// URL by eye, so it is walked over the real shapes rather than the tidy one.
+    #[test]
+    fn a_pasted_link_is_read_in_every_shape_it_arrives_in() {
+        let level = LevelSeed::quick_play(8371);
+        let token = level.encode().expect("a config a run can hold");
+        let expected = Ok((level, vec![Input::Step(Direction::North)]));
+
+        for link in [
+            // The fragment alone, and with each sigil.
+            format!("seed={token}&inputs=N"),
+            format!("#seed={token}&inputs=N"),
+            format!("?seed={token}&inputs=N"),
+            // Field order is not part of the format.
+            format!("#inputs=N&seed={token}"),
+            // A real hosted URL: the host's *own* query sits before the hash, and the
+            // hash is what carries the run. The query must not be mistaken for it.
+            format!("https://example.test/_f/1785420630-6a43/?__frame_t=abc.def&__frame_v=manifest.json#seed={token}&inputs=N"),
+            // The Pages form, and an unrelated field beside the pair.
+            format!("https://tk-auto.github.io/intrusion/#seed={token}&inputs=N"),
+            format!("#a=1&seed={token}&inputs=N&b=2"),
+            // Whitespace from a paste.
+            format!("  #seed={token}&inputs=N  "),
+        ] {
+            assert_eq!(parse_replay_link(&link), expected, "link {link:?}");
+        }
+
+        // A level link with no inputs is a replay of length zero — the opening
+        // facility — not an error: being handed one is ordinary.
+        assert_eq!(
+            parse_replay_link(&format!("#seed={token}")),
+            Ok((level, Vec::new())),
+        );
+    }
+
+    /// A link that cannot be reproduced **exactly** is refused rather than resolved
+    /// to a near-miss (§12.4): no seed field, a seed that is not a token (the old
+    /// bare-number form among them, #333), and a script with a bad token in it.
+    #[test]
+    fn an_unreproducible_link_is_refused() {
+        for link in [
+            "#inputs=NN",
+            "https://example.test/",
+            "#seed=8371&inputs=NN",
+            "#seed=notatoken",
+        ] {
+            assert!(parse_replay_link(link).is_err(), "link {link:?}");
+        }
+        let token = LevelSeed::quick_play(1).encode().expect("a token");
+        assert!(
+            parse_replay_link(&format!("#seed={token}&inputs=NQ")).is_err(),
+            "a malformed script is an error, not a truncated run",
+        );
+    }
+
+    /// A **real link, pasted from a real build** — the one this feature was first
+    /// asked to read, kept verbatim as the fixture. It pins the whole chain end to
+    /// end: the host's query is skipped, the token decodes to the run that was
+    /// played, and the script is the thirteen inputs that were pressed.
+    #[test]
+    fn the_first_link_anyone_pasted_still_reads() {
+        let link = "https://6dcafcf6-cb7b-4f80-9d6f-db85c4366efa.frame.claudeusercontent.com\
+                    /_f/1785420630-6a43/?__frame_t=uUXWTnWCKDUNRtSJccvSP10v.3dcc06db-1137-4123\
+                    -b2ec-7027f73c03ca.fd285f8d-60c8-459b-8dcc-abc57cc530f5.1785424456\
+                    &__frame_v=manifest.ec369d2e020e53f6.json\
+                    #seed=hwqcwzlhzanrdsdfzd&inputs=NNNNNEEEEEESS";
+        let (level, inputs) = parse_replay_link(link).expect("a real pasted link");
+        assert_eq!(level.seed, 18900);
+        assert_eq!(inputs.len(), 13);
+        assert_eq!(to_script(&inputs), "NNNNNEEEEEESS");
     }
 
     /// The letters are keyed by **identity**, so no two abilities share one — the

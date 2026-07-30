@@ -46,6 +46,7 @@ mod config;
 pub mod cue;
 pub mod dispatch;
 mod harness;
+mod inspect;
 mod policy;
 mod profile;
 mod replay;
@@ -64,6 +65,7 @@ pub use harness::{
     capture_one, capture_one_with, run_batch, run_batch_with, run_one, run_one_with, RunOutcome,
     RunRecord, DEFAULT_INPUT_CAP,
 };
+pub use inspect::{inspect, Inspection, TurnRecord};
 pub use policy::{PlayerPolicy, Recording, Scripted};
 pub use profile::{Descent, Profile};
 pub use replay::Replay;

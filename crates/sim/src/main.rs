@@ -8,9 +8,9 @@
 
 use std::process::ExitCode;
 
-use intrusion_core::{parse_script, Input, LevelSeed};
+use intrusion_core::{parse_replay_link, parse_script, Input, LevelSeed};
 use intrusion_sim::{
-    ability_names, alert_knob_names, capture_one_with, intel_gate_named, intel_gate_names,
+    ability_names, alert_knob_names, capture_one_with, inspect, intel_gate_named, intel_gate_names,
     modifier_names, run_batch_with, Profile, RunConfig, Scripted, StealthBot, Summary,
     DEFAULT_INPUT_CAP,
 };
@@ -20,6 +20,7 @@ Usage: sim [--runs N] [--seed S] [--cap N] [--config TOKEN] [--guards N]
            [--intel-gate none|one|all] [--modifier NAME]... [--alert NAME=N]...
            [--abilities LIST] [--without LIST]
            [--bot [--profile NAME] | --script MOVES] [--emit-replay]
+       sim --inspect LINK
 
 Run N seeded games headlessly and print JSON lines: one row per run, then a
 summary row (schema: crates/sim/README.md).
@@ -55,6 +56,12 @@ summary row (schema: crates/sim/README.md).
   --emit-replay  play one run (seed S) and print its captured
                  replay `{seed,inputs}` (§12.4) instead of the
                  metrics batch — the shareable form            (default: off)
+  --inspect LINK read a replay someone pasted and narrate it:
+                 the run's trajectory turn by turn and the
+                 frame it ended on. Takes the link as pasted —
+                 a whole URL, or just its `seed=…&inputs=…`
+                 fragment. Takes no other flag: the link says
+                 what to play                                  (a mode of its own)
 
 --bot is the balance-signal mode: a greedy stealth player that explores, takes
 the intel and leaves, fleeing to hideouts when hunted (§13.2–§13.4). Without it
@@ -89,7 +96,16 @@ config can encode it, so a swept run reproduces only under the same --alert.
 and prints the `(seed, inputs)` replay: with --bot, the exact run the bot
 played, ready to hand to the web viewer or bake into an Artifact (#197). Its
 token carries the config the run was played under, so a non-default batch's
-replay reproduces rather than approximates.";
+replay reproduces rather than approximates.
+
+--inspect is the read half of that (#411): hand it a link a player copied out
+of a build — the help panel's replay control writes one — and it says what they
+did. It is *not* --script: a script pads with waits and plays a whole batch on
+to a capture or the cap, which answers a balance question; --inspect replays
+exactly the pasted inputs, stops where they stop, and reports the trajectory. It
+boots the level the way the browser does, so it reproduces the run that was
+played rather than the sim preset's variation on it — which is why it takes no
+config flags at all.";
 
 /// Which player drives the batch.
 #[derive(Debug)]
@@ -208,7 +224,7 @@ impl ConfigFlags {
     }
 }
 
-fn parse_args(argv: &[String]) -> Result<Args, String> {
+fn parse_args(argv: &[String]) -> Result<Command, String> {
     let mut runs = 100;
     let mut seed: Option<u64> = None;
     let mut cap = DEFAULT_INPUT_CAP;
@@ -217,6 +233,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut bot = false;
     let mut profile: Option<String> = None;
     let mut emit_replay = false;
+    let mut inspect: Option<String> = None;
+    // Which *other* flags were written, so `--inspect` can refuse them by name
+    // rather than ignore them (below).
+    let mut companions: Vec<String> = Vec::new();
     let mut it = argv.iter();
     while let Some(flag) = it.next() {
         let mut value = || {
@@ -224,6 +244,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 .ok_or_else(|| format!("{flag} needs a value"))
                 .cloned()
         };
+        if !matches!(flag.as_str(), "--inspect" | "--help" | "-h") {
+            companions.push(flag.clone());
+        }
         match flag.as_str() {
             "--runs" => runs = parse_number(&value()?, flag)?,
             "--seed" => seed = Some(parse_number(&value()?, flag)?),
@@ -239,9 +262,25 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--bot" => bot = true,
             "--profile" => profile = Some(value()?),
             "--emit-replay" => emit_replay = true,
+            "--inspect" => inspect = Some(value()?),
             "--help" | "-h" => return Err(usage()),
             other => return Err(format!("unknown flag {other}\n\n{}", usage())),
         }
+    }
+    // `--inspect` is a mode of its own: the link states the level *and* the inputs,
+    // so every other flag either duplicates it or contradicts it. Refused by name
+    // rather than ignored — a report that silently ignored `--guards 8` would be a
+    // report of a run the reader thinks they asked for and did not get, which is the
+    // same attribution failure `--profile needs --bot` exists to prevent.
+    if let Some(link) = inspect {
+        if let Some(extra) = companions.first() {
+            return Err(format!(
+                "--inspect takes no other flags (got {extra}): the link says which \
+                 level and which inputs\n\n{}",
+                usage()
+            ));
+        }
+        return Ok(Command::Inspect(link));
     }
     let policy = match (bot, script) {
         (true, Some(_)) => return Err(format!("--bot and --script are exclusive\n\n{}", usage())),
@@ -253,7 +292,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         }
         (false, script) => Policy::Scripted(script.unwrap_or_default()),
     };
-    Ok(Args {
+    Ok(Command::Batch(Args {
         runs,
         // A token names a *run*, seed included, so it stands in as the first seed —
         // which is what makes `--config <token> --runs 1` replay the run it names.
@@ -263,7 +302,44 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         config: flags.resolve()?,
         policy,
         emit_replay,
-    })
+    }))
+}
+
+/// What the command line asked for: the metrics batch (`--emit-replay` included, a
+/// variation on the same run), or the standalone link inspector.
+#[derive(Debug)]
+enum Command {
+    Batch(Args),
+    /// `--inspect LINK` (#411) — narrate a pasted replay. It carries the raw link
+    /// rather than the parsed pair so the parse error reaches the user through the
+    /// one reporting path in [`inspect_link`].
+    Inspect(String),
+}
+
+/// Narrate a pasted replay link (§12.4/#411) — the read half of `--emit-replay`.
+///
+/// Prints the report on stdout. A link that cannot be parsed, or a level that
+/// somehow fails to carve, is a hard error with a message that says which: an
+/// inspection that quietly fell back to *some* run would answer a question nobody
+/// asked, and be believed.
+fn inspect_link(link: &str) -> ExitCode {
+    let (level, inputs) = match parse_replay_link(link) {
+        Ok(pair) => pair,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match inspect(&level, &inputs) {
+        Ok(seen) => {
+            print!("{}", seen.report());
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("seed {}: generation failed: {error:?}", level.seed);
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Decode a `--config` level-seed token (#245/#333), or refuse it.
@@ -337,7 +413,8 @@ fn emit_replay(args: &Args) -> ExitCode {
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&argv) {
-        Ok(args) => args,
+        Ok(Command::Batch(args)) => args,
+        Ok(Command::Inspect(link)) => return inspect_link(&link),
         Err(message) => {
             eprintln!("{message}");
             return ExitCode::FAILURE;
@@ -377,8 +454,18 @@ mod tests {
     use super::*;
     use intrusion_core::{AbilityId, AlertTuning, IntelGate, LevelModifiers, Loadout};
 
-    fn args(argv: &[&str]) -> Result<Args, String> {
+    fn command(argv: &[&str]) -> Result<Command, String> {
         parse_args(&argv.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
+    }
+
+    /// The batch command line these tests are about — every one of them describes a
+    /// batch, so the mode is unwrapped here rather than in each.
+    fn args(argv: &[&str]) -> Result<Args, String> {
+        match command(argv) {
+            Ok(Command::Batch(args)) => Ok(args),
+            Ok(Command::Inspect(link)) => panic!("expected a batch, got --inspect {link}"),
+            Err(error) => Err(error),
+        }
     }
 
     /// `--profile` selects the temperament, and defaults to `balanced` so an
@@ -609,5 +696,54 @@ mod tests {
         assert!(args(&["--script", "NE", "--profile", "cautious"])
             .expect_err("scripted")
             .contains("--profile needs --bot"));
+    }
+
+    /// `--inspect` is its own mode and carries the link through verbatim (#411) —
+    /// the parse of it belongs to the core, and its errors to the one reporting
+    /// path, so the flag's only job is to say *which* mode this is.
+    #[test]
+    fn the_inspect_flag_is_a_mode_of_its_own() {
+        let link = "#seed=abc&inputs=NE";
+        let Ok(Command::Inspect(carried)) = command(&["--inspect", link]) else {
+            panic!("--inspect must yield the inspect mode");
+        };
+        assert_eq!(carried, link, "the link reaches the reader untouched");
+        assert!(command(&["--inspect"])
+            .expect_err("a link is required")
+            .contains("needs a value"));
+    }
+
+    /// Every other flag is **refused by name** beside `--inspect`, never ignored: the
+    /// link states the level and the inputs, so a config flag next to it describes a
+    /// run that is not the one being inspected. Silently dropping it would hand back
+    /// a confident report of a different run — the attribution failure `--profile
+    /// needs --bot` guards against, in the mode where it would be hardest to notice.
+    #[test]
+    fn inspect_refuses_the_flags_it_would_otherwise_ignore() {
+        let link = "#seed=abc&inputs=NE";
+        for extra in [
+            vec!["--bot"],
+            vec!["--guards", "8"],
+            vec!["--config", "prbjdokbxcqgjnrnco"],
+            vec!["--seed", "42"],
+            vec!["--script", "NN"],
+            vec!["--emit-replay"],
+            vec!["--runs", "10"],
+        ] {
+            let mut argv = vec!["--inspect", link];
+            argv.extend_from_slice(&extra);
+            let error = command(&argv).expect_err("companions are refused");
+            assert!(
+                error.contains("--inspect takes no other flags") && error.contains(extra[0]),
+                "{:?} must be refused by name: {error}",
+                extra[0],
+            );
+            // …written either way round, since a reader may append or prepend it.
+            let mut swapped = extra.clone();
+            swapped.extend_from_slice(&["--inspect", link]);
+            assert!(command(&swapped)
+                .expect_err("order does not launder it")
+                .contains("--inspect takes no other flags"));
+        }
     }
 }

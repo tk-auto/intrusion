@@ -17,6 +17,8 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] \
     [--config TOKEN] [--guards N] [--intel-gate none|one|all] [--modifier NAME]... \
     [--abilities LIST] [--without LIST] \
     [--bot [--profile NAME] | --script MOVES] [--emit-replay]
+
+cargo run --release -p intrusion-sim -- --inspect LINK
 ```
 
 | Flag | Meaning | Default |
@@ -28,6 +30,7 @@ cargo run --release -p intrusion-sim -- [--runs N] [--seed S] [--cap N] \
 | `--profile NAME` | which **playstyle profile** the bot plays (below); needs `--bot` | `balanced` |
 | `--script MOVES` | inputs replayed from the start of every run (notation below); after the script the player waits out the run | empty |
 | `--emit-replay` | capture one run (seed `S`) and print its `(level, inputs)` replay — the `seed` field a level-seed token (#245) — instead of the metrics batch | off |
+| `--inspect LINK` | read a replay someone pasted and narrate it turn by turn (below) — a mode of its own, taking no other flag | — |
 
 And the **run config** (below): what every run of the batch boots from.
 
@@ -204,6 +207,55 @@ stderr), so it pipes cleanly into a consumer. The round-trip is asserted
 natively in `src/replay.rs` — capturing a bot run and replaying the emitted
 stream lands on an identical record — which is the §12.4 determinism property
 end to end.
+
+## Inspecting a pasted replay (`--inspect`, §12.4/#411)
+
+The read half of `--emit-replay`. A replay travels as
+`seed=<token>&inputs=<script>`, and both the sim and the browser can now *write*
+one — the help panel's `replay [r]` control copies the run a player just had.
+`--inspect` takes one back and says what they did:
+
+```
+$ cargo run --release -p intrusion-sim -- --inspect '…#seed=hwqcwzlhzanrdsdfzd&inputs=NNNNNEEEEEESS'
+level  hwqcwzlhzanrdsdfzd  (seed 18900)
+rules  Intel to exit: all of it
+tech   Run, Camouflage, Decoy, Pierce Wall
+start  (31,12) facing north, 13 input(s) to replay
+
+  1. N   (31,12) → (31,11)
+  …
+ 12. S   (37, 7) → (37, 8)   DoorOpened { at: (21,26), by_player: false }
+ 13. S   (37, 8) —  stayed   the exit needs 3 more intel
+
+<the frame it ended on>
+
+13 turn(s) played, still playing
+```
+
+**Take the link as pasted.** A whole URL, or just its fragment; `#` or `?`; either
+field order; a host's own query in front of it. Cutting the fragment out by eye is
+exactly the step that gets done wrong, so the parser does it
+(`intrusion_core::parse_replay_link`). An `inputs=` field may be absent — that is a
+*level* link, and it inspects to the opening frame.
+
+**It is not `--script`.** A script pads with waits and plays a whole batch on to a
+capture or the cap, then reports balance metrics; that answers a different question.
+Feeding a 13-input link through `--script` reports *"capture at turn 61"*, when the
+true answer is *"on turn 13 the exit refused them"*. `--inspect` replays exactly the
+pasted inputs, stops where they stop, and reports the trajectory.
+
+**It boots the level the way the browser does** (`start_level`), so it reproduces
+the run that was played rather than the sim preset's variation on it. That is why it
+takes no config flags: the sim's knobs (`--guards`, `--alert`) are not in the token,
+so a shared link cannot have been played under them, and naming one beside a link
+would describe a run other than the one being inspected. They are refused by name
+rather than ignored.
+
+**It withholds nothing.** Per-turn lines use the game's own words where the core has
+them (`message_for`), but those words are the near line's, and the near line is a
+player-facing filter — it stays deliberately silent about a door a guard opened
+across the facility (§11.7). An inspector must not inherit a filter built to
+withhold, so an event with no near-line words is still reported in plain form.
 
 ## The baseline stealth bot (`--bot`, §13.2–§13.4)
 
