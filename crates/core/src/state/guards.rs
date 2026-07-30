@@ -145,12 +145,35 @@ impl State {
     /// as a live lead. A Calm patrol whose cone merely grazes the entry is not
     /// alerted, so it never checks, and the cupboard stays a safe room against it
     /// (§10.3).
+    ///
+    /// # A mood change re-aims the cone
+    ///
+    /// Phase 2 casts every cone from the guard's mood as the turn *opened*, and this
+    /// pass is where that mood changes — so a guard alerted here is left holding a
+    /// cone cast under the mood it has just left. That is invisible under the shipped
+    /// §155 rule, where [`BlindPolicy`] carves the same tier whichever mood a guard is
+    /// in; it is a contradiction under `calm_guards_detect_only_their_cone`
+    /// (§6.1/§12.6/#410), where a **Calm** guard is blind at its flanks and every other
+    /// mood is not. A guard that has just spotted the player would keep a *patrol's*
+    /// blind flanks — for the §11.5 danger overlay, which would paint them clear while
+    /// the `g` glyph beside them reads Danger, and for the body (§7.2) and decoy (§8.3)
+    /// scans, which read the same one cone.
+    ///
+    /// So a guard whose mood moved re-aims before the passes that read it. The look
+    /// itself is unchanged — detection was already resolved against the cone the guard
+    /// *looked* with, and that is the cone the §15 Q5 witness check reads too, which is
+    /// why the re-aim comes after both. This is the mind updating on the turn it learns
+    /// something, which is exactly what #430 defers the guard's **feet** for and not its
+    /// eyes. Sight is a pure recompute drawing no RNG (§12.4), so this cannot perturb
+    /// the stream.
     fn sense_guards(&mut self, senses: &GuardSenses, events: &mut Vec<Event>) {
+        let blind = self.guard_blind_policy();
         let mut spotters = Vec::new();
-        for (index, guard) in self.guards.iter_mut().enumerate() {
+        for index in 0..self.guards.len() {
             if !senses.acts(index) {
                 continue;
             }
+            let guard = &mut self.guards[index];
             // Awareness is per-turn, so the pre-sense reading is last turn's: a
             // guard aware now that was not aware then has *freshly* found the
             // player — the transition [`Event::Detected`] reports, and the §13.2
@@ -177,6 +200,13 @@ impl State {
                 // The player has left the cell this guard was flushing (climbed out, or
                 // moved to another cupboard): the witness is stale, so drop it.
                 guard.forget_hideout();
+            }
+            // The mood this pass may just have changed decides the cone's blind tier
+            // (#410) — see the note above. Re-aimed only when it actually moved, so a
+            // patrol that stayed a patrol keeps the cone it looked with.
+            if self.guards[index].state() != senses.plans[index].state {
+                let facility = self.layout.facility();
+                self.guards[index].look(facility, blind);
             }
         }
         // Hand this turn's fresh spots to the renderer (#222), replacing the set the

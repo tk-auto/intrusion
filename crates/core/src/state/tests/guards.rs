@@ -3123,3 +3123,84 @@ fn a_chaser_that_reacquires_after_broken_sight_gets_no_second_delay() {
     assert_eq!(s.guards()[0].state(), GuardState::Chasing);
     assert_eq!(s.outcome(), Outcome::Playing);
 }
+
+/// §11.5/#410/#430: **a deferred first spot never leaves the overlay lying.** The
+/// cone follows the guard's mood on the turn the mood changes, so a guard that has
+/// just spotted the player paints an *alerted* cone — flanks live — even though
+/// #430 holds its feet to the turn it had planned. What defers is the action, not
+/// the eyes, so the red the player reads and the Danger the `g` glyph shows are
+/// one fact.
+///
+/// This is the **hold** path, and it is the one a player actually looks at: a
+/// guard that spends its deferred turn dwelling never moves, so nothing re-aims it
+/// and it used to keep the cone phase 2 cast while it was still a patrol. (A
+/// deferred turn spent on §7.5's slow rotation re-aims by a different route and is
+/// pinned in
+/// [`a_deferred_first_spot_rotation_still_watches_its_flanks`](crate::guard) — the
+/// two used to disagree, which is the contradiction both tests exist to stop
+/// coming back.)
+///
+/// Run in the `calm_guards_detect_only_their_cone` arm, because that is the only
+/// arm where the tier depends on the mood at all — under the shipped §155 rule the
+/// carve is the same in every mood, so nothing here would be observable.
+#[test]
+fn a_deferred_spotter_paints_the_cone_of_the_mood_it_is_in() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5), // concealed two cells in front of the guard's stop
+        Direction::North,
+        vec![Guard::patrolling_to(Cell::new(5, 2), Cell::new(5, 3))],
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_modifiers(LevelModifiers {
+        calm_guards_detect_only_their_cone: true,
+        ..LevelModifiers::default()
+    });
+
+    // The startup turn walks the guard onto its destination at (5,3), still facing
+    // south — so its deferred turn below is the §7.5 arrival dwell.
+    let guard = &s.guards()[0];
+    assert_eq!(guard.pos(), Cell::new(5, 3));
+    assert_eq!(guard.facing(), Direction::South);
+    assert_eq!(guard.state(), GuardState::Calm, "a patrol to start");
+    let flanks = [Cell::new(4, 3), Cell::new(6, 3)];
+    let red: Vec<Cell> = s.visible_cone_cells().collect();
+    for flank in flanks {
+        assert!(
+            !red.contains(&flank),
+            "precondition: a Calm guard's flank is blind in this arm ({flank:?})",
+        );
+    }
+
+    // The player climbs out in front of it: the fresh spot, deferred (#430).
+    s.step(Input::Step(Direction::North));
+    let guard = &s.guards()[0];
+    assert_eq!(
+        guard.state(),
+        GuardState::Chasing,
+        "the mind updated on the spot turn",
+    );
+    assert_eq!(
+        guard.state().category(),
+        Category::Danger,
+        "…and the glyph says so",
+    );
+    assert_eq!(
+        (guard.pos(), guard.facing()),
+        (Cell::new(5, 3), Direction::South),
+        "…while the feet held to the planned dwell",
+    );
+    assert_eq!(s.outcome(), Outcome::Playing, "and it did not capture");
+
+    let red: Vec<Cell> = s.visible_cone_cells().collect();
+    for flank in flanks {
+        assert!(
+            red.contains(&flank),
+            "a guard that has spotted you watches its sides, and the overlay must \
+             say so — {flank:?} left unpainted under a Danger glyph",
+        );
+    }
+}
