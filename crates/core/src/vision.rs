@@ -90,20 +90,25 @@ pub const GUARD_SIGHT_ARC: u8 = 2;
 pub struct BlindTier(u8);
 
 impl BlindTier {
-    /// **The shipped rule** (§155, §6.1/§7.2): the three cells at a guard's back —
-    /// the two rear diagonals (tier 4) and directly behind (tier 5). Its *sides*
-    /// still detect, so a takedown must come from directly behind or rear-diagonal,
-    /// and you can never stand beside or in front of a guard undetected.
+    /// **What an alerted guard carves** (§155, §6.1/§7.2): the three cells at a
+    /// guard's back — the two rear diagonals (tier 4) and directly behind (tier 5).
+    /// Its *sides* still detect, so against a guard that is hunting you a takedown
+    /// must come from directly behind or rear-diagonal, and you can never stand
+    /// beside or in front of it undetected.
+    ///
+    /// This was every guard's carve in every mood until #442; it is now what a guard
+    /// falls back to the moment it stops being Calm.
     pub const REAR: Self = Self(4);
 
-    /// **The experiment** (#410): tiers 3–5, so a guard detects exactly what its
-    /// ~90° cone covers and the free touching ring becomes player-only. Two things
-    /// follow — a **flank** takedown opens up, and a **tail** survives a corner: walk
-    /// in a guard's blind spot and its 90° turn no longer catches you (a 180° turn
-    /// still does, since that lands you at tier 1, dead ahead).
+    /// **What a Calm guard carves** (#410, adopted by #442): tiers 3–5, so a patrol
+    /// detects exactly what its ~90° cone covers and the free touching ring becomes
+    /// player-only. Two things follow — a **flank** takedown opens up, and a **tail**
+    /// survives a corner: walk in a patrol's blind spot and its 90° turn no longer
+    /// catches you (a 180° turn still does, since that lands you at tier 1, dead
+    /// ahead).
     ///
-    /// Never a whole level's rule: it is reached only through
-    /// [`BlindPolicy::FlankWhileCalm`], and so only ever by a guard that is **Calm**.
+    /// Reached only through [`BlindPolicy::FlankWhileCalm`], and so only ever by a
+    /// guard that is **Calm** — which is the whole of the rule's pricing.
     pub const FLANK: Self = Self(3);
 
     /// Whether a ring neighbour at `tier` is dropped from detection.
@@ -112,22 +117,28 @@ impl BlindTier {
     }
 }
 
-/// A level's rule for how much of a guard's ring goes blind (§12.6/#410) — the
-/// **policy**, resolved to a [`BlindTier`] per guard by the guard's own
+/// How much of a guard's ring goes blind (§6.1/§6.2/#410/#442) — the **policy**,
+/// resolved to a [`BlindTier`] per guard by the guard's own
 /// [`GuardState`](crate::GuardState).
 ///
-/// It is a policy rather than a tier because the interesting version of the flank
-/// experiment is **conditional on the guard's mood**, and the mood lives on the
-/// guard. Passing the policy down and resolving it there keeps one reading of one
-/// fact: nothing has to remember to ask "is this guard calm?" alongside "which arm is
-/// this level?", and the two can never be answered inconsistently.
+/// It is a policy rather than a bare tier because the rule is **conditional on the
+/// guard's mood**, and the mood lives on the guard. Passing the policy down and
+/// resolving it there keeps one reading of one fact: nothing has to remember to ask
+/// "is this guard calm?" alongside "which carve applies?", and the two can never be
+/// answered inconsistently.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum BlindPolicy {
-    /// **The shipped rule** (§155): every guard, in every mood, is blind only at
-    /// [`BlindTier::REAR`] — the three cells at its back.
-    #[default]
+    /// **The rule this replaced** (§155): every guard, in every mood, blind only at
+    /// [`BlindTier::REAR`] — the three cells at its back, its sides always live.
+    ///
+    /// No longer reachable in a shipped run (#442): it is kept as the named control
+    /// arm the A/B tests still compare against, because "what a flank used to do" is
+    /// the contrast that makes the tier ladder legible. Do not wire it back to a
+    /// level's config — restoring the harder rule would be a **new** modifier slot,
+    /// never a revival of the retired one.
     Rear,
-    /// **The experiment** (#410): a **Calm** guard is blind at its flanks too
+
+    /// **The rule** (#410, adopted by #442): a **Calm** guard is blind at its flanks
     /// ([`BlindTier::FLANK`]) — it detects exactly its ~90° cone — and any guard that
     /// is *not* Calm falls back to [`BlindTier::REAR`] and watches its sides again.
     ///
@@ -137,7 +148,8 @@ pub enum BlindPolicy {
     /// searching or answering a call, its sides are live, so the flank is a place you
     /// can work from and never a place you can hide in. The unconditional form gave
     /// avoidance-first play a win-rate rise with no new decision attached, which is
-    /// the un-priced safety §7.2 exists to prevent.
+    /// the un-priced safety §7.2 exists to prevent (appendix 28).
+    #[default]
     FlankWhileCalm,
 }
 

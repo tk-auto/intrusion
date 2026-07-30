@@ -290,6 +290,12 @@ fn affordances_mirror_what_a_bump_would_do() {
 /// (§7.2's gate — the unaware case is the takedown test above), and the
 /// usable line must never promise what a bump will not do (§2.3). An
 /// occupied cupboard is likewise just solid.
+///
+/// The guard is put in a hunting mood deliberately: the player stands at its
+/// *flank*, and a **Calm** guard does not detect its flank (§6.1/#442), which would
+/// make this the takedown case rather than the aware one. Any non-Calm mood watches
+/// its sides, so this is the smallest change that makes the fixture mean what its
+/// name says.
 #[test]
 fn affordances_skip_guards_and_occupied_hideouts() {
     let mut layout = open_room(12, 12);
@@ -298,7 +304,7 @@ fn affordances_skip_guards_and_occupied_hideouts() {
         layout,
         Cell::new(5, 5),
         Direction::North,
-        vec![Guard::stationary(Cell::new(6, 5))], // east of the player
+        vec![Guard::stationary(Cell::new(6, 5)).with_state(GuardState::Chasing)], // east
         Vec::new(),
         Cell::new(10, 10),
     );

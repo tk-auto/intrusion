@@ -337,16 +337,33 @@ it trivialises the hiding game.
   exception, the guard rear blind spot below. For the **player** this is
   unqualified and **[SETTLED]**: you can never stand adjacent to the player
   undetected, in any direction including directly behind.
-- **Guard rear blind spot (#155).** A guard does **not** detect the three cells
-  at its back — the two rear diagonals (tier 4) and directly behind (tier 5) of
-  §6.2. Its *forward* and *side* (tier 3) cells still detect, so you can never
-  stand **beside or in front of** a guard undetected — but you *can* slip
-  **directly behind** an unaware one. This narrows the old blanket 360° ring for
-  guards only; it is the deliberate revision that makes a behind-the-back
-  Takedown (§7.2) approachable. The rear cells stay §6.2 cone-carving walls (the
-  wedge silhouette is unchanged) — only their membership in the *detection* set
-  is dropped. Pairs with the patrol dwell (§7.5): a window to act, and a back to
-  approach.
+- **Guard blind spot — and it depends on the guard's mood (#155, #410/#442).** A
+  guard never detects the three cells at its back: the two rear diagonals (tier 4)
+  and directly behind (tier 5) of §6.2. **A Calm guard is blind at its *sides*
+  (tier 3) as well** — a patrol detects exactly its ~90° cone, and the free
+  touching ring is the player's alone. Any guard that is **not** Calm — chasing,
+  investigating, searching, answering a call — watches its sides again, so against
+  a guard that is hunting you the old rule holds in full: you cannot stand beside
+  or in front of it undetected. **[SETTLED]** since #442; the wider carve was the
+  #410 experiment, and appendix 28 is what it measured.
+
+  Two things follow, and both are the reward for **reading a patrol**: a takedown
+  can come from a Calm guard's flank as well as its back — five approach cells,
+  not three — and you can **tail** one, because its 90° turn at a corner no longer
+  brings you into a detecting cell. A 180° reversal still catches you: that lands
+  you dead ahead, tier 1.
+
+  **The condition is the design, not a tuning fudge.** A patrol you have read is
+  predictable; a guard hunting you is not. So the flank is somewhere to *work
+  from* and never somewhere to *hide*. It costs no new state and no timer — the
+  mood is already on the guard and the cone is recomputed every sight phase, so a
+  guard's sides come back the turn it stops being Calm.
+
+  Either way the carved cells stay §6.2 cone-carving walls (the wedge silhouette
+  is unchanged) — only their membership in the *detection* set is dropped. This
+  narrows the old blanket 360° ring for guards only; the player's ring is
+  untouched. Pairs with the patrol dwell (§7.5): a window to act, and a back — now
+  a back and two sides — to approach.
 - **Auto-peek — the player only.** **[START]** The player's sight is the union
   of the cast from their cell and a cast from the cell one step ahead along
   their facing — where the head would be if they leaned forward — clipped to
@@ -365,11 +382,20 @@ if they were walls.** Shadowcasting propagates outward, so those artificial wall
 cast the shadows that carve the cone. Because artificial walls are still marked
 seen — exactly like real ones — you get the 360° touching ring for free.
 
-For a **guard**, the three rear ring cells (tiers 4–5) are then dropped from the
-detection set — the §6.1 rear blind spot (#155). They still act as artificial
-walls during the cast, so the wedge silhouette is untouched; they are only
-unmarked afterwards, so the guard simply does not *notice* what is at its back.
+For a **guard**, ring cells are then dropped from the detection set — the §6.1
+blind spot — and **how many depends on the guard's mood** (#155, #410/#442):
+tiers 4–5 (its back) for a guard that is alerted in any way, and tiers **3**–5
+(its back and its two sides) for one that is Calm. They still act as artificial
+walls during the cast, so the wedge silhouette is identical either way; they are
+only unmarked afterwards, so the guard simply does not *notice* what is there.
 The player keeps the full ring.
+
+The carve is resolved **per guard, at look time**, from the mood the guard is in
+at that moment — never stored — which is what makes "a guard's sides come back
+the turn it stops being Calm" fall out rather than need machinery. Because the
+§11.5 danger overlay is drawn from that same one cone, a patrol and a searcher
+standing side by side paint **differently**: the rule is legible on screen rather
+than remembered.
 
 Rank the 8 neighbours by angular deviation from facing:
 
@@ -425,15 +451,26 @@ on, and the old one was free, unlimited-range and therefore the game.
 | Result | Target is **permanently** out. Leaves a **body**. |
 | Cooldown | None — the constraints *are* the cost |
 
-Because of the touching ring (§6.1), **an aware guard can always see you when you
-are adjacent to it — beside it or in front.** The one gap is its **rear blind
-spot** (§6.1/#155): the three cells directly behind and rear-diagonal do not
-detect. So a takedown is possible either against a guard made unaware in front —
-arranging to be adjacent without ever having been in its cone, a puzzle of
-geometry, timing, doors and distraction — or by reaching the cell **directly
-behind** an unaware guard. The rear approach is the intended path, and it needs a
-window: pair it with the patrol dwell (§7.5), because a guard that never stops
-moving cannot be lined up on. Either way it is not a button.
+Because of the touching ring (§6.1), **a guard that is hunting you can always see
+you when you are adjacent to it — beside it or in front.** Its one gap is the
+**rear blind spot** (§6.1/#155): the three cells directly behind and rear-diagonal
+do not detect. Against a hunting guard, then, a takedown means either making it
+unaware in front — arranging to be adjacent without ever having been in its cone,
+a puzzle of geometry, timing, doors and distraction — or reaching the cell
+**directly behind** it.
+
+**Against a Calm patrol the surface is wider: its two flanks are blind too**
+(§6.1/#410/#442), so five of the eight adjacent cells work rather than three, and
+you can walk up beside a guard that is looking the other way and take it. That is
+deliberately the *reward for reading a patrol*, and it is priced by the same
+condition that grants it: the moment the guard is alerted its sides are live, so
+the flank is somewhere to work from and never somewhere to hide. A guard that has
+spotted you is exactly as hard to take down as it always was.
+
+The rear and flank approaches both need a **window**: pair them with the patrol
+dwell (§7.5), because a guard that never stops moving cannot be lined up on. And
+neither is safety — **capture is contact** (§4.5), so a guard that walks onto you
+still catches you, blind flank or not. Either way it is not a button.
 
 **The body is the cost.** A body is a **non-solid** object — it lies on the floor
 and blocks nothing (neither movement, pathing, nor sight). Its cost is not that it
@@ -2664,15 +2701,23 @@ Adding a source is a new field and a line in `resolve`, never a new difficulty
 path — #210 owns the alert→modifier *mapping* and its own fairness (decay, floor,
 §2.2); this seam owns only the merge and the application.
 
-**A modifier is also how an experiment ships.** `calm_guards_detect_only_their_cone`
-(#410) bends a **[SETTLED]** sentence — §6.1/§6.2/§7.2's *"you can never stand
-beside or in front of a guard undetected"* — so it ships as a knob to be measured
-rather than as a rule. Both arms of a paired A/B then run from **one build** on
-identical seeds, which is the only way the comparison is exact; and because
-placement is pinned to the shipped carve, the two arms generate the *same
-facility*, so nothing in a diff is geometry. Adopting an experiment is a
-design-doc edit, not a merge: the sections above move only if the numbers say so.
-Appendix 28 records what this one measured — and why it was not adopted.
+**A modifier is also how an experiment ships, and how one is adopted.**
+`calm_guards_detect_only_their_cone` (#410) bent a **[SETTLED]** sentence —
+§6.1/§6.2/§7.2's *"you can never stand beside or in front of a guard undetected"*
+— so it shipped as a knob to be measured rather than as a rule. Both arms of a
+paired A/B then ran from **one build** on identical seeds, which is the only way
+the comparison is exact; and because placement is pinned to the conservative rear
+carve, the two arms generate the *same facility*, so nothing in the diff was
+geometry. Appendix 28 records what it measured.
+
+**It was then adopted (#442)**, which is a design-doc edit rather than a merge:
+the three sections above moved together, and the knob was **retired in place**.
+That last part is the format rule, not tidiness — a modifier's position is a
+permanent slot the level-seed token encodes *by index*, so a retired one leaves a
+tombstone that still round-trips and is never read, never drawn and never
+captioned. Deleting it and closing the gap would silently re-point every token
+ever shared (§12.5, the #286 break). Restoring a retired rule as a *harder*
+modifier is a **new** slot appended to the end, never a revival of the old one.
 
 **Determinism (§12.4 [SETTLED]).** The resolved set is part of the reproducible
 config: same seed + **same modifiers** + same inputs → identical run. It is plain

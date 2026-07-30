@@ -97,13 +97,15 @@ fn a_dephased_player_passes_through_a_guard_without_a_takedown() {
     .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.step(Input::Activate(AbilityId::Dephase));
     let events = s.step(Input::Step(Direction::East));
-    // The guard is looking straight at the phasing player from one cell away, so the
-    // facility's alert ladder steps as it would for any sighting (§7.3) — what matters
-    // here is what the *step* did: a plain move, no takedown and no bump.
+    // The guard sees the phasing player the moment they are on its own cell — its
+    // *flank*, where a calm guard sees nothing (§6.1/#442), is where they started — so
+    // this turn carries the §7.6 detection transition and the §7.3 ladder step with it.
+    // Neither is what the test is about: what matters is what the *step* did, which is
+    // a plain move, no takedown and no bump.
     assert_eq!(
         events
             .iter()
-            .filter(|e| !matches!(e, Event::AlertRaised { .. }))
+            .filter(|e| !matches!(e, Event::AlertRaised { .. } | Event::Detected { .. }))
             .copied()
             .collect::<Vec<_>>(),
         vec![Event::Moved {
