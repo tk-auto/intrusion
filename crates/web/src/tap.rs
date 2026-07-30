@@ -246,6 +246,7 @@ impl Game {
                 self.screen_height(),
                 self.ui.help_tab,
                 self.state.level(),
+                self.ui.offer_replay_copy,
                 col,
                 row,
             )

@@ -1438,11 +1438,19 @@ fn the_panel_is_reachable_to_open_and_escapable_once_open() {
     // Open: the panel is escapable by touch — the `[x]` closes, a tab switches.
     let height = closed.height;
     assert!(matches!(
-        help_hit(width, height, HelpTab::default(), s.level(), width - 2, 0),
+        help_hit(
+            width,
+            height,
+            HelpTab::default(),
+            s.level(),
+            false,
+            width - 2,
+            0
+        ),
         Some(HelpHit::Close)
     ));
     assert!(matches!(
-        help_hit(width, height, HelpTab::default(), s.level(), 2, 0),
+        help_hit(width, height, HelpTab::default(), s.level(), false, 2, 0),
         Some(HelpHit::Tab(_))
     ));
 }

@@ -196,7 +196,16 @@ impl Game {
     /// Feed one [`Input`] to the loop and repaint — the single seam every input
     /// source (a key, a gesture tick) drives, one ordinary input at a time against
     /// the current frame's state (§2.2 fairness: never a batched multi-step).
+    ///
+    /// Being the single seam is what makes it the recorder's home (§12.4/#411):
+    /// everything that reaches the world — a held key's repeats, a free wall bump, a
+    /// swallowed post-end press — is appended exactly as fed, so the recording *is*
+    /// the run and a stream taken anywhere shallower would drift from what was
+    /// played. `debug-tools` builds only; elsewhere the branch is compiled out.
     pub(crate) fn step_and_draw(&mut self, input: Input) {
+        if cfg!(feature = "debug-tools") {
+            self.recorded.push(input);
+        }
         self.state.step(input);
         self.draw();
     }
@@ -265,6 +274,7 @@ impl Game {
             HelpNav::PrevTab => self.show_help_tab(self.ui.help_tab.prev()),
             HelpNav::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
             HelpNav::CopySeed => self.copy_seed(),
+            HelpNav::CopyReplay => self.copy_replay(),
         }
     }
 
@@ -279,6 +289,7 @@ impl Game {
             HelpHit::Tab(tab) => self.show_help_tab(tab),
             HelpHit::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
             HelpHit::CopySeed => self.copy_seed(),
+            HelpHit::CopyReplay => self.copy_replay(),
         }
     }
 
@@ -313,8 +324,33 @@ impl Game {
         let Some(token) = self.seed_to_copy() else {
             return;
         };
+        self.copy_to_clipboard(&token);
+    }
+
+    /// Put the whole **run** on the clipboard as a `…#seed=<token>&inputs=<script>`
+    /// link (§12.4/§13.1/#411) — the keyboard/touch halves of the Level info tab's
+    /// `replay [r]` control, [`copy_seed`](Self::copy_seed)'s sibling, through the
+    /// very same clipboard plumbing and acknowledgement line.
+    ///
+    /// It mirrors the drawn control exactly ([`replay_to_copy`](Self::replay_to_copy)):
+    /// offered by this build at all, on the Level info tab, and only when the run has
+    /// a token for the link to carry. In every other build the control is not drawn
+    /// and this is a no-op, so the `r` key does exactly what the panel shows.
+    fn copy_replay(&mut self) {
+        let Some(url) = self.replay_to_copy() else {
+            return;
+        };
+        self.copy_to_clipboard(&url);
+    }
+
+    /// The one clipboard write both copy controls share (#353/#411): start the
+    /// conditional write, and record what is known *now* — nothing while the
+    /// browser's answer is still coming, [`SeedCopy::Unavailable`] when there was no
+    /// clipboard to ask. The microtask half lands in
+    /// [`note_seed_copy`](Self::note_seed_copy).
+    fn copy_to_clipboard(&mut self, text: &str) {
         let handle = self.handle.clone();
-        let started = clipboard::write_text(&token, move |ok| {
+        let started = clipboard::write_text(text, move |ok| {
             // The promise settles in a microtask, long after the borrow this call was
             // made under; a page that has gone away simply has nobody to tell.
             if let Some(game) = handle.upgrade() {
@@ -342,6 +378,21 @@ impl Game {
             return None;
         }
         self.state.level().and_then(|level| level.encode())
+    }
+
+    /// The replay link the panel is currently offering to copy (§12.4/#411), or
+    /// `None` when it is offering none — no control in this build
+    /// ([`ScreenUi::offer_replay_copy`](intrusion_core::ScreenUi)), a different tab
+    /// up, or a run with no token for the link to carry. The link is the recording
+    /// so far over this page's own URL ([`crate::replay::replay_url`]), so what a
+    /// mid-run copy hands over is the run *up to this turn* — and a later copy, the
+    /// longer one.
+    fn replay_to_copy(&self) -> Option<String> {
+        if !self.ui.offer_replay_copy {
+            return None;
+        }
+        let token = self.seed_to_copy()?;
+        crate::replay::replay_url(&token, &intrusion_core::to_script(&self.recorded))
     }
 
     /// Record what the browser said about the copy and repaint (#353) — the microtask

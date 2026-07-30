@@ -91,8 +91,10 @@ fn level_from_url() -> Option<LevelSeed> {
 
 /// Find a `seed=<value>` field in a `?a=b&…` query or `#a=b&…` hash fragment and
 /// decode it as a level-seed token ([`LevelSeed::decode`]). Tolerates other fields
-/// around it (the shared `inputs=` among them) and a leading `?`/`#`.
-fn level_in(fragment: &str) -> Option<LevelSeed> {
+/// around it (the shared `inputs=` among them) and a leading `?`/`#`. `pub(crate)`
+/// so the copy-replay round trip ([`crate::replay`], #411) is asserted against this
+/// real reader rather than a test's re-implementation of it.
+pub(crate) fn level_in(fragment: &str) -> Option<LevelSeed> {
     fragment
         .trim_start_matches(['?', '#'])
         .split('&')

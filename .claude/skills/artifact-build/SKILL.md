@@ -37,10 +37,14 @@ crates.io is the path that works.
 ## 2. Build and generate the glue
 
 Same pipeline as `pages.yml`, run locally (from the repo root; `$SCRATCH` is the
-session scratchpad directory):
+session scratchpad directory) — plus `--features debug-tools`, which is what
+separates a preview from the deploy (#411): it switches on the input recorder
+and the help panel's `replay [r]` control, so a playtester can copy the whole
+run they just had as a `…#seed=<token>&inputs=<script>` link. `pages.yml` builds
+without it, so the public deploy carries neither.
 
 ```
-cargo build -p intrusion-web --release --target wasm32-unknown-unknown
+cargo build -p intrusion-web --release --target wasm32-unknown-unknown --features debug-tools
 rm -rf "$SCRATCH/dist" && mkdir -p "$SCRATCH/dist"
 wasm-bindgen target/wasm32-unknown-unknown/release/intrusion_web.wasm \
   --out-dir "$SCRATCH/dist" --target web --no-typescript

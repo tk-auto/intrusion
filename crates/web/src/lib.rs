@@ -58,8 +58,8 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use intrusion_core::{
-    render_screen, start_level, Grid, LevelSeed, ScreenUi, State, Theme, Visibility, BOTTOM_ROWS,
-    TOP_ROWS,
+    render_screen, start_level, Grid, Input, LevelSeed, ScreenUi, State, Theme, Visibility,
+    BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -151,7 +151,15 @@ pub fn start() -> Result<(), JsValue> {
     } else {
         ScreenUi::default()
     };
-    let ui = ScreenUi { modality, ..ui };
+    // Whether this build offers the help panel's copy-replay control (#411) is a
+    // fact about the build, decided once here: exactly the builds whose recorder
+    // runs ([`Game::step_and_draw`]) offer the control, so it can never be drawn
+    // with nothing behind it.
+    let ui = ScreenUi {
+        modality,
+        offer_replay_copy: cfg!(feature = "debug-tools"),
+        ..ui
+    };
 
     // `new_cyclic` because the shell has to be able to reach *itself* from a browser
     // callback that finishes later — the clipboard write is the one action here whose
@@ -167,6 +175,7 @@ pub fn start() -> Result<(), JsValue> {
             replay,
             replay_hud: None,
             key_ramp: replay::ScrubRamp::default(),
+            recorded: Vec::new(),
             handle: handle.clone(),
         })
     });
@@ -237,6 +246,16 @@ struct Game {
     /// only: a held Space/→/← climbs it and a fresh press resets it. Its touch
     /// counterpart lives on each scrub gesture; live play never touches either.
     key_ramp: replay::ScrubRamp,
+    /// Every [`Input`] this live run has been fed, in order — the recorder half of
+    /// the copy-replay control (§12.4/#411). §12.4 [SETTLED]: a replay is
+    /// `(seed, [inputs])` and nothing else, so this plus [`level`](Game::level) *is*
+    /// the run, and re-feeding it reproduces the run byte-for-byte. Appended at the
+    /// one seam every input crosses ([`Game::step_and_draw`]) and cleared only when
+    /// a fresh run replaces the world ([`Game::reseed`]) — never by the panel, so
+    /// copying twice hands over the run so far, then the run so further. Pushed in
+    /// `debug-tools` builds only; empty for the page's lifetime everywhere else,
+    /// and always empty in replay mode, whose inputs drive a cursor, not a world.
+    recorded: Vec<Input>,
     /// A weak handle back to the shell's own cell, closed at construction
     /// (`Rc::new_cyclic`). Every other input the shell takes is answered inside the
     /// call that raised it, so nothing else needs this; the clipboard write (§13.1/
@@ -302,11 +321,18 @@ impl Game {
     fn reseed(&mut self, level: LevelSeed) -> Result<(), JsValue> {
         self.state = new_run(&level)?;
         self.level = level;
+        // A fresh world means a fresh recording (§12.4/#411): the old inputs were
+        // fed to a run that no longer exists, and a replay stitched across two
+        // worlds would reproduce neither.
+        self.recorded.clear();
         // A clean view state, except for what the *player* is — the modality the
         // hint speaks (§11.6/#323) is a fact about their hands, not about the run,
-        // so a fresh facility must not send a touch player back to reading keys.
+        // so a fresh facility must not send a touch player back to reading keys —
+        // and for what the *build* is: the copy-replay offer (#411) is the page's,
+        // not the run's.
         self.ui = ScreenUi {
             modality: self.ui.modality,
+            offer_replay_copy: self.ui.offer_replay_copy,
             ..ScreenUi::default()
         };
         self.fit_and_draw();

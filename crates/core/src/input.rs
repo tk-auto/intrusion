@@ -94,6 +94,14 @@ pub enum HelpNav {
     /// write and mirrors the control exactly: a run whose panel draws no token has
     /// nothing to copy, and the key does nothing there, as the absent control does.
     CopySeed,
+    /// Copy the whole **run** — a `…#seed=<token>&inputs=<script>` replay link — to
+    /// the clipboard (§12.4/§13.1/#411): the keyboard half of the Level info tab's
+    /// `replay [r]` control, [`CopySeed`](Self::CopySeed)'s sibling. The control
+    /// exists only in builds whose shell records the input stream (a preview-build
+    /// affordance, [`ScreenUi::offer_replay_copy`](crate::ScreenUi)); the shell
+    /// mirrors it exactly, so in every other build the key does nothing, as the
+    /// absent control does.
+    CopyReplay,
 }
 
 /// Map a key to the [`HelpNav`] it drives **while the help panel is open**, or
@@ -124,6 +132,10 @@ pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
         // `ui_command_for_key` also leaves the letter free for an ability mnemonic
         // (#360), which the modal panel swallows anyway while it is up.
         "c" => Some(HelpNav::CopySeed),
+        // `r` copies the whole run as a replay link (#411), panel-only for the same
+        // reasons as `c` — and, like it, only *doing* anything in a build whose shell
+        // offers the control at all.
+        "r" => Some(HelpNav::CopyReplay),
         _ => None,
     }
 }
@@ -497,14 +509,21 @@ mod tests {
             Some(HelpNav::PrevTab),
             "← → prev tab"
         );
-        // `c` copies the run's level-seed token (#353) — a panel-only binding, so it
-        // is here and *not* in the board's table: outside this panel there is no token
-        // drawn for it to name.
+        // `c` copies the run's level-seed token (#353) and `r` the whole run as a
+        // replay link (#411) — panel-only bindings, so they are here and *not* in the
+        // board's table: outside this panel there is nothing drawn for them to name.
         assert_eq!(help_nav_for_key("c"), Some(HelpNav::CopySeed));
-        assert_eq!(ui_command_for_key("c"), None, "and nothing on the board");
+        assert_eq!(help_nav_for_key("r"), Some(HelpNav::CopyReplay));
+        for key in ["c", "r"] {
+            assert_eq!(
+                ui_command_for_key(key),
+                None,
+                "{key:?} does nothing on the board"
+            );
+        }
         // A movement/wait/ability/other-UI key is swallowed by the open modal panel —
         // the vi keys among them, now that they navigate nothing anywhere (#368).
-        for key in ["k", "j", "l", "h", "w", "5", "r", "t", "m", "Enter"] {
+        for key in ["k", "j", "l", "h", "w", "5", "t", "m", "Enter"] {
             assert_eq!(
                 help_nav_for_key(key),
                 None,

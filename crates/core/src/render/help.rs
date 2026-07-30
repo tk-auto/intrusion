@@ -53,8 +53,8 @@
 mod abilities;
 
 use super::{
-    blank_grid, draw, Grid, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH, SCHEMATIC_GROUND,
-    SCHEMATIC_WALL,
+    blank_grid, draw, Grid, ScreenUi, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH,
+    SCHEMATIC_GROUND, SCHEMATIC_WALL,
 };
 use crate::ability::Loadout;
 use crate::alert::AlertReadout;
@@ -153,11 +153,23 @@ pub enum HelpHit {
     /// clipboard (§12.1). Only ever produced when a token is actually drawn, so a
     /// hand-built state offers no control rather than one that copies nothing.
     CopySeed,
+    /// The Level info tab's `replay [r]` control — put the whole **run** on the
+    /// clipboard as a `…#seed=<token>&inputs=<script>` link (§12.4/§13.1/#411), the
+    /// seed control's bigger sibling: that one hands over the level, this one hands
+    /// over what just happened on it. The shell owns the recorder and the write, as
+    /// with [`CopySeed`]; the core owns the geometry. Only ever produced when the
+    /// shell says this build offers the control at all
+    /// ([`ScreenUi::offer_replay_copy`](super::ScreenUi)) — a preview-build
+    /// affordance, absent from the public deploy.
+    CopyReplay,
 }
 
-/// Whether the player's last attempt to copy this run's level-seed token reached the
-/// clipboard (§13.1/#353) — the acknowledgement the Level info tab prints under the
-/// token, and the panel's answer to "did that work?".
+/// Whether the player's last attempt to copy from the Level info tab reached the
+/// clipboard (§13.1/#353) — the acknowledgement the panel prints under the token,
+/// and its answer to "did that work?". One line for both copy controls: the
+/// level-seed token's `copy [c]`, and the `replay [r]` beside it where a build
+/// offers one (#411) — the acknowledgement sits directly under both, and "copied to
+/// clipboard" is the honest answer either way.
 ///
 /// It lives on [`ScreenUi`](super::ScreenUi), **not** on [`State`](crate::State): the
 /// panel writes no state ([`render_help`]'s standing promise), the copy costs no turn
@@ -266,6 +278,33 @@ fn copy_control_len() -> u32 {
     copy_control().chars().count() as u32
 }
 
+/// The key that copies the whole **run** — the `…#seed=<token>&inputs=<script>`
+/// replay link — while the panel is open (§12.4/§13.1/#411): `r`, for *replay*.
+/// Panel-only like [`COPY_KEY`], and matched in
+/// [`help_nav_for_key`](crate::help_nav_for_key); the letter is free there because
+/// the open panel swallows the ability mnemonics anyway.
+const REPLAY_COPY_KEY: char = 'r';
+
+/// The copy-replay control, drawn whole — a `const` string rather than a
+/// [`copy_control`]-style `format!`, because the compile-time layout checks below
+/// need its width. The check under it pins the bracketed character to
+/// [`REPLAY_COPY_KEY`], so the drawn key and the bound one cannot drift.
+const REPLAY_CONTROL: &str = "replay [r]";
+
+// ASCII throughout, so bytes are cells and the `const` width below is exact —
+// and byte indexing can read the key back out of the label.
+const _: () = {
+    let bytes = REPLAY_CONTROL.as_bytes();
+    assert!(
+        bytes[bytes.len() - 3] == b'['
+            && bytes[bytes.len() - 2] == REPLAY_COPY_KEY as u8
+            && bytes[bytes.len() - 1] == b']',
+        "the replay control must end with its own bracketed key, `[r]`",
+    );
+};
+
+const REPLAY_CONTROL_LEN: u32 = REPLAY_CONTROL.len() as u32;
+
 /// The column every Level info row is drawn from — one in from the section
 /// headings, the panel's standing content indent.
 const CONTENT_INDENT: u32 = 3;
@@ -280,6 +319,15 @@ const CONTENT_TOP: u32 = 2;
 /// then the token. Shared by [`draw_level_info`] and [`help_hit`] so a tap lands on
 /// exactly the control drawn.
 const SEED_TOKEN_ROW: u32 = CONTENT_TOP + 3;
+
+/// The row the `replay [r]` control sits on when a build offers it (#411): the one
+/// under the token — the acknowledgement's spacer, whose left side stays the
+/// acknowledgement's (the compile-time check below keeps the two clear). Beside the
+/// seed control rather than on its row, because the token plus two labelled controls
+/// cannot all fit the v1 width; stacked in the same right column instead, the way the
+/// `[x]`, the theme control and `copy [c]` already stack. Shared by
+/// [`draw_level_info`] and [`help_hit`].
+const REPLAY_CONTROL_ROW: u32 = SEED_TOKEN_ROW + 1;
 
 /// **The modifier caption width bound** (#248). The panel fills the board, so the
 /// narrowest screen a real run ever renders on is the v1 board
@@ -344,6 +392,28 @@ fn copy_control_start(width: u32) -> u32 {
     right_aligned_start(width, copy_control_len())
 }
 
+/// The column the `replay [r]` control starts at — the same right edge as the rest
+/// of the panel's control column. `const` so the acknowledgement clearance below can
+/// be checked at compile time. Shared by [`draw_level_info`] and [`help_hit`].
+const fn replay_control_start(width: u32) -> u32 {
+    right_aligned_start(width, REPLAY_CONTROL_LEN)
+}
+
+// The replay control shares its row with the seed-copy acknowledgement (#353), which
+// is drawn from [`CONTENT_INDENT`] on the left — so every acknowledgement must stop
+// short of the control, with a cell of air between, or [`draw`] would clip one into
+// the other in silence. Checked at compile time over both acknowledgements, like the
+// panel's other fixed columns (§2.3).
+const _: () = {
+    let control = replay_control_start(LevelConfig::V1.width) as usize;
+    let indent = CONTENT_INDENT as usize;
+    assert!(
+        indent + COPIED_ACK.len() < control && indent + UNAVAILABLE_ACK.len() < control,
+        "a seed-copy acknowledgement runs into the replay control beside it — \
+         shorten it (see REPLAY_CONTROL_ROW in render::help)",
+    );
+};
+
 /// Lay the tab bar out: each tab as `(tab, start col, width)`, drawn `[Label]`
 /// from a one-cell margin with a one-cell gap between. The width is independent of
 /// which tab is active (the brackets are always there), so switching tabs never
@@ -389,13 +459,17 @@ fn seed_token(level: Option<LevelSeed>) -> Option<String> {
 /// It takes `tab` and `level` for the copy control's sake, and reads the token through
 /// the same [`seed_token`] the drawing does: the control is offered on the Level info
 /// tab, on the token's own row, and only when there is a token — never on a run whose
-/// panel shows no seed section at all.
+/// panel shows no seed section at all. `offer_replay` is the shell's word on whether
+/// this build carries the `replay [r]` control at all (#411,
+/// [`ScreenUi::offer_replay_copy`](super::ScreenUi)); when it does, the control
+/// follows the same rule one row down.
 #[must_use]
 pub fn help_hit(
     width: u32,
     height: u32,
     tab: HelpTab,
     level: Option<LevelSeed>,
+    offer_replay: bool,
     x: u32,
     y: u32,
 ) -> Option<HelpHit> {
@@ -418,10 +492,18 @@ pub fn help_hit(
         }
         return None;
     }
-    if tab == HelpTab::LevelInfo && y == SEED_TOKEN_ROW && seed_token(level).is_some() {
-        let copy = copy_control_start(width);
-        if x >= copy && x < copy + copy_control_len() {
-            return Some(HelpHit::CopySeed);
+    if tab == HelpTab::LevelInfo && seed_token(level).is_some() {
+        if y == SEED_TOKEN_ROW {
+            let copy = copy_control_start(width);
+            if x >= copy && x < copy + copy_control_len() {
+                return Some(HelpHit::CopySeed);
+            }
+        }
+        if offer_replay && y == REPLAY_CONTROL_ROW {
+            let replay = replay_control_start(width);
+            if x >= replay && x < replay + REPLAY_CONTROL_LEN {
+                return Some(HelpHit::CopyReplay);
+            }
         }
     }
     None
@@ -440,24 +522,36 @@ pub fn help_hit(
 /// and stops. The Abilities tab wraps its prose to the v1 width rather than relying
 /// on that clamp, because a clipped sentence is a wrong sentence (see
 /// [`abilities`]).
+///
+/// `ui` is the shell's whole view state; the panel reads the three fields that are
+/// its own — the tab up ([`ScreenUi::help_tab`]), the copy acknowledgement
+/// ([`ScreenUi::seed_copy`], #353) and whether this build offers the replay control
+/// ([`ScreenUi::offer_replay_copy`], #411) — and ignores the rest, which
+/// [`render_screen`](super::render_screen) has already adjudicated.
 pub(super) fn render_help(
     width: u32,
     height: u32,
-    tab: HelpTab,
+    ui: ScreenUi,
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
     alert: &AlertReadout,
     loadout: Loadout,
-    copy: SeedCopy,
 ) -> Grid {
     let mut grid = blank_grid(width, height);
 
+    let tab = ui.help_tab;
     draw_tab_bar(&mut grid, tab);
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
     match tab {
-        HelpTab::LevelInfo => {
-            draw_level_info(&mut grid, CONTENT_TOP, level, modifiers, alert, copy)
-        }
+        HelpTab::LevelInfo => draw_level_info(
+            &mut grid,
+            CONTENT_TOP,
+            level,
+            ui.offer_replay_copy,
+            modifiers,
+            alert,
+            ui.seed_copy,
+        ),
         HelpTab::Abilities => abilities::draw_abilities(&mut grid, CONTENT_TOP, loadout),
         HelpTab::Help => draw_help_card(&mut grid, CONTENT_TOP),
     }
@@ -498,6 +592,7 @@ fn draw_level_info(
     grid: &mut Grid,
     mut y: u32,
     level: Option<LevelSeed>,
+    offer_replay: bool,
     modifiers: LevelModifiers,
     alert: &AlertReadout,
     copy: SeedCopy,
@@ -535,6 +630,24 @@ fn draw_level_info(
         // modifier list stays exactly where it was drawn a frame earlier.
         if let Some((text, category)) = copy.acknowledgement() {
             draw(grid, CONTENT_INDENT, y, text, category);
+        }
+        // The copy-replay control (§12.4/#411), in the control column's right edge on
+        // that same spacer — a preview-build affordance, so it is drawn only when the
+        // shell says this build offers it, and the public deploy's panel is untouched.
+        // The compile-time check beside `replay_control_start` keeps the row's two
+        // tenants — the acknowledgement and this — clear of each other.
+        if offer_replay {
+            debug_assert_eq!(
+                y, REPLAY_CONTROL_ROW,
+                "the control row and its hit-test agree"
+            );
+            draw(
+                grid,
+                replay_control_start(grid.width),
+                y,
+                REPLAY_CONTROL,
+                Category::System,
+            );
         }
         y += 1;
     }
