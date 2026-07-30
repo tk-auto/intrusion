@@ -60,9 +60,9 @@ tried in priority order, and the first that applies wins:
 4. **`Explore`** — nothing known to head for, so sweep toward the nearest frontier
    (a seen cell bordering the unseen) until the consoles reveal themselves.
 
-Two **steps without an `Intent` of their own** bracket those four, because both are
-about a physical commitment rather than a plan (§7.2/§8.3), and both are silent for
-a temperament whose reach for them is zero:
+Three **steps without an `Intent` of their own** bracket those four, because each is
+about a physical commitment rather than a plan (§7.2/§7.7/§8.3), and each is silent
+for a temperament whose reach for it is zero:
 
 - **The body in hand comes first.** A drag halves the bot's speed and refuses to
   stack with Run, so it is settled before anything else is planned — hauled to a
@@ -70,6 +70,20 @@ a temperament whose reach for them is zero:
 - **The strike sits between fleeing and taking cover.** Ahead of cover deliberately:
   the commonest safe angle in the game is the one from *inside* a cupboard, where
   taking cover would only ever wait.
+- **The comms switch sits between taking cover and pursuing** (§7.7/#405). A comms
+  console *already adjacent* is bumped: one bump, and no guard calls another for the
+  rest of the level. Below cover, because silencing while a patrol is closing spends
+  the turn that was the escape; above the objective, because the bot is walking
+  anyway and one turn buys the rest of the level.
+
+  **It never detours to one**, and that restraint is §7.7's own: "*The cost is the
+  route, not the switch.* One bump is cheap; getting to it is not. Placement distance
+  is therefore the balance knob." A bot that routed to the console would price the
+  switch instead of the route and make the placement knob measure the bot's
+  pathfinding — a solver, not a temperament (§13.4). So there is no goal, no
+  cost-field term and no frontier bias; the trigger is core's own
+  `Affordance::SilenceRadio` (§2 above), which also makes it FOV-gated, so the
+  console must have been *seen* (§11.5a) exactly as §7.7 intends.
 
 Naming the plan is not cosmetic. It is the thing an ability cue is asked its
 question *against* (§4 below), and it is computed once per decision so that no cue
@@ -318,6 +332,23 @@ waiting, the other is caught pushing — is precisely the §13.3 flag worth play
 
 And `aggressive` is not a better player. It is an impatient one, and it *should* be
 detected more often; that is the cost of its temperament, not a verdict on it.
+
+The verbs a profile can decline outright are the ones with a **reach** — a number
+whose `0` means "does not want it" rather than "never got the chance":
+
+| Field | `0` means | Who takes it |
+|---|---|---|
+| `takedown_reach` | never strikes an unaware guard; leaves it blocked and waits the patrol out | `aggressive` 4, `careless` 8 |
+| `body_stow_reach` | leaves every body where it fell, so §7.3's clock stays exercised | `aggressive` 6 |
+| `comms_reach` | never throws §7.7's comms switch | `balanced` 1, `cautious` 1 — adjacent-only |
+| `crouches` (a flag, #379) | never ducks behind a bench | all but `careless` |
+
+`comms_reach` splits the temperaments the **opposite way** from the takedown, and
+that crossing is deliberate. There is a real argument that the striking temperaments
+want the silence *most* — their bodies are what trigger the call-ins — but shipping
+that guess inside the change that built the verb would have left nothing to compare
+it against. Two declining profiles is a clean control for the sweep that asks the
+question properly.
 
 ### 5.1 Why the takedown needs *two* striking temperaments
 

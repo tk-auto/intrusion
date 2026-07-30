@@ -1,7 +1,7 @@
 use super::*;
 use crate::test_support::boot;
 use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
-use intrusion_core::{Loadout, Outcome};
+use intrusion_core::{Event, Loadout, Outcome};
 
 /// #276: the bot routes by **the core's rule**, never a table of its own.
 ///
@@ -1332,4 +1332,194 @@ fn the_bot_plays_identically_while_holding_pierce_wall() {
         "only {decided}/20 runs reached a decision — the baseline is stalling, \
              so this test would prove nothing",
     );
+}
+
+/// **#405: §7.7's comms console has a live source at last.**
+///
+/// Until this verb existed `Terrain::CommsConsole` was scenery in the metrics: the
+/// bot never routed to one and never bumped one, so `bodies_found` and every alert
+/// row was measured in a world where the radio counterplay was never taken.
+///
+/// The split is the one the profiles were built around, and it is the same shape the
+/// `takedown_reach` assertions make:
+///
+/// - the **opting-in** temperaments land a non-zero count over a sweep — a zero here
+///   would be a broken policy rather than a temperament (#379's rule);
+/// - the **declining** ones land exactly zero, which is `comms_reach: 0` working.
+///
+/// **The opting-in half searches rather than fixing a range, and that is a finding
+/// rather than a convenience.** An opportunistic bump only happens on a seed whose
+/// layout walks the bot past the console, and at §7.7's current 16-cell placement
+/// distance **[START]** that is roughly one seed in fifty. A fixed 60-seed window
+/// contained exactly *one* hit, which is a test one generation change away from a
+/// false red — so this walks seeds until it finds a hit and stops, which is fast in
+/// the ordinary case and still fails honestly if the policy ever breaks. If this
+/// starts needing most of its budget, the encounter rate has dropped and §7.7's
+/// placement knob is what to look at.
+///
+/// Loose and direction-only (§13.4): the counts are free to move, the split is not.
+#[test]
+fn the_careful_temperaments_silence_the_comms_console() {
+    // Generous, because it bounds a search rather than describing the sweep: the
+    // hit normally lands far inside it.
+    const HUNT: u64 = 400;
+    const ZERO_SWEEP: std::ops::Range<u64> = 0..60;
+
+    let silences = |profile: Profile, seed: u64| {
+        let mut bot = StealthBot::with_profile(profile);
+        run_one(seed, &mut bot, DEFAULT_INPUT_CAP)
+            .expect("generates")
+            .usage
+            .count(Verb::SilenceRadio)
+    };
+
+    for profile in [Profile::BALANCED, Profile::CAUTIOUS] {
+        let found = (0..HUNT).any(|seed| silences(profile, seed) > 0);
+        assert!(
+            found,
+            "{}: the opportunistic bump never happened in {HUNT} seeds — \
+             a zero here is a broken policy, not a temperament",
+            profile.name,
+        );
+    }
+    for profile in [Profile::AGGRESSIVE, Profile::CARELESS] {
+        let total: u32 = ZERO_SWEEP.map(|seed| silences(profile, seed)).sum();
+        assert_eq!(
+            total, 0,
+            "{}: comms_reach 0 declines the verb outright",
+            profile.name,
+        );
+    }
+}
+
+/// #405/§2 of `docs/bot-behaviour.md`: **rules asked of core, never re-implemented.**
+///
+/// The trigger is [`Affordance::SilenceRadio`] out of [`State::affordances`], not a
+/// private scan of the four neighbours — so "is this console still live, is it in
+/// view, would the bump land" is answered once, by the game. This walks a real run
+/// and pins the two halves of that agreement on every single turn:
+///
+/// - the bot presses the silence **only** on a turn core offers the affordance;
+/// - and when it does, it steps in **the direction core named**.
+///
+/// A hand-rolled neighbour scan would drift from core's answer the first time the
+/// preconditions moved (a spent console, a fogged one), and this is what would catch
+/// it. It also gets §11.5a for free: `affordances` is FOV-gated, so the console must
+/// have been *seen*.
+#[test]
+fn the_silence_is_the_cores_affordance_and_never_a_terrain_scan() {
+    let mut silences = 0;
+    for seed in 0..120 {
+        let (mut state, _) = boot(seed);
+        let mut bot = StealthBot::with_profile(Profile::BALANCED);
+        for _ in 0..DEFAULT_INPUT_CAP {
+            if state.outcome() != Outcome::Playing {
+                break;
+            }
+            // What core says is on offer, read *before* the bot is asked.
+            let offered: Option<Direction> = state
+                .affordances()
+                .into_iter()
+                .find(|&(_, a)| a == Affordance::SilenceRadio)
+                .map(|(dir, _)| dir);
+            let input = bot.decide(&state);
+            state.step(input);
+            if state
+                .last_events()
+                .iter()
+                .any(|e| matches!(e, Event::CommsSilenced { .. }))
+            {
+                assert_eq!(
+                    input,
+                    Input::Step(offered.expect(
+                        "the switch was thrown on a turn core offered no SilenceRadio \
+                         affordance — the bot is scanning terrain of its own",
+                    )),
+                    "seed {seed}: the bump must go where core said it was",
+                );
+                silences += 1;
+            }
+        }
+    }
+    assert!(
+        silences > 0,
+        "the sweep never threw the switch — the assertions above passed vacuously",
+    );
+}
+
+/// #405: **it never detours.** No goal, no cost-field term, no frontier bias toward
+/// the console — a seed where the bot ends up beside one got there on the route it
+/// was already walking.
+///
+/// Asserted rather than asserted-by-comment, and asserted as the strongest form of
+/// the claim: on every turn where core is **not** offering the silence, a
+/// `comms_reach: 1` bot and a `comms_reach: 0` bot — today's bot, unchanged — must
+/// choose the *same input*. Any routing preference whatsoever, however slight, would
+/// have to show up as a divergence on some turn of some seed, because a preference
+/// that never changed a decision is not a preference.
+///
+/// The declining bot is polled rather than driven, so it sees exactly the same states
+/// in the same order; that is only self-consistent while the two agree, which is
+/// precisely what is being asserted.
+#[test]
+fn the_bot_never_detours_to_the_comms_console() {
+    let mut compared = 0;
+    for seed in 0..40 {
+        let (mut state, _) = boot(seed);
+        let mut opts_in = StealthBot::with_profile(Profile::BALANCED);
+        let mut declines = StealthBot::with_profile(Profile {
+            comms_reach: 0,
+            ..Profile::BALANCED
+        });
+        for turn in 0..DEFAULT_INPUT_CAP {
+            if state.outcome() != Outcome::Playing {
+                break;
+            }
+            let offered = state
+                .affordances()
+                .iter()
+                .any(|&(_, a)| a == Affordance::SilenceRadio);
+            let taken = opts_in.decide(&state);
+            let untaken = declines.decide(&state);
+            if !offered {
+                assert_eq!(
+                    taken, untaken,
+                    "seed {seed} turn {turn}: with no console under its hand, wanting \
+                     the switch must change nothing about where the bot walks",
+                );
+                compared += 1;
+            }
+            state.step(taken);
+        }
+    }
+    assert!(compared > 0, "the sweep compared nothing");
+}
+
+/// #405: **the silence is never taken while `Flee` or `TakeCover` applies.**
+/// Silencing while a patrol is closing spends the turn that was the escape, which is
+/// why the step sits below both of them in `decide`. Pinned by walking real runs and
+/// checking that no turn ever both wants cover and takes the switch.
+#[test]
+fn a_closing_patrol_outranks_the_comms_switch() {
+    for seed in 0..40 {
+        let (mut state, _) = boot(seed);
+        let mut bot = StealthBot::with_profile(Profile::CAUTIOUS);
+        for _ in 0..DEFAULT_INPUT_CAP {
+            if state.outcome() != Outcome::Playing {
+                break;
+            }
+            let input = bot.decide(&state);
+            state.step(input);
+            let silenced = state
+                .last_events()
+                .iter()
+                .any(|e| matches!(e, Event::CommsSilenced { .. }));
+            if silenced {
+                assert!(
+                    !being_hunted(&state, &danger_cells(&state)),
+                    "seed {seed}: the switch was thrown on a turn the bot was hunted",
+                );
+            }
+        }
+    }
 }

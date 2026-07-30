@@ -87,13 +87,24 @@ pub enum Verb {
     /// being a hideout at all. Read it against `bodies_found`: the tidier the run, the
     /// flatter that row.
     Stow,
+    /// Threw the comms console's switch (§7.7/#405) —
+    /// [`Event::CommsSilenced`](intrusion_core::Event::CommsSilenced). A bump verb like
+    /// Takedown and Crouch, and the deed is *read* rather than inferred: one bump ends
+    /// guard-to-guard call-ins for the rest of the level, so the count is at most one
+    /// per run and a `1` here says the whole radio half of §7.3/§7.7 was actually
+    /// exercised on that seed.
+    ///
+    /// Read it against `bodies_found` and the alert rows. Until this verb existed
+    /// `Terrain::CommsConsole` had no source in the sim at all — every alert number was
+    /// measured in a world where the counterplay was never taken.
+    SilenceRadio,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 13] = [
+    pub const ALL: [Verb; 14] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -107,6 +118,7 @@ impl Verb {
         Verb::Lockdown,
         Verb::Crouch,
         Verb::Stow,
+        Verb::SilenceRadio,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -160,6 +172,9 @@ impl Verb {
             // already crouched behind is a free no-op that emits no event, so a pose
             // held for a dozen turns still counts once.
             Event::Crouched { .. } => Some(Verb::Crouch),
+            // The switch itself (§7.7/#405). Permanent for the level, so a second bump
+            // is a no-op that emits nothing and the count never exceeds one.
+            Event::CommsSilenced { .. } => Some(Verb::SilenceRadio),
             _ => None,
         }
     }
@@ -180,6 +195,7 @@ impl Verb {
             Verb::Lockdown => "lockdown",
             Verb::Crouch => "crouch",
             Verb::Stow => "stow",
+            Verb::SilenceRadio => "silence_radio",
         }
     }
 
@@ -302,7 +318,8 @@ mod tests {
                 "pierce_wall",
                 "lockdown",
                 "crouch",
-                "stow"
+                "stow",
+                "silence_radio"
             ]
         );
         // Each ability activation lands in its own slot.
