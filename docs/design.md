@@ -199,6 +199,19 @@ A turn resolves in three fixed phases, always in this order:
 One full turn runs at level start, so guards have established position and sight
 before the player's first input.
 
+**A guard's first alert does not move it (#430).** A guard that was Calm at the
+head of phase 3 finishes the turn it had already planned — its patrol step, its
+dwell, the slow quarter of a reversal — even when this turn's look flips it to
+Chasing or Investigating. The fresh state routes it from the *next* turn's
+decision. Three edges, all deliberate: only the first alert defers — a guard
+already reactive reacts the same turn, so a chase that re-acquires you is never
+handed a second delay; only the *action* defers — the mind updates at once (the
+state flip, the §7.3 sighting tally, the §7.7 call-ins), so being seen stays
+expensive; and a planned step that lands on your cell is still §4.5 contact — it
+walked into you, it did not react to seeing you. The rule exists to kill the
+unreadable capture (a guard converting its first sight of you into a step in the
+same turn), not to make capture rarer.
+
 > **Design note.** In the old version guards read a field-of-view snapshot from
 > *before* their last move, giving a one-turn sensory lag. Recomputing sight in
 > phase 2 removes it. That lag was accidental, but it created a real and

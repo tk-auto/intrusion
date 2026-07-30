@@ -83,6 +83,18 @@ pub(crate) enum Contact {
     Glimpse,
 }
 
+/// A guard's already-decided turn (§4.2/#430): the state of mind and the walking
+/// destination it entered phase 3 with, snapshotted before this turn's look is
+/// folded in ([`Guard::plan`]). The movement pass hands it back to
+/// [`Guard::decide_planned`] for a guard whose look this turn *first* alerted it,
+/// so the guard finishes the turn it had planned instead of acting on the fresh
+/// sighting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Plan {
+    pub(crate) state: GuardState,
+    pub(crate) destination: Option<Cell>,
+}
+
 /// A guard on the level.
 ///
 /// A Calm guard **patrols** (§7.5): it sweeps toward the farthest cell in its
@@ -588,6 +600,16 @@ impl Guard {
         self.focus
     }
 
+    /// The turn this guard has already decided on (§4.2/#430) — its state of mind
+    /// and the cell it is walking to, as a value the guard phase snapshots before
+    /// any look is folded in ([`GuardSenses`](crate::State)).
+    pub(crate) fn plan(&self) -> Plan {
+        Plan {
+            state: self.state,
+            destination: self.destination,
+        }
+    }
+
     /// This guard's §7.5 beat — the cells of its territory, empty for a guard built
     /// without a region graph. The seam for asserting that a guard which arrived
     /// mid-level (§7.3/#374) got one, so it has somewhere to patrol once its errand
@@ -1030,6 +1052,67 @@ impl Guard {
         self.repick_patrol_target(facility, style, rng);
         let step = self.step_toward_destination(facility, blocked);
         self.commit_step(step, facility, blind)
+    }
+
+    /// [`decide`](Self::decide), run on `plan` — the mind this guard entered the
+    /// phase with — instead of on the live one (§4.2/#430): **a guard whose look
+    /// first alerts it does not act on that look.** It carries out the turn it had
+    /// already decided — its patrol step, its dwell, the slow quarter of a
+    /// reversal — and the fresh state routes it from the next turn's decision.
+    /// The caller gates this on the guard having been Calm at the head of the
+    /// phase, so a guard already hunting still reacts the same turn, and a chase
+    /// that re-acquires the player after a broken turn of sight is never handed a
+    /// second delay.
+    ///
+    /// Mechanically a swap: the planned state and destination are put back for
+    /// the decision, then the live mind — the state this turn's look set, the
+    /// destination on the player — is restored over whatever the planned decision
+    /// wrote there (a patrol repick's target is deliberately dropped; the chase
+    /// owns the next turn). Everything else the decision did is *kept*, because
+    /// it is the planned turn actually being spent: a dwell counts down, the
+    /// inspected memory absorbs the cone, and a rotation turns the guard in
+    /// place. The step returned is walked for real by the movement pass — one
+    /// that lands on the player's cell is §4.5 contact and still captures.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn decide_planned(
+        &mut self,
+        plan: Plan,
+        facility: &Facility,
+        blocked: &[Cell],
+        rng: &mut Rng,
+        dwell: Dwell,
+        style: PatrolStyle,
+        blind: BlindPolicy,
+    ) -> Option<Direction> {
+        let (state, destination, facing) = (self.state, self.destination, self.facing);
+        self.state = plan.state;
+        self.destination = plan.destination;
+        let step = self.decide(facility, blocked, rng, dwell, style, blind);
+        self.state = state;
+        self.destination = destination;
+        // **The cone is re-aimed against the guard's real mood, never the planned
+        // one** (§6.1/#410). A planned turn that spends itself rotating (§7.5's slow
+        // quarter) re-aims through [`turn_in_place`], which resolves
+        // [`BlindPolicy`] against `self.state` — and that was the *planned* Calm for
+        // the length of the decision above. Left there, a guard that has just
+        // spotted the player would look with a **patrol's** blind flanks, which is
+        // exactly the pricing [`BlindPolicy::FlankWhileCalm`] exists to enforce: the
+        // flank is somewhere to work from against a patrol you have read, never
+        // somewhere to hide from a guard that is hunting you. It would also paint
+        // that patrol's cone on the danger overlay for a guard the player can see
+        // (§11.5), which is the overlay lying about a mood the `g` glyph is
+        // simultaneously colouring Danger.
+        //
+        // So the rotation is the planned turn (it happens, and it is slow, because
+        // that is the turn the guard had decided), while the **sight** it leaves
+        // behind is this turn's. A guard that *stepped* needs nothing here: the
+        // movement pass re-aims it through [`advance_to`] with the live state. Sight
+        // is a pure recompute and draws no RNG (§12.4), so the extra cast costs a
+        // frame's work and cannot perturb the stream.
+        if self.facing != facing {
+            self.look(facility, blind);
+        }
+        step
     }
 
     /// Reconcile a desired step against the guard's facing before it commits (§7.5

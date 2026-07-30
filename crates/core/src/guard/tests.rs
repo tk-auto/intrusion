@@ -1551,3 +1551,64 @@ fn the_always_search_hideouts_modifier_flushes_a_lost_chase() {
         "modifier: a Calm watcher with a stale focus never flushes",
     );
 }
+
+/// #430 must not quietly undo #410's pricing. A guard whose first spot is
+/// deferred spends the turn it had planned — and if that turn is §7.5's slow
+/// quarter-turn, the rotation re-aims its cone. The mood that cone is cast
+/// against must be the guard's **live** one, not the Calm it was executing:
+/// [`BlindPolicy::FlankWhileCalm`] gives blind flanks to a *patrol*, and a guard
+/// that has just spotted you is not patrolling. Otherwise the deferred turn would
+/// hand a hunting guard a patrol's blind spot — the "somewhere to hide from a
+/// guard that is hunting you" the experiment is conditioned to prevent — and
+/// paint it on the danger overlay (§11.5) while the `g` glyph reads Danger.
+#[test]
+fn a_deferred_first_spot_rotation_still_watches_its_flanks() {
+    let facility = Facility::walled_box(11, 11);
+
+    // The guard's pre-look plan: Calm, walking north — a 90° turn from its east
+    // facing, so the planned turn is spent rotating.
+    let plan = Plan {
+        state: GuardState::Calm,
+        destination: Some(Cell::new(5, 2)),
+    };
+    let rotate_then_sense = |state: GuardState, flanker: Cell| {
+        let mut guard = Guard::patrolling(Cell::new(5, 5));
+        guard.facing = Direction::East;
+        // This turn's look left the guard in `state`; the plan above is what it
+        // had already decided.
+        guard.state = state;
+        guard.destination = Some(Cell::new(5, 4));
+        let step = guard.decide_planned(
+            plan,
+            &facility,
+            &[],
+            &mut Rng::new(0),
+            Dwell::NEVER,
+            PatrolStyle::Beat,
+            BlindPolicy::FlankWhileCalm,
+        );
+        assert_eq!(step, None, "the planned turn is spent rotating");
+        assert_eq!(guard.facing, Direction::North, "…and it rotated");
+        assert_eq!(guard.state, state, "the live mood survives the swap");
+        guard.sense(flanker, false);
+        guard.detected_player()
+    };
+
+    // Facing north after the rotation, so (4,5) and (6,5) are the flanks.
+    for flanker in [Cell::new(4, 5), Cell::new(6, 5)] {
+        assert!(
+            rotate_then_sense(GuardState::Chasing, flanker),
+            "{flanker:?}: a guard that has just spotted you watches its sides (#410)",
+        );
+        assert!(
+            rotate_then_sense(GuardState::Investigating, flanker),
+            "{flanker:?}: a glimpse is a mood too — its flanks are live",
+        );
+        // The control: a guard that stayed Calm keeps the patrol's blind flanks,
+        // so the difference is the mood and nothing else about the turn.
+        assert!(
+            !rotate_then_sense(GuardState::Calm, flanker),
+            "{flanker:?}: a patrol that stayed a patrol is still flank-blind",
+        );
+    }
+}
