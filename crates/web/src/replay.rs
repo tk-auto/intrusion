@@ -155,6 +155,32 @@ fn inputs_in(fragment: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The hash fragment a copied replay travels as (§12.4/§13.1/#411):
+/// `seed=<token>&inputs=<script>` — the whole run, in the two carriers the boot
+/// already reads. **No new URL scheme and no second builder**: the `seed=` half is
+/// the very field [`crate::seed`] reflects and reads, the `inputs=` half is what
+/// [`script_from_url`] parses, and both readers tolerate the other field beside
+/// them (asserted below), so appending `&inputs=` needed no parser change. Pure, so
+/// the round trip — record, spell, read back, re-run — is pinned natively.
+///
+/// Both halves are fragment-safe as spelt: a token is lowercase letters and the
+/// script notation is `NESW.`, `+`/`-` and letters — no `&`, no `#`, nothing a
+/// browser rewrites — so the readers' no-percent-decoding stance holds here too.
+pub(crate) fn replay_fragment(token: &str, script: &str) -> String {
+    format!("seed={token}&inputs={script}")
+}
+
+/// The complete copyable replay link (#411): this page's own URL with its fragment
+/// replaced by [`replay_fragment`] — so what the copy control hands over opens the
+/// run wherever the page itself lives (the Pages deploy above all). `None` when the
+/// page has no usable address to build on (a hostless test harness); the platform
+/// half of the pair, thin so everything testable stays in [`replay_fragment`].
+pub(crate) fn replay_url(token: &str, script: &str) -> Option<String> {
+    let href = web_sys::window()?.location().href().ok()?;
+    let base = href.split('#').next().unwrap_or_default();
+    Some(format!("{base}#{}", replay_fragment(token, script)))
+}
+
 /// A direction in *time* a replay gesture drives — the scrub counterpart of a
 /// live [`Input`]. Right is forward (toward the run's end), left is rewind.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -678,5 +704,105 @@ mod tests {
         assert_eq!(inputs_in("#seed=42").as_deref(), None);
         assert_eq!(inputs_in("?inputs=").as_deref(), None);
         assert_eq!(inputs_in(""), None);
+    }
+
+    use crate::seed::level_in;
+    use intrusion_core::{render_screen, start_level, to_script, AbilityId, Direction, ScreenUi};
+
+    /// The state a fresh boot of `level` reaches after `inputs` — the deterministic
+    /// path the live shell, the sim and this viewer all share (`start_level`,
+    /// §12.4/§13.2), so "the same run" below means byte-for-byte the same.
+    fn run_through(level: &intrusion_core::LevelSeed, inputs: &[Input]) -> intrusion_core::State {
+        let mut state = start_level(level).expect("the v1 footprint always carves");
+        for &input in inputs {
+            state.step(input);
+        }
+        state
+    }
+
+    /// Feed `recorded` to a live run of `level`, spell the pair as the copy control
+    /// would ([`replay_fragment`]), read both halves back through the **real** boot
+    /// readers ([`level_in`] / [`inputs_in`]), re-run, and demand the identical final
+    /// frame — the whole #411 loop, minus only the clipboard itself.
+    fn assert_round_trips(level: intrusion_core::LevelSeed, recorded: &[Input]) {
+        let token = level.encode().expect("a config a run can hold");
+        let played = run_through(&level, recorded);
+
+        let fragment = replay_fragment(&token, &to_script(recorded));
+        // Each boot reader accepts its half with the other field beside it — which
+        // is why the copy needed no second URL scheme and no parser change (#411).
+        assert_eq!(
+            level_in(&fragment),
+            Some(level),
+            "the level half reads back"
+        );
+        let script = inputs_in(&fragment).expect("the inputs half reads back");
+        let replayed = parse_script(&script).expect("the copied script parses");
+        assert_eq!(replayed, recorded, "input for input, in order");
+        assert_eq!(
+            render_screen(&run_through(&level, &replayed), ScreenUi::default()),
+            render_screen(&played, ScreenUi::default()),
+            "the replay lands on the very frame that was played (§12.4)",
+        );
+    }
+
+    /// **The copied run is the played run** (§12.4/#411), over a scripted stream
+    /// that exercises every kind of token: steps, waits, and ability toggles.
+    #[test]
+    fn a_recorded_run_round_trips_through_the_copied_fragment() {
+        let recorded = parse_script("NN+rE.E-r.SS+cWW..-c").expect("a legal script");
+        assert_round_trips(LevelSeed::quick_play(4242), &recorded);
+    }
+
+    /// The same loop over a **long, adversarial stream**: hundreds of seeded-random
+    /// inputs — walls walked into, abilities toggled blind, and a tail that keeps
+    /// pressing long after the run has ended (a recorder that is wrong is worse
+    /// than none, and a short friendly script would never catch the drift). The
+    /// generator is a seeded xorshift, not a clock or a crate: the stream is
+    /// reproducible here if it ever fails.
+    #[test]
+    fn a_long_random_stream_round_trips_even_past_the_runs_end() {
+        let level = LevelSeed::quick_play(97);
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let recorded: Vec<Input> = (0..800)
+            .map(|_| {
+                let roll = next();
+                match roll % 10 {
+                    0 => Input::Step(Direction::North),
+                    1 => Input::Step(Direction::East),
+                    2 => Input::Step(Direction::South),
+                    3 => Input::Step(Direction::West),
+                    // The live share: most of a real run is waits (#411's own note),
+                    // so the stream leans that way too.
+                    4..=7 => Input::Wait,
+                    _ => {
+                        let id = AbilityId::ALL[(roll as usize >> 4) % AbilityId::ALL.len()];
+                        if roll % 2 == 0 {
+                            Input::Activate(id)
+                        } else {
+                            Input::Deactivate(id)
+                        }
+                    }
+                }
+            })
+            .collect();
+
+        // The stream outlives the run: its tail is fed to a world `State::step`
+        // has gone inert on, and the recording must replay through that too —
+        // the copy control stays usable *after* the end, when a capture is most
+        // wanted, so the tail is part of what it hands over.
+        assert_ne!(
+            run_through(&level, &recorded).outcome(),
+            intrusion_core::Outcome::Playing,
+            "the stream is meant to overrun this run's end — pick a longer stream \
+             or another seed if generation ever moves this",
+        );
+        assert_round_trips(level, &recorded);
     }
 }

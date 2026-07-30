@@ -22,6 +22,19 @@ pub(super) fn quiet_alert() -> AlertReadout {
     }
 }
 
+/// The view state a test renders the panel under: the tab up, whether this build
+/// offers the replay control (#411), and the copy acknowledgement to print — the
+/// three [`ScreenUi`] fields the panel reads, spelled positionally so a test says
+/// all three where it renders.
+pub(super) fn show(tab: HelpTab, offer_replay: bool, copy: SeedCopy) -> ScreenUi {
+    ScreenUi {
+        help_tab: tab,
+        offer_replay_copy: offer_replay,
+        seed_copy: copy,
+        ..ScreenUi::default()
+    }
+}
+
 /// One tab of a baseline run's panel, at the v1 screen size — the shape most
 /// tests want, including the [`abilities`] tab's, which is why it is
 /// `pub(super)` rather than local.
@@ -29,12 +42,11 @@ pub(super) fn render_tab(tab: HelpTab, loadout: Loadout) -> Grid {
     render_help(
         W,
         H,
-        tab,
+        show(tab, false, SeedCopy::default()),
         None,
         LevelModifiers::default(),
         &quiet_alert(),
         loadout,
-        SeedCopy::default(),
     )
 }
 
@@ -228,12 +240,11 @@ fn the_level_info_tab_lists_active_modifiers_or_none() {
     let baseline = render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, false, SeedCopy::default()),
         None,
         LevelModifiers::default(),
         &quiet_alert(),
         Loadout::innate(),
-        SeedCopy::default(),
     );
     let text = text_of(&baseline);
     assert!(text.contains("THIS RUN") && text.contains("MODIFIERS"));
@@ -252,12 +263,11 @@ fn the_level_info_tab_lists_active_modifiers_or_none() {
     let g = render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, false, SeedCopy::default()),
         None,
         modified,
         &quiet_alert(),
         Loadout::innate(),
-        SeedCopy::default(),
     );
     let text = text_of(&g);
     assert!(
@@ -295,12 +305,11 @@ fn no_modifier_caption_is_clipped_on_the_board() {
         let g = render_help(
             W,
             H,
-            HelpTab::LevelInfo,
+            show(HelpTab::LevelInfo, false, SeedCopy::default()),
             None,
             all_on,
             &quiet_alert(),
             Loadout::innate(),
-            SeedCopy::default(),
         );
         let text = text_of(&g);
         for m in all_on.active() {
@@ -349,12 +358,11 @@ fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
         let g = render_help(
             W,
             H,
-            HelpTab::LevelInfo,
+            show(HelpTab::LevelInfo, false, SeedCopy::default()),
             Some(level),
             level.modifiers,
             &quiet_alert(),
             Loadout::innate(),
-            SeedCopy::default(),
         );
         let text = text_of(&g);
         let token = level.encode().expect("a config a run can hold");
@@ -383,12 +391,11 @@ fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
     let g = render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, false, SeedCopy::default()),
         Some(quick),
         quick.modifiers,
         &quiet_alert(),
         Loadout::innate(),
-        SeedCopy::default(),
     );
     assert!(
         text_of(&g).contains(&token),
@@ -400,12 +407,11 @@ fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
     let none = render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, false, SeedCopy::default()),
         None,
         LevelModifiers::default(),
         &quiet_alert(),
         Loadout::innate(),
-        SeedCopy::default(),
     );
     assert!(!text_of(&none).contains("LEVEL SEED"));
 }
@@ -425,12 +431,11 @@ fn the_level_info_tab_shows_the_alert_rung_and_what_it_is_doing() {
         text_of(&render_help(
             W,
             H,
-            HelpTab::LevelInfo,
+            show(HelpTab::LevelInfo, false, SeedCopy::default()),
             None,
             LevelModifiers::default(),
             alert,
             Loadout::innate(),
-            SeedCopy::default(),
         ))
     };
 
@@ -534,12 +539,11 @@ fn the_seed_section_shifts_the_modifier_list_without_changing_it() {
     let g = render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, false, SeedCopy::default()),
         Some(level),
         level.modifiers,
         &quiet_alert(),
         Loadout::innate(),
-        SeedCopy::default(),
     );
     let text = text_of(&g);
     assert!(text.contains("Guards search hideouts"));
@@ -573,12 +577,11 @@ fn the_caption_reads_in_its_direction_cue_colour() {
     let g = render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, false, SeedCopy::default()),
         None,
         harder,
         &quiet_alert(),
         Loadout::innate(),
-        SeedCopy::default(),
     );
     // The MODIFIERS heading is at row 4 (THIS RUN@2, blank, heading@4), the first
     // modifier row at row 5; its caption starts at column 3.
@@ -597,12 +600,11 @@ fn the_caption_reads_in_its_direction_cue_colour() {
     let g = render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, false, SeedCopy::default()),
         None,
         easier,
         &quiet_alert(),
         Loadout::innate(),
-        SeedCopy::default(),
     );
     assert_eq!(g.get(3, 5).glyph, 'A');
     assert_eq!(
@@ -622,12 +624,11 @@ fn the_tab_bar_highlights_the_active_tab() {
         let g = render_help(
             W,
             H,
-            active,
+            show(active, false, SeedCopy::default()),
             None,
             LevelModifiers::default(),
             &quiet_alert(),
             Loadout::innate(),
-            SeedCopy::default(),
         );
         for &(tab, start, _len) in &layout {
             let expected = if tab == active {
@@ -656,7 +657,7 @@ fn hit(x: u32, y: u32) -> Option<HelpHit> {
 /// The same, on a panel `height` rows tall — for the footer, which is drawn from
 /// the bottom edge and so must be hit-tested from it too.
 fn hit_on(height: u32, x: u32, y: u32) -> Option<HelpHit> {
-    help_hit(W, height, HelpTab::default(), None, x, y)
+    help_hit(W, height, HelpTab::default(), None, false, x, y)
 }
 
 /// The panel is escapable and switchable **by touch** (§11.6/#248): the `[x]`
@@ -718,17 +719,23 @@ fn run_with_a_token() -> LevelSeed {
 }
 
 /// The Level info panel for `level`, with the seed-copy acknowledgement in
-/// `copy` — the frame the copy control is drawn on.
+/// `copy` — the frame the copy control is drawn on. A build that does not offer
+/// the replay control (`offer_replay` false), which is every public one (#411).
 fn level_info(level: Option<LevelSeed>, copy: SeedCopy) -> Grid {
+    level_info_offering(level, false, copy)
+}
+
+/// The same panel with the build's word on the `replay [r]` control spelled out —
+/// the replay-control tests drive both answers through here.
+fn level_info_offering(level: Option<LevelSeed>, offer_replay: bool, copy: SeedCopy) -> Grid {
     render_help(
         W,
         H,
-        HelpTab::LevelInfo,
+        show(HelpTab::LevelInfo, offer_replay, copy),
         level,
         LevelModifiers::default(),
         &quiet_alert(),
         Loadout::innate(),
-        copy,
     )
 }
 
@@ -744,7 +751,7 @@ fn level_info(level: Option<LevelSeed>, copy: SeedCopy) -> Grid {
 #[test]
 fn the_token_row_carries_a_copy_control_and_its_neighbours_do_not() {
     let level = Some(run_with_a_token());
-    let hit = |x, y| help_hit(W, H, HelpTab::LevelInfo, level, x, y);
+    let hit = |x, y| help_hit(W, H, HelpTab::LevelInfo, level, false, x, y);
 
     let start = copy_control_start(W);
     for x in start..start + copy_control_len() {
@@ -781,7 +788,7 @@ fn a_run_with_no_token_offers_nothing_to_copy() {
     let start = copy_control_start(W);
     for x in start..start + copy_control_len() {
         assert_eq!(
-            help_hit(W, H, HelpTab::LevelInfo, None, x, SEED_TOKEN_ROW),
+            help_hit(W, H, HelpTab::LevelInfo, None, false, x, SEED_TOKEN_ROW),
             None,
             "cell {x} of a panel with no token",
         );
@@ -804,7 +811,7 @@ fn the_copy_control_is_the_level_info_tabs_alone() {
             continue;
         }
         assert_eq!(
-            help_hit(W, H, tab, level, start, SEED_TOKEN_ROW),
+            help_hit(W, H, tab, level, false, start, SEED_TOKEN_ROW),
             None,
             "{tab:?} has no token on it",
         );
@@ -899,6 +906,114 @@ fn the_copy_key_is_the_same_on_the_control_and_in_the_table() {
         None,
         "panel-only: the board has no token to copy",
     );
+    assert_eq!(
+        crate::input_for_key(&key),
+        None,
+        "and it shadows no movement"
+    );
+}
+
+/// **The run is takeable where a build offers it** (§12.4/#411): with
+/// `offer_replay` set, the row under the token carries a `replay [r]` control —
+/// drawn where it is hit-tested, every cell of the label a target, in the
+/// HUD-control colour the panel's other controls wear — and without it, drawn
+/// nowhere and hit nowhere: the public build's panel is exactly the panel that
+/// existed before this control did.
+#[test]
+fn the_replay_control_appears_only_when_a_build_offers_it() {
+    let level = Some(run_with_a_token());
+    let start = replay_control_start(W);
+
+    // Offered: every cell of the control resolves, and the drawn row matches.
+    let hit = |x, y| help_hit(W, H, HelpTab::LevelInfo, level, true, x, y);
+    for x in start..start + REPLAY_CONTROL_LEN {
+        assert_eq!(
+            hit(x, REPLAY_CONTROL_ROW),
+            Some(HelpHit::CopyReplay),
+            "cell {x}"
+        );
+    }
+    assert_eq!(hit(start - 1, REPLAY_CONTROL_ROW), None, "the gap is inert");
+    assert_eq!(hit(start, REPLAY_CONTROL_ROW + 1), None, "the row beneath");
+    let g = level_info_offering(level, true, SeedCopy::Idle);
+    let drawn: String = (start..start + REPLAY_CONTROL_LEN)
+        .map(|x| g.get(x, REPLAY_CONTROL_ROW).glyph)
+        .collect();
+    assert_eq!(drawn, REPLAY_CONTROL, "the control is drawn on its row");
+    assert_eq!(g.get(start, REPLAY_CONTROL_ROW).fg, Category::System);
+
+    // Not offered: the same cells are body, and nothing is drawn there — the
+    // regression this guards is the control leaking into the public deploy.
+    let public = |x, y| help_hit(W, H, HelpTab::LevelInfo, level, false, x, y);
+    for x in start..start + REPLAY_CONTROL_LEN {
+        assert_eq!(public(x, REPLAY_CONTROL_ROW), None, "public cell {x}");
+    }
+    assert!(!text_of(&level_info(level, SeedCopy::Idle)).contains(REPLAY_CONTROL));
+
+    // No token, no run to hand over — like the seed control (#353), the offer
+    // means nothing on a panel with no seed section at all.
+    assert_eq!(
+        help_hit(
+            W,
+            H,
+            HelpTab::LevelInfo,
+            None,
+            true,
+            start,
+            REPLAY_CONTROL_ROW
+        ),
+        None,
+    );
+    assert!(!text_of(&level_info_offering(None, true, SeedCopy::Idle)).contains(REPLAY_CONTROL));
+
+    // And it belongs to the Level info tab alone, where the run's section is.
+    for tab in HelpTab::ALL {
+        if tab == HelpTab::LevelInfo {
+            continue;
+        }
+        assert_eq!(
+            help_hit(W, H, tab, level, true, start, REPLAY_CONTROL_ROW),
+            None,
+            "{tab:?} draws no replay control",
+        );
+    }
+}
+
+/// The replay control shares its row with the seed-copy acknowledgement (#411),
+/// so both must read whole together — the compile-time clearance check's runtime
+/// double, over the longer of the two acknowledgements.
+#[test]
+fn the_replay_control_is_drawn_clear_of_the_acknowledgement() {
+    let g = level_info_offering(Some(run_with_a_token()), true, SeedCopy::Unavailable);
+    let row: String = (0..W).map(|x| g.get(x, REPLAY_CONTROL_ROW).glyph).collect();
+    assert!(
+        row.contains(UNAVAILABLE_ACK),
+        "the acknowledgement reads whole: {row:?}"
+    );
+    assert!(
+        row.contains(REPLAY_CONTROL),
+        "and so does the control: {row:?}"
+    );
+}
+
+/// The panel's key and its control name the same character (#411), the way `c`
+/// and `copy [c]` do — and, like `c`, it is panel-only and shadows nothing: not a
+/// UI command, not a movement key. (In a build with no recorder the shell's
+/// handler mirrors the absent control and the key does nothing — the shell's own
+/// tests cover that half.)
+#[test]
+fn the_replay_key_is_the_same_on_the_control_and_in_the_table() {
+    let key = REPLAY_COPY_KEY.to_string();
+    assert_eq!(
+        crate::help_nav_for_key(&key),
+        Some(crate::input::HelpNav::CopyReplay),
+    );
+    assert_eq!(
+        REPLAY_CONTROL,
+        format!("replay [{REPLAY_COPY_KEY}]"),
+        "the drawn key is the bound one",
+    );
+    assert_eq!(crate::input::ui_command_for_key(&key), None, "panel-only");
     assert_eq!(
         crate::input_for_key(&key),
         None,

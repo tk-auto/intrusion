@@ -11,6 +11,16 @@ description = "Thin wasm-bindgen + canvas2d shell for Intrusion. Renders and fee
 # native gate (`cargo test/clippy --workspace`) can still compile and lint it.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The preview-build tools (#411): the input recorder and the help panel's
+# `replay [r]` control, which copies the whole run as a `…#seed=&inputs=` link.
+# Off by default, so the Pages deploy ships without them; the artifact-build
+# skill switches them on, which is what makes an artifact preview capturable.
+# Deliberately a feature and not `cfg(debug_assertions)`: both builds a human
+# plays are `--release`, so a debug-assertions gate would put the tools in
+# exactly the builds nobody plays.
+debug-tools = []
+
 [dependencies]
 intrusion-core = { path = "../core" }
 wasm-bindgen = "=0.2.100"

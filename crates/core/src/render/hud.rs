@@ -146,6 +146,13 @@ pub struct ScreenUi {
     /// only decides what that outcome *looks like*, so [`render_help`] keeps writing
     /// no state and the copy still costs no turn (§4.4).
     pub seed_copy: SeedCopy,
+    /// Whether this build offers the Level info tab's `replay [r]` control
+    /// (§12.4/§13.1/#411) — the copy-the-whole-run affordance of preview builds. A
+    /// shell built with its recorder switched on sets this once at boot; the core
+    /// only owns what the control looks like and where it is
+    /// ([`help_hit`](crate::help_hit)). Default `false`, so the public deploy, the
+    /// sim and every test draw the panel without it.
+    pub offer_replay_copy: bool,
     /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
     /// wording of the usable line's floor ([`usable`](super::usable)), and nothing else.
     /// The shell answers only *is this a touch session?*; the core keeps the words
@@ -341,12 +348,11 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         return super::help::render_help(
             width,
             height,
-            ui.help_tab,
+            ui,
             state.level(),
             state.modifiers(),
             &state.alert_readout(),
             state.loadout(),
-            ui.seed_copy,
         );
     }
 
