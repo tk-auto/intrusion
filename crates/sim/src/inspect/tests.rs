@@ -13,44 +13,68 @@ const PASTED: &str = "https://6dcafcf6-cb7b-4f80-9d6f-db85c4366efa.frame.claudeu
 
 /// **The whole point, end to end**: a pasted link becomes the run it names.
 ///
-/// The player walked five north and six east to the exit, then pressed south into
-/// it — and the exit refused them, because that level asks for all three intel
-/// (§4.5). Every claim here is one a reader of the report needs to be able to
-/// trust: the trajectory, the free action that spent no move, and the refusal
-/// carrying *how much* was still wanted.
+/// The player walked five north up a corridor, turned east into its head, was
+/// carried one more cell by the #57 **auto-slide**, then spent four inputs pressed
+/// against the wall before turning south and ducking behind a table. Every claim
+/// here is one a reader of the report needs to be able to trust: the trajectory, the
+/// slide that moved them somewhere their key did not name, and the inputs that spent
+/// a turn without moving — the free actions (§4.4) a bare position list would hide.
+///
+/// **The run this link names changed with #387**, and that is worth understanding
+/// rather than papering over: a level-seed token encodes the *seed*, and the level is
+/// a function of the seed **and the generator**. Any generation change therefore
+/// re-carves every previously shared token — the link still parses and still names a
+/// v1 level, but not the one the player walked. The fixture is refreshed with the
+/// generator, exactly as the committed sim baseline is.
 #[test]
 fn the_pasted_link_reproduces_the_run_that_was_played() {
     let (level, inputs) = parse_replay_link(PASTED).expect("a real link");
     let seen = inspect(&level, &inputs).expect("the v1 footprint carves");
 
-    assert_eq!(seen.start, Cell { x: 31, y: 12 }, "where they opened");
+    assert_eq!(seen.start, Cell { x: 26, y: 6 }, "where they opened");
     assert_eq!(seen.turns.len(), 13, "one record per pasted input");
 
-    // Five north, then six east: every one of them a real move.
-    for turn in &seen.turns[..11] {
+    // Five north up the corridor, every one of them a real move.
+    for turn in &seen.turns[..5] {
         assert!(!turn.stayed_put(), "input {} moved", turn.index);
     }
     assert_eq!(
         seen.turns[4].to,
-        Cell { x: 31, y: 7 },
+        Cell { x: 26, y: 1 },
         "after the five north"
     );
+
+    // The sixth input turns east; the seventh is pressed east too but the player
+    // ends up a cell *south* — the #57 auto-slide following the corridor round.
+    // Worth pinning: it is the one place the report shows a move the key did not
+    // name, and a reader has to be able to trust it rather than suspect the report.
+    assert_eq!(seen.turns[5].to, Cell { x: 27, y: 1 }, "east into the head");
+    assert_eq!(seen.turns[6].input, Input::Step(Direction::East));
     assert_eq!(
-        seen.turns[10].to,
-        Cell { x: 37, y: 7 },
-        "after the six east"
+        seen.turns[6].to,
+        Cell { x: 27, y: 2 },
+        "the auto-slide carried them on, perpendicular to the key pressed",
     );
 
-    // The twelfth step puts them on the exit's doorstep; the thirteenth is the
-    // refusal — the player did not move, and the game said how much was missing.
+    // Then four easts against the wall: turns spent, nobody moved.
+    for turn in &seen.turns[7..11] {
+        assert!(
+            turn.stayed_put(),
+            "input {} was blocked and should show as stayed",
+            turn.index,
+        );
+    }
+
+    // The twelfth goes south; the thirteenth bumps the table there and ducks —
+    // a spent turn that changes posture rather than position (§10.3).
     let last = seen.turns.last().expect("thirteen records");
     assert_eq!(last.input, Input::Step(Direction::South));
-    assert!(last.stayed_put(), "the exit refused, so they stayed");
+    assert!(last.stayed_put(), "the crouch is a pose, not a step");
     assert!(
         last.events
             .iter()
-            .any(|e| matches!(e, Event::ExitRefused { still_needed: 3 })),
-        "the refusal names what is still needed: {:?}",
+            .any(|e| matches!(e, Event::Crouched { .. })),
+        "the last input ducked behind the table: {:?}",
         last.events,
     );
     assert_eq!(seen.outcome(), Outcome::Playing, "the run was still live");
@@ -69,11 +93,15 @@ fn the_report_narrates_the_run_in_the_games_own_words() {
     assert!(report.contains("seed 18900"));
     assert!(report.contains("Intel to exit"), "the rule in force");
     assert!(report.contains("stayed"), "the input that did not move");
-    // The near line's own words for the refusal, not a second vocabulary.
-    let refusal = intrusion_core::message_for(Event::ExitRefused { still_needed: 3 })
-        .expect("the exit refusal speaks");
+    // The near line's own words for what the run actually did, not a second
+    // vocabulary. The event is whichever one this level's run produces — the claim
+    // being pinned is that the report quotes the game rather than paraphrasing it.
+    let crouch = intrusion_core::message_for(Event::Crouched {
+        behind: Cell { x: 27, y: 4 },
+    })
+    .expect("the crouch speaks");
     assert!(
-        report.contains(&refusal.text),
+        report.contains(&crouch.text),
         "the report speaks the game's words: {report}",
     );
     assert!(report.contains("still playing"), "how it ended");

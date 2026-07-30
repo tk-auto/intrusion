@@ -659,7 +659,7 @@ pub(crate) fn has_adjacent_usable(facility: &Facility, cell: Cell, extra: &[Cell
 /// overridden (a sightline that only one crowded cell can break, a structural
 /// door cluster), so nothing asserts its absence — the arrow disambiguates a
 /// doubled cell instead.
-fn creates_usable_conflict(facility: &Facility, cell: Cell) -> bool {
+pub(super) fn creates_usable_conflict(facility: &Facility, cell: Cell) -> bool {
     facility.neighbours(cell).any(|f| {
         facility.terrain(f) == Some(Terrain::Floor) && has_adjacent_usable(facility, f, &[])
     })

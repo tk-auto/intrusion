@@ -155,6 +155,25 @@ pub(super) fn is_clear(room: &Rect, facility: &Facility, cell: Cell) -> bool {
     room.contains(cell) && facility.terrain(cell) == Some(Terrain::Floor)
 }
 
+/// Whether `cell` is orthogonally adjacent to a **door cell** — the throat rule
+/// (§10.1.5/§11.4, #387). A doorway is the one cell everything funnels through, so a
+/// solid jammed against its frame clogs the throat, narrows the burst-through to a
+/// squeeze and gives the mouth cell a doubled usable (`→ door: open` *and*
+/// `↑ table: crouch`).
+///
+/// This **refines** §10.1.5's "cover near doors", it does not repeal it: cover a cell
+/// or two into the room still serves the burst-through — it is cover *in the frame*
+/// that stops serving it.
+///
+/// Reads [`is_door_terrain`], so a hinge and both panel poses are one idea in one
+/// vocabulary across all three passes that consult it. Orthogonal only, like
+/// [`Facility::neighbours`]: a diagonal table does not clog a throat.
+pub(super) fn touches_door(facility: &Facility, cell: Cell) -> bool {
+    facility
+        .neighbours(cell)
+        .any(|n| facility.terrain(n).is_some_and(is_door_terrain))
+}
+
 /// Stamp a 2×2 wall pillar whose corner sits on run position `i`, spanning one
 /// step along the run and one lane toward `dir` — the last-resort §10.1a repair
 /// for a corridor stretch too open for any recess ([`recess_run_hideout`]).
@@ -168,6 +187,7 @@ pub(super) fn place_pillar(
     run: &SightRun,
     i: u32,
     dir: Direction,
+    door_clear: bool,
 ) -> bool {
     let corner = run.line.cell(i);
     let along = run.line.cell(i + 1);
@@ -185,6 +205,11 @@ pub(super) fn place_pillar(
             && facility
                 .neighbours(cell)
                 .all(|n| facility.terrain(n) != Some(Terrain::Hideout))
+            // The throat rule (#387), as a *preference*: the caller tries the ladder
+            // door-clear first and only relaxes it if nothing else breaks the run —
+            // §10.1a outranks the placement preference (§10.6), so a repair is never
+            // failed for this.
+            && (!door_clear || !touches_door(facility, cell))
             && !severs_pathing(facility, cell)
             && !splits_region(regions, cell)
     };
@@ -378,6 +403,9 @@ pub(super) fn try_bench(
     let may_join = |facility: &Facility, regions: &RegionGraph, cell: Cell, prev: Option<Cell>| {
         can_take_table(facility, regions, cell)
             && (allow_double || !creates_table_double(facility, cell))
+            // The throat rule (#387) rides the same flag: preferred in the ordinary
+            // pass, overridden by the mandatory fallback rather than failing the carve.
+            && (allow_double || !touches_door(facility, cell))
             && facility
                 .neighbours(cell)
                 .all(|n| Some(n) == prev || facility.terrain(n) != Some(Terrain::PartialCover))
@@ -498,9 +526,14 @@ pub(super) fn stamp_table(facility: &mut Facility, regions: &mut RegionGraph, ce
 
 /// Whether stamping a table at `cell` would give some floor neighbour a **second**
 /// adjacent table — the §11.4 doubled-crouch case, where one floor cell shows
-/// `→ table: crouch` *and* `↑ table: crouch`. Table-specific on purpose: a table
-/// beside a *door* is the doubling §11.4 accepts (corridors are door-rich), so this
-/// looks only at partial-cover neighbours, not the whole usable set.
+/// `→ table: crouch` *and* `↑ table: crouch`. Table-specific on purpose: it looks only
+/// at partial-cover neighbours, not the whole usable set.
+///
+/// It used to say that a table beside a *door* was the doubling §11.4 accepts. **That
+/// allowance is gone (#387)**, but it did not move here — a door-adjacent table is now
+/// refused by [`touches_door`] in [`try_bench`]'s own `may_join`, for the throat rather
+/// than for the doubling. Two different objections to the same cell, kept apart: this
+/// one is about a *usable line read twice*, that one about *a clogged doorway*.
 pub(super) fn creates_table_double(facility: &Facility, cell: Cell) -> bool {
     facility.neighbours(cell).any(|f| {
         facility.terrain(f) == Some(Terrain::Floor)

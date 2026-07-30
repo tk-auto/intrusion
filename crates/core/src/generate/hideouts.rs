@@ -325,40 +325,50 @@ pub(super) fn recess_run_hideout(
     // column in the hall, solid wall that blocks sight outright and forces the
     // squeeze. Architecture, not furniture — the corridors-carry-no-tables rule
     // (§10.1.6) stays intact.
-    for &i in &order {
-        for dir in lateral {
-            if place_pillar(facility, regions, run, i, dir) {
-                return true;
+    // The whole structural ladder is tried **door-clear first**, then permissively
+    // (#387). A repair stamped against a doorway's frame clogs the throat everything
+    // funnels through, and §10.1.5 is explicit that a corridor repair is
+    // "architecture, not furniture; the flight path stays clear". But §10.1a outranks
+    // the placement preference (§10.6), so the throat rule is a preference here and
+    // never a reason to fail a carve: if no door-clear pillar or buttress anywhere on
+    // the run breaks it, a door-adjacent one is taken rather than losing the level.
+    for door_clear in [true, false] {
+        for &i in &order {
+            for dir in lateral {
+                if place_pillar(facility, regions, run, i, dir, door_clear) {
+                    return true;
+                }
             }
         }
-    }
 
-    // Last resort: a 1-cell **buttress** — wall up a run cell flush against a
-    // flank wall, the §10.1a S-squeeze as a pilaster. This serves the 2-wide
-    // corridor whose walls are all doors: a pillar would fill its whole width
-    // (severing pathing), but a single jutting cell narrows it to the 1-cell
-    // squeeze the design wants. Never floating (it must touch solid wall, so it
-    // reads as structure), never on a cupboard mouth, and the sever/split guards
-    // keep the squeeze passable.
-    for &i in &order {
-        let cell = run.line.cell(i);
-        let touches = |t: Terrain| {
-            facility
-                .neighbours(cell)
-                .any(|n| facility.terrain(n) == Some(t))
-        };
-        if facility.terrain(cell) == Some(Terrain::Floor)
-            && regions
-                .region_at(cell)
-                .is_some_and(|id| regions.kind(id) == RegionKind::Corridor)
-            && touches(Terrain::Wall)
-            && !touches(Terrain::Hideout)
-            && !severs_pathing(facility, cell)
-            && !splits_region(regions, cell)
-        {
-            regions.remove_cell(cell);
-            facility.set_terrain(cell.x, cell.y, Terrain::Wall);
-            return true;
+        // Last resort: a 1-cell **buttress** — wall up a run cell flush against a
+        // flank wall, the §10.1a S-squeeze as a pilaster. This serves the 2-wide
+        // corridor whose walls are all doors: a pillar would fill its whole width
+        // (severing pathing), but a single jutting cell narrows it to the 1-cell
+        // squeeze the design wants. Never floating (it must touch solid wall, so it
+        // reads as structure), never on a cupboard mouth, and the sever/split guards
+        // keep the squeeze passable.
+        for &i in &order {
+            let cell = run.line.cell(i);
+            let touches = |t: Terrain| {
+                facility
+                    .neighbours(cell)
+                    .any(|n| facility.terrain(n) == Some(t))
+            };
+            if facility.terrain(cell) == Some(Terrain::Floor)
+                && regions
+                    .region_at(cell)
+                    .is_some_and(|id| regions.kind(id) == RegionKind::Corridor)
+                && touches(Terrain::Wall)
+                && !touches(Terrain::Hideout)
+                && (!door_clear || !touches_door(facility, cell))
+                && !severs_pathing(facility, cell)
+                && !splits_region(regions, cell)
+            {
+                regions.remove_cell(cell);
+                facility.set_terrain(cell.x, cell.y, Terrain::Wall);
+                return true;
+            }
         }
     }
     false

@@ -1501,3 +1501,214 @@ fn an_unsatisfiable_config_fails_loudly() {
         }
     );
 }
+
+/// §10.1.5/§11.4 (#387): **room pillars are door-clear by construction**, so no
+/// runtime check was added for them — and this is the test that keeps that true.
+///
+/// `propose_pillar` demands a **1-cell floor moat** on every side of the grown block
+/// ([`is_clear`], which also requires the cell to lie inside the room's floor
+/// rectangle). So no pillar cell can be adjacent to the room's boundary wall, and a
+/// doorway is cut *in* that boundary wall — two facts that together make the throat
+/// rule vacuous here. The pass also runs at step 5, **before** `place_doorways`, so
+/// there is not even a door on the grid to be adjacent to yet.
+///
+/// The property is asserted on the proposal rather than on the finished grid, because
+/// that is where the moat lives: a later relaxation of the moat is exactly what would
+/// quietly reintroduce the smell, and it would fail here rather than in a playtest.
+#[test]
+fn a_room_pillar_keeps_its_moat_and_so_can_never_touch_a_doorway() {
+    // A room's floor rectangle inside a walled box: the boundary wall — where every
+    // doorway is cut — is the ring at x=9/x=20 and y=9/y=20, just outside the rect.
+    let room = Rect::new(10, 10, 20, 20);
+    let facility = Facility::walled_box(31, 31);
+    let mut proposals = 0;
+    for seed in 0..200 {
+        let mut rng = Rng::new(seed);
+        let Some(block) = propose_pillar(&room, &facility, &mut rng) else {
+            continue;
+        };
+        proposals += 1;
+        for cell in block {
+            for n in facility.neighbours(cell) {
+                assert!(
+                    room.contains(n),
+                    "seed {seed}: pillar cell {cell:?} touches {n:?}, outside the room's \
+                     floor rectangle — the 1-cell moat is gone, and with it the guarantee \
+                     that a room pillar can never reach the boundary wall a doorway is \
+                     cut into",
+                );
+            }
+        }
+    }
+    assert!(
+        proposals > 0,
+        "no pillar was ever proposed — the sweep asserted nothing",
+    );
+}
+
+/// §10.1.6/§11.4 (#387): duct entries **do not crowd their own kind**, asserted as a
+/// property over a seed sweep rather than on one hand-built fixture.
+///
+/// Two checks, and they are not the same check. Two entries **shoulder to shoulder**
+/// draw as one two-cell `=` and read as a single wide opening rather than two
+/// crawlspaces. Two entries in **different walls** can share one floor mouth without
+/// touching each other at all, and that cell then offers two `→ duct: enter` bumps.
+///
+/// Strict, not preferred: a duct is optional and capped, and entry combinations are
+/// tried shortest-first, so refusing a crowded one costs the next combination rather
+/// than the carve.
+#[test]
+fn no_two_duct_entries_crowd_each_other() {
+    let mut entries_seen = 0;
+    for seed in seed_sweep(120) {
+        let (layout, _) =
+            generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("V1 generates");
+        let facility = layout.facility();
+        for y in 0..facility.height() {
+            for x in 0..facility.width() {
+                let cell = Cell::new(x, y);
+                match facility.terrain(cell).expect("in bounds") {
+                    Terrain::DuctEntry => {
+                        entries_seen += 1;
+                        for n in facility.neighbours(cell) {
+                            assert_ne!(
+                                facility.terrain(n),
+                                Some(Terrain::DuctEntry),
+                                "seed {seed}: entries at {cell:?} and {n:?} are shoulder to \
+                                 shoulder — they draw as one wide opening, not two recesses",
+                            );
+                        }
+                    }
+                    Terrain::Floor => {
+                        let mouths = facility
+                            .neighbours(cell)
+                            .filter(|&n| facility.terrain(n) == Some(Terrain::DuctEntry))
+                            .count();
+                        assert!(
+                            mouths <= 1,
+                            "seed {seed}: floor {cell:?} is the mouth of {mouths} duct \
+                             entries — its usable line offers the same bump twice",
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    assert!(
+        entries_seen > 0,
+        "the sweep placed no duct at all — it asserted nothing",
+    );
+}
+
+/// §10.1.5 (#387): the throat rule **refines "cover near doors", it does not repeal
+/// it.** Moving furniture out of the door frame must not empty the doorway's
+/// neighbourhood — "a door you burst through should have something to duck behind on
+/// the other side, or bursting through it accomplishes nothing".
+///
+/// So: over a sweep, a healthy majority of room doorways still have crouchable cover
+/// **within a couple of cells** — just not in the frame itself. Loose and
+/// direction-only (§13.4): what is pinned is that the fix did not clear the
+/// neighbourhood, not a particular ratio.
+#[test]
+fn cover_survives_beside_doors_it_just_leaves_the_frame() {
+    let mut served = 0;
+    let mut doors = 0;
+    for seed in seed_sweep(64) {
+        let (layout, _) =
+            generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("V1 generates");
+        let facility = layout.facility();
+        for y in 0..facility.height() {
+            for x in 0..facility.width() {
+                let door = Cell::new(x, y);
+                if !is_door_terrain(facility.terrain(door).expect("in bounds")) {
+                    continue;
+                }
+                doors += 1;
+                // Cover a cell or two into the room still serves the burst-through.
+                let near = (0..facility.height())
+                    .flat_map(|cy| (0..facility.width()).map(move |cx| Cell::new(cx, cy)))
+                    .any(|c| {
+                        facility.terrain(c) == Some(Terrain::PartialCover)
+                            && door.manhattan_distance(c) <= 3
+                    });
+                if near {
+                    served += 1;
+                }
+            }
+        }
+    }
+    assert!(doors > 0, "the sweep found no doors");
+    assert!(
+        served * 4 >= doors,
+        "only {served} of {doors} doorways have cover within 3 cells — the throat rule \
+         has emptied the doorway's neighbourhood instead of just its frame (§10.1.5)",
+    );
+}
+
+/// [`touches_door`] is the throat rule's one vocabulary (#387): a hinge and **both**
+/// panel poses all clog a doorway, and the neighbourhood is **orthogonal only** — a
+/// diagonal table does not clog a throat.
+#[test]
+fn the_throat_rule_reads_every_door_cell_and_only_orthogonally() {
+    for door in [
+        Terrain::DoorHinge,
+        Terrain::DoorPanelClosed,
+        Terrain::DoorPanelOpen,
+    ] {
+        let mut f = Facility::walled_box(8, 8);
+        f.set_terrain(4, 4, door);
+        assert!(
+            touches_door(&f, Cell::new(4, 3)),
+            "{door:?}: an orthogonal neighbour is in the throat",
+        );
+        assert!(
+            !touches_door(&f, Cell::new(3, 3)),
+            "{door:?}: a diagonal neighbour is not — two recesses, not one wide mouth",
+        );
+    }
+}
+
+/// §10.1.5/§10.6/§11.4 (#387): **a table in a door frame is now the rare exception,
+/// not the rule.** The doorway is the one cell everything funnels through, and a
+/// table jammed against its frame narrows the burst-through to a squeeze and gives
+/// the mouth cell a doubled usable (`→ door: open` *and* `↑ table: crouch`).
+///
+/// A *preference*, not a guarantee, and deliberately so — the same shape
+/// [`cover_rarely_doubles_the_crouch_hint`] above pins for the §11.4 rule, and for
+/// the same §10.6 reason: the bench pass exists to repair a §10.1a sightline, and
+/// §10.1a outranks the placement preference. So the throat rule lives in the
+/// *preferring* pass and the mandatory last-resort pass overrides it rather than
+/// failing the carve.
+///
+/// **Measured before shipping, which is what settled the shape.** Over 300 seeds the
+/// rule took door-adjacent tables from **1582 (on 296 of 300 seeds) to 9 (on 6)** —
+/// so the fallback is genuinely load-bearing on ~2% of seeds and could *not* be
+/// dropped for a strict rule, which is the outcome this ticket asked to check for.
+/// The carve rejection rate moved 309 → 313 carves per 300 levels (3.0% → 4.3%),
+/// nowhere near §10.6's ~85%-rejection cautionary history.
+#[test]
+fn a_table_in_a_door_frame_is_the_rare_last_resort() {
+    let seeds = seed_sweep(300);
+    let framed: u32 = seeds
+        .iter()
+        .map(|&seed| {
+            let layout = generate(40, 40, &mut Rng::new(seed)).unwrap();
+            let f = layout.facility();
+            (0..f.height())
+                .flat_map(|y| (0..f.width()).map(move |x| Cell::new(x, y)))
+                .filter(|&c| f.terrain(c) == Some(Terrain::PartialCover) && touches_door(f, c))
+                .count() as u32
+        })
+        .sum();
+    // Ceiling of 0.2 framed tables per level — ~6× the measured 0.03/level, floored
+    // so a thin fast-mode sample never flakes, and far under the ~5/level the pass
+    // produced before the rule.
+    let budget = (seeds.len() as u32 / 5).max(3);
+    assert!(
+        framed <= budget,
+        "{framed} door-adjacent tables over {} seeds (budget {budget}) — the throat \
+         rule has stopped preferring, and the frame is filling up again",
+        seeds.len(),
+    );
+}
