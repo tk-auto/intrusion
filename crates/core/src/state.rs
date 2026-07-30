@@ -1895,21 +1895,23 @@ impl State {
         }
     }
 
-    /// How much of a guard's touching ring is blind this level (§6.1/§6.2/#410) —
-    /// [`BlindTier::REAR`] by default (§155's three cells at its back), or
-    /// [`BlindTier::FLANK`] with `calm_guards_detect_only_their_cone` on, where a guard
-    /// detects exactly its cone.
+    /// How much of a guard's touching ring is blind (§6.1/§6.2/#410/#442) — the
+    /// **rule**, not a level's choice any more: [`BlindPolicy::FlankWhileCalm`],
+    /// resolved per guard against its own mood. A **Calm** guard detects exactly its
+    /// ~90° cone ([`BlindTier::FLANK`] — its flanks blind along with its back); every
+    /// other mood watches its sides ([`BlindTier::REAR`], §155's three cells).
     ///
-    /// Derived from the resolved modifiers on every read rather than cached (§12.3),
-    /// exactly like [`patrol_style`](Self::patrol_style): one truth, so a guard's
-    /// cone and the danger overlay drawn over it can never disagree about which arm
-    /// the level is playing.
+    /// It was the `calm_guards_detect_only_their_cone` experiment (§12.6) until the
+    /// measurement came in clean (appendix 28) and #442 adopted it. The seam survives
+    /// the adoption because the *policy* was never the interesting part: what matters
+    /// is that the tier is resolved from the guard's mood at look time, so a guard's
+    /// sides come back the turn it stops being Calm, with no new state and no timer.
+    ///
+    /// Still a function rather than a constant, and still read fresh on every use
+    /// (§12.3) exactly like [`patrol_style`](Self::patrol_style) — one truth, so a
+    /// guard's cone and the §11.5 danger overlay drawn from it cannot disagree.
     pub(crate) fn guard_blind_policy(&self) -> BlindPolicy {
-        if self.modifiers.calm_guards_detect_only_their_cone {
-            BlindPolicy::FlankWhileCalm
-        } else {
-            BlindPolicy::Rear
-        }
+        BlindPolicy::FlankWhileCalm
     }
 
     /// Phase 2 (§4.2): recompute every viewer's field of view from its current

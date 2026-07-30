@@ -165,6 +165,17 @@ fn the_balanced_profile_is_the_default_bot() {
 /// moves them — that is what makes them useful. Update them *with* the change
 /// and say what moved, never to make a red test green.
 ///
+/// **#442 moved 8 of the 48 rows, 5 changing outcome — every one of them a loss
+/// becoming a win, and the pin's wins go 20 → 25.** Adopting the flank rule
+/// (§6.1/§6.2/§7.2) makes a *calm* guard blind at its sides, so runs that used to end
+/// against a patrol the bot walked past now survive it: `cautious 7` and `cautious 10`
+/// convert long losses into longer wins, `aggressive 2`/`8` and `careless 2` likewise.
+/// A one-directional move of this size is what adoption is *supposed* to look like —
+/// the rule only ever removes detections, and only from patrols — and it is the twelve
+/// seeds agreeing with appendix 28's 150-seed conditional table rather than a new
+/// finding. Read the deltas against the refreshed baseline in the same PR, not here:
+/// twelve seeds are a pin, not a balance signal (§13.4).
+///
 /// **#430 moved 12 of the 48 rows, 3 changing outcome.** A guard's first alert no
 /// longer moves it (§4.2): it finishes the turn it had planned and turns for the
 /// player from the next decision, so every run in which a Calm guard freshly
@@ -279,8 +290,8 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "balanced 7 won 94 r",
         "balanced 8 won 121 c",
         "balanced 9 won 84 ",
-        "balanced 10 lost 346 rrdrdrc",
-        "balanced 11 lost 323 rrcrrdcr",
+        "balanced 10 lost 246 rrdr",
+        "balanced 11 lost 201 rrcr",
         "cautious 0 won 107 rc",
         "cautious 1 won 233 crdr",
         "cautious 2 lost 209 rdrrrr",
@@ -288,26 +299,26 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "cautious 4 won 91 rd",
         "cautious 5 won 217 ",
         "cautious 6 lost 270 rrr",
-        "cautious 7 lost 321 rrrdrrd",
+        "cautious 7 won 598 rrrdrdrrrrd",
         "cautious 8 won 115 rd",
         "cautious 9 won 96 ",
-        "cautious 10 lost 756 rdrddrrdrrr",
+        "cautious 10 won 833 rdrddrdrrdrrrr",
         "cautious 11 lost 35 cr",
         "aggressive 0 lost 77 rcrr",
         "aggressive 1 won 73 ",
-        "aggressive 2 lost 219 rcrc",
+        "aggressive 2 won 278 rr",
         "aggressive 3 won 225 crdc",
         "aggressive 4 lost 48 r",
         "aggressive 5 lost 89 r",
         "aggressive 6 lost 135 rcrrdrcd",
         "aggressive 7 lost 65 r",
-        "aggressive 8 lost 156 rrr",
+        "aggressive 8 won 163 rr",
         "aggressive 9 won 84 ",
         "aggressive 10 lost 110 r",
         "aggressive 11 lost 273 rrrrrr",
         "careless 0 lost 77 rcrr",
         "careless 1 won 88 ",
-        "careless 2 lost 117 rcrc",
+        "careless 2 won 314 rcrccrcr",
         "careless 3 won 214 crdc",
         "careless 4 won 78 rc",
         "careless 5 lost 89 r",
@@ -315,7 +326,7 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "careless 7 lost 65 r",
         "careless 8 won 117 rc",
         "careless 9 won 84 ",
-        "careless 10 won 346 rcrrcc",
+        "careless 10 won 360 rcrrc",
         "careless 11 lost 220 rrcr",
     ];
 
@@ -867,8 +878,23 @@ fn the_striking_profiles_work_the_body_chain() {
 fn every_profile_ducks_behind_a_bench() {
     let mut histogram = 0u32;
     for profile in Profile::ALL {
+        // **The sweep is per temperament, and `aggressive`'s is elsewhere (#442).**
+        // Adopting the flank rule gave the bot a better answer than ducking when a
+        // *calm* guard is close: walk to its blind side and take it. `aggressive`,
+        // which keeps moving and strikes what it walks past, now reaches for the
+        // crouch vanishingly rarely — 3 ducks in 240 seeds, the first at 106, against
+        // 20 for `balanced` and 35 for `cautious` over the same range. That is a
+        // temperament finding a different tool, not §10.3 going inert, so the
+        // zero-versus-nonzero guarantee is kept for every profile and only the window
+        // moves. Sweeping 0..170 for all of them would buy the same assertion at
+        // roughly three times the gate's cost.
+        let seeds = if profile.name == "aggressive" {
+            100..170
+        } else {
+            0..60
+        };
         let (mut ducks, mut crouched_turns) = (0u32, 0u32);
-        for seed in 0..60 {
+        for seed in seeds {
             let (mut state, _) = boot(seed);
             let mut bot = StealthBot::with_profile(profile);
             for _ in 0..DEFAULT_INPUT_CAP {
@@ -897,7 +923,7 @@ fn every_profile_ducks_behind_a_bench() {
         }
         assert!(
             ducks > 0,
-            "{}: never ducked behind a bench over 60 seeds — §10.3 is inert again",
+            "{}: never ducked behind a bench over its seed sweep — §10.3 is inert again",
             profile.name,
         );
         assert!(

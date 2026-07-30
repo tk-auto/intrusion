@@ -1050,7 +1050,8 @@ change would have been indistinguishable from the fix.
 
 ## Appendix 28 — The flank experiment, and why it is conditional on the guard's mood
 
-*(§6.1, §6.2, §7.2, §12.6. The knob ships **off**; this is what it measured.)*
+*(§6.1, §6.2, §7.2, §12.6. Measured as a knob; **adopted as the rule** by #442 — see
+the closing note.)*
 
 §155 carved the three cells at a guard's back out of its detection set, so a takedown
 can be lined up from directly behind. Its *sides* — §6.2 tier 3 — still detect, and
@@ -1152,3 +1153,36 @@ say the same thing — a patrol you have read is a patrol you can act against.
 **Still a knob, still off.** Adopting it is a design-doc edit to §6.1, §6.2 and §7.2,
 which is a human judgement about *feel* (§13.4) — tailing a guard through a corner is
 not something these metrics can score. The numbers no longer argue against it.
+
+### Adopted (#442)
+
+That feel call was made, and the answer was yes: **a Calm guard detects exactly its
+cone** is now the rule, and §6.1, §6.2 and §7.2 moved together to say so. Nothing above
+was re-measured — the conditional table is what it was, and it is what the adoption
+rests on. What changed is only that the knob stopped being a knob.
+
+Three consequences worth recording, because each is the kind of thing a later reader
+would otherwise have to rediscover:
+
+- **The modifier is retired in place, not deleted.** Slot 5 is frozen: it still
+  round-trips through `modifier_slots` so every token ever shared still decodes, and
+  nothing reads it. A token minted with the bit set now plays the identical game,
+  because what it asked for is the rule. Closing the gap instead would have re-pointed
+  every older token at a different modifier — the appendix 26 (#286) break, with nothing
+  to notice it by.
+- **`BlindPolicy::Rear` survives as the control.** The old rule is no longer reachable
+  from any level's config, but it is kept as the named arm the unit tests compare
+  against: "what a flank used to do" is the contrast that makes the §6.2 tier ladder
+  legible. Restoring it as a *harder* modifier would be a new slot appended to the end.
+- **The seeded Calm-patrol pin moved, and had to.** A guard's cone feeds its `inspected`
+  memory (§7.5), and patrol targets are chosen as the farthest cell *outside* it — so a
+  narrower Calm cone inspects less per turn and the sweep walks a different route. No
+  patrol logic changed. The pin catching this is the pin working.
+
+**What it composes with.** #430 landed alongside: a guard cannot act on the turn it
+first spots you. The two say the same thing from opposite ends — a first sighting costs
+the guard its turn, and a calm guard's flank is not a sighting at all — so *a patrol you
+have read is a patrol you can act against*. #430's rule that a mood change re-aims the
+cone stops being defensive here and becomes load-bearing: a guard's flanks going live on
+the turn it spots you is precisely that seam, and without it the §11.5 overlay would
+paint a patrol's blind flanks under a Danger glyph.

@@ -302,13 +302,16 @@ fn a_guard_stepping_into_the_player_captures() {
 /// so the §13.2 sim counts broken stealth, never chase length.
 #[test]
 fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
-    // A stationary guard facing south; the player starts two cells to its
-    // west — outside the ~90° wedge and past the touching ring — so the
-    // startup turn sees nothing. (Directly behind would sit in the guard's
-    // rear blind spot, §155, and never detect — hence the side approach.)
+    // A stationary guard facing south, with a pillar three cells in front of it. The
+    // player starts in the pillar's shadow — inside the ~90° wedge, but with no line
+    // — so the startup turn sees nothing, and one step sideways enters and leaves
+    // sight. Contact is broken by *geometry* here rather than by stepping to the
+    // guard's flank, which a calm guard no longer detects at all (§6.1/#442).
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 7), Terrain::Wall);
     let mut s = State::new(
-        open_room(12, 12),
-        Cell::new(3, 5),
+        layout,
+        Cell::new(5, 8),
         Direction::North,
         vec![Guard::stationary(Cell::new(5, 5))],
         Vec::new(),
@@ -316,12 +319,10 @@ fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
     );
     assert!(
         !s.guards()[0].detected_player(),
-        "precondition: beside the cone at range, unseen"
+        "precondition: in the cone but behind the pillar, unseen"
     );
 
-    // Step to the guard's side: the touching ring (§6.1) finds the player — a
-    // side cell still detects (only the rear three do not, §155) — the
-    // transition, reported.
+    // Step out of the shadow into the open wedge — the transition, reported.
     let events = s.step(Input::Step(Direction::East));
     assert!(
         events.contains(&Event::Detected {
@@ -338,8 +339,7 @@ fn a_fresh_detection_is_reported_once_and_rearms_on_broken_contact() {
         "a held gaze is not a new detection: {events:?}"
     );
 
-    // Break contact — back out to the side, past the ring — then re-enter: a
-    // second event.
+    // Back into the pillar's shadow, then out again: a second event.
     let events = s.step(Input::Step(Direction::West));
     assert!(!s.guards()[0].detected_player(), "contact broken");
     assert!(
@@ -509,161 +509,174 @@ fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
     );
 }
 
-/// #410 (§6.1/§7.2): the **flank takedown** the experiment opens up, against a guard
-/// that is **Calm**. The same scene in both arms — a south-facing stationary patrol
-/// with the player walking up to its side, on open floor, no cupboard and no decoy.
+/// §6.1/§7.2/#442: the **flank takedown**, against a guard that is **Calm**. A
+/// south-facing stationary patrol with the player walking up to its side, on open
+/// floor — no cupboard, no decoy, nothing but the rule. A calm guard detects exactly
+/// its cone, so its flank is blind and the bump takes it down: the approach surface
+/// against a patrol is five cells, not §155's three.
 ///
-/// Baseline the side cell detects, so the bump is refused and the usable line offers
-/// nothing (§11.4): a takedown must come from directly behind or rear-diagonal. With
-/// `calm_guards_detect_only_their_cone` a calm guard detects exactly its cone, the
-/// flank goes blind, and the takedown lands — widening the approach surface against a
-/// patrol from three cells to five, which is the real loosening of §7.2's price this
-/// experiment is for.
+/// This was the #410 experiment's headline, measured in appendix 28 and adopted by
+/// #442; it needs no modifier now, which is the point of the assertion.
 ///
-/// The player **walks in** rather than starting at the flank: the §4.2 startup world
-/// phase runs before a builder can set the arm, so a player placed at the flank would
-/// be detected once under the shipped rule and the guard would never be Calm again.
+/// The player **walks in** rather than starting at the flank, because the §4.2 startup
+/// world phase runs before the first input — the scene is only honest if the guard has
+/// been Calm throughout.
 #[test]
-fn a_flank_takedown_lands_only_in_the_experimental_arm() {
-    let scene = |experimental: bool| {
-        let mut s = State::new(
-            open_room(10, 10),
-            Cell::new(2, 5), // clear of the guard to start
-            Direction::East,
-            vec![Guard::stationary(Cell::new(5, 5))], // faces south (§7.1), holds
-            Vec::new(),
-            Cell::new(8, 8),
-        )
-        .with_modifiers(LevelModifiers {
-            calm_guards_detect_only_their_cone: experimental,
-            ..LevelModifiers::default()
-        });
-        // Up to the guard's western flank.
-        s.step(Input::Step(Direction::East));
-        s.step(Input::Step(Direction::East));
-        assert_eq!(s.player(), Cell::new(4, 5), "at the guard's side");
-        assert!(!s.hidden(), "on open floor, not concealed");
-        s
-    };
-
-    // Control: the flank detects, so there is no takedown to offer.
-    let control = scene(false);
-    assert!(
-        control.guard_detects_now(&control.guards()[0]),
-        "control: standing beside a guard is detected (§6.1/§7.2)",
+fn a_calm_guards_flank_offers_the_takedown() {
+    let mut s = State::new(
+        open_room(10, 10),
+        Cell::new(2, 5), // clear of the guard to start
+        Direction::East,
+        vec![Guard::stationary(Cell::new(5, 5))], // faces south (§7.1), holds
+        Vec::new(),
+        Cell::new(8, 8),
     );
-    assert!(
-        !control
-            .affordances()
-            .iter()
-            .any(|(_, a)| *a == Affordance::Takedown),
-        "control: a detecting guard refuses the takedown",
-    );
+    // Up to the guard's western flank.
+    s.step(Input::Step(Direction::East));
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), Cell::new(4, 5), "at the guard's side");
+    assert!(!s.hidden(), "on open floor, not concealed");
 
-    // Experiment: the calm guard's flank is blind, so the same bump takes it down.
-    let mut experiment = scene(true);
     assert_eq!(
-        experiment.guards()[0].state(),
+        s.guards()[0].state(),
         GuardState::Calm,
         "it never noticed, so it is still a patrol",
     );
     assert!(
-        !experiment.guard_detects_now(&experiment.guards()[0]),
-        "experiment: a calm guard detects exactly its cone, so its flank is blind",
+        !s.guard_detects_now(&s.guards()[0]),
+        "a calm guard detects exactly its cone, so its flank is blind",
     );
     assert_eq!(
-        experiment.affordances(),
+        s.affordances(),
         vec![(Direction::East, Affordance::Takedown)],
         "the usable line offers the flank takedown (§11.4)",
     );
 
-    let events = experiment.step(Input::Step(Direction::East));
+    let events = s.step(Input::Step(Direction::East));
     assert_eq!(
         events,
         vec![Event::TakenDown {
             at: Cell::new(5, 5)
         }]
     );
-    assert!(experiment.guards().is_empty(), "the takedown is permanent");
-    assert_eq!(experiment.bodies().len(), 1, "a body is left behind");
+    assert!(s.guards().is_empty(), "the takedown is permanent");
+    assert_eq!(s.bodies().len(), 1, "a body is left behind");
     assert_eq!(
-        experiment.player(),
+        s.player(),
         Cell::new(4, 5),
         "a takedown is a bump, not a move"
     );
 }
 
-/// #410 + §4.5 **[SETTLED]**: **capture is contact, not detection.** A blind flank
+/// §6.1/§7.2/#442, **the other half of the rule and the half that prices it**: a guard
+/// that is *not* Calm watches its sides exactly as §155 always had it. The flank is
+/// somewhere to **work from** against a patrol you have read, never somewhere to
+/// **hide** from a guard that is hunting you (appendix 28).
+///
+/// Asserted across every non-Calm mood on one scene, so the difference is the mood and
+/// nothing else: the player stands at the guard's side throughout.
+#[test]
+fn every_alerted_mood_watches_its_flanks() {
+    for state in [
+        GuardState::Chasing,
+        GuardState::Investigating,
+        GuardState::Alerted,
+        GuardState::Responding,
+    ] {
+        let s = State::new(
+            open_room(10, 10),
+            Cell::new(4, 5), // the guard's western flank
+            Direction::East,
+            vec![Guard::stationary(Cell::new(5, 5)).with_state(state)],
+            Vec::new(),
+            Cell::new(8, 8),
+        );
+        assert!(
+            s.guard_detects_now(&s.guards()[0]),
+            "{state:?}: a guard that is not calm sees the player at its side",
+        );
+        assert!(
+            !s.affordances()
+                .iter()
+                .any(|(_, a)| *a == Affordance::Takedown),
+            "{state:?}: …so the takedown is refused (§7.2)",
+        );
+    }
+
+    // The control, same cell and same facing: Calm, and the flank is blind.
+    let calm = State::new(
+        open_room(10, 10),
+        Cell::new(4, 5),
+        Direction::East,
+        vec![Guard::stationary(Cell::new(5, 5))],
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    assert!(
+        !calm.guard_detects_now(&calm.guards()[0]),
+        "calm, same scene: the flank is blind — the difference is the mood alone",
+    );
+}
+
+/// §4.5 **[SETTLED]** + #442: **capture is contact, not detection.** A blind flank
 /// buys a stealth window, never immunity — a guard that walks onto the player still
-/// catches them, whichever arm is playing. This is the reason the experiment is not
-/// as dangerous as it sounds, so it is asserted rather than left to prose.
+/// catches them. This is the reason the rule is not as dangerous as it sounds, so it
+/// is asserted rather than left to prose.
 ///
 /// A 1-wide corridor, the guard facing across it (§7.1's spawn facing) so its ~90°
 /// wedge points at a wall and the corridor itself is outside it. The player walks up
-/// to the guard's side: in the control arm tier 3 detects them there, and in the
-/// experimental arm it does not. Then the guard is called down the corridor — its
+/// to the calm guard's side, unseen. Then the guard is called down the corridor — its
 /// route runs straight through the player's cell — and it steps onto them and
-/// captures, **without ever having seen them**. Standing at a moving guard's side is
-/// still a gamble against where it walks next.
+/// captures. Standing at a moving guard's side is still a gamble against where it
+/// walks next.
 #[test]
 fn contact_still_captures_at_a_blind_flank() {
-    for experimental in [false, true] {
-        let mut s = State::new(
-            open_room(10, 3),
-            Cell::new(3, 1), // well clear of the guard to start
-            Direction::East,
-            vec![Guard::patrolling(Cell::new(7, 1))], // faces south, into the wall
-            Vec::new(),
-            Cell::new(1, 1),
-        )
-        .with_modifiers(LevelModifiers {
-            calm_guards_detect_only_their_cone: experimental,
-            ..LevelModifiers::default()
-        });
-        s.set_guard_close_chance(0);
-        assert_eq!(s.outcome(), Outcome::Playing, "the scene starts clean");
+    let mut s = State::new(
+        open_room(10, 3),
+        Cell::new(3, 1), // well clear of the guard to start
+        Direction::East,
+        vec![Guard::patrolling(Cell::new(7, 1))], // faces south, into the wall
+        Vec::new(),
+        Cell::new(1, 1),
+    );
+    s.set_guard_close_chance(0);
+    assert_eq!(s.outcome(), Outcome::Playing, "the scene starts clean");
 
-        // Walk up to the guard's flank.
-        for _ in 0..3 {
-            s.step(Input::Step(Direction::East));
-        }
-        assert_eq!(s.player(), Cell::new(6, 1), "at the guard's side");
-        assert_eq!(
-            s.guard_detects_now(&s.guards()[0]),
-            !experimental,
-            "the flank detects in the control arm and is blind in the experimental one",
-        );
-
-        // In the control arm the guard has already seen the player and is coming of
-        // its own accord — it is Chasing, so §7.4 would not dispatch it anyway. In
-        // the experimental arm nothing has drawn it, so call it down the corridor:
-        // its only route runs straight through the cell the player is standing in.
-        if experimental {
-            assert!(
-                s.call_guards_to_for_test(Cell::new(1, 1), 1),
-                "the blind guard was free to answer",
-            );
-            // **The narrowing, seen from the player's side.** Answering the call makes
-            // it Responding, so on its next look its flanks are live again — the
-            // player is standing in a blind spot that has just closed under them.
-            s.step(Input::Wait);
-            assert!(
-                s.guard_detects_now(&s.guards()[0]),
-                "a guard that stops being calm watches its sides again (#410)",
-            );
-        }
-        for _ in 0..16 {
-            if s.outcome() != Outcome::Playing {
-                break;
-            }
-            s.step(Input::Wait);
-        }
-        assert_eq!(
-            s.outcome(),
-            Outcome::Lost,
-            "experimental={experimental}: contact is capture (§4.5), blind flank or not",
-        );
+    // Walk up to the guard's flank, unseen.
+    for _ in 0..3 {
+        s.step(Input::Step(Direction::East));
     }
+    assert_eq!(s.player(), Cell::new(6, 1), "at the guard's side");
+    assert!(
+        !s.guard_detects_now(&s.guards()[0]),
+        "a calm guard's flank is blind",
+    );
+
+    // Nothing has drawn it, so call it down the corridor: its only route runs
+    // straight through the cell the player is standing in.
+    assert!(
+        s.call_guards_to_for_test(Cell::new(1, 1), 1),
+        "the blind guard was free to answer",
+    );
+    // **The narrowing, seen from the player's side.** Answering the call makes it
+    // Responding, so on its next look its flanks are live again — the player is
+    // standing in a blind spot that has just closed under them.
+    s.step(Input::Wait);
+    assert!(
+        s.guard_detects_now(&s.guards()[0]),
+        "a guard that stops being calm watches its sides again",
+    );
+    for _ in 0..16 {
+        if s.outcome() != Outcome::Playing {
+            break;
+        }
+        s.step(Input::Wait);
+    }
+    assert_eq!(
+        s.outcome(),
+        Outcome::Lost,
+        "contact is capture (§4.5), blind flank or not",
+    );
 }
 
 /// §6.1 **[SETTLED]** + #410: the **player's** touching ring is untouched by the
@@ -2874,11 +2887,20 @@ fn two_released_watchers_do_not_clump() {
     );
 }
 
-/// #430 pins its own blast radius: the first-spot rule must touch **only**
-/// freshly-alerted guards, so a seeded run in which every guard stays Calm walks
-/// exactly the patrol — every step, dwell and RNG draw — it walked before the
-/// rule landed. The fingerprint below was captured on the pre-#430 loop; any
-/// change that moves a Calm guard's walk shows up as a different fold.
+/// A seeded run in which every guard stays Calm, folded to one number: the pin that
+/// makes **any** change to a patrol's walk — every step, dwell and RNG draw — visible
+/// as a moved fingerprint.
+///
+/// It was captured on the pre-#430 loop to pin that ticket's blast radius, and it
+/// held: the first-spot rule touches only freshly-alerted guards, so a Calm guard that
+/// stayed Calm walked the identical patrol.
+///
+/// **#442 moved it, and that is the pin working rather than failing.** Adopting the
+/// flank rule takes the two side cells out of a Calm guard's cone, and the cone is
+/// what feeds its `inspected` memory (§7.5) — the set the next patrol target is chosen
+/// as the farthest cell *outside* of. A narrower cone inspects slightly less per turn,
+/// so the sweep picks different targets and walks a different route. Patrol *logic* is
+/// untouched; what moved is what the guard has looked at.
 #[test]
 fn calm_guards_walk_the_same_patrol_as_before_the_first_spot_rule() {
     let mut layout = open_room(14, 14);
@@ -2915,8 +2937,8 @@ fn calm_guards_walk_the_same_patrol_as_before_the_first_spot_rule() {
         }
     }
     assert_eq!(
-        fold, 14_111_564_392_247_783_089,
-        "a Calm guard that stays Calm moves identically to before #430",
+        fold, 3_018_052_600_522_778_679,
+        "a Calm guard's patrol walk moved — if that was intended, say why in the doc",
     );
 }
 

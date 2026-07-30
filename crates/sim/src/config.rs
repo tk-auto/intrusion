@@ -264,7 +264,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 6] = [
+const MODIFIERS: [(&str, SetModifier); 5] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -278,9 +278,10 @@ const MODIFIERS: [(&str, SetModifier); 6] = [
         m.always_show_vision_cones = true
     }),
     ("full-layout-known", |m| m.full_layout_known = true),
-    ("calm-guards-detect-only-their-cone", |m| {
-        m.calm_guards_detect_only_their_cone = true
-    }),
+    // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
+    // and its rule is the baseline, so a name that set it would offer the operator a
+    // sweep that measures nothing. The destructure in the test below still names the
+    // field, so the compiler keeps this decision deliberate rather than forgotten.
 ];
 
 /// The `--alert` vocabulary (§7.3/#376): each threshold paired with the field it
@@ -532,8 +533,9 @@ mod tests {
     ///
     /// The destructure is the obligation: a new [`LevelModifiers`] field will not
     /// compile here until somebody names it, and then the assertion fails until
-    /// [`MODIFIERS`] carries it. The gate is excluded on purpose — it is a bounded
-    /// knob with its own flag, not a toggle.
+    /// [`MODIFIERS`] carries it. Two fields are excluded on purpose — the intel gate,
+    /// a bounded knob with its own flag rather than a toggle, and the **retired** slot
+    /// 5 (#442), whose rule is the baseline and which therefore has no name to offer.
     #[test]
     fn every_modifier_toggle_has_a_name_that_flips_it() {
         // One name at a time: exactly one modifier goes active (§12.6's `active` set
@@ -568,7 +570,10 @@ mod tests {
         assert!(body_found_calls_two_guards);
         assert!(always_show_vision_cones);
         assert!(full_layout_known);
-        assert!(calm_guards_detect_only_their_cone);
+        assert!(
+            !calm_guards_detect_only_their_cone,
+            "the retired slot has no name, so naming every modifier must not set it",
+        );
         assert_eq!(
             intel_to_exit,
             RunConfig::sim().modifiers.intel_to_exit,

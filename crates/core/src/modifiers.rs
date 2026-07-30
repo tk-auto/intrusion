@@ -165,49 +165,29 @@ pub struct LevelModifiers {
     /// the difficulty draw it spends budget that must be found by taking a harder
     /// rule elsewhere. A modifier that only ever gave would not be a modifier.
     pub full_layout_known: bool,
-    /// **Easier.** A **Calm** guard detects **exactly its ~90° cone**
-    /// (§6.1/§6.2/#410): while it is patrolling, the two cells at its *flank* (§6.2
-    /// tier 3) drop out of its detection set along with the three at its back, so the
-    /// free touching ring becomes player-only. **A guard that is not Calm watches its
-    /// sides again** — chasing, investigating, searching or answering a call, tier 3
-    /// detects exactly as it always did.
+    /// **Retired — slot 5, frozen (#442).** This was the `calm_guards_detect_only_
+    /// their_cone` experiment (#410): a **Calm** guard detecting exactly its ~90° cone,
+    /// its flank cells (§6.2 tier 3) dropping out of detection along with the three at
+    /// its back, while any guard that is *not* Calm watches its sides as it always did.
     ///
-    /// Baseline, tier 3 always detects — "you can never stand **beside or in front
-    /// of** a guard undetected" (§6.1/§7.2) — and two things follow from that which
-    /// this modifier undoes, but only against a patrol. A **takedown** must come from
-    /// directly behind or rear-diagonal: step to a guard's side and you are seen,
-    /// though it is looking the other way. And you **cannot tail a guard**: walk in
-    /// its blind spot and the moment it turns 90° at a corner you are at its side,
-    /// tier 3, detected — so the one manoeuvre that should be the reward for reading a
-    /// patrol is impossible.
+    /// **It is now the rule** (§6.1/§6.2/§7.2), so this toggle asks for nothing that is
+    /// not already true. Appendix 28 has what it measured and why the condition on the
+    /// mood is the design rather than a tuning fudge; the adoption itself was the feel
+    /// call that appendix left open.
     ///
-    /// **The Calm condition is what prices it.** The unconditional form measured as a
-    /// win-rate rise on temperaments that never strike at all — un-priced safety
-    /// rather than a new option, which is precisely what §7.2 means when it says the
-    /// takedown's constraints *are* the cost. Conditioning on the mood buys the
-    /// manoeuvre and nothing else: reading a patrol is rewarded, and being **hunted**
-    /// is not, because a guard that is looking for you sweeps its own sides. The flank
-    /// becomes somewhere to work from, never somewhere to hide.
+    /// **The field stays because the slot must.** Its position is a permanent slot
+    /// number the level-seed token encodes *by index*
+    /// ([`docs/level-seed-token.md`](../../docs/level-seed-token.md) §3): deleting it
+    /// and closing the gap would silently re-point every token ever shared at a
+    /// different modifier — the #286 break, with nothing to notice it by. So it is a
+    /// tombstone, not a hole: it still round-trips through
+    /// [`modifier_slots`](crate::level_seed) so old tokens decode exactly, and nothing
+    /// reads it. It contributes no [`CAPTIONS`] row, because a caption announcing a
+    /// rule the level plays regardless would be noise.
     ///
-    /// **It buys a stealth window, never immunity.** Capture is contact (§4.5
-    /// **[SETTLED]**), not detection: a guard that steps onto the player still
-    /// catches them, blind flank or not, so standing at a moving guard's side is
-    /// still a gamble against where it walks next.
-    ///
-    /// It narrows the **one** cone (`guard.fov()`), so it narrows every consumer with
-    /// it — body-finding (§7.2), seeing a decoy (§8.3), the §15 Q5 witness check, the
-    /// §11.5 danger overlay and the spawn-safety check. That is deliberate: the rear
-    /// carve already works exactly this way (a body directly behind a guard is
-    /// already unnoticed), and splitting detection from body-finding would mean two
-    /// fovs per guard and a second meaning for "the cone". The overlay following
-    /// automatically is what keeps the player's information honest — the narrowed
-    /// cone is **drawn**, not hidden (§11.5) — and because it is drawn per guard, a
-    /// patrol and a searcher standing side by side paint differently, which is the
-    /// rule made visible.
-    ///
-    /// **An experiment, off by default** (#410). It bends a **[SETTLED]** sentence in
-    /// §6.1/§6.2/§7.2, so it ships as a knob to measure rather than as the rule; the
-    /// numbers decide whether those sections move.
+    /// Restoring the *harder* arm — guards that watch their flanks even while calm —
+    /// would be a **new** entry appended to the end of the slot list, never a revival
+    /// of this one.
     pub calm_guards_detect_only_their_cone: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
@@ -276,13 +256,12 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 8] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 7] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
     SHOWS_ALL_CONES,
     KNOWS_FULL_LAYOUT,
-    BLIND_FLANKS,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -315,12 +294,6 @@ const KNOWS_FULL_LAYOUT: ActiveModifier = ActiveModifier {
     name: "Full layout known",
     direction: ModifierDirection::Easier,
     detail: None,
-};
-
-const BLIND_FLANKS: ActiveModifier = ActiveModifier {
-    name: "Calm guards: cone only",
-    direction: ModifierDirection::Easier,
-    detail: Some("flanks blind"),
 };
 
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
@@ -378,9 +351,11 @@ impl LevelModifiers {
         if full_layout_known {
             active.push(KNOWS_FULL_LAYOUT);
         }
-        if calm_guards_detect_only_their_cone {
-            active.push(BLIND_FLANKS);
-        }
+        // Slot 5 is **retired** (#442) — see the field's own note. A run that
+        // decodes a token with the bit set gets no caption, because there is nothing
+        // to announce: what the bit asked for is the rule the level is already
+        // playing.
+        let _ = calm_guards_detect_only_their_cone;
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
         // settings are "active", each with the direction its exposure rank implies.
         match intel_to_exit {
@@ -408,6 +383,8 @@ impl LevelModifiers {
             always_show_vision_cones: self.always_show_vision_cones
                 || other.always_show_vision_cones,
             full_layout_known: self.full_layout_known || other.full_layout_known,
+            // Retired (#442): composed like any other toggle so the slot keeps
+            // round-tripping, but nothing reads the result.
             calm_guards_detect_only_their_cone: self.calm_guards_detect_only_their_cone
                 || other.calm_guards_detect_only_their_cone,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
@@ -629,6 +606,10 @@ mod tests {
         assert_eq!(none.active()[0].detail, Some("none required"));
 
         // Several sources at once: every active field is listed, in reading order.
+        // **Six, not seven, with every field set** — `calm_guards_detect_only_their_cone`
+        // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
+        // asked for is the rule the level plays regardless, so a caption for it would
+        // tell the player about a difference that no longer exists.
         let stacked = LevelModifiers {
             guards_always_search_hideouts: true,
             sighting_lost_calls_a_guard: true,
@@ -638,7 +619,14 @@ mod tests {
             calm_guards_detect_only_their_cone: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 7);
+        assert_eq!(stacked.active().len(), 6);
+        assert!(
+            !stacked
+                .active()
+                .iter()
+                .any(|m| m.name.contains("cone only") || m.detail == Some("flanks blind")),
+            "the retired slot must never surface a caption",
+        );
     }
 
     #[test]
