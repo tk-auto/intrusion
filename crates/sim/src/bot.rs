@@ -729,7 +729,27 @@ impl StealthBot {
     /// does not walk straight back and pick up the body it has just decided it cannot
     /// place. Without that the two would trade the same corpse back and forth for the
     /// rest of the run, which is a livelock rather than a temperament.
+    ///
+    /// **`None` when a guard is standing on the body.** A loose body is non-solid
+    /// (§7.2), so a chaser walks straight over the one being dragged — and then the
+    /// release bump is a step into an *aware* guard, which §7.2 refuses. Attempting it
+    /// would spend the turn on a refusal in the one situation where the turn is the
+    /// escape, and it is exactly the front strike
+    /// [`every_takedown_the_bot_lands_is_a_legal_one`] forbids the bot from ever
+    /// aiming. Declining hands the turn back to [`haul`](Self::haul)'s other answers —
+    /// route to a shelter, or step away and try again once the guard has moved off.
+    ///
+    /// Only a guard the bot can **perceive** counts (§9.2/§13.2): one it cannot see or
+    /// sense is not something a player could plan around either, so blocking on it
+    /// would be the bot reading state it is not allowed to.
     fn let_go(&mut self, state: &State, body: Cell) -> Option<Input> {
+        if state
+            .guards()
+            .iter()
+            .any(|g| g.pos() == body && state.perceive_guard(g).is_some())
+        {
+            return None;
+        }
         self.abandoned.insert(body);
         Direction::ALL
             .into_iter()
