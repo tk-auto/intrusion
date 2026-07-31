@@ -60,6 +60,12 @@ pub enum Verb {
     /// Grabbed a body to drag (§8.3) — [`Event::BodyGrabbed`](intrusion_core::Event::BodyGrabbed).
     /// The grab is the decision the histogram counts; the half-speed steps that
     /// follow are Moves.
+    ///
+    /// It is a **real** decision since #451: the pickup is a wait spent standing on
+    /// the body, not something that rode the step off its cell. The count used to
+    /// include grabs no temperament had asked for — a bot crossing a body picked it
+    /// up and dropped it again — and does not any more, so a `drag` here now means a
+    /// turn the policy chose to spend.
     Drag,
     /// Bored through a wall with Pierce Wall (§8.3/#303). Counted like any other
     /// activation, and worth watching closely: three per level is a small enough
@@ -80,9 +86,9 @@ pub enum Verb {
     Crouch,
     /// Put a dragged body away inside a cupboard (§10.3/#381) —
     /// [`Event::BodyStored`](intrusion_core::Event::BodyStored). The last link in
-    /// §7.2's body chain, and the only one that is a *choice*: the takedown's cost is
-    /// the body, taking hold of it is automatic (stepping off its cell grabs it,
-    /// §8.3/#187), and letting it go is free — but stowing it spends the turn, puts
+    /// §7.2's body chain, and the *loudest* choice in it: the takedown's cost is the
+    /// body, taking hold of it costs a turn (§8.3/#451), and letting it go is free —
+    /// but stowing it spends the turn, puts
     /// the body beyond every cone and **locks** the cupboard behind it, which stops it
     /// being a hideout at all. Read it against `bodies_found`: the tidier the run, the
     /// flatter that row.

@@ -3,7 +3,9 @@
 //! A takedown is permanent and free of cooldown; **the body is the cost**. It is
 //! an entity the level owns directly (§12.3), not terrain stamped into the grid,
 //! and since #187 a loose one is **non-solid** (§7.2): it blocks neither movement
-//! nor pathing, so you walk over it and take hold by stepping *off* its cell. The
+//! nor pathing, so you walk over it — and, since #451, take hold by **waiting**
+//! while standing on it, which is what makes the pickup a decision rather than
+//! something that happens to you on the way past. The
 //! one place it counts as an occupant is the door-crush check — a door never
 //! shuts on a body ([`actor_occupies`](crate::state)) — which is the exception
 //! that makes the rule worth stating.

@@ -733,11 +733,11 @@ impl State {
             .collect()
     }
 
-    /// What a bump would do from here — the **usable line** (§11.4): each
-    /// interaction orthogonally adjacent to the player, with the direction to
-    /// bump it, in [`Direction::ALL`] order. The §10.6 one-usable guarantee
-    /// keeps this to a single entry on generated boards; a hand-built state
-    /// may list more, one per direction.
+    /// What the next press would do from here — the **usable line** (§11.4): each
+    /// interaction available where the player stands, with the direction to press
+    /// for it, in [`Direction::ALL`] order. The §10.6 one-usable guarantee keeps
+    /// this to a single entry on generated boards; a hand-built state may list
+    /// more, one per direction.
     ///
     /// This mirrors [`step`](Self::step)'s bump resolution case for case, so
     /// the line can never promise what a bump won't deliver: an **unaware**
@@ -746,15 +746,37 @@ impl State {
     /// come from the same door graph the bump consults (§10.4). Each target must
     /// also be in the player's FOV — which the touching ring always is (§6.2) —
     /// so the line can never leak what the fog still hides (§11.5a).
-    pub fn affordances(&self) -> Vec<(Direction, Affordance)> {
+    ///
+    /// # Why the direction is optional (#451)
+    ///
+    /// Every entry used to be a bump, so every entry had a direction. Taking hold of
+    /// a body is the first that is not: it is a **wait**, and it is about the cell the
+    /// player is standing **on** (§8.3). `None` says exactly that — *here, no
+    /// direction* — rather than picking a neighbour the press has nothing to do with,
+    /// which is the one thing §11.4 forbids this line: it must never promise what the
+    /// next press will not deliver. The renderer reads the `None` and draws the entry
+    /// without an arrow (§11.4/#384); nothing else in the game has to care.
+    ///
+    /// The mirror-the-bump discipline is unweakened, only widened from *bump* to
+    /// *press*: the standing-on entry is derived from the same state the
+    /// [`Input::Wait`](crate::Input::Wait) arm acts on, so it appears exactly when the
+    /// wait would take hold and never otherwise.
+    pub fn affordances(&self) -> Vec<(Option<Direction>, Affordance)> {
         // A stunned player bumps nothing (§8.3/#329): every input is swallowed, so
         // offering an interaction here would promise exactly what the next press will
         // not deliver (§2.3). The same silence a phased player already gets, for the
-        // same reason.
+        // same reason — and it covers the standing-on entry too, since a stunned wait
+        // is not a wait at all (it takes hold of nothing).
         if self.stunned > 0 {
             return Vec::new();
         }
         let mut out = Vec::new();
+        // The cell underfoot comes first: it is the only entry that is not aimed, and
+        // reading it before the ring keeps the line's order a fact about the state
+        // rather than about the loop.
+        if self.take_body_offered() {
+            out.push((None, Affordance::TakeBody));
+        }
         for dir in Direction::ALL {
             let Some(target) = self.player.step(dir) else {
                 continue;
@@ -766,9 +788,28 @@ impl State {
                 continue;
             }
             if let Some(a) = self.bump_kind(target).affordance() {
-                out.push((dir, a));
+                out.push((Some(dir), a));
             }
         }
         out
+    }
+
+    /// Whether a wait from here would **take hold of a body** (§8.3/#451) — the
+    /// predicate behind [`Affordance::TakeBody`], and the same one the
+    /// [`Input::Wait`](crate::Input::Wait) arm acts on, so the line and the press
+    /// cannot disagree (§11.4).
+    ///
+    /// Free hands and a loose body underfoot, and that is the whole rule. It needs no
+    /// FOV gate: the player's own cell is never fogged, and a body you are standing on
+    /// is not something the line could leak. **Phased**, it is silent along with
+    /// everything else — a phased player passes through the body rather than standing
+    /// on it, and cannot bump or grab anything (§8.3) — which falls out of
+    /// [`can_rematerialize`](Self::can_rematerialize) being the wrong question here and
+    /// the phase check being the right one.
+    fn take_body_offered(&self) -> bool {
+        if self.dragging.is_some() || self.abilities.effect_active(Effect::Phase) {
+            return false;
+        }
+        self.body_at(self.player).is_some()
     }
 }

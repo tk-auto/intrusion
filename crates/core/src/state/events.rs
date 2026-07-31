@@ -373,8 +373,16 @@ pub enum Affordance {
     /// land — an aware guard's cell offers nothing.
     Takedown,
     /// The body being dragged: bump it to let go — free (§4.4). (Taking hold is
-    /// not a bump: you drag by walking over a body and off its cell, §8.3.)
+    /// not a bump either — it is a **wait**, see [`TakeBody`](Affordance::TakeBody).)
     ReleaseBody,
+    /// A loose body **under the player's own feet**, hands free: wait to take hold
+    /// (§8.3/#451). The one affordance that is not about a neighbour — it has no
+    /// direction, which is why the usable line carries an
+    /// [`Option<Direction>`](crate::Direction) rather than a `Direction`.
+    ///
+    /// Never offered while already dragging: the line shows `body: release` on the
+    /// held body instead, and a second body is not something free hands can take.
+    TakeBody,
     /// An empty cupboard while dragging a body: bump to stow the body inside and
     /// lock the cupboard — it is no longer a hideout (§7.2/§10.3).
     StoreBody,
@@ -406,6 +414,7 @@ impl Affordance {
         match self {
             Affordance::Takedown => "guard: take down",
             Affordance::ReleaseBody => "body: release",
+            Affordance::TakeBody => "body: wait to take hold",
             Affordance::StoreBody => "cupboard: stow body",
             Affordance::OpenDoor => "door: open",
             Affordance::CloseDoor => "door: close",
@@ -430,6 +439,10 @@ impl Affordance {
     pub fn category(self) -> Category {
         match self {
             Affordance::Takedown => Category::Caution,
+            // The body in your hands is Owned; the one you are about to pick up is
+            // still the §7.3 liability it was when it hit the floor — Caution, the
+            // same yellow as its own `z` and as the takedown that left it there.
+            Affordance::TakeBody => Category::Caution,
             Affordance::ReleaseBody => Category::Owned,
             Affordance::OpenDoor
             | Affordance::CloseDoor

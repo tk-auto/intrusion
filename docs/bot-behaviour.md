@@ -66,7 +66,11 @@ for a temperament whose reach for it is zero:
 
 - **The body in hand comes first.** A drag halves the bot's speed and refuses to
   stack with Run, so it is settled before anything else is planned — hauled to a
-  cupboard, or let go.
+  cupboard, or let go. Picking one *up* is a separate step (`fetch`), and since #451
+  it presses **Wait** while standing on the body rather than stepping off it: the
+  grab is a spent turn now, so a bot that kept walking would leave the body behind.
+  The press goes through core's own verb, so the bot takes hold exactly when a player
+  pressing the same key would (§2's rules-asked-of-core rule).
 - **The strike sits between fleeing and taking cover.** Ahead of cover deliberately:
   the commonest safe angle in the game is the one from *inside* a cupboard, where
   taking cover would only ever wait.
@@ -122,8 +126,8 @@ fell into:
 The bot used to carry a fourth refusal — *"it will not spring a takedown that would
 wall it in"* — on the grounds that a body dropped on the guard's cell seals a dead
 end's only mouth (§7.2/#170). **That hazard stopped existing** when #187 made a loose
-body non-solid: the mouth stays walkable, and stepping over it on the way out takes
-hold of it. The rule outlived its reason and went on refusing *every* takedown the
+body non-solid: the mouth stays walkable, and the bot can stand on it and wait to take
+hold (§8.3/#451). The rule outlived its reason and went on refusing *every* takedown the
 bot was ever offered — because all of them are that exact shape, a hidden bot with a
 patrol on its cupboard door (#316).
 
@@ -370,14 +374,22 @@ rear blind spot one (§155); `aggressive` takes cover, so it gets the concealed 
 (§7.2). Loosen either half and both profiles cover both angles, which is one
 temperament measured twice.
 
-Taking hold is worth distinguishing from stowing here, because only one of them is a
-decision: stepping off a body's cell grabs it **automatically** (§8.3/#187), so even
-`careless` racks up grabs — and then immediately drops them. A `drag` count therefore
-says nothing about temperament on its own; putting a body *away* is the choice. That
-choice has its own §13.2 slot since #381 — `stow`, counted from `Event::BodyStored` —
-so the split is now **read** off the histogram rather than inferred from the gap
-between `takedowns`, `drag` and `bodies_found`. The release beside it still counts as
-nothing, because it is free (§4.4).
+Taking hold is worth distinguishing from stowing here, and **#451 changed which of
+them is a decision — both are now.** The grab used to ride the step *off* a body's
+cell, so it happened automatically and even `careless` racked up grabs it never asked
+for and immediately dropped; a `drag` count said nothing about temperament on its own.
+It is now a **wait spent standing on the body**, which means the bot has to press for
+it: `fetch` walks onto the body, waits, and only then leaves for the cupboard — three
+turns where it used to be two.
+
+That makes `drag` a truer signal than it was, but it does **not** make it the one to
+read: a temperament that declines to stow never presses the wait at all, so the count
+now separates the stowing profiles from the rest for the same reason the strike counts
+do, rather than because everyone grabs by accident. Putting a body *away* is still the
+choice worth measuring, and it has its own §13.2 slot since #381 — `stow`, counted
+from `Event::BodyStored` — so the split is **read** off the histogram rather than
+inferred from the gap between `takedowns`, `drag` and `bodies_found`. The release
+beside it still counts as nothing, because it is free (§4.4).
 
 ## 6. The per-ability floor, and the ambiguity it exists to resolve
 

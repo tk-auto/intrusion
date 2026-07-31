@@ -1005,10 +1005,10 @@ whole reason the architecture looks the way it does.
 | Ability | Cost | Duration | Cooldown | Effect |
 |---|---|---|---|---|
 | **Move** | 1 turn | — | — | One cell, cardinal. Sets facing. Not shown in the UI. |
-| **Wait** | 1 turn | — | — | **360° vision for that turn.** The only way to see behind you. |
+| **Wait** | 1 turn | — | — | **360° vision for that turn.** The only way to see behind you. Standing on a body with free hands, it **also takes hold** (Drag, below) — and still gives the look. |
 | **Run** | 1 turn | 5 | 12 | One free move per turn while active → 2 cells/turn. |
 | **Takedown** | 1 turn | — | — | §7.2. Adjacent, unaware target only. Permanent. Leaves a body. |
-| **Drag** | 1 turn/step | while held | — | A body is non-solid: **walk over it and step off to take hold**; **you move at half speed while dragging**; **bump the held body to release** (free), or **stow it in a cupboard** (§10.3). |
+| **Drag** | 1 turn/step | while held | — | A body is non-solid: walk over it, and **wait while standing on it to take hold** (#451); **you move at half speed while dragging**; **bump the held body to release** (free), or **stow it in a cupboard** (§10.3). |
 
 **Salvaged tech** — found in the facility:
 
@@ -1069,14 +1069,40 @@ Notes carried forward, because they are good and non-obvious:
   bar name every held ability on a single row (§11.4): the bar's width bound is
   checked against it at compile time, so raising the cap is a change the *build*
   has an opinion about (#287).
-- **Drag has no grab button.** A body is non-solid (§7.2), so you cross it like
-  floor; the drag begins the moment you step *off* a cell with a body on it and your
-  hands are free, and the body follows into each cell you vacate. **Bump the trailing
-  body to drop it** (free), or **bump an empty cupboard while dragging to stow the
-  body inside and lock it** (§10.3) — the two ways to end a drag. Half speed holds
-  throughout (one cell per two turns), and **Run never stacks with Drag** — picking a
-  body up suppresses the sprint's extra step. Ducts refuse a dragging player: a body
-  cannot follow into the walls (§10.7), so let it go first.
+- **Drag has no grab button, but it does have a grab *turn*** (#451). A body is
+  non-solid (§7.2), so you cross it like floor — and **waiting while you stand on it
+  takes hold**, if your hands are free. From then on the body follows into each cell
+  you vacate. **Bump the trailing body to drop it** (free), or **bump an empty
+  cupboard while dragging to stow the body inside and lock it** (§10.3) — the two
+  ways to end a drag. Half speed holds throughout (one cell per two turns), and **Run
+  never stacks with Drag**. Ducts refuse a dragging player: a body cannot follow into
+  the walls (§10.7), so let it go first.
+
+  > **It used to ride the step off the body's cell, and that was the wrong shape.**
+  > The grab was something that happened *to* you: you could not walk across a body
+  > at all without picking it up, and the drag that followed costs half speed — so the
+  > accident landed exactly when you least wanted it, mid-escape, over the guard you
+  > had just put down. Making it a spent turn makes it a **decision**, which is what
+  > §7.2's body economy is supposed to be asking of you.
+  >
+  > **The overload is on Wait, and the wait keeps its look.** A take-hold wait still
+  > gives the 360° for that turn: the turn is spent either way and the look costs
+  > nothing to keep, so the verb loses nothing and no new key is invented. The only
+  > consequence is that you cannot wait *over* a body without picking it up — stand a
+  > cell off if that is what you want. Wait is also the verb a player taps most for
+  > information, so the usable line names the new one (`body: wait to take hold`,
+  > §11.4); the hint is the mitigation, not a nicety.
+  >
+  > **It straightens the cupboard sequence.** A takedown made from inside a cupboard
+  > leaves the body next to you, and stowing it used to need a square move — out, off,
+  > back — because the grab only landed on the step *away*. Now it is a straight line:
+  > takedown → step out onto the body → wait → bump the cupboard.
+  >
+  > **The pickup carries no haul debt.** The old grab rode a step, so the player got a
+  > whole cell of movement on the turn they picked up and the weight caught up on the
+  > next one. This one rides a wait — a full turn already paid, and nowhere gone — so
+  > charging the debt on top would charge twice for the same grab. Half speed starts
+  > from the first step, which is where §8.3's "one cell per two turns" lives.
 
 ### 8.4 Targeting
 
@@ -1565,7 +1591,10 @@ stay a future axis.
 > **A cupboard is also where you hide a body (§7.2), and doing so locks it.** Drag a
 > body to a cupboard and **bump the empty cupboard to stow it inside**: the body
 > slides in and is *gone* — no cone will ever find it — and the cupboard is now
-> **locked**. A locked cupboard is no longer a hideout: it holds a body, so you
+> **locked**. From inside a cupboard the whole sequence is a straight line since
+> #451: takedown → step out onto the body → **wait** to take hold → bump the cupboard.
+> It used to need a square move — out, off, and back — because the grab only landed
+> on the step *away* from the body (§8.3). A locked cupboard is no longer a hideout: it holds a body, so you
 > cannot climb in, and bumping it is an inert no-op. It shows the body's **`z`** in
 > the **Neutral** colour (not the empty `}`), so a glance tells you which cupboards you
 > have spent this way — Neutral because that list of three is *the* definition of a
@@ -2003,16 +2032,27 @@ is the case this serves.
   > `message_for` can build, with an explicit, only-ever-shrinking list of the few
   > that predate the bound; an over-long message clips silently on a real screen,
   > which is why the check is a test and not a hope.
-- **Usable line** — *what you can act on*: the bump affordances adjacent to the
-  player right now, each **with an arrow giving the bump's direction** (`↑
+- **Usable line** — *what you can act on*: the affordances available where the
+  player stands, each **with an arrow giving the bump's direction** (`↑
   console: take intel`, `← table: crouch`, `↓ cupboard: hide`, `door: open →`).
   Not a message — a **pure derived function of state**, recomputed every frame, no
-  plumbing. When nothing is adjacent it falls back to the **innate-verb floor**
+  plumbing. When nothing is available it falls back to the **innate-verb floor**
   below rather than sitting empty (#323). The arrow makes each bump an aimed
   "press this way, get that", so even the rare cell beside two usables stays
   unambiguous — one row lists each with its own direction. The generator
   *prefers* one usable per floor cell (§10.6, best-effort) to keep the common
   case to a single line, but does not guarantee it.
+
+  **One entry has no direction** (#451). Taking hold of a body is about the cell the
+  player is standing **on**, and its press is a **wait**, not a bump — so the line
+  carries `body: wait to take hold` with **no arrow at all**, drawn among the centred
+  group where the player's own cell is. An arrow would be a lie in the one channel
+  this row exists to be trusted in: the whole promise of the aimed row is *press
+  towards the words*, and there is nowhere to press. The discipline is unweakened,
+  only widened from *mirror the bump* to **mirror the press** — the entry is derived
+  from the same state the Wait acts on, so it appears exactly when the wait would
+  take hold and never otherwise, and a stunned or phased player is offered it no more
+  than they are offered anything else (§8.3).
 
   **The row is aimed, not packed** (#384): each entry draws where its direction
   points — **west** flush left, **north and south** centred, **east** flush right

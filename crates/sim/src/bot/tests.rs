@@ -284,6 +284,16 @@ fn the_balanced_profile_is_the_default_bot() {
 /// than waving through: the 100-seed batch puts timeouts at 4 in 100 against 3
 /// before, so it is a tail, not a trend.
 ///
+/// **#451 moved exactly one row**, and it is the row it should have moved:
+/// `aggressive 0`, `won 124 rdr` → `won 139 rdrd`. Taking hold of a body became a
+/// wait spent standing on it rather than something that rode the step off its cell,
+/// so every fetch-and-stow costs a turn more — and `aggressive` is the one
+/// temperament here that stows. The other 47 rows are **byte-for-byte unchanged**,
+/// which is the criterion in its sharpest form: a change to the body chain must not
+/// touch the profiles that decline the verb. Fifteen turns and one extra activation
+/// on one seed is a pin moving, not a balance signal; the 100-seed batches in the PR
+/// are what judge the cost.
+///
 /// This list is the bot's play against a fixed game, so a change to the *game*
 /// moves it exactly as a change to the cue seam would — which is why the refresh
 /// belongs in the PR that changed the game, with the deltas read rather than waved
@@ -316,7 +326,7 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "cautious 9 lost 285 rdrdr",
         "cautious 10 lost 795 dcrrrdrdrrdrdrr",
         "cautious 11 lost 224 rrrdrc",
-        "aggressive 0 won 124 rdr",
+        "aggressive 0 won 139 rdrd",
         "aggressive 1 lost 40 r",
         "aggressive 2 lost 110 r",
         "aggressive 3 lost 62 rdcr",
@@ -846,12 +856,24 @@ fn the_striking_profiles_work_the_body_chain() {
              has nothing to react to",
     );
 
-    // The temperaments' actual split is **stowing**, not grabbing. Taking hold is
-    // not a decision — stepping off a body's cell grabs it whether you meant to or
-    // not (§8.3/#187) — so `careless` racks up grabs it immediately undoes, and a
-    // `Drag` count says nothing about temperament on its own. Putting a body
-    // *away* is the decision, and since #381 it has its own §13.2 slot, so the
-    // split is **read off the histogram** rather than replayed and counted by hand.
+    // The temperaments' split is **stowing**, and since #451 the grab is a decision
+    // too — a wait spent standing on the body rather than something that rode the
+    // step off its cell, so `careless` no longer racks up grabs it immediately
+    // undoes. Stowing stays the sharper line, because it is the one that spends a
+    // turn to put a body beyond every cone and locks a cupboard doing it; since #381
+    // it has its own §13.2 slot, so the split is **read off the histogram** rather
+    // than replayed and counted by hand.
+    //
+    // `careless` grabbing nothing is now a *consequence* rather than a coincidence:
+    // it never stows, so it never presses the wait, so it never takes hold. Asserted
+    // below, because it is the clearest reading available that the pickup stopped
+    // being automatic.
+    assert_eq!(
+        careless.count(Verb::Drag),
+        0,
+        "careless took hold of a body it had no intention of putting away — the \
+             pickup is a spent turn now (§8.3/#451), not something a walk-past does",
+    );
     assert!(
         aggressive.count(Verb::Stow) > 0,
         "aggressive never stowed a body — §10.3's deposit-and-lock is unexercised",
@@ -1441,8 +1463,7 @@ fn the_silence_is_the_cores_affordance_and_never_a_terrain_scan() {
             let offered: Option<Direction> = state
                 .affordances()
                 .into_iter()
-                .find(|&(_, a)| a == Affordance::SilenceRadio)
-                .map(|(dir, _)| dir);
+                .find_map(|(dir, a)| (a == Affordance::SilenceRadio).then_some(dir?));
             let input = bot.decide(&state);
             state.step(input);
             if state

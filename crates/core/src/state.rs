@@ -1118,6 +1118,14 @@ impl State {
                 // Resting pays off any haul debt (§8.3 half-speed convention):
                 // the spent turn is the cost either way.
                 self.drag_debt = false;
+                // A wait spent standing on a body with free hands **takes hold**
+                // (§8.3/#451). The look still happens — `waited` is already set, so
+                // the coming sight phase grants its 360° all the same. The turn is
+                // spent either way and the look costs nothing to keep, so the verb
+                // loses nothing and no new key is invented; the only consequence is
+                // that you cannot wait *over* a body without picking it up, and a
+                // cell off is where you stand if that is what you wanted.
+                self.take_body(events);
                 true
             }
             Input::Step(dir) => {
@@ -1542,20 +1550,15 @@ impl State {
         self.player = target;
         self.facing = dir; // facing follows the last successful step (§5)
         events.push(Event::Moved { to: target });
-        // Take hold on the way out (§8.3): stepping *off* a body cell with free hands
-        // starts the drag — the body stays in the vacated cell and follows from here.
-        // The pickup rides this full step; the weight then catches up at half speed
-        // (`drag_debt`), so the next step is spent hauling. A dragging player never
-        // reaches here for a second body (hands are full), and a sprint's extra step
-        // below is suppressed the instant a grab lands, so Run never stacks with Drag
-        // (§8.3/#103).
-        if self.dragging.is_none() {
-            if let Some(i) = self.body_at(vacated) {
-                self.dragging = Some(i);
-                self.drag_debt = true;
-                events.push(Event::BodyGrabbed { at: vacated });
-            }
-        }
+        // **Stepping off a body no longer takes hold** (§8.3/#451). It used to, and the
+        // grab landed on the one turn you least wanted it: you could not cross a body
+        // at all without picking it up, and the drag that followed cost half speed —
+        // so the accident happened mid-escape, over the guard you had just put down.
+        // Taking hold is now a **wait** spent standing on the body ([`take_body`]),
+        // which is a turn you chose to spend. Walking over one is walking over one.
+        //
+        // [`take_body`]: Self::take_body
+        //
         // Stepping onto your own decoy kills it (§8.3) — anything's step does, the
         // maker's included; a sprint checks its second cell too.
         self.stomp_decoy(target, events);
