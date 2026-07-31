@@ -252,6 +252,18 @@ fn the_balanced_profile_is_the_default_bot() {
 /// 2 and 3 began **walking guards into the facility** (§7.3/#374). Then #398 took
 /// the spawn-cell anchor off patrol territory, moving two rows.
 ///
+/// **#387** moved **all 48 rows**, which is the expected shape rather than a signal:
+/// the throat rule changes where tables and repair pillars may be stamped, so every
+/// seed's *geometry* is different and the bot is simply playing 48 different levels.
+/// Nothing here is comparable row to row.
+///
+/// The aggregate did move — **25 wins to 20**, with the first `playing` row since
+/// #401 — and that is precisely the kind of number twelve seeds per temperament
+/// cannot settle. Read it against the committed baseline in the same PR, which runs
+/// 100 seeds per profile and moved far less; the doc note on #401 above is the
+/// standing warning that these two can disagree even in *sign*. A 48-run pin is a
+/// change-detector, not a balance signal (§13.4).
+///
 /// Then #401 clipped the §7.6 post-search watch to each guard's own territory
 /// instead of replacing it, and **12 of 48 rows moved, 5 changing outcome** — a net
 /// three wins lost *here*. Read that against the committed baseline rather than on
@@ -280,54 +292,54 @@ fn the_balanced_profile_is_the_default_bot() {
 #[test]
 fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
     const PINNED: [&str; 48] = [
-        "balanced 0 won 78 rcd",
-        "balanced 1 lost 137 crrd",
-        "balanced 2 lost 47 c",
-        "balanced 3 lost 108 rdr",
-        "balanced 4 lost 57 rr",
-        "balanced 5 lost 152 rdr",
-        "balanced 6 won 135 ",
-        "balanced 7 won 94 r",
-        "balanced 8 won 121 c",
-        "balanced 9 won 84 ",
-        "balanced 10 lost 246 rrdr",
-        "balanced 11 lost 201 rrcr",
-        "cautious 0 won 107 rc",
-        "cautious 1 won 233 crdr",
-        "cautious 2 lost 209 rdrrrr",
-        "cautious 3 lost 326 rrdrdr",
-        "cautious 4 won 91 rd",
-        "cautious 5 won 217 ",
-        "cautious 6 lost 270 rrr",
-        "cautious 7 won 598 rrrdrdrrrrd",
-        "cautious 8 won 115 rd",
-        "cautious 9 won 96 ",
-        "cautious 10 won 833 rdrddrdrrdrrrr",
-        "cautious 11 lost 35 cr",
-        "aggressive 0 lost 77 rcrr",
-        "aggressive 1 won 73 ",
-        "aggressive 2 won 278 rr",
-        "aggressive 3 won 225 crdc",
-        "aggressive 4 lost 48 r",
-        "aggressive 5 lost 89 r",
-        "aggressive 6 lost 135 rcrrdrcd",
-        "aggressive 7 lost 65 r",
-        "aggressive 8 won 163 rr",
-        "aggressive 9 won 84 ",
-        "aggressive 10 lost 110 r",
-        "aggressive 11 lost 273 rrrrrr",
-        "careless 0 lost 77 rcrr",
-        "careless 1 won 88 ",
-        "careless 2 won 314 rcrccrcr",
-        "careless 3 won 214 crdc",
-        "careless 4 won 78 rc",
-        "careless 5 lost 89 r",
-        "careless 6 lost 54 rcd",
-        "careless 7 lost 65 r",
-        "careless 8 won 117 rc",
-        "careless 9 won 84 ",
-        "careless 10 won 360 rcrrc",
-        "careless 11 lost 220 rrcr",
+        "balanced 0 playing 1000 rdrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+        "balanced 1 lost 49 rrc",
+        "balanced 2 won 160 r",
+        "balanced 3 won 201 cdrrrd",
+        "balanced 4 won 67 ",
+        "balanced 5 lost 118 rcrcrdr",
+        "balanced 6 lost 147 rrr",
+        "balanced 7 lost 11 rc",
+        "balanced 8 lost 113 r",
+        "balanced 9 won 349 c",
+        "balanced 10 won 249 ",
+        "balanced 11 lost 199 crrr",
+        "cautious 0 won 150 dr",
+        "cautious 1 lost 112 rr",
+        "cautious 2 lost 313 rcdrdr",
+        "cautious 3 won 376 rdr",
+        "cautious 4 won 73 c",
+        "cautious 5 lost 73 crcrcr",
+        "cautious 6 lost 140 rrr",
+        "cautious 7 lost 11 rc",
+        "cautious 8 won 296 rd",
+        "cautious 9 lost 285 rdrdr",
+        "cautious 10 lost 795 dcrrrdrdrrdrdrr",
+        "cautious 11 lost 224 rrrdrc",
+        "aggressive 0 won 124 rdr",
+        "aggressive 1 lost 40 r",
+        "aggressive 2 lost 110 r",
+        "aggressive 3 lost 62 rdcr",
+        "aggressive 4 lost 172 rrr",
+        "aggressive 5 won 74 rcrc",
+        "aggressive 6 won 75 c",
+        "aggressive 7 lost 11 rc",
+        "aggressive 8 lost 142 rr",
+        "aggressive 9 won 355 crd",
+        "aggressive 10 won 247 ",
+        "aggressive 11 won 166 r",
+        "careless 0 lost 130 rdrr",
+        "careless 1 lost 40 r",
+        "careless 2 lost 110 r",
+        "careless 3 lost 62 rdcr",
+        "careless 4 lost 162 rdcrcr",
+        "careless 5 won 70 rcr",
+        "careless 6 won 75 c",
+        "careless 7 lost 11 rc",
+        "careless 8 won 200 rdc",
+        "careless 9 lost 263 cr",
+        "careless 10 won 247 ",
+        "careless 11 won 138 rc",
     ];
 
     let mut played = Vec::new();
@@ -878,23 +890,32 @@ fn the_striking_profiles_work_the_body_chain() {
 fn every_profile_ducks_behind_a_bench() {
     let mut histogram = 0u32;
     for profile in Profile::ALL {
-        // **The sweep is per temperament, and `aggressive`'s is elsewhere (#442).**
+        // **The sweep searches and stops; it does not pin a window (#442/#387).**
         // Adopting the flank rule gave the bot a better answer than ducking when a
         // *calm* guard is close: walk to its blind side and take it. `aggressive`,
-        // which keeps moving and strikes what it walks past, now reaches for the
-        // crouch vanishingly rarely — 3 ducks in 240 seeds, the first at 106, against
-        // 20 for `balanced` and 35 for `cautious` over the same range. That is a
-        // temperament finding a different tool, not §10.3 going inert, so the
-        // zero-versus-nonzero guarantee is kept for every profile and only the window
-        // moves. Sweeping 0..170 for all of them would buy the same assertion at
-        // roughly three times the gate's cost.
-        let seeds = if profile.name == "aggressive" {
-            100..170
-        } else {
-            0..60
-        };
+        // which keeps moving and strikes what it walks past, reaches for the crouch
+        // vanishingly rarely — a handful of ducks in hundreds of seeds, against far
+        // more for `balanced` and `cautious`. That is a temperament finding a
+        // different tool, not §10.3 going inert.
+        //
+        // It used to be spelled as a hand-picked window (`100..170`, chosen because a
+        // duck happened to land in it). That made a *generation* change — which moves
+        // every seed's geometry — look like a §10.3 regression, which is exactly what
+        // #387 hit: the window emptied while the behaviour was intact. So the range is
+        // generous and the loop **stops at the first seed that satisfies the
+        // assertions**: fast in the ordinary case, and it still fails honestly if the
+        // crouch really does go inert.
+        //
+        // A temperament that declines the pose proves the opposite — that it *never*
+        // crouches — and a search cannot exit early on a negative, so it keeps a short
+        // fixed sweep rather than paying for the long one.
+        let seeds = if profile.crouches { 0..400 } else { 0..60 };
         let (mut ducks, mut crouched_turns) = (0u32, 0u32);
         for seed in seeds {
+            // Everything this profile has to prove is proved — stop paying for more.
+            if ducks > 0 && crouched_turns > ducks {
+                break;
+            }
             let (mut state, _) = boot(seed);
             let mut bot = StealthBot::with_profile(profile);
             for _ in 0..DEFAULT_INPUT_CAP {

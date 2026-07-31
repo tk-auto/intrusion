@@ -1389,7 +1389,18 @@ asserted away (appendix 15). Concretely:
   bench can furnish — the 1-wide lane behind a partition stub — fall back to the
   same cupboard repair.
 - **Cover near doors.** A door you burst through should have something to duck
-  behind on the other side, or bursting through it accomplishes nothing.
+  behind on the other side, or bursting through it accomplishes nothing. **Near, not
+  *in the frame*** (#387): a table or a repair pillar stamped orthogonally against a
+  door cell clogs the one cell everything funnels through, narrows the burst-through
+  to a squeeze, and gives the mouth a doubled usable — `→ door: open` *and*
+  `↑ table: crouch`. Cover a cell or two into the room still serves the
+  burst-through, so the throat rule moves furniture out of the doorway rather than
+  clearing its neighbourhood. It is a **preference**, like the rest of §10.6's
+  placement rules: the bench pass exists to repair a §10.1a sightline and §10.1a
+  outranks the preference, so a last-resort bench may still take the frame rather
+  than fail the carve. Measured over 300 seeds, that fallback is needed on ~2% of
+  them. **Two duct entries, by contrast, are refused outright** — a duct is optional
+  and capped, so refusing a crowded entry costs the next combination, not the level.
 
 A run none of the repairs can break rejects the carve like a reachability
 failure. (**Jogging the corridors** mid-carve — offsetting a corridor a cell or

@@ -33,7 +33,7 @@ use crate::facility::{Facility, Terrain};
 use crate::region::{RegionGraph, RegionId};
 use crate::rng::Rng;
 
-use super::recess_site;
+use super::{creates_usable_conflict, recess_site};
 
 /// How many duct crawlspaces a level gets, at most (§10.7 **[START]**). A *small*
 /// number: ducts are a spice, not the main route — reachability never depends on one
@@ -119,6 +119,22 @@ pub(super) fn place_ducts(
             // entry's recessed backing intact and its mouth the one and only climb-out.
             let mouth_a = mouth_of(ea, wall_a);
             let mouth_b = mouth_of(eb, wall_b);
+            // Don't crowd your own kind (#387). Two checks, and they are not the same
+            // check: entries *shoulder to shoulder* draw as one two-cell `=` and read
+            // as a single wide opening rather than two crawlspaces, while two entries
+            // in *different* walls can share one floor mouth without touching each
+            // other at all — and that cell then offers two `→ duct: enter` bumps.
+            //
+            // Strict rather than preferred, unlike the throat rule on the structural
+            // passes: a duct is optional and capped, and combinations are already tried
+            // shortest-first, so refusing a crowded entry costs the next combination
+            // rather than the carve.
+            if entry_crowded(facility, wall_a, wall_b)
+                || entry_crowded(facility, wall_b, wall_a)
+                || mouth_a == mouth_b
+            {
+                continue;
+            }
             if let Some(path) = route_duct(facility, wall_a, wall_b, mouth_a, mouth_b, &used) {
                 if path.len() < DUCT_MIN_CELLS || path.len() > DUCT_MAX_CELLS {
                     continue;
@@ -141,6 +157,20 @@ pub(super) fn place_ducts(
     }
 
     ducts
+}
+
+/// Whether the entry candidate at `wall` would be **crowded** (#387) — by an entry
+/// already committed, by `other` (the far end of the very duct being placed, which no
+/// grid scan can see yet because neither end is stamped), or by a floor neighbour that
+/// already carries a usable of its own ([`creates_usable_conflict`], the check
+/// [`place_hideouts`] makes at three sites and this pass never did).
+///
+/// Orthogonal only: two entries on a diagonal still read as two separate recesses.
+fn entry_crowded(facility: &Facility, wall: Cell, other: Cell) -> bool {
+    facility
+        .neighbours(wall)
+        .any(|n| n == other || facility.terrain(n) == Some(Terrain::DuctEntry))
+        || creates_usable_conflict(facility, wall)
 }
 
 /// The floor **mouth** of the entry candidate at `wall` — the cached second element of
