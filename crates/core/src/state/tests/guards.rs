@@ -138,21 +138,16 @@ fn a_hidden_body_still_misses_its_ping() {
         Vec::new(),
         Cell::new(10, 10),
     );
-    s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
-    s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
-    s.step(Input::Step(Direction::North)); // stow the body in the cupboard at (5,2)
-    let body = Cell::new(5, 2);
-    assert_eq!(s.bodies()[0].cell(), body);
-    assert_eq!(
-        s.layout().facility().terrain(body),
-        Some(Terrain::Hideout),
-        "the body is hidden in the cupboard",
-    );
-
+    // **Watch from the takedown, not from the stow.** The silence fires exactly once,
+    // on the body's first missed ping, and that ping is on the clock from the moment
+    // the guard goes down — not from the moment the body is put away. Since taking
+    // hold became its own spent turn (#451) the stow sequence is a turn longer, which
+    // is long enough for the ping to land *during* it; a check that only watched the
+    // waits afterwards would miss the one event it is looking for and read as a
+    // regression. So every turn from the takedown on is scanned.
     let mut silenced = false;
-    for _ in 0..4 {
-        for e in s.step(Input::Wait) {
+    let mut watch = |events: Vec<Event>| {
+        for e in events {
             if matches!(e, Event::RadioSilence { .. }) {
                 silenced = true;
             }
@@ -161,6 +156,24 @@ fn a_hidden_body_still_misses_its_ping() {
                 "a hidden body is never found",
             );
         }
+    };
+    watch(s.step(Input::Step(Direction::North))); // takedown: body at (5,4)
+    watch(s.step(Input::Step(Direction::North))); // climb out onto the body
+    watch(s.step(Input::Wait)); // stand on the body: take hold (§8.3/#451)
+    watch(s.step(Input::Step(Direction::North))); // step off to (5,3), hauling
+    watch(s.step(Input::Step(Direction::North))); // stow it in the cupboard at (5,2)
+    let body = Cell::new(5, 2);
+    assert_eq!(s.bodies()[0].cell(), body);
+    assert_eq!(
+        s.layout().facility().terrain(body),
+        Some(Terrain::Hideout),
+        "the body is hidden in the cupboard",
+    );
+
+    // A whole radio period on top, so the ping is caught whatever phase of the clock
+    // the stow sequence happened to end on.
+    for _ in 0..radio::RadioClock::from_period(5).period() {
+        watch(s.step(Input::Wait));
     }
     assert!(silenced, "the hidden body still missed its ping (§7.3)");
     assert!(!s.bodies()[0].found(), "confusion, not cancellation");
@@ -190,7 +203,8 @@ fn dragging_a_body_sends_the_responder_to_the_empty_takedown_site() {
 
     s.step(Input::Step(Direction::North)); // takedown at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::North)); // step off to (5,3), hauling
     s.step(Input::Step(Direction::North)); // the hold costs its turn (§8.3)
     s.step(Input::Step(Direction::North)); // haul: player to (5,2), body to (5,3)
 
@@ -414,7 +428,7 @@ fn an_unaware_adjacent_guard_is_taken_down_leaving_a_body() {
     );
     assert_eq!(
         s.affordances(),
-        vec![(Direction::North, Affordance::Takedown)],
+        vec![(Some(Direction::North), Affordance::Takedown)],
         "the usable line offers the takedown (§11.4)",
     );
 
@@ -487,7 +501,7 @@ fn a_guard_is_taken_down_from_directly_behind_on_open_floor() {
     );
     assert_eq!(
         s.affordances(),
-        vec![(Direction::South, Affordance::Takedown)],
+        vec![(Some(Direction::South), Affordance::Takedown)],
         "the usable line offers the takedown from directly behind (§11.4)",
     );
 
@@ -548,7 +562,7 @@ fn a_calm_guards_flank_offers_the_takedown() {
     );
     assert_eq!(
         s.affordances(),
-        vec![(Direction::East, Affordance::Takedown)],
+        vec![(Some(Direction::East), Affordance::Takedown)],
         "the usable line offers the flank takedown (§11.4)",
     );
 
@@ -2769,7 +2783,8 @@ fn a_stowed_body_calls_nobody() {
 
     s.step(Input::Step(Direction::North)); // takedown at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::North)); // step off to (5,3), hauling
     s.step(Input::Step(Direction::North)); // the hold costs its turn (§8.3)
     s.step(Input::Step(Direction::North)); // stow it in the cupboard at (5,2)
     assert_eq!(

@@ -333,7 +333,8 @@ fn you_cannot_enter_a_duct_while_dragging_a_body() {
     // Take the guard down from concealment, then pick up the body and carry it east.
     s.step(Input::Step(Direction::North)); // takedown at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body at (5,4)
-    s.step(Input::Step(Direction::East)); // step off — take hold; player (6,4)
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::East)); // step off, hauling; player (6,4)
     assert!(s.dragging().is_some());
     assert_eq!(s.player(), Cell::new(6, 4));
 
@@ -355,7 +356,7 @@ fn the_usable_line_offers_duct_enter_at_a_mouth() {
     assert!(
         s.affordances()
             .iter()
-            .any(|&(dir, a)| dir == Direction::North && a == Affordance::EnterDuct),
+            .any(|&(dir, a)| dir == Some(Direction::North) && a == Affordance::EnterDuct),
         "the mouth offers duct: enter",
     );
     s.step(Input::Step(Direction::North)); // climb in

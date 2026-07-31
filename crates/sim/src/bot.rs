@@ -628,10 +628,11 @@ impl StealthBot {
     /// Deal with the body **in hand** (§8.3): haul it to a cupboard and stow it, or
     /// let it go. `None` with empty hands, which is the usual case.
     ///
-    /// The grab itself is never a decision — stepping off a body's cell takes hold of
-    /// it automatically (§8.3/#187) — so a temperament that does not stow cannot
-    /// express that by standing still. It has to *act*, by letting go, which is why
-    /// [`body_stow_reach`](Profile::body_stow_reach) of zero still reaches this code.
+    /// The grab **is** a decision since #451 — a wait spent standing on the body —
+    /// but a temperament that does not stow still cannot express that by standing
+    /// still, because a body already in hand has to be put down. It has to *act*, by
+    /// letting go, which is why [`body_stow_reach`](Profile::body_stow_reach) of zero
+    /// still reaches this code.
     fn haul(
         &mut self,
         state: &State,
@@ -672,10 +673,12 @@ impl StealthBot {
     /// stows. `None` for one that does not, and none when there is nothing worth the
     /// walk.
     ///
-    /// Two steps, because the grab is the step *off* a body's cell (#187): get on it,
-    /// then leave in the direction of the cupboard, and the pickup rides that step for
-    /// free. A body only counts as worth fetching when there is somewhere to *put* it —
-    /// hauling one to nowhere is turns spent making the run slower and no quieter.
+    /// **Three turns since #451**: walk onto the body, **wait** to take hold, then
+    /// leave in the direction of the cupboard. It was two — the grab rode the step
+    /// *off* the cell (#187) and cost nothing — and the middle turn is the price the
+    /// ticket set on making the pickup a decision. A body only counts as worth
+    /// fetching when there is somewhere to *put* it: hauling one to nowhere is turns
+    /// spent making the run slower and no quieter, and that is one turn truer now.
     fn fetch(
         &self,
         state: &State,
@@ -691,22 +694,18 @@ impl StealthBot {
         if shelters.is_empty() {
             return None;
         }
-        // Already standing on one: any step from here takes hold, so make it the step
-        // that starts the haul — toward the cupboard, but never **into** it. Bumping a
-        // cupboard with empty hands climbs in to hide (§10.3) rather than stowing, and
-        // the body would still be lying on the floor outside.
+        // Already standing on one: **wait, and take hold** (§8.3/#451). This is the
+        // whole of the bot's half of that change. The pickup used to ride the step
+        // *off* the body, so this branch stepped toward the cupboard and the grab came
+        // free; now it is its own spent turn, and a bot that kept stepping would walk
+        // off the body and leave it lying there for ever.
+        //
+        // Pressing the same key core acts on, rather than modelling the rule: the wait
+        // takes hold if and only if core says it would, which is the seam
+        // `docs/bot-behaviour.md` §2 asks for.
         let loose = findable_bodies(state);
         if loose.contains(&player) {
-            return self
-                .descend_avoiding(
-                    state,
-                    &shelters,
-                    danger,
-                    blocked,
-                    self.profile.flee,
-                    &shelters,
-                )
-                .map(Input::Step);
+            return Some(Input::Wait);
         }
         let worth: Vec<Cell> = loose
             .into_iter()
@@ -783,8 +782,13 @@ impl StealthBot {
         state
             .affordances()
             .into_iter()
-            .find(|&(_, a)| a == Affordance::SilenceRadio)
-            .map(|(dir, _)| Input::Step(dir))
+            // The direction is an `Option` since #451 — the line carries one
+            // standing-on entry that has none — but `SilenceRadio` is a bump, so a
+            // `None` here would be core contradicting itself. `find_map` reads the
+            // direction rather than asserting it, and a shape that cannot happen
+            // simply yields no press.
+            .find_map(|(dir, a)| (a == Affordance::SilenceRadio).then_some(dir?))
+            .map(Input::Step)
     }
 
     /// Pursue the objective — nearest known untaken console, then the exit — or, when
@@ -1292,12 +1296,13 @@ fn near_findable_body(bodies: &[Cell], hideout: Cell) -> bool {
 /// — bumping an aware guard is a wasted, refused turn (§7.2), whereas an *unaware*
 /// one is left out so the takedown stays available.
 ///
-/// **Bodies are deliberately not here** (§7.2/#187). They used to be, on the strength
-/// of a comment calling them solid; they have not been since bodies went
-/// pickup-on-walk, and routing round one cost the bot the only way to *take hold* of
-/// it — the grab is the step **off** a body's cell, so a bot that will not stand on a
-/// body can never drag one (#316). The single exception is the door-crush rule, which
-/// is core's business and not a routing question.
+/// **Bodies are deliberately not here** (§7.2/#187/#451). They used to be, on the
+/// strength of a comment calling them solid; they have not been since bodies went
+/// non-solid, and routing round one costs the bot the only way to *take hold* of it —
+/// the grab is a wait spent **standing on** the body, so a bot that will not stand on
+/// one can never drag one (#316), and that is truer now than when the grab merely
+/// rode the step away. The single exception is the door-crush rule, which is core's
+/// business and not a routing question.
 fn blocked_cells(state: &State) -> HashSet<Cell> {
     let mut cells = HashSet::new();
     for guard in state.guards() {
@@ -1323,7 +1328,7 @@ fn blocked_cells(state: &State) -> HashSet<Cell> {
 /// cell, so springing one from a dead end — a cupboard, a one-wide stub — whose *only*
 /// way out held that guard walled the mouth and stranded the bot for the run. **That
 /// hazard no longer exists.** #187 made a loose body non-solid: the mouth stays
-/// walkable, and stepping over it on the way out takes hold of it (§8.3). The rule
+/// walkable, and the bot can stand on it and wait to take hold (§8.3/#451). The rule
 /// outlived its reason by four days and went on suppressing every takedown the bot was
 /// ever offered — all of them this exact shape, a hidden bot with a patrol on its
 /// cupboard door (#316).

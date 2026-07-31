@@ -1,11 +1,30 @@
 //! The **usable line** (§11.4): what you can act on from where you stand.
 //!
-//! One row directly under the near line, listing the bump affordances
-//! ([`State::affordances`](crate::State::affordances)) adjacent to the player
-//! right now — each with an arrow giving the bump's direction — or, when nothing
-//! is adjacent, the innate-verb floor (#323). Like the rest of the render it is a
+//! One row directly under the near line, listing the affordances
+//! ([`State::affordances`](crate::State::affordances)) available where the player
+//! stands right now — each bump with an arrow giving its direction — or, when there
+//! is nothing, the innate-verb floor (#323). Like the rest of the render it is a
 //! **pure derived function of state**, recomputed every frame with nothing to
 //! clear (§11.1/§11.4).
+//!
+//! # One entry has no direction (#451)
+//!
+//! Taking hold of a body is about the cell the player is standing **on**, and its
+//! press is a **wait**, not a bump — so it arrives here with `None` for a direction
+//! and draws its words with no arrow, in the centred group where the player's own
+//! cell is. An arrow would be a lie in the one channel this row exists to be trusted
+//! in: the compass below promises *press towards the words*, and there is nowhere to
+//! press.
+//!
+//! Its label is `body: wait to grab` — **`wait`** rather than a clock glyph, because
+//! §11.3's table has no glyph for *this costs a turn* and the shipped font stack falls
+//! back to a generic `monospace` on some devices, where an unguaranteed codepoint
+//! comes out as tofu in the one row whose job is to teach a verb.
+//!
+//! It started life as `body: wait to take hold`, and at 23 of the v1 board's 40 cells
+//! (§10.2) it clipped the entry beside it on a real phone. [`LABEL_MAX`] is the guard
+//! that fell out of that: every label is measured against the row at compile time, so
+//! the next one that wide fails the build instead of a screenshot.
 //!
 //! # The row is a compass (§11.4, #384)
 //!
@@ -78,6 +97,34 @@ const fn hint_width(hint: [&str; 2]) -> u32 {
     MARGIN + hint_cells(hint[0]) + SEGMENT_GAP + hint_cells(hint[1])
 }
 
+/// **The widest label the row is built around**, in cells (§11.4/#451). Every
+/// affordance label is checked against it at compile time below.
+///
+/// The number is the longest label the v1 row was designed with — `exit: needs the
+/// intel` — rather than something derived, because there is no clean derivation to
+/// have: §11.4 already accepts that **two** long labels overrun a 40-wide board and
+/// falls back to the packed list for them, so a bound that guaranteed any *pair* fits
+/// would forbid labels the row has always carried. What this bound is actually for is
+/// the case that bit #451: a single label so much wider than the rest that pairs
+/// which used to fit start clipping on a real screen.
+const LABEL_MAX: u32 = 21;
+
+/// The bound bites here, over the complete set (§2.3 — a check that cannot be
+/// bypassed by adding an affordance, because [`Affordance::ALL`] is what
+/// `every_affordance_is_in_all` holds exhaustive).
+const _: () = {
+    let mut i = 0;
+    while i < Affordance::ALL.len() {
+        assert!(
+            hint_cells(Affordance::ALL[i].label()) <= LABEL_MAX,
+            "a usable-line label is wider than the row is built for — shorten it \
+             (see LABEL_MAX in render::usable). A label this wide clips the entry \
+             beside it on the v1 board (§10.2).",
+        );
+        i += 1;
+    }
+};
+
 /// **Both hints must fit the board they are drawn on**, the way the ability bar's
 /// worst case does (#287): a hint clipped mid-word teaches nothing, and discovering
 /// that in a screenshot is discovering it too late. Rewording either variant past
@@ -134,15 +181,20 @@ fn arrow(dir: Direction) -> char {
     }
 }
 
-/// Which of the row's three aimed groups a bump direction belongs to (#384): west
-/// flush left, north and south centred, east flush right. The index is also the
+/// Which of the row's three aimed groups a press belongs to (#384): west flush
+/// left, north and south centred, east flush right. The index is also the
 /// left-to-right order the groups are placed in, which is what makes the collision
 /// check in [`aimed_starts`] a single forward sweep.
-fn group_of(dir: Direction) -> usize {
+///
+/// A **standing-on** entry (`None`, #451) joins the centre group, which is where the
+/// player's own cell is: the row is a compass around them, so the thing under their
+/// feet belongs at the middle of it. That is also the group that carries no left or
+/// right lean, which is the honest place for an entry with no direction at all.
+fn group_of(dir: Option<Direction>) -> usize {
     match dir {
-        Direction::West => 0,
-        Direction::North | Direction::South => 1,
-        Direction::East => 2,
+        Some(Direction::West) => 0,
+        Some(Direction::North) | Some(Direction::South) | None => 1,
+        Some(Direction::East) => 2,
     }
 }
 
@@ -150,10 +202,18 @@ fn group_of(dir: Direction) -> usize {
 /// except the east, where it **trails** so that it points off the right edge — the
 /// mirror of the west entry's arrow pointing off the left. Either way it is the
 /// same glyph and the same width, so a group's arithmetic does not care which.
-fn entry(dir: Direction, a: Affordance) -> (String, Category) {
+///
+/// A **standing-on** entry (`None`, #451) draws its words alone. An arrow would be a
+/// lie in the one channel this row exists to be trusted in — the whole promise of the
+/// aimed row is *press towards the words*, and there is no direction to press: the
+/// entry is about the cell underfoot and its press is a wait. Bare words are what
+/// "no direction" looks like, and the label says the verb out loud (`body: wait to
+/// take hold`) so nothing is left to the arrow to carry.
+fn entry(dir: Option<Direction>, a: Affordance) -> (String, Category) {
     let text = match dir {
-        Direction::East => format!("{} {}", a.label(), arrow(dir)),
-        _ => format!("{} {}", arrow(dir), a.label()),
+        Some(Direction::East) => format!("{} {}", a.label(), arrow(Direction::East)),
+        Some(d) => format!("{} {}", arrow(d), a.label()),
+        None => a.label().to_string(),
     };
     (text, a.category())
 }
@@ -246,7 +306,7 @@ fn draw_group(
 /// message (§11.4/§11.7).
 pub(super) fn usable_row(
     width: u32,
-    affordances: &[(Direction, Affordance)],
+    affordances: &[(Option<Direction>, Affordance)],
     modality: InputModality,
 ) -> Vec<GlyphCell> {
     if affordances.is_empty() {
@@ -270,7 +330,13 @@ pub(super) fn usable_row(
         // leading, clipped at the row's edge by `status_row` as it always was.
         let packed: Vec<(String, Category)> = affordances
             .iter()
-            .map(|&(dir, a)| (format!("{} {}", arrow(dir), a.label()), a.category()))
+            .map(|&(dir, a)| {
+                let text = match dir {
+                    Some(d) => format!("{} {}", arrow(d), a.label()),
+                    None => a.label().to_string(),
+                };
+                (text, a.category())
+            })
             .collect();
         return status_row(width, 1, width, &packed, None);
     };
@@ -330,13 +396,13 @@ mod tests {
     /// each, so a group measured in bytes aims every entry wrong.
     #[test]
     fn a_groups_width_counts_cells_not_bytes() {
-        let one = vec![entry(Direction::West, Affordance::OpenDoor)];
+        let one = vec![entry(Some(Direction::West), Affordance::OpenDoor)];
         assert_eq!(group_width(&one), hint_cells("← door: open"));
         assert_eq!(group_width(&one), 12);
 
         let pair = vec![
-            entry(Direction::North, Affordance::TakeIntel),
-            entry(Direction::South, Affordance::Hide),
+            entry(Some(Direction::North), Affordance::TakeIntel),
+            entry(Some(Direction::South), Affordance::Hide),
         ];
         assert_eq!(
             group_width(&pair),
@@ -349,30 +415,30 @@ mod tests {
     #[test]
     fn the_east_entry_trails_its_arrow() {
         assert_eq!(
-            entry(Direction::East, Affordance::OpenDoor).0,
+            entry(Some(Direction::East), Affordance::OpenDoor).0,
             "door: open →"
         );
         assert_eq!(
-            entry(Direction::West, Affordance::OpenDoor).0,
+            entry(Some(Direction::West), Affordance::OpenDoor).0,
             "← door: open"
         );
         assert_eq!(
-            entry(Direction::North, Affordance::Crouch).0,
+            entry(Some(Direction::North), Affordance::Crouch).0,
             "↑ table: crouch"
         );
         assert_eq!(
-            entry(Direction::South, Affordance::Crouch).0,
+            entry(Some(Direction::South), Affordance::Crouch).0,
             "↓ table: crouch"
         );
         // The category is the affordance's own, whichever way the arrow points.
         assert_eq!(
-            entry(Direction::East, Affordance::TakeIntel).1,
+            entry(Some(Direction::East), Affordance::TakeIntel).1,
             Affordance::TakeIntel.category()
         );
     }
 
     /// The whole row, as text, for each shape it can take.
-    fn row(width: u32, affordances: &[(Direction, Affordance)]) -> String {
+    fn row(width: u32, affordances: &[(Option<Direction>, Affordance)]) -> String {
         usable_row(width, affordances, InputModality::Keys)
             .iter()
             .map(|c| c.glyph)
@@ -383,15 +449,15 @@ mod tests {
     #[test]
     fn each_entry_is_placed_where_its_arrow_points() {
         assert_eq!(
-            row(40, &[(Direction::West, Affordance::OpenDoor)]),
+            row(40, &[(Some(Direction::West), Affordance::OpenDoor)]),
             " ← door: open                           "
         );
         assert_eq!(
-            row(40, &[(Direction::East, Affordance::OpenDoor)]),
+            row(40, &[(Some(Direction::East), Affordance::OpenDoor)]),
             "                           door: open → "
         );
         assert_eq!(
-            row(40, &[(Direction::North, Affordance::Crouch)]),
+            row(40, &[(Some(Direction::North), Affordance::Crouch)]),
             "            ↑ table: crouch             "
         );
         // North and south are centred as one group, the row's own gap between them.
@@ -399,8 +465,8 @@ mod tests {
             row(
                 40,
                 &[
-                    (Direction::North, Affordance::Crouch),
-                    (Direction::South, Affordance::Hide),
+                    (Some(Direction::North), Affordance::Crouch),
+                    (Some(Direction::South), Affordance::Hide),
                 ]
             ),
             "   ↑ table: crouch  ↓ cupboard: hide    "
@@ -411,10 +477,10 @@ mod tests {
         let all = row(
             80,
             &[
-                (Direction::North, Affordance::Hide),
-                (Direction::East, Affordance::OpenDoor),
-                (Direction::South, Affordance::Crouch),
-                (Direction::West, Affordance::EnterDuct),
+                (Some(Direction::North), Affordance::Hide),
+                (Some(Direction::East), Affordance::OpenDoor),
+                (Some(Direction::South), Affordance::Crouch),
+                (Some(Direction::West), Affordance::EnterDuct),
             ],
         );
         assert!(all.starts_with(" ← duct: enter"), "{all:?}");
@@ -428,10 +494,10 @@ mod tests {
     #[test]
     fn an_overrun_row_falls_back_to_packing() {
         let crowded = [
-            (Direction::North, Affordance::SilenceRadio),
-            (Direction::East, Affordance::ExitRefused),
-            (Direction::South, Affordance::StoreBody),
-            (Direction::West, Affordance::Takedown),
+            (Some(Direction::North), Affordance::SilenceRadio),
+            (Some(Direction::East), Affordance::ExitRefused),
+            (Some(Direction::South), Affordance::StoreBody),
+            (Some(Direction::West), Affordance::Takedown),
         ];
         let packed = row(40, &crowded);
         assert!(
@@ -447,8 +513,8 @@ mod tests {
         // Two long entries are already enough to overrun the v1 board (§10.2), so
         // the packed path is what a real crowded cell gets.
         let two = [
-            (Direction::West, Affordance::SilenceRadio),
-            (Direction::East, Affordance::ExitRefused),
+            (Some(Direction::West), Affordance::SilenceRadio),
+            (Some(Direction::East), Affordance::ExitRefused),
         ];
         assert!(
             row(40, &two).starts_with(" ← comms: silence radio  → exit"),
@@ -489,8 +555,8 @@ mod tests {
         let cells = usable_row(
             40,
             &[
-                (Direction::East, Affordance::TakeIntel),
-                (Direction::West, Affordance::Crouch),
+                (Some(Direction::East), Affordance::TakeIntel),
+                (Some(Direction::West), Affordance::Crouch),
             ],
             InputModality::Keys,
         );
@@ -504,5 +570,100 @@ mod tests {
             .expect("the east entry trails an arrow");
         assert_eq!(cells[intel].fg, Affordance::TakeIntel.category());
         assert_eq!(intel as u32, 40 - MARGIN - 1);
+    }
+
+    /// §11.4/#451: the **standing-on** entry draws its words with **no arrow**, and
+    /// draws them in the centred group — where the player's own cell is on a row that
+    /// is a compass around them.
+    ///
+    /// The absent arrow is the assertion that matters. The aimed row's whole promise
+    /// is *press towards the words*, and this entry's press is a wait: an arrow would
+    /// be a lie in the one channel this row exists to be trusted in.
+    #[test]
+    fn the_standing_on_entry_draws_centred_and_without_an_arrow() {
+        assert_eq!(
+            entry(None, Affordance::TakeBody).0,
+            "body: wait to grab",
+            "words alone — no arrow to press towards",
+        );
+        assert_eq!(group_of(None), 1, "the centre, where the player stands");
+
+        let row = row(40, &[(None, Affordance::TakeBody)]);
+        assert!(
+            !row.contains('↑') && !row.contains('↓') && !row.contains('←') && !row.contains('→'),
+            "no arrow anywhere on the row: {row:?}",
+        );
+        assert!(row.contains("body: wait to grab"), "{row:?}");
+        // Centred on the row, not packed against the left margin.
+        let start = row.find("body:").expect("the entry is drawn") as u32;
+        assert_eq!(start, (40 - hint_cells("body: wait to grab")) / 2);
+    }
+
+    /// **The regression #451's first label caused, pinned** (§11.4/§10.2).
+    ///
+    /// It shipped as `body: wait to take hold` — 23 of the v1 board's 40 cells — and
+    /// a row carrying it beside `→ cupboard: hide` came to 42 cells and **clipped**
+    /// on a real phone: `body: wait to take hold  → cupboard: hi`. The label is now
+    /// `body: wait to grab` at 18, and the pair fits with cells to spare.
+    ///
+    /// What is asserted is the thing that actually went wrong: **both entries survive
+    /// whole**. A width comparison alone would not have caught it — the packed row
+    /// was the right layout, it was simply too long for the board and `status_row`
+    /// clips in silence.
+    #[test]
+    fn a_shared_row_keeps_both_entries_whole() {
+        let take = hint_cells("body: wait to grab");
+        assert_eq!(take, 18, "the label the row is sized for");
+        assert!(take <= LABEL_MAX, "and it is inside the compile-time bound");
+
+        let row = row(
+            40,
+            &[
+                (None, Affordance::TakeBody),
+                (Some(Direction::East), Affordance::Hide),
+            ],
+        );
+        assert!(
+            row.contains("body: wait to grab"),
+            "the standing-on entry is whole: {row:?}",
+        );
+        assert!(
+            row.contains("cupboard: hide"),
+            "…and so is the entry beside it — this is the clip that shipped: {row:?}",
+        );
+        assert_eq!(
+            row.chars().count(),
+            40,
+            "the row is exactly the board's width",
+        );
+    }
+
+    /// The aimed layout is still refused for this pair, and the packed fallback is
+    /// still what draws it — the #384 rule doing its job rather than a case of its
+    /// own. Separated from the clip assertion above because they fail for different
+    /// reasons and a reader should be able to tell which broke.
+    #[test]
+    fn the_standing_on_entry_still_packs_beside_an_aimed_one() {
+        let take = hint_cells("body: wait to grab");
+        assert_eq!(
+            aimed_starts(40, [hint_cells("← table: crouch"), take, 0]),
+            None,
+            "a west entry and an 18-cell centre cannot both keep their aim",
+        );
+        let row = row(
+            40,
+            &[
+                (None, Affordance::TakeBody),
+                (Some(Direction::West), Affordance::Crouch),
+            ],
+        );
+        assert!(
+            row.starts_with(" body:"),
+            "packed from the left, no arrow invented for it: {row:?}",
+        );
+        assert!(
+            row.contains('←'),
+            "and the aimed entry keeps its arrow: {row:?}"
+        );
     }
 }

@@ -129,10 +129,10 @@ fn ambient_reports_dragging_as_owned() {
     );
     s.step(Input::Step(Direction::North)); // takedown
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::East)); // step off — take hold: the message turn
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451) — the message turn
     assert_eq!(near_line(&s).text, "you take hold of the body");
 
-    s.step(Input::Wait); // the message clears to the held state
+    s.step(Input::Step(Direction::East)); // step off, hauling: the message clears
     let line = near_line(&s);
     assert_eq!(line.text, "dragging the body — half speed");
     assert_eq!(line.category, Category::Owned);

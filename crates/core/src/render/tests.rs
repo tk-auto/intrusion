@@ -549,7 +549,8 @@ fn a_dragged_body_reads_owned_and_a_stowed_one_reads_neutral() {
     );
     s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::West)); // step off to (4,4), hauling
     assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
 
     // Look around (Wait's 360°) to see the body behind you: yours, an Owned `z`.
@@ -604,7 +605,8 @@ fn an_occupied_cupboard_is_owned_and_a_spent_one_is_not() {
 
     s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::West)); // step off to (4,4), hauling
     s.step(Input::Step(Direction::West)); // stow into the cupboard at (3,4)
     let spent = render(&s).get(3, 4);
     assert_eq!(
@@ -634,7 +636,8 @@ fn a_stowed_cupboard_is_remembered_out_of_view() {
     );
     s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::West)); // step off to (4,4), hauling
     s.step(Input::Step(Direction::West)); // stow into the cupboard at (3,4)
     assert_eq!(
         s.bodies()[0].cell(),

@@ -263,9 +263,9 @@ fn affordances_mirror_what_a_bump_would_do() {
     assert_eq!(
         s.affordances(),
         vec![
-            (Direction::North, Affordance::ExitRefused),
-            (Direction::East, Affordance::TakeIntel),
-            (Direction::West, Affordance::Hide)
+            (Some(Direction::North), Affordance::ExitRefused),
+            (Some(Direction::East), Affordance::TakeIntel),
+            (Some(Direction::West), Affordance::Hide)
         ],
         "Direction::ALL order: north, east, … west"
     );
@@ -275,8 +275,8 @@ fn affordances_mirror_what_a_bump_would_do() {
     assert_eq!(
         s.affordances(),
         vec![
-            (Direction::North, Affordance::Leave),
-            (Direction::West, Affordance::Hide)
+            (Some(Direction::North), Affordance::Leave),
+            (Some(Direction::West), Affordance::Hide)
         ],
         "a spent console offers nothing; the exit now offers the win"
     );
@@ -309,7 +309,10 @@ fn affordances_skip_guards_and_occupied_hideouts() {
         Cell::new(10, 10),
     );
     // Enter the cupboard north; the guard east never shows.
-    assert_eq!(s.affordances(), vec![(Direction::North, Affordance::Hide)]);
+    assert_eq!(
+        s.affordances(),
+        vec![(Some(Direction::North), Affordance::Hide)]
+    );
     s.step(Input::Step(Direction::North));
     assert!(s.hidden());
 
@@ -1079,7 +1082,7 @@ fn the_opening_look_offers_the_console_behind_you() {
     );
     assert_eq!(
         s.affordances(),
-        vec![(Direction::South, Affordance::TakeIntel)],
+        vec![(Some(Direction::South), Affordance::TakeIntel)],
         "the opening look offers the bump behind you",
     );
 

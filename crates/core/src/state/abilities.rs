@@ -171,9 +171,9 @@ impl State {
     /// at one cell rather than auto-bumping (no door flung open, no takedown, no
     /// climb — a sprint never triggers an interaction the player didn't aim, the
     /// §8.4 no-auto-target spirit). A loose body is non-solid (§7.2), so the
-    /// sprint runs straight over it — and never picks it up, since taking hold is
-    /// the deliberate step *off* a body's cell, which the extra step is not. It
-    /// sets facing like any move
+    /// sprint runs straight over it — and never picks it up, since taking hold is a
+    /// wait spent standing on the body (§8.3/#451) and a sprint is the opposite of
+    /// standing still. It sets facing like any move
     /// (trivially: the same direction) and the whole two-cell step is one spent
     /// turn, so guards still get exactly one turn — the only speed asymmetry in
     /// the game (§7.1: guards never accelerate; §8.3: watch this pair).
@@ -194,6 +194,46 @@ impl State {
         self.player = target;
         events.push(Event::Moved { to: target });
         self.stomp_decoy(target, events);
+    }
+
+    /// Take hold of the body under the player's feet (§8.3/#451) — the drag's
+    /// deliberate start. A no-op with full hands, or standing anywhere there is no
+    /// loose body.
+    ///
+    /// Called from the [`Input::Wait`](crate::Input::Wait) arm, and from nowhere else:
+    /// the pickup **is** the wait. It used to ride the step *off* a body's cell, which
+    /// made it something that happened *to* the player — you could not cross a body
+    /// without picking it up, and the half-speed drag that followed landed exactly
+    /// when you least wanted it.
+    ///
+    /// # No haul debt on the pickup
+    ///
+    /// The old grab set [`drag_debt`](Self::drag_debt), because it rode a step: the
+    /// player got a *whole cell of movement* on the turn they picked the body up, so
+    /// the weight had to catch up on the next one. This one rides a wait — the player
+    /// has already paid a full turn and gone nowhere — so charging the debt on top
+    /// would charge twice for the same grab, and the drag would start with the player
+    /// standing still for two turns before the body had moved at all. The debt is what
+    /// makes a *step* cost double; a turn spent not stepping is not one of those.
+    ///
+    /// Half speed is unchanged from the first step onward: [`haul_body_to`] sets the
+    /// debt on every move that actually hauls the body, which is where §8.3's *"one
+    /// cell per two turns"* comes from and where it stays.
+    ///
+    /// [`haul_body_to`]: Self::haul_body_to
+    pub(super) fn take_body(&mut self, events: &mut Vec<Event>) {
+        // **Not while phased** (§8.3): the whole "cannot bump" rule is that you pass
+        // straight through everything you came for, and a body is one of those things
+        // — you are inside its cell, not standing on it. The usable line reads the
+        // same predicate ([`take_body_offered`](Self::take_body_offered)), so the
+        // silence there and the no-op here are one decision.
+        if self.dragging.is_some() || self.abilities.effect_active(Effect::Phase) {
+            return;
+        }
+        if let Some(i) = self.body_at(self.player) {
+            self.dragging = Some(i);
+            events.push(Event::BodyGrabbed { at: self.player });
+        }
     }
 
     /// Haul the dragged body — if any — into `vacated`, the cell the player is
