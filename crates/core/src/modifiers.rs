@@ -308,6 +308,77 @@ const INTEL_GATE_NONE: ActiveModifier = ActiveModifier {
     detail: Some("none required"),
 };
 
+/// One **toggle** modifier, as the §12.6 difficulty draw sees it (#297): the caption
+/// that already names it and states its direction, plus the field it flips.
+///
+/// The direction is declared **once**, on the caption, and the draw reads it from
+/// there — there is no second hand-kept list of "the harder ones" that could come to
+/// disagree with the field's own documentation.
+pub(crate) struct Toggle {
+    /// The caption this toggle contributes to [`LevelModifiers::active`], and so —
+    /// through [`ActiveModifier::direction`] — the way it bends the run.
+    pub(crate) caption: ActiveModifier,
+    /// Switch this toggle on. A `fn` pointer rather than a field offset, so the table
+    /// below stays plain data that a `const` can hold.
+    pub(crate) set: fn(&mut LevelModifiers),
+}
+
+/// **The directed pool** (§12.6/#297): every toggle the difficulty draw may pick,
+/// listed in the permanent slot order [`modifier_slots`](crate::level_seed) encodes.
+/// A new modifier joins the pool by taking a row here beside the caption that
+/// declares its direction.
+///
+/// Two things are deliberately *not* in it. The **retired** slot 5 (#442) is not a
+/// modifier any more — it asks for the rule the level already plays, so drawing it
+/// would spend a pick on nothing. And the **intel gate** is not a toggle: it is a
+/// bounded knob whose baseline quick play already sets to [`IntelGate::All`], and
+/// [`LevelModifiers::union`] composes it *harder-ward*, so an easier draw could not
+/// relax it without the draw learning to replace a knob rather than compose with it.
+/// Relaxing the gate is therefore a decision the pool does not quietly make; the
+/// easier side stays thin until the pool is enriched.
+pub(crate) const TOGGLES: [Toggle; 5] = [
+    Toggle {
+        caption: SEARCHES_HIDEOUTS,
+        set: |m| m.guards_always_search_hideouts = true,
+    },
+    Toggle {
+        caption: CALLS_IN_SIGHTINGS,
+        set: |m| m.sighting_lost_calls_a_guard = true,
+    },
+    Toggle {
+        caption: CALLS_IN_BODIES,
+        set: |m| m.body_found_calls_two_guards = true,
+    },
+    Toggle {
+        caption: SHOWS_ALL_CONES,
+        set: |m| m.always_show_vision_cones = true,
+    },
+    Toggle {
+        caption: KNOWS_FULL_LAYOUT,
+        set: |m| m.full_layout_known = true,
+    },
+];
+
+/// How many toggles in the pool bend a run `direction`-wards — the size the draw
+/// takes what it can from when it is asked for more picks than exist.
+pub(crate) const fn pool_size(direction: ModifierDirection) -> usize {
+    let mut size = 0;
+    let mut i = 0;
+    while i < TOGGLES.len() {
+        // `PartialEq` is not `const`; the enum is fieldless, so pattern-match instead.
+        let same = matches!(
+            (TOGGLES[i].caption.direction, direction),
+            (ModifierDirection::Harder, ModifierDirection::Harder)
+                | (ModifierDirection::Easier, ModifierDirection::Easier)
+        );
+        if same {
+            size += 1;
+        }
+        i += 1;
+    }
+    size
+}
+
 impl LevelModifiers {
     /// The modifiers **active** for this run, each described for display (#248):
     /// every field sitting off its baseline, in reading order. The baseline
@@ -626,6 +697,43 @@ mod tests {
                 .iter()
                 .any(|m| m.name.contains("cone only") || m.detail == Some("flanks blind")),
             "the retired slot must never surface a caption",
+        );
+    }
+
+    /// The §12.6 directed pool (#297) and [`LevelModifiers::active`] describe the
+    /// **same** toggles: switching a pool entry on surfaces exactly that entry's
+    /// caption and nothing else. This is what keeps the pool from becoming the second
+    /// hand-kept list the ticket set out to avoid — a caption that drifted from the
+    /// field its `set` flips fails here rather than in a draw nobody reads.
+    #[test]
+    fn every_pool_entry_flips_exactly_the_modifier_its_caption_names() {
+        for toggle in &TOGGLES {
+            let mut modifiers = LevelModifiers::default();
+            (toggle.set)(&mut modifiers);
+            assert_eq!(
+                modifiers.active(),
+                vec![toggle.caption],
+                "{} flipped something else",
+                toggle.caption.name,
+            );
+        }
+        // The pool covers every live toggle: the fields, less the retired slot 5,
+        // which asks for the rule the level plays regardless (#442).
+        assert_eq!(TOGGLES.len(), 5);
+        assert_eq!(pool_size(ModifierDirection::Harder), 3);
+        assert_eq!(pool_size(ModifierDirection::Easier), 2);
+        assert_eq!(
+            pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
+            TOGGLES.len(),
+            "every pool entry has a direction the draw can ask for",
+        );
+        // The intel gate stays out of the pool — it is a knob, not a toggle, and no
+        // entry may claim its caption (see [`TOGGLES`]).
+        assert!(
+            !TOGGLES
+                .iter()
+                .any(|t| t.caption.name == INTEL_GATE_ALL.name),
+            "the intel gate is not a pool toggle",
         );
     }
 

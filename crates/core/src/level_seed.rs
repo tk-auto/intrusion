@@ -82,6 +82,7 @@
 
 use crate::ability::{AbilityId, Loadout};
 use crate::cell::Direction;
+use crate::difficulty::Difficulty;
 use crate::generate::{generate_level, GenError};
 use crate::modifiers::{IntelGate, LevelModifiers};
 use crate::place::LevelConfig;
@@ -361,12 +362,30 @@ impl LevelSeed {
     /// always yields the same quick-play run — which is why a bare seed can stand in
     /// for the whole token.
     pub fn quick_play(seed: u64) -> Self {
+        Self::quick_play_at(seed, Difficulty::Standard)
+    }
+
+    /// Quick play for `seed` at a **difficulty** (§12.6/#297): the preset above, with
+    /// the modifiers [`Difficulty::draw`] picks for the level composed on top.
+    ///
+    /// [`Difficulty::Standard`] draws nothing, so this *is*
+    /// [`quick_play`](Self::quick_play) — the axis costs the baseline nothing. The
+    /// draw resolves here, before the run boots, and what the [`LevelSeed`] carries
+    /// on is the **resolved set**: the difficulty number needs no field in the token
+    /// and a shared token still reproduces the run exactly (§12.4).
+    ///
+    /// Composition is [`LevelModifiers::union`], the one rule §12.6 gives for putting
+    /// two contributions together — so an easier draw *adds* what it reveals rather
+    /// than relaxing the base's [`IntelGate::All`], which union composes harder-ward
+    /// and the pool therefore leaves alone.
+    pub fn quick_play_at(seed: u64, difficulty: Difficulty) -> Self {
         Self {
             seed,
             modifiers: LevelModifiers {
                 intel_to_exit: IntelGate::All,
                 ..LevelModifiers::default()
-            },
+            }
+            .union(difficulty.draw(seed)),
             abilities: quick_play_loadout(seed),
         }
     }
@@ -962,6 +981,46 @@ mod tests {
         );
         // The pool now outgrows the grant, so the loadout is a strict subset.
         assert_ne!(level.abilities, Loadout::full(), "not every tech is held");
+    }
+
+    /// The **difficulty axis over quick play** (§12.6/#297): the level draws its
+    /// modifiers onto the preset, the baseline draws nothing, and — the part that
+    /// matters for the format — the resolved set round-trips through the token with
+    /// **no new field**. The difficulty number is not carried because it does not need
+    /// to be: it is spent before the run boots, and what a shared token hands over is
+    /// the run itself rather than a recipe for re-rolling one.
+    #[test]
+    fn a_difficulty_draws_onto_quick_play_and_still_fits_the_token() {
+        for seed in [0, 42, 8371, SEED_SPACE - 1] {
+            // The baseline is quick play exactly — the axis costs it nothing.
+            assert_eq!(
+                LevelSeed::quick_play_at(seed, Difficulty::Standard),
+                LevelSeed::quick_play(seed),
+            );
+            for position in Difficulty::ALL {
+                let level = LevelSeed::quick_play_at(seed, position);
+                // The seed and the loadout are untouched: only the rules differ, so
+                // the ±N arms of a comparison are the same building (§12.4).
+                assert_eq!(level.seed, seed);
+                assert_eq!(level.abilities, LevelSeed::quick_play(seed).abilities);
+                // Quick play's objective survives every draw: `union` composes the
+                // gate harder-ward, and the pool holds no knob that could relax it.
+                assert_eq!(level.modifiers.intel_to_exit, IntelGate::All);
+                // The drawn toggles are on top of the preset, and the whole set is
+                // still a config the token can carry — no new field, same width.
+                assert_eq!(level.modifiers.active().len(), position.picks() + 1);
+                let token = token(level);
+                assert_eq!(token.len(), TOKEN_LEN);
+                assert_eq!(
+                    LevelSeed::decode(&token),
+                    Some(level),
+                    "{position:?} at seed {seed} does not round-trip",
+                );
+                // …and the run it boots plays under exactly those rules.
+                let state = start_level(&level).expect("the v1 recipe places");
+                assert_eq!(state.modifiers(), level.modifiers);
+            }
+        }
     }
 
     /// The sim preset (§13.3): the baseline gate ([`IntelGate::AtLeastOne`]) and the
