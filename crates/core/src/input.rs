@@ -153,9 +153,16 @@ pub enum MenuNav {
     /// Choose the selected entry — start the run, or open the seed prompt. A
     /// disabled entry (§14 v2/v3) does nothing.
     Activate,
-    /// Step back out of the seed prompt to the entry list. On the list itself there
+    /// Step back out of a sub-screen to the entry list. On the list itself there
     /// is nowhere further back — the menu *is* the root — so it does nothing there.
     Back,
+    /// Nudge the level-options difficulty slider one stop **easier** (§12.6/#298).
+    /// Named for what it does to the control rather than for the key's direction:
+    /// `←` and a west swipe are two spellings of the same intent, and the slider
+    /// clamps at its ends rather than wrapping.
+    Easier,
+    /// Nudge the difficulty slider one stop **harder**.
+    Harder,
     /// Flip the colour theme from the title screen (§11.2/#189) — the same
     /// [`UiCommand::ToggleTheme`] the board and the help panel answer. The menu is
     /// the first thing a load puts on screen, so it is where a player who cannot
@@ -177,6 +184,11 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
     match key {
         "ArrowUp" => Some(MenuNav::Prev),
         "ArrowDown" => Some(MenuNav::Next),
+        // The horizontal pair drives the level-options slider (#298), and only it —
+        // the entry list has nothing to nudge, so the shell drops them there. Same
+        // spelling as everywhere else: `←` is towards the easier end.
+        "ArrowLeft" => Some(MenuNav::Easier),
+        "ArrowRight" => Some(MenuNav::Harder),
         "Enter" | " " => Some(MenuNav::Activate),
         "Escape" => Some(MenuNav::Back),
         // The theme toggle reaches every modal screen (#189), here as on the help
@@ -291,7 +303,7 @@ pub fn input_for_gesture(gesture: Gesture) -> Option<Input> {
 /// #336) — the touch half of [`menu_nav_for_key`], and the reason a title screen
 /// can be walked by finger at all.
 ///
-/// The list is vertical, so it takes the vertical swipes and nothing else: up is
+/// The list is vertical, so it takes the vertical swipes: up is
 /// [`Prev`](MenuNav::Prev), down is [`Next`](MenuNav::Next), the same spelling the
 /// arrows have one table up. Wrapping and the skipping of disabled entries are the
 /// *menu's* rules, not the gesture's — both commands go through the same handler
@@ -308,6 +320,11 @@ pub fn menu_nav_for_gesture(gesture: Gesture) -> Option<MenuNav> {
     match gesture {
         Gesture::Swipe(Direction::North) => Some(MenuNav::Prev),
         Gesture::Swipe(Direction::South) => Some(MenuNav::Next),
+        // The horizontal swipes set the level-options slider (#298), the touch twin
+        // of `←`/`→` — the one control on the menu that is a *value* rather than a
+        // choice, and the one a swipe reads naturally as nudging.
+        Gesture::Swipe(Direction::West) => Some(MenuNav::Easier),
+        Gesture::Swipe(Direction::East) => Some(MenuNav::Harder),
         _ => None,
     }
 }
@@ -553,21 +570,22 @@ mod tests {
             );
         }
         assert_eq!(menu_nav_for_key("Escape"), Some(MenuNav::Back));
+        // The horizontal pair sets the level-options slider (#298) — `←` towards the
+        // easier end, the same spelling every other left/right on the menu has. The
+        // *screen* decides whether there is anything to set: the shell drops them on
+        // the entry list, which has no value on it to nudge.
+        assert_eq!(
+            menu_nav_for_key("ArrowLeft"),
+            Some(MenuNav::Easier),
+            "← eases"
+        );
+        assert_eq!(
+            menu_nav_for_key("ArrowRight"),
+            Some(MenuNav::Harder),
+            "→ hardens"
+        );
         // A key the game would otherwise own is swallowed by the open menu.
-        for key in [
-            "ArrowLeft",
-            "h",
-            "j",
-            "k",
-            "l",
-            "w",
-            "5",
-            "r",
-            "t",
-            "m",
-            "?",
-            "Tab",
-        ] {
+        for key in ["h", "j", "k", "l", "w", "5", "r", "t", "m", "?", "Tab"] {
             assert_eq!(
                 menu_nav_for_key(key),
                 None,
@@ -719,6 +737,17 @@ mod tests {
             menu_nav_for_key("ArrowDown"),
         );
 
+        // …and the horizontal swipes set the level-options slider (#298), the same
+        // pair `←`/`→` set, so the dialog is driveable by finger and by key alike.
+        assert_eq!(
+            menu_nav_for_gesture(Gesture::Swipe(Direction::West)),
+            menu_nav_for_key("ArrowLeft"),
+        );
+        assert_eq!(
+            menu_nav_for_gesture(Gesture::Swipe(Direction::East)),
+            menu_nav_for_key("ArrowRight"),
+        );
+
         // The help panel: a horizontal tab bar, walked by the horizontal swipes.
         assert_eq!(
             help_nav_for_gesture(Gesture::Swipe(Direction::West)),
@@ -739,11 +768,20 @@ mod tests {
     fn a_press_activates_nothing_on_a_modal_screen() {
         assert_eq!(menu_nav_for_gesture(Gesture::Press), None);
         assert_eq!(help_nav_for_gesture(Gesture::Press), None);
-        // And neither list answers the axis it does not run along, so a swipe across
-        // a vertical menu is silence rather than a guess.
+        // The horizontal swipes on the menu set a *value* (#298) and never fire a
+        // control, so the restraint above survives the level-options dialog: no
+        // gesture on the menu starts a run.
         for direction in [Direction::East, Direction::West] {
-            assert_eq!(menu_nav_for_gesture(Gesture::Swipe(direction)), None);
+            assert!(
+                matches!(
+                    menu_nav_for_gesture(Gesture::Swipe(direction)),
+                    Some(MenuNav::Easier | MenuNav::Harder),
+                ),
+                "a horizontal swipe may only move the slider",
+            );
         }
+        // The help panel answers only the axis its tab bar runs along, so a swipe up
+        // a horizontal bar is silence rather than a guess.
         for direction in [Direction::North, Direction::South] {
             assert_eq!(help_nav_for_gesture(Gesture::Swipe(direction)), None);
         }

@@ -58,14 +58,20 @@ if (!canvas) {
   process.exit(1);
 }
 // An unbaked live build opens on the title screen (#268), where the arrows would
-// only move a selection. Screenshot the menu, then press Enter on Quick play so the
-// checks below exercise the real game. A build with a baked seed (or a replay) is
-// already in its run and reports no menu, so this is skipped.
+// only move a selection. Screenshot the menu, then walk the two-Enter fast path into
+// a run so the checks below exercise the real game: Quick play opens the level-options
+// dialog (#298), whose Play control is selected by default. A build with a baked seed
+// (or a replay) is already in its run and reports no menu, so this is skipped.
 const screen = () => page.evaluate(() => document.body.dataset.screen ?? "");
 if ((await screen()) === "menu") {
   await page.screenshot({ path: resolve(shotsDir, "menu.png") });
   await page.keyboard.press("Enter");
   await page.waitForTimeout(500);
+  if ((await screen()) === "options") {
+    await page.screenshot({ path: resolve(shotsDir, "options.png") });
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+  }
   const now = await screen();
   if (now !== "play") {
     console.error(`verify: FAIL — Quick play did not start a run (screen "${now}")`);
