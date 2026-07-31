@@ -238,10 +238,10 @@ impl Grid {
 /// Terrain splits into the design's layers. **Geometry** — walls, floor, hinges,
 /// door *positions*, and the exit (the door you came in by, §4.5, and the anchor of
 /// every escape plan, §7.6) — draws as-is from turn one, never fogged. **Contents**
-/// — a console, a hideout — draw only inside the current FOV or, once their cell is
-/// in tile memory, as [`Visibility::Remembered`]; never seen, the cell masks as the
-/// geometry naturally in its place (floor under a console, wall over a hideout
-/// alcove — the scouting reward of §11.5a). **Live state** — guards, and a door's
+/// — a console, a hideout, a duct mouth — draw only inside the current FOV or, once
+/// their cell is in tile memory, as [`Visibility::Remembered`]; never seen, the cell
+/// masks as the geometry naturally in its place (floor under a console, wall over a
+/// hideout alcove or a duct mouth — the scouting reward of §11.5a). **Live state** — guards, and a door's
 /// open/closed pose — draws only inside the FOV and is never remembered: an
 /// out-of-view panel always shows its canonical closed `+`, whatever it really is.
 /// The one exception is a guard's *position*, known through walls within the
@@ -719,6 +719,28 @@ struct Fogged {
 /// by (§4.5), the one piece of this building that is theirs and that they could
 /// not fail to know. It keeps its `E` and its Interest tint from turn one, and
 /// goes on anchoring every escape plan (§7.6).
+///
+/// # Geometry versus contents, in the *explored* half
+///
+/// The second match below asks a different question from the schematic's, and the
+/// two do not partition the same way (`docs/render-reference.md` §3). Here the
+/// question is **which ink a cell keeps once it leaves your sight**: the row's dim
+/// shade, or the memory slate that says *you found this*.
+///
+/// **Contents take the slate** — intel, comms, cupboards, and duct mouths (#450).
+/// The slate earns its distinctness by being rare, so the set is the handful of
+/// things worth a mark on a plan. A duct mouth belongs among them because §10.7
+/// makes a duct an escape a pursuer cannot follow: a mouth scouted is a route you
+/// plan with, in the way §2.3's exit anchors every escape plan. Drawn as geometry it
+/// took the shared dim gray — the very colour a wall dims to — and a route found
+/// read as one more piece of building the moment you looked away.
+///
+/// **Doors and furniture take the dim shade**, and that is the render's decision
+/// rather than an oversight. A door's *pose* is live state, redrawn canonically
+/// closed every frame out of view, so a slate door would be a memory colour on a
+/// drawing that is not a memory. And doors are everywhere: slating all of them would
+/// bury the two or three marks that change a plan under a building's worth of
+/// doorways. A colour that marks everything marks nothing.
 fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
     let vis = if explored {
         Visibility::Explored
@@ -770,7 +792,6 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         | Terrain::Wall
         | Terrain::DoorHinge
         | Terrain::Exit
-        | Terrain::DuctEntry
         | Terrain::PartialCover => real(terrain),
         // A door's *position* is known once explored, but its open/closed pose is
         // live state, never remembered: out of view a panel draws canonically closed.
@@ -779,16 +800,35 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         // (§7.3/§7.7) is contents like the intel console: the counterplay it offers
         // has to be *found*, so the map never advertises it before the player has
         // scouted the room.
-        Terrain::Console | Terrain::CommsConsole | Terrain::Hideout if explored => Fogged {
-            shown: terrain,
-            vis: Visibility::Remembered,
-            schematic: false,
-        },
+        //
+        // A **duct mouth** is contents too (#450), and for the reason the layer table
+        // gives it: it is a route you plan with. §10.7 makes a duct an escape a
+        // pursuer cannot follow, so a mouth found once is worth as much to the plan as
+        // the cupboard beside it — and drawn as geometry it took the shared dim gray
+        // and read as one more wall the moment you looked away. The memory slate is
+        // what says *you found this*.
+        Terrain::Console | Terrain::CommsConsole | Terrain::Hideout | Terrain::DuctEntry
+            if explored =>
+        {
+            Fogged {
+                shown: terrain,
+                vis: Visibility::Remembered,
+                schematic: false,
+            }
+        }
         // Layout handed over but the cell never seen: the content is still hidden,
         // masked by the geometry naturally in its place. The modifier buys the
         // architecture, never the objectives.
         Terrain::Console | Terrain::CommsConsole => real(Terrain::Floor),
         Terrain::Hideout => real(Terrain::Wall),
+        // The one content the modifier **does** hand over, and deliberately left that
+        // way by #450: a mouth is cut into the fabric and reads off a plan the way a
+        // doorway does, which is why `full_layout_known` has always drawn it (§12.6,
+        // and the modifier's own row in §11.5a). Being remembered once scouted is a
+        // change to what *finding* one is worth; it is not an argument for taking it
+        // off the plans, and quietly narrowing an *easier*-direction modifier is a
+        // difficulty change wearing a render fix's clothes.
+        Terrain::DuctEntry => real(terrain),
     }
 }
 

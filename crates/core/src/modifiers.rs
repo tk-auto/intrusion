@@ -160,6 +160,13 @@ pub struct LevelModifiers {
     /// only. The knowledge state on the seam stays truthful either way: an
     /// unexplored cell still reports itself unexplored, it is simply drawn in full.
     ///
+    /// **The duct mouth is the one content on the plans**, and stays one (#450). It
+    /// is a recess cut into the fabric and reads off a drawing the way a doorway
+    /// does, which is why this modifier has always handed it over. #450 made a mouth
+    /// *remembered* once scouted — a change to what finding one is worth — and left
+    /// that alone deliberately: quietly narrowing an easier-direction modifier is a
+    /// difficulty change wearing a render fix's clothes.
+    ///
     /// **It has to be paid for.** Route-planning through unscouted wings is a real
     /// advantage, so this sits on the *easier* side of the §12.6 directed pool: under
     /// the difficulty draw it spends budget that must be found by taking a harder
