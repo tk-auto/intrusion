@@ -25,7 +25,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use intrusion_core::{LevelSeed, MenuEntry, MenuHit, MenuNav, MenuUi, ScreenUi, UiCommand};
+use intrusion_core::{
+    LevelSeed, MenuEntry, MenuHit, MenuNav, MenuScreen, MenuUi, ScreenUi, UiCommand,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -86,6 +88,12 @@ fn set_screen(screen: &str) {
     }
 }
 
+/// Whether the **entry list** is the surface showing — the screen whose selection
+/// the list keys walk. On any sub-screen they belong to that screen instead.
+fn on_list(menu: MenuUi) -> bool {
+    menu.screen == MenuScreen::Entries
+}
+
 /// The menu half of [`Game`] — the input side, like [`crate::input`] for play.
 impl Game {
     /// The menu's view state, or `None` once a run is playing.
@@ -103,20 +111,20 @@ impl Game {
         match nav {
             // The list walks only while the list is showing: with the seed prompt up,
             // up/down belong to the text box, not to a selection nobody can see.
-            MenuNav::Prev if !menu.seed_entry => self.select(menu.selected.prev()),
-            MenuNav::Next if !menu.seed_entry => self.select(menu.selected.next()),
-            MenuNav::Activate if !menu.seed_entry => self.choose(menu.selected),
+            MenuNav::Prev if on_list(menu) => self.select(menu.selected.prev()),
+            MenuNav::Next if on_list(menu) => self.select(menu.selected.next()),
+            MenuNav::Activate if on_list(menu) => self.choose(menu.selected),
             // Held back on the seed prompt, where `n` is an ordinary letter of the
             // token being typed (§13.1/#245): the box has the keyboard there, and a
             // key that recoloured the screen mid-token would be a trap, not an
             // option. On the list it is the same free view toggle as everywhere else.
-            MenuNav::ToggleTheme if !menu.seed_entry => {
+            MenuNav::ToggleTheme if on_list(menu) => {
                 self.apply_ui_command(UiCommand::ToggleTheme);
                 self.draw();
             }
             // Back out of the seed prompt. On the list itself there is nowhere
             // further back — the menu is the root — so Escape there does nothing.
-            MenuNav::Back if menu.seed_entry => self.show_entries(),
+            MenuNav::Back if !on_list(menu) => self.show_entries(),
             _ => {}
         }
     }
@@ -160,7 +168,7 @@ impl Game {
     /// to be typed into.
     fn show_seed_prompt(&mut self) {
         if let Some(menu) = self.ui.menu.as_mut() {
-            menu.seed_entry = true;
+            menu.screen = MenuScreen::SeedPrompt;
         }
         self.draw();
         set_screen(SCREEN_SEED);
@@ -170,7 +178,7 @@ impl Game {
     /// Return from the seed prompt to the entry list, hiding the box again.
     fn show_entries(&mut self) {
         if let Some(menu) = self.ui.menu.as_mut() {
-            menu.seed_entry = false;
+            menu.screen = MenuScreen::Entries;
         }
         self.draw();
         set_screen(SCREEN_MENU);

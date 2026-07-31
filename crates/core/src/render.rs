@@ -836,7 +836,7 @@ pub use hud::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, is_help_button,
     render_screen, InputModality, ScreenUi, BOTTOM_ROWS, TOP_ROWS,
 };
-pub use menu::{menu_hit, MenuEntry, MenuHit, MenuUi};
+pub use menu::{menu_hit, MenuEntry, MenuHit, MenuScreen, MenuUi};
 #[cfg(test)]
 pub(crate) use message_log::near_line_text_max;
 pub use message_log::{is_message_button, message_log_rows};

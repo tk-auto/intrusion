@@ -99,6 +99,25 @@ impl MenuEntry {
     }
 }
 
+/// Which of the title screen's surfaces is showing (#268).
+///
+/// The menu is a small stack of full screens rather than one screen with flags: an
+/// enum makes "the entry list and the seed prompt at once" unrepresentable, where a
+/// second `bool` beside the first would make it merely unlikely. Every surface is
+/// drawn by [`render_menu`], hit-tested by [`menu_hit`], and reached and left through
+/// the shell's one [`MenuNav`](crate::MenuNav) handler.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MenuScreen {
+    /// The **entry list** — the title block and [`MenuEntry::ALL`]. The root: there
+    /// is nowhere further back from it.
+    #[default]
+    Entries,
+    /// The **seed prompt** — the sub-screen [`MenuEntry::SeedPlay`] opens, where the
+    /// DOM text box takes a level-seed token. Escape (or the box's own *back* button)
+    /// returns to the list.
+    SeedPrompt,
+}
+
 /// The menu's **view state**, owned by the shell exactly like
 /// [`ScreenUi`](super::ScreenUi) — it changes no world and costs no turn (§12.1).
 /// A shell keeps `Some(MenuUi)` on [`ScreenUi::menu`](super::ScreenUi::menu) while
@@ -108,10 +127,18 @@ pub struct MenuUi {
     /// Which entry the selection marker rests on. The [`Default`] is
     /// [`MenuEntry::QuickPlay`], so a load is one Enter (or one tap) from playing.
     pub selected: MenuEntry,
-    /// Whether the **seed prompt** is showing instead of the entry list — the
-    /// sub-screen [`MenuEntry::SeedPlay`] opens, where the DOM text box takes a
-    /// level-seed token. Escape (or the box's own *back* button) clears it.
-    pub seed_entry: bool,
+    /// Which surface is showing. The [`Default`] is
+    /// [`MenuScreen::Entries`](MenuScreen::Entries), the screen a load opens on.
+    pub screen: MenuScreen,
+}
+
+impl MenuUi {
+    /// Whether the seed prompt is the surface showing — the one question most of this
+    /// module asks of [`screen`](Self::screen), kept as a name rather than a
+    /// comparison repeated at a dozen sites.
+    fn seed_prompt(self) -> bool {
+        self.screen == MenuScreen::SeedPrompt
+    }
 }
 
 /// The title, spaced out — the one piece of ornament on the screen. Spacing the
@@ -256,7 +283,7 @@ pub enum MenuHit {
 /// and a theme control under a floating text box is a control half hidden.
 #[must_use]
 pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<MenuHit> {
-    if ui.seed_entry {
+    if ui.seed_prompt() {
         return None;
     }
     if height > 0 && y == height - 1 {
@@ -274,7 +301,7 @@ pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<M
 /// not an overlay, so the shell paints it through the one path it paints a frame
 /// with and nothing of the game shows behind it.
 ///
-/// Two screens, one for each state of [`MenuUi::seed_entry`]:
+/// One screen per [`MenuScreen`]:
 ///
 /// - the **entry list** — the title block centred, the four entries with the
 ///   selection marker, and the footer that names both ways to choose;
@@ -289,7 +316,7 @@ pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<M
 /// for a row, that row shows what fits and stops.
 pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     let mut grid = blank_grid(width, height);
-    let (title_row, tagline_row, heading_row) = if ui.seed_entry {
+    let (title_row, tagline_row, heading_row) = if ui.seed_prompt() {
         seed_rows(height)
     } else {
         rows(height)
@@ -298,7 +325,7 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     draw_centred(&mut grid, title_row, TITLE, Category::Interest);
     draw_centred(&mut grid, tagline_row, TAGLINE, Category::Ground);
 
-    if ui.seed_entry {
+    if ui.seed_prompt() {
         draw_seed_prompt(&mut grid, heading_row);
     } else {
         let column = entry_column(width);
@@ -323,7 +350,7 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     }
 
     let footer_row = height.saturating_sub(1);
-    let footer = if ui.seed_entry {
+    let footer = if ui.seed_prompt() {
         SEED_FOOTER
     } else {
         MENU_FOOTER
@@ -339,7 +366,7 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     // (#189) — label and key together in System, so the word is visibly part of the
     // button and is a target in its own right. Not on the seed prompt: the DOM text
     // box floats over that screen, and a control it might cover is worse than none.
-    if !ui.seed_entry {
+    if !ui.seed_prompt() {
         draw(
             &mut grid,
             theme_control_start(width),
@@ -379,7 +406,15 @@ mod tests {
     fn menu(selected: MenuEntry) -> MenuUi {
         MenuUi {
             selected,
-            seed_entry: false,
+            screen: MenuScreen::Entries,
+        }
+    }
+
+    /// The seed prompt, at the default selection.
+    fn seed_prompt() -> MenuUi {
+        MenuUi {
+            screen: MenuScreen::SeedPrompt,
+            ..MenuUi::default()
         }
     }
 
@@ -554,10 +589,7 @@ mod tests {
     /// *back* button as the way out (§11.6's no-trap rule) and nothing else.
     #[test]
     fn the_seed_prompt_carries_no_theme_control() {
-        let ui = MenuUi {
-            seed_entry: true,
-            ..MenuUi::default()
-        };
+        let ui = seed_prompt();
         let start = theme_control_start(W);
         for x in start..start + theme_control_len() {
             assert_eq!(menu_hit(W, H, ui, x, H - 1), None, "footer cell {x}");
@@ -598,10 +630,7 @@ mod tests {
     /// present and correct.
     #[test]
     fn the_seed_prompt_instructs_and_keeps_the_middle_clear() {
-        let ui = MenuUi {
-            seed_entry: true,
-            ..MenuUi::default()
-        };
+        let ui = seed_prompt();
         let rows = render_menu(W, H, ui).to_text();
         let (title, tagline, heading) = seed_rows(H);
         let row = |y: u32| rows[y as usize].trim().to_string();
@@ -653,14 +682,7 @@ mod tests {
     fn every_screen_spells_out_the_way_on() {
         let list = text_of(&render_menu(W, H, MenuUi::default()));
         assert!(list.contains(MENU_FOOTER), "{list}");
-        let prompt = text_of(&render_menu(
-            W,
-            H,
-            MenuUi {
-                seed_entry: true,
-                ..MenuUi::default()
-            },
-        ));
+        let prompt = text_of(&render_menu(W, H, seed_prompt()));
         assert!(prompt.contains(SEED_FOOTER), "{prompt}");
     }
 
@@ -671,14 +693,7 @@ mod tests {
         for (w, h) in [(1, 1), (8, 4), (12, 7)] {
             let grid = render_menu(w, h, MenuUi::default());
             assert_eq!((grid.width(), grid.height()), (w, h));
-            let seeded = render_menu(
-                w,
-                h,
-                MenuUi {
-                    seed_entry: true,
-                    ..MenuUi::default()
-                },
-            );
+            let seeded = render_menu(w, h, seed_prompt());
             assert_eq!((seeded.width(), seeded.height()), (w, h));
         }
     }
