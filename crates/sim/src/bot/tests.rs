@@ -284,6 +284,16 @@ fn the_balanced_profile_is_the_default_bot() {
 /// than waving through: the 100-seed batch puts timeouts at 4 in 100 against 3
 /// before, so it is a tail, not a trend.
 ///
+/// **#451 moved exactly one row**, and it is the row it should have moved:
+/// `aggressive 0`, `won 124 rdr` → `won 139 rdrd`. Taking hold of a body became a
+/// wait spent standing on it rather than something that rode the step off its cell,
+/// so every fetch-and-stow costs a turn more — and `aggressive` is the one
+/// temperament here that stows. The other 47 rows are **byte-for-byte unchanged**,
+/// which is the criterion in its sharpest form: a change to the body chain must not
+/// touch the profiles that decline the verb. Fifteen turns and one extra activation
+/// on one seed is a pin moving, not a balance signal; the 100-seed batches in the PR
+/// are what judge the cost.
+///
 /// **#452 moved all 48 rows, and it is the one case where that means nothing at all.**
 /// Making automatic doors a level modifier dropped the per-doorway RNG draw, which
 /// shifts the generation stream — so every seed carves a *different facility* and the
@@ -294,6 +304,14 @@ fn the_balanced_profile_is_the_default_bot() {
 /// change-detector, not a balance signal (§13.4) — and against a re-rolled level set
 /// it is not even that, only a new reference point.
 ///
+/// **Merging #451 and #452 moved four more rows**, all `aggressive`/`careless` and
+/// none of them a win/loss flip: the extra turn a fetch now costs (#451) lands on
+/// levels #452 re-carved, so the two interact only where a profile both stows a body
+/// and meets a different building. `careless 6` is the one to watch — it now reaches
+/// the input cap still playing (`lost 252` → `playing 999`), the second `playing`
+/// row this pin carries. Neither branch produced it alone, which is exactly what a
+/// change-detector is for; the committed baseline refreshed on the merged tree is
+/// what says whether the timeout tail actually grew.
 /// This list is the bot's play against a fixed game, so a change to the *game*
 /// moves it exactly as a change to the cue seam would — which is why the refresh
 /// belongs in the PR that changed the game, with the deltas read rather than waved
@@ -330,21 +348,21 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
         "aggressive 1 won 129 r",
         "aggressive 2 won 129 ",
         "aggressive 3 lost 110 rr",
-        "aggressive 4 lost 148 rcrcrdrcrc",
+        "aggressive 4 lost 116 rcrcrrdc",
         "aggressive 5 lost 13 rc",
-        "aggressive 6 lost 48 rc",
+        "aggressive 6 lost 98 rccrd",
         "aggressive 7 won 53 ",
         "aggressive 8 lost 70 rdrc",
         "aggressive 9 won 62 ",
         "aggressive 10 lost 44 r",
-        "aggressive 11 lost 66 rrdr",
+        "aggressive 11 lost 174 rrdrcrdrr",
         "careless 0 lost 65 rrc",
         "careless 1 lost 89 r",
         "careless 2 won 129 ",
         "careless 3 lost 110 rr",
         "careless 4 lost 46 r",
         "careless 5 lost 13 rc",
-        "careless 6 lost 252 rcrcrcrcrcr",
+        "careless 6 playing 999 rcrcrcrcrcr",
         "careless 7 won 53 ",
         "careless 8 lost 109 rcrrr",
         "careless 9 won 62 ",
@@ -575,11 +593,28 @@ fn every_confusion_is_fired_at_a_guard_it_catches() {
 /// (`phase_eject_stun`, core's `state/abilities.rs`), which makes `stunned() == 0`
 /// over a batch an exact statement that it never fired — a much sharper assertion
 /// than counting crossings. Two policies hold it up together: the cue only wants a
-/// **one-cell** crossing (in at turn 1, out at 2, of a 3-turn duration), and
-/// leaving the wall outranks every other plan while the bot is in one.
+/// **one-cell** crossing (in at turn 1, out at 2, with a turn of the four-turn
+/// window spare since #449), and leaving the wall outranks every other plan while
+/// the bot is in one.
+///
+/// **A third policy joined them when #452's levels were re-carved: a phased step is
+/// only as safe as the cell it *ends* on.** Run is innate, so the bot can be
+/// sprinting and phased at once — nothing forbids holding both — and then one press
+/// moves two cells, the second chosen by the sprint rule rather than by the bot.
+/// Seed 25 (`balanced`) is the witness: fleeing a chaser on open floor with one turn
+/// of phase left, it stepped south onto floor and the free second cell carried it
+/// into the wall behind, where the duration expired. Phased there is no bump to stop
+/// it at the wall, which is what makes the one-cell check insufficient rather than
+/// merely optimistic. Neither branch produced this alone — #449's window and #452's
+/// carve had to meet.
+///
+/// The `sprinted` counter is what keeps that half honest. Without it the batch could
+/// quietly stop ever holding both at once and go on passing while proving only the
+/// original two policies.
 #[test]
 fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
     let mut crossings = 0;
+    let mut sprinted = 0;
     for seed in 0..40 {
         for profile in Profile::ALL {
             let (state, _) = boot(seed);
@@ -592,6 +627,17 @@ fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
                 let input = bot.decide(&state);
                 if input == Input::Activate(AbilityId::Dephase) {
                     crossings += 1;
+                }
+                let phased = matches!(
+                    state.ability_state(AbilityId::Dephase),
+                    AbilityState::Active { .. }
+                );
+                let sprinting = matches!(
+                    state.ability_state(AbilityId::Run),
+                    AbilityState::Active { .. }
+                );
+                if phased && sprinting {
+                    sprinted += 1;
                 }
                 state.step(input);
                 assert_eq!(
@@ -608,6 +654,11 @@ fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
     assert!(
         crossings > 0,
         "no phase in 40 seeds × 4 profiles — this test would prove nothing",
+    );
+    assert!(
+        sprinted > 0,
+        "no turn in the batch was both phased and sprinting — the two-cell step is \
+         the sharpest way into the eject and this batch never exercises it",
     );
 }
 
@@ -856,12 +907,24 @@ fn the_striking_profiles_work_the_body_chain() {
              has nothing to react to",
     );
 
-    // The temperaments' actual split is **stowing**, not grabbing. Taking hold is
-    // not a decision — stepping off a body's cell grabs it whether you meant to or
-    // not (§8.3/#187) — so `careless` racks up grabs it immediately undoes, and a
-    // `Drag` count says nothing about temperament on its own. Putting a body
-    // *away* is the decision, and since #381 it has its own §13.2 slot, so the
-    // split is **read off the histogram** rather than replayed and counted by hand.
+    // The temperaments' split is **stowing**, and since #451 the grab is a decision
+    // too — a wait spent standing on the body rather than something that rode the
+    // step off its cell, so `careless` no longer racks up grabs it immediately
+    // undoes. Stowing stays the sharper line, because it is the one that spends a
+    // turn to put a body beyond every cone and locks a cupboard doing it; since #381
+    // it has its own §13.2 slot, so the split is **read off the histogram** rather
+    // than replayed and counted by hand.
+    //
+    // `careless` grabbing nothing is now a *consequence* rather than a coincidence:
+    // it never stows, so it never presses the wait, so it never takes hold. Asserted
+    // below, because it is the clearest reading available that the pickup stopped
+    // being automatic.
+    assert_eq!(
+        careless.count(Verb::Drag),
+        0,
+        "careless took hold of a body it had no intention of putting away — the \
+             pickup is a spent turn now (§8.3/#451), not something a walk-past does",
+    );
     assert!(
         aggressive.count(Verb::Stow) > 0,
         "aggressive never stowed a body — §10.3's deposit-and-lock is unexercised",
@@ -1451,8 +1514,7 @@ fn the_silence_is_the_cores_affordance_and_never_a_terrain_scan() {
             let offered: Option<Direction> = state
                 .affordances()
                 .into_iter()
-                .find(|&(_, a)| a == Affordance::SilenceRadio)
-                .map(|(dir, _)| dir);
+                .find_map(|(dir, a)| (a == Affordance::SilenceRadio).then_some(dir?));
             let input = bot.decide(&state);
             state.step(input);
             if state

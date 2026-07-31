@@ -347,6 +347,11 @@ fn a_refused_bore_marks_nothing() {
 /// A 12×12 room with a wall at `(5,4)` and the player one cell west of it holding
 /// Dephase, seeded so the landing is reproducible (§12.4). Phasing east and waiting
 /// out the duration strands them inside the wall and fires the safety eject.
+///
+/// Returned **one turn short of the expiry**, so a caller's single `Wait` is the turn
+/// the window ends. The waiting is counted off the catalog's duration rather than
+/// written out, so a retune (#449 moved it 3 → 4) leaves every caller reading the
+/// same way.
 fn phased_into_a_wall() -> State {
     let mut layout = open_room(12, 12);
     layout.place(Cell::new(5, 4), Terrain::Wall);
@@ -367,7 +372,22 @@ fn phased_into_a_wall() -> State {
         Cell::new(5, 4),
         "precondition: inside the solid"
     );
+    // Stand in the solid for whatever the window has left beyond the caller's own
+    // expiry turn — none at all when the duration is 2, one when it is 4.
+    for _ in 2..dephase_duration() - 1 {
+        s.step(Input::Wait);
+    }
     s
+}
+
+/// Dephase's `[START]` window (§8.3), counting the activation turn — read from the
+/// catalog so a tune moves the tests with it rather than stranding them on a number.
+fn dephase_duration() -> u32 {
+    AbilityId::Dephase
+        .def()
+        .economy()
+        .expect("Dephase is activated")
+        .duration()
 }
 
 /// The two ends of the throw the last `step` reported, straight off the event — the
@@ -814,17 +834,30 @@ fn a_phase_over_open_floor_marks_nothing() {
 }
 
 /// §8.3/§11.2 (#416): the mark **follows the cell**, not the window — the
-/// disagreement §11.2 requires of a marked effect. One unchanged window, two frames,
-/// two different answers: open floor says nothing, the solid lights up.
+/// disagreement §11.2 requires of a marked effect. One unchanged window, three frames,
+/// the answer changing **both ways**: open floor says nothing, the solid lights up,
+/// and the floor beyond puts it out again while the bar entry never moves.
 ///
-/// Only one transition is asserted because only one is reachable. Dephase's duration
-/// is **3 [START]** and the activation itself spends the first of them, so a window
-/// holds exactly two readable frames — the activation and one move. The
-/// wall → floor → wall round trip needs three, and would start passing on its own if
-/// the duration is ever tuned up; the rule-equality test below is what pins the
-/// general case in the meantime.
+/// #416 could assert only the first of those transitions. Dephase's duration was
+/// **3 [START]** and the activation spends the first of them, so a window held two
+/// readable frames — the activation and one move — and the mark could be watched
+/// lighting but never going out. #449 tuned the duration to **4**, which buys the
+/// second move and with it the darkening: this test's missing arm.
+///
+/// **The leading wall frame is still out of reach, and the arithmetic says why.** A
+/// window of N holds N − 1 moves, and the last of them is the turn the duration
+/// *ends* — so a solid entered on that move is ejected out of before anything can be
+/// read. The frames a phase can be observed standing still in are therefore the
+/// activation plus N − 2 moves: two at N = 4, and the activation is necessarily on
+/// floor, because a phase can only be begun somewhere a solid body already stands.
+/// A literal `wall → floor → wall` needs three *post-activation* frames and so a
+/// window of **5**. What it would prove beyond the two transitions below is that the
+/// mark is not a one-shot latch, which the rule-equality test next door already pins
+/// over every frame of a window.
 #[test]
 fn the_phase_mark_follows_the_cell_and_not_the_window() {
+    // A wall with open floor either side, so one straight eastward walk crosses
+    // floor → solid → floor without ever leaving the window.
     let mut layout = open_room(12, 12);
     layout.place(Cell::new(5, 4), Terrain::Wall);
     let mut s = State::new(
@@ -846,16 +879,31 @@ fn the_phase_mark_follows_the_cell_and_not_the_window() {
     );
     assert!(!marked(&s), "on open floor the mark says nothing");
 
-    s.step(Input::Step(Direction::East)); // into the solid
-    assert_eq!(s.player(), Cell::new(5, 4), "precondition: inside the wall");
-    assert!(
-        s.abilities.effect_active(Effect::Phase),
-        "precondition: the very same window, unchanged — so is the bar entry",
-    );
-    assert!(
-        marked(&s),
-        "…but the board now says the eject would fire if it ended here",
-    );
+    // Frame by frame east: into the wall, then out the far side. The bar entry is the
+    // *same* window throughout — only the cell changes, and the mark changes with it.
+    // That is the disagreement §11.2 asks a marked effect for.
+    for (step, cell, lit, note) in [
+        (
+            1,
+            Cell::new(5, 4),
+            true,
+            "the board says the eject would fire if it ended here",
+        ),
+        (
+            2,
+            Cell::new(6, 4),
+            false,
+            "…and out the far side it goes dark again, window untouched",
+        ),
+    ] {
+        s.step(Input::Step(Direction::East));
+        assert_eq!(s.player(), cell, "step {step}: walked to {cell:?}");
+        assert!(
+            s.abilities.effect_active(Effect::Phase),
+            "step {step}: the very same window, unchanged — so is the bar entry",
+        );
+        assert_eq!(marked(&s), lit, "step {step}: {note}");
+    }
 }
 
 /// §11.5/#416: the mark is the eject **rule**, not a second derivation of it.

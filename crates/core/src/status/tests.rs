@@ -129,10 +129,10 @@ fn ambient_reports_dragging_as_owned() {
     );
     s.step(Input::Step(Direction::North)); // takedown
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::East)); // step off — take hold: the message turn
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451) — the message turn
     assert_eq!(near_line(&s).text, "you take hold of the body");
 
-    s.step(Input::Wait); // the message clears to the held state
+    s.step(Input::Step(Direction::East)); // step off, hauling: the message clears
     let line = near_line(&s);
     assert_eq!(line.text, "dragging the body — half speed");
     assert_eq!(line.category, Category::Owned);
@@ -463,9 +463,19 @@ fn ambient_counts_the_stun_down() {
         Cell::new(10, 10),
     )
     .with_loadout(crate::Loadout::innate().with(crate::AbilityId::Dephase));
-    s.step(Input::Activate(crate::AbilityId::Dephase));
-    s.step(Input::Step(Direction::East)); // into the wall
-    s.step(Input::Wait); // the duration ends: thrown clear and stunned
+    s.step(Input::Activate(crate::AbilityId::Dephase)); // window turn 1
+    s.step(Input::Step(Direction::East)); // turn 2: into the wall
+                                          // Stand in there for the rest of the window; the last of these is the turn the
+                                          // duration ends and the player is thrown clear and stunned. Counted off the
+                                          // catalog so a retune (#449) moves the scene rather than breaking it.
+    let duration = crate::AbilityId::Dephase
+        .def()
+        .economy()
+        .expect("Dephase is activated")
+        .duration();
+    for _ in 2..duration {
+        s.step(Input::Wait);
+    }
 
     // The eject's own turn speaks the message; the floor carries the rest.
     assert_eq!(near_line(&s).text, "safety eject — stunned");

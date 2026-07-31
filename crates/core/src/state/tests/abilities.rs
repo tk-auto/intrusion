@@ -17,7 +17,8 @@ use crate::test_support::{open_room, solo};
 /// expiry on floor is just the ability fading.
 #[test]
 fn dephased_movement_passes_through_solids_without_bumping() {
-    // Through a wall (duration 3: activate, in, out — expiring on floor).
+    // Through a wall (duration 4: activate, in, out, and a spare turn on the floor
+    // beyond — expiring where a body can stand).
     let mut layout = open_room(12, 12);
     layout.place(Cell::new(5, 4), Terrain::Wall);
     let mut s = State::new(
@@ -41,6 +42,13 @@ fn dephased_movement_passes_through_solids_without_bumping() {
     assert_eq!(s.player(), Cell::new(5, 4), "standing inside the wall");
     let events = s.step(Input::Step(Direction::East)); // out, onto floor
     assert_eq!(s.player(), Cell::new(6, 4));
+    assert!(
+        !events.contains(&Event::AbilityExpired {
+            ability: AbilityId::Dephase
+        }),
+        "the window has a turn left after the crossing",
+    );
+    let events = s.step(Input::Wait); // stood on floor: the duration ends here
     assert!(
         events.contains(&Event::AbilityExpired {
             ability: AbilityId::Dephase
@@ -140,11 +148,28 @@ fn wall_to_phase_into(guards: Vec<Guard>, seed: u64) -> State {
 /// Phase east into the solid at `(5,4)` — a wall in [`wall_to_phase_into`], any other
 /// solid in the terrain sweep — and let the duration run out in there, returning the
 /// expiry turn's events.
+///
+/// The waiting is counted off the **catalog's** duration rather than written out as a
+/// fixed run of turns, so a retune of the `[START]` number (#449 moved it 3 → 4)
+/// changes where the window ends without changing what any of these tests assert.
 fn phase_into_the_solid(s: &mut State) -> Vec<Event> {
     s.step(Input::Activate(AbilityId::Dephase)); // active turn 1
     s.step(Input::Step(Direction::East)); // turn 2: into the wall
     assert_eq!(s.player(), Cell::new(5, 4), "standing inside the solid");
-    s.step(Input::Wait) // turn 3: the duration ends in there
+    // Turns 3..=N are spent standing in there; the last of them is the expiry.
+    let duration = dephase_duration();
+    (2..duration).fold(Vec::new(), |_, _| s.step(Input::Wait))
+}
+
+/// Dephase's `[START]` window (§8.3), counting the activation turn — read from the
+/// catalog so a tune moves the tests with it. Pinned value-by-value by
+/// `the_catalog_matches_the_design_activated`; here it is only arithmetic.
+fn dephase_duration() -> u32 {
+    AbilityId::Dephase
+        .def()
+        .economy()
+        .expect("Dephase is activated")
+        .duration()
 }
 
 /// §8.3/#329: the cost that keeps Dephase from being free — the duration running out
@@ -283,6 +308,11 @@ fn every_input_kind_is_swallowed_while_stunned() {
 
 /// §2.3/§11.4: the usable line must never offer what the next press will not
 /// deliver — and while stunned no press delivers anything, so it goes quiet.
+///
+/// The silence covers the **whole** line, the standing-on entry included (#451):
+/// `affordances` returns early on a stun, before it has looked at either the cell
+/// underfoot or the ring, so a new kind of entry cannot escape this rule by being
+/// added somewhere the loop does not reach.
 #[test]
 fn the_usable_line_is_empty_while_stunned() {
     // A console beside the player, so there is a real affordance to suppress.
@@ -333,20 +363,30 @@ fn a_stunned_player_can_still_be_captured() {
     ] {
         layout.place(cell, Terrain::Wall);
     }
+    // The guard walks one cell a turn and the whole scene is a race against the
+    // window, so its start is placed off the duration rather than written down: it
+    // must reach (7,4) on the turn the phase runs out, leaving it two cells and the
+    // player two turns of stun. A retune of the `[START]` window (#449) then moves the
+    // guard back with it instead of quietly desynchronising the choreography.
+    let guard_start = Cell::new(7 - dephase_duration(), 4);
     let mut s = State::new(
         layout,
         Cell::new(9, 4),
         Direction::North,
-        vec![Guard::patrolling_to(Cell::new(4, 4), Cell::new(9, 4))],
+        vec![Guard::patrolling_to(guard_start, Cell::new(9, 4))],
         Vec::new(),
         Cell::new(2, 10),
     )
     .with_loadout(Loadout::innate().with(AbilityId::Dephase));
     s.set_guard_dwell_chance(0); // one cell per turn, so the scene is not a race
 
-    s.step(Input::Activate(AbilityId::Dephase)); // guard → (5,4)
-    s.step(Input::Step(Direction::East)); // into the wall; guard → (6,4)
-    let events = s.step(Input::Wait); // the duration ends in there; guard → (7,4)
+    s.step(Input::Activate(AbilityId::Dephase)); // window turn 1
+    s.step(Input::Step(Direction::East)); // turn 2: into the wall
+                                          // Stand in there for what is left of the window; the last of these is the expiry.
+    let mut events = Vec::new();
+    for _ in 2..dephase_duration() {
+        events = s.step(Input::Wait);
+    }
     assert!(
         events.iter().any(|e| matches!(e, Event::Ejected { .. })),
         "the wall let go: {events:?}",
@@ -374,7 +414,12 @@ fn a_stunned_player_can_still_be_captured() {
 #[test]
 fn the_eject_drops_a_dragged_body() {
     let mut layout = open_room(12, 12);
+    // Two cells thick. A hauled body moves at half speed (§8.3), so a single-cell
+    // wall is something a four-turn window can now drag a body clean through — and a
+    // crossing that succeeds never reaches the eject this test is about. The wall has
+    // to be deeper than the window can haul.
     layout.place(Cell::new(5, 4), Terrain::Wall);
+    layout.place(Cell::new(5, 5), Terrain::Wall);
     layout.place(Cell::new(4, 4), Terrain::Hideout); // conceal the takedown
     let mut s = State::new(
         layout,
@@ -388,14 +433,15 @@ fn the_eject_drops_a_dragged_body() {
     .with_rng(crate::Rng::new(9));
     s.step(Input::Step(Direction::North)); // take the guard down: a body at (4,3)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::East)); // step off it: take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::East)); // step off: the body stays where it lies and follows
     assert!(s.dragging().is_some(), "dragging the body");
 
     // Phase south into the wall, hauling. Half speed means a step can be spent
     // standing still, so run until the duration expires.
     s.step(Input::Activate(AbilityId::Dephase));
     let mut events = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..dephase_duration() {
         events = s.step(Input::Step(Direction::South));
         if events.iter().any(|e| matches!(e, Event::Ejected { .. })) {
             break;
@@ -570,12 +616,14 @@ fn any_solid_ejects_you_not_just_a_wall() {
 /// the deep dive the same flat rate.
 ///
 /// A 5×5 wall block spanning x 5..=9, y 2..=6, with open floor either side. Phasing to
-/// its western face `(5,4)` is one cell from floor; one deeper, `(6,4)`, is two. Two
-/// depths, two prices, each asserted against the distance actually travelled.
+/// its western face `(5,4)` is one cell from floor; `(6,4)` is two; the block's centre
+/// `(7,4)` is three. Three depths, three prices, each asserted against the distance
+/// actually travelled.
 ///
-/// Two is also as deep as this ability can put you from open ground: Dephase runs for
-/// three turns counting its activation, so a phase begun outside buys exactly two
-/// steps. The stun therefore tops out at `phase_eject_stun(2)` in ordinary play — the
+/// Three is also **as deep as this ability can put you from open ground**, which is
+/// the other half of what this test pins: Dephase runs for four turns counting its
+/// activation (#449, was three), so a phase begun outside buys exactly three steps.
+/// The stun therefore tops out at `phase_eject_stun(3)` in ordinary play — the
 /// arithmetic goes further, the ability does not.
 #[test]
 fn a_deeper_eject_stuns_for_longer() {
@@ -598,21 +646,33 @@ fn a_deeper_eject_stuns_for_longer() {
         .with_rng(crate::Rng::new(13))
     };
 
+    // How far in a phase begun on open floor reaches: the activation spends the first
+    // turn of the window, so the rest are steps. Asserted, not just computed — this is
+    // the number #449 moved, and the starts below are placed for exactly this reach.
+    let steps_in = dephase_duration() - 1;
+    assert_eq!(
+        steps_in, 3,
+        "a phase begun outside buys three steps into a solid (§8.3 [START], #449)",
+    );
+
     let mut stuns = Vec::new();
-    // Each start is two steps west of the cell the phase strands the player in, so the
-    // expiry lands exactly there.
+    // Each start is `steps_in` steps west of the cell the phase strands the player in,
+    // so the expiry lands exactly there.
     for (start, stuck, depth) in [
-        (Cell::new(3, 4), Cell::new(5, 4), 1u32), // the block's face
-        (Cell::new(4, 4), Cell::new(6, 4), 2),    // one ring deeper
+        (Cell::new(2, 4), Cell::new(5, 4), 1u32), // the block's face
+        (Cell::new(3, 4), Cell::new(6, 4), 2),    // one ring deeper
+        (Cell::new(4, 4), Cell::new(7, 4), 3),    // the centre — as deep as it goes
     ] {
         let mut s = block(start);
-        s.step(Input::Activate(AbilityId::Dephase)); // turn 1
-        s.step(Input::Step(Direction::East)); // turn 2
-        let events = s.step(Input::Step(Direction::East)); // turn 3: the duration ends
+        s.step(Input::Activate(AbilityId::Dephase)); // turn 1 of the window
+        let mut events = Vec::new();
+        for _ in 0..steps_in {
+            events = s.step(Input::Step(Direction::East));
+        }
         assert_eq!(
             events.first(),
             Some(&Event::Moved { to: stuck }),
-            "the second step should strand the player at {stuck:?}",
+            "the last step should strand the player at {stuck:?}",
         );
 
         let thrown = stuck.sight_distance(s.player());
@@ -1182,10 +1242,72 @@ fn run_never_stacks_with_dragging() {
     assert_eq!(s.player(), Cell::new(7, 4), "the debt turn holds under Run");
 }
 
-/// The drag scenario (§8.3): the cupboard takedown, then climb out onto the body
-/// and step off it to **take hold** — a body is non-solid, so the grab is walking
-/// over it and off its cell, not a bump. Ends with the player at (6,4) dragging the
-/// body at (5,4), a haul debt owed (the pickup rode a full step).
+/// §8.3/#103/#451: the two ends of the Run/Drag fence, on the new grab.
+///
+/// The fence used to need watching at the moment of the pickup: the grab rode a step,
+/// so the sprint's extra step had to be suppressed the instant it landed or a body
+/// would be hauled two cells on its first turn. That whole hazard is gone — a
+/// take-hold is a **wait**, and a wait has no step for a sprint to double. What is
+/// left to pin is that the sprint still runs *over* a body without taking it, which
+/// is the same rule read from the other side.
+#[test]
+fn a_sprint_runs_over_a_body_and_the_grab_has_no_step_to_double() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 4))],
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Run));
+    s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+
+    // Sprint east off the body: two cells, hands empty, body untouched.
+    s.step(Input::Activate(AbilityId::Run));
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.player(), Cell::new(7, 4), "the sprint ran its two cells");
+    assert!(s.dragging().is_none(), "a sprint never takes hold");
+    assert_eq!(s.bodies()[0].cell(), Cell::new(5, 4), "the body stayed put");
+
+    // Back onto the body — the sprint carries straight over it, not into a grab.
+    s.step(Input::Step(Direction::West));
+    assert_eq!(
+        s.player(),
+        Cell::new(5, 4),
+        "two cells west lands on the body",
+    );
+    assert!(
+        s.dragging().is_none(),
+        "…and running over it is not taking it"
+    );
+
+    // Now take it deliberately. The sprint is still up and has nothing to add: a
+    // wait is not a step, so there is no extra cell for Run to grant.
+    let before = s.player();
+    let events = s.step(Input::Wait);
+    assert!(
+        events.contains(&Event::BodyGrabbed { at: before }),
+        "the wait takes hold even mid-sprint: {events:?}",
+    );
+    assert_eq!(
+        s.player(),
+        before,
+        "a take-hold wait moves nobody, Run or not"
+    );
+}
+
+/// The drag scenario (§8.3/#451): the cupboard takedown, then climb out onto the
+/// body and **wait** to take hold — a body is non-solid, so you stand on it, and the
+/// grab is a spent turn rather than a bump. Ends with the player at (6,4) dragging
+/// the body at (5,4), one step taken and its haul debt owed.
+///
+/// The straight sequence the ticket was for: takedown, step out, wait, and from here
+/// a bump on the cupboard would stow it. The pickup itself owes **no** debt (it rides
+/// a wait, not a step); the debt below is the one the step east earned.
 fn dragging_a_body() -> State {
     let mut layout = open_room(10, 10);
     layout.place(Cell::new(5, 5), Terrain::Hideout);
@@ -1199,17 +1321,21 @@ fn dragging_a_body() -> State {
     );
     s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out of the cupboard onto the body
-    let events = s.step(Input::Step(Direction::East)); // step off — take hold
+    let events = s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
     assert_eq!(
         events,
-        vec![
-            Event::Moved {
-                to: Cell::new(6, 4)
-            },
-            Event::BodyGrabbed {
-                at: Cell::new(5, 4)
-            }
-        ]
+        vec![Event::BodyGrabbed {
+            at: Cell::new(5, 4)
+        }],
+        "the wait is the grab, and it is the only thing the turn reports",
+    );
+    let events = s.step(Input::Step(Direction::East)); // step off, hauling
+    assert_eq!(
+        events,
+        vec![Event::Moved {
+            to: Cell::new(6, 4)
+        }],
+        "the body was already in hand — the step is a plain haul",
     );
     assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
     assert_eq!(s.player(), Cell::new(6, 4));
@@ -1220,21 +1346,25 @@ fn dragging_a_body() -> State {
 /// convention: a dragging move succeeds and leaves a haul debt, the next
 /// step is spent but stationary, and the one after moves again — one cell
 /// per two spent turns, with the body following into each vacated cell.
-/// Taking hold rides a full step and owes the first debt; releasing is free.
+///
+/// **The pickup owes no debt** (#451): it rides a *wait*, a full turn already paid
+/// with nowhere gone, so charging the half-speed tax on top would charge twice for
+/// the same grab. The debt below is the one the first hauling **step** earned, which
+/// is where half speed has always come from. Releasing is free.
 #[test]
 fn dragging_moves_at_half_speed_and_the_body_follows() {
     let mut s = dragging_a_body();
     assert_eq!(
         s.turn(),
-        3,
-        "takedown, the climb-out, and the grab all spend"
+        4,
+        "takedown, the climb-out, the grab's wait, and one hauling step",
     );
 
-    // The grab's debt: the first step is spent but stationary and silent.
+    // The first step's debt: the next one is spent but stationary and silent.
     let events = s.step(Input::Step(Direction::East));
     assert!(events.is_empty(), "the debt turn narrates nothing");
     assert_eq!(s.player(), Cell::new(6, 4), "no movement on the debt turn");
-    assert_eq!(s.turn(), 4, "but the turn is spent");
+    assert_eq!(s.turn(), 5, "but the turn is spent");
 
     // Debt paid: a full step, the body following into the vacated cell.
     let events = s.step(Input::Step(Direction::East));
@@ -1284,6 +1414,196 @@ fn releasing_the_body_is_free_and_it_stays_where_it_lies() {
     );
 }
 
+/// §8.3/#451: **taking hold is a decision, and walking over a body is not taking
+/// it.** The two halves of the change, in one scene: crossing a body with free hands
+/// leaves it exactly where it lies, and a wait spent standing on it picks it up.
+///
+/// The first half is what the ticket is *for*. The grab used to ride the step off the
+/// body's cell, so a body could not be crossed at all without picking it up — and the
+/// drag that followed costs half speed, which made the accident land precisely when
+/// it hurt most: mid-escape, over the guard you had just put down.
+#[test]
+fn walking_over_a_body_leaves_it_and_a_wait_takes_hold() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 4))],
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+
+    // Straight across, and out the other side. Not a grab in sight.
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        events,
+        vec![Event::Moved {
+            to: Cell::new(6, 4)
+        }],
+        "crossing a body is a plain move — no grab rides the step off it",
+    );
+    assert!(s.dragging().is_none(), "hands still free on the far side");
+    assert_eq!(
+        s.bodies()[0].cell(),
+        Cell::new(5, 4),
+        "and the body is where it fell",
+    );
+
+    // Back onto it, and this time spend the turn.
+    s.step(Input::Step(Direction::West));
+    assert_eq!(s.player(), Cell::new(5, 4), "precondition: standing on it");
+    let events = s.step(Input::Wait);
+    assert_eq!(
+        events,
+        vec![Event::BodyGrabbed {
+            at: Cell::new(5, 4)
+        }],
+        "the wait takes hold",
+    );
+    assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
+}
+
+/// §8.3/#451: **the wait keeps its look.** A take-hold wait is still a wait, so it
+/// still buys the 360° the verb exists for (§9.1) — the turn is spent either way and
+/// the look costs nothing to keep, which is what lets the pickup borrow the verb
+/// without a new key and without taking anything away from it.
+///
+/// Asserted against a guard placed squarely *behind* the player, which the forward
+/// arc cannot reach: seeing it at all is the 360° and nothing else.
+#[test]
+fn a_take_hold_wait_still_buys_the_360_look() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![
+            Guard::stationary(Cell::new(5, 4)), // the victim, ahead
+            Guard::stationary(Cell::new(5, 7)), // the watcher, behind and below
+        ],
+        Vec::new(),
+        Cell::new(10, 10),
+    );
+    s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body, facing north
+    let behind = Cell::new(5, 7);
+    assert!(
+        !s.player_fov().contains(behind),
+        "precondition: the forward arc does not reach behind the player (§5)",
+    );
+
+    let events = s.step(Input::Wait);
+    assert!(
+        events.contains(&Event::BodyGrabbed {
+            at: Cell::new(5, 4)
+        }),
+        "precondition: this wait took hold",
+    );
+    assert!(
+        s.player_fov().contains(behind),
+        "…and it is still a wait, so the 360° look happened (§8.3/§9.1)",
+    );
+}
+
+/// §8.3/§11.4/#451: the usable line's **first non-directional entry**. Standing on a
+/// body with free hands offers `body: wait to grab` with no direction at all —
+/// the affordance is about the cell underfoot, and its press is a wait, so an arrow
+/// would promise a bump the next press will not deliver.
+///
+/// And the line mirrors the press in both directions: once the body is in hand the
+/// offer is gone, replaced by the release on the body behind.
+#[test]
+fn the_usable_line_offers_the_take_hold_without_a_direction() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 4))],
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
+    assert!(
+        !s.affordances()
+            .iter()
+            .any(|&(_, a)| a == Affordance::TakeBody),
+        "beside the body is not standing on it",
+    );
+
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    assert!(
+        s.affordances().contains(&(None, Affordance::TakeBody)),
+        "standing on it, hands free: {:?}",
+        s.affordances(),
+    );
+
+    s.step(Input::Wait); // take hold
+    let affs = s.affordances();
+    assert!(
+        !affs.iter().any(|&(_, a)| a == Affordance::TakeBody),
+        "hands full — the offer is spent: {affs:?}",
+    );
+    s.step(Input::Step(Direction::East)); // step off, hauling
+    assert!(
+        s.affordances()
+            .contains(&(Some(Direction::West), Affordance::ReleaseBody)),
+        "the held body offers the release, aimed as ever",
+    );
+}
+
+/// §8.3/#451: a **phased** player takes hold of nothing, and is offered nothing.
+/// While Dephase is up there is no bump and no grab — *"you pass straight through
+/// everything you came for"* — and a body is one of those things: you are inside its
+/// cell rather than standing on it.
+///
+/// Both halves asserted, because they are two decisions that must be one: the line
+/// stays silent, **and** the wait is a no-op. A line that went quiet while the press
+/// still worked would be the §11.4 promise broken from the other side.
+#[test]
+fn a_phased_player_takes_hold_of_nothing() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 5), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 4))],
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Dephase));
+    s.step(Input::Step(Direction::North)); // takedown: the body at (5,4)
+    s.step(Input::Step(Direction::North)); // climb out onto the body
+    assert!(
+        s.affordances().contains(&(None, Affordance::TakeBody)),
+        "precondition: the offer is live before the phase",
+    );
+
+    s.step(Input::Activate(AbilityId::Dephase));
+    assert!(
+        !s.affordances()
+            .iter()
+            .any(|&(_, a)| a == Affordance::TakeBody),
+        "phased, the line offers nothing to take: {:?}",
+        s.affordances(),
+    );
+    let events = s.step(Input::Wait);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::BodyGrabbed { .. })),
+        "…and the wait takes hold of nothing: {events:?}",
+    );
+    assert!(s.dragging().is_none(), "hands still empty");
+}
+
 /// While dragging, the usable line offers the release on the held body behind
 /// you, and a wall bump stays free without moving anything (§4.4 — cannot drag
 /// through a wall).
@@ -1292,7 +1612,7 @@ fn dragging_affordances_and_walls() {
     let mut s = dragging_a_body(); // player (6,4), body (5,4) to the west, debt owed
     assert_eq!(
         s.affordances(),
-        vec![(Direction::West, Affordance::ReleaseBody)],
+        vec![(Some(Direction::West), Affordance::ReleaseBody)],
         "the held body offers the release",
     );
 
@@ -1343,7 +1663,8 @@ fn a_stowed_body_is_gone() {
 
     s.step(Input::Step(Direction::North)); // takedown from the cupboard: body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::North)); // step off to (5,3) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::North)); // step off to (5,3), hauling
     assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
     let stow = Cell::new(5, 2);
     let events = s.step(Input::Step(Direction::North)); // bump the cupboard: stow it
@@ -1440,7 +1761,8 @@ fn stowing_a_body_locks_the_cupboard() {
 
     s.step(Input::Step(Direction::South)); // takedown at (5,5)
     s.step(Input::Step(Direction::South)); // climb onto the body
-    s.step(Input::Step(Direction::South)); // step off to (5,6) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::South)); // step off to (5,6), hauling
     assert_eq!(s.dragging(), Some(Cell::new(5, 5)));
     assert_eq!(s.player(), Cell::new(5, 6));
 
@@ -1459,6 +1781,67 @@ fn stowing_a_body_locks_the_cupboard() {
     assert!(
         !s.affordances().iter().any(|(_, a)| *a == Affordance::Hide),
         "the usable line no longer offers the hide",
+    );
+}
+
+/// §7.2/§10.3/§8.3 (#451): **the cupboard sequence, straight through.** A takedown
+/// made from *inside* a cupboard leaves the body in the doorway of your own hiding
+/// place, and this is the run of presses that puts it away: takedown → step out onto
+/// the body → wait to take hold → bump the cupboard.
+///
+/// It is the change's second justification, and it is a *shortening*. The grab used
+/// to land only on the step **away** from the body, so tidying up from inside a
+/// cupboard needed a square move — out onto the body, off it to some third cell to
+/// take hold, then back to the cupboard — three moves to get one cell. Four presses
+/// in a straight line replace five in a loop, and nothing is walked twice.
+#[test]
+fn the_cupboard_takedown_stows_without_a_square_move() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(5, 5), Terrain::Hideout); // the player's cupboard
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5), // hidden inside it, so the victim never sees it coming
+        Direction::North,
+        vec![Guard::stationary(Cell::new(5, 4))],
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    assert!(s.hidden(), "precondition: the takedown is made from cover");
+
+    // Four presses, no cell walked twice.
+    let events = s.step(Input::Step(Direction::North)); // 1. takedown, from inside
+    assert!(
+        events.iter().any(|e| matches!(e, Event::TakenDown { .. })),
+        "1. the takedown: {events:?}",
+    );
+    s.step(Input::Step(Direction::North)); // 2. step out onto the body
+    assert_eq!(s.player(), Cell::new(5, 4), "2. standing on the body");
+
+    let events = s.step(Input::Wait); // 3. wait: take hold
+    assert_eq!(
+        events,
+        vec![Event::BodyGrabbed {
+            at: Cell::new(5, 4)
+        }],
+        "3. the wait takes hold",
+    );
+
+    let stow = Cell::new(5, 5);
+    let events = s.step(Input::Step(Direction::South)); // 4. bump the cupboard: stow
+    assert_eq!(events, vec![Event::BodyStored { at: stow }], "4. stowed");
+    assert_eq!(s.bodies()[0].cell(), stow);
+    assert_eq!(s.dragging(), None, "hands free");
+    assert_eq!(
+        s.player(),
+        Cell::new(5, 4),
+        "the player stayed outside, on the cell the body fell on",
+    );
+    // Locked behind them (§10.3): the cupboard they hid in has been spent to hide
+    // the body instead, which is the trade §7.2 is pricing.
+    assert!(
+        !s.affordances().iter().any(|(_, a)| *a == Affordance::Hide),
+        "the cupboard is locked — no hide on offer: {:?}",
+        s.affordances(),
     );
 }
 

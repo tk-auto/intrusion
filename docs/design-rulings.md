@@ -447,9 +447,18 @@ corner of a table strands you one cell from open floor and costs the smallest st
 burying yourself a ring deeper into a wall block costs more, because the eject had to reach
 further to find you anywhere to stand. A flat rate charged the near miss and the deep dive
 the same, which made the worst case as cheap as the safest. In practice the ability caps its
-own damage: Dephase runs three turns counting its activation, so a phase begun outside buys
-two steps in and the stun tops out at three turns — the arithmetic goes further, the ability
+own damage: Dephase runs four turns counting its activation, so a phase begun outside buys
+three steps in and the stun tops out at four turns — the arithmetic goes further, the ability
 does not.
+
+That cap moved once, deliberately (#449): the window was three turns, two steps in, a stun
+topping out at three. One more turn is the smaller half of the change — two steps in becomes
+three, which is the depth the ability is actually for — and this paragraph is the larger
+half. The stun is as long as the throw and the throw is bounded by how deep you can get, so
+buying reach buys worst case at the same rate: the price of recklessness rose from three
+turns helpless to four on the same turn the tool got useful. That is the §2.3 trade an
+ability is supposed to carry, and it is why the lockout was left at 30 — one knob at a
+time, or neither is measured.
 
 **The randomness is load-bearing.** A predictable eject would make phasing into a wall a
 reliable way *through* one, and you may well be dropped back on the side you came from.

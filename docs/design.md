@@ -1005,10 +1005,10 @@ whole reason the architecture looks the way it does.
 | Ability | Cost | Duration | Cooldown | Effect |
 |---|---|---|---|---|
 | **Move** | 1 turn | — | — | One cell, cardinal. Sets facing. Not shown in the UI. |
-| **Wait** | 1 turn | — | — | **360° vision for that turn.** The only way to see behind you. |
+| **Wait** | 1 turn | — | — | **360° vision for that turn.** The only way to see behind you. Standing on a body with free hands, it **also takes hold** (Drag, below) — and still gives the look. |
 | **Run** | 1 turn | 5 | 12 | One free move per turn while active → 2 cells/turn. |
 | **Takedown** | 1 turn | — | — | §7.2. Adjacent, unaware target only. Permanent. Leaves a body. |
-| **Drag** | 1 turn/step | while held | — | A body is non-solid: **walk over it and step off to take hold**; **you move at half speed while dragging**; **bump the held body to release** (free), or **stow it in a cupboard** (§10.3). |
+| **Drag** | 1 turn/step | while held | — | A body is non-solid: walk over it, and **wait while standing on it to take hold** (#451); **you move at half speed while dragging**; **bump the held body to release** (free), or **stow it in a cupboard** (§10.3). |
 
 **Salvaged tech** — found in the facility:
 
@@ -1016,7 +1016,7 @@ whole reason the architecture looks the way it does.
 |---|---|---|---|---|
 | **Camouflage** | 1 turn | 10 | 20 | Undetectable **while you don't move**. Moving reveals you for that turn. |
 | **Decoy** | 1 turn | 20 | 30 | A fake intruder in the cell you face. Draws Investigating, not Chasing. Dies when anything steps on it. |
-| **Dephase** | 1 turn | 3 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** |
+| **Dephase** | 1 turn | 4 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** The window counts its own activation, so a phase begun on open floor buys **three steps** into a solid — and the safety eject below can therefore throw you back from three cells deep, for a worst case of four turns stunned (#449, appendix 12). |
 | **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). *"Alike"* is the rule, not a description of a typical level: a run plays one door vocabulary (§10.4/§12.6/#452), so the automatic clause is inert in a baseline facility and the manual clause is inert with the modifier on — the ability behaves the same either way, which is why it is worded over both. A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
 | **Confusion** | 1 turn | — (instant) | 45 | **Fired once**, from the cell you press it in (#325). Every guard standing within the blast at that moment — `CONFUSION_RADIUS`, through walls like the guard sense (§9) — is **blinded and frozen** for `CONFUSION_DAZE_TURNS` (**6** **[START]**), a countdown each guard carries itself. A costed panic-buy of time, not a kill: a dazed chaser **pauses** (keeps its lead), it does not reset. **After the flash, distance stops mattering** — a guard you run away from stays dazed, and one that walks into the cells the blast covered was never in it and is untouched, which is what keeps it from being a no-guard-may-act field you carry. Capture-is-contact still holds (§4.5): a dazed adjacent guard cannot step into you, but the daze is no shield to walk into a guard the blast never caught, and a frozen guard's cell stays solid. **The clamp [SETTLED]:** the reach fired is `min(CONFUSION_RADIUS, sense_range())`, so the blast can never freeze what you cannot sense — inert on open floor (`min(6, 10)`), and shrunk to **5** inside a duct (§10.7). It can only ever shrink the blast, never widen it. A firing with nothing in reach is a **free no-op** with a near-line message (§4.4/§8.4); a real firing says how many it caught (§11.7). The long cooldown is what keeps it rare (#240). Appendix 24. |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket**, which is a use of the tool rather than a waste of it. It conceals nothing (it is not a cupboard, §10.3), so **three walls around you means you can dig a hole to hide in, never a tunnel**. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. Appendix 24. |
@@ -1069,14 +1069,40 @@ Notes carried forward, because they are good and non-obvious:
   bar name every held ability on a single row (§11.4): the bar's width bound is
   checked against it at compile time, so raising the cap is a change the *build*
   has an opinion about (#287).
-- **Drag has no grab button.** A body is non-solid (§7.2), so you cross it like
-  floor; the drag begins the moment you step *off* a cell with a body on it and your
-  hands are free, and the body follows into each cell you vacate. **Bump the trailing
-  body to drop it** (free), or **bump an empty cupboard while dragging to stow the
-  body inside and lock it** (§10.3) — the two ways to end a drag. Half speed holds
-  throughout (one cell per two turns), and **Run never stacks with Drag** — picking a
-  body up suppresses the sprint's extra step. Ducts refuse a dragging player: a body
-  cannot follow into the walls (§10.7), so let it go first.
+- **Drag has no grab button, but it does have a grab *turn*** (#451). A body is
+  non-solid (§7.2), so you cross it like floor — and **waiting while you stand on it
+  takes hold**, if your hands are free. From then on the body follows into each cell
+  you vacate. **Bump the trailing body to drop it** (free), or **bump an empty
+  cupboard while dragging to stow the body inside and lock it** (§10.3) — the two
+  ways to end a drag. Half speed holds throughout (one cell per two turns), and **Run
+  never stacks with Drag**. Ducts refuse a dragging player: a body cannot follow into
+  the walls (§10.7), so let it go first.
+
+  > **It used to ride the step off the body's cell, and that was the wrong shape.**
+  > The grab was something that happened *to* you: you could not walk across a body
+  > at all without picking it up, and the drag that followed costs half speed — so the
+  > accident landed exactly when you least wanted it, mid-escape, over the guard you
+  > had just put down. Making it a spent turn makes it a **decision**, which is what
+  > §7.2's body economy is supposed to be asking of you.
+  >
+  > **The overload is on Wait, and the wait keeps its look.** A take-hold wait still
+  > gives the 360° for that turn: the turn is spent either way and the look costs
+  > nothing to keep, so the verb loses nothing and no new key is invented. The only
+  > consequence is that you cannot wait *over* a body without picking it up — stand a
+  > cell off if that is what you want. Wait is also the verb a player taps most for
+  > information, so the usable line names the new one (`body: wait to grab`,
+  > §11.4); the hint is the mitigation, not a nicety.
+  >
+  > **It straightens the cupboard sequence.** A takedown made from inside a cupboard
+  > leaves the body next to you, and stowing it used to need a square move — out, off,
+  > back — because the grab only landed on the step *away*. Now it is a straight line:
+  > takedown → step out onto the body → wait → bump the cupboard.
+  >
+  > **The pickup carries no haul debt.** The old grab rode a step, so the player got a
+  > whole cell of movement on the turn they picked up and the weight caught up on the
+  > next one. This one rides a wait — a full turn already paid, and nowhere gone — so
+  > charging the debt on top would charge twice for the same grab. Half speed starts
+  > from the first step, which is where §8.3's "one cell per two turns" lives.
 
 ### 8.4 Targeting
 
@@ -1575,7 +1601,10 @@ stay a future axis.
 > **A cupboard is also where you hide a body (§7.2), and doing so locks it.** Drag a
 > body to a cupboard and **bump the empty cupboard to stow it inside**: the body
 > slides in and is *gone* — no cone will ever find it — and the cupboard is now
-> **locked**. A locked cupboard is no longer a hideout: it holds a body, so you
+> **locked**. From inside a cupboard the whole sequence is a straight line since
+> #451: takedown → step out onto the body → **wait** to take hold → bump the cupboard.
+> It used to need a square move — out, off, and back — because the grab only landed
+> on the step *away* from the body (§8.3). A locked cupboard is no longer a hideout: it holds a body, so you
 > cannot climb in, and bumping it is an inert no-op. It shows the body's **`z`** in
 > the **Neutral** colour (not the empty `}`), so a glance tells you which cupboards you
 > have spent this way — Neutral because that list of three is *the* definition of a
@@ -2026,16 +2055,41 @@ is the case this serves.
   > `message_for` can build, with an explicit, only-ever-shrinking list of the few
   > that predate the bound; an over-long message clips silently on a real screen,
   > which is why the check is a test and not a hope.
-- **Usable line** — *what you can act on*: the bump affordances adjacent to the
-  player right now, each **with an arrow giving the bump's direction** (`↑
+- **Usable line** — *what you can act on*: the affordances available where the
+  player stands, each **with an arrow giving the bump's direction** (`↑
   console: take intel`, `← table: crouch`, `↓ cupboard: hide`, `door: open →`).
   Not a message — a **pure derived function of state**, recomputed every frame, no
-  plumbing. When nothing is adjacent it falls back to the **innate-verb floor**
+  plumbing. When nothing is available it falls back to the **innate-verb floor**
   below rather than sitting empty (#323). The arrow makes each bump an aimed
   "press this way, get that", so even the rare cell beside two usables stays
   unambiguous — one row lists each with its own direction. The generator
   *prefers* one usable per floor cell (§10.6, best-effort) to keep the common
   case to a single line, but does not guarantee it.
+
+  **One entry has no direction** (#451). Taking hold of a body is about the cell the
+  player is standing **on**, and its press is a **wait**, not a bump — so the line
+  carries `body: wait to grab` with **no arrow at all**, drawn among the centred
+  group where the player's own cell is. An arrow would be a lie in the one channel
+  this row exists to be trusted in: the whole promise of the aimed row is *press
+  towards the words*, and there is nowhere to press. The discipline is unweakened,
+  only widened from *mirror the bump* to **mirror the press** — the entry is derived
+  from the same state the Wait acts on, so it appears exactly when the wait would
+  take hold and never otherwise, and a stunned or phased player is offered it no more
+  than they are offered anything else (§8.3).
+
+  **Every label is bounded at 21 cells** (`LABEL_MAX`), checked at compile time over
+  the complete set. The row already accepts that *two* long labels overrun a 40-wide
+  board and falls back to the packed list for them, so the bound is not a promise that
+  any pair fits — it is a guard against the case #451 shipped and a phone found: one
+  label so much wider than the rest (`body: wait to take hold`, 23 cells) that a pair
+  which used to fit started clipping. `status_row` clips in silence, so nothing but a
+  bound catches it before a screenshot does.
+
+  It says **`wait`** rather than carrying a clock glyph because §11.3's table has none
+  for *this costs a turn*, and the shipped font stack falls back to a generic
+  `monospace` on some devices — an unguaranteed codepoint would come out as tofu in
+  the one row whose job is to teach a verb. Adding a timer glyph is a §11.3 change
+  with its own justification to make, not a side effect of naming an affordance.
 
   **The row is aimed, not packed** (#384): each entry draws where its direction
   points — **west** flush left, **north and south** centred, **east** flush right
@@ -2266,6 +2320,19 @@ boundary is visible across open ground at all.
 > mouth is a recess backed by structure and a table is something put in a room rather
 > than part of it (appendix 18). Room shapes, wall runs and the openings between them
 > still read from turn one, so you are still never lost and never mapping.
+>
+> **"Remembered" is two questions, and the row above answers the first.** *Hidden
+> until seen* is this table's axis. *Which ink it keeps once it leaves your sight* is
+> the renderer's, and the two do not partition the same way:
+> [`docs/render-reference.md`](render-reference.md) §3 owns that second answer and
+> holds the layer split it implies. **Intel, comms, cupboards and duct mouths** take
+> the **memory slate** — the ink that says *you found this*, and the reason #450 moved
+> the duct mouth onto it: §10.7 makes a duct an escape a pursuer cannot follow, so a
+> mouth scouted is a route you plan with, not a wall you have walked past. **Doors and
+> furniture** take the ordinary dim shade instead, because a door's *pose* is live
+> state redrawn every frame and a slate door would compete with it, and because doors
+> are everywhere — slating all of them would bury the two or three marks that change a
+> plan. A colour that marks everything marks nothing.
 >
 > **The cost is meant to be payable.** §12.6's `full_layout_known` modifier hands
 > the whole layout over as an *easier*-direction modifier — so under the directed
@@ -2715,7 +2782,9 @@ flips a rule an existing system already owns rather than adding a parallel one:
 cupboards unconditionally (harder); *"always show vision cones"* paints the §11.5
 danger overlay in full (easier); *"full layout known"* draws the building's real
 architecture where the §11.5a schematic would otherwise stand, so doorways, duct
-mouths and furniture are all on the map from turn one (easier); the two
+mouths and furniture are all on the map from turn one (easier — the duct mouth is
+the one *content* it hands over, because a mouth reads off a plan the way a doorway
+does; a scouted mouth is still the one that gets the memory slate, #450); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
 summon anyone (harder); *"all doors automatic"* generates every doorway frameless
 instead of hinged (§10.4/#452 — harder, and the **one modifier read by generation**

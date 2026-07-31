@@ -373,8 +373,22 @@ pub enum Affordance {
     /// land — an aware guard's cell offers nothing.
     Takedown,
     /// The body being dragged: bump it to let go — free (§4.4). (Taking hold is
-    /// not a bump: you drag by walking over a body and off its cell, §8.3.)
+    /// not a bump either — it is a **wait**, see [`TakeBody`](Affordance::TakeBody).)
     ReleaseBody,
+    /// A loose body **under the player's own feet**, hands free: wait to take hold
+    /// (§8.3/#451). The one affordance that is not about a neighbour — it has no
+    /// direction, which is why the usable line carries an
+    /// [`Option<Direction>`](crate::Direction) rather than a `Direction`.
+    ///
+    /// Its label says **`wait`** because there is no glyph in §11.3's table for
+    /// *this costs a turn*, and the shipped font stack falls back to a generic
+    /// `monospace` on some devices — a clock codepoint nobody can guarantee would
+    /// come out as tofu in the one row whose job is to teach a verb. The word costs
+    /// five cells and cannot fail to render.
+    ///
+    /// Never offered while already dragging: the line shows `body: release` on the
+    /// held body instead, and a second body is not something free hands can take.
+    TakeBody,
     /// An empty cupboard while dragging a body: bump to stow the body inside and
     /// lock the cupboard — it is no longer a hideout (§7.2/§10.3).
     StoreBody,
@@ -401,11 +415,38 @@ pub enum Affordance {
 }
 
 impl Affordance {
+    /// **Every affordance there is**, so the usable line's width bound can measure
+    /// the complete set at compile time (§11.4). Written out rather than derived —
+    /// the same shape [`CAPTIONS`](crate::modifiers) takes, and for the same reason:
+    /// a variant missing from here is a label nothing checks, which is exactly the
+    /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
+    /// against it so a new variant cannot quietly skip the list.
+    pub(crate) const ALL: [Affordance; 13] = [
+        Affordance::Takedown,
+        Affordance::ReleaseBody,
+        Affordance::TakeBody,
+        Affordance::StoreBody,
+        Affordance::OpenDoor,
+        Affordance::CloseDoor,
+        Affordance::TakeIntel,
+        Affordance::SilenceRadio,
+        Affordance::Hide,
+        Affordance::EnterDuct,
+        Affordance::Crouch,
+        Affordance::Leave,
+        Affordance::ExitRefused,
+    ];
+
     /// The words the usable line shows for this affordance.
-    pub fn label(self) -> &'static str {
+    ///
+    /// `const` so the row's width bound ([`super::super::render::usable`]) can be a
+    /// compile-time assertion rather than a test: a label too wide for the v1 board
+    /// then fails the *build*, never the frame.
+    pub const fn label(self) -> &'static str {
         match self {
             Affordance::Takedown => "guard: take down",
             Affordance::ReleaseBody => "body: release",
+            Affordance::TakeBody => "body: wait to grab",
             Affordance::StoreBody => "cupboard: stow body",
             Affordance::OpenDoor => "door: open",
             Affordance::CloseDoor => "door: close",
@@ -430,6 +471,10 @@ impl Affordance {
     pub fn category(self) -> Category {
         match self {
             Affordance::Takedown => Category::Caution,
+            // The body in your hands is Owned; the one you are about to pick up is
+            // still the §7.3 liability it was when it hit the floor — Caution, the
+            // same yellow as its own `z` and as the takedown that left it there.
+            Affordance::TakeBody => Category::Caution,
             Affordance::ReleaseBody => Category::Owned,
             Affordance::OpenDoor
             | Affordance::CloseDoor
@@ -442,5 +487,44 @@ impl Affordance {
             | Affordance::Leave
             | Affordance::ExitRefused => Category::Interest,
         }
+    }
+}
+
+#[cfg(test)]
+mod affordance_tests {
+    use super::*;
+
+    /// [`Affordance::ALL`] really is **all** of them (§11.4/#451). The list is what
+    /// the usable line's compile-time width bound measures, so a variant missing from
+    /// it would be a label nothing checks — the drift the bound exists to stop.
+    ///
+    /// The match is the mechanism: adding a variant fails to compile here until it is
+    /// named, and naming it without adding it to `ALL` then fails this assertion.
+    #[test]
+    fn every_affordance_is_in_all() {
+        for a in Affordance::ALL {
+            // Exhaustive on purpose — the compiler enumerates the work (§12.2).
+            let named = match a {
+                Affordance::Takedown
+                | Affordance::ReleaseBody
+                | Affordance::TakeBody
+                | Affordance::StoreBody
+                | Affordance::OpenDoor
+                | Affordance::CloseDoor
+                | Affordance::TakeIntel
+                | Affordance::SilenceRadio
+                | Affordance::Hide
+                | Affordance::EnterDuct
+                | Affordance::Crouch
+                | Affordance::Leave
+                | Affordance::ExitRefused => true,
+            };
+            assert!(named, "{a:?}");
+        }
+        let mut seen: Vec<&str> = Affordance::ALL.iter().map(|a| a.label()).collect();
+        seen.sort_unstable();
+        let before = seen.len();
+        seen.dedup();
+        assert_eq!(seen.len(), before, "two affordances share a label");
     }
 }

@@ -413,10 +413,11 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         USABLE_ROW * width,
         "the usable line follows the near line"
     );
-    // The usable line owns its own row end to end (§11.4): the adjacent
-    // affordances aimed where they point (#384), or — with nothing to act on —
-    // the innate-verb floor in the modality the shell says the player is using
-    // (#323). A floor, never a competitor: one adjacent usable and the
+    // The usable line owns its own row end to end (§11.4): the affordances aimed
+    // where they point (#384) — plus, since #451, the one that points nowhere,
+    // because it is about the cell underfoot and its press is a wait — or, with
+    // nothing to act on, the innate-verb floor in the modality the shell says the
+    // player is using (#323). A floor, never a competitor: one usable and the
     // affordances have the row back.
     cells.extend(super::usable::usable_row(
         width,

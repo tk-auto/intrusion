@@ -275,7 +275,7 @@ fn an_automatic_door_offers_open_but_never_close() {
     // Closed and faced: the usable line offers "door: open" to the east.
     assert!(
         s.affordances()
-            .contains(&(Direction::East, Affordance::OpenDoor)),
+            .contains(&(Some(Direction::East), Affordance::OpenDoor)),
         "a closed automatic door offers open",
     );
 
@@ -290,7 +290,7 @@ fn an_automatic_door_offers_open_but_never_close() {
     assert!(
         !affs
             .iter()
-            .any(|(d, a)| *d == Direction::East && *a == Affordance::OpenDoor),
+            .any(|(d, a)| *d == Some(Direction::East) && *a == Affordance::OpenDoor),
         "an open automatic door is walked through, not re-opened",
     );
 }
@@ -452,7 +452,7 @@ fn a_frame_bump_opens_the_door_and_auto_faces_the_peek() {
     assert!(
         s.affordances()
             .iter()
-            .any(|&(dir, a)| dir == Direction::East && a == Affordance::OpenDoor),
+            .any(|&(dir, a)| dir == Some(Direction::East) && a == Affordance::OpenDoor),
         "a closed hinge offers door: open on the usable line",
     );
 
@@ -636,7 +636,7 @@ fn the_frame_close_returns_the_action_after_the_open() {
     assert_eq!(s.door_just_opened, None, "one action wide, no more");
     assert!(
         s.affordances()
-            .contains(&(Direction::North, Affordance::CloseDoor)),
+            .contains(&(Some(Direction::North), Affordance::CloseDoor)),
         "the frame offers the close again",
     );
 

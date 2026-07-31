@@ -90,9 +90,13 @@ pub const BORE_MARGIN: u64 = 3 * crate::bot::CROSSING_MARGIN;
 pub const URGE_NONE: u8 = 0;
 
 /// How much room a Dephase crossing wants from the nearest perceived guard
-/// (**[START] = 3**): one cell for each turn the phase lasts (§8.3), so a guard
-/// walking at the §7.1 one cell per turn cannot reach the landing cell before the bot
-/// is out of it.
+/// (**[START] = 3**): one cell for each turn the *crossing* commits the bot — press,
+/// in, out — so a guard walking at the §7.1 one cell per turn cannot reach the landing
+/// cell before the bot is out of it.
+///
+/// Counted off the crossing rather than off the window, which is why #449's tune of
+/// the window (3 → 4) left this number alone: the extra turn is slack the bot spends
+/// standing on floor, not another turn a guard has to close on the landing.
 pub const CROSSING_CLEARANCE: u32 = 3;
 
 /// **A faint fit**: it might help. A step is probably worth more, and by default
@@ -423,7 +427,7 @@ impl Moment<'_> {
         )
     }
 
-    /// Dephase (§8.3): *"walk through walls, doors, guards"* for three turns — and
+    /// Dephase (§8.3): *"walk through walls, doors, guards"* for four turns (#449) — and
     /// **it does not conceal you**. So what it is *for* is a short crossing you can
     /// see the far side of, never a way out of being seen.
     fn dephase(&self, status: AbilityStatus) -> Option<Bid> {

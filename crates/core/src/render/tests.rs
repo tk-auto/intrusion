@@ -549,7 +549,8 @@ fn a_dragged_body_reads_owned_and_a_stowed_one_reads_neutral() {
     );
     s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::West)); // step off to (4,4), hauling
     assert_eq!(s.dragging(), Some(Cell::new(5, 4)));
 
     // Look around (Wait's 360°) to see the body behind you: yours, an Owned `z`.
@@ -604,7 +605,8 @@ fn an_occupied_cupboard_is_owned_and_a_spent_one_is_not() {
 
     s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::West)); // step off to (4,4), hauling
     s.step(Input::Step(Direction::West)); // stow into the cupboard at (3,4)
     let spent = render(&s).get(3, 4);
     assert_eq!(
@@ -634,7 +636,8 @@ fn a_stowed_cupboard_is_remembered_out_of_view() {
     );
     s.step(Input::Step(Direction::North)); // takedown: body at (5,4)
     s.step(Input::Step(Direction::North)); // climb out onto the body
-    s.step(Input::Step(Direction::West)); // step off to (4,4) — take hold
+    s.step(Input::Wait); // stand on the body: take hold (§8.3/#451)
+    s.step(Input::Step(Direction::West)); // step off to (4,4), hauling
     s.step(Input::Step(Direction::West)); // stow into the cupboard at (3,4)
     assert_eq!(
         s.bodies()[0].cell(),
@@ -1425,6 +1428,56 @@ fn an_unseen_hideout_masks_as_wall_until_scouted() {
     );
 }
 
+/// §11.5a/§10.7 (#450): **a duct mouth found is a duct remembered** — the same
+/// three-state life as the cupboard above, and for the same reason. A duct is an
+/// escape a pursuer cannot follow (§10.7), so a mouth you have scouted is a route
+/// you plan with, exactly as §2.3's exit anchors every escape plan. It used to take
+/// the geometry arm and draw its `=` in the shared dim gray out of view, which is
+/// the colour a wall dims to — a route found, reported as one more piece of
+/// building.
+///
+/// The unexplored end is unchanged and asserted here too: a mouth is a recess cut
+/// back into a wall run, so on the plans it is fabric, and the schematic never
+/// advertises a shortcut the player has not found.
+#[test]
+fn a_scouted_duct_mouth_is_remembered_like_a_cupboard() {
+    let mut layout = open_room(20, 20);
+    layout.place(Cell::new(10, 14), Terrain::DuctEntry); // behind the spawn facing
+    let mut s = State::new(
+        layout,
+        Cell::new(10, 10),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .without_the_opening_look();
+
+    // Glyph *and* category come from the mask, as with the hideout: a lone System-tan
+    // mark among Neutral ones would give the mouth away through the colour channel.
+    let cell = render(&s).get(10, 14);
+    assert_eq!(
+        (cell.glyph, cell.fg, cell.vis),
+        (SCHEMATIC_WALL, Category::Neutral, Visibility::Unexplored),
+        "an unscouted duct mouth reads as the wall run it is cut into",
+    );
+
+    s.step(Input::Step(Direction::South)); // face it: live
+    let cell = render(&s).get(10, 14);
+    assert_eq!(
+        (cell.glyph, cell.fg, cell.vis),
+        ('=', Category::System, Visibility::Live),
+    );
+
+    s.step(Input::Step(Direction::North)); // leave: remembered, not merely dim
+    let cell = render(&s).get(10, 14);
+    assert_eq!(
+        (cell.glyph, cell.fg, cell.vis),
+        ('=', Category::System, Visibility::Remembered),
+        "the memory slate is what says you found this — not the wall's dim gray",
+    );
+}
+
 /// §11.5a: a door's **position** is part of the building's fabric, but its
 /// open/closed pose is live state — once explored, a panel out of the FOV draws
 /// canonically closed, *even after the player has seen it open*. Memory holds
@@ -2042,9 +2095,12 @@ fn a_crawled_duct_leaves_no_trace_on_the_base_map() {
     }
 }
 
-/// With no duct occupied the view is ordinary (§11.5a): an **entry** is geometry,
-/// drawn `=` from turn one, but the **interior** is contents — plain wall until
-/// crawled, giving the shortcut's route away to nobody.
+/// With no duct occupied the view is ordinary (§11.5a): an **entry** the player can
+/// see draws its `=`, but the **interior** is the duct's own private layer — plain
+/// wall until crawled, and not even then (see above), giving the shortcut's route
+/// away to nobody. Both entries here are in the opening look, which is why they draw
+/// at all: a mouth is contents (#450), so an unscouted one masks as the fabric it is
+/// cut into.
 #[test]
 fn an_unentered_duct_shows_entries_but_hides_its_path() {
     let g = render(&duct_state(Vec::new()));

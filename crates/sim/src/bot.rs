@@ -455,6 +455,24 @@ impl StealthBot {
         if !self.profile.crouches {
             return None;
         }
+        // **Never while phased.** The duck is a *bump* into the furniture, and while
+        // Dephase is up there is no bump (§8.3): the step walks the bot inside the
+        // bench instead, and a window that ends in there costs the safety eject and a
+        // stun as long as the throw. So a phased bot has no duck on offer — which is
+        // no loss, since the phase conceals nothing and the cover would have been the
+        // point. `step_down` refuses to enter a solid on the ordinary route for the
+        // same reason; this is that rule on the cover ladder.
+        //
+        // It became reachable at #449. With a three-turn window the phase was spent by
+        // the time the crossing was walked, so a phased bot was never standing on open
+        // floor with a bench beside it and a turn to fill; the fourth turn is exactly
+        // that turn.
+        if matches!(
+            state.ability_state(AbilityId::Dephase),
+            AbilityState::Active { .. }
+        ) {
+            return None;
+        }
         let threats = self.nearby_threats(state);
         if threats.is_empty() {
             return None;
@@ -610,10 +628,11 @@ impl StealthBot {
     /// Deal with the body **in hand** (§8.3): haul it to a cupboard and stow it, or
     /// let it go. `None` with empty hands, which is the usual case.
     ///
-    /// The grab itself is never a decision — stepping off a body's cell takes hold of
-    /// it automatically (§8.3/#187) — so a temperament that does not stow cannot
-    /// express that by standing still. It has to *act*, by letting go, which is why
-    /// [`body_stow_reach`](Profile::body_stow_reach) of zero still reaches this code.
+    /// The grab **is** a decision since #451 — a wait spent standing on the body —
+    /// but a temperament that does not stow still cannot express that by standing
+    /// still, because a body already in hand has to be put down. It has to *act*, by
+    /// letting go, which is why [`body_stow_reach`](Profile::body_stow_reach) of zero
+    /// still reaches this code.
     fn haul(
         &mut self,
         state: &State,
@@ -654,10 +673,12 @@ impl StealthBot {
     /// stows. `None` for one that does not, and none when there is nothing worth the
     /// walk.
     ///
-    /// Two steps, because the grab is the step *off* a body's cell (#187): get on it,
-    /// then leave in the direction of the cupboard, and the pickup rides that step for
-    /// free. A body only counts as worth fetching when there is somewhere to *put* it —
-    /// hauling one to nowhere is turns spent making the run slower and no quieter.
+    /// **Three turns since #451**: walk onto the body, **wait** to take hold, then
+    /// leave in the direction of the cupboard. It was two — the grab rode the step
+    /// *off* the cell (#187) and cost nothing — and the middle turn is the price the
+    /// ticket set on making the pickup a decision. A body only counts as worth
+    /// fetching when there is somewhere to *put* it: hauling one to nowhere is turns
+    /// spent making the run slower and no quieter, and that is one turn truer now.
     fn fetch(
         &self,
         state: &State,
@@ -673,22 +694,18 @@ impl StealthBot {
         if shelters.is_empty() {
             return None;
         }
-        // Already standing on one: any step from here takes hold, so make it the step
-        // that starts the haul — toward the cupboard, but never **into** it. Bumping a
-        // cupboard with empty hands climbs in to hide (§10.3) rather than stowing, and
-        // the body would still be lying on the floor outside.
+        // Already standing on one: **wait, and take hold** (§8.3/#451). This is the
+        // whole of the bot's half of that change. The pickup used to ride the step
+        // *off* the body, so this branch stepped toward the cupboard and the grab came
+        // free; now it is its own spent turn, and a bot that kept stepping would walk
+        // off the body and leave it lying there for ever.
+        //
+        // Pressing the same key core acts on, rather than modelling the rule: the wait
+        // takes hold if and only if core says it would, which is the seam
+        // `docs/bot-behaviour.md` §2 asks for.
         let loose = findable_bodies(state);
         if loose.contains(&player) {
-            return self
-                .descend_avoiding(
-                    state,
-                    &shelters,
-                    danger,
-                    blocked,
-                    self.profile.flee,
-                    &shelters,
-                )
-                .map(Input::Step);
+            return Some(Input::Wait);
         }
         let worth: Vec<Cell> = loose
             .into_iter()
@@ -785,8 +802,13 @@ impl StealthBot {
         state
             .affordances()
             .into_iter()
-            .find(|&(_, a)| a == Affordance::SilenceRadio)
-            .map(|(dir, _)| Input::Step(dir))
+            // The direction is an `Option` since #451 — the line carries one
+            // standing-on entry that has none — but `SilenceRadio` is a bump, so a
+            // `None` here would be core contradicting itself. `find_map` reads the
+            // direction rather than asserting it, and a shape that cannot happen
+            // simply yields no press.
+            .find_map(|(dir, a)| (a == Affordance::SilenceRadio).then_some(dir?))
+            .map(Input::Step)
     }
 
     /// Pursue the objective — nearest known untaken console, then the exit — or, when
@@ -1102,13 +1124,15 @@ impl StealthBot {
             // duration that expires in there costs the safety eject and a stun (§8.3).
             // Entering a solid is the crossing's business alone, and the crossing
             // checks it has the window to come out again.
-            if phased
-                && state
-                    .layout()
-                    .facility()
-                    .terrain(next)
-                    .is_some_and(|t| t.blocks_movement())
-            {
+            //
+            // **The sprint's free second cell is part of the same step.** Run moves two
+            // cells on one input (§8.3) and core walks the second one itself, so a check
+            // that looks one cell ahead lets a phased sprinter be *carried* into a solid
+            // it never chose — and while the phase is up there is no bump to stop it at
+            // the wall. One turn later the duration expires in there and the eject fires.
+            // §13.2's rule that the bot only presses what a player could press cuts both
+            // ways: it must also own what the press actually does.
+            if phased && self.phased_step_ends_in_a_solid(state, dir) {
                 continue;
             }
             let watched = danger.contains(&next);
@@ -1127,6 +1151,36 @@ impl StealthBot {
         }
         Some(dir)
     }
+
+    /// Whether pressing `Step(dir)` while phased would leave the bot standing in a
+    /// solid — the cell the eject is priced off (§8.3).
+    ///
+    /// The subtlety is that *one press is not always one cell*. With Run up the step
+    /// moves two (§8.3), and the free second cell is chosen by the rule rather than by
+    /// the bot, so the question a caller has to ask is where the press **ends**, not
+    /// where it begins. Phased, nothing along the way refuses it: a wall the sprint
+    /// would ordinarily stop against is simply walked into.
+    ///
+    /// Only ever consulted while phased. Unphased, a solid ahead is a bump — a spent
+    /// turn or a take (§4.4), never a stranding — and the ordinary cost field is left
+    /// to judge it.
+    fn phased_step_ends_in_a_solid(&self, state: &State, dir: Direction) -> bool {
+        let facility = state.layout().facility();
+        let solid = |cell: Cell| facility.terrain(cell).is_some_and(|t| t.blocks_movement());
+        let sprinting = matches!(
+            state.ability_state(AbilityId::Run),
+            AbilityState::Active { .. }
+        );
+        let Some(next) = state.player().step(dir) else {
+            return false;
+        };
+        // The near cell strands the bot whether or not the sprint carries it further;
+        // the far one only exists as a destination while Run is up.
+        match sprinting.then(|| next.step(dir)).flatten() {
+            Some(beyond) => solid(next) || solid(beyond),
+            None => solid(next),
+        }
+    }
 }
 
 /// The **one-cell crossing** worth phasing through from `from`, if the field knows
@@ -1137,10 +1191,13 @@ impl StealthBot {
 /// the ability can never be pressed for a crossing the policy would then decline to
 /// take — the shy-cue failure #347 warns about, in its most literal form.
 ///
-/// **One cell of solid, never two.** The duration is 3 turns: in at 1, out at 2,
-/// with a turn in hand. A two-cell run would land on expiry, and a duration that ends
-/// inside a solid costs a safety eject plus a stun as long as the throw (§8.3) — the
-/// exact trap the cue must not walk into.
+/// **One cell of solid, never two.** The crossing spends three turns whatever the
+/// window is — press, in, out — and #449 widened the window to 4, so there is now a
+/// turn of slack rather than none. The cue is deliberately *not* widened with it: a
+/// two-cell run would spend the whole window and land its exit on the expiry turn, and
+/// a duration that ends inside a solid costs a safety eject plus a stun as long as the
+/// throw (§8.3) — the exact trap the cue must not walk into. The slack is what absorbs
+/// a stolen turn (see [`StealthBot::push_on`]), not a deeper crossing.
 fn crossing(
     facility: &Facility,
     memory: &intrusion_core::VisibleSet,
@@ -1291,12 +1348,13 @@ fn near_findable_body(bodies: &[Cell], hideout: Cell) -> bool {
 /// — bumping an aware guard is a wasted, refused turn (§7.2), whereas an *unaware*
 /// one is left out so the takedown stays available.
 ///
-/// **Bodies are deliberately not here** (§7.2/#187). They used to be, on the strength
-/// of a comment calling them solid; they have not been since bodies went
-/// pickup-on-walk, and routing round one cost the bot the only way to *take hold* of
-/// it — the grab is the step **off** a body's cell, so a bot that will not stand on a
-/// body can never drag one (#316). The single exception is the door-crush rule, which
-/// is core's business and not a routing question.
+/// **Bodies are deliberately not here** (§7.2/#187/#451). They used to be, on the
+/// strength of a comment calling them solid; they have not been since bodies went
+/// non-solid, and routing round one costs the bot the only way to *take hold* of it —
+/// the grab is a wait spent **standing on** the body, so a bot that will not stand on
+/// one can never drag one (#316), and that is truer now than when the grab merely
+/// rode the step away. The single exception is the door-crush rule, which is core's
+/// business and not a routing question.
 fn blocked_cells(state: &State) -> HashSet<Cell> {
     let mut cells = HashSet::new();
     for guard in state.guards() {
@@ -1322,7 +1380,7 @@ fn blocked_cells(state: &State) -> HashSet<Cell> {
 /// cell, so springing one from a dead end — a cupboard, a one-wide stub — whose *only*
 /// way out held that guard walled the mouth and stranded the bot for the run. **That
 /// hazard no longer exists.** #187 made a loose body non-solid: the mouth stays
-/// walkable, and stepping over it on the way out takes hold of it (§8.3). The rule
+/// walkable, and the bot can stand on it and wait to take hold (§8.3/#451). The rule
 /// outlived its reason by four days and went on suppressing every takedown the bot was
 /// ever offered — all of them this exact shape, a hidden bot with a patrol on its
 /// cupboard door (#316).
