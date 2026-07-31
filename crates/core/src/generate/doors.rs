@@ -19,7 +19,14 @@ use super::*;
 /// three rarely) — but always at least one, so no room is sealed (§10.6). Because
 /// rooms are always separated from each other by corridor-plus-two-walls, **every
 /// door connects a room to a corridor** (§10.1.4, §10.6).
-pub(super) fn place_doorways(facility: &mut Facility, regions: &mut RegionGraph, rng: &mut Rng) {
+///
+/// `automatic` is the run's §12.6 door vocabulary, applied to every doorway alike.
+pub(super) fn place_doorways(
+    facility: &mut Facility,
+    regions: &mut RegionGraph,
+    rng: &mut Rng,
+    automatic: bool,
+) {
     let (w, h) = (facility.width(), facility.height());
     let mut candidates: Vec<Candidate> = Vec::new();
     // Rows first: a horizontal wall with floor north and south is a run in x, and
@@ -33,7 +40,7 @@ pub(super) fn place_doorways(facility: &mut Facility, regions: &mut RegionGraph,
     }
 
     for idx in choose_doors(&candidates, rng) {
-        cut_door(facility, regions, rng, &candidates[idx]);
+        cut_door(facility, regions, rng, &candidates[idx], automatic);
     }
 }
 
@@ -148,15 +155,27 @@ pub(super) fn room_door_budget(rng: &mut Rng) -> u32 {
 }
 
 /// Cut the doorway for one chosen `candidate`. Length is random `3..=min(len, 6)`
-/// at a random offset (§10.1.4). A **[START]** [`AUTO_DOOR_PERCENT`] share (drawn
-/// from the seeded RNG, §12.4) become **automatic** — the whole span is closed
-/// panels, no hinges (§10.4/#147) — and the rest are **manual**: the two ends are
-/// hinges, the cells between are closed panels (§10.4).
+/// at a random offset (§10.1.4).
+///
+/// **Which kind of door is the level's property, not the doorway's** (§10.4/#452):
+/// `automatic` comes from the run's [`LevelModifiers`](crate::LevelModifiers) and is
+/// the same for every doorway on the facility. An **automatic** door is frameless —
+/// the whole span is closed panels, no hinges, so there is no handle to shut it by
+/// hand and it closes itself on [`AUTO_CLOSE_DELAY`] (#147). A **manual** one frames
+/// the span: the two ends are hinges, the cells between are closed panels (§10.4).
+///
+/// It used to be a per-doorway draw against a `[START]` share, which made every
+/// facility a mixture and made "which vocabulary is this door?" a coin flip the
+/// player discovered by walking up to it. Dropping the draw is also what shifts the
+/// RNG stream, so every pre-#452 seed carves a different facility — the deliberate
+/// break, taken rather than papered over with a throwaway draw that would have kept
+/// compatibility by lying about what the generator does.
 pub(super) fn cut_door(
     facility: &mut Facility,
     regions: &mut RegionGraph,
     rng: &mut Rng,
     candidate: &Candidate,
+    automatic: bool,
 ) {
     let Candidate {
         line,
@@ -170,10 +189,9 @@ pub(super) fn cut_door(
     let first = start + offset;
     let last = first + door_len - 1;
 
-    // The automatic/manual draw is made here so the same seed makes the same doors
-    // automatic (§12.4). An automatic door is frameless: every cell of the span is a
-    // panel. A manual door frames the span with a hinge at each end.
-    let automatic = rng.below(100) < AUTO_DOOR_PERCENT;
+    // All or nothing (§12.6/#452): the level speaks one door vocabulary. An automatic
+    // door is frameless — every cell of the span is a panel; a manual door frames the
+    // span with a hinge at each end.
     let (hinges, panels): (Vec<Cell>, Vec<Cell>) = if automatic {
         (Vec::new(), (first..=last).map(|i| line.cell(i)).collect())
     } else {

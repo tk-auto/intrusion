@@ -97,6 +97,21 @@ makes that structurally impossible rather than merely detected.
 The compiler helps: `modifier_slots` destructures `LevelModifiers` by name, so a new
 modifier will not compile until it is given a slot.
 
+> **A slot is not the same promise as a seed.** These rules keep a token *naming the
+> same run* — the same seed, modifiers and loadout — forever. They do **not** promise
+> that the seed carves the same building: a level is a function of the seed **and the
+> generator** (§12.4), so any change to generation re-carves every token ever shared,
+> quietly and by design. #452 is the worked example: making automatic doors a level
+> modifier dropped a per-doorway RNG draw, which shifted the stream, so a `#seed=N`
+> link from before it names a different facility. The token still decodes to exactly
+> the run it always described; that run is simply played in a different building.
+>
+> The alternative was to consume a throwaway draw and keep the stream aligned. It was
+> rejected: it buys compatibility by making the generator perform a step it does not
+> need, and a generator with a vestigial draw in it is a generator nobody can read.
+> Take the break, refresh the committed baseline and the replay fixtures in the same
+> PR, and say so in the commit.
+
 *Checked at build time by the `const _` block in `level_seed.rs` — a roster that had
 outgrown its slots fails the compile, not the suite. Test:
 `a_token_naming_an_unknown_slot_is_rejected`.*

@@ -299,6 +299,13 @@ Two of these are worth reading twice, because they are the seam's own rules biti
   the histogram fills, and nothing happens. One function answers both "is there a
   crossing worth it?" and "which way do I step while phased", which is what makes that
   impossible rather than merely unlikely.
+- **A phased step is judged by the cell it ends on, not the one it enters.** Run is
+  innate and nothing forbids holding it with Dephase, so one press can move two cells
+  — and phased there is no bump to stop the free second one at a wall. The policy
+  therefore asks where the press *lands* before it will walk a phased step at all, and
+  the crossing offer is withdrawn outright while the sprint is up (a two-cell step
+  overshoots the far side). Both guard the same thing: a duration that expires inside
+  a solid costs the safety eject plus a stun as long as the throw (§8.3).
 
 ### 4.5 Arbitration
 

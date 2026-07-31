@@ -82,6 +82,11 @@ pub enum DoorCell {
 
 /// How a door closes (§10.4) — the axis #147 splits the old `auto_close` boolean into.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Which is on a given level is **not a per-doorway draw** (§12.6/#452): the run's
+/// [`automatic_doors`](crate::LevelModifiers::automatic_doors) modifier picks one for
+/// the whole facility, so a level speaks one door vocabulary and which one is a stated
+/// property of the run. A mixture was the old behaviour and its cost was legibility —
+/// which kind a door was, you found out by walking up to it.
 pub enum DoorKind {
     /// A hinged door: a solid frame end at each side and movable panels between them.
     /// Opened by bumping a panel, closed by bumping a hinge (§10.4) or by a Calm guard

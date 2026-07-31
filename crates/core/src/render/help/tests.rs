@@ -290,8 +290,8 @@ fn the_level_info_tab_lists_active_modifiers_or_none() {
 /// as `…one guard conver` on the v1 board.)
 #[test]
 fn no_modifier_caption_is_clipped_on_the_board() {
-    // Every toggle on, and the knob at each of its non-baseline values, so all
-    // five captions in `CAPTIONS` are exercised across the two renders.
+    // Every toggle on, and the knob at each of its non-baseline values, so every
+    // caption in `CAPTIONS` is exercised across the two renders.
     for gate in [IntelGate::All, IntelGate::None] {
         let all_on = LevelModifiers {
             guards_always_search_hideouts: true,
@@ -300,6 +300,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             always_show_vision_cones: true,
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
+            automatic_doors: true,
             intel_to_exit: gate,
         };
         let g = render_help(

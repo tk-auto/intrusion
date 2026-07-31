@@ -1212,8 +1212,12 @@ fn beats_and_sweeps_are_deterministic_from_the_seed() {
             // dwell roll (§153) are part of what this pins deterministic — same seed
             // → same closes and same dwells, turn for turn.
             let mut rng = Rng::new(seed);
-            let (layout, p) =
-                generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+            let (layout, p) = generate_level(
+                &crate::LevelConfig::V1,
+                &LevelModifiers::default(),
+                &mut rng,
+            )
+            .expect("the v1 config generates");
             let guards = p.guards(&layout);
             State::new(
                 layout,

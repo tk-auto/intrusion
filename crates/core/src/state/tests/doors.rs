@@ -132,8 +132,12 @@ fn guard_close_behind_fires_on_generated_levels() {
     let mut any_close = false;
     for seed in seed_sweep(32) {
         let mut rng = Rng::new(seed);
-        let (layout, placement) =
-            generate_level(&crate::LevelConfig::V1, &mut rng).expect("v1 generates");
+        let (layout, placement) = generate_level(
+            &crate::LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut rng,
+        )
+        .expect("v1 generates");
         let guards = placement.guards(&layout);
         let mut s = State::new(
             layout,

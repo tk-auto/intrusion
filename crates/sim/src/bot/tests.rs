@@ -294,6 +294,24 @@ fn the_balanced_profile_is_the_default_bot() {
 /// on one seed is a pin moving, not a balance signal; the 100-seed batches in the PR
 /// are what judge the cost.
 ///
+/// **#452 moved all 48 rows, and it is the one case where that means nothing at all.**
+/// Making automatic doors a level modifier dropped the per-doorway RNG draw, which
+/// shifts the generation stream — so every seed carves a *different facility* and the
+/// bot is playing 48 different levels. Nothing here is comparable row to row, in
+/// either direction, and the aggregate (**24 wins to 16**) is not a difficulty
+/// finding: read the committed baseline in the same PR, which runs 100 seeds per
+/// profile on both door settings and puts the win rate flat. A 48-run pin is a
+/// change-detector, not a balance signal (§13.4) — and against a re-rolled level set
+/// it is not even that, only a new reference point.
+///
+/// **Merging #451 and #452 moved four more rows**, all `aggressive`/`careless` and
+/// none of them a win/loss flip: the extra turn a fetch now costs (#451) lands on
+/// levels #452 re-carved, so the two interact only where a profile both stows a body
+/// and meets a different building. `careless 6` is the one to watch — it now reaches
+/// the input cap still playing (`lost 252` → `playing 999`), the second `playing`
+/// row this pin carries. Neither branch produced it alone, which is exactly what a
+/// change-detector is for; the committed baseline refreshed on the merged tree is
+/// what says whether the timeout tail actually grew.
 /// This list is the bot's play against a fixed game, so a change to the *game*
 /// moves it exactly as a change to the cue seam would — which is why the refresh
 /// belongs in the PR that changed the game, with the deltas read rather than waved
@@ -302,54 +320,54 @@ fn the_balanced_profile_is_the_default_bot() {
 #[test]
 fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
     const PINNED: [&str; 48] = [
-        "balanced 0 playing 1000 rdrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
-        "balanced 1 lost 49 rrc",
-        "balanced 2 won 160 r",
-        "balanced 3 won 201 cdrrrd",
-        "balanced 4 won 67 ",
-        "balanced 5 lost 118 rcrcrdr",
-        "balanced 6 lost 147 rrr",
-        "balanced 7 lost 11 rc",
-        "balanced 8 lost 113 r",
-        "balanced 9 won 349 c",
-        "balanced 10 won 249 ",
-        "balanced 11 lost 199 crrr",
-        "cautious 0 won 150 dr",
-        "cautious 1 lost 112 rr",
-        "cautious 2 lost 313 rcdrdr",
-        "cautious 3 won 376 rdr",
-        "cautious 4 won 73 c",
-        "cautious 5 lost 73 crcrcr",
-        "cautious 6 lost 140 rrr",
-        "cautious 7 lost 11 rc",
-        "cautious 8 won 296 rd",
-        "cautious 9 lost 285 rdrdr",
-        "cautious 10 lost 795 dcrrrdrdrrdrdrr",
-        "cautious 11 lost 224 rrrdrc",
-        "aggressive 0 won 139 rdrd",
-        "aggressive 1 lost 40 r",
-        "aggressive 2 lost 110 r",
-        "aggressive 3 lost 62 rdcr",
-        "aggressive 4 lost 172 rrr",
-        "aggressive 5 won 74 rcrc",
-        "aggressive 6 won 75 c",
-        "aggressive 7 lost 11 rc",
-        "aggressive 8 lost 142 rr",
-        "aggressive 9 won 355 crd",
-        "aggressive 10 won 247 ",
-        "aggressive 11 won 166 r",
-        "careless 0 lost 130 rdrr",
-        "careless 1 lost 40 r",
-        "careless 2 lost 110 r",
-        "careless 3 lost 62 rdcr",
-        "careless 4 lost 162 rdcrcr",
-        "careless 5 won 70 rcr",
-        "careless 6 won 75 c",
-        "careless 7 lost 11 rc",
-        "careless 8 won 200 rdc",
-        "careless 9 lost 263 cr",
-        "careless 10 won 247 ",
-        "careless 11 won 138 rc",
+        "balanced 0 lost 74 rcr",
+        "balanced 1 won 149 rr",
+        "balanced 2 won 125 ",
+        "balanced 3 lost 118 r",
+        "balanced 4 lost 117 r",
+        "balanced 5 lost 87 cr",
+        "balanced 6 lost 35 r",
+        "balanced 7 won 53 ",
+        "balanced 8 lost 45 rd",
+        "balanced 9 won 62 ",
+        "balanced 10 won 158 rcdcrdc",
+        "balanced 11 lost 64 rrdr",
+        "cautious 0 won 101 ",
+        "cautious 1 won 186 rdrd",
+        "cautious 2 won 293 ",
+        "cautious 3 won 231 ",
+        "cautious 4 lost 190 drrc",
+        "cautious 5 won 111 c",
+        "cautious 6 lost 99 rrc",
+        "cautious 7 won 53 ",
+        "cautious 8 lost 216 rdrrrr",
+        "cautious 9 won 62 ",
+        "cautious 10 lost 65 rcd",
+        "cautious 11 lost 58 rdr",
+        "aggressive 0 lost 150 rrrrr",
+        "aggressive 1 won 129 r",
+        "aggressive 2 won 129 ",
+        "aggressive 3 lost 110 rr",
+        "aggressive 4 lost 116 rcrcrrdc",
+        "aggressive 5 lost 13 rc",
+        "aggressive 6 lost 98 rccrd",
+        "aggressive 7 won 53 ",
+        "aggressive 8 lost 70 rdrc",
+        "aggressive 9 won 62 ",
+        "aggressive 10 lost 44 r",
+        "aggressive 11 lost 174 rrdrcrdrr",
+        "careless 0 lost 65 rrc",
+        "careless 1 lost 89 r",
+        "careless 2 won 129 ",
+        "careless 3 lost 110 rr",
+        "careless 4 lost 46 r",
+        "careless 5 lost 13 rc",
+        "careless 6 playing 999 rcrcrcrcrcr",
+        "careless 7 won 53 ",
+        "careless 8 lost 109 rcrrr",
+        "careless 9 won 62 ",
+        "careless 10 lost 44 r",
+        "careless 11 lost 99 rrcrrc",
     ];
 
     let mut played = Vec::new();
@@ -575,11 +593,28 @@ fn every_confusion_is_fired_at_a_guard_it_catches() {
 /// (`phase_eject_stun`, core's `state/abilities.rs`), which makes `stunned() == 0`
 /// over a batch an exact statement that it never fired — a much sharper assertion
 /// than counting crossings. Two policies hold it up together: the cue only wants a
-/// **one-cell** crossing (in at turn 1, out at 2, of a 3-turn duration), and
-/// leaving the wall outranks every other plan while the bot is in one.
+/// **one-cell** crossing (in at turn 1, out at 2, with a turn of the four-turn
+/// window spare since #449), and leaving the wall outranks every other plan while
+/// the bot is in one.
+///
+/// **A third policy joined them when #452's levels were re-carved: a phased step is
+/// only as safe as the cell it *ends* on.** Run is innate, so the bot can be
+/// sprinting and phased at once — nothing forbids holding both — and then one press
+/// moves two cells, the second chosen by the sprint rule rather than by the bot.
+/// Seed 25 (`balanced`) is the witness: fleeing a chaser on open floor with one turn
+/// of phase left, it stepped south onto floor and the free second cell carried it
+/// into the wall behind, where the duration expired. Phased there is no bump to stop
+/// it at the wall, which is what makes the one-cell check insufficient rather than
+/// merely optimistic. Neither branch produced this alone — #449's window and #452's
+/// carve had to meet.
+///
+/// The `sprinted` counter is what keeps that half honest. Without it the batch could
+/// quietly stop ever holding both at once and go on passing while proving only the
+/// original two policies.
 #[test]
 fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
     let mut crossings = 0;
+    let mut sprinted = 0;
     for seed in 0..40 {
         for profile in Profile::ALL {
             let (state, _) = boot(seed);
@@ -592,6 +627,17 @@ fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
                 let input = bot.decide(&state);
                 if input == Input::Activate(AbilityId::Dephase) {
                     crossings += 1;
+                }
+                let phased = matches!(
+                    state.ability_state(AbilityId::Dephase),
+                    AbilityState::Active { .. }
+                );
+                let sprinting = matches!(
+                    state.ability_state(AbilityId::Run),
+                    AbilityState::Active { .. }
+                );
+                if phased && sprinting {
+                    sprinted += 1;
                 }
                 state.step(input);
                 assert_eq!(
@@ -608,6 +654,11 @@ fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
     assert!(
         crossings > 0,
         "no phase in 40 seeds × 4 profiles — this test would prove nothing",
+    );
+    assert!(
+        sprinted > 0,
+        "no turn in the batch was both phased and sprinting — the two-cell step is \
+         the sharpest way into the eject and this batch never exercises it",
     );
 }
 

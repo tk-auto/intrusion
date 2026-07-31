@@ -536,12 +536,28 @@ fn reachable(facility: &Facility, start: Cell) -> HashSet<Cell> {
 /// after, which is why the ability needs no §10.6 re-check of its own.
 #[test]
 fn a_bore_only_ever_adds_reachability() {
-    let (layout, placement) = generate_level(&LevelConfig::V1, &mut Rng::new(7))
-        .expect("the v1 recipe carves and places");
+    let (layout, placement) = generate_level(
+        &LevelConfig::V1,
+        &LevelModifiers::default(),
+        &mut Rng::new(7),
+    )
+    .expect("the v1 recipe carves and places");
 
-    // Somewhere on this level the ability is legal. Find it the way the player would
-    // — by standing places — rather than by constructing the geometry.
-    let stand = borable_stand(&layout).expect("a 40×40 facility has a lone wall face somewhere");
+    // Somewhere in the space the player can actually walk, the ability is legal. Find
+    // it the way the player would — by standing places — rather than by constructing
+    // the geometry.
+    //
+    // **Flooded on the stamped grid, not the bare carve.** `State::new` stamps the
+    // solid usables (§4.3) — the comms console among them — and a console can be the
+    // one cell joining a pocket to the rest of the level, so the bare carve's
+    // connectivity is not the player's. Getting this wrong is invisible until a seed
+    // puts the first borable wall face inside such a pocket, at which point the
+    // §10.6 assertion below is measuring the wrong set of cells; #452's stream shift
+    // is what walked seed 7 into exactly that.
+    let stamped = borer(layout.clone(), placement.player());
+    let from_start = reachable(stamped.layout().facility(), placement.player());
+    let stand = borable_stand(&layout, &from_start)
+        .expect("a 40×40 facility has a lone wall face the player can reach");
     let mut s = borer(layout, stand);
     let before = reachable(s.layout().facility(), stand);
 
@@ -571,14 +587,21 @@ fn a_bore_only_ever_adds_reachability() {
 }
 
 /// A cell on `layout` the player could legally bore from — floor, with exactly one
-/// adjacent interior wall whose far side is not itself wall. Scanned in row-major
-/// order so the answer is the same every run (§12.4).
-fn borable_stand(layout: &Layout) -> Option<Cell> {
+/// adjacent interior wall whose far side is not itself wall — and **inside `within`**.
+/// Scanned in row-major order so the answer is the same every run (§12.4).
+///
+/// The `within` filter is what keeps the caller's §10.6 assertion meaningful: a stand
+/// in some pocket the player cannot reach floods a component of its own, and "the
+/// objectives are still bump-adjacent" would then be a claim about the wrong set of
+/// cells. Scoping the search to the player's own component says *this* rather than
+/// leaning on a particular seed happening to put the first borable face there — which
+/// is what it had been doing, and what #452's stream shift exposed.
+fn borable_stand(layout: &Layout, within: &HashSet<Cell>) -> Option<Cell> {
     let facility = layout.facility();
     for y in 1..facility.height() - 1 {
         for x in 1..facility.width() - 1 {
             let cell = Cell::new(x, y);
-            if facility.terrain(cell) != Some(Terrain::Floor) {
+            if facility.terrain(cell) != Some(Terrain::Floor) || !within.contains(&cell) {
                 continue;
             }
             let probe = State::new(

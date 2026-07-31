@@ -345,8 +345,12 @@ fn the_comms_console_is_hidden_until_seen() {
 fn silencing_is_deterministic() {
     let run = || {
         let mut rng = Rng::new(4242);
-        let (layout, p) =
-            crate::generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config places");
+        let (layout, p) = crate::generate_level(
+            &crate::LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut rng,
+        )
+        .expect("the v1 config places");
         let guards = p.guards(&layout);
         let mut s = State::new(
             layout,

@@ -109,8 +109,12 @@ mod tests {
     /// Any placed level serves as a state to poll the policy against — the
     /// scripted policy never reads it, which is exactly what makes it a replay.
     fn any_state() -> State {
-        let (layout, placement) =
-            generate_level(&LevelConfig::V1, &mut Rng::new(0)).expect("the V1 config generates");
+        let (layout, placement) = generate_level(
+            &LevelConfig::V1,
+            &intrusion_core::LevelModifiers::default(),
+            &mut Rng::new(0),
+        )
+        .expect("the V1 config generates");
         let guards = placement.guards(&layout);
         State::new(
             layout,

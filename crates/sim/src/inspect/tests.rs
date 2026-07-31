@@ -20,53 +20,78 @@ const PASTED: &str = "https://6dcafcf6-cb7b-4f80-9d6f-db85c4366efa.frame.claudeu
 /// slide that moved them somewhere their key did not name, and the inputs that spent
 /// a turn without moving — the free actions (§4.4) a bare position list would hide.
 ///
-/// **The run this link names changed with #387**, and that is worth understanding
-/// rather than papering over: a level-seed token encodes the *seed*, and the level is
-/// a function of the seed **and the generator**. Any generation change therefore
-/// re-carves every previously shared token — the link still parses and still names a
-/// v1 level, but not the one the player walked. The fixture is refreshed with the
-/// generator, exactly as the committed sim baseline is.
+/// **The run this link names changes with every generation change** — #387, and now
+/// #452 — and that is worth understanding rather than papering over: a level-seed
+/// token encodes the *seed*, and the level is a function of the seed **and the
+/// generator**. Any generation change therefore re-carves every previously shared
+/// token; the link still parses and still names a v1 level, but not the one the
+/// player walked. The fixture is refreshed with the generator, exactly as the
+/// committed sim baseline is.
+///
+/// The assertions are rewritten with it rather than loosened, which is the point: the
+/// facts this fixture exists to pin are *kinds* of turn — a real move, a spent turn
+/// that changed posture instead of position, a blocked press, and the #57 auto-slide
+/// that carries the player perpendicular to the key. Every one of them survives the
+/// re-carve on this link; only which input is which has moved.
 #[test]
 fn the_pasted_link_reproduces_the_run_that_was_played() {
     let (level, inputs) = parse_replay_link(PASTED).expect("a real link");
     let seen = inspect(&level, &inputs).expect("the v1 footprint carves");
 
-    assert_eq!(seen.start, Cell { x: 26, y: 6 }, "where they opened");
+    assert_eq!(seen.start, Cell { x: 36, y: 12 }, "where they opened");
     assert_eq!(seen.turns.len(), 13, "one record per pasted input");
 
-    // Five north up the corridor, every one of them a real move.
-    for turn in &seen.turns[..5] {
+    // Four north up the corridor, every one of them a real move.
+    for turn in &seen.turns[..4] {
         assert!(!turn.stayed_put(), "input {} moved", turn.index);
     }
     assert_eq!(
-        seen.turns[4].to,
-        Cell { x: 26, y: 1 },
-        "after the five north"
+        seen.turns[3].to,
+        Cell { x: 36, y: 8 },
+        "after the four north"
     );
 
-    // The sixth input turns east; the seventh is pressed east too but the player
-    // ends up a cell *south* — the #57 auto-slide following the corridor round.
-    // Worth pinning: it is the one place the report shows a move the key did not
-    // name, and a reader has to be able to trust it rather than suspect the report.
-    assert_eq!(seen.turns[5].to, Cell { x: 27, y: 1 }, "east into the head");
+    // The fifth is pressed north too and the player does **not** move: the cell
+    // ahead is a table, so the press ducks behind it instead (§10.3). Worth pinning
+    // for the same reason the auto-slide was: it is a spent turn the report has to
+    // show as a change of *posture*, not of position, or a reader cannot trust it.
+    assert!(
+        seen.turns[4].stayed_put(),
+        "the crouch is a pose, not a step"
+    );
+    assert!(
+        seen.turns[4]
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::Crouched { .. })),
+        "input 5 ducked behind the table ahead: {:?}",
+        seen.turns[4].events,
+    );
+
+    // The sixth turns east and moves; the seventh is pressed east and ducks again,
+    // this time behind the bench on that side.
+    assert_eq!(seen.turns[5].to, Cell { x: 37, y: 8 }, "east off the table");
     assert_eq!(seen.turns[6].input, Input::Step(Direction::East));
+    assert!(seen.turns[6].stayed_put(), "another duck, not a step");
+
+    // Then the #57 auto-slide: pressed east against the bench, the player is carried
+    // **north** instead — a move the key did not name, which the report must show
+    // rather than leave a reader suspecting it.
     assert_eq!(
-        seen.turns[6].to,
-        Cell { x: 27, y: 2 },
+        seen.turns[7].to,
+        Cell { x: 37, y: 7 },
         "the auto-slide carried them on, perpendicular to the key pressed",
     );
 
-    // Then four easts against the wall: turns spent, nobody moved.
-    for turn in &seen.turns[7..11] {
-        assert!(
-            turn.stayed_put(),
-            "input {} was blocked and should show as stayed",
-            turn.index,
-        );
-    }
+    // An east against the wall: a turn spent, nobody moved.
+    assert!(
+        seen.turns[10].stayed_put(),
+        "input 11 was blocked and should show as stayed: {:?}",
+        seen.turns[10].events,
+    );
 
-    // The twelfth goes south; the thirteenth bumps the table there and ducks —
-    // a spent turn that changes posture rather than position (§10.3).
+    // The twelfth goes south; the thirteenth is pressed south and ducks behind the
+    // bench there — a spent turn that changes posture rather than position (§10.3).
     let last = seen.turns.last().expect("thirteen records");
     assert_eq!(last.input, Input::Step(Direction::South));
     assert!(last.stayed_put(), "the crouch is a pose, not a step");

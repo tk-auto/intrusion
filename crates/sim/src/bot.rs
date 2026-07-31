@@ -746,7 +746,27 @@ impl StealthBot {
     /// does not walk straight back and pick up the body it has just decided it cannot
     /// place. Without that the two would trade the same corpse back and forth for the
     /// rest of the run, which is a livelock rather than a temperament.
+    ///
+    /// **`None` when a guard is standing on the body.** A loose body is non-solid
+    /// (§7.2), so a chaser walks straight over the one being dragged — and then the
+    /// release bump is a step into an *aware* guard, which §7.2 refuses. Attempting it
+    /// would spend the turn on a refusal in the one situation where the turn is the
+    /// escape, and it is exactly the front strike
+    /// [`every_takedown_the_bot_lands_is_a_legal_one`] forbids the bot from ever
+    /// aiming. Declining hands the turn back to [`haul`](Self::haul)'s other answers —
+    /// route to a shelter, or step away and try again once the guard has moved off.
+    ///
+    /// Only a guard the bot can **perceive** counts (§9.2/§13.2): one it cannot see or
+    /// sense is not something a player could plan around either, so blocking on it
+    /// would be the bot reading state it is not allowed to.
     fn let_go(&mut self, state: &State, body: Cell) -> Option<Input> {
+        if state
+            .guards()
+            .iter()
+            .any(|g| g.pos() == body && state.perceive_guard(g).is_some())
+        {
+            return None;
+        }
         self.abandoned.insert(body);
         Direction::ALL
             .into_iter()
@@ -1104,13 +1124,15 @@ impl StealthBot {
             // duration that expires in there costs the safety eject and a stun (§8.3).
             // Entering a solid is the crossing's business alone, and the crossing
             // checks it has the window to come out again.
-            if phased
-                && state
-                    .layout()
-                    .facility()
-                    .terrain(next)
-                    .is_some_and(|t| t.blocks_movement())
-            {
+            //
+            // **The sprint's free second cell is part of the same step.** Run moves two
+            // cells on one input (§8.3) and core walks the second one itself, so a check
+            // that looks one cell ahead lets a phased sprinter be *carried* into a solid
+            // it never chose — and while the phase is up there is no bump to stop it at
+            // the wall. One turn later the duration expires in there and the eject fires.
+            // §13.2's rule that the bot only presses what a player could press cuts both
+            // ways: it must also own what the press actually does.
+            if phased && self.phased_step_ends_in_a_solid(state, dir) {
                 continue;
             }
             let watched = danger.contains(&next);
@@ -1128,6 +1150,36 @@ impl StealthBot {
             return None;
         }
         Some(dir)
+    }
+
+    /// Whether pressing `Step(dir)` while phased would leave the bot standing in a
+    /// solid — the cell the eject is priced off (§8.3).
+    ///
+    /// The subtlety is that *one press is not always one cell*. With Run up the step
+    /// moves two (§8.3), and the free second cell is chosen by the rule rather than by
+    /// the bot, so the question a caller has to ask is where the press **ends**, not
+    /// where it begins. Phased, nothing along the way refuses it: a wall the sprint
+    /// would ordinarily stop against is simply walked into.
+    ///
+    /// Only ever consulted while phased. Unphased, a solid ahead is a bump — a spent
+    /// turn or a take (§4.4), never a stranding — and the ordinary cost field is left
+    /// to judge it.
+    fn phased_step_ends_in_a_solid(&self, state: &State, dir: Direction) -> bool {
+        let facility = state.layout().facility();
+        let solid = |cell: Cell| facility.terrain(cell).is_some_and(|t| t.blocks_movement());
+        let sprinting = matches!(
+            state.ability_state(AbilityId::Run),
+            AbilityState::Active { .. }
+        );
+        let Some(next) = state.player().step(dir) else {
+            return false;
+        };
+        // The near cell strands the bot whether or not the sprint carries it further;
+        // the far one only exists as a destination while Run is up.
+        match sprinting.then(|| next.step(dir)).flatten() {
+            Some(beyond) => solid(next) || solid(beyond),
+            None => solid(next),
+        }
     }
 }
 

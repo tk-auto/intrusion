@@ -467,7 +467,12 @@ mod tests {
     const SEEDS: u64 = 64;
 
     fn v1(seed: u64) -> (Layout, Placement) {
-        generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("the v1 config places")
+        generate_level(
+            &LevelConfig::V1,
+            &crate::LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .expect("the v1 config places")
     }
 
     /// The room region a cell belongs to.
@@ -754,7 +759,11 @@ mod tests {
             ..LevelConfig::V1
         };
         assert!(matches!(
-            generate_level(&impossible, &mut Rng::new(0)),
+            generate_level(
+                &impossible,
+                &crate::LevelModifiers::default(),
+                &mut Rng::new(0)
+            ),
             Err(GenError::RetriesExhausted { .. })
         ));
     }

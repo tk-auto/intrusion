@@ -11,8 +11,12 @@ use intrusion_core::{generate_level, Direction, LevelConfig, Placement, Rng, Sta
 /// and the placement — so a test can compare against the ground truth the bot must
 /// *not* peek at.
 pub fn boot(seed: u64) -> (State, Placement) {
-    let (layout, placement) =
-        generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("V1 generates");
+    let (layout, placement) = generate_level(
+        &LevelConfig::V1,
+        &intrusion_core::LevelModifiers::default(),
+        &mut Rng::new(seed),
+    )
+    .expect("V1 generates");
     let guards = placement.guards(&layout);
     let state = State::new(
         layout,

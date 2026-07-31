@@ -645,6 +645,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         always_show_vision_cones,
         full_layout_known,
         calm_guards_detect_only_their_cone,
+        automatic_doors,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -655,6 +656,10 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         always_show_vision_cones,
         full_layout_known,
         calm_guards_detect_only_their_cone,
+        // Slot 6, appended (#452) — never inserted. A slot number is permanent: the
+        // token encodes it by index, so renumbering would silently re-point every
+        // token ever shared at a different modifier.
+        automatic_doors,
     ]
     .into_iter()
     .enumerate()
@@ -675,7 +680,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors] =
         active;
     Some(LevelModifiers {
         guards_always_search_hideouts,
@@ -684,6 +689,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         always_show_vision_cones,
         full_layout_known,
         calm_guards_detect_only_their_cone,
+        automatic_doors,
         intel_to_exit: gate,
     })
 }
@@ -691,7 +697,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// How many modifier toggles this build actually has — the live count, against which
 /// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
 /// the format.
-const MODIFIER_FIELDS: usize = 6;
+const MODIFIER_FIELDS: usize = 7;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -845,7 +851,10 @@ pub fn start_level(level: &LevelSeed) -> Result<State, GenError> {
 /// loadout; only the recipe the facility carves from differs.
 pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State, GenError> {
     let mut rng = Rng::new(level.seed);
-    let (layout, placement) = generate_level(config, &mut rng)?;
+    // **Modifiers are resolved before the carve** (§12.6/#452). Most of them are read
+    // at runtime, but `automatic_doors` decides what a doorway *is*, so it has to
+    // reach the generator — threaded as a parameter, never consulted from a global.
+    let (layout, placement) = generate_level(config, &level.modifiers, &mut rng)?;
     let guards = placement.guards(&layout);
     Ok(State::new(
         layout,
@@ -1019,47 +1028,52 @@ mod tests {
                     for body in [false, true] {
                         for layout in [false, true] {
                             for cone_only in [false, true] {
-                                for gate in gates {
-                                    for abilities in loadouts {
-                                        let modifiers = LevelModifiers {
-                                            guards_always_search_hideouts: search,
-                                            sighting_lost_calls_a_guard: sighting,
-                                            body_found_calls_two_guards: body,
-                                            always_show_vision_cones: cones,
-                                            full_layout_known: layout,
-                                            calm_guards_detect_only_their_cone: cone_only,
-                                            intel_to_exit: gate,
-                                        };
-                                        let level = LevelSeed {
-                                            seed: 12345,
-                                            modifiers,
-                                            abilities,
-                                        };
-                                        // With more modifier fields than
-                                        // [`MODIFIER_CAP`], the space now has a corner
-                                        // the format deliberately refuses (see
-                                        // [`modifier_slots`]) — the codec is total over
-                                        // the configs a run *can hold*, which is the
-                                        // claim, and refusing the rest **exactly** is
-                                        // the other half of it.
-                                        let active =
-                                            [search, sighting, body, cones, layout, cone_only]
-                                                .into_iter()
-                                                .filter(|&on| on)
-                                                .count();
-                                        if active > MODIFIER_CAP {
-                                            assert_eq!(
+                                for doors in [false, true] {
+                                    for gate in gates {
+                                        for abilities in loadouts {
+                                            let modifiers = LevelModifiers {
+                                                guards_always_search_hideouts: search,
+                                                sighting_lost_calls_a_guard: sighting,
+                                                body_found_calls_two_guards: body,
+                                                always_show_vision_cones: cones,
+                                                full_layout_known: layout,
+                                                calm_guards_detect_only_their_cone: cone_only,
+                                                automatic_doors: doors,
+                                                intel_to_exit: gate,
+                                            };
+                                            let level = LevelSeed {
+                                                seed: 12345,
+                                                modifiers,
+                                                abilities,
+                                            };
+                                            // With more modifier fields than
+                                            // [`MODIFIER_CAP`], the space now has a corner
+                                            // the format deliberately refuses (see
+                                            // [`modifier_slots`]) — the codec is total over
+                                            // the configs a run *can hold*, which is the
+                                            // claim, and refusing the rest **exactly** is
+                                            // the other half of it.
+                                            let active = [
+                                                search, sighting, body, cones, layout, cone_only,
+                                                doors,
+                                            ]
+                                            .into_iter()
+                                            .filter(|&on| on)
+                                            .count();
+                                            if active > MODIFIER_CAP {
+                                                assert_eq!(
                                                 level.encode(),
                                                 None,
                                                 "over the cap must be refused, not truncated: {level:?}",
                                             );
-                                            continue;
+                                                continue;
+                                            }
+                                            assert_eq!(
+                                                LevelSeed::decode(&token(level)),
+                                                Some(level),
+                                                "round-trip failed for {level:?}",
+                                            );
                                         }
-                                        assert_eq!(
-                                            LevelSeed::decode(&token(level)),
-                                            Some(level),
-                                            "round-trip failed for {level:?}",
-                                        );
                                     }
                                 }
                             }
@@ -1157,6 +1171,11 @@ mod tests {
                 always_show_vision_cones: false,
                 full_layout_known: false,
                 calm_guards_detect_only_their_cone: false,
+                // Slot 6 did not exist when this token was minted (#452), so the
+                // frozen string decodes it off — which is exactly the property the
+                // frozen token is here to prove: appending a slot leaves every token
+                // ever shared naming the run it always named.
+                automatic_doors: false,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1278,16 +1297,17 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 2])
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] toggles, and the widest
-        // *payload* takes the highest slots — so this is every modifier but slot 0,
-        // which now reaches the newest slot (#410). Turning all six on is over the cap
-        // and is refused outright, asserted in `every_config_round_trips`.
+        // *payload* takes the **highest** slots — so this is the top five, which now
+        // reaches slot 6 (#452). Turning more than five on is over the cap and is
+        // refused outright, asserted in `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
             guards_always_search_hideouts: false,
-            sighting_lost_calls_a_guard: true,
+            sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
+            automatic_doors: true,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {
