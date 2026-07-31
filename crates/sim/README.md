@@ -68,8 +68,16 @@ newly shipped ability is spellable the day it lands. The modifier names are the
 
 ```
 guards-always-search-hideouts   sighting-lost-calls-a-guard   body-found-calls-two-guards
-always-show-vision-cones        full-layout-known
+always-show-vision-cones        full-layout-known             automatic-doors
 ```
+
+`automatic-doors` is the odd one out and worth knowing about (§12.6/#452): every
+other modifier is read at **runtime**, so naming it measures the same facility played
+under a different rule. This one is read by **generation** — it decides whether a
+doorway is a hinged manual door or a frameless automatic one — so a batch that names
+it carves a *different facility* from the same seed. Both halves of a comparison are
+still the same seed sweep, which is what keeps it fair; just do not read a per-seed
+row across the two arms as if it were the same level.
 
 Two refusals are deliberate, and both are the §13.2 attribution rule — *a batch
 whose rows claim a config it never ran is worse than a batch that did not start*:

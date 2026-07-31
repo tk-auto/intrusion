@@ -206,8 +206,12 @@ fn an_arrival_is_never_in_view_and_never_adjacent() {
     let mut landed = 0;
     for seed in seed_sweep(SEEDS) {
         let mut rng = Rng::new(seed);
-        let (layout, p) =
-            generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+        let (layout, p) = generate_level(
+            &crate::LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut rng,
+        )
+        .expect("the v1 config generates");
         let guards = p.guards(&layout);
         let mut s = State::new(
             layout,
@@ -275,8 +279,12 @@ fn an_arrival_is_never_in_view_and_never_adjacent() {
 fn an_arrival_comes_in_at_the_far_end() {
     for seed in seed_sweep(SEEDS) {
         let mut rng = Rng::new(seed);
-        let (layout, p) =
-            generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+        let (layout, p) = generate_level(
+            &crate::LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut rng,
+        )
+        .expect("the v1 config generates");
         let guards = p.guards(&layout);
         let mut s = State::new(
             layout,
@@ -524,8 +532,12 @@ fn a_reinforcement_patrols_where_it_finished_not_where_it_landed() {
 fn a_reinforcement_arrives_on_an_errand_not_on_the_player() {
     for seed in seed_sweep(SEEDS) {
         let mut rng = Rng::new(seed);
-        let (layout, p) =
-            generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+        let (layout, p) = generate_level(
+            &crate::LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut rng,
+        )
+        .expect("the v1 config generates");
         let guards = p.guards(&layout);
         let mut s = State::new(
             layout,
@@ -695,8 +707,12 @@ fn a_reinforcement_is_an_ordinary_guard_in_every_other_respect() {
 #[test]
 fn a_reinforcement_moves_no_faster_than_anybody_else() {
     let mut rng = Rng::new(11);
-    let (layout, p) =
-        generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+    let (layout, p) = generate_level(
+        &crate::LevelConfig::V1,
+        &LevelModifiers::default(),
+        &mut rng,
+    )
+    .expect("the v1 config generates");
     let guards = p.guards(&layout);
     let mut s = State::new(
         layout,
@@ -743,8 +759,12 @@ fn a_reinforcement_moves_no_faster_than_anybody_else() {
 fn the_same_seed_and_inputs_send_the_same_guards_to_the_same_cells() {
     let run = |seed: u64| -> Vec<(u32, Cell)> {
         let mut rng = Rng::new(seed);
-        let (layout, p) =
-            generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+        let (layout, p) = generate_level(
+            &crate::LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut rng,
+        )
+        .expect("the v1 config generates");
         let guards = p.guards(&layout);
         let mut s = State::new(
             layout,

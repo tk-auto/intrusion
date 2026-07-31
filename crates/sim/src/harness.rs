@@ -288,15 +288,23 @@ mod tests {
     /// itself all the way to a changed baseline.
     ///
     /// The row is the *game's* output, so a change to the game moves it and the refresh
-    /// belongs in that PR with the delta read. It last moved when the guards began
-    /// **partitioning the whole level** (§7.5): seed 42 was a 111-turn win with zero
-    /// detections through ground nobody patrolled, and is now a capture at 216 with
-    /// seven. That is the change doing exactly what it says — there is no longer a
-    /// wing with nobody on it — and it is the single sharpest illustration of the cost
-    /// in the suite.
+    /// belongs in that PR with the delta read.
+    ///
+    /// **#452 moved it for a reason that is not about the game at all**: making
+    /// automatic doors a level modifier dropped the per-doorway RNG draw, so seed 42
+    /// carves a **different facility** and this row describes a different level rather
+    /// than a different outcome on the same one. A 130-turn win becomes a capture at
+    /// 98 with seven detections; nothing about that comparison means anything, and the
+    /// PR's 100-seed batches on both door settings are where the actual reading is.
+    ///
+    /// Before that it moved when the guards began **partitioning the whole level**
+    /// (§7.5) — seed 42 was a 111-turn win with zero detections through ground nobody
+    /// patrolled — which *was* a real cost, and is the sharpest illustration of one in
+    /// the suite. The two kinds of move are worth telling apart when reading this
+    /// history: a re-carve makes the row incomparable, a rule change makes it evidence.
     #[test]
     fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
-        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"win\",\"turns\":130,\"detections\":0,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":12,\"run\":0,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":0,\"alert_escalations\":[],\"reinforcements\":0}";
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"capture\",\"turns\":98,\"detections\":7,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":3,\"run\":3,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":1,\"alert_escalations\":[{\"turn\":11,\"rung\":1,\"trigger\":\"sighting\"}],\"reinforcements\":0}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.

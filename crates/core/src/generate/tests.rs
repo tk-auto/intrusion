@@ -44,8 +44,15 @@ fn placement_shares(seeds: &[u64], tuning: &Tuning) -> (f64, f64, f64, f64) {
     let (mut ch, mut rh) = (0u32, 0u32); // corridor / room hideouts
     let (mut ct, mut rt) = (0u32, 0u32); // corridor / room tables
     for &seed in seeds {
-        let layout =
-            generate_where(40, 40, &mut Rng::new(seed), passes_guarantees, tuning).unwrap();
+        let layout = generate_where(
+            40,
+            40,
+            &mut Rng::new(seed),
+            passes_guarantees,
+            tuning,
+            &LevelModifiers::default(),
+        )
+        .unwrap();
         let (f, g) = (layout.facility(), layout.regions());
         for (_, region) in g.regions() {
             let hideouts = region
@@ -239,7 +246,14 @@ fn the_corridor_network_is_always_connected() {
     // so the §10.6 gate in `generate` must not get the chance to mask a break
     // by silently rejecting and redrawing.
     for seed in seed_sweep(200) {
-        let layout = generate_once(40, 40, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
+        let layout = generate_once(
+            40,
+            40,
+            &mut Rng::new(seed),
+            &Tuning::BIASED,
+            &LevelModifiers::default(),
+        )
+        .unwrap();
         assert_corridors_connected(&layout, seed);
     }
 }
@@ -249,7 +263,14 @@ fn the_corridor_network_is_always_connected() {
 fn connectivity_holds_across_sizes() {
     for &(w, h) in &[(18, 18), (24, 40), (40, 24), (33, 51), (60, 60)] {
         for seed in seed_sweep(40) {
-            let layout = generate_once(w, h, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
+            let layout = generate_once(
+                w,
+                h,
+                &mut Rng::new(seed),
+                &Tuning::BIASED,
+                &LevelModifiers::default(),
+            )
+            .unwrap();
             assert_corridors_connected(&layout, seed);
         }
     }
@@ -310,7 +331,8 @@ fn a_seed_reproduces_the_whole_placed_level() {
     let boot = |seed: u64| {
         let mut rng = Rng::new(seed);
         let (layout, placement) =
-            generate_level(&LevelConfig::V1, &mut rng).expect("the v1 footprint always carves");
+            generate_level(&LevelConfig::V1, &LevelModifiers::default(), &mut rng)
+                .expect("the v1 footprint always carves");
         let guards = placement.guards(&layout);
         let state = crate::State::new(
             layout,
@@ -485,14 +507,17 @@ fn doorways_are_well_formed_spans() {
     }
 }
 
-/// §10.4/#147: generation produces *both* door kinds — most manual, a minority
-/// automatic (the [`AUTO_DOOR_PERCENT`] share) — and the split is deterministic
-/// per seed (§12.4). Asserted in aggregate so the distribution, not one door, is
-/// what's pinned.
+/// §10.4/§12.6/#452: **the baseline facility is all manual.** Automatic doors used
+/// to be a `[START]` share drawn per doorway, so every level was a mixture and which
+/// vocabulary a door spoke was a coin flip the player found out by walking up to it.
+/// They are a level modifier now, and this is the *off* half: on every sampled seed,
+/// every door is hinged and there is not one frameless span.
+///
+/// Determinism is asserted alongside, because dropping the per-door draw is what
+/// shifts the RNG stream — the seed-stability break #452 took deliberately — and a
+/// seed must still carve the same facility twice in a row (§12.4).
 #[test]
-fn generation_produces_both_door_kinds_deterministically() {
-    assert_eq!(AUTO_DOOR_PERCENT, 30, "the [START] automatic-door share");
-    let (mut manual, mut automatic) = (0u32, 0u32);
+fn the_baseline_facility_has_no_automatic_door() {
     for seed in seed_sweep(200) {
         let a = generate(40, 40, &mut Rng::new(seed)).unwrap();
         let b = generate(40, 40, &mut Rng::new(seed)).unwrap();
@@ -504,16 +529,62 @@ fn generation_produces_both_door_kinds_deterministically() {
             kinds(&b),
             "seed {seed}: door kinds are deterministic"
         );
-        for (_, door) in a.regions().doors() {
-            if door.is_automatic() {
-                automatic += 1;
-            } else {
-                manual += 1;
-            }
+        let doors: Vec<_> = a.regions().doors().collect();
+        assert!(!doors.is_empty(), "seed {seed}: a facility has doorways");
+        for (_, door) in &doors {
+            assert!(
+                !door.is_automatic(),
+                "seed {seed}: the baseline has no automatic door (§12.6/#452)",
+            );
+            assert!(
+                !door.hinges().is_empty(),
+                "seed {seed}: a manual door is framed by hinges",
+            );
         }
     }
-    assert!(automatic > 0, "some doors are automatic");
-    assert!(manual > automatic, "but most doors are manual");
+}
+
+/// §10.4/§12.6/#452: **the modifier on, the facility is all automatic.** No hinge
+/// cell anywhere on the level — the other half of the all-or-nothing rule, and the
+/// half that makes it a *stated property of the run* rather than a per-doorway draw.
+///
+/// The hinge check is against the **grid**, not only the door graph: a frameless span
+/// must leave no [`Terrain::DoorHinge`] behind it, or the level would still be drawing
+/// a vocabulary it no longer plays.
+#[test]
+fn the_modifier_makes_every_door_automatic_and_leaves_no_hinge() {
+    let all_auto = LevelModifiers {
+        automatic_doors: true,
+        ..LevelModifiers::default()
+    };
+    for seed in seed_sweep(200) {
+        let layout = generate_where(
+            40,
+            40,
+            &mut Rng::new(seed),
+            passes_guarantees,
+            &Tuning::BIASED,
+            &all_auto,
+        )
+        .unwrap();
+        let doors: Vec<_> = layout.regions().doors().collect();
+        assert!(!doors.is_empty(), "seed {seed}: a facility has doorways");
+        for (_, door) in &doors {
+            assert!(
+                door.is_automatic(),
+                "seed {seed}: every door is automatic with the modifier on",
+            );
+            assert!(
+                door.hinges().is_empty(),
+                "seed {seed}: an automatic door is frameless",
+            );
+        }
+        let hinges = (0..layout.facility().height())
+            .flat_map(|y| (0..layout.facility().width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| layout.facility().terrain_at(x, y) == Some(Terrain::DoorHinge))
+            .count();
+        assert_eq!(hinges, 0, "seed {seed}: no hinge cell survives on the grid");
+    }
 }
 
 /// #145: in a *placed* level a deterministic share of doorways starts open, and
@@ -523,8 +594,18 @@ fn generation_produces_both_door_kinds_deterministically() {
 #[test]
 fn some_doors_start_open_deterministically_and_stamped_together() {
     for seed in seed_sweep(64) {
-        let (a, _) = generate_level(&LevelConfig::V1, &mut Rng::new(seed)).unwrap();
-        let (b, _) = generate_level(&LevelConfig::V1, &mut Rng::new(seed)).unwrap();
+        let (a, _) = generate_level(
+            &LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .unwrap();
+        let (b, _) = generate_level(
+            &LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .unwrap();
 
         // Determinism: the same seed opens exactly the same doors.
         let poses_a: Vec<bool> = a.regions().doors().map(|(_, d)| d.is_open()).collect();
@@ -571,7 +652,12 @@ fn about_a_fifth_of_doors_start_open() {
 
     let (mut open, mut total) = (0u32, 0u32);
     for seed in seed_sweep(128) {
-        let (layout, _) = generate_level(&LevelConfig::V1, &mut Rng::new(seed)).unwrap();
+        let (layout, _) = generate_level(
+            &LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .unwrap();
         for (_, door) in layout.regions().doors() {
             total += 1;
             open += u32::from(door.is_open());
@@ -1240,7 +1326,14 @@ fn hideouts_keep_guard_pathing_connected() {
     // property, so going through the entry point would mask a regression in
     // `severs_pathing` as silent rejections instead of a red test.
     for seed in seed_sweep(200) {
-        let layout = generate_once(40, 40, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
+        let layout = generate_once(
+            40,
+            40,
+            &mut Rng::new(seed),
+            &Tuning::BIASED,
+            &LevelModifiers::default(),
+        )
+        .unwrap();
         let f = layout.facility();
         let pathable: HashSet<Cell> = (0..f.height())
             .flat_map(|y| (0..f.width()).map(move |x| Cell::new(x, y)))
@@ -1394,7 +1487,14 @@ fn the_cover_pass_repairs_almost_every_carve() {
     let unrepaired = seeds
         .iter()
         .filter(|&&seed| {
-            let layout = generate_once(40, 40, &mut Rng::new(seed), &Tuning::BIASED).unwrap();
+            let layout = generate_once(
+                40,
+                40,
+                &mut Rng::new(seed),
+                &Tuning::BIASED,
+                &LevelModifiers::default(),
+            )
+            .unwrap();
             !sightlines_bounded(layout.facility())
         })
         .count();
@@ -1488,12 +1588,162 @@ fn accepted_seeds_always_pass_the_gate() {
     }
 }
 
+/// §10.6 under **both** door vocabularies (§12.6/#452) — the risk the modifier
+/// actually carries. An automatic door is a **3–6 panel span** where a manual one is
+/// two hinges around 1–4 panels, so an all-automatic level has systematically wider
+/// throats, and a wider throat is where a clearance or reachability regression would
+/// show up first. The same seed sweep, run twice.
+///
+/// Deliberately the *whole* §10.6 gate rather than a hand-picked clause: the
+/// interesting failure is the one nobody predicted, and `passes_guarantees` is the
+/// list of things that must be true either way.
+#[test]
+fn both_door_vocabularies_pass_the_gate() {
+    let all_auto = LevelModifiers {
+        automatic_doors: true,
+        ..LevelModifiers::default()
+    };
+    for modifiers in [LevelModifiers::default(), all_auto] {
+        for seed in seed_sweep(200) {
+            let layout = generate_where(
+                40,
+                40,
+                &mut Rng::new(seed),
+                passes_guarantees,
+                &Tuning::BIASED,
+                &modifiers,
+            )
+            .unwrap_or_else(|e| {
+                panic!(
+                    "seed {seed}, automatic={}: {e:?}",
+                    modifiers.automatic_doors
+                )
+            });
+            assert!(
+                passes_guarantees(&layout),
+                "seed {seed}, automatic={}: gate breached",
+                modifiers.automatic_doors,
+            );
+        }
+    }
+}
+
+/// §2.3's **anti-facade** guard for `automatic_doors` (§12.6/#452), in the only form
+/// this modifier admits: it must change the *building*, measurably and in the
+/// documented direction.
+///
+/// Every other modifier is read at runtime, so its assertion can hold one facility
+/// fixed and vary the rule. This one decides what a doorway is, so from one seed the
+/// two settings are two different facilities and "same seed and inputs" cannot be the
+/// frame. What is left — and what actually carries the direction — is the geometry:
+/// the **passable** width. Both kinds occupy a 3–6 cell span, but a manual door
+/// spends two of those cells on solid hinges, so what you can actually walk and see
+/// through is **1–4** cells against an automatic door's **3–6**. An all-automatic
+/// level therefore has systematically wider throats, and a wider throat is a longer
+/// sightline through every doorway (§10.1a). Asserted over the sweep in aggregate,
+/// because the claim is about the level and not about a door — and measured on the
+/// **panels**, not the span, since the span alone is identical and would have let a
+/// facade through.
+///
+/// It is a *proxy* for the direction, not the verdict: whether wider throats and no
+/// hand-close outweigh doors that re-close themselves is what the sim answers, over
+/// the profiles (§13.2). This is the part a test can hold, and it is the part that
+/// would silently stop being true if the modifier ever became a facade.
+#[test]
+fn the_modifier_widens_the_facility_s_throats() {
+    let all_auto = LevelModifiers {
+        automatic_doors: true,
+        ..LevelModifiers::default()
+    };
+    let span_total = |modifiers: &LevelModifiers| -> (u32, u32) {
+        let (mut cells, mut doors) = (0u32, 0u32);
+        for seed in seed_sweep(100) {
+            let layout = generate_where(
+                40,
+                40,
+                &mut Rng::new(seed),
+                passes_guarantees,
+                &Tuning::BIASED,
+                modifiers,
+            )
+            .unwrap();
+            for (_, door) in layout.regions().doors() {
+                // Panels, not `cells()`: the hinges are solid, so they are throat the
+                // player can neither walk nor see through.
+                cells += door.panels().len() as u32;
+                doors += 1;
+            }
+        }
+        (cells, doors)
+    };
+    let (manual_cells, manual_doors) = span_total(&LevelModifiers::default());
+    let (auto_cells, auto_doors) = span_total(&all_auto);
+    assert!(
+        manual_doors > 0 && auto_doors > 0,
+        "both settings cut doors"
+    );
+
+    // Mean throat width, in hundredths so the comparison needs no floats.
+    let mean = |cells: u32, doors: u32| cells * 100 / doors;
+    let (manual_mean, auto_mean) = (
+        mean(manual_cells, manual_doors),
+        mean(auto_cells, auto_doors),
+    );
+    assert!(
+        auto_mean > manual_mean,
+        "the modifier must widen the throats it is priced on: \
+             manual mean {manual_mean}/100, automatic mean {auto_mean}/100",
+    );
+}
+
+/// §10.4/#452: the span rule holds under the modifier too — an automatic door is a
+/// **3–6 panel** frameless run, on every doorway of every sampled seed.
+///
+/// Pinned because it is the geometric fact the ticket's risk note is about: the
+/// all-automatic level is the *wide-throat* one, and if that ever stopped being true
+/// the §10.6 sweep above would go on passing while the thing it was watching for had
+/// quietly disappeared.
+#[test]
+fn every_automatic_door_is_a_three_to_six_panel_span() {
+    let all_auto = LevelModifiers {
+        automatic_doors: true,
+        ..LevelModifiers::default()
+    };
+    for seed in seed_sweep(200) {
+        let layout = generate_where(
+            40,
+            40,
+            &mut Rng::new(seed),
+            passes_guarantees,
+            &Tuning::BIASED,
+            &all_auto,
+        )
+        .unwrap();
+        for (_, door) in layout.regions().doors() {
+            let panels = door.panels().len();
+            assert!(
+                (3..=6).contains(&panels),
+                "seed {seed}: {panels} panels, want a 3..=6 frameless span",
+            );
+            assert_eq!(door.cells().count(), panels, "no cell but the panels");
+        }
+    }
+}
+
 /// The retry cap is a real cap: a config that can never validate fails loudly
 /// with [`GenError::RetriesExhausted`] instead of spinning forever (§10.6
 /// "fail loudly or retry the seed" — this is both, in order).
 #[test]
 fn an_unsatisfiable_config_fails_loudly() {
-    let err = generate_where(40, 40, &mut Rng::new(0), |_| false, &Tuning::BIASED).unwrap_err();
+    let err = generate_where(
+        40,
+        40,
+        &mut Rng::new(0),
+        |_| false,
+        &Tuning::BIASED,
+        &LevelModifiers::default(),
+    )
+    .unwrap_err();
     assert_eq!(
         err,
         GenError::RetriesExhausted {
@@ -1561,8 +1811,12 @@ fn a_room_pillar_keeps_its_moat_and_so_can_never_touch_a_doorway() {
 fn no_two_duct_entries_crowd_each_other() {
     let mut entries_seen = 0;
     for seed in seed_sweep(120) {
-        let (layout, _) =
-            generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("V1 generates");
+        let (layout, _) = generate_level(
+            &LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .expect("V1 generates");
         let facility = layout.facility();
         for y in 0..facility.height() {
             for x in 0..facility.width() {
@@ -1615,8 +1869,12 @@ fn cover_survives_beside_doors_it_just_leaves_the_frame() {
     let mut served = 0;
     let mut doors = 0;
     for seed in seed_sweep(64) {
-        let (layout, _) =
-            generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("V1 generates");
+        let (layout, _) = generate_level(
+            &LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .expect("V1 generates");
         let facility = layout.facility();
         for y in 0..facility.height() {
             for x in 0..facility.width() {

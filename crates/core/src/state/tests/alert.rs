@@ -359,8 +359,12 @@ fn rung_one_shortens_the_patrol_dwell_without_removing_it() {
 #[test]
 fn no_rung_ever_speeds_a_guard_up_or_falls_back_down() {
     let mut rng = Rng::new(11);
-    let (layout, p) =
-        generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+    let (layout, p) = generate_level(
+        &crate::LevelConfig::V1,
+        &LevelModifiers::default(),
+        &mut rng,
+    )
+    .expect("the v1 config generates");
     let guards = p.guards(&layout);
     let mut s = State::new(
         layout,
@@ -413,8 +417,12 @@ fn no_rung_ever_speeds_a_guard_up_or_falls_back_down() {
 fn the_same_seed_and_inputs_reach_the_same_rungs_on_the_same_turns() {
     let ladder = |seed: u64| -> Vec<(u32, u32, AlertTrigger)> {
         let mut rng = Rng::new(seed);
-        let (layout, p) =
-            generate_level(&crate::LevelConfig::V1, &mut rng).expect("the v1 config generates");
+        let (layout, p) = generate_level(
+            &crate::LevelConfig::V1,
+            &LevelModifiers::default(),
+            &mut rng,
+        )
+        .expect("the v1 config generates");
         let guards = p.guards(&layout);
         let mut s = State::new(
             layout,

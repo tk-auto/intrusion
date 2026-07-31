@@ -1017,10 +1017,10 @@ whole reason the architecture looks the way it does.
 | **Camouflage** | 1 turn | 10 | 20 | Undetectable **while you don't move**. Moving reveals you for that turn. |
 | **Decoy** | 1 turn | 20 | 30 | A fake intruder in the cell you face. Draws Investigating, not Chasing. Dies when anything steps on it. |
 | **Dephase** | 1 turn | 3 | 30 | Fill → 0. Walk through walls, doors, guards. **Does not conceal you.** |
-| **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
+| **Autodoors** | 1 turn | 16 | 40 | While active, a door in your path **opens as you step into it** — no bump, no lost turn — and **shuts behind you** once you clear it, **manual and automatic alike** (an automatic door is shut early rather than left to its slow `delay`). *"Alike"* is the rule, not a description of a typical level: a run plays one door vocabulary (§10.4/§12.6/#452), so the automatic clause is inert in a baseline facility and the manual clause is inert with the modifier on — the ability behaves the same either way, which is why it is worded over both. A door closed behind breaks line of sight (§10.3) and forces a pursuer to reopen it (§10.4): a §7.6 flight tool, not invincibility (#241). |
 | **Confusion** | 1 turn | — (instant) | 45 | **Fired once**, from the cell you press it in (#325). Every guard standing within the blast at that moment — `CONFUSION_RADIUS`, through walls like the guard sense (§9) — is **blinded and frozen** for `CONFUSION_DAZE_TURNS` (**6** **[START]**), a countdown each guard carries itself. A costed panic-buy of time, not a kill: a dazed chaser **pauses** (keeps its lead), it does not reset. **After the flash, distance stops mattering** — a guard you run away from stays dazed, and one that walks into the cells the blast covered was never in it and is untouched, which is what keeps it from being a no-guard-may-act field you carry. Capture-is-contact still holds (§4.5): a dazed adjacent guard cannot step into you, but the daze is no shield to walk into a guard the blast never caught, and a frozen guard's cell stays solid. **The clamp [SETTLED]:** the reach fired is `min(CONFUSION_RADIUS, sense_range())`, so the blast can never freeze what you cannot sense — inert on open floor (`min(6, 10)`), and shrunk to **5** inside a duct (§10.7). It can only ever shrink the blast, never widen it. A firing with nothing in reach is a **free no-op** with a near-line message (§4.4/§8.4); a real firing says how many it caught (§11.7). The long cooldown is what keeps it rare (#240). Appendix 24. |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket**, which is a use of the tool rather than a waste of it. It conceals nothing (it is not a cupboard, §10.3), so **three walls around you means you can dig a hole to hide in, never a tunnel**. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. Appendix 24. |
-| **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot work the handle, so its route goes the long way round (§7.6/§10.4). A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it. **You** are never refused — a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in; that costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4). Appendix 24. |
+| **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot get it open, so its route goes the long way round (§7.6/§10.4). (It used to say *"cannot work the handle"*; on an all-automatic level there is no handle to work — §10.4/#452 — and the seal holds the door shut whatever kind it is.) A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it. **You** are never refused — a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in; that costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4). Appendix 24. |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 
 Notes carried forward, because they are good and non-obvious:
@@ -1194,6 +1194,16 @@ an automatic door timing out — is *evidence that someone passed* (§10.4). As 
 transient near-line word ("the door opens") that evidence was easy to miss, cleared
 on your next action (§11.7), and never said *where*. So it becomes a **positional,
 on-grid cue**, exactly like the sensed guard.
+
+> **Which of those three sources fires depends on the run's door vocabulary**
+> (§10.4/§12.6/#452). The channel is fed by guards opening and closing manual doors in
+> the **baseline** facility, and a timeout never fires there because there is no
+> automatic door to time out. With the modifier on it is the other way about: no guard
+> ever closes a door by hand, and the timeouts are the whole of the second half. The
+> channel works either way — it is not a claim about a mixture, and never was — but a
+> reading of it has to know which vocabulary the level is speaking, because *what a cue
+> means* differs: a manual door shutting is somebody's hand, a timeout is only that
+> nobody has been in the doorway for a few turns.
 
 - **It is the *same* sense channel — the `Sensed` category (§11.2), the same orange
   background** as a guard felt through a wall. A door change is "sensed through a
@@ -1623,12 +1633,25 @@ one unit.
     that passes through one *sometimes* closes it behind itself (#146, a seeded
     **[START]** chance, deliberately not always: §7.6 — a guard that always tidied up
     would erase the "traffic opens the facility up" pressure).
-  - **Automatic doors** (#147) are a **[START]** fraction of doorways generated
-    *frameless* — no hinges, the whole span is panels — so there is no handle to shut
-    them by hand. They close *themselves* a few turns (**[START] ~5**) after the
-    doorway is last vacated; an actor standing in the throat holds them open (never a
-    crush). The delay is a stealth window: a guard passing through leaves the door open
-    just long enough to slip after them.
+  - **Automatic doors** (#147) are a **level modifier** (§12.6/#452), all or nothing:
+    the baseline facility is entirely **manual and hinged**, and with the modifier on
+    *every* door is automatic. An automatic door is generated **frameless** — no
+    hinges, the whole span is panels — so there is no handle to shut it by hand. They
+    close *themselves* a few turns (**[START] ~5**) after the doorway is last vacated;
+    an actor standing in the throat holds them open (never a crush). The delay is a
+    stealth window: a guard passing through leaves the door open just long enough to
+    slip after them.
+
+    **A run speaks one door vocabulary.** They used to be a **[START]** *fraction* of
+    every facility, drawn per doorway, so every level was a mixture and which
+    vocabulary a given door spoke was a coin flip you found out by walking up to it —
+    which is not a decision, only a surprise. Which vocabulary a run plays is now a
+    stated property of the run.
+
+    The geometry differs, and that is most of what the modifier is: an automatic door
+    is a **3–6 panel span** where a manual one is two hinges around 1–4 panels, so an
+    all-automatic level has systematically **wider throats** and longer sightlines
+    through every doorway (§10.1a's concern, and #387's).
 - **You sense a door change away from you** (§9.4): a door opening or shutting that
   you did not cause lights a fading on-grid cue over its **whole footprint**, in the
   same orange **`Sensed`** channel as a guard felt through a wall, at its own longer
@@ -2694,7 +2717,9 @@ danger overlay in full (easier); *"full layout known"* draws the building's real
 architecture where the §11.5a schematic would otherwise stand, so doorways, duct
 mouths and furniture are all on the map from turn one (easier); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
-summon anyone (harder); *"calm guards detect only their cone"* drops a **Calm**
+summon anyone (harder); *"all doors automatic"* generates every doorway frameless
+instead of hinged (§10.4/#452 — harder, and the **one modifier read by generation**
+rather than at runtime: see below); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
 wedge while a guard that is hunting still watches its sides (easier — an
 **experiment**, see below). This is the
@@ -2712,6 +2737,24 @@ every read site that must handle it. Each field carries a documented **direction
 **directional assertion** — from the same seed and inputs, the harder one yields
 at least as much pressure as baseline, the easier one reveals at least as much —
 so a flag that changes nothing observable cannot pass for shipped.
+
+> **One modifier reaches generation, and it changes what the assertion can be**
+> (§10.4/#452). Every other field here is read at runtime or by the renderer, so a
+> directional assertion can hold the *facility* fixed and vary only the rule. `all
+> doors automatic` decides what a doorway **is**, so it must be resolved **before**
+> `generate_level` and threaded in as a parameter — never consulted from a global, or
+> the generator would have a hidden input and §12.4's determinism would be a claim
+> nobody could check. The consequence for §2.3: from one seed the two settings are two
+> *different facilities*, so "same seed and inputs" cannot be the frame. The assertion
+> it is held to instead is **distributional** — the sim's four temperaments over the
+> same seed sweep, both settings — which is the honest form of the question for a
+> modifier that changes the building rather than the rules inside it.
+>
+> It is also why adding one to this set is not free: a generation-time modifier
+> breaks **seed stability**. Dropping the old per-doorway draw shifted the RNG stream,
+> so every `#seed=N` link shared before #452 now names a different facility. The break
+> was taken deliberately rather than papered over with a throwaway draw that would have
+> bought compatibility by making the generator lie about what it does.
 
 **The source → modifier → config flow.** The mechanism is shared; the *sources*
 that switch modifiers on are separate and stack on top of it. Three, kept
@@ -2814,10 +2857,20 @@ budget has to be found by taking a harder rule elsewhere.
 The *"always show vision cones"* modifier may only ever **widen**
 the §11.5 overlay — it reveals unseen guards' cones on top of the seen ones, and
 must never narrow or hide the red detection set (§11.5 is **[SETTLED]**). Modifiers
-resolved before generation (guard count #232, safe zones #235, locked doors #236)
-read the same value at the generation seam; runtime modifiers (the two shipped,
-the intel gate #244, the two §7.7 cooperation call-ins) read it off the running
-state. Same value, two horizons.
+resolved before generation (**all doors automatic** #452 — the first one shipped —
+plus guard count #232, safe zones #235, locked doors #236) read the same value at the
+generation seam; runtime modifiers (the intel gate #244, the two §7.7 cooperation
+call-ins, and the rest) read it off the running state. Same value, two horizons.
+
+The **generation** horizon is the one with teeth, and #452 is where that got paid
+for. A modifier read before the carve is a *hidden input to the generator*, so it has
+to be threaded in as a parameter rather than reached for — and two consequences
+follow that a runtime modifier never has: the same seed under the two settings is two
+different facilities, so §2.3's directional assertion cannot be a same-scene
+comparison and becomes distributional instead; and adding one **shifts the RNG
+stream**, so every seed shared before it names a different building. Both are worth
+paying, but they are the price of this horizon and should be stated when a new
+modifier asks to sit on it.
 
 ---
 

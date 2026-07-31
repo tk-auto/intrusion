@@ -189,6 +189,48 @@ pub struct LevelModifiers {
     /// would be a **new** entry appended to the end of the slot list, never a revival
     /// of this one.
     pub calm_guards_detect_only_their_cone: bool,
+    /// **Harder.** Every door on the level is **automatic** (§10.4/#147/#452):
+    /// frameless spans that shut themselves a few turns after the doorway is last
+    /// vacated. Baseline, every door is **manual** and hinged — a handle to shut by
+    /// hand, and a Calm guard that closes one behind itself (#146).
+    ///
+    /// **All or nothing, and that is the change.** Automatic doors used to be a
+    /// `[START]` fraction of every facility drawn per doorway, so a run met both
+    /// vocabularies mixed together and which door was which was a coin flip you
+    /// discovered by walking up to it. A run now speaks **one** door vocabulary, and
+    /// which one is a stated property of the run rather than a per-doorway draw.
+    ///
+    /// **Marked `Harder`, and the sim does not confirm it.** This is the honest state
+    /// of the question rather than a claim, so it is written down here:
+    ///
+    /// The case *for* harder is structural. The hand-close goes away — you can no
+    /// longer bump a hinge to break a sightline when you choose to, only wait out a
+    /// timer you do not control — and an all-automatic level has systematically
+    /// **wider throats** (a 3–6 panel passable span where a manual door is two solid
+    /// hinges around 1–4), which is a longer sightline through every doorway. That
+    /// much is measurable, and it is what `the_modifier_widens_the_facility_s_throats`
+    /// holds as §2.3's anti-facade guard.
+    ///
+    /// The case against is the batch. Over 100 seeds × four temperaments the **win
+    /// rate does not move** (net one win in four hundred), and detections per turn
+    /// fall in *all four* — the doors re-closing themselves restores cover that the
+    /// baseline's guard traffic props open for good. What does move is the run's
+    /// character: `alert_peak_mean` rises in three of four, `diversity` falls in three
+    /// of four, and pacing splits by temperament — the avoidant profiles get slower,
+    /// the striking ones faster.
+    ///
+    /// So on the evidence this is a **feel** modifier, not a difficulty one, and it is
+    /// a candidate for the difficulty/feeling split (#258) rather than for the directed
+    /// pool. `Harder` is the safer of the two labels until that split exists: the
+    /// structural change is the harder-direction one, and it is the direction the
+    /// anti-facade assertion can actually hold.
+    ///
+    /// **The one modifier that reaches generation.** Every other field here is read
+    /// at runtime or by the renderer; this one is consumed by
+    /// [`generate_level`](crate::generate_level) before a single cell is stamped, so
+    /// it is threaded in as a parameter rather than consulted from a global — see
+    /// that function's own note.
+    pub automatic_doors: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -256,12 +298,13 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 7] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 8] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
     SHOWS_ALL_CONES,
     KNOWS_FULL_LAYOUT,
+    ALL_DOORS_AUTOMATIC,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -294,6 +337,12 @@ const KNOWS_FULL_LAYOUT: ActiveModifier = ActiveModifier {
     name: "Full layout known",
     direction: ModifierDirection::Easier,
     detail: None,
+};
+
+const ALL_DOORS_AUTOMATIC: ActiveModifier = ActiveModifier {
+    name: "Doors",
+    direction: ModifierDirection::Harder,
+    detail: Some("all automatic"),
 };
 
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
@@ -331,6 +380,7 @@ impl LevelModifiers {
             always_show_vision_cones,
             full_layout_known,
             calm_guards_detect_only_their_cone,
+            automatic_doors,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -350,6 +400,9 @@ impl LevelModifiers {
         }
         if full_layout_known {
             active.push(KNOWS_FULL_LAYOUT);
+        }
+        if automatic_doors {
+            active.push(ALL_DOORS_AUTOMATIC);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -387,6 +440,7 @@ impl LevelModifiers {
             // round-tripping, but nothing reads the result.
             calm_guards_detect_only_their_cone: self.calm_guards_detect_only_their_cone
                 || other.calm_guards_detect_only_their_cone,
+            automatic_doors: self.automatic_doors || other.automatic_doors,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
             // in its documented direction, so sources add pressure, never cancel.
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
@@ -606,7 +660,7 @@ mod tests {
         assert_eq!(none.active()[0].detail, Some("none required"));
 
         // Several sources at once: every active field is listed, in reading order.
-        // **Six, not seven, with every field set** — `calm_guards_detect_only_their_cone`
+        // **Seven, not eight, with every field set** — `calm_guards_detect_only_their_cone`
         // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
         // asked for is the rule the level plays regardless, so a caption for it would
         // tell the player about a difference that no longer exists.
@@ -617,9 +671,10 @@ mod tests {
             always_show_vision_cones: true,
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
+            automatic_doors: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 6);
+        assert_eq!(stacked.active().len(), 7);
         assert!(
             !stacked
                 .active()
@@ -638,6 +693,7 @@ mod tests {
             always_show_vision_cones: false,
             full_layout_known: false,
             calm_guards_detect_only_their_cone: false,
+            automatic_doors: false,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -647,6 +703,7 @@ mod tests {
             always_show_vision_cones: true,
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
+            automatic_doors: true,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);

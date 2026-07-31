@@ -8,10 +8,16 @@
 //!
 //! §10.4's baseline is *"anyone can operate any door. No keys, no locks"* **[START]**,
 //! and this is the bounded exception the design already anticipated. What a seal buys
-//! is a **detour**: a guard cannot work a sealed handle, so its route runs the long way
-//! round and it loses the turns that costs (§7.6, "cornered and cut off" inverted in
-//! the player's favour). It is not a hiding place and not invincibility — the wall is
-//! made of time.
+//! is a **detour**: a guard cannot get a sealed door open, so its route runs the long
+//! way round and it loses the turns that costs (§7.6, "cornered and cut off" inverted
+//! in the player's favour). It is not a hiding place and not invincibility — the wall
+//! is made of time.
+//!
+//! **The fiction says "sealed", not "locked"**, and that is #452's doing: a run may be
+//! played entirely on **automatic** doors (§10.4/§12.6), which have no hinge and so no
+//! handle to lock. Nothing here branches on the door kind and nothing needs to — the
+//! seal is a property of the door, not of its furniture — but the wording used to
+//! claim a handle that an all-automatic level does not have.
 //!
 //! §2.2/§7.2 forbid the class of ability that can *permanently* sever pathing (the
 //! soft-lock, #170/#182), and the guarantee here is structural rather than careful:
@@ -38,7 +44,7 @@
 //!
 //! It is not free, either, which is what stops the seal being a one-sided wall with no
 //! decision in it. Opening one costs the turn (§4.4) and leaves the door **open**: the
-//! seal locks a handle, it does not hold a door shut, so a door you reopened is a door
+//! seal refuses the *opening*, it does not hold a door shut, so a door you reopened is a door
 //! the pursuer behind you walks straight through. Firing a lockdown across a route you
 //! still have to travel is therefore a real mistake a player can make, and the cost of
 //! unmaking it is paid in exactly the turns the ability was bought to save.

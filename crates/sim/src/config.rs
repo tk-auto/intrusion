@@ -264,7 +264,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 5] = [
+const MODIFIERS: [(&str, SetModifier); 6] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -278,6 +278,10 @@ const MODIFIERS: [(&str, SetModifier); 5] = [
         m.always_show_vision_cones = true
     }),
     ("full-layout-known", |m| m.full_layout_known = true),
+    // The one modifier that is read by **generation** rather than at runtime
+    // (§12.6/#452): it decides what a doorway is, so a batch that names it carves a
+    // different facility from the same seed. That is the point of measuring it.
+    ("automatic-doors", |m| m.automatic_doors = true),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -563,6 +567,7 @@ mod tests {
             always_show_vision_cones,
             full_layout_known,
             calm_guards_detect_only_their_cone,
+            automatic_doors,
             intel_to_exit,
         } = all.modifiers;
         assert!(guards_always_search_hideouts);
@@ -570,6 +575,7 @@ mod tests {
         assert!(body_found_calls_two_guards);
         assert!(always_show_vision_cones);
         assert!(full_layout_known);
+        assert!(automatic_doors);
         assert!(
             !calm_guards_detect_only_their_cone,
             "the retired slot has no name, so naming every modifier must not set it",

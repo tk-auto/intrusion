@@ -44,6 +44,7 @@
 use crate::cell::{Cell, Direction};
 use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
+use crate::modifiers::LevelModifiers;
 use crate::path;
 use crate::place::{place, LevelConfig, Placement};
 use crate::region::{DoorId, DoorKind, RegionGraph, RegionId, RegionKind};
@@ -88,13 +89,6 @@ const MAX_ROOMS: usize = 12;
 const MIN_DOOR_RUN: u32 = 3;
 /// The longest a single doorway spans (§10.4): two hinges and up to four panels.
 const MAX_DOOR_LEN: u32 = 6;
-/// The share of doorways generated as **automatic** (§10.4/#147) **[START]**:
-/// frameless spans that shut themselves, versus manual hinged doors that a hand or a
-/// passing Calm guard (#146) closes. Drawn per doorway from the seeded RNG (§12.4),
-/// so the same seed makes the same doors automatic. A minority — most doors stay
-/// manual, keeping the hinge/bump vocabulary the common case; the automatics are the
-/// self-healing seam that stops a busy wing propping every door open.
-const AUTO_DOOR_PERCENT: u32 = 30;
 /// How long an automatic door stays open after its doorway is last vacated
 /// (§10.4/#147, **[START] = 5** turns): short but nonzero, so a guard passing through
 /// leaves a real slip-through window before the door shuts (the ticket's stealth knob)
@@ -390,7 +384,17 @@ impl Layout {
 /// Returns [`GenError::TooSmall`] immediately for a footprint that cannot be
 /// partitioned at all — no amount of redrawing fixes geometry.
 pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenError> {
-    generate_where(width, height, rng, passes_guarantees, &Tuning::BIASED)
+    // The **baseline** facility (§12.6): every door manual and hinged. This is the
+    // bare-carve entry the §10.6 guarantee tests measure over; a run with modifiers
+    // comes through [`generate_level`], which threads them.
+    generate_where(
+        width,
+        height,
+        rng,
+        passes_guarantees,
+        &Tuning::BIASED,
+        &LevelModifiers::default(),
+    )
 }
 
 /// Generate a *placed* level: a carve passing every §10.6 guarantee **and** a
@@ -414,10 +418,12 @@ pub fn generate(width: u32, height: u32, rng: &mut Rng) -> Result<Layout, GenErr
 /// [`GenError::RetriesExhausted`] instead of shipping a silent shortfall.
 pub fn generate_level(
     config: &LevelConfig,
+    modifiers: &LevelModifiers,
     rng: &mut Rng,
 ) -> Result<(Layout, Placement), GenError> {
     for _ in 0..MAX_GEN_ATTEMPTS {
-        let mut layout = generate_once(config.width, config.height, rng, &Tuning::BIASED)?;
+        let mut layout =
+            generate_once(config.width, config.height, rng, &Tuning::BIASED, modifiers)?;
         if !passes_guarantees(&layout) {
             continue;
         }
@@ -448,9 +454,10 @@ fn generate_where(
     rng: &mut Rng,
     valid: impl Fn(&Layout) -> bool,
     tuning: &Tuning,
+    modifiers: &LevelModifiers,
 ) -> Result<Layout, GenError> {
     for _ in 0..MAX_GEN_ATTEMPTS {
-        let layout = generate_once(width, height, rng, tuning)?;
+        let layout = generate_once(width, height, rng, tuning, modifiers)?;
         if valid(&layout) {
             return Ok(layout);
         }
@@ -469,6 +476,7 @@ fn generate_once(
     height: u32,
     rng: &mut Rng,
     tuning: &Tuning,
+    modifiers: &LevelModifiers,
 ) -> Result<Layout, GenError> {
     // Step 1: one region covering the interior `(W-2) x (H-2)`. Below the minimum,
     // no corridor fits or a room could not reach 6×6 — reject rather than partition
@@ -534,7 +542,7 @@ fn generate_once(
 
     // Step 4: cut doorways where a room meets a corridor, now that every region is
     // named (§10.1.4). Runs on the finished grid so it sees the true walls.
-    place_doorways(&mut facility, &mut regions, rng);
+    place_doorways(&mut facility, &mut regions, rng, modifiers.automatic_doors);
 
     // Step 5a (§10.1.5): thicken about a third of the interior walls to two cells,
     // giving recessed cupboards their solid backing (§10.1.6) and the facility some

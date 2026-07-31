@@ -191,8 +191,12 @@ fn placed_guard_territories_are_reachable_and_cover_corridors() {
     use std::collections::HashSet;
 
     for seed in seed_sweep(32) {
-        let (layout, placement) =
-            generate_level(&LevelConfig::V1, &mut Rng::new(seed)).expect("v1 generates");
+        let (layout, placement) = generate_level(
+            &LevelConfig::V1,
+            &crate::LevelModifiers::default(),
+            &mut Rng::new(seed),
+        )
+        .expect("v1 generates");
         let facility = layout.facility();
         for guard in placement.guards(&layout) {
             let territory = guard.territory(facility, PatrolStyle::Beat);
