@@ -462,6 +462,11 @@ impl StealthBot {
         // no loss, since the phase conceals nothing and the cover would have been the
         // point. `step_down` refuses to enter a solid on the ordinary route for the
         // same reason; this is that rule on the cover ladder.
+        //
+        // It became reachable at #449. With a three-turn window the phase was spent by
+        // the time the crossing was walked, so a phased bot was never standing on open
+        // floor with a bench beside it and a turn to fill; the fourth turn is exactly
+        // that turn.
         if matches!(
             state.ability_state(AbilityId::Dephase),
             AbilityState::Active { .. }
@@ -1130,10 +1135,13 @@ impl StealthBot {
 /// the ability can never be pressed for a crossing the policy would then decline to
 /// take — the shy-cue failure #347 warns about, in its most literal form.
 ///
-/// **One cell of solid, never two.** The duration is 3 turns: in at 1, out at 2,
-/// with a turn in hand. A two-cell run would land on expiry, and a duration that ends
-/// inside a solid costs a safety eject plus a stun as long as the throw (§8.3) — the
-/// exact trap the cue must not walk into.
+/// **One cell of solid, never two.** The crossing spends three turns whatever the
+/// window is — press, in, out — and #449 widened the window to 4, so there is now a
+/// turn of slack rather than none. The cue is deliberately *not* widened with it: a
+/// two-cell run would spend the whole window and land its exit on the expiry turn, and
+/// a duration that ends inside a solid costs a safety eject plus a stun as long as the
+/// throw (§8.3) — the exact trap the cue must not walk into. The slack is what absorbs
+/// a stolen turn (see [`StealthBot::push_on`]), not a deeper crossing.
 fn crossing(
     facility: &Facility,
     memory: &intrusion_core::VisibleSet,

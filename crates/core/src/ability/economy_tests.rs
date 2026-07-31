@@ -35,7 +35,8 @@ fn the_catalog_matches_the_design_activated() {
             AbilityId::Dephase,
             1,
             TargetingMode::Itself,
-            3,
+            // 4 since #449 — three steps into a solid, counting the activation.
+            4,
             30,
             Effect::Phase,
         ),
@@ -267,21 +268,21 @@ fn activation_sets_the_full_duration() {
     assert!(deck.activate(AbilityId::Dephase));
     assert_eq!(
         deck.state(AbilityId::Dephase),
-        AbilityState::Active { remaining: 3 },
+        AbilityState::Active { remaining: 4 },
         "the bar shows the full duration, not duration − 1",
     );
     // Re-activating an active ability is a free no-op — nothing changes.
     assert!(!deck.activate(AbilityId::Dephase));
     assert_eq!(
         deck.state(AbilityId::Dephase),
-        AbilityState::Active { remaining: 3 }
+        AbilityState::Active { remaining: 4 }
     );
 }
 
 /// The §8.2 timing convention, at the economy level: an N-turn ability is
 /// **Active for exactly N ticks including activation**, then flips to cooling —
 /// so a freshly activated N yields N protected turns, the activation turn
-/// covered. (Dephase, N = 3.)
+/// covered. (Dephase, N = 4.)
 #[test]
 fn an_n_turn_ability_is_active_for_n_ticks_including_activation() {
     let mut deck = Deck::new(Loadout::full());
@@ -298,7 +299,7 @@ fn an_n_turn_ability_is_active_for_n_ticks_including_activation() {
             break;
         }
     }
-    assert_eq!(active_ticks, 3, "N protected turns, activation included");
+    assert_eq!(active_ticks, 4, "N protected turns, activation included");
 }
 
 /// The full `duration + cooldown` lockout (§8.2), emergent from the rules:
@@ -652,12 +653,12 @@ fn a_refused_activation_consumes_no_use() {
 /// the one lie §8.2's timing rule names.
 #[test]
 fn a_cooldown_and_a_budget_report_the_nearer_gate() {
-    let id = AbilityId::Dephase; // dur 3 / cd 30
+    let id = AbilityId::Dephase; // dur 4 / cd 30
     let mut deck = deck_budgeting(Loadout::full(), id, 2);
 
     assert!(deck.activate(id));
-    assert_eq!(deck.state(id), AbilityState::Active { remaining: 3 });
-    for _ in 0..3 {
+    assert_eq!(deck.state(id), AbilityState::Active { remaining: 4 });
+    for _ in 0..4 {
         deck.tick(&mut Vec::new());
     }
     assert_eq!(
@@ -681,10 +682,10 @@ fn a_cooldown_and_a_budget_report_the_nearer_gate() {
     assert_eq!(deck.uses_left(id), Some(0));
     assert_eq!(
         deck.state(id),
-        AbilityState::Active { remaining: 3 },
+        AbilityState::Active { remaining: 4 },
         "a spent budget never hides the window it just bought",
     );
-    for _ in 0..3 {
+    for _ in 0..4 {
         deck.tick(&mut Vec::new());
     }
     assert_eq!(

@@ -942,9 +942,17 @@ const DECOY: Ability = Ability {
     mode: activated(1, TargetingMode::Direction, 20, 30),
     behaviour: Behaviour::Effects(&[Effect::SpawnDecoy]),
 };
+// Dephase [START] (§8.3, #449): the window is **4**, counting the activation that
+// opens it — so a phase begun on open floor buys three steps into a solid, which is
+// the depth the ability is actually for. It was 3 (two steps in), and the third step
+// is the smaller half of the change: the same arithmetic that lets you reach further
+// lets the safety eject throw you further back, and the stun is as long as the throw
+// (appendix 12). One more turn of reach is therefore also one more turn of worst-case
+// helplessness — the §2.3 trade an ability is supposed to carry. The lockout stays at
+// 30: two knobs moved at once is neither knob measured.
 const DEPHASE: Ability = Ability {
     id: AbilityId::Dephase,
-    mode: activated(1, TargetingMode::Itself, 3, 30),
+    mode: activated(1, TargetingMode::Itself, 4, 30),
     behaviour: Behaviour::Effects(&[Effect::Phase]),
 };
 // Autodoors [START] (§8.3): a long active window — enough to walk a whole stretch
