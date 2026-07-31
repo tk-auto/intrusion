@@ -16,10 +16,15 @@
 //! in: the compass below promises *press towards the words*, and there is nowhere to
 //! press.
 //!
-//! Its label is a wide one — `body: wait to take hold` is 23 of the v1 board's 40
-//! cells (§10.2) — so a row that carries it *and* an aimed entry overruns the aimed
-//! layout and falls back to the packed list, exactly as any other pair of long labels
-//! does. That is the #384 rule doing its job, not a case of its own.
+//! Its label is `body: wait to grab` — **`wait`** rather than a clock glyph, because
+//! §11.3's table has no glyph for *this costs a turn* and the shipped font stack falls
+//! back to a generic `monospace` on some devices, where an unguaranteed codepoint
+//! comes out as tofu in the one row whose job is to teach a verb.
+//!
+//! It started life as `body: wait to take hold`, and at 23 of the v1 board's 40 cells
+//! (§10.2) it clipped the entry beside it on a real phone. [`LABEL_MAX`] is the guard
+//! that fell out of that: every label is measured against the row at compile time, so
+//! the next one that wide fails the build instead of a screenshot.
 //!
 //! # The row is a compass (§11.4, #384)
 //!
@@ -91,6 +96,34 @@ const fn hint_cells(text: &str) -> u32 {
 const fn hint_width(hint: [&str; 2]) -> u32 {
     MARGIN + hint_cells(hint[0]) + SEGMENT_GAP + hint_cells(hint[1])
 }
+
+/// **The widest label the row is built around**, in cells (§11.4/#451). Every
+/// affordance label is checked against it at compile time below.
+///
+/// The number is the longest label the v1 row was designed with — `exit: needs the
+/// intel` — rather than something derived, because there is no clean derivation to
+/// have: §11.4 already accepts that **two** long labels overrun a 40-wide board and
+/// falls back to the packed list for them, so a bound that guaranteed any *pair* fits
+/// would forbid labels the row has always carried. What this bound is actually for is
+/// the case that bit #451: a single label so much wider than the rest that pairs
+/// which used to fit start clipping on a real screen.
+const LABEL_MAX: u32 = 21;
+
+/// The bound bites here, over the complete set (§2.3 — a check that cannot be
+/// bypassed by adding an affordance, because [`Affordance::ALL`] is what
+/// `every_affordance_is_in_all` holds exhaustive).
+const _: () = {
+    let mut i = 0;
+    while i < Affordance::ALL.len() {
+        assert!(
+            hint_cells(Affordance::ALL[i].label()) <= LABEL_MAX,
+            "a usable-line label is wider than the row is built for — shorten it \
+             (see LABEL_MAX in render::usable). A label this wide clips the entry \
+             beside it on the v1 board (§10.2).",
+        );
+        i += 1;
+    }
+};
 
 /// **Both hints must fit the board they are drawn on**, the way the ability bar's
 /// worst case does (#287): a hint clipped mid-word teaches nothing, and discovering
@@ -550,7 +583,7 @@ mod tests {
     fn the_standing_on_entry_draws_centred_and_without_an_arrow() {
         assert_eq!(
             entry(None, Affordance::TakeBody).0,
-            "body: wait to take hold",
+            "body: wait to grab",
             "words alone — no arrow to press towards",
         );
         assert_eq!(group_of(None), 1, "the centre, where the player stands");
@@ -560,43 +593,69 @@ mod tests {
             !row.contains('↑') && !row.contains('↓') && !row.contains('←') && !row.contains('→'),
             "no arrow anywhere on the row: {row:?}",
         );
-        assert!(row.contains("body: wait to take hold"), "{row:?}");
+        assert!(row.contains("body: wait to grab"), "{row:?}");
         // Centred on the row, not packed against the left margin.
         let start = row.find("body:").expect("the entry is drawn") as u32;
-        assert_eq!(start, (40 - hint_cells("body: wait to take hold")) / 2);
+        assert_eq!(start, (40 - hint_cells("body: wait to grab")) / 2);
     }
 
-    /// **The standing-on entry is a wide one, and sharing the row falls back to the
-    /// packed rule** — which is the existing #384 behaviour meeting a long label, not
-    /// a new case. `body: wait to take hold` is 23 of the v1 board's 40 cells (§10.2),
-    /// so a centred group of that width leaves 8 either side and any neighbour
-    /// collides with it. The whole row then falls back to the packed left-to-right
-    /// list, one rule and never a clipped word.
+    /// **The regression #451's first label caused, pinned** (§11.4/§10.2).
     ///
-    /// Worth pinning rather than leaving to be discovered in a screenshot: the entry
-    /// keeps its bare words in the fallback too — no arrow is invented for it on the
-    /// way — and both entries survive whole.
+    /// It shipped as `body: wait to take hold` — 23 of the v1 board's 40 cells — and
+    /// a row carrying it beside `→ cupboard: hide` came to 42 cells and **clipped**
+    /// on a real phone: `body: wait to take hold  → cupboard: hi`. The label is now
+    /// `body: wait to grab` at 18, and the pair fits with cells to spare.
+    ///
+    /// What is asserted is the thing that actually went wrong: **both entries survive
+    /// whole**. A width comparison alone would not have caught it — the packed row
+    /// was the right layout, it was simply too long for the board and `status_row`
+    /// clips in silence.
     #[test]
-    fn a_shared_row_packs_and_the_standing_on_entry_keeps_its_bare_words() {
-        // The aim is genuinely refused: the arithmetic, before the drawing.
-        let take = hint_cells("body: wait to take hold");
-        assert_eq!(take, 23, "the label's width is what forces the fallback");
+    fn a_shared_row_keeps_both_entries_whole() {
+        let take = hint_cells("body: wait to grab");
+        assert_eq!(take, 18, "the label the row is sized for");
+        assert!(take <= LABEL_MAX, "and it is inside the compile-time bound");
+
+        let row = row(
+            40,
+            &[
+                (None, Affordance::TakeBody),
+                (Some(Direction::East), Affordance::Hide),
+            ],
+        );
+        assert!(
+            row.contains("body: wait to grab"),
+            "the standing-on entry is whole: {row:?}",
+        );
+        assert!(
+            row.contains("cupboard: hide"),
+            "…and so is the entry beside it — this is the clip that shipped: {row:?}",
+        );
+        assert_eq!(
+            row.chars().count(),
+            40,
+            "the row is exactly the board's width",
+        );
+    }
+
+    /// The aimed layout is still refused for this pair, and the packed fallback is
+    /// still what draws it — the #384 rule doing its job rather than a case of its
+    /// own. Separated from the clip assertion above because they fail for different
+    /// reasons and a reader should be able to tell which broke.
+    #[test]
+    fn the_standing_on_entry_still_packs_beside_an_aimed_one() {
+        let take = hint_cells("body: wait to grab");
         assert_eq!(
             aimed_starts(40, [hint_cells("← table: crouch"), take, 0]),
             None,
-            "west and a 23-cell centre cannot both be aimed on a 40-wide row",
+            "a west entry and an 18-cell centre cannot both keep their aim",
         );
-
         let row = row(
             40,
             &[
                 (None, Affordance::TakeBody),
                 (Some(Direction::West), Affordance::Crouch),
             ],
-        );
-        assert!(
-            row.contains("body: wait to take hold"),
-            "the bare words survive the fallback: {row:?}",
         );
         assert!(
             row.starts_with(" body:"),

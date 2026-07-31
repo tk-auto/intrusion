@@ -1457,7 +1457,7 @@ fn a_take_hold_wait_still_buys_the_360_look() {
 }
 
 /// §8.3/§11.4/#451: the usable line's **first non-directional entry**. Standing on a
-/// body with free hands offers `body: wait to take hold` with no direction at all —
+/// body with free hands offers `body: wait to grab` with no direction at all —
 /// the affordance is about the cell underfoot, and its press is a wait, so an arrow
 /// would promise a bump the next press will not deliver.
 ///

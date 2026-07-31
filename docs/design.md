@@ -1090,7 +1090,7 @@ Notes carried forward, because they are good and non-obvious:
   > nothing to keep, so the verb loses nothing and no new key is invented. The only
   > consequence is that you cannot wait *over* a body without picking it up — stand a
   > cell off if that is what you want. Wait is also the verb a player taps most for
-  > information, so the usable line names the new one (`body: wait to take hold`,
+  > information, so the usable line names the new one (`body: wait to grab`,
   > §11.4); the hint is the mitigation, not a nicety.
   >
   > **It straightens the cupboard sequence.** A takedown made from inside a cupboard
@@ -2045,7 +2045,7 @@ is the case this serves.
 
   **One entry has no direction** (#451). Taking hold of a body is about the cell the
   player is standing **on**, and its press is a **wait**, not a bump — so the line
-  carries `body: wait to take hold` with **no arrow at all**, drawn among the centred
+  carries `body: wait to grab` with **no arrow at all**, drawn among the centred
   group where the player's own cell is. An arrow would be a lie in the one channel
   this row exists to be trusted in: the whole promise of the aimed row is *press
   towards the words*, and there is nowhere to press. The discipline is unweakened,
@@ -2053,6 +2053,20 @@ is the case this serves.
   from the same state the Wait acts on, so it appears exactly when the wait would
   take hold and never otherwise, and a stunned or phased player is offered it no more
   than they are offered anything else (§8.3).
+
+  **Every label is bounded at 21 cells** (`LABEL_MAX`), checked at compile time over
+  the complete set. The row already accepts that *two* long labels overrun a 40-wide
+  board and falls back to the packed list for them, so the bound is not a promise that
+  any pair fits — it is a guard against the case #451 shipped and a phone found: one
+  label so much wider than the rest (`body: wait to take hold`, 23 cells) that a pair
+  which used to fit started clipping. `status_row` clips in silence, so nothing but a
+  bound catches it before a screenshot does.
+
+  It says **`wait`** rather than carrying a clock glyph because §11.3's table has none
+  for *this costs a turn*, and the shipped font stack falls back to a generic
+  `monospace` on some devices — an unguaranteed codepoint would come out as tofu in
+  the one row whose job is to teach a verb. Adding a timer glyph is a §11.3 change
+  with its own justification to make, not a side effect of naming an affordance.
 
   **The row is aimed, not packed** (#384): each entry draws where its direction
   points — **west** flush left, **north and south** centred, **east** flush right
