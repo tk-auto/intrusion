@@ -455,6 +455,19 @@ impl StealthBot {
         if !self.profile.crouches {
             return None;
         }
+        // **Never while phased.** The duck is a *bump* into the furniture, and while
+        // Dephase is up there is no bump (§8.3): the step walks the bot inside the
+        // bench instead, and a window that ends in there costs the safety eject and a
+        // stun as long as the throw. So a phased bot has no duck on offer — which is
+        // no loss, since the phase conceals nothing and the cover would have been the
+        // point. `step_down` refuses to enter a solid on the ordinary route for the
+        // same reason; this is that rule on the cover ladder.
+        if matches!(
+            state.ability_state(AbilityId::Dephase),
+            AbilityState::Active { .. }
+        ) {
+            return None;
+        }
         let threats = self.nearby_threats(state);
         if threats.is_empty() {
             return None;
