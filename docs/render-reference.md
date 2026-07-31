@@ -80,7 +80,7 @@ put two opposite readings in one ink on one piece of furniture.
 | `×` | Door frame (hinge) | System |
 | `}` | Cupboard | System; **Owned** while you are hiding in it |
 | `π` | Table (partial cover) | System; **Owned** while it conceals you |
-| `=` | Duct mouth | System |
+| `=` | Duct mouth | System; **memory slate** once scouted and out of view (§3) |
 | `$` | Intel console | Interest; **Neutral** once spent |
 | `Ψ` | Comms console | Interest; **Neutral** once used |
 | `E` | The exit | Interest |
@@ -94,6 +94,11 @@ They are deliberately the quietest thing on the board.
 Two glyphs recolour rather than change shape when their meaning shifts — a spent
 console (`$` Interest → Neutral) and a hiding place holding *you* (`}` System →
 Owned). Shape is *what it is*; colour is *what it means to you now*.
+
+The **contents** rows — `}`, `=`, `$`, `Ψ` — take the memory slate rather than the
+dim shade once they are out of view, which is the §3 knowledge state and not a
+category of their own. Only `=` names it in the table above, because it is the one
+whose layer moved (#450) and the note is there to stop it drifting back.
 
 ### 2.3 The schematic
 
@@ -223,13 +228,40 @@ The three layers those states apply to (§11.5a **[SETTLED]**):
 
 | Layer | Visibility |
 |---|---|
-| **Geometry** — walls, floor, room shapes | Always drawn, from turn one — as the schematic until explored |
-| **Contents** — intel, cupboards, ducts, doors, furniture | Hidden until seen; then remembered |
+| **Geometry** — walls, floor, room shapes, doors, furniture | Always drawn, from turn one — as the schematic until explored, then the row's dim shade |
+| **Contents** — intel, comms, cupboards, duct mouths | Hidden until seen; then **remembered**, in the memory slate |
 | **Live state** — guards, bodies, a door's pose | Only what you can see right now; never remembered |
 
 The pairing is the point: **you plan confidently against the building's bones and
 get surprised by what is in it**, not by the architecture. Being surprised by a wall
 is annoying; finding an empty room where you expected the intel is a decision.
+
+**Doors and furniture sit in Geometry here, and that is the render's own rule.**
+This table is about what a cell draws as when it leaves your sight, and on that
+question both take the shared dim shade rather than the memory slate — deliberately,
+for two different reasons:
+
+- **A door's pose is live state**, redrawn canonically closed every frame out of
+  view (`real(Terrain::DoorPanelClosed)`). A slate door would be a memory colour on
+  a drawing that is not a memory, competing with the live pose the moment you can
+  see it again.
+- **Doors are everywhere.** The memory slate earns its distinctness by being rare —
+  it is the ink that says *you found this*. Slating every panel in the facility would
+  bury the two or three marks that actually change a plan under a building's worth of
+  doorways.
+
+Furniture keeps the same shade for the second reason. Neither is a claim that a door
+is load-bearing: on the *schematic* a doorway still draws as the gap in the wall line
+a plan would show, and a table still draws as floor space, which is §2.3–§2.4's
+question, not this one.
+
+**A duct mouth is Contents** (#450) — it moved here from Geometry, where it drew its
+`=` in the same dim gray a wall dims to and so read as one more piece of building the
+moment you looked away. §10.7 makes a duct an escape a pursuer cannot follow, which is
+exactly why a mouth found once should stay on the map in its own ink: it is a route
+you plan with, in the way §2.3's exit anchors every escape plan. The mouths are still
+masked as fabric until scouted, and the duct's *interior* is not on this table at all
+— it is the private fourth layer §10.7 gives it, never absorbed into tile memory.
 
 ---
 

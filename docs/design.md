@@ -2244,6 +2244,19 @@ boundary is visible across open ground at all.
 > than part of it (appendix 18). Room shapes, wall runs and the openings between them
 > still read from turn one, so you are still never lost and never mapping.
 >
+> **"Remembered" is two questions, and the row above answers the first.** *Hidden
+> until seen* is this table's axis. *Which ink it keeps once it leaves your sight* is
+> the renderer's, and the two do not partition the same way:
+> [`docs/render-reference.md`](render-reference.md) §3 owns that second answer and
+> holds the layer split it implies. **Intel, comms, cupboards and duct mouths** take
+> the **memory slate** — the ink that says *you found this*, and the reason #450 moved
+> the duct mouth onto it: §10.7 makes a duct an escape a pursuer cannot follow, so a
+> mouth scouted is a route you plan with, not a wall you have walked past. **Doors and
+> furniture** take the ordinary dim shade instead, because a door's *pose* is live
+> state redrawn every frame and a slate door would compete with it, and because doors
+> are everywhere — slating all of them would bury the two or three marks that change a
+> plan. A colour that marks everything marks nothing.
+>
 > **The cost is meant to be payable.** §12.6's `full_layout_known` modifier hands
 > the whole layout over as an *easier*-direction modifier — so under the directed
 > difficulty draw it is bought with pressure taken on elsewhere, never given away.
@@ -2692,7 +2705,9 @@ flips a rule an existing system already owns rather than adding a parallel one:
 cupboards unconditionally (harder); *"always show vision cones"* paints the §11.5
 danger overlay in full (easier); *"full layout known"* draws the building's real
 architecture where the §11.5a schematic would otherwise stand, so doorways, duct
-mouths and furniture are all on the map from turn one (easier); the two
+mouths and furniture are all on the map from turn one (easier — the duct mouth is
+the one *content* it hands over, because a mouth reads off a plan the way a doorway
+does; a scouted mouth is still the one that gets the memory slate, #450); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
 summon anyone (harder); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
