@@ -329,9 +329,13 @@ mod tests {
 
     /// A pool with fewer candidates than the level asks for **takes what exists**,
     /// deterministically — it does not loop to fill the quota and it does not panic.
-    /// The easier side is exactly two deep today, so `MuchEasier` is the exhaustive
-    /// case: it draws both candidates, every seed, and drawing one twice would show
-    /// as a set of one.
+    ///
+    /// **Both sides are now deeper than the axis reaches** (#232 gave the easier side
+    /// its third candidate, appendix 30), so ±2 draws *distinct* pairs that differ by
+    /// seed rather than the one exhaustive set every seed used to get on the easier
+    /// end. The claim the test exists for is unchanged and stated generally below —
+    /// never more picks than the pool holds — and it is the case that would matter
+    /// again the moment a pool shrank.
     #[test]
     fn a_short_pool_takes_what_exists() {
         assert_eq!(Difficulty::MuchEasier.picks(), 2);
@@ -339,8 +343,18 @@ mod tests {
         for seed in SEEDS {
             let drawn = Difficulty::MuchEasier.draw(seed);
             assert_eq!(drawn.active().len(), 2, "two distinct easier rules");
-            assert!(drawn.always_show_vision_cones && drawn.full_layout_known);
         }
+        // The easier side is a genuine draw now: over this spread of seeds, −2 lands
+        // on more than one pair. A pool that had gone back to exactly two deep, or a
+        // draw that ignored its seed, shows up here as a single set.
+        let easier_pairs: std::collections::BTreeSet<_> = SEEDS
+            .iter()
+            .map(|&seed| format!("{:?}", Difficulty::MuchEasier.draw(seed).active()))
+            .collect();
+        assert!(
+            easier_pairs.len() > 1,
+            "−2 is exhaustive again: {easier_pairs:?}"
+        );
         // The general claim, over every position: never more than the pool holds.
         for position in Difficulty::ALL {
             let bound = position.direction().map_or(0, pool_size);

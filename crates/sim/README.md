@@ -69,15 +69,26 @@ newly shipped ability is spellable the day it lands. The modifier names are the
 ```
 guards-always-search-hideouts   sighting-lost-calls-a-guard   body-found-calls-two-guards
 always-show-vision-cones        full-layout-known             automatic-doors
+guard-count-more                guard-count-fewer
 ```
 
-`automatic-doors` is the odd one out and worth knowing about (§12.6/#452): every
-other modifier is read at **runtime**, so naming it measures the same facility played
-under a different rule. This one is read by **generation** — it decides whether a
-doorway is a hinged manual door or a frameless automatic one — so a batch that names
-it carves a *different facility* from the same seed. Both halves of a comparison are
-still the same seed sweep, which is what keeps it fair; just do not read a per-seed
-row across the two arms as if it were the same level.
+The last three are read by **generation** rather than at runtime, and they are not
+read at the same depth (§12.6):
+
+- `automatic-doors` (#452) decides whether a doorway is a hinged manual door or a
+  frameless automatic one, so it reaches the **carve**: a batch that names it plays a
+  *different facility* from the same seed. Both halves of a comparison are still the
+  same seed sweep, which is what keeps it fair; just do not read a per-seed row across
+  the two arms as if it were the same level.
+- `guard-count-more` / `guard-count-fewer` (#232) are the two ends of one **knob** — a
+  knob is not a toggle, so the name has to say which end, and naming both leaves the
+  one named last. They reach **placement** only, so both arms carve the same building
+  and place the same player, exit and intel; the guard sets are nested and only the
+  pieces drawn after the guards (the comms console, the radio clocks) shift. A per-seed
+  row *is* comparable across these two arms, up to that shift.
+
+`--guards N` still exists and is a different thing: it overrides the **recipe** to any
+count, where the knob is a bounded ±1 step that a real run can actually be dealt.
 
 Two refusals are deliberate, and both are the §13.2 attribution rule — *a batch
 whose rows claim a config it never ran is worse than a batch that did not start*:

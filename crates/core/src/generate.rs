@@ -421,6 +421,13 @@ pub fn generate_level(
     modifiers: &LevelModifiers,
     rng: &mut Rng,
 ) -> Result<(Layout, Placement), GenError> {
+    // The §12.6 **guard-count knob** (#232) is resolved into the recipe here, once,
+    // before a piece is placed — the same discipline `automatic_doors` follows below,
+    // and for the same reason: a generation-time modifier is threaded in as a
+    // parameter, never consulted from a global, or §12.4's determinism would be a
+    // claim nobody could check. It reaches *placement* rather than the carve, so the
+    // three settings still carve one building from one seed (see the field's note).
+    let config = &config.with_guard_count(modifiers.guard_count);
     for _ in 0..MAX_GEN_ATTEMPTS {
         let mut layout =
             generate_once(config.width, config.height, rng, &Tuning::BIASED, modifiers)?;

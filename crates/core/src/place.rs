@@ -30,6 +30,7 @@ use crate::cell::Cell;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{has_adjacent_usable, shuffle, Layout};
 use crate::guard::{Guard, GUARD_INITIAL_FACING};
+use crate::modifiers::GuardCount;
 use crate::path;
 use crate::radio::RadioClock;
 use crate::region::{RegionId, RegionKind};
@@ -60,6 +61,14 @@ const PLAYER_COMMS_MIN_DISTANCE: u32 = 16;
 // Reaching the radio must cost more than reaching the way out, whatever these
 // [START]s are retuned to — held at compile time, like the §7.3 radio relations.
 const _: () = assert!(PLAYER_COMMS_MIN_DISTANCE > PLAYER_EXIT_MIN_DISTANCE);
+
+// The shipped recipe sits **strictly inside** the guard-count envelope (#232), so
+// both ends of the knob always bite on the level the game actually ships. Held at
+// compile time rather than in a test: retuning §10.2's [START] count to an edge of
+// the envelope would leave one end of a shipped modifier silently doing nothing —
+// §2.3's facade, arrived at by moving a number somewhere else entirely.
+const _: () = assert!(LevelConfig::GUARDS_MIN < LevelConfig::V1.guards);
+const _: () = assert!(LevelConfig::V1.guards < LevelConfig::GUARDS_MAX);
 
 /// A level recipe: the footprint and the piece counts (§10.2). v1 ships exactly
 /// one tuned configuration — [`LevelConfig::V1`] — but the knobs are data so the
@@ -92,6 +101,49 @@ impl LevelConfig {
         guards: 4,
         intel: 3,
     };
+
+    /// The fewest guards the [`GuardCount`] modifier may leave a facility with
+    /// (§10.2/§10.6/#232).
+    ///
+    /// **Three, and the floor is about the game rather than about placement.** A carve
+    /// seats fewer guards more easily, not less, so nothing here would *fail* at one or
+    /// at none — it would simply hand back a building with nobody in it, which is a
+    /// walk rather than a raid. Three is the last row of the `--guards` sweep that is
+    /// still a real level: a bare bot wins 48% of them against 37% at the baseline
+    /// (appendix 26), so it is one step of relief and not a different game.
+    pub const GUARDS_MIN: usize = 3;
+
+    /// The most guards the [`GuardCount`] modifier may add (§10.2/§10.6/#232).
+    ///
+    /// Five, one over the §10.2 baseline. Two things bound it and both point the same
+    /// way: the board is **screen-bound** (§11.4/§10.2), so a 40×40 crowds long before
+    /// the placement pool runs dry; and the §7.5 region partition divides the facility
+    /// into as many beats as there are guards (§10.5), so each extra guard cuts every
+    /// territory smaller — the §7.6 trap the design warns about is reached by adding
+    /// guards, not by any one of them being cleverer.
+    pub const GUARDS_MAX: usize = 5;
+
+    /// This recipe with the §12.6 **guard-count knob** applied (#232) — the effective
+    /// config [`generate_level`](crate::generate_level) places from.
+    ///
+    /// **A step, not a setter.** The knob moves the recipe's own count by one and
+    /// stops at the [`GUARDS_MIN`](Self::GUARDS_MIN)…[`GUARDS_MAX`](Self::GUARDS_MAX)
+    /// envelope; a recipe already outside it is **left where it is** rather than
+    /// dragged into range, because clamping a sim sweep of seven guards down to five
+    /// would have "one more" quietly place *two fewer* — a knob that moved the wrong
+    /// way would be worse than one that did nothing. For the one shipped recipe
+    /// ([`V1`](Self::V1), four guards) both ends always bite.
+    #[must_use]
+    pub const fn with_guard_count(self, knob: GuardCount) -> Self {
+        let guards = match knob {
+            GuardCount::Baseline => self.guards,
+            GuardCount::Fewer if self.guards > Self::GUARDS_MIN => self.guards - 1,
+            GuardCount::More if self.guards < Self::GUARDS_MAX => self.guards + 1,
+            // Already at or past the envelope's edge in the direction asked for.
+            GuardCount::Fewer | GuardCount::More => self.guards,
+        };
+        Self { guards, ..self }
+    }
 }
 
 /// Where everything starts: the output of §10.1 steps 7–9 — the cell each piece
@@ -498,6 +550,189 @@ mod tests {
             .iter()
             .filter(|&&c| layout.facility().terrain(c) == Some(Terrain::Floor))
             .count()
+    }
+
+    /// The §12.6 guard-count knob is a **step within an envelope** (#232): it moves
+    /// the recipe's own count by one and stops at
+    /// [`GUARDS_MIN`](LevelConfig::GUARDS_MIN)…[`GUARDS_MAX`](LevelConfig::GUARDS_MAX),
+    /// and — the part worth pinning — a recipe already outside that envelope is left
+    /// where it is rather than dragged into it, so an end can never move the count the
+    /// way it does not name.
+    #[test]
+    fn the_guard_knob_steps_the_recipe_and_stops_at_the_envelope() {
+        // The shipped recipe sits inside the envelope (held at compile time beside
+        // the constants), so both ends bite: §10.2's four becomes three or five, the
+        // ±1 the knob promises.
+        assert_eq!(LevelConfig::V1.guards, 4, "the §10.2 [START] baseline");
+        let at = |knob| LevelConfig::V1.with_guard_count(knob).guards;
+        assert_eq!(at(GuardCount::Fewer), LevelConfig::V1.guards - 1);
+        assert_eq!(at(GuardCount::Baseline), LevelConfig::V1.guards);
+        assert_eq!(at(GuardCount::More), LevelConfig::V1.guards + 1);
+        assert_eq!(at(GuardCount::Fewer), LevelConfig::GUARDS_MIN);
+        assert_eq!(at(GuardCount::More), LevelConfig::GUARDS_MAX);
+
+        // The knob touches nothing but the count.
+        assert_eq!(
+            LevelConfig {
+                guards: LevelConfig::V1.guards,
+                ..LevelConfig::V1.with_guard_count(GuardCount::More)
+            },
+            LevelConfig::V1,
+        );
+
+        // Over the whole range a recipe could name, including the sim's sweeps: the
+        // result is within one of the baseline, never past the envelope in the
+        // direction asked for, and **never moved the wrong way**.
+        for guards in 0..=12 {
+            let recipe = LevelConfig {
+                guards,
+                ..LevelConfig::V1
+            };
+            let fewer = recipe.with_guard_count(GuardCount::Fewer).guards;
+            let more = recipe.with_guard_count(GuardCount::More).guards;
+            assert_eq!(recipe.with_guard_count(GuardCount::Baseline).guards, guards);
+            assert!(fewer <= guards && guards <= more, "{guards}: wrong way");
+            assert!(
+                guards - fewer <= 1 && more - guards <= 1,
+                "{guards}: a step"
+            );
+            // Inside the envelope both ends move; outside it the end pointing further
+            // out stays put rather than clamping back across the baseline.
+            assert_eq!(fewer < guards, guards > LevelConfig::GUARDS_MIN);
+            assert_eq!(more > guards, guards < LevelConfig::GUARDS_MAX);
+        }
+    }
+
+    /// **The §2.3 directional assertion for the guard-count knob** (#232): from one
+    /// seed, more guards means at least as much detection pressure as the baseline and
+    /// fewer means at most — and the claim is exact rather than distributional,
+    /// because the knob is read by *placement* and not by the carve.
+    ///
+    /// So the three settings put the same player, exit and intel in the same building,
+    /// and — since the guards come off one shuffled pool by `take(n)` — their guard
+    /// sets are strictly **nested**. The turn-one detection sets are therefore nested
+    /// too, which is the pressure claim stated over the cells a guard can actually
+    /// catch you in.
+    #[test]
+    fn more_guards_watch_a_superset_of_what_fewer_guards_watch() {
+        // The turn-one detection set of a placed guard: the same call placement
+        // itself makes (the conservative rear carve, §7.1/#410).
+        let watched = |layout: &Layout, p: &Placement| -> HashSet<Cell> {
+            p.guard_cells()
+                .iter()
+                .flat_map(|&cell| {
+                    field_of_view_with_blind_spot(
+                        layout.facility(),
+                        cell,
+                        GUARD_INITIAL_FACING,
+                        GUARD_SIGHT_ARC,
+                        GUARD_SIGHT_RANGE,
+                        BlindTier::REAR,
+                    )
+                    .cells()
+                    .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        let at = |seed: u64, knob| {
+            generate_level(
+                &LevelConfig::V1,
+                &crate::LevelModifiers {
+                    guard_count: knob,
+                    ..crate::LevelModifiers::default()
+                },
+                &mut Rng::new(seed),
+            )
+            .expect("the v1 config places at every setting of the knob")
+        };
+
+        for seed in seed_sweep(SEEDS) {
+            let (fewer_layout, fewer) = at(seed, GuardCount::Fewer);
+            let (base_layout, base) = at(seed, GuardCount::Baseline);
+            let (more_layout, more) = at(seed, GuardCount::More);
+
+            // Exactly the requested counts, at every setting — §10.6's no-silent-drop
+            // rule applies to the knob's numbers as much as to the recipe's.
+            assert_eq!(fewer.guard_cells().len(), LevelConfig::GUARDS_MIN);
+            assert_eq!(base.guard_cells().len(), LevelConfig::V1.guards);
+            assert_eq!(more.guard_cells().len(), LevelConfig::GUARDS_MAX);
+
+            // The same building, cell for cell: the knob reaches placement, not the
+            // carve, so the comparison below is between two runs of one facility.
+            let facility = base_layout.facility();
+            for y in 0..facility.height() {
+                for x in 0..facility.width() {
+                    let want = facility.terrain_at(x, y);
+                    assert_eq!(
+                        fewer_layout.facility().terrain_at(x, y),
+                        want,
+                        "seed {seed}"
+                    );
+                    assert_eq!(more_layout.facility().terrain_at(x, y), want, "seed {seed}");
+                }
+            }
+
+            // …and the same pieces in it, drawn before the guards from one stream.
+            for other in [&fewer, &more] {
+                assert_eq!(other.player(), base.player(), "seed {seed}");
+                assert_eq!(other.exit(), base.exit(), "seed {seed}");
+                assert_eq!(other.intel(), base.intel(), "seed {seed}");
+            }
+
+            // **Nested guard sets**: fewer is the baseline's guards minus its last,
+            // more is them plus one. `take(n)` off one shuffled pool, in one order.
+            assert_eq!(
+                fewer.guard_cells(),
+                &base.guard_cells()[..LevelConfig::GUARDS_MIN],
+                "seed {seed}: dropping a guard re-stationed the others",
+            );
+            assert_eq!(
+                &more.guard_cells()[..LevelConfig::V1.guards],
+                base.guard_cells(),
+                "seed {seed}: adding a guard re-stationed the others",
+            );
+
+            // The directional claim itself, in cells a guard can catch you in.
+            let (fewer_seen, base_seen, more_seen) = (
+                watched(&fewer_layout, &fewer),
+                watched(&base_layout, &base),
+                watched(&more_layout, &more),
+            );
+            assert!(
+                base_seen.is_subset(&more_seen),
+                "seed {seed}: more guards watched less ground",
+            );
+            assert!(
+                fewer_seen.is_subset(&base_seen),
+                "seed {seed}: fewer guards watched more ground",
+            );
+        }
+    }
+
+    /// Determinism (§12.4): the guard count is part of the reproducible config, so the
+    /// same seed **and the same knob** place the identical board — and two *different*
+    /// settings of the knob do not, or the modifier would be a facade (§2.3).
+    #[test]
+    fn the_guard_knob_is_part_of_the_reproducible_config() {
+        let at = |seed: u64, knob| {
+            generate_level(
+                &LevelConfig::V1,
+                &crate::LevelModifiers {
+                    guard_count: knob,
+                    ..crate::LevelModifiers::default()
+                },
+                &mut Rng::new(seed),
+            )
+            .expect("the v1 config places")
+            .1
+        };
+        for seed in seed_sweep(SEEDS) {
+            for knob in [GuardCount::Fewer, GuardCount::Baseline, GuardCount::More] {
+                assert_eq!(at(seed, knob), at(seed, knob), "seed {seed}: {knob:?}");
+            }
+            assert_ne!(at(seed, GuardCount::Baseline), at(seed, GuardCount::More));
+            assert_ne!(at(seed, GuardCount::Baseline), at(seed, GuardCount::Fewer));
+        }
     }
 
     /// §10.6: **exactly** the requested counts, on every accepted seed — never the

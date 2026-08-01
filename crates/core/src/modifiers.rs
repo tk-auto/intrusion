@@ -97,6 +97,68 @@ impl Ord for IntelGate {
     }
 }
 
+/// The facility's **guard count** (§10.2/#232) — one step either side of the
+/// recipe's own number, the two ends of a single bounded knob.
+///
+/// The §10.2 [START] baseline is four guards, and the `--guards` sweep is roughly
+/// linear at 8–10 points of bare win rate per guard with no cliff (appendix 26), so
+/// one guard is exactly one difficulty step: [`More`](GuardCount::More) is harder,
+/// [`Fewer`](GuardCount::Fewer) easier, and neither is a threshold that turns the
+/// game into a different one. The **±1 reach is the whole knob** — the envelope it
+/// may move within is [`LevelConfig::GUARDS_MIN`]…[`LevelConfig::GUARDS_MAX`]
+/// (`crate::LevelConfig`), and the arithmetic lives there with the recipe rather
+/// than here, because how many guards a carve can *seat* is a fact about generation
+/// (§10.6), not about the modifier seam.
+///
+/// **The one knob whose baseline sits in the middle.** [`IntelGate`] is ordered along
+/// a single exposure axis with quick play already at its hard end, so composing it
+/// harder-ward is all the seam ever needs. This knob's baseline is a *neutral* middle
+/// with a departure on each side, which is what lets both ends live in the §12.6
+/// directed pool — see [`harder_of`](GuardCount::harder_of) for the composition rule
+/// that follows from it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GuardCount {
+    /// **Easier.** One guard fewer than the recipe asks for — never below
+    /// [`LevelConfig::GUARDS_MIN`](crate::LevelConfig::GUARDS_MIN), the floor that
+    /// keeps a facility patrolled rather than empty.
+    Fewer,
+    /// The recipe's own count, unchanged — §10.2's four **[START]** for
+    /// [`LevelConfig::V1`](crate::LevelConfig::V1). [`Default`], so a hand-built
+    /// state and the sim play the unchanged §10.2 game.
+    #[default]
+    Baseline,
+    /// **Harder.** One guard more — never above
+    /// [`LevelConfig::GUARDS_MAX`](crate::LevelConfig::GUARDS_MAX), the cap that
+    /// keeps the screen-bound board (§11.4) from being crowded.
+    More,
+}
+
+impl GuardCount {
+    /// Compose two contributions, the [`LevelModifiers::union`] rule for this knob:
+    /// **the end that departs from the baseline wins, and pressure breaks a tie.**
+    ///
+    /// It is the same promise [`IntelGate::harder_of`] makes — *sources add pressure
+    /// and never cancel each other* — read against a knob whose baseline is a neutral
+    /// middle rather than one end of an axis. Taking the plain maximum would have a
+    /// source that asked for **nothing** silently overrule one that asked for fewer
+    /// guards, which is not a source adding pressure; it is a source that stayed
+    /// quiet being counted as one that objected.
+    ///
+    /// So: a baseline contribution yields to whichever end its partner names, and
+    /// [`More`](Self::More) beats [`Fewer`](Self::Fewer) when two sources genuinely
+    /// disagree. The invariant that matters is preserved exactly — **no contribution
+    /// can relieve pressure another one asked for**, so the campaign alert (#210)
+    /// cannot be talked out of its extra guard by a choice the player made.
+    #[must_use]
+    pub fn harder_of(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Baseline, end) | (end, Self::Baseline) => end,
+            (Self::More, _) | (_, Self::More) => Self::More,
+            (Self::Fewer, Self::Fewer) => Self::Fewer,
+        }
+    }
+}
+
 /// The set of level modifiers active for a facility — resolved once at facility
 /// start (§12.3) into the one value guards, vision, and render branch on.
 ///
@@ -238,6 +300,28 @@ pub struct LevelModifiers {
     /// it is threaded in as a parameter rather than consulted from a global — see
     /// that function's own note.
     pub automatic_doors: bool,
+    /// How many guards patrol the facility (§10.2/#232) — one step either side of the
+    /// recipe's count, [`More`](GuardCount::More) harder and
+    /// [`Fewer`](GuardCount::Fewer) easier. Baseline
+    /// [`GuardCount::Baseline`]: the recipe's own number, untouched.
+    ///
+    /// **The second modifier that reaches generation**, and it reaches a different
+    /// part of it than [`automatic_doors`](LevelModifiers::automatic_doors) does. The
+    /// doors modifier changes what a doorway *is*, so the two settings **carve
+    /// different buildings** from one seed. This one is read by placement (§10.1.9)
+    /// and leaves the carve alone: the pieces are drawn from the same stream in the
+    /// same order, and the guards come off one shuffled pool by `take(n)` — so from a
+    /// single seed the three settings put the **same player, exit and intel** in the
+    /// **same building**, and their guard sets are strictly **nested**. `Fewer` is the
+    /// baseline's guards minus its last, `More` is them plus one more.
+    ///
+    /// That nesting is what the §2.3 directional assertion is stated on, and it is a
+    /// much stronger claim than the distributional one the doors modifier has to
+    /// settle for: on one seed, more guards watch a superset of the cells fewer guards
+    /// watch. Everything after placement does shift — the comms console is drawn from
+    /// a pool the guards are excluded from, and each guard draws a radio clock — so
+    /// the two settings are the same *level* played out differently, not the same run.
+    pub guard_count: GuardCount,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -305,13 +389,15 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 8] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 10] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
     SHOWS_ALL_CONES,
     KNOWS_FULL_LAYOUT,
     ALL_DOORS_AUTOMATIC,
+    GUARDS_MORE,
+    GUARDS_FEWER,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -352,6 +438,23 @@ const ALL_DOORS_AUTOMATIC: ActiveModifier = ActiveModifier {
     detail: Some("all automatic"),
 };
 
+/// The knob's two ends read as a **count**, not as a rule — "one more" says what the
+/// facility holds, which is the only thing about it a player can act on. The absolute
+/// number is deliberately not in the caption: the card describes how a run departs
+/// from the baseline, and a bare "5" would need the baseline beside it to mean
+/// anything.
+const GUARDS_MORE: ActiveModifier = ActiveModifier {
+    name: "Guards",
+    direction: ModifierDirection::Harder,
+    detail: Some("one more"),
+};
+
+const GUARDS_FEWER: ActiveModifier = ActiveModifier {
+    name: "Guards",
+    direction: ModifierDirection::Easier,
+    detail: Some("one fewer"),
+};
+
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
     name: "Intel to exit",
     direction: ModifierDirection::Harder,
@@ -390,9 +493,17 @@ pub(crate) struct PoolEntry {
 /// reach: quick play already sets it to [`IntelGate::All`], and
 /// [`LevelModifiers::union`] composes it *harder-ward*, so an easier draw could not
 /// relax it without the draw learning to replace a knob rather than compose with it.
-/// Relaxing the gate is therefore a decision the pool does not quietly make; the
-/// easier side stays thin until the pool is enriched (appendix 29).
-pub(crate) const POOL: [PoolEntry; 5] = [
+/// Relaxing the gate is therefore a decision the pool does not quietly make.
+///
+/// **A symmetric knob is a different case, and both its ends are in** (#232,
+/// appendix 30). [`GuardCount`]'s baseline is a neutral middle rather than one end of
+/// an axis quick play has already walked to, so
+/// [`harder_of`](GuardCount::harder_of) leaves an easier pick standing instead of
+/// overruling it with a base that asked for nothing — the exact mechanical objection
+/// that keeps the gate out does not arise. It is the third easier candidate appendix
+/// 29 said would close its own question, and it closes it: −2 is a genuine draw of
+/// two from three rather than the one exhaustive pair every seed used to get.
+pub(crate) const POOL: [PoolEntry; 7] = [
     PoolEntry {
         caption: SEARCHES_HIDEOUTS,
         set: |m| m.guards_always_search_hideouts = true,
@@ -412,6 +523,18 @@ pub(crate) const POOL: [PoolEntry; 5] = [
     PoolEntry {
         caption: KNOWS_FULL_LAYOUT,
         set: |m| m.full_layout_known = true,
+    },
+    // The knob's two ends, one on each side of the pool's filter (#232). They are
+    // listed in slot order like everything else, so the two rows sit together even
+    // though no single draw can ever pick both — a `+N` draw sees only the first and
+    // a `−N` draw only the second.
+    PoolEntry {
+        caption: GUARDS_MORE,
+        set: |m| m.guard_count = GuardCount::More,
+    },
+    PoolEntry {
+        caption: GUARDS_FEWER,
+        set: |m| m.guard_count = GuardCount::Fewer,
     },
 ];
 
@@ -459,6 +582,7 @@ impl LevelModifiers {
             full_layout_known,
             calm_guards_detect_only_their_cone,
             automatic_doors,
+            guard_count,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -487,6 +611,13 @@ impl LevelModifiers {
         // to announce: what the bit asked for is the rule the level is already
         // playing.
         let _ = calm_guards_detect_only_their_cone;
+        // A bounded knob surfaces only when it has left its baseline, and each end
+        // carries its own direction (§10.2/#232).
+        match guard_count {
+            GuardCount::Baseline => {} // the recipe's own count — nothing to surface
+            GuardCount::More => active.push(GUARDS_MORE),
+            GuardCount::Fewer => active.push(GUARDS_FEWER),
+        }
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
         // settings are "active", each with the direction its exposure rank implies.
         match intel_to_exit {
@@ -521,6 +652,10 @@ impl LevelModifiers {
             automatic_doors: self.automatic_doors || other.automatic_doors,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
             // in its documented direction, so sources add pressure, never cancel.
+            // For the guard count that reads as "the end that departs from the
+            // baseline wins, pressure breaking a tie" — the same promise over a knob
+            // whose baseline is a neutral middle (#232).
+            guard_count: self.guard_count.harder_of(other.guard_count),
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
         }
     }
@@ -618,6 +753,8 @@ mod tests {
     #[test]
     fn the_baseline_default_has_every_modifier_off() {
         let baseline = LevelModifiers::default();
+        // A knob's baseline is the recipe's own count — the §10.2 game, untouched.
+        assert_eq!(baseline.guard_count, GuardCount::Baseline);
         assert!(!baseline.guards_always_search_hideouts);
         assert!(!baseline.always_show_vision_cones);
         // A debug modifier is off by default too — the fog is on unless a build
@@ -737,8 +874,29 @@ mod tests {
         assert_eq!(none.active()[0].direction, ModifierDirection::Easier);
         assert_eq!(none.active()[0].detail, Some("none required"));
 
+        // The guard count is the second bounded knob, and its two ends carry opposite
+        // directions off the one field.
+        let more = LevelModifiers {
+            guard_count: GuardCount::More,
+            ..LevelModifiers::default()
+        };
+        assert_eq!(
+            more.active(),
+            vec![ActiveModifier {
+                name: "Guards",
+                direction: ModifierDirection::Harder,
+                detail: Some("one more"),
+            }]
+        );
+        let fewer = LevelModifiers {
+            guard_count: GuardCount::Fewer,
+            ..LevelModifiers::default()
+        };
+        assert_eq!(fewer.active()[0].direction, ModifierDirection::Easier);
+        assert_eq!(fewer.active()[0].detail, Some("one fewer"));
+
         // Several sources at once: every active field is listed, in reading order.
-        // **Seven, not eight, with every field set** — `calm_guards_detect_only_their_cone`
+        // **Eight, not nine, with every field set** — `calm_guards_detect_only_their_cone`
         // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
         // asked for is the rule the level plays regardless, so a caption for it would
         // tell the player about a difference that no longer exists.
@@ -750,9 +908,10 @@ mod tests {
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
+            guard_count: GuardCount::More,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 7);
+        assert_eq!(stacked.active().len(), 8);
         assert!(
             !stacked
                 .active()
@@ -779,11 +938,13 @@ mod tests {
                 entry.caption.name,
             );
         }
-        // The pool covers every live toggle: the fields, less the retired slot 5,
-        // which asks for the rule the level plays regardless (#442).
-        assert_eq!(POOL.len(), 5);
-        assert_eq!(pool_size(ModifierDirection::Harder), 3);
-        assert_eq!(pool_size(ModifierDirection::Easier), 2);
+        // The pool covers every live toggle — the fields, less the retired slot 5,
+        // which asks for the rule the level plays regardless (#442) — plus the guard
+        // knob's two ends, one on each side (#232). The easier side is three deep, so
+        // −2 is a genuine draw rather than the one exhaustive pair of appendix 29.
+        assert_eq!(POOL.len(), 7);
+        assert_eq!(pool_size(ModifierDirection::Harder), 4);
+        assert_eq!(pool_size(ModifierDirection::Easier), 3);
         assert_eq!(
             pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
             POOL.len(),
@@ -807,6 +968,7 @@ mod tests {
             full_layout_known: false,
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
+            guard_count: GuardCount::Baseline,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -817,6 +979,7 @@ mod tests {
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
+            guard_count: GuardCount::Fewer,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);
@@ -824,7 +987,54 @@ mod tests {
         assert!(both.always_show_vision_cones);
         // The bounded gate composes harder-ward, not by OR: `All` wins over `None`.
         assert_eq!(both.intel_to_exit, IntelGate::All);
+        // The guard knob is the case a plain maximum would get wrong: `a` asked for
+        // nothing, `b` asked for fewer guards, and the source that stayed quiet does
+        // not get to overrule the one that spoke.
+        assert_eq!(both.guard_count, GuardCount::Fewer);
         // Union with the baseline changes nothing.
         assert_eq!(a.union(LevelModifiers::default()), a);
+    }
+
+    /// The guard knob's composition rule (#232): the **end that departs from the
+    /// baseline wins, and pressure breaks a tie**. The invariant it exists to keep is
+    /// the §12.6 one — no contribution can relieve pressure another one asked for —
+    /// stated over a knob whose baseline is a neutral middle rather than one end of an
+    /// axis, which is why a plain maximum is not the rule here.
+    #[test]
+    fn the_guard_knob_composes_without_a_quiet_source_overruling_a_loud_one() {
+        use GuardCount::{Baseline, Fewer, More};
+        // A source that asks for nothing yields to one that names an end — either end.
+        assert_eq!(Baseline.harder_of(Fewer), Fewer);
+        assert_eq!(Fewer.harder_of(Baseline), Fewer);
+        assert_eq!(Baseline.harder_of(More), More);
+        assert_eq!(More.harder_of(Baseline), More);
+        // A genuine disagreement resolves *harder-ward*: the campaign alert (#210)
+        // cannot be talked out of its extra guard by the player's easier choice.
+        assert_eq!(More.harder_of(Fewer), More);
+        assert_eq!(Fewer.harder_of(More), More);
+        // Agreement composes to itself, and the baseline is the identity.
+        assert_eq!(Fewer.harder_of(Fewer), Fewer);
+        assert_eq!(More.harder_of(More), More);
+        assert_eq!(Baseline.harder_of(Baseline), Baseline);
+        // Commutative over the whole knob — sources compose in any order.
+        for a in [Fewer, Baseline, More] {
+            for b in [Fewer, Baseline, More] {
+                assert_eq!(a.harder_of(b), b.harder_of(a), "{a:?} / {b:?}");
+            }
+        }
+        // And the whole rule, once more through the seam the systems actually read:
+        // an alert asking for one more guard survives a choice asking for one fewer.
+        let resolved = ModifierSources {
+            chosen: LevelModifiers {
+                guard_count: Fewer,
+                ..LevelModifiers::default()
+            },
+            alert: Some(LevelModifiers {
+                guard_count: More,
+                ..LevelModifiers::default()
+            }),
+        }
+        .resolve();
+        assert_eq!(resolved.guard_count, More);
     }
 }

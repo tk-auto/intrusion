@@ -25,7 +25,7 @@
 //! a paired A/B (#257) rests on.
 
 use intrusion_core::{
-    AbilityId, AlertTuning, IntelGate, LevelConfig, LevelModifiers, LevelSeed, Loadout,
+    AbilityId, AlertTuning, GuardCount, IntelGate, LevelConfig, LevelModifiers, LevelSeed, Loadout,
 };
 
 /// What every run in a batch boots from (§13.2): the facility recipe, the modifiers
@@ -134,7 +134,9 @@ impl RunConfig {
     /// `Full Layout Known` all name the same field.
     ///
     /// Modifiers only ever go on: the baseline is every one of them off, so "off" is
-    /// what not naming it already means.
+    /// what not naming it already means. A **knob**'s ends are two names over one
+    /// field (#232), so naming both leaves the one named last — the plain reading of a
+    /// command line that asked for two things which cannot both be true.
     pub fn with_modifier(self, name: &str) -> Result<Self, String> {
         let wanted = normalise(name);
         let entry = MODIFIERS
@@ -264,7 +266,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 6] = [
+const MODIFIERS: [(&str, SetModifier); 8] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -282,6 +284,13 @@ const MODIFIERS: [(&str, SetModifier); 6] = [
     // (§12.6/#452): it decides what a doorway is, so a batch that names it carves a
     // different facility from the same seed. That is the point of measuring it.
     ("automatic-doors", |m| m.automatic_doors = true),
+    // The **guard-count knob**'s two ends (§10.2/#232), one name each — a knob is not
+    // a toggle, so the name has to say which end. Read by placement rather than by the
+    // carve, so a batch that names one plays the *same building* as the baseline with
+    // one guard added or dropped: exactly the comparison appendix 26's `--guards`
+    // sweep makes, now reachable as a level modifier rather than as a recipe override.
+    ("guard-count-more", |m| m.guard_count = GuardCount::More),
+    ("guard-count-fewer", |m| m.guard_count = GuardCount::Fewer),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -540,6 +549,7 @@ mod tests {
     /// [`MODIFIERS`] carries it. Two fields are excluded on purpose — the intel gate,
     /// a bounded knob with its own flag rather than a toggle, and the **retired** slot
     /// 5 (#442), whose rule is the baseline and which therefore has no name to offer.
+    /// The guard-count knob (#232) is in, with one name per end.
     #[test]
     fn every_modifier_toggle_has_a_name_that_flips_it() {
         // One name at a time: exactly one modifier goes active (§12.6's `active` set
@@ -568,6 +578,7 @@ mod tests {
             full_layout_known,
             calm_guards_detect_only_their_cone,
             automatic_doors,
+            guard_count,
             intel_to_exit,
         } = all.modifiers;
         assert!(guards_always_search_hideouts);
@@ -576,6 +587,9 @@ mod tests {
         assert!(always_show_vision_cones);
         assert!(full_layout_known);
         assert!(automatic_doors);
+        // The knob's two ends are two names over one field, so naming both leaves the
+        // one named last rather than accumulating — see [`RunConfig::with_modifier`].
+        assert_eq!(guard_count, GuardCount::Fewer);
         assert!(
             !calm_guards_detect_only_their_cone,
             "the retired slot has no name, so naming every modifier must not set it",
