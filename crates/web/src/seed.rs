@@ -84,10 +84,19 @@ pub(crate) fn random_level() -> LevelSeed {
 /// address bar then reflects — is the resolved modifier set: a link shared from a run
 /// started at `Much harder` hands over that run, not a re-roll at that setting.
 pub(crate) fn random_level_at(difficulty: Difficulty) -> LevelSeed {
-    LevelSeed::quick_play_at(
-        LevelSeed::narrow_seed(js_sys::Date::now() as u64),
-        difficulty,
-    )
+    LevelSeed::quick_play_at(clock_seed(), difficulty)
+}
+
+/// A fresh run's seed, off the wall clock and **narrowed to the token's seed width**
+/// (#333) — the shell's one impurity (§12.1), named so the callers that need a seed
+/// without needing a whole preset can share it.
+///
+/// The end screen's *new run* is the second such caller (§14 v2/#138): what a fresh
+/// run *is* — the preset, the options carried over — is the core's rule
+/// ([`EndExit::level`](intrusion_core::EndExit::level)), and the only thing it cannot
+/// supply is the reading of the clock.
+pub(crate) fn clock_seed() -> u64 {
+    LevelSeed::narrow_seed(js_sys::Date::now() as u64)
 }
 
 /// Read a level from the page URL — `?seed=<token>` first, then `#seed=<token>` — or

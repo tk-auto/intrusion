@@ -106,8 +106,19 @@ pub enum Event {
     ExitRefused { still_needed: usize },
     /// The intel gate was satisfied (§10.2) and the player reached the exit: won.
     Won,
-    /// A guard moved into the player's cell: captured (§4.5) — the only loss.
-    Captured { by: Cell },
+    /// A guard moved into the player's cell: captured (§4.5) — the only ordinary loss.
+    ///
+    /// It carries the whole **cause**, because this is the one instant the cause is
+    /// true (§2.2/#138): `guard` indexes [`State::guards`](crate::State::guards),
+    /// `state` is the mood that guard held **as it made contact** (§7.4), and `at` is
+    /// the cell. The end screen presents these; it never reconstructs them from the
+    /// finished board, where the capturing guard has since been standing on the
+    /// player's cell and its mood at contact is gone.
+    Captured {
+        guard: usize,
+        state: GuardState,
+        at: Cell,
+    },
     /// The player took an unaware adjacent guard down (§7.2): the guard is
     /// permanently out, and a body now lies at `at`.
     TakenDown { at: Cell },

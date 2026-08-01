@@ -8,7 +8,7 @@
 
 use crate::guard::{GuardState, SEARCH_RADIUS};
 use crate::state::*;
-use crate::test_support::{open_beat, open_room, region_strip};
+use crate::test_support::{captured_at, open_beat, open_room, region_strip};
 use crate::{generate_level, AlertTrigger, LevelModifiers, Rng};
 
 /// §7.3: a downed guard misses its radio ping a period after the takedown; control
@@ -303,7 +303,9 @@ fn a_guard_stepping_into_the_player_captures() {
                 by: Cell::new(5, 4)
             },
             Event::Captured {
-                by: Cell::new(4, 4)
+                guard: 0,
+                state: GuardState::Chasing,
+                at: Cell::new(4, 4),
             },
         ]
     );
@@ -1859,9 +1861,7 @@ fn a_frozen_adjacent_guard_cannot_capture_until_confusion_lapses() {
     let events = s.step(Input::Wait);
     assert_eq!(s.outcome(), Outcome::Lost, "the reprieve is over");
     assert!(
-        events.contains(&Event::Captured {
-            by: Cell::new(10, 10)
-        }),
+        captured_at(&events, Cell::new(10, 10)),
         "capture-is-contact resumes: {events:?}",
     );
 }
@@ -3013,9 +3013,7 @@ fn a_calm_guards_fresh_spot_does_not_capture_on_the_spot_turn() {
     // From the next turn the chase is live: adjacent contact is capture (§4.5).
     let events = s.step(Input::Wait);
     assert!(
-        events.contains(&Event::Captured {
-            by: Cell::new(5, 4)
-        }),
+        captured_at(&events, Cell::new(5, 4)),
         "one turn later the guard turns for the player: {events:?}",
     );
     assert_eq!(s.outcome(), Outcome::Lost);
@@ -3102,9 +3100,7 @@ fn a_planned_step_onto_the_player_still_captures() {
         "the spot still happens: {events:?}",
     );
     assert!(
-        events.contains(&Event::Captured {
-            by: Cell::new(5, 5)
-        }),
+        captured_at(&events, Cell::new(5, 5)),
         "the planned step is §4.5 contact: {events:?}",
     );
     assert_eq!(s.outcome(), Outcome::Lost);

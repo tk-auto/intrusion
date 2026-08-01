@@ -1364,3 +1364,51 @@ ever shared decoding to the run it always named — where a third radix-3 field 
 the intel gate's would have been a format version bump. A set naming both ends is
 refused on decode, since the encoder cannot produce one. The rule for the next knob:
 **if its values can be spelled as slots, spell them as slots.**
+
+---
+
+## Appendix 31 — Quick play is training; the campaign is the run
+
+*(§2.2, §10.2, §14, #138. Decided while building the end screen — the first surface
+that had to answer "and now what?", and therefore the first that could get permadeath
+wrong.)*
+
+The end screen (§14 v2) carries the run's exits, and the obvious set is *retry this
+level*, *new run*, *back to menu*. **Retry is the problem.** §2.2 marks permadeath
+**[SETTLED]** without qualification — "you are captured, you lose, and the next run
+starts exactly where the last one started" — and a button that hands the same facility
+back, from turn one, with the same loadout, is the plainest possible contradiction of
+it. Ship the screen without an answer and the pillar is quietly gone, not by a decision
+anyone took but by a button that seemed obviously right.
+
+**The answer is that the two things are different games.** The run — the thing
+permadeath is a promise about — is the **campaign** (§2.2: 2–3 hours, progression
+throughout, nothing carried to the next one). **Quick play is training.** It is one
+tuned facility (§10.2), and what a player does with it is learn: how corridors carry
+sight, how a patrol beats, what a takedown really costs. Learning a building means
+walking it more than once. A training mode you may not replay teaches a fraction of
+what it could, and refusing the retry there buys the pillar nothing, because there was
+no 2.5-hour run to protect.
+
+Two consequences, both worth writing down rather than leaving to be found.
+
+**The exits belong to the mode, not to the screen.** §14 v3 does not exist, so the
+temptation is to put the three buttons on the screen and gate them later. That is the
+version that fails: the campaign's end screen will be *this* screen, and a screen with
+a retry button on it inherits the retry. So the gate is a `RunMode` the run carries and
+one function on it — `RunMode::exits` — that says what a mode may offer. A new mode has
+to answer there. A test pins that the campaign offers neither retry nor new run, today,
+years before there is a campaign to run it.
+
+**While v1 ships quick play only, the shipped game has no permadeath in force.** That
+reads worse than it is: it is the same fact as "v1 ships a training mode", said in the
+pillar's vocabulary. The alternative — shipping the training mode with permadeath
+enforced, to be seen to honour a pillar about a mode that does not exist — would make
+v1 worse at the one job it has (§14: *is the hiding game fun?*), because the answer
+comes from players who replayed a seed until they read it. It is written here, in §2.2
+and in §10.2, so that "the game has no permadeath" is never discovered as a bug.
+
+**What would change the answer.** Nothing about quick play. The thing to watch is the
+campaign: if its end screen ever grows a way to play the run again — an "undo the last
+hour" mercy, the prison level of appendix 3 taken too far — that is a change to §2.2
+itself and belongs there, not in a mode's exit list.

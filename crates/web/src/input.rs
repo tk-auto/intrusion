@@ -40,10 +40,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_in_slot, ability_slot_for_code, ability_slot_for_letter, help_nav_for_gesture,
-    help_nav_for_key, input_for_gesture, input_for_key, key_for_code, menu_nav_for_gesture,
-    menu_nav_for_key, ui_command_for_key, Cell, Direction, Gesture, HelpHit, HelpNav, HelpTab,
-    Input, InputModality, MenuNav, SeedCopy, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    ability_in_slot, ability_slot_for_code, ability_slot_for_letter, end_nav_for_gesture,
+    end_nav_for_key, help_nav_for_gesture, help_nav_for_key, input_for_gesture, input_for_key,
+    key_for_code, menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, Cell, Direction,
+    EndExit, EndNav, Gesture, HelpHit, HelpNav, HelpTab, Input, InputModality, MenuNav, SeedCopy,
+    UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -85,6 +86,18 @@ impl Game {
         if self.ui.menu.is_some() {
             if let Some(nav) = menu_nav_for_key(key) {
                 self.apply_menu_nav(nav);
+                return true;
+            }
+            return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
+        }
+        // A finished run owns the keyboard next (§14 v2/#138). The end screen is
+        // modal in the menu's strong sense — there is no world left to step, since
+        // the loop is inert once the run is over — so its own list keys are answered
+        // here and everything the game would otherwise claim is swallowed. A
+        // genuinely unowned key (F5, a browser shortcut) is still left to the page.
+        if self.run_over() {
+            if let Some(nav) = end_nav_for_key(key) {
+                self.apply_end_nav(nav);
                 return true;
             }
             return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
@@ -179,7 +192,12 @@ impl Game {
     /// The rule itself is [`surface_command`], pure so it is pinned natively like
     /// every other §11.6 rule here; this reads the two view flags it needs.
     fn gesture_command(&self, gesture: Gesture) -> Option<GestureCommand> {
-        surface_command(self.ui.menu.is_some(), self.ui.help_open, gesture)
+        surface_command(
+            self.ui.menu.is_some(),
+            self.run_over(),
+            self.ui.help_open,
+            gesture,
+        )
     }
 
     /// Whether the game would claim this press *in play*, used by the modal screens
@@ -207,6 +225,13 @@ impl Game {
             self.recorded.push(input);
         }
         self.state.step(input);
+        // The frame a run ends on belongs to the verdict (§14 v2/#138): the deployed
+        // message list is folded away as the loop stops, so what reads behind the
+        // panel is the board the capture has to be traced on — and not a list left
+        // hanging over it that the end screen's keys can no longer close.
+        if self.run_over() {
+            self.ui.message_log_open = false;
+        }
         self.draw();
     }
 
@@ -261,6 +286,52 @@ impl Game {
             UiCommand::ToggleTheme => {
                 self.ui.theme = self.ui.theme.toggled();
             }
+        }
+    }
+
+    /// Whether the run has ended, and the end screen is therefore up (§14 v2/#138).
+    ///
+    /// Asked of the **core**, never of a flag here: the screen is drawn exactly when
+    /// the state has a verdict ([`State::verdict`](intrusion_core::State::verdict)),
+    /// so what the shell routes input to and what the renderer paints cannot come
+    /// apart.
+    pub(crate) fn run_over(&self) -> bool {
+        self.state.verdict().is_some()
+    }
+
+    /// Apply an [`EndNav`] from the end screen (§14 v2/#138) — walk the exits, or
+    /// fire the marked one. Walking is a pure view move; firing starts a run or goes
+    /// to the menu, and neither steps the finished world.
+    pub(crate) fn apply_end_nav(&mut self, nav: EndNav) {
+        match nav {
+            EndNav::Prev => self.select_exit(self.ui.end.prev()),
+            EndNav::Next => self.select_exit(self.ui.end.next()),
+            EndNav::Activate => self.take_exit(self.ui.end.selected()),
+        }
+    }
+
+    /// Move the end screen's marker and repaint.
+    fn select_exit(&mut self, exit: EndExit) {
+        self.ui.end.selected = exit;
+        self.draw();
+    }
+
+    /// Take an exit — the one place a finished run leads anywhere (§14 v2/#138).
+    ///
+    /// **Which level each exit boots is the core's rule** ([`EndExit::level`]), not
+    /// this shell's: retry hands back the identical [`LevelSeed`] and *new run* rolls
+    /// quick play at the same options, both pinned by native tests. What is left here
+    /// is the shell's own two contributions — the clock the fresh seed comes off, and
+    /// the title screen, which is markup rather than a level.
+    ///
+    /// A tapped or fired exit is applied even when the marker was elsewhere, so the
+    /// screen always does what the finger just pointed at.
+    pub(crate) fn take_exit(&mut self, exit: EndExit) {
+        self.ui.end.selected = exit;
+        let options = self.ui.end.options;
+        match exit.level(&self.level, options, crate::seed::clock_seed()) {
+            Some(level) => self.start_run(level, options),
+            None => self.show_menu(),
         }
     }
 
@@ -617,20 +688,32 @@ enum GestureCommand {
     /// A navigation inside the open help panel (§14 v2/#248): walk the tab bar.
     /// Likewise free (§4.4).
     Help(HelpNav),
+    /// A navigation on the end screen (§14 v2/#138): walk the exits. Free too — a
+    /// finished run has no turn left to spend.
+    End(EndNav),
 }
 
 /// Which surface a [`Gesture`] is aimed at, and what it means there (§11.6/#336) —
 /// the pure rule behind [`Game::gesture_command`], in the spirit of
 /// [`drag_gesture`], so the *order* the shell owns is pinned natively too.
 ///
-/// The precedence is the keyboard's, deliberately: menu, then help, then the board.
+/// The precedence is the keyboard's, deliberately: menu, then the end screen, then
+/// help, then the board.
 /// Only the last arm can produce a [`Play`](GestureCommand::Play), which is what
 /// makes the two board-only gates in [`GesturePump::apply`] structurally
 /// unreachable from a modal screen — #223 asks about visible danger and #306's dead
 /// band about the board's edges, and a title screen has neither.
-fn surface_command(menu_up: bool, help_open: bool, gesture: Gesture) -> Option<GestureCommand> {
+fn surface_command(
+    menu_up: bool,
+    run_over: bool,
+    help_open: bool,
+    gesture: Gesture,
+) -> Option<GestureCommand> {
     if menu_up {
         return menu_nav_for_gesture(gesture).map(GestureCommand::Menu);
+    }
+    if run_over {
+        return end_nav_for_gesture(gesture).map(GestureCommand::End);
     }
     if help_open {
         return help_nav_for_gesture(gesture).map(GestureCommand::Help);
@@ -930,6 +1013,7 @@ impl GesturePump {
             // edges, and a title screen has neither. It owns the whole viewport, so
             // there is nowhere on it a swipe could be a misaimed something else.
             Some(GestureCommand::Menu(nav)) => game.apply_menu_nav(nav),
+            Some(GestureCommand::End(nav)) => game.apply_end_nav(nav),
             Some(GestureCommand::Help(nav)) => {
                 game.apply_help_nav(nav);
                 game.draw();
@@ -1417,24 +1501,30 @@ mod tests {
         let up = Gesture::Swipe(Direction::North);
         let left = Gesture::Swipe(Direction::West);
         assert_eq!(
-            surface_command(true, false, up),
+            surface_command(true, false, false, up),
             Some(GestureCommand::Menu(MenuNav::Prev)),
         );
         assert_eq!(
-            surface_command(true, true, up),
+            surface_command(true, false, true, up),
             Some(GestureCommand::Menu(MenuNav::Prev)),
             "the menu outranks the panel, as it does on the keyboard",
         );
         assert_eq!(
-            surface_command(false, true, left),
+            surface_command(false, false, true, left),
             Some(GestureCommand::Help(HelpNav::PrevTab)),
         );
+        // A finished run outranks the panel underneath it, as it does on the
+        // keyboard: there is nothing left to navigate but the way on (#138).
         assert_eq!(
-            surface_command(false, false, up),
+            surface_command(false, true, true, up),
+            Some(GestureCommand::End(EndNav::Prev)),
+        );
+        assert_eq!(
+            surface_command(false, false, false, up),
             Some(GestureCommand::Play(Input::Step(Direction::North))),
         );
         assert_eq!(
-            surface_command(false, false, Gesture::Press),
+            surface_command(false, false, false, Gesture::Press),
             Some(GestureCommand::Play(Input::Wait)),
         );
     }
@@ -1455,10 +1545,14 @@ mod tests {
             Gesture::Swipe(Direction::West),
         ];
         for gesture in every {
-            for (menu_up, help_open) in [(true, false), (false, true)] {
+            for (menu_up, run_over, help_open) in [
+                (true, false, false),
+                (false, true, false),
+                (false, false, true),
+            ] {
                 assert!(
                     !matches!(
-                        surface_command(menu_up, help_open, gesture),
+                        surface_command(menu_up, run_over, help_open, gesture),
                         Some(GestureCommand::Play(_))
                     ),
                     "{gesture:?} on a modal must never reach the board's gates",
@@ -1466,7 +1560,7 @@ mod tests {
             }
             assert!(
                 matches!(
-                    surface_command(false, false, gesture),
+                    surface_command(false, false, false, gesture),
                     Some(GestureCommand::Play(_))
                 ),
                 "{gesture:?} on the board still goes through the gates",
@@ -1481,14 +1575,14 @@ mod tests {
     /// ([`armed_fires`]), which this leaves untouched.
     #[test]
     fn a_tap_on_empty_menu_space_never_activates_an_entry() {
-        assert_eq!(surface_command(true, false, Gesture::Press), None);
+        assert_eq!(surface_command(true, false, false, Gesture::Press), None);
         // Nor does a swipe across the list's grain: the horizontal pair sets the
         // level-options slider (#298) and fires no control at all, so no gesture on
         // the menu can start a run.
         for direction in [Direction::East, Direction::West] {
             assert!(
                 matches!(
-                    surface_command(true, false, Gesture::Swipe(direction)),
+                    surface_command(true, false, false, Gesture::Swipe(direction)),
                     Some(GestureCommand::Menu(MenuNav::Easier | MenuNav::Harder)),
                 ),
                 "a horizontal swipe on the menu may only move the slider",
@@ -1515,7 +1609,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(true, false, gesture),
+                surface_command(true, false, false, gesture),
                 menu_nav_for_key(key).map(GestureCommand::Menu),
                 "{gesture:?} and {key} drive the menu the same way",
             );
@@ -1527,7 +1621,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(false, true, gesture),
+                surface_command(false, false, true, gesture),
                 help_nav_for_key(key).map(GestureCommand::Help),
             );
         }

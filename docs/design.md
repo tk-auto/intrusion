@@ -136,6 +136,19 @@ decision the player made.**
 The cost this imposes on development, and the **prison level** parked as a possible
 later relief for it (§14), are appendix 3.
 
+**Where the pillar is in force: the campaign, and not quick play.** **[SETTLED]** The
+pillar above is about **the run**, and the run is the campaign (§14 v3). **Quick play
+is training** — one tuned facility (§10.2) played to learn the building, the guards and
+your own verbs — so its end screen (§14 v2) offers *retry this level* and *new run*,
+and the campaign's will offer neither. The exits are therefore a property of the run's
+**mode**, not of the screen, so the campaign cannot inherit a retry button by reusing
+it (appendix 31).
+
+The consequence, stated rather than left to be discovered: **while v1 ships quick play
+only, the shipped game has no permadeath in force.** That is intended — a training mode
+you cannot replay teaches nothing — and it is why the mode gate exists in shape now,
+before the mode that needs it does.
+
 ### 2.3 The rule the last version's failure leaves behind
 
 The previous version was not fun, and the cause was not the design: **every system
@@ -1453,7 +1466,10 @@ wants play evidence first.
 
 ### 10.2 Parameters
 
-**v1 ships quick play only** (§14). One tuned configuration:
+**v1 ships quick play only** (§14), and quick play is **training**: one tuned
+configuration, played to learn the building rather than to be survived once. That is
+what earns its end screen a *retry this level* and a *new run* where the campaign's
+will have neither (§2.2, appendix 31) — the exits belong to the mode.
 
 | Parameter | Value |
 |---|---|
@@ -2907,7 +2923,7 @@ quick play's objective. The guard count is a knob too and is drawn all the same,
 because its baseline is a **neutral middle** rather than an end the base has already
 walked to: composing an easier pick onto a base that asked for nothing leaves the pick
 standing, so no replacement rule is needed. That distinction — where a knob's baseline
-sits — is what decides whether the pool can reach it (appendix 30).
+sits — is what decides whether the pool can reach it (appendix 31).
 
 **The slider is a pre-run dialog** (#298). Quick play opens a **level options** screen
 before it boots: the five stops, a *Play* and a *Back*, drawn in the character grid
@@ -3126,7 +3142,10 @@ scaffolding.**
 - Saves, options, a help screen and a legend (there was never a legend; nothing
   ever explained what `$`, `E`, `}` or `z` meant)
 - A game-over screen that says **why you lost** (the old one didn't distinguish
-  victory from defeat at all)
+  victory from defeat at all) — the capturing guard, the mood it made contact in and
+  the cell it happened on, latched from the terminal event; a distinct win screen with
+  the run's ledger; the seed on both; and the ways on, **gated by the run's mode**
+  (§2.2, appendix 31)
 - An alert indicator
 
 ### v3 — the campaign

@@ -27,7 +27,7 @@ use std::rc::Rc;
 
 use intrusion_core::{
     Difficulty, LevelSeed, MenuEntry, MenuHit, MenuNav, MenuScreen, MenuUi, OptionsControl,
-    ScreenUi, UiCommand,
+    RunMode, RunOptions, ScreenUi, UiCommand,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -192,7 +192,16 @@ impl Game {
         match control {
             OptionsControl::Play => {
                 let difficulty = self.menu().map(|menu| menu.difficulty).unwrap_or_default();
-                self.start_run(seed::random_level_at(difficulty));
+                // Quick play, and the setting the slider was left on — the run's
+                // framing (§14 v2/#138), which its end screen reads for what to
+                // offer and what *new run* re-rolls at.
+                self.start_run(
+                    seed::random_level_at(difficulty),
+                    RunOptions {
+                        mode: RunMode::QuickPlay,
+                        difficulty,
+                    },
+                );
             }
             OptionsControl::Back => self.show_entries(),
         }
@@ -265,11 +274,30 @@ impl Game {
     /// A level that somehow fails to generate leaves the menu exactly as it was
     /// rather than dropping the player onto a broken board (§10.6 says the v1
     /// footprint always carves, so this is belt-and-braces).
-    fn start_run(&mut self, level: LevelSeed) {
+    pub(crate) fn start_run(&mut self, level: LevelSeed, options: RunOptions) {
         if self.reseed(level).is_ok() {
+            // The framing outlives the reset [`Game::reseed`] performs, because it is
+            // a fact about *how the player is playing*, not about the facility they
+            // are about to walk into — the same reasoning that keeps the modality and
+            // the build's replay offer across a fresh run.
+            self.ui.end.options = options;
             seed::reflect_level(&level);
             set_screen(SCREEN_PLAY);
         }
+    }
+
+    /// Leave a finished run for the title screen (§14 v2/#138) — the one exit that
+    /// starts no run ([`EndExit::Menu`](intrusion_core::EndExit)).
+    ///
+    /// The world underneath is left exactly as it was: the menu draws instead of the
+    /// game frame, so there is nothing to reset, and nothing that could show through.
+    pub(crate) fn show_menu(&mut self) {
+        self.ui = ScreenUi {
+            menu: Some(MenuUi::default()),
+            ..self.ui
+        };
+        self.draw();
+        set_screen(SCREEN_MENU);
     }
 }
 
@@ -397,7 +425,17 @@ pub(crate) fn install(document: &Document, game: &Rc<RefCell<Game>>) -> Result<(
         Rc::new(move || {
             let level = LevelSeed::decode(&input.value()).unwrap_or_else(seed::random_level);
             input.set_value("");
-            game.borrow_mut().start_run(level);
+            // A token names a level, never a difficulty — the draw is already
+            // resolved into the modifiers it carries (§12.6/#298) — so the run's
+            // framing is quick play at the baseline setting. That is what its end
+            // screen's *new run* will roll; *retry* hands back this very token.
+            game.borrow_mut().start_run(
+                level,
+                RunOptions {
+                    mode: RunMode::QuickPlay,
+                    difficulty: Difficulty::Standard,
+                },
+            );
         })
     };
 

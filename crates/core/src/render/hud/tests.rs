@@ -2,6 +2,7 @@ use super::*;
 use crate::ability::{AbilityMode, Loadout};
 use crate::cell::{Cell, Direction};
 use crate::guard::Guard;
+use crate::guard::GuardState;
 use crate::modifiers::LevelModifiers;
 use crate::state::{BoreRefusal, Event, Input, State};
 use crate::test_support::open_room;
@@ -125,7 +126,11 @@ fn every_near_line_message_fits() {
         },
         Event::ExitRefused { still_needed: 9 },
         Event::Won,
-        Event::Captured { by: at },
+        Event::Captured {
+            guard: 0,
+            state: GuardState::Chasing,
+            at,
+        },
         Event::TakenDown { at },
         Event::Detected { by: at },
         Event::BodyFound { at },

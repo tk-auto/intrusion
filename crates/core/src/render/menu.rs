@@ -272,13 +272,13 @@ const LATER_TAG: &str = " — later";
 /// The marker on the selected row, and the blank that holds its place on every
 /// other row so the labels never shift as the selection moves (the two are the
 /// same width — asserted below).
-const MARKER: &str = "> ";
-const NO_MARKER: &str = "  ";
+pub(super) const MARKER: &str = "> ";
+pub(super) const NO_MARKER: &str = "  ";
 
 /// Rows between one entry and the next: one drawn row, one blank. The gap is what
 /// makes a full-width row a comfortable tap target — a mis-aimed tap lands on the
 /// blank between entries and does nothing, never on the neighbour (§11.6).
-const ENTRY_SPACING: u32 = 2;
+pub(super) const ENTRY_SPACING: u32 = 2;
 
 /// Rows from the title to the last entry: title, blank, tagline, three blanks, then
 /// the four entries at [`ENTRY_SPACING`] apart. Used to centre the block vertically,
@@ -397,7 +397,7 @@ fn entry_column(width: u32) -> u32 {
 
 /// The column a `len`-wide run of text starts at to sit centred on a `width` screen,
 /// clamped to 0 on a board too narrow to hold it.
-fn centre(width: u32, len: u32) -> u32 {
+pub(super) fn centre(width: u32, len: u32) -> u32 {
     width.saturating_sub(len) / 2
 }
 
