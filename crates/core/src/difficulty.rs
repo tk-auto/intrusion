@@ -133,7 +133,12 @@ impl Difficulty {
     #[must_use]
     pub fn blurb(self) -> &'static str {
         match (self.picks(), self.direction()) {
-            (0, _) | (_, None) => "quick play, unchanged",
+            // The baseline reads in the *same* terms as every other stop — "no rules
+            // bent either way" — rather than naming the mode it happens to be. A
+            // player reading the slider has no way to know what "quick play,
+            // unchanged" is unchanged *from*; the count they can compare against the
+            // stop either side of it needs no such context.
+            (0, _) | (_, None) => "no rules bent either way",
             (1, Some(ModifierDirection::Easier)) => "one rule bent your way",
             (_, Some(ModifierDirection::Easier)) => "two rules bent your way",
             (1, Some(ModifierDirection::Harder)) => "one rule bent against you",
@@ -353,7 +358,7 @@ mod tests {
         for position in Difficulty::ALL {
             let blurb = position.blurb();
             let expected = match position.picks() {
-                0 => "quick play",
+                0 => "no rules",
                 1 => "one rule",
                 _ => "two rules",
             };

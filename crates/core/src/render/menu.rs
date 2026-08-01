@@ -244,11 +244,20 @@ const OPTIONS_FOOTER: &str = "←→ set · Enter · Esc back";
 const OPTIONS_HEADING: &str = "LEVEL OPTIONS";
 const DIFFICULTY_CAPTION: &str = "DIFFICULTY";
 
-/// The slider's stops: a dot for each position it can rest at, and the filled one it
+/// The slider's stops: a ring for each position it can rest at, and the filled one it
 /// rests at now. Same width, so the track does not reflow as the slider moves — the
 /// [`MARKER`]/[`NO_MARKER`] rule, one row over.
-const STOP: &str = "·";
+///
+/// The stops are drawn in Neutral against a Ground [`TRACK_FILL`], so the row reads as
+/// *five positions on a rail* at a glance. Drawn as five bare dots with nothing
+/// between them it read as a decorative row rather than as a control, and a stop had
+/// to be found before it could be aimed at.
+const STOP: &str = "○";
 const STOP_HERE: &str = "●";
+
+/// What runs **between** the stops — the slider's rail. Faint (Ground), so it joins
+/// the stops into one control without competing with them for the eye.
+const TRACK_FILL: &str = "·";
 
 /// Cells from one slider stop to the next. Wide enough that a stop's **tap band** is
 /// a comfortable target on a phone (§11.6) — six cells each, against the entry list's
@@ -595,19 +604,28 @@ fn draw_level_options(grid: &mut Grid, height: u32, ui: MenuUi) {
         Category::Neutral,
     );
 
-    // The track: a dot per position, the current one filled and lifted into Interest
-    // — the same "the thing worth reaching for" cue the entry list's marker carries.
+    // The rail first, then the stops over it: the current one filled and lifted into
+    // Interest — the same "the thing worth reaching for" cue the entry list's marker
+    // carries — the rest as open rings in Neutral, on a Ground line joining them.
+    let track_row = title + OPTIONS_TRACK_ROW;
+    draw(
+        grid,
+        stop_column(width, 0),
+        track_row,
+        &TRACK_FILL.repeat(TRACK_WIDTH as usize),
+        Category::Ground,
+    );
     for (i, &position) in Difficulty::ALL.iter().enumerate() {
         let here = position == ui.difficulty;
         draw(
             grid,
             stop_column(width, i),
-            title + OPTIONS_TRACK_ROW,
+            track_row,
             if here { STOP_HERE } else { STOP },
             if here {
                 Category::Interest
             } else {
-                Category::Ground
+                Category::Neutral
             },
         );
     }
@@ -626,7 +644,7 @@ fn draw_level_options(grid: &mut Grid, height: u32, ui: MenuUi) {
 
     // The controls, marked and columned exactly as the entry list's rows are, so the
     // two screens are read the same way.
-    let column = centre(width, control_text(OptionsControl::Play, true).len() as u32);
+    let column = control_column(width);
     for (i, &control) in OptionsControl::ALL.iter().enumerate() {
         let selected = control == ui.options_control;
         draw(
@@ -649,6 +667,24 @@ fn draw_level_options(grid: &mut Grid, height: u32, ui: MenuUi) {
 fn control_text(control: OptionsControl, selected: bool) -> String {
     let marker = if selected { MARKER } else { NO_MARKER };
     format!("{marker}{}", control.label())
+}
+
+/// The column a control's drawn text starts at: **the label is centred and the marker
+/// hangs into the margin left of it**, so the words sit on the same centre line as the
+/// heading and the slider above them.
+///
+/// The entry list centres marker-and-label together, which is right there — it has
+/// four rows of differing width and the block reads as a list. Here there are two
+/// short labels and nothing else on the row, so including the marker in the measure
+/// pushed both words off the screen's centre by half its width, and the dialog read as
+/// leaning right against the rows above it.
+fn control_column(width: u32) -> u32 {
+    let widest = OptionsControl::ALL
+        .iter()
+        .map(|&c| c.label().chars().count() as u32)
+        .max()
+        .unwrap_or(0);
+    centre(width, widest).saturating_sub(MARKER.chars().count() as u32)
 }
 
 fn draw_seed_prompt(grid: &mut Grid, heading: u32) {
@@ -1039,6 +1075,22 @@ mod tests {
             // The filled stop is the one at the position's own column.
             let filled = track.chars().position(|c| c.to_string() == STOP_HERE);
             assert_eq!(filled, Some(stop_column(W, index) as usize), "{position:?}");
+            // The stops sit on a **rail**: every cell between two of them carries the
+            // fill, so the row reads as one control rather than as five loose dots.
+            let cells: Vec<char> = track.chars().collect();
+            for column in stop_column(W, 0)..stop_column(W, Difficulty::ALL.len() - 1) {
+                let on_stop = Difficulty::ALL
+                    .iter()
+                    .enumerate()
+                    .any(|(i, _)| stop_column(W, i) == column);
+                if !on_stop {
+                    assert_eq!(
+                        cells[column as usize].to_string(),
+                        TRACK_FILL,
+                        "column {column} of the rail is bare",
+                    );
+                }
+            }
             // …and the two rows under it name the position and its effect.
             assert_eq!(
                 rows[(title + OPTIONS_NAME_ROW) as usize].trim(),
@@ -1130,6 +1182,49 @@ mod tests {
             "the options footer runs into the theme control ({prose_end} vs {})",
             theme_control_start(W),
         );
+    }
+
+    /// The dialog sits on **one centre line**: the heading, the slider's rail, the
+    /// position's name and both control labels all centre on the same column. The
+    /// controls get there by centring the *label* and hanging the marker into the
+    /// margin — measuring the marker in pushed both words half its width to the right,
+    /// and against the rows above it the block read as leaning.
+    #[test]
+    fn the_dialog_composes_on_one_centre_line() {
+        // Twice the midpoint, so a run of even length and one of odd length are both
+        // exact — on a character grid they can never share a *cell*, only a line, and
+        // the most either may be off it is the half cell that parity costs.
+        let midpoint = |start: u32, len: u32| 2 * start + len;
+        let heading = midpoint(
+            centre(W, OPTIONS_HEADING.chars().count() as u32),
+            OPTIONS_HEADING.chars().count() as u32,
+        );
+        let rail = midpoint(stop_column(W, 0), TRACK_WIDTH);
+        assert_eq!(
+            rail, heading,
+            "the slider's rail is off the heading's centre"
+        );
+        for control in OptionsControl::ALL {
+            let label = control.label().chars().count() as u32;
+            let start = control_column(W) + MARKER.chars().count() as u32;
+            assert!(
+                midpoint(start, label).abs_diff(heading) <= 1,
+                "{control:?}'s label is off the centre line by more than parity",
+            );
+        }
+        // The **marker hangs into the margin** — measuring it into the centring is the
+        // bug this test exists for, and it would show as both labels sitting a whole
+        // cell right of every row above them.
+        assert_eq!(
+            control_column(W) + MARKER.chars().count() as u32,
+            centre(W, OptionsControl::Play.label().chars().count() as u32),
+            "the label is not centred in its own right",
+        );
+        // The two labels still share a column, so the marker moves and they do not.
+        let rows = render_menu(W, H, options(Difficulty::Standard)).to_text();
+        let label_at =
+            |i: usize| rows[options_control_row(H, i) as usize].find(char::is_alphabetic);
+        assert_eq!(label_at(0), label_at(1), "the labels sit in one column");
     }
 
     /// The marker rests on exactly one control, and *Play* is where it opens — the
