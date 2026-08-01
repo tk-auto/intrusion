@@ -25,7 +25,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use intrusion_core::{LevelSeed, MenuEntry, MenuHit, MenuNav, MenuUi, ScreenUi, UiCommand};
+use intrusion_core::{
+    Difficulty, LevelSeed, MenuEntry, MenuHit, MenuNav, MenuScreen, MenuUi, OptionsControl,
+    ScreenUi, UiCommand,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -42,6 +45,7 @@ use crate::{seed, Game};
 const SCREEN_ATTR: &str = "data-screen";
 const SCREEN_MENU: &str = "menu";
 const SCREEN_SEED: &str = "seed";
+const SCREEN_OPTIONS: &str = "options";
 const SCREEN_PLAY: &str = "play";
 
 /// The view state a fresh load opens on: the menu's entry list, Quick play selected.
@@ -86,6 +90,17 @@ fn set_screen(screen: &str) {
     }
 }
 
+/// Whether the **level-options** dialog is the surface showing.
+fn on_options(menu: MenuUi) -> bool {
+    menu.screen == MenuScreen::LevelOptions
+}
+
+/// Whether the **entry list** is the surface showing — the screen whose selection
+/// the list keys walk. On any sub-screen they belong to that screen instead.
+fn on_list(menu: MenuUi) -> bool {
+    menu.screen == MenuScreen::Entries
+}
+
 /// The menu half of [`Game`] — the input side, like [`crate::input`] for play.
 impl Game {
     /// The menu's view state, or `None` once a run is playing.
@@ -103,20 +118,33 @@ impl Game {
         match nav {
             // The list walks only while the list is showing: with the seed prompt up,
             // up/down belong to the text box, not to a selection nobody can see.
-            MenuNav::Prev if !menu.seed_entry => self.select(menu.selected.prev()),
-            MenuNav::Next if !menu.seed_entry => self.select(menu.selected.next()),
-            MenuNav::Activate if !menu.seed_entry => self.choose(menu.selected),
+            MenuNav::Prev if on_list(menu) => self.select(menu.selected.prev()),
+            MenuNav::Next if on_list(menu) => self.select(menu.selected.next()),
+            MenuNav::Activate if on_list(menu) => self.choose(menu.selected),
+            // The level-options dialog (#298). Up and down walk its two controls —
+            // the ring is two long, so both steps are the same move — while the
+            // horizontal pair sets the slider whichever control is marked, which is
+            // what keeps the fast path Enter, Enter with the slider still reachable
+            // without first walking to it.
+            MenuNav::Prev | MenuNav::Next if on_options(menu) => {
+                self.select_control(menu.options_control.other());
+            }
+            MenuNav::Easier if on_options(menu) => self.set_difficulty(menu.difficulty.easier()),
+            MenuNav::Harder if on_options(menu) => self.set_difficulty(menu.difficulty.harder()),
+            MenuNav::Activate if on_options(menu) => self.activate(menu.options_control),
             // Held back on the seed prompt, where `n` is an ordinary letter of the
             // token being typed (§13.1/#245): the box has the keyboard there, and a
             // key that recoloured the screen mid-token would be a trap, not an
-            // option. On the list it is the same free view toggle as everywhere else.
-            MenuNav::ToggleTheme if !menu.seed_entry => {
+            // option. Everywhere else on the menu — the list and the level-options
+            // dialog, both of which draw the control — it is the same free view
+            // toggle as anywhere in the game, and the key matches the drawn control.
+            MenuNav::ToggleTheme if menu.screen != MenuScreen::SeedPrompt => {
                 self.apply_ui_command(UiCommand::ToggleTheme);
                 self.draw();
             }
             // Back out of the seed prompt. On the list itself there is nowhere
             // further back — the menu is the root — so Escape there does nothing.
-            MenuNav::Back if menu.seed_entry => self.show_entries(),
+            MenuNav::Back if !on_list(menu) => self.show_entries(),
             _ => {}
         }
     }
@@ -135,15 +163,68 @@ impl Game {
                 self.apply_ui_command(UiCommand::ToggleTheme);
                 self.draw();
             }
+            // A tapped slider stop is set directly rather than nudged towards — the
+            // stop under the finger is the one the player meant.
+            MenuHit::Difficulty(difficulty) => self.set_difficulty(difficulty),
+            // A tapped control fires it *and* leaves the marker on it, so the screen
+            // agrees with what the finger just did.
+            MenuHit::OptionsControl(control) => {
+                self.select_control(control);
+                self.activate(control);
+            }
         }
     }
 
     pub(crate) fn choose(&mut self, entry: MenuEntry) {
         match entry {
-            MenuEntry::QuickPlay => self.start_run(seed::random_level()),
+            // Quick play opens its **pre-run** dialog rather than booting straight in
+            // (#298): the difficulty is a choice about the run, so it is asked before
+            // there is a run. `MenuEntry::Options` stays inert — that is §14 v2's
+            // *global* settings screen, a different thing entirely.
+            MenuEntry::QuickPlay => self.show_level_options(),
             MenuEntry::SeedPlay => self.show_seed_prompt(),
             MenuEntry::Options | MenuEntry::StoryMode => {}
         }
+    }
+
+    /// Fire a level-options control: play the run the slider names, or go back.
+    fn activate(&mut self, control: OptionsControl) {
+        match control {
+            OptionsControl::Play => {
+                let difficulty = self.menu().map(|menu| menu.difficulty).unwrap_or_default();
+                self.start_run(seed::random_level_at(difficulty));
+            }
+            OptionsControl::Back => self.show_entries(),
+        }
+    }
+
+    /// Move the slider and repaint. The difficulty is view state until *Play* is
+    /// pressed: the draw (#297) happens at boot, off the seed rolled then, so moving
+    /// the slider costs nothing and commits to nothing.
+    fn set_difficulty(&mut self, difficulty: Difficulty) {
+        if let Some(menu) = self.ui.menu.as_mut() {
+            menu.difficulty = difficulty;
+        }
+        self.draw();
+    }
+
+    /// Move the level-options marker and repaint.
+    fn select_control(&mut self, control: OptionsControl) {
+        if let Some(menu) = self.ui.menu.as_mut() {
+            menu.options_control = control;
+        }
+        self.draw();
+    }
+
+    /// Show the level-options dialog. Every control on it is glyphs, so unlike the
+    /// seed prompt there is no markup to reveal — only the screen attribute, which
+    /// keeps the seed box hidden and tells the smoke check which surface is up.
+    fn show_level_options(&mut self) {
+        if let Some(menu) = self.ui.menu.as_mut() {
+            menu.screen = MenuScreen::LevelOptions;
+        }
+        self.draw();
+        set_screen(SCREEN_OPTIONS);
     }
 
     /// Move the selection marker and repaint.
@@ -160,7 +241,7 @@ impl Game {
     /// to be typed into.
     fn show_seed_prompt(&mut self) {
         if let Some(menu) = self.ui.menu.as_mut() {
-            menu.seed_entry = true;
+            menu.screen = MenuScreen::SeedPrompt;
         }
         self.draw();
         set_screen(SCREEN_SEED);
@@ -170,7 +251,7 @@ impl Game {
     /// Return from the seed prompt to the entry list, hiding the box again.
     fn show_entries(&mut self) {
         if let Some(menu) = self.ui.menu.as_mut() {
-            menu.seed_entry = false;
+            menu.screen = MenuScreen::Entries;
         }
         self.draw();
         set_screen(SCREEN_MENU);

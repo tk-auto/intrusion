@@ -1215,3 +1215,50 @@ have read is a patrol you can act against*. #430's rule that a mood change re-ai
 cone stops being defensive here and becomes load-bearing: a guard's flanks going live on
 the turn it spots you is precisely that seam, and without it the §11.5 overlay would
 paint a patrol's blind flanks under a Danger glyph.
+
+---
+
+## Appendix 29 — Why the difficulty draw leaves the intel gate alone
+
+*(§12.6, #297/#298. Decided in the ticket, deliberately without evidence — this
+records the shape of the choice so the next person does not have to rediscover it.)*
+
+The −2…+2 difficulty axis draws `|level|` modifiers from the §12.6 pool in the sign's
+direction. That works cleanly on the harder side, which had three candidates when the
+axis landed: +1 is a genuine draw of one, +2 of two, and the resolved set differs by
+seed. The easier side had **two**, so −2 is exhaustive — every seed resolves to the
+same pair — and −1 is a coin flip between them.
+
+**The obvious third easier candidate is the intel gate**, and it is not taken. Quick
+play sets `IntelGate::All` (gather everything, then leave, §10.2); relaxing it to
+`AtLeastOne` would be a real, large easing. Two things stood against it.
+
+The first is mechanical. `LevelModifiers::union` is the one composition rule §12.6
+gives, and it composes a bounded knob **harder-ward** so that sources add pressure and
+never cancel each other — which is exactly what keeps the campaign alert (#210) from
+being undone by a choice the player made. An easier draw could only relax the gate by
+learning to **replace** a knob rather than compose with it, and that second rule would
+then need a story about what happens when the alert source and the difficulty draw
+disagree about the same knob. That is a real design question, not a line of code.
+
+The second is about what a difficulty control is allowed to mean. Every toggle in the
+pool bends a *rule*: how guards search, what they call in, how much of the building you
+can see. The gate is the run's **objective**. A slider that quietly turned "take all the
+intel and get out" into "grab one and go" would be changing what quick play *is*, not
+how hard it is — and it would do so without saying which of the two games the player
+was about to be handed, since the dialog names the difficulty rather than previewing
+the draw.
+
+**So the easier side stays thin, and the cost is stated rather than hidden.** The
+slider's blurb counts what a level will *actually* bend, off the live pool size rather
+than off the level, so −2 cannot claim two rules when only one exists to bend; the
+directional assertion holds regardless, because a draw filtered on `ModifierDirection`
+can never hand back a set bending the way it was not asked for.
+
+**What would change the answer.** A third easier modifier — anything that gives the
+player knowledge or slack without touching the objective — makes −1 and −2 properly
+distinct and closes this on its own; that is the expected path, and it is why the pool
+is a filter over the fields' own directions rather than a hand-kept list, so a new
+modifier joins by declaring its direction and nothing else. The knob-replacement rule
+is the other path, and it should be taken deliberately, with an answer for the alert
+source, rather than as a side effect of wanting a third candidate.

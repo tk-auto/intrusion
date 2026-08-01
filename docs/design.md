@@ -2842,6 +2842,38 @@ Adding a source is a new field and a line in `resolve`, never a new difficulty
 path — #210 owns the alert→modifier *mapping* and its own fairness (decay, floor,
 §2.2); this seam owns only the merge and the application.
 
+**A difficulty is a directed draw over the pool** (#297). The *choice* source's
+player-facing form is a **level from −2 to +2** over quick play: it resolves to a
+concrete `LevelModifiers` by drawing `|level|` modifiers from the pool in the sign's
+direction — harder for positive, easier for negative — and composing them onto the
+quick-play base with `union`. Zero is exactly quick play, so the axis costs the
+baseline nothing. The draw is a **pure function of `(level, seed)`** and runs *before*
+the run boots, which is why the difficulty number needs no field in the level-seed
+token: what travels is the **resolved set**, so a shared token hands over the run
+rather than a recipe for re-rolling one. It takes a salted sub-stream of its own, so a
+seed's facility is byte-identical at every difficulty and only the rules bending it
+differ — which is what makes the ±N arms of a comparison the same building. The pool
+is filtered on the fields' own documented **direction**, which makes §2.3's
+directional assertion true by construction rather than by review; a level deeper than
+its pool takes what exists rather than looping.
+
+**The easier side is thin, and that is a known cost. [START]** The pool holds three
+harder toggles and two easier ones, so −2 is exhaustive where +2 is a genuine draw.
+Relaxing the intel gate would be a third easier candidate, but the gate is a *knob*
+that `union` composes harder-ward: an easier draw could only relax it if the draw
+learned to **replace** a knob rather than compose with it — which would also mean the
+difficulty slider could change quick play's objective. That is left undecided until
+the pool is enriched (appendix 29).
+
+**The slider is a pre-run dialog** (#298). Quick play opens a **level options** screen
+before it boots: the five stops, a *Play* and a *Back*, drawn in the character grid
+(§11.1) and driveable by key and by finger alike (§11.6's no-trap rule — the exact
+failure the old options dialog shipped). It **names** the difficulty and does not
+preview which rules the draw will pick: the seed is not rolled until *Play*, and the
+resolved set is the help panel's Level info tab to show once there is a run to
+describe. It is deliberately **not** the menu's `Options` entry, which is §14 v2's
+*global* settings screen and stays inert.
+
 **A modifier is also how an experiment ships, and how one is adopted.**
 `calm_guards_detect_only_their_cone` (#410) bent a **[SETTLED]** sentence —
 §6.1/§6.2/§7.2's *"you can never stand beside or in front of a guard undetected"*

@@ -52,6 +52,7 @@ mod body;
 mod category;
 mod cell;
 mod cover;
+mod difficulty;
 mod door;
 mod duct;
 mod facility;
@@ -83,6 +84,7 @@ pub use alert::{AlertEffect, AlertReadout, AlertTrigger, AlertTuning, TOP_RUNG};
 pub use body::Body;
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
+pub use difficulty::{Difficulty, SPAN as DIFFICULTY_SPAN};
 pub use door::DoorAction;
 pub use duct::Duct;
 pub use facility::{Facility, Terrain};
@@ -104,8 +106,8 @@ pub use region::{
 pub use render::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid, help_hit,
     is_help_button, is_message_button, menu_hit, message_log_rows, render, render_screen, Fill,
-    GlyphCell, Grid, HelpHit, HelpTab, InputModality, MenuEntry, MenuHit, MenuUi, ScreenUi,
-    SeedCopy, Visibility, BOTTOM_ROWS, TOP_ROWS,
+    GlyphCell, Grid, HelpHit, HelpTab, InputModality, MenuEntry, MenuHit, MenuScreen, MenuUi,
+    OptionsControl, ScreenUi, SeedCopy, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{
     ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,

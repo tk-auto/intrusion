@@ -25,7 +25,7 @@
 //! the player chooses one — so a shared link still boots straight into its run, and
 //! only a bare load stops at the front door (#268).
 
-use intrusion_core::LevelSeed;
+use intrusion_core::{Difficulty, LevelSeed};
 use wasm_bindgen::JsValue;
 
 /// The level this load was **told** to play, or `None` when nothing named one. Two
@@ -72,7 +72,22 @@ fn baked_level() -> Option<LevelSeed> {
 /// address bar. Every run the shell creates has to be sayable, so the narrowing
 /// happens here, at the source, rather than being discovered downstream.
 pub(crate) fn random_level() -> LevelSeed {
-    LevelSeed::quick_play(LevelSeed::narrow_seed(js_sys::Date::now() as u64))
+    random_level_at(Difficulty::Standard)
+}
+
+/// A fresh quick-play run off the wall clock at a chosen **difficulty** (§12.6/#298)
+/// — what the level-options dialog's *Play* control rolls.
+///
+/// The clock is read here and nowhere else, so the difficulty draw and the facility
+/// take the *same* seed and the run stays one seeded source (§12.4). The draw resolves
+/// before the run boots, so what the returned [`LevelSeed`] carries — and what the
+/// address bar then reflects — is the resolved modifier set: a link shared from a run
+/// started at `Much harder` hands over that run, not a re-roll at that setting.
+pub(crate) fn random_level_at(difficulty: Difficulty) -> LevelSeed {
+    LevelSeed::quick_play_at(
+        LevelSeed::narrow_seed(js_sys::Date::now() as u64),
+        difficulty,
+    )
 }
 
 /// Read a level from the page URL — `?seed=<token>` first, then `#seed=<token>` — or

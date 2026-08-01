@@ -1482,11 +1482,16 @@ mod tests {
     #[test]
     fn a_tap_on_empty_menu_space_never_activates_an_entry() {
         assert_eq!(surface_command(true, false, Gesture::Press), None);
-        // Nor does a swipe across the list's grain — it is a vertical list.
+        // Nor does a swipe across the list's grain: the horizontal pair sets the
+        // level-options slider (#298) and fires no control at all, so no gesture on
+        // the menu can start a run.
         for direction in [Direction::East, Direction::West] {
-            assert_eq!(
-                surface_command(true, false, Gesture::Swipe(direction)),
-                None
+            assert!(
+                matches!(
+                    surface_command(true, false, Gesture::Swipe(direction)),
+                    Some(GestureCommand::Menu(MenuNav::Easier | MenuNav::Harder)),
+                ),
+                "a horizontal swipe on the menu may only move the slider",
             );
         }
         // The one path that does activate is unchanged, and it still needs the lift
@@ -1506,11 +1511,13 @@ mod tests {
         for (gesture, key) in [
             (Gesture::Swipe(Direction::North), "ArrowUp"),
             (Gesture::Swipe(Direction::South), "ArrowDown"),
+            (Gesture::Swipe(Direction::West), "ArrowLeft"),
+            (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
                 surface_command(true, false, gesture),
                 menu_nav_for_key(key).map(GestureCommand::Menu),
-                "{gesture:?} and {key} walk the list the same way",
+                "{gesture:?} and {key} drive the menu the same way",
             );
         }
         // And the help panel's tab swipes match its own arrows, the second consumer
