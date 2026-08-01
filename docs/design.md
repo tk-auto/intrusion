@@ -1458,7 +1458,7 @@ wants play evidence first.
 | Parameter | Value |
 |---|---|
 | Size | **40 × 40** **[START]** |
-| Guards | **4** **[START]** |
+| Guards | **4** **[START]** — a **level modifier** moves it (`guard_count`, §12.6/#232): one more (harder) or one fewer (easier), within **3…5** |
 | Intel | **3** **[START]** |
 | Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, the sim = **at least one**, campaign = **none** |
 | Starting abilities | **A level modifier** (`starting_abilities`, §8.3/#244): quick play grants the innate set **plus three random tech**, seeded (§12.4); the sim grants the **innate set only**; campaign accumulates instead (§2.2) |
@@ -1474,6 +1474,15 @@ bare number, so every tech draw on top is upside.
 of win rate per guard**, with no cliff, so the number is a taste call rather than a
 threshold; **4** is the forgiving-but-real end, giving a bare bot run a 37% win rate
 (appendix 26). Read it against §13.4: this is a floor, not a forecast.
+
+**And one guard is one difficulty step.** That same linearity is what makes the count a
+good level modifier (§12.6/#232): the knob moves it by **one**, bounded to **3…5**, so
+each end is worth roughly one sweep row — measured at 43% / 35% / 25% over 300 bare bot
+seeds. The envelope is stated rather than open-ended: below three a facility is a walk
+rather than a raid, and above five a screen-bound 40×40 board (§11.4) crowds and the
+§7.5 beats cut too small. The knob is a **step, not a setter** — it never moves the
+count the way it does not name, so a sim sweep already outside the envelope is left
+where it is rather than dragged into it.
 
 Size is **screen-bound**: the whole level renders on screen with no camera
 (§11.4 **[SETTLED]**), so it cannot outgrow what one screen shows legibly. The
@@ -2787,8 +2796,11 @@ the one *content* it hands over, because a mouth reads off a plan the way a door
 does; a scouted mouth is still the one that gets the memory slate, #450); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
 summon anyone (harder); *"all doors automatic"* generates every doorway frameless
-instead of hinged (§10.4/#452 — harder, and the **one modifier read by generation**
-rather than at runtime: see below); *"calm guards detect only their cone"* drops a **Calm**
+instead of hinged (§10.4/#452 — harder, and one of the two modifiers **read by
+generation** rather than at runtime: see below); the **guard count** moves the §10.2
+baseline by one either way (#232 — *"guards: one more"* harder, *"one fewer"* easier;
+the other generation-time modifier, and the one bounded knob whose baseline is a
+neutral middle); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
 wedge while a guard that is hunting still watches its sides (easier — an
 **experiment**, see below). This is the
@@ -2807,23 +2819,37 @@ every read site that must handle it. Each field carries a documented **direction
 at least as much pressure as baseline, the easier one reveals at least as much —
 so a flag that changes nothing observable cannot pass for shipped.
 
-> **One modifier reaches generation, and it changes what the assertion can be**
-> (§10.4/#452). Every other field here is read at runtime or by the renderer, so a
-> directional assertion can hold the *facility* fixed and vary only the rule. `all
-> doors automatic` decides what a doorway **is**, so it must be resolved **before**
-> `generate_level` and threaded in as a parameter — never consulted from a global, or
-> the generator would have a hidden input and §12.4's determinism would be a claim
-> nobody could check. The consequence for §2.3: from one seed the two settings are two
-> *different facilities*, so "same seed and inputs" cannot be the frame. The assertion
-> it is held to instead is **distributional** — the sim's four temperaments over the
-> same seed sweep, both settings — which is the honest form of the question for a
-> modifier that changes the building rather than the rules inside it.
+> **Two modifiers reach generation, and they reach different parts of it**
+> (§10.4/#452, §10.2/#232). Every other field here is read at runtime or by the
+> renderer, so a directional assertion can hold the *facility* fixed and vary only the
+> rule. Both of these are resolved **before** `generate_level` and threaded in as a
+> parameter — never consulted from a global, or the generator would have a hidden input
+> and §12.4's determinism would be a claim nobody could check. What they cost differs,
+> and the difference is exactly how deep into generation they reach.
 >
-> It is also why adding one to this set is not free: a generation-time modifier
+> `all doors automatic` decides what a doorway **is**, so it reaches the **carve**. From
+> one seed the two settings are two *different facilities*, so "same seed and inputs"
+> cannot be the frame; the assertion it is held to instead is **distributional** — the
+> sim's four temperaments over the same seed sweep, both settings.
+>
+> The **guard count** reaches **placement** only, and that buys back the stronger claim.
+> The carve is already finished when it is read, and the pieces are drawn from one
+> stream in one order, so the three settings put the same player, exit and intel in the
+> same building — and because the guards come off a single shuffled pool by taking the
+> first *N*, their guard sets are strictly **nested**: fewer is the baseline's guards
+> minus its last, more is them plus one. The directional assertion is therefore exact
+> and per-seed — on one facility, more guards watch a **superset** of the cells fewer
+> guards watch. What does shift after placement is everything drawn from the stream
+> behind it (the comms console, the radio clocks), so the two settings are the same
+> *level* played out differently, not the same run.
+>
+> It is also why adding to this set is not free: a modifier that reaches the **carve**
 > breaks **seed stability**. Dropping the old per-doorway draw shifted the RNG stream,
 > so every `#seed=N` link shared before #452 now names a different facility. The break
 > was taken deliberately rather than papered over with a throwaway draw that would have
-> bought compatibility by making the generator lie about what it does.
+> bought compatibility by making the generator lie about what it does. A
+> placement-depth modifier does not carry that cost, which is a reason to prefer one
+> where the rule permits — not a licence to reach for generation by default.
 
 **The source → modifier → config flow.** The mechanism is shared; the *sources*
 that switch modifiers on are separate and stack on top of it. Three, kept
@@ -2851,19 +2877,37 @@ baseline nothing. The draw is a **pure function of `(level, seed)`** and runs *b
 the run boots, which is why the difficulty number needs no field in the level-seed
 token: what travels is the **resolved set**, so a shared token hands over the run
 rather than a recipe for re-rolling one. It takes a salted sub-stream of its own, so a
-seed's facility is byte-identical at every difficulty and only the rules bending it
-differ — which is what makes the ±N arms of a comparison the same building. The pool
+seed's **carve** is byte-identical at every difficulty — which is what makes the ±N
+arms of a comparison the same building. The pool
 is filtered on the fields' own documented **direction**, which makes §2.3's
 directional assertion true by construction rather than by review; a level deeper than
 its pool takes what exists rather than looping.
 
-**The easier side is thin, and that is a known cost. [START]** The pool holds three
-harder toggles and two easier ones, so −2 is exhaustive where +2 is a genuine draw.
-Relaxing the intel gate would be a third easier candidate, but the gate is a *knob*
-that `union` composes harder-ward: an easier draw could only relax it if the draw
-learned to **replace** a knob rather than compose with it — which would also mean the
-difficulty slider could change quick play's objective. That is left undecided until
-the pool is enriched (appendix 29).
+> **What "the same building" now means, precisely** (#232). Every pool entry used to be
+> read at runtime, so the ±N arms of a comparison were the same *level* down to the last
+> radio clock. The guard-count knob is read at **placement**, so an arm that draws it
+> gets the same carve and the same player, exit and intel — its guard set nested against
+> the baseline's — but the pieces drawn after the guards (the comms console, the clocks)
+> come off a shifted stream. The comparison is still between two runs of one building;
+> it is no longer between two runs of one board. Said here rather than left to be
+> discovered, because "byte-identical at every difficulty" was a stated property.
+
+**Both sides are now deeper than the axis reaches. [START]** The pool holds **four**
+harder entries and **three** easier ones, so ±2 are both genuine draws that differ by
+seed. The easier side used to be two deep and therefore exhaustive at −2 — the cost
+appendix 29 stated rather than hid — and what closed it is the guard count's easier end
+(#232), exactly the "knowledge or slack without touching the objective" that appendix
+said would.
+
+Relaxing the **intel gate** would have been the other candidate, and it is still not
+taken: the gate is a knob `union` composes harder-ward, and quick play already sits at
+its hard end, so an easier draw could only relax it by learning to **replace** a knob
+rather than compose with it — which would also mean the difficulty slider could change
+quick play's objective. The guard count is a knob too and is drawn all the same,
+because its baseline is a **neutral middle** rather than an end the base has already
+walked to: composing an easier pick onto a base that asked for nothing leaves the pick
+standing, so no replacement rule is needed. That distinction — where a knob's baseline
+sits — is what decides whether the pool can reach it (appendix 30).
 
 **The slider is a pre-run dialog** (#298). Quick play opens a **level options** screen
 before it boots: the five stops, a *Play* and a *Back*, drawn in the character grid

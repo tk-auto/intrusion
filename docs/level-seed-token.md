@@ -62,7 +62,7 @@ no token (§6).
 
 A held set — the active modifiers, the tech a run holds — is encoded as a
 **combination index over 256 reserved slots**, not over the entries that exist today
-(six tech and five modifier toggles as of writing).
+(six tech and nine modifier slots as of writing).
 
 This is the single most important property of the format.
 
@@ -93,6 +93,19 @@ makes that structurally impossible rather than merely detected.
   ticket — never a quiet edit inside another one.
 - Reserving 256 against a target of ~100 live entries is what makes the churn
   affordable: a placeholder costs a slot, and there are 256 of them.
+
+**A bounded knob spends one slot per end, not a field of its own.** The guard count
+(#232) is the worked example: `More` takes slot 7 and `Fewer` slot 8, and its baseline
+names neither, so a run at the §10.2 count encodes byte-for-byte as it did before the
+knob existed. The alternative — a new radix-3 field in the chain beside the intel
+gate's — would have moved every field after it and changed what a token *means*: a §8
+version bump, and every link ever shared stops decoding. Two slots out of 256 change no
+radix at all. **So a knob joins the format for free if its ends can be slots**, and only
+a knob whose values are too many to spell as slots is worth a field.
+
+A set naming **both ends at once** is refused by `decode` (§6): the encoder cannot
+produce one, so it describes no run, and there is no honest way to pick which end was
+meant.
 
 The compiler helps: `modifier_slots` destructures `LevelModifiers` by name, so a new
 modifier will not compile until it is given a slot.
@@ -248,6 +261,9 @@ something else. Four cases, all meaning *"this is not a run this game can produc
 - a loadout over the §8.3 tech cap (`Loadout::full` documents itself as exactly that);
 - a loadout missing an innate ability, which the token does not carry (§2);
 - more than `MODIFIER_CAP` modifiers active at once.
+
+`decode` likewise refuses a slot set naming **both ends of one bounded knob** (§3) — a
+config no run can be in.
 
 Every surface that shows or shares a token already had a "there is no token for this"
 branch, because a hand-built state has never had one.
