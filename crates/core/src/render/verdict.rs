@@ -25,8 +25,14 @@
 //! walking into a cell you thought nobody was coming to — two different mistakes.
 //!
 //! It does **not** name the guard's index. That is the code's handle on it (§11.8:
-//! the screen names the world), and "guard 2" tells a player nothing they can act on;
-//! the mood and the cell are the whole of what they can.
+//! the screen names the world), and "guard 2" tells a player nothing they can act on.
+//!
+//! **Nor does it print the contact cell.** The `Ending` carries it — the loop knows
+//! exactly where the run ended — but a pair of coordinates is a thing to decode, and
+//! the board it names is *right there*, unchanged, with the guard standing on the
+//! player's last cell. Saying `24,12` asks the player to look the answer up on a
+//! picture that is already showing it. This is the overlay earning its keep: because
+//! the evidence stayed on screen, the panel does not have to describe it.
 
 use super::alert::condition_line;
 use super::help::seed_token;
@@ -155,19 +161,13 @@ enum Row {
 fn rows(verdict: Verdict, ui: EndUi, level: Option<LevelSeed>) -> Vec<Row> {
     let mut rows = vec![Row::Rule, Row::Blank];
     let (heading, cause) = match verdict.ending {
-        Ending::Captured { state, at, .. } => (
+        Ending::Captured { state, .. } => (
             (CAPTURED_HEADING, Category::Danger),
-            vec![
-                (capture_cause(state).to_string(), state.category()),
-                (format!("caught at {},{}", at.x, at.y), Category::Neutral),
-            ],
+            vec![(capture_cause(state).to_string(), state.category())],
         ),
-        Ending::Entombed { at } => (
+        Ending::Entombed { .. } => (
             (ENTOMBED_HEADING, Category::Danger),
-            vec![
-                (ENTOMBED_CAUSE.to_string(), Category::Danger),
-                (format!("sealed at {},{}", at.x, at.y), Category::Neutral),
-            ],
+            vec![(ENTOMBED_CAUSE.to_string(), Category::Danger)],
         ),
         // Interest is the goals-and-rewards colour (§11.2): a won run is the one thing
         // on this screen that *is* the reward, and it is the furthest possible read

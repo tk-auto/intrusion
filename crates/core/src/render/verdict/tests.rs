@@ -78,8 +78,9 @@ fn row_of(rows: &[String], text: &str) -> u32 {
         .unwrap_or_else(|| panic!("{text:?} is on the screen: {rows:#?}")) as u32
 }
 
-/// **The loss screen names the cause** (§2.2/§14 v2): the guard's mood at contact and
-/// the cell it happened on, over a board that still reads above and below the panel.
+/// **The loss screen names the cause** (§2.2/§14 v2): the guard's mood at contact,
+/// over a board that still reads above and below the panel — which is where the *cell*
+/// is answered, the panel deliberately printing no coordinates.
 #[test]
 fn a_capture_draws_the_cause_it_was_latched_with() {
     let state = captured_run();
@@ -92,7 +93,12 @@ fn a_capture_draws_the_cause_it_was_latched_with() {
         shows(&rows, capture_cause(GuardState::Chasing)),
         "the cause line: {rows:#?}",
     );
-    assert!(shows(&rows, "caught at 4,4"), "the contact cell: {rows:#?}");
+    // The contact cell is on the board behind the panel, not spelled out on it: a
+    // pair of coordinates is a thing to decode, and the picture already shows it.
+    assert!(
+        !rows.iter().any(|row| row.contains("4,4")),
+        "the panel prints no coordinates: {rows:#?}",
+    );
     assert!(!shows(&rows, ESCAPED_HEADING), "a loss is not a win");
 
     // …and the board is still there to trace it on: the panel is an overlay, so the
@@ -291,8 +297,6 @@ fn every_line_fits_the_v1_board() {
         ENTOMBED_CAUSE.into(),
         FOOTER_CHOOSE.into(),
         FOOTER_ONE_WAY.into(),
-        "caught at 39,39".into(),
-        "sealed at 39,39".into(),
     ];
     lines.extend(ledger(stats).into_iter().map(|(text, _)| text));
     lines.extend(
