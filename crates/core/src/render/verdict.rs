@@ -54,7 +54,7 @@ use crate::verdict::{EndExit, Ending, RunOptions, RunStats, Verdict};
 /// run's framing — which decides the exits — and which exit the marker rests on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct EndUi {
-    /// How this run is being played (§2.2/appendix 30): the mode gates the exits, and
+    /// How this run is being played (§2.2/appendix 31): the mode gates the exits, and
     /// the difficulty is what *new run* re-rolls at.
     pub options: RunOptions,
     /// Where the selection marker rests. Walked by

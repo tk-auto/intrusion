@@ -1265,7 +1265,109 @@ source, rather than as a side effect of wanting a third candidate.
 
 ---
 
-## Appendix 30 — Quick play is training; the campaign is the run
+## Appendix 30 — Where a knob's baseline sits decides whether the pool can reach it
+
+*(§12.6, §10.2, #232. Closes the question appendix 29 left open, and records the
+composition rule that made it closeable.)*
+
+The guard-count modifier is a small feature — ±1 guard around §10.2's four — and it
+was expected to be a straightforward consumer of the #225 seam. Three things about it
+were not straightforward, and each is a general rule the next knob will meet.
+
+### 1. Appendix 29's objection does not apply — and not because guards are special
+
+Appendix 29 kept the **intel gate** out of the directed pool on a mechanical ground:
+`LevelModifiers::union` composes a bounded knob **harder-ward** so sources add pressure
+and never cancel, and quick play already sets the gate to its hardest value — so an
+easier draw could only relax it by learning to **replace** a knob rather than compose
+with it, which then needs a story about the campaign alert (#210) disagreeing with the
+player's choice.
+
+The guard count is a knob too, and it is in the pool. The difference is **where its
+baseline sits**. The gate is ordered along one exposure axis with the base already at
+the far end; the guard count's baseline is a **neutral middle** with a departure on
+each side. Compose an easier pick onto a base that asked for *nothing*, and there is
+nothing to relax — the pick simply stands.
+
+That is the general rule, and it is worth stating in the abstract because it is not
+about guards at all:
+
+> **A pool can draw either end of a bounded knob when the base rests at its baseline.
+> It cannot relax a knob the base has already turned.** What decides it is the
+> baseline's position, not whether the field is a `bool` or an enum.
+
+So the pool's exclusion list shrinks from "knobs" to "knobs the base has turned", which
+today is exactly the intel gate, for exactly appendix 29's second reason as well: the
+gate is the run's *objective*, and a difficulty slider that silently swapped the
+objective would be changing what quick play **is**.
+
+### 2. Harder-ward composition needed a definition for a symmetric knob
+
+`IntelGate::harder_of` is `max` over an exposure rank. Applying `max` to a knob with a
+middle baseline gets it **wrong**: `Baseline.max(Fewer)` is `Baseline`, so a source
+that asked for *nothing* would overrule a source that asked for fewer guards. That is
+not "sources add pressure"; it is a quiet source being counted as an objecting one.
+
+The rule adopted instead — **the end that departs from the baseline wins, and pressure
+breaks a tie**:
+
+| | `Fewer` | `Baseline` | `More` |
+|---|---|---|---|
+| **`Fewer`** | `Fewer` | `Fewer` | `More` |
+| **`Baseline`** | `Fewer` | `Baseline` | `More` |
+| **`More`** | `More` | `More` | `More` |
+
+It keeps the invariant §12.6 actually cares about — **no contribution can relieve
+pressure another one asked for**, so the alert cannot be talked out of its extra guard
+— while letting the only-source-that-spoke be heard. It is commutative, the baseline is
+its identity, and it collapses to `max` for any knob whose baseline is an end, which is
+why the gate's rule did not have to change.
+
+### 3. Reaching generation is not one cost — carve depth and placement depth differ
+
+§12.6 warned that a generation-time modifier breaks **seed stability** (#452's worked
+example: dropping a per-doorway draw re-carved every shared `#seed=N`). The guard count
+is read before generation too, so the same warning looked like it applied.
+
+It does not, and the distinction is worth keeping: `automatic_doors` reaches the
+**carve**, while the guard count reaches **placement**, which runs after the carve is
+finished and validated. Placement draws its pieces from one stream in a fixed order and
+takes the guards as the first *N* of a **single shuffled pool**, so from one seed the
+three settings give:
+
+- the same carve, cell for cell;
+- the same player, exit and intel — every draw before the guards is untouched;
+- **nested** guard sets: `Fewer` is the baseline's guards minus its last, `More` is
+  them plus one.
+
+That last property is worth more than it cost. §2.3 asks every modifier for a
+directional assertion, and a carve-depth modifier can only manage a *distributional*
+one (the sim's temperaments over a seed sweep, both arms). A placement-depth modifier
+gets an **exact, per-seed** one: on one facility, more guards watch a strict superset
+of the cells fewer guards watch. The sim then agrees with it in the aggregate — 43% /
+35% / 25% bare bot win rate over 300 seeds at three, four and five guards — which is
+appendix 26's own curve, re-measured through the modifier seam rather than through
+`--guards`.
+
+What *does* shift is everything drawn after the guards: the comms console comes from a
+pool the guards are excluded from, and each guard draws a radio clock. So the arms are
+the same **building** played out differently, not the same **board** — and since the
+knob sits in the difficulty pool, that narrows §12.6's stated "byte-identical at every
+difficulty" to the carve. Both are now said in the design doc rather than left to be
+found.
+
+### The format footnote
+
+A bounded knob does **not** need a field in the level-seed token. The guard count
+spends **one slot per end** (7 and 8), which changes no radix and leaves every token
+ever shared decoding to the run it always named — where a third radix-3 field beside
+the intel gate's would have been a format version bump. A set naming both ends is
+refused on decode, since the encoder cannot produce one. The rule for the next knob:
+**if its values can be spelled as slots, spell them as slots.**
+
+---
+
+## Appendix 31 — Quick play is training; the campaign is the run
 
 *(§2.2, §10.2, §14, #138. Decided while building the end screen — the first surface
 that had to answer "and now what?", and therefore the first that could get permadeath

@@ -21,7 +21,7 @@
 //! can restart is not a permadeath run at all. So the exit set is a property of
 //! [`RunMode`] ([`RunMode::exits`]), and a campaign cannot inherit a retry button by
 //! reusing this screen. §14 v3 does not exist yet; the gate does, in shape, which is
-//! the whole point of writing it down now (see design appendix 30).
+//! the whole point of writing it down now (see design appendix 31).
 
 use crate::cell::Cell;
 use crate::difficulty::Difficulty;
@@ -99,7 +99,7 @@ pub struct Verdict {
 }
 
 /// **How a run is being played** — which decides what the end screen may offer
-/// (§2.2/§14, appendix 30).
+/// (§2.2/§14, appendix 31).
 ///
 /// Not a difficulty and not a level modifier (§12.6): those bend the facility, and
 /// this bends nothing inside it. It says what the run *is for* — practice, or the
@@ -208,7 +208,7 @@ mod tests {
     use crate::level_seed::start_level;
     use crate::render::render;
 
-    /// The gate the campaign will inherit (§2.2/appendix 30): **the exits come from
+    /// The gate the campaign will inherit (§2.2/appendix 31): **the exits come from
     /// the mode**. Quick play is training and may be replayed; a campaign run is the
     /// run, so its only way on is out.
     #[test]

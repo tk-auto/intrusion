@@ -2,7 +2,7 @@
 //!
 //! A [`Difficulty`] is a level from −2 to +2 over the quick-play base. It resolves to
 //! a concrete [`LevelModifiers`] by drawing `|level|` modifiers from the §12.6
-//! **directed pool** ([`TOGGLES`]) in the sign's direction — *harder* for positive,
+//! **directed pool** ([`POOL`]) in the sign's direction — *harder* for positive,
 //! *easier* for negative — and composing them onto the base.
 //! [`Standard`](Difficulty::Standard) draws nothing at all, so it is exactly today's
 //! quick play, byte for byte.
@@ -33,7 +33,7 @@
 //! is filtered on [`ModifierDirection`] itself rather than on a list of names, which
 //! is what makes that true by construction instead of by review.
 
-use crate::modifiers::{pool_size, LevelModifiers, ModifierDirection, Toggle, TOGGLES};
+use crate::modifiers::{pool_size, LevelModifiers, ModifierDirection, PoolEntry, POOL};
 use crate::rng::Rng;
 
 /// A fixed transform applied to the run seed before the difficulty draw, so it takes
@@ -177,7 +177,7 @@ impl Difficulty {
     ///
     /// Returns the *contribution*, not the run's resolved set: it is composed onto
     /// the quick-play base by [`LevelSeed::quick_play_at`](crate::LevelSeed), which is
-    /// the one place a run's modifiers are settled. Every toggle it switches on bends
+    /// the one place a run's modifiers are settled. Every entry it applies bends
     /// [`direction`](Self::direction)-wards, so the contribution can only ever add
     /// pressure to a `+N` or relief to a `−N`.
     #[must_use]
@@ -188,9 +188,9 @@ impl Difficulty {
             // Standard is byte-identical to quick play before there was an axis.
             return drawn;
         };
-        let mut pool: Vec<&Toggle> = TOGGLES
+        let mut pool: Vec<&PoolEntry> = POOL
             .iter()
-            .filter(|toggle| toggle.caption.direction == direction)
+            .filter(|entry| entry.caption.direction == direction)
             .collect();
         // A partial Fisher–Yates over the directed pool, the same idiom the
         // quick-play tech grant draws its subset with.
@@ -329,9 +329,13 @@ mod tests {
 
     /// A pool with fewer candidates than the level asks for **takes what exists**,
     /// deterministically — it does not loop to fill the quota and it does not panic.
-    /// The easier side is exactly two deep today, so `MuchEasier` is the exhaustive
-    /// case: it draws both candidates, every seed, and drawing one twice would show
-    /// as a set of one.
+    ///
+    /// **Both sides are now deeper than the axis reaches** (#232 gave the easier side
+    /// its third candidate, appendix 30), so ±2 draws *distinct* pairs that differ by
+    /// seed rather than the one exhaustive set every seed used to get on the easier
+    /// end. The claim the test exists for is unchanged and stated generally below —
+    /// never more picks than the pool holds — and it is the case that would matter
+    /// again the moment a pool shrank.
     #[test]
     fn a_short_pool_takes_what_exists() {
         assert_eq!(Difficulty::MuchEasier.picks(), 2);
@@ -339,8 +343,18 @@ mod tests {
         for seed in SEEDS {
             let drawn = Difficulty::MuchEasier.draw(seed);
             assert_eq!(drawn.active().len(), 2, "two distinct easier rules");
-            assert!(drawn.always_show_vision_cones && drawn.full_layout_known);
         }
+        // The easier side is a genuine draw now: over this spread of seeds, −2 lands
+        // on more than one pair. A pool that had gone back to exactly two deep, or a
+        // draw that ignored its seed, shows up here as a single set.
+        let easier_pairs: std::collections::BTreeSet<_> = SEEDS
+            .iter()
+            .map(|&seed| format!("{:?}", Difficulty::MuchEasier.draw(seed).active()))
+            .collect();
+        assert!(
+            easier_pairs.len() > 1,
+            "−2 is exhaustive again: {easier_pairs:?}"
+        );
         // The general claim, over every position: never more than the pool holds.
         for position in Difficulty::ALL {
             let bound = position.direction().map_or(0, pool_size);

@@ -177,7 +177,7 @@ fn a_live_run_draws_no_verdict_at_all() {
     }
 }
 
-/// **The exit set is the mode's** (§2.2/appendix 30): quick play may play the level
+/// **The exit set is the mode's** (§2.2/appendix 31): quick play may play the level
 /// again, and a campaign run — which is the run — may not. Asserted on the drawn rows
 /// *and* on the hit-test, so neither path can offer what the other does not.
 #[test]
