@@ -439,7 +439,7 @@ fn tab_layout() -> Vec<(HelpTab, u32, u32)> {
 /// Shared by [`draw_level_info`] and [`help_hit`], so the copy control exists on
 /// exactly the frames that print something for it to copy: the affordance and the
 /// token can never disagree about whether this run has one.
-fn seed_token(level: Option<LevelSeed>) -> Option<String> {
+pub(super) fn seed_token(level: Option<LevelSeed>) -> Option<String> {
     level.and_then(|level| level.encode())
 }
 

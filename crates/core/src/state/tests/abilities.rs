@@ -9,7 +9,7 @@
 
 use crate::guard::{GuardState, CERTAIN_RANGE, GLIMPSE_RANGE};
 use crate::state::*;
-use crate::test_support::{open_room, solo};
+use crate::test_support::{captured_at, open_room, solo};
 
 /// §8.3 Dephase: while phased, solids are plain moves — the player walks
 /// *into* a wall and *onto* a closed door panel without opening it — and
@@ -401,9 +401,7 @@ fn a_stunned_player_can_still_be_captured() {
     // — §4.5's only loss condition, once more the only one.
     let events = s.step(Input::Wait);
     assert!(
-        events.contains(&Event::Captured {
-            by: Cell::new(9, 4)
-        }),
+        captured_at(&events, Cell::new(9, 4)),
         "a helpless player is captured by contact: {events:?}",
     );
     assert_eq!(s.outcome(), Outcome::Lost);
@@ -812,9 +810,7 @@ fn dephase_conceals_nothing_and_contact_still_captures() {
         let events = s.step(Input::Wait);
         if s.outcome() == Outcome::Lost {
             assert!(
-                events.contains(&Event::Captured {
-                    by: Cell::new(5, 6)
-                }),
+                captured_at(&events, Cell::new(5, 6)),
                 "the capture, not the entombment, is the loss here",
             );
             return;

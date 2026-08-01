@@ -200,6 +200,59 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
     }
 }
 
+/// A navigation command on the **end screen** (§14 v2/#138) — the third modal
+/// surface, and the narrowest: a finished run has nothing to step, so the only thing
+/// left to do is choose a way on.
+///
+/// There is deliberately **no `Back`**. Escape closes a panel you opened; the end
+/// screen is not one — it is what the run left behind, and there is nothing under it
+/// to go back to. Every way on is a drawn row, by key and by finger alike (§11.6).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EndNav {
+    /// Move the marker to the previous exit, wrapping.
+    Prev,
+    /// Move the marker to the next exit, wrapping.
+    Next,
+    /// Fire the marked exit — retry the level, roll a new run, or go to the menu.
+    Activate,
+}
+
+/// Map a key to the [`EndNav`] it drives **while the end screen is up**, or `None`
+/// for a key the modal screen swallows (§14 v2/#138).
+///
+/// The same spelling as the menu one table up, because it is the same shape of
+/// screen: a vertical list of rows, walked by `↑`/`↓` (the numpad folding onto them
+/// through [`key_for_code`]) and fired by `Enter`/`Space`. A player who has used the
+/// title screen has already learned this one.
+///
+/// The theme toggle is **not** forwarded here, unlike on the menu and the help panel:
+/// this screen's colours are its cause line's, and a key that recoloured the verdict
+/// mid-read would be changing the evidence. It is a keypress away on either of the
+/// screens this one leads to.
+pub fn end_nav_for_key(key: &str) -> Option<EndNav> {
+    match key {
+        "ArrowUp" => Some(EndNav::Prev),
+        "ArrowDown" => Some(EndNav::Next),
+        "Enter" | " " => Some(EndNav::Activate),
+        _ => None,
+    }
+}
+
+/// Map a gesture to the [`EndNav`] it drives **while the end screen is up**
+/// (§11.6/#336/#138) — the touch half of [`end_nav_for_key`].
+///
+/// The vertical swipes walk the list, exactly as they walk the menu's. **A press is
+/// unbound**, for the menu's reason and more sharply: the exits start runs, one of
+/// them by throwing away the level you were just reading, and a stray tap on the
+/// board behind the panel must not do that. An exit fires by pressing *the exit*.
+pub fn end_nav_for_gesture(gesture: Gesture) -> Option<EndNav> {
+    match gesture {
+        Gesture::Swipe(Direction::North) => Some(EndNav::Prev),
+        Gesture::Swipe(Direction::South) => Some(EndNav::Next),
+        _ => None,
+    }
+}
+
 /// Map a key to the [`UiCommand`] it drives, or `None` for a key that is not a UI
 /// control. The shell consults this *before* [`input_for_key`]: a key claimed here
 /// toggles view state and redraws without ever touching [`State`](crate::State).
@@ -459,6 +512,7 @@ mod tests {
                 "{key:?} navigates no help tab"
             );
             assert_eq!(menu_nav_for_key(&key), None, "{key:?} walks no menu list");
+            assert_eq!(end_nav_for_key(&key), None, "{key:?} walks no exit list");
         }
         // …and the numpad fold cannot smuggle one back in: it names the arrows and
         // the wait key, the spellings the top row can never produce.
@@ -590,6 +644,35 @@ mod tests {
                 menu_nav_for_key(key),
                 None,
                 "{key:?} is swallowed while the menu is up"
+            );
+        }
+    }
+
+    /// #138: the end screen is modal like the other two — while it is up the shell
+    /// routes keys through [`end_nav_for_key`] first, and a finished run has nothing
+    /// for anything else to do. The vertical keys walk the exits and `Enter`/`Space`
+    /// fires one, the same spelling the menu's list takes.
+    #[test]
+    fn the_end_screen_captures_input_and_walks_its_exits() {
+        assert_eq!(end_nav_for_key("ArrowUp"), Some(EndNav::Prev));
+        assert_eq!(end_nav_for_key("ArrowDown"), Some(EndNav::Next));
+        for key in ["Enter", " "] {
+            assert_eq!(
+                end_nav_for_key(key),
+                Some(EndNav::Activate),
+                "{key:?} fires the marked exit"
+            );
+        }
+        // Escape is **not** bound: this screen is not a panel laid over something to
+        // go back to — every way on is one of its own drawn rows. Nor is the theme
+        // key, the one key the other two modal screens forward: the verdict's colours
+        // are its cause line's, and recolouring the evidence mid-read is not a view
+        // toggle worth having here.
+        for key in ["Escape", "n", "?", "m", "w", "5", "h", "j", "Tab", "c"] {
+            assert_eq!(
+                end_nav_for_key(key),
+                None,
+                "{key:?} is swallowed while the run's verdict is up",
             );
         }
     }
@@ -748,6 +831,16 @@ mod tests {
             menu_nav_for_key("ArrowRight"),
         );
 
+        // The end screen: a vertical list of exits, walked like the menu's.
+        assert_eq!(
+            end_nav_for_gesture(Gesture::Swipe(Direction::North)),
+            end_nav_for_key("ArrowUp"),
+        );
+        assert_eq!(
+            end_nav_for_gesture(Gesture::Swipe(Direction::South)),
+            end_nav_for_key("ArrowDown"),
+        );
+
         // The help panel: a horizontal tab bar, walked by the horizontal swipes.
         assert_eq!(
             help_nav_for_gesture(Gesture::Swipe(Direction::West)),
@@ -768,6 +861,17 @@ mod tests {
     fn a_press_activates_nothing_on_a_modal_screen() {
         assert_eq!(menu_nav_for_gesture(Gesture::Press), None);
         assert_eq!(help_nav_for_gesture(Gesture::Press), None);
+        // And on the end screen, where the same restraint bites hardest: two of its
+        // three exits start a run, one of them by throwing away the level the player
+        // is still reading. An exit fires by pressing the exit.
+        assert_eq!(end_nav_for_gesture(Gesture::Press), None);
+        for direction in [Direction::East, Direction::West] {
+            assert_eq!(
+                end_nav_for_gesture(Gesture::Swipe(direction)),
+                None,
+                "the exit list runs vertically and answers only that axis",
+            );
+        }
         // The horizontal swipes on the menu set a *value* (#298) and never fire a
         // control, so the restraint above survives the level-options dialog: no
         // gesture on the menu starts a run.

@@ -546,9 +546,19 @@ impl State {
                     if self.hidden() && self.guards[i].witnessed_hideout() != Some(target) {
                         continue;
                     }
+                    // The mood is read **before** the guard is moved onto the player
+                    // (§7.4/#138): what the end screen has to name is the state the
+                    // guard made contact in, and a capture is the last thing that
+                    // happens to it — nothing here changes it, but reading it beside
+                    // the cell keeps the pair one reading rather than two.
+                    let state = self.guards[i].state();
                     self.guards[i].place_at(target);
                     self.outcome = Outcome::Lost;
-                    events.push(Event::Captured { by: target });
+                    events.push(Event::Captured {
+                        guard: i,
+                        state,
+                        at: target,
+                    });
                     return;
                 }
             }

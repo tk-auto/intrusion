@@ -33,8 +33,8 @@
 //! at all (§11.6), so the band never leaves a player unable to wait.
 
 use intrusion_core::{
-    ability_at, help_hit, is_help_button, is_message_button, menu_hit, message_log_rows, AbilityId,
-    HelpHit, MenuHit, UiCommand, TOP_ROWS,
+    ability_at, help_hit, is_help_button, is_message_button, menu_hit, message_log_rows,
+    verdict_hit, AbilityId, EndExit, HelpHit, MenuHit, UiCommand, TOP_ROWS,
 };
 
 use crate::input::SWIPE_THRESHOLD_PX;
@@ -57,6 +57,9 @@ pub(crate) enum Control {
     MessageLog,
     /// An ability's slot on the always-on bar (§11.4) — the whole nine-cell slot.
     Ability(AbilityId),
+    /// An exit row on the end screen (§14 v2/#138) — the whole row, since a finished
+    /// run's screen is modal and nothing else is drawn on it.
+    End(EndExit),
 }
 
 /// What a tap at a viewport point resolves to (§11.6/#306) — the whole vocabulary of
@@ -223,7 +226,10 @@ impl Game {
             map_h: self.state.layout().facility().height(),
             row_px,
             log_rows: message_log_rows(&self.state, self.ui),
-            modal: self.ui.menu.is_some() || self.ui.help_open,
+            // A finished run is modal too: the board behind the verdict is evidence
+            // to read, not a surface to tap (§14 v2/#138) — and a stray wait on it
+            // would be an input to a loop that is already over.
+            modal: self.ui.menu.is_some() || self.ui.help_open || self.state.verdict().is_some(),
         }
     }
 
@@ -239,6 +245,19 @@ impl Game {
         let width = self.state.layout().facility().width();
         if let Some(menu) = self.ui.menu {
             return menu_hit(width, self.screen_height(), menu, col, row).map(Control::Menu);
+        }
+        // A finished run's verdict owns the frame next (§14 v2/#138) — the panel is
+        // drawn over everything, so the chrome underneath must not answer a press
+        // that landed on it. Column-free: an exit owns its whole row (§11.6).
+        if let Some(verdict) = self.state.verdict() {
+            return verdict_hit(
+                self.screen_height(),
+                verdict,
+                self.ui.end,
+                self.state.level(),
+                row,
+            )
+            .map(Control::End);
         }
         if self.ui.help_open {
             return help_hit(
@@ -296,6 +315,9 @@ impl Game {
                 let input = self.state.ability_input(id);
                 self.step_and_draw(input);
             }
+            // A tapped exit fires *and* leaves the marker on it, so the screen agrees
+            // with what the finger just did — the level-options dialog's rule (#298).
+            Control::End(exit) => self.take_exit(exit),
         }
     }
 }

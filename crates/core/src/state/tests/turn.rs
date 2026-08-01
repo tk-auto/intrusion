@@ -9,7 +9,7 @@
 use crate::guard::GuardState;
 use crate::state::*;
 use crate::targeting::Target;
-use crate::test_support::{open_room, solo};
+use crate::test_support::{captured_at, open_room, solo};
 use crate::vision::field_of_view;
 use crate::{LevelModifiers, Rng};
 
@@ -792,9 +792,7 @@ fn a_crouched_player_is_still_captured_by_contact() {
         behind: Cell::new(4, 3)
     }));
     assert!(
-        events.contains(&Event::Captured {
-            by: Cell::new(4, 4)
-        }),
+        captured_at(&events, Cell::new(4, 4)),
         "contact captures a crouched player"
     );
     assert_eq!(s.outcome(), Outcome::Lost);

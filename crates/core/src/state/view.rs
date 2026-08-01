@@ -604,6 +604,42 @@ impl State {
         self.outcome
     }
 
+    /// **Why** the run ended (§14 v2/#138), or `None` while it is live — the terminal
+    /// event as it was latched the turn it fired.
+    ///
+    /// The pairing with [`outcome`](Self::outcome) is exact: this is `Some` precisely
+    /// when the outcome is no longer `Playing`, so an in-progress run has no verdict
+    /// to draw and a finished one always does.
+    pub fn ending(&self) -> Option<Ending> {
+        self.ending
+    }
+
+    /// What this run amounts to so far (§14 v2/#138): the five numbers the end screen
+    /// reads. Live at any point — the run simply stops changing them once it ends.
+    pub fn run_stats(&self) -> RunStats {
+        RunStats {
+            turns: self.turn,
+            intel: self.intel_in_hand(),
+            intel_total: self.objectives.len(),
+            takedowns: self.takedowns,
+            detections: self.detections,
+            // The ladder never decays (§7.3), so the rung standing now is the run's
+            // peak — no separate high-water mark to keep, and none to let drift.
+            alert_peak: self.alert(),
+        }
+    }
+
+    /// The finished run as the end screen reads it (§14 v2/#138) — why it ended and
+    /// what it cost — or `None` while it is still being played, which is what makes
+    /// "an in-progress state renders neither screen" a property of the state rather
+    /// than a check the renderer has to remember.
+    pub fn verdict(&self) -> Option<Verdict> {
+        self.ending().map(|ending| Verdict {
+            ending,
+            stats: self.run_stats(),
+        })
+    }
+
     /// The events of the player's most recent action — the near line's source
     /// (§11.7). Empty before the first input; frozen once the run ends.
     pub fn last_events(&self) -> &[Event] {

@@ -68,6 +68,7 @@ use crate::region::{DoorCell, DoorId, RegionId};
 use crate::rng::Rng;
 use crate::status::MessageHistory;
 use crate::targeting::Targeting;
+use crate::verdict::{Ending, RunStats, Verdict};
 use crate::vision::{
     field_of_view_with_peek, BlindPolicy, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC,
     PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE,
@@ -569,6 +570,24 @@ pub struct State {
     /// [`reinforcements`] for the whole argument.
     pending_reinforcements: Vec<Cell>,
     outcome: Outcome,
+    /// **Why** the run ended (§14 v2/#138), latched from the terminal event the turn
+    /// it fired — `None` while the run is live, and set exactly once, since the loop
+    /// is inert afterwards ([`step`](Self::step)).
+    ///
+    /// It is latched rather than derived because the cause is only true at the
+    /// instant of contact: the capturing guard's mood (§7.4) is a live reading that
+    /// the finished board no longer holds, and a screen that re-derived it would be
+    /// telling the player a mistake they did not make (§2.2's traceability promise).
+    ending: Option<Ending>,
+    /// Fresh detections this run (§7.6) — one per [`Event::Detected`], so a chase
+    /// that holds the player in sight for ten turns counts once. The §13.2 sim counts
+    /// the same event the same way; the end screen reads it from here (#138).
+    detections: u32,
+    /// Takedowns landed this run (§7.2) — one per [`Event::TakenDown`]. Counted
+    /// rather than read off [`bodies`](Self::bodies), which a stow can hide and a
+    /// drag can move: the run's ledger is what the player *did*, not what is still
+    /// lying about.
+    takedowns: u32,
     /// The events of the player's most recent action, free or spent — what the
     /// near line reads (§11.7: messages clear on the next action, so holding
     /// exactly one action's events *is* the clearing rule). Empty before the
@@ -759,6 +778,9 @@ impl State {
             alert: Alert::new(),
             pending_reinforcements: Vec::new(),
             outcome: Outcome::Playing,
+            ending: None,
+            detections: 0,
+            takedowns: 0,
             last_events: Vec::new(),
             message_history: MessageHistory::default(),
             door_cues: Vec::new(),
@@ -1081,6 +1103,11 @@ impl State {
             self.record_effect_marks(&events);
         }
 
+        // The run's ledger and its ending, read off this action's events (§14 v2/#138)
+        // — one place, on the way out, so nothing that can end a run or break stealth
+        // has to remember to keep score at its own site.
+        self.record_verdict(&events);
+
         // Every action replaces the near line's source, free bumps included —
         // this assignment is §11.7's "messages clear on the next action".
         //
@@ -1090,6 +1117,28 @@ impl State {
         self.message_history.record(&self.last_events);
         self.last_events = events.clone();
         events
+    }
+
+    /// Keep the run's score, and latch its ending if this action ended it
+    /// (§14 v2/#138).
+    ///
+    /// Every number the end screen shows is either already a fact of the state (the
+    /// turn count, the intel in hand, the alert rung — which only rises, §7.3, so the
+    /// standing rung *is* the peak) or is counted here, from the very events the §13.2
+    /// sim counts. Two readers of one vocabulary, not two tallies that merely agree.
+    fn record_verdict(&mut self, events: &[Event]) {
+        for event in events {
+            match *event {
+                Event::Detected { .. } => self.detections += 1,
+                Event::TakenDown { .. } => self.takedowns += 1,
+                Event::Captured { guard, state, at } => {
+                    self.ending = Some(Ending::Captured { guard, state, at });
+                }
+                Event::Entombed { at } => self.ending = Some(Ending::Entombed { at }),
+                Event::Won => self.ending = Some(Ending::Escaped),
+                _ => {}
+            }
+        }
     }
 
     /// Phase 1 (§4.2). Returns whether the turn was spent (a world-changing action)

@@ -20,7 +20,7 @@ use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
 use crate::region::{DoorKind, RegionGraph, RegionKind};
-use crate::state::State;
+use crate::state::{Event, State};
 
 /// The default sampled sweep width — small enough to keep the routine gate fast,
 /// wide enough to spread across each sweep's range.
@@ -129,4 +129,19 @@ pub(crate) fn solo(player: Cell) -> State {
         Vec::new(),
         Cell::new(8, 8),
     )
+}
+
+/// Whether `events` reports a capture on `cell` (§4.5).
+///
+/// The event carries the whole cause since #138 — the guard's index and the mood it
+/// made contact in — and a test that asserted on the *cell* has no business pinning
+/// either: which of four guards reached you is an artefact of placement order, and a
+/// fixture that spelled it out would fail the day a guard is placed differently while
+/// still walking into the same cell. So the shared assertion reads the one field the
+/// test means, and the fields it does not mean are pinned where they are the point
+/// ([`crate::render::verdict`], the cause line).
+pub(crate) fn captured_at(events: &[Event], cell: Cell) -> bool {
+    events
+        .iter()
+        .any(|event| matches!(event, Event::Captured { at, .. } if *at == cell))
 }

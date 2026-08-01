@@ -153,6 +153,14 @@ pub struct ScreenUi {
     /// ([`help_hit`](crate::help_hit)). Default `false`, so the public deploy, the
     /// sim and every test draw the panel without it.
     pub offer_replay_copy: bool,
+    /// The end screen's view state (§14 v2/#138) — the run's mode, which gates the
+    /// exits it offers, and the exit the marker rests on.
+    ///
+    /// There is no flag for *whether* the screen is up: it is up exactly when the run
+    /// has ended ([`State::verdict`](crate::State::verdict)), so an in-progress run
+    /// draws neither verdict and a finished one always draws its own. That is the one
+    /// thing about this screen a shell cannot get wrong.
+    pub end: EndUi,
     /// Which input vocabulary to teach the innate verbs in (§11.6/#323): the
     /// wording of the usable line's floor ([`usable`](super::usable)), and nothing else.
     /// The shell answers only *is this a touch session?*; the core keeps the words
@@ -440,6 +448,13 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // question of what it holds and whether it holds anything at all.
     if ui.message_log_open {
         super::message_log::overlay_message_log(&mut screen, state);
+    }
+    // The verdict is the **last** thing laid on (§14 v2/#138): a finished run has one
+    // thing left to say, and nothing — not the log, not the bar — may sit on top of
+    // it. It is an overlay rather than a scene on purpose: the board that reads above
+    // and below it is most of how a capture gets traced (§2.2).
+    if let Some(verdict) = state.verdict() {
+        super::verdict::overlay_verdict(&mut screen, verdict, ui.end, state.level());
     }
     screen
 }

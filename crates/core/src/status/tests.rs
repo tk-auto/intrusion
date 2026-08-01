@@ -4,6 +4,7 @@ use crate::alert::AlertTrigger;
 use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::guard::Guard;
+use crate::guard::GuardState;
 use crate::modifiers::{IntelGate, LevelModifiers};
 use crate::state::Input;
 use crate::test_support::open_room;
@@ -432,7 +433,9 @@ fn the_eject_outranks_every_guard_event_but_the_capture() {
     })
     .expect("an alert speaks");
     let caught = message_for(Event::Captured {
-        by: Cell::new(3, 3),
+        guard: 0,
+        state: GuardState::Chasing,
+        at: Cell::new(3, 3),
     })
     .expect("the capture speaks");
     assert!(
@@ -714,7 +717,11 @@ fn no_event_can_come_between_the_raise_and_its_reason() {
             to: Cell::new(3, 4),
             stunned: crate::phase_eject_stun(1),
         },
-        Event::Captured { by: at },
+        Event::Captured {
+            guard: 0,
+            state: GuardState::Chasing,
+            at,
+        },
     ];
     let texts: Vec<String> = loudest_first(&events).into_iter().map(|m| m.text).collect();
     let headline = texts

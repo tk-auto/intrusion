@@ -74,6 +74,7 @@ mod status;
 mod targeting;
 #[cfg(test)]
 mod test_support;
+mod verdict;
 mod vision;
 
 pub use ability::{
@@ -91,9 +92,9 @@ pub use facility::{Facility, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
 pub use guard::{Guard, GuardState};
 pub use input::{
-    ability_slot_for_code, help_nav_for_gesture, help_nav_for_key, input_for_gesture,
-    input_for_key, key_for_code, menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key,
-    Gesture, HelpNav, MenuNav, UiCommand,
+    ability_slot_for_code, end_nav_for_gesture, end_nav_for_key, help_nav_for_gesture,
+    help_nav_for_key, input_for_gesture, input_for_key, key_for_code, menu_nav_for_gesture,
+    menu_nav_for_key, ui_command_for_key, EndNav, Gesture, HelpNav, MenuNav, UiCommand,
 };
 pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
@@ -105,9 +106,9 @@ pub use region::{
 };
 pub use render::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid, help_hit,
-    is_help_button, is_message_button, menu_hit, message_log_rows, render, render_screen, Fill,
-    GlyphCell, Grid, HelpHit, HelpTab, InputModality, MenuEntry, MenuHit, MenuScreen, MenuUi,
-    OptionsControl, ScreenUi, SeedCopy, Visibility, BOTTOM_ROWS, TOP_ROWS,
+    is_help_button, is_message_button, menu_hit, message_log_rows, render, render_screen,
+    verdict_hit, EndUi, Fill, GlyphCell, Grid, HelpHit, HelpTab, InputModality, MenuEntry, MenuHit,
+    MenuScreen, MenuUi, OptionsControl, ScreenUi, SeedCopy, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{
     ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,
@@ -121,6 +122,7 @@ pub use state::{
 };
 pub use status::{live_messages, message_for, near_line, Message, MessageHistory, HISTORY_ACTIONS};
 pub use targeting::{within_range, Target, Targeting, TileCursor};
+pub use verdict::{EndExit, Ending, RunMode, RunOptions, RunStats, Verdict};
 pub use vision::{
     field_of_view, field_of_view_with_blind_spot, field_of_view_with_peek, BlindPolicy, BlindTier,
     VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE,

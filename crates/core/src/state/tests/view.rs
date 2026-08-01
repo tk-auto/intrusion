@@ -233,7 +233,15 @@ fn events_declare_their_message_category() {
         Category::Interest
     );
     assert_eq!(Event::Won.category(), Category::Interest);
-    assert_eq!(Event::Captured { by: at }.category(), Category::Danger);
+    assert_eq!(
+        Event::Captured {
+            guard: 0,
+            state: GuardState::Chasing,
+            at,
+        }
+        .category(),
+        Category::Danger
+    );
     assert_eq!(Event::TakenDown { at }.category(), Category::Owned);
     assert_eq!(Event::BodyFound { at }.category(), Category::Warning);
     // A refused toggle-off is one of your own tools answering back (§8/#304), so it
@@ -1134,4 +1142,78 @@ fn the_opening_look_spends_no_turn() {
         PLAYER_SENSE_RANGE,
         "but a blast fired on turn one measures off the plain box (#325/#345)",
     );
+}
+
+/// **A finished run keeps why it ended and what it cost** (§14 v2/#138) — the two
+/// readings the end screen presents and never reconstructs.
+///
+/// The mood is the load-bearing half: it is latched *at contact*, so a screen drawn
+/// twenty seconds later still names the state the guard made contact in rather than
+/// whatever the last turn left on the board. The ledger is counted from the very
+/// events the §13.2 sim counts, so the two never say different things about one run.
+#[test]
+fn a_capture_latches_its_cause_and_the_runs_ledger() {
+    let mut guard = Guard::patrolling(Cell::new(6, 4));
+    guard.respond_to(Cell::new(1, 4));
+    let mut s = State::new(
+        open_room(10, 10),
+        Cell::new(4, 4),
+        Direction::North,
+        vec![guard],
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    // Live, there is nothing to draw and nothing to say about the ending.
+    assert_eq!(s.ending(), None);
+    assert_eq!(s.verdict(), None, "a live run renders neither screen");
+
+    s.step(Input::Wait);
+    assert_eq!(s.outcome(), Outcome::Lost);
+    assert_eq!(
+        s.ending(),
+        Some(Ending::Captured {
+            guard: 0,
+            state: GuardState::Chasing,
+            at: Cell::new(4, 4),
+        }),
+        "the whole cause, as the terminal event carried it",
+    );
+
+    let stats = s.run_stats();
+    assert_eq!(stats.detections, 1, "the look that found the player");
+    assert_eq!(stats.takedowns, 0);
+    assert_eq!(stats.intel, 0);
+    assert_eq!(
+        stats.alert_peak,
+        s.alert(),
+        "the ladder never decays (§7.3), so the standing rung is the peak",
+    );
+
+    // The loop is inert once the run is over (§4.5), so the verdict is what it was:
+    // further input cannot rewrite the cause the player is being shown.
+    let before = s.verdict();
+    s.step(Input::Wait);
+    assert_eq!(
+        s.verdict(),
+        before,
+        "a finished run's verdict does not move"
+    );
+}
+
+/// The **won** run's terminal event latches too, and it is the one ending that is not
+/// a loss — the distinction §14 v2 says the old game never drew at all.
+#[test]
+fn reaching_the_exit_latches_the_win() {
+    let mut s = State::new(
+        open_room(10, 10),
+        Cell::new(4, 4),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(5, 4),
+    );
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.outcome(), Outcome::Won);
+    assert_eq!(s.ending(), Some(Ending::Escaped));
+    assert!(s.ending().expect("an ending").won(), "the one win there is");
 }
