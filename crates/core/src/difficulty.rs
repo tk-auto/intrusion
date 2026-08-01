@@ -2,7 +2,7 @@
 //!
 //! A [`Difficulty`] is a level from −2 to +2 over the quick-play base. It resolves to
 //! a concrete [`LevelModifiers`] by drawing `|level|` modifiers from the §12.6
-//! **directed pool** ([`TOGGLES`]) in the sign's direction — *harder* for positive,
+//! **directed pool** ([`POOL`]) in the sign's direction — *harder* for positive,
 //! *easier* for negative — and composing them onto the base.
 //! [`Standard`](Difficulty::Standard) draws nothing at all, so it is exactly today's
 //! quick play, byte for byte.
@@ -33,7 +33,7 @@
 //! is filtered on [`ModifierDirection`] itself rather than on a list of names, which
 //! is what makes that true by construction instead of by review.
 
-use crate::modifiers::{pool_size, LevelModifiers, ModifierDirection, Toggle, TOGGLES};
+use crate::modifiers::{pool_size, LevelModifiers, ModifierDirection, PoolEntry, POOL};
 use crate::rng::Rng;
 
 /// A fixed transform applied to the run seed before the difficulty draw, so it takes
@@ -177,7 +177,7 @@ impl Difficulty {
     ///
     /// Returns the *contribution*, not the run's resolved set: it is composed onto
     /// the quick-play base by [`LevelSeed::quick_play_at`](crate::LevelSeed), which is
-    /// the one place a run's modifiers are settled. Every toggle it switches on bends
+    /// the one place a run's modifiers are settled. Every entry it applies bends
     /// [`direction`](Self::direction)-wards, so the contribution can only ever add
     /// pressure to a `+N` or relief to a `−N`.
     #[must_use]
@@ -188,9 +188,9 @@ impl Difficulty {
             // Standard is byte-identical to quick play before there was an axis.
             return drawn;
         };
-        let mut pool: Vec<&Toggle> = TOGGLES
+        let mut pool: Vec<&PoolEntry> = POOL
             .iter()
-            .filter(|toggle| toggle.caption.direction == direction)
+            .filter(|entry| entry.caption.direction == direction)
             .collect();
         // A partial Fisher–Yates over the directed pool, the same idiom the
         // quick-play tech grant draws its subset with.
