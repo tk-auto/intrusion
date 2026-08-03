@@ -252,9 +252,9 @@ fn events_declare_their_message_category() {
 /// The usable line's contract (§11.4): [`State::affordances`] offers exactly
 /// what a bump would do. A live console reads `TakeIntel`; once taken it is
 /// just solid and offers nothing; an empty cupboard offers `Hide`; and the exit
-/// reads **`exit: enter`** from the facility side (§4.5/#466) — bumping `E` climbs
-/// into the tunnel, whatever the intel gate says, because the gate is checked at the
-/// far end of the crawl.
+/// answers the **intel gate at its mouth** (§4.5/#466) — `exit: needs the intel`
+/// short of it, `exit: enter` once it is met, since climbing into the tunnel is
+/// what a bump on `E` does when it does anything.
 #[test]
 fn affordances_mirror_what_a_bump_would_do() {
     let mut layout = room_with_tunnel(12, 12, Cell::new(5, 4), Direction::North);
@@ -268,20 +268,20 @@ fn affordances_mirror_what_a_bump_would_do() {
         Cell::new(5, 4),   // the exit north
     );
 
-    // Console east, the tunnel's mouth north, cupboard west — each with the direction
-    // to bump it.
+    // Console east, the tunnel's mouth north — refusing, with the intel still out —
+    // and a cupboard west, each with the direction to bump it.
     assert_eq!(
         s.affordances(),
         vec![
-            (Some(Direction::North), Affordance::EnterExit),
+            (Some(Direction::North), Affordance::ExitRefused),
             (Some(Direction::East), Affordance::TakeIntel),
             (Some(Direction::West), Affordance::Hide)
         ],
         "Direction::ALL order: north, east, … west"
     );
 
-    // Take the intel: the console goes solid, and the mouth still says `exit: enter` —
-    // what changes is what the *way out* will say when the crawl reaches it.
+    // Take the intel: the console goes solid, and the mouth opens — the same cell, the
+    // same bump, now a climb into the tunnel home.
     s.step(Input::Step(Direction::East));
     assert_eq!(
         s.affordances(),
@@ -289,7 +289,7 @@ fn affordances_mirror_what_a_bump_would_do() {
             (Some(Direction::North), Affordance::EnterExit),
             (Some(Direction::West), Affordance::Hide)
         ],
-        "a spent console offers nothing; the mouth is still the way in"
+        "a spent console offers nothing; the mouth is now the way in"
     );
 
     // In the middle of open floor, the line is empty.
@@ -305,29 +305,24 @@ fn affordances_mirror_what_a_bump_would_do() {
 /// Inside the tunnel it is the only thing on the row: a crawler can bump nothing else.
 #[test]
 fn the_way_out_offers_leave_or_the_refusal_aimed_off_the_board() {
+    // Both start where a run starts — on the way-out cell, inside the tunnel (#466) —
+    // which is also the one place a player can stand on it empty-handed, since the
+    // mouth refuses them short of the gate.
     let build = |intel: Vec<Cell>| {
-        State::new(
+        let s = State::new(
             room_with_tunnel(12, 12, Cell::new(5, 4), Direction::North),
-            Cell::new(5, 5),
+            Cell::new(5, 0),
             Direction::North,
             Vec::new(),
             intel,
             Cell::new(5, 4),
-        )
-    };
-
-    // Climb in at the mouth (5,4) and crawl the four cells to the border at (5,0).
-    let crawl_out = |s: &mut State| {
-        for _ in 0..5 {
-            s.step(Input::Step(Direction::North));
-        }
-        assert_eq!(s.player(), Cell::new(5, 0), "standing on the way out");
-        assert!(s.in_duct(), "still inside the tunnel");
+        );
+        assert!(s.in_duct(), "the run opens inside the tunnel");
+        s
     };
 
     // Empty-handed with an objective still out: the row says what the bump will do.
-    let mut refused = build(vec![Cell::new(6, 5)]);
-    crawl_out(&mut refused);
+    let refused = build(vec![Cell::new(6, 5)]);
     assert_eq!(
         refused.affordances(),
         vec![(Some(Direction::North), Affordance::ExitRefused)],
@@ -335,8 +330,7 @@ fn the_way_out_offers_leave_or_the_refusal_aimed_off_the_board() {
     );
 
     // Nothing to fetch: the gate is vacuously met, so the same cell offers the win.
-    let mut ready = build(Vec::new());
-    crawl_out(&mut ready);
+    let ready = build(Vec::new());
     assert_eq!(
         ready.affordances(),
         vec![(Some(Direction::North), Affordance::Leave)],

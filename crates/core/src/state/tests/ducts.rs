@@ -61,6 +61,7 @@ fn enter_crawl_and_climb_out_of_a_duct() {
     // Bump the entry from the mouth: a decision, the turn spent, now concealed inside.
     let e = s.step(Input::Step(Direction::North));
     assert!(e.contains(&Event::EnteredDuct {
+        own_tunnel: false,
         at: Cell::new(2, 1)
     }));
     assert!(s.in_duct());

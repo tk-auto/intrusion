@@ -282,8 +282,13 @@ If you are adding an ability and about to make it free, re-read §2.3.
   Leaving is the same thing backwards: bump `E` to climb in (the usable line reads
   **`exit: enter`**, never `duct: enter` — one is a shortcut you found and the other is
   the way home), crawl back to the border cell, and **bump outward**, off the grid. That
-  step off the board is the win check. Bumping it before you hold enough intel refuses,
-  with a message. **How much is "enough" is a level modifier** (`intel_to_exit`, §12.6/#244),
+  step off the board is the win.
+
+  **The gate is answered at the mouth.** Bumping `E` before you hold enough intel
+  refuses, with the message, exactly as bumping the exit always did — you are told in
+  the facility, where you can act on it, rather than after a crawl that ends in a wall.
+  The border cell answers it too, since that is where the run *begins* and you can stand
+  there empty-handed. **How much is "enough" is a level modifier** (`intel_to_exit`, §12.6/#244),
   not one fixed rule, so the modes gate the *same* facility differently:
   - **Quick play — all the intel** (§10.2/#244). Gather the whole set, then get out:
     a complete objective, and v1's default mode.
@@ -1794,7 +1799,10 @@ guard sees, paths on, or looks through changes.
 **The player's own tunnel is a duct too** (§4.5/#466, appendix 32). The exit `E` is the
 inner mouth of a **linear** run of duct cells going out to the level border, and the
 far end of it is not an entry but the **way out**: no mouth, nothing to climb onto but
-the world, and a step off the board there is the §4.5 win check. It is the same model in
+the world, and a step off the board there is the §4.5 win. Its mouth answers the intel
+gate before it lets you in, so a crawl home is never begun in vain; and the occupied run
+is drawn in the **exit's** colour rather than the crawlspace's (§11.2), so the opening
+frame is one line from the border to `E`. It is the same model in
 every other respect — concealed and contact-safe inside, memory and a shortened sense for
 perception, the mouth peek at `E` — and it stamps nothing: the border cell keeps its wall
 terrain (so §10.6's enclosure is untouched) and `E` keeps its own glyph. The one thing it

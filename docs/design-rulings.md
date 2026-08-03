@@ -1444,7 +1444,13 @@ Everything the animation was for falls out of that, and is *played*:
 
 - **The eye is pointed.** §10.7 draws the whole occupied run as one connected `=`, so
   turn one opens on a bright line from the border to the mouth you are about to climb
-  out of. Nothing was added to the renderer to get this; the rule was already there.
+  out of. Nothing was added to the renderer to get this; the rule was already there —
+  only the *colour* is the tunnel's own (Interest, the exit's band, where a found
+  shortcut stays System), so the line and the letter it ends in read as one thing.
+- **The row says where you are.** Turn one has no action behind it and so no message, so
+  the §11.4 ambient floor gained the arm it was missing: *"your own tunnel — crawl out"*,
+  standing for the length of the crawl, next to the cupboard's and the crouch's. A
+  crawlspace is a state you are in, and the floor is where a standing fact belongs.
 - **The opening is the player's own inputs.** Three or four crawl steps and a climb-out
   — real turns, so the facility is already moving when you arrive and you arrive knowing
   it, rather than materialising into a frozen tableau.
@@ -1469,13 +1475,20 @@ the crawl behind the mouth — the same secret every other duct keeps. Nothing a
 
 **Three consequences worth naming, because each is a real change and not a detail.**
 
-1. **The win check moved off the grid.** The exit is no longer a cell you bump; it is a
-   step **off the board** from the tunnel's border cell, and that is the first affordance
-   whose arrow points off the grid (§11.4/#384). The §4.5 intel gate and its refusal ride
-   along unchanged — same words, same free refusal, a different cell to read them on.
-   `E` bumped from the facility side now means *climb in*, so it gets its own label
-   (`exit: enter`): two bumps that behave identically and mean completely different
-   things must not read identically on the one row that says what a bump does.
+1. **The win check moved off the grid; the gate stayed at the mouth.** The *win* is no
+   longer a cell you bump — it is a step **off the board** from the tunnel's border cell,
+   and that is the first affordance whose arrow points off the grid (§11.4/#384). But the
+   **intel gate** is answered at `E`, where it always was: bumping the mouth short of it
+   refuses, free, with the same words. Splitting them that way is deliberate and was the
+   first thing playtesting corrected. A gate at the far end only is *technically* the same
+   rule and a worse game: the player is told no after four turns of crawling, in a
+   crawlspace where the answer is useless to them, and the row that promised
+   `exit: enter` turns out to have promised a dead end. Refusing at the mouth keeps the
+   refusal where the player can still do something about it, and keeps the §11.4 rule that
+   the row never says a bump will do what it will not. `E` with the gate met means *climb
+   in*, so it gets its own label (`exit: enter`): two bumps that behave identically and
+   mean completely different things must not read identically on the one row that says
+   what a bump does.
 2. **`PLAYER_EXIT_MIN_DISTANCE` retired.** Eight cells between the spawn and the exit
    existed so that no run started won. There is no spawn-to-exit distance any more — the
    player starts *at* the way out — so the hazard is re-closed as a floor on the

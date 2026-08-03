@@ -337,7 +337,14 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     // here, which nothing used to do.
     let mut taken: Vec<Cell> = vec![exit, player];
     taken.extend(exit_duct.cells().iter().copied());
-    taken.extend(ducted.iter().copied());
+    // Read off the layout rather than the `ducted` set: the list is ordered, and every
+    // draw below this one has to be a function of the seed alone (§12.4).
+    taken.extend(
+        layout
+            .ducts()
+            .iter()
+            .flat_map(|d| d.cells().iter().copied()),
+    );
     // The usables placed so far — what later usable picks prefer not to crowd
     // (§11.4, one usable per cell — a preference, not a gate).
     let mut usables: Vec<Cell> = vec![exit];

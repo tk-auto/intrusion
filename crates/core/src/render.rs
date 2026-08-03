@@ -421,12 +421,23 @@ fn duct_pass(state: &State, cells: &mut [GlyphCell]) {
     let facility = state.layout().facility();
     let width = facility.width();
     if let Some(duct) = state.occupied_duct() {
+        // **Your own tunnel wears the exit's colour** (§11.2/#466). A found shortcut is
+        // System — the furniture band, where the doors and cupboards are — but the
+        // tunnel is the thing `E` anchors, so lighting the run in Interest makes the
+        // opening frame one continuous purple line from the border to the mouth rather
+        // than a gray thread ending in a purple letter. Same glyph either way: `=` is
+        // what a crawlspace is (§11.3), and a second `E` on the board would be a lie
+        // about where the mouth is.
+        let band = if duct.way_out().is_some() {
+            Category::Interest
+        } else {
+            Category::System
+        };
         for &c in duct.cells() {
             if facility.terrain(c) == Some(Terrain::Exit) {
                 continue;
             }
-            cells[(c.y * width + c.x) as usize] =
-                GlyphCell::on_board('=', Category::System, Visibility::Live);
+            cells[(c.y * width + c.x) as usize] = GlyphCell::on_board('=', band, Visibility::Live);
         }
     }
 }

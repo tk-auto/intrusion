@@ -221,6 +221,46 @@ fn both_ambient_forms_fit_the_near_line() {
     }
 }
 
+/// **The line the run opens on** (§4.5/§11.4/#466): turn one has no action behind it and
+/// so no message, and a run that begins inside its own tunnel has to say so. The floor
+/// says it — a standing fact for the length of the crawl, not one frame of narration —
+/// and it names *which* crawlspace, because one is a shortcut you found and the other is
+/// the way home.
+///
+/// It fits the row, which is the constraint every near-line string is under (§11.7): the
+/// message's capacity is what is left beside the row's controls.
+#[test]
+fn the_run_opens_saying_where_you_are() {
+    let exit = Cell::new(5, 4);
+    let tunnel = crate::test_support::exit_tunnel_cells(12, 12, exit, Direction::North);
+    let mut s = State::new(
+        crate::test_support::room_with_tunnel(12, 12, exit, Direction::North),
+        *tunnel.last().expect("a way out"),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(8, 8)],
+        exit,
+    );
+    let opening = near_line(&s);
+    assert_eq!(opening.text, "your own tunnel — crawl out");
+    assert_eq!(opening.category, Category::Owned, "a state you are in");
+    assert!(opening.is_ambient(), "the floor, not a message");
+    let max = crate::render::near_line_text_max(crate::LevelConfig::V1.width);
+    for line in ["your own tunnel — crawl out", "in the duct — memory only"] {
+        let len = line.chars().count();
+        assert!(
+            len <= max,
+            "{line:?} is {len} cells, over the {max} the row leaves"
+        );
+    }
+
+    // It holds for the whole crawl, and gives the row back on the way out.
+    s.step(Input::Step(Direction::South));
+    assert_eq!(near_line(&s).text, "your own tunnel — crawl out");
+    crate::test_support::climb_out_of_the_tunnel(&mut s);
+    assert_eq!(near_line(&s).text, "objectives: 0/1", "back to the floor");
+}
+
 /// §11.4/#421: the momentary states still **pre-empt** the standing pair, and every
 /// live message still pre-empts all of them. The floor gained a second fact; it did
 /// not gain a claim on the row.
@@ -833,9 +873,10 @@ fn gated(gate: IntelGate) -> State {
 /// The directions that take the three consoles of [`gated`], in order.
 const TAKES: [Direction; 3] = [Direction::North, Direction::East, Direction::West];
 
-/// Answer the exit from the [`gated`] fixture (§4.5/#466): climb into the tunnel south
-/// of the player, crawl to the border, and step off the board. Returns the events of
-/// that last step — the win, or the refusal.
+/// Answer the exit from the [`gated`] fixture (§4.5/#466): with the gate met, climb into
+/// the tunnel south of the player, crawl to the border and step off the board; short of
+/// it, the mouth refuses on the spot. Returns the events of that last press — the win, or
+/// the refusal, wherever it was answered.
 fn answer_the_exit(s: &mut State) -> Vec<Event> {
     leave_by_the_tunnel(s)
 }
@@ -1020,17 +1061,14 @@ fn a_refusal_names_what_the_gate_still_wants() {
 #[test]
 fn a_refusal_still_costs_nothing() {
     let mut s = gated(IntelGate::All);
-    // Climb in at the mouth and crawl south to the border — the tunnel of the
-    // fixture runs (5,6) → (5,11) — so the step under test is the one off the board.
-    for _ in 0..6 {
-        s.step(Input::Step(Direction::South));
-    }
-    assert_eq!(s.player(), Cell::new(5, 11), "standing on the way out");
     let (turn, at) = (s.turn(), s.player());
-    let refused = s.step(Input::Step(Direction::South));
+    // Empty-handed the mouth itself refuses (§4.5/#466) — the crawl is never begun, so
+    // this is the whole of what the press costs.
+    let refused = answer_the_exit(&mut s);
     assert_eq!(refused, vec![Event::ExitRefused { still_needed: 3 }]);
     assert_eq!(s.turn(), turn, "a refused exit is free (§4.5)");
     assert_eq!(s.player(), at, "and moves nobody");
+    assert!(!s.in_duct(), "and never got as far as the tunnel");
 }
 
 /// A **budgeted** ability's activation is **silent** (§8.2/#302). The count it

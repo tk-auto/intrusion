@@ -285,17 +285,26 @@ enum BumpKind {
     /// body inside and locks the cupboard — it is no longer a hideout. A spent
     /// turn; the player stays put and their hands come free.
     DepositBody,
-    /// The **way out** (§4.5/§10.7/#466): the step off the board from the exit
-    /// tunnel's border cell, the one target that is not a cell of the grid. `ready` is
-    /// [`exit_ready`](State::exit_ready) — the run's intel gate met (§4.5/§12.6): win
-    /// vs. refused. Classified by [`way_out_kind`](State::way_out_kind) rather than by
-    /// [`bump_kind`](State::bump_kind), which only ever looks at cells.
+    /// The **exit**, answered by the run's intel gate (§4.5/§12.6, `ready` is
+    /// [`exit_ready`](State::exit_ready)) — win vs. refused. Two bumps reach it since
+    /// #466, and only one of them can win:
+    ///
+    /// - the step **off the board** from the tunnel's border cell, the one target that
+    ///   is not a cell of the grid, classified by
+    ///   [`way_out_kind`](State::way_out_kind) rather than by
+    ///   [`bump_kind`](State::bump_kind), which only ever looks at cells;
+    /// - the mouth `E` bumped short of the gate, which refuses at the near end rather
+    ///   than sending the player down a crawl that will refuse at the far one. A bump
+    ///   on `E` *with* the gate met is [`EnterExitDuct`](BumpKind::EnterExitDuct): the
+    ///   climb in, not the win.
     Exit { ready: bool },
-    /// The exit `E` bumped from the facility side (§4.5/§10.7/#466): the inner mouth of
-    /// the player's own tunnel, climbed into exactly as any duct entry is. Distinct
-    /// from [`EnterDuct`](BumpKind::EnterDuct) only in what the usable line calls it —
-    /// one of the two is a shortcut and the other is the way home, and the row that
-    /// tells you what a bump does should not read the same for both.
+    /// The exit `E` bumped from the facility side **with the intel gate met**
+    /// (§4.5/§10.7/#466): the inner mouth of the player's own tunnel, climbed into
+    /// exactly as any duct entry is. Distinct from [`EnterDuct`](BumpKind::EnterDuct)
+    /// only in what the usable line calls it — one of the two is a shortcut and the
+    /// other is the way home, and the row that tells you what a bump does should not
+    /// read the same for both. Short of the gate the same cell is
+    /// [`Exit { ready: false }`](BumpKind::Exit) — the refusal.
     EnterExitDuct,
     /// An objective console still holding its intel.
     Intel,
@@ -1550,7 +1559,10 @@ impl State {
                 // tunnel's own axis, the way a crawl arrives. The fallback covers a
                 // hand-built duct with no derivable mouth.
                 self.facing = self.duct_entry_facing(target).unwrap_or(dir.opposite());
-                events.push(Event::EnteredDuct { at: target });
+                events.push(Event::EnteredDuct {
+                    at: target,
+                    own_tunnel: matches!(kind, BumpKind::EnterExitDuct),
+                });
                 true
             }
             // A crawl one cell along the duct (§10.7): a spent turn that moves the
@@ -1772,15 +1784,25 @@ impl State {
             }
         }
         // The exit `E` from the facility side (§4.5/#466): the inner mouth of the
-        // player's own tunnel. Bumping it **climbs in**, exactly as a §10.7 shortcut's
-        // entry does — winning happens at the far end of the crawl, off the board
-        // ([`way_out_kind`]). Like any duct entry it refuses a dragging player: a body
-        // cannot follow into the walls, so let it go before you leave.
+        // player's own tunnel.
+        //
+        // **The intel gate is answered here**, at the mouth, not at the far end of the
+        // crawl: short of it the bump refuses exactly as bumping the exit always did —
+        // free, with the §4.5 message — rather than letting the player crawl four cells
+        // to be told no somewhere they can do nothing about it. With the gate met the
+        // bump **climbs in**, exactly as a §10.7 shortcut's entry does, and the win is
+        // the step off the board at the far end ([`way_out_kind`](Self::way_out_kind)),
+        // which is the one the run *starts* inside and so still answers the gate itself.
+        //
+        // Like any duct entry it refuses a dragging player: a body cannot follow into
+        // the walls, so let it go before you leave.
         if target == self.exit {
             return if self.dragging.is_some() {
                 BumpKind::Solid
-            } else {
+            } else if self.exit_ready() {
                 BumpKind::EnterExitDuct
+            } else {
+                BumpKind::Exit { ready: false }
             };
         }
         if self.objectives.iter().any(|o| o.cell == target && !o.taken) {

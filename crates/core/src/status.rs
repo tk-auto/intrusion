@@ -84,7 +84,17 @@ pub fn message_for(event: Event) -> Option<Message> {
         Event::Bumped { .. } => ("blocked".to_string(), 0),
         Event::Crouched { .. } => ("you duck behind the table".to_string(), 0),
         Event::EnteredHideout { .. } => ("you slip into the cupboard".to_string(), 0),
-        Event::EnteredDuct { .. } => ("you climb into the duct".to_string(), 0),
+        // Which crawlspace matters (§4.5/#466): one is a shortcut you found, the other
+        // is the way home, and the near line says the same thing the usable line just
+        // said the bump would do (`duct: enter` / `exit: enter`).
+        Event::EnteredDuct { own_tunnel, .. } => (
+            if own_tunnel {
+                "you climb into your own tunnel".to_string()
+            } else {
+                "you climb into the duct".to_string()
+            },
+            0,
+        ),
         // A crawl is silent like a plain step — narrating every cell would bury the
         // near line (§11.7).
         Event::DuctCrawled { .. } => return None,
@@ -510,6 +520,22 @@ fn ambient(state: &State) -> Message {
             "hidden — the cupboard conceals you".to_string(),
             Category::Owned,
         )
+    } else if let Some(duct) = state.occupied_duct() {
+        // Inside a crawlspace (§10.7), which is a state exactly like the cupboard above
+        // it: concealed, contact-safe, and shaping every next decision while it lasts —
+        // here because your sight is gone and only the mouth gives it back (§6.1).
+        //
+        // It is also **the line the run opens on** (§4.5/#466). Turn one has no action
+        // behind it and so no message, and a run that begins inside its own tunnel needs
+        // to say so; the floor is where a standing fact belongs, and it keeps saying it
+        // for the length of the crawl rather than for one frame. The two ducts are
+        // worded apart because they *are* apart: one is a shortcut you found, the other
+        // is the way home.
+        if duct.way_out().is_some() {
+            ("your own tunnel — crawl out".to_string(), Category::Owned)
+        } else {
+            ("in the duct — memory only".to_string(), Category::Owned)
+        }
     } else if state.crouched() {
         ("crouched behind cover".to_string(), Category::Owned)
     } else if state.dragging().is_some() {

@@ -93,7 +93,10 @@ fn every_near_line_message_fits() {
         Event::Moved { to: at },
         Event::Bumped { into: at },
         Event::EnteredHideout { at },
-        Event::EnteredDuct { at },
+        Event::EnteredDuct {
+            at,
+            own_tunnel: false,
+        },
         Event::DuctCrawled { to: at },
         Event::Crouched { behind: at },
         Event::DoorOpened {

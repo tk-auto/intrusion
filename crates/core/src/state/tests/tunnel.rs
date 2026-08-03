@@ -120,7 +120,8 @@ fn the_exit_is_entered_from_the_facility_side() {
     assert_eq!(
         events,
         vec![Event::EnteredDuct {
-            at: Cell::new(5, 4)
+            at: Cell::new(5, 4),
+            own_tunnel: true,
         }]
     );
     assert!(s.in_duct(), "the bump climbed in");
@@ -152,6 +153,48 @@ fn the_way_out_wins_or_refuses_and_a_refusal_is_free() {
     let events = s.step(Input::Step(Direction::North));
     assert_eq!(events, vec![Event::Won]);
     assert_eq!(s.outcome(), Outcome::Won);
+}
+
+/// **The gate is answered at the mouth** (§4.5/#466). Short of the intel, bumping `E`
+/// from the facility side refuses — free, with the §4.5 message — instead of letting the
+/// player climb in and crawl to the border to be told no somewhere they can do nothing
+/// about it. The usable line says so before they press: `exit: needs the intel` on the
+/// very cell that will read `exit: enter` the moment the gate is met.
+#[test]
+fn the_mouth_refuses_short_of_the_intel_gate() {
+    // The one console sits just beyond the climb-out cell, so the whole run is: out of
+    // the mouth, one bump for the intel, and back in.
+    let mut s = tunnelled(vec![Cell::new(5, 6)]);
+    climb_out_of_the_tunnel(&mut s);
+    assert_eq!(s.player(), Cell::new(5, 5), "out of the mouth");
+    assert!(!s.exit_ready(), "an objective is still out");
+
+    assert!(
+        s.affordances()
+            .contains(&(Some(Direction::North), Affordance::ExitRefused)),
+        "the row refuses before the press does: {:?}",
+        s.affordances(),
+    );
+    let (turn, at) = (s.turn(), s.player());
+    let events = s.step(Input::Step(Direction::North));
+    assert_eq!(events, vec![Event::ExitRefused { still_needed: 1 }]);
+    assert!(!s.in_duct(), "and it never let us into the tunnel");
+    assert_eq!(s.turn(), turn, "a refusal spends nothing (§4.4)");
+    assert_eq!(s.player(), at, "and moves nobody");
+
+    // Take the intel — a bump, so it moves nobody — and the same cell, the same press,
+    // is now the way home.
+    s.step(Input::Step(Direction::South));
+    assert!(s.exit_ready(), "the gate is met");
+    assert_eq!(s.player(), at, "taking intel is a bump, not a move");
+    let events = s.step(Input::Step(Direction::North));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::EnteredDuct { .. })),
+        "with the gate met the mouth opens: {events:?}",
+    );
+    assert!(s.in_duct());
 }
 
 /// The way out is **one cell and one direction** (§4.5/#466). Every other step off the

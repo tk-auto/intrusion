@@ -2836,9 +2836,10 @@ fn any_effect_ink(grid: &Grid) -> bool {
 /// standing on to the mouth they are about to climb out of, which is the thing nothing on
 /// a 40×40 board did before: it points the eye at where you are.
 ///
-/// **`E` keeps its own face** through it. §11.5a draws the exit as itself from turn one —
-/// *yours* — so the run lights as `=` up to the mouth and the mouth stays `E`, in the
-/// Interest colour, rather than vanishing into an anonymous stretch of crawlspace.
+/// **`E` keeps its own face** through it, and the run wears the exit's own colour
+/// (§11.2/#466): §11.5a draws the exit as itself from turn one — *yours* — so the frame
+/// is one continuous Interest line from the border to the mouth, `=` up to `E` and `E`
+/// at the end of it, rather than a gray thread finishing in a purple letter.
 #[test]
 fn turn_one_draws_the_whole_exit_tunnel_and_e_keeps_its_face() {
     let exit = Cell::new(4, 4);
@@ -2861,7 +2862,11 @@ fn turn_one_draws_the_whole_exit_tunnel_and_e_keeps_its_face() {
         let cell = g.get(c.x, c.y);
         assert_eq!(cell.glyph, '=', "the run is drawn end to end at {c:?}");
         assert_eq!(cell.vis, Visibility::Live);
-        assert_eq!(cell.fg, Category::System);
+        assert_eq!(
+            cell.fg,
+            Category::Interest,
+            "your own tunnel wears the exit's colour, not the furniture band",
+        );
     }
 
     // …and the mouth is the exit, drawn as itself.

@@ -53,7 +53,13 @@ pub enum Event {
     /// they now occupy the duct and are concealed, their perception cut to the mouth
     /// peek and a shortened sense. Crawling along is [`Event::DuctCrawled`]; climbing
     /// out is an ordinary [`Event::Moved`] off an entry onto its mouth.
-    EnteredDuct { at: Cell },
+    ///
+    /// `own_tunnel` says **which** crawlspace (§4.5/#466): the way home, or a shortcut
+    /// found in the facility. It rides on the event because
+    /// [`message_for`](crate::message_for) is pure over it and cannot ask the layout —
+    /// and the near line must not call the tunnel a duct one frame after the usable
+    /// line offered `exit: enter`.
+    EnteredDuct { at: Cell, own_tunnel: bool },
     /// The player crawled one cell along a duct (§10.7): a spent turn (§4.4) that
     /// moves them to `to` but leaves them concealed inside the crawlspace.
     DuctCrawled { to: Cell },

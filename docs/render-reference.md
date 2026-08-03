@@ -164,6 +164,13 @@ where you are to where you are about to be, on a board that otherwise gives the 
 nothing. Climb out and it hides again like any other duct; `E` stays drawn, so the way
 back is never lost.
 
+**It wears Interest, where a found shortcut wears System.** A shortcut is furniture — the
+band the doors and cupboards are in — but the tunnel is the thing `E` anchors, so the run
+takes the exit's own colour and the opening frame reads as one continuous purple line
+rather than a gray thread ending in a purple letter. The **glyph** stays `=` either way:
+that is what a crawlspace is, and a second `E` on the board would lie about where the
+mouth is.
+
 ### 2.4 Why shape rather than a fourth brightness level
 
 The alternative was a fourth rung on the §11.5 dimming ladder: never-explored
