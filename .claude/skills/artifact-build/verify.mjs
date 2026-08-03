@@ -80,6 +80,22 @@ if ((await screen()) === "menu") {
   }
 }
 
+// A replay build reveals a #replaybar HUD; a live build never does. Asked here,
+// before the boot frame, because the two are checked differently from this point on.
+const replayPos = await page.$("#replaybar.on #replay-pos");
+
+// A live run opens with the tunnel walk (#466): the `@` comes up at `E` and walks to
+// the spawn over about five seconds, and **any key skips it without also acting**.
+// So the boot frame must be taken *after* the beat, or the movement check below
+// would spend its first arrow on the skip and pass on the frame that skip repainted
+// — proving only that the intro is skippable, never that input reaches the game.
+// `Escape` is bound to nothing in play (§11.6), so it ends the walk and does nothing
+// else, and is a harmless no-op on a build that has no walk to end.
+if (!replayPos) {
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+}
+
 const boot = await page.screenshot({ path: resolve(shotsDir, "boot.png") });
 
 // A blank canvas screenshots as a near-empty PNG; the glyph grid does not.
@@ -89,8 +105,6 @@ if (boot.length < 5000) {
   process.exit(1);
 }
 
-// A replay build reveals a #replaybar HUD; a live build never does. Branch on it.
-const replayPos = await page.$("#replaybar.on #replay-pos");
 let moved = false;
 if (replayPos) {
   // Replay viewer (#197): the arrows scrub the time cursor, not the player. Assert
