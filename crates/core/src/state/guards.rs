@@ -168,7 +168,6 @@ impl State {
     /// the stream.
     fn sense_guards(&mut self, senses: &GuardSenses, events: &mut Vec<Event>) {
         let blind = self.guard_blind_policy();
-        let mut spotters = Vec::new();
         for index in 0..self.guards.len() {
             if !senses.acts(index) {
                 continue;
@@ -182,10 +181,6 @@ impl State {
             guard.sense(senses.player, senses.concealed[index]);
             if guard.detected_player() && !was_aware {
                 events.push(Event::Detected { by: guard.pos() });
-                // Record the fresh spot for the one-beat spot flash (§11.5, #222).
-                // Every fresh detection is recorded; the renderer paints only the
-                // ones the player cannot *see* — a seen guard's cone already paints.
-                spotters.push(index);
             }
             if let Some(cell) = senses.entered {
                 if senses.seen[index]
@@ -209,9 +204,6 @@ impl State {
                 self.guards[index].look(facility, blind);
             }
         }
-        // Hand this turn's fresh spots to the renderer (#222), replacing the set the
-        // step head cleared. Empty on a turn nobody freshly detected the player.
-        self.spotters = spotters;
     }
 
     /// Pass 2 — the facility alert's sighting window (§7.3/§7.6): a turn in which

@@ -478,7 +478,7 @@ Backgrounds are the threat channel, and there is a fixed precedence:
 
 | Background | Means |
 |---|---|
-| **Danger** (red) | This cell is watched by a guard **you can see** |
+| **Danger** (red) | This cell is watched by a guard **you can see** — or it lies on the **watcher line**, the sightline of a guard you cannot see that is watching you right now |
 | **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; the `@` here is you, hidden by Camouflage *this turn*; or the `@` here is you **inside a solid with Phase Out running** — the cell the safety eject would throw you out of if the window ended now |
 | **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
 | **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
@@ -518,6 +518,37 @@ Two consequences that follow, and must not regress:
 
 Cones of guards you **cannot** see paint nothing — that is information you have not
 earned, and painting it would leak what you have not scouted.
+
+### The watcher line (#222/#465)
+
+That last rule leaves one hole, and the red channel closes it. A guard watching from
+a room you cannot see into paints no cone, so without this the board would say you
+are safe right up to the capture. Whenever a guard **detects you right now** and you
+**cannot see it**, the straight line between it and you is painted `Danger` — not the
+cone, just the line: where the threat is, and which way to run.
+
+It is **standing**, not a flash. Drawn on every turn that guard still has you, gone
+the turn it loses you, so it keeps answering *"it is still looking at you"* rather
+than only *"something just saw you"*. Read it as *"it can see you right now"* and
+never as *"it is after you"*: a chaser that has lost you draws nothing. Three cases
+draw nothing at all — a guard you can **see** (its real cone paints already, and the
+line must never double-draw one), a **confused** guard (blind, §8.3, so it has no
+cone to be honest about), and a player **concealed** from it (§10.3, matching the
+overlay's own spare — red under you means detected).
+
+It is painted among the *weakest* backgrounds, below the marks and the sensed dot,
+even though it is red: the line is a route, and the cues along it are about
+particular cells. So a **sensed** watcher keeps its orange position dot with the red
+line running up to it, and a watcher that is neither seen nor sensed is marked only
+by the line's own far end. The danger overlay still paints last and still outranks
+everything.
+
+**What it costs, stated rather than discovered:** while an unseen guard is looking at
+you, you get its exact position, through walls, at any distance, for free. That is a
+deliberate exception to §9's bound on what may be known about a guard — the sense
+range, the wait's widening, the duct's shrinking. §2.2/§2.3 buy it: you may not be
+caught by something you could not perceive. The exception is bounded by the condition
+it exists for, and expires with it.
 
 The cyan channel carries two things, and the difference is worth knowing. The
 **footprint** is the one-frame wash that answers *how far* — Confusion's bubble,

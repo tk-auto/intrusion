@@ -629,18 +629,6 @@ pub struct State {
     /// promptly too. A small set — a player passes through one door at a time — so a
     /// plain `Vec` scan beats a map.
     autodoors_pending: Vec<DoorId>,
-    /// The guards that **freshly** detected the player on the last spent turn — the
-    /// transition [`Event::Detected`] reports (§7.6) — as indices into
-    /// [`guards`](Self::guards), for the momentary **spot flash** (§11.5/§9.2, #222).
-    /// Filled in [`guard_phase`](Self::guard_phase) and cleared at the head of every
-    /// [`step`](Self::step), so it holds exactly one turn's fresh spots and clears on
-    /// the next action — the same one-beat life as the near-line message (§11.7). The
-    /// renderer reads it through [`spot_flash`](Self::spot_flash) and lights the
-    /// sightline of each spotter the player still cannot *see* (a seen guard's cone
-    /// already paints, §9.2). Indices, not cells: they are set and consumed within a
-    /// single turn — no guard is added or removed between — so the order is stable for
-    /// that window, and the renderer reads each spotter's *current* position.
-    spotters: Vec<usize>,
     /// The run's seeded random source (§12.4), carried through the turn loop for the
     /// two stochastic guard decisions: a Calm guard's chance to close a door behind
     /// itself (§10.4/#146) and its chance to dwell on reaching a patrol destination
@@ -786,7 +774,6 @@ impl State {
             door_cues: Vec::new(),
             effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
-            spotters: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
             // run seed. The startup world phase below draws nothing — a guard cannot
             // have passed through a door before it has taken a step — so setting the
@@ -1010,10 +997,6 @@ impl State {
         // A fresh turn: no hideout has been climbed into yet. The §15 Q5 witness check
         // in phase 3 reads whatever the Hide bump sets below, this turn only.
         self.entered_hideout = None;
-        // The spot flash lasts exactly one action (§11.7, #222): clear last turn's
-        // fresh spots here, so any this turn's guard phase records show for that beat
-        // and nothing lingers on the next input — free action or spent.
-        self.spotters.clear();
         // Phase 1. A free action (wall bump, refused exit) does not end the turn.
         let from = self.player;
         // The frame-bump mark (#320) has to survive *into* this action to be readable

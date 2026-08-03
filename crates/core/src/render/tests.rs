@@ -1734,18 +1734,27 @@ fn the_show_vision_cones_modifier_paints_an_unseen_guards_cone() {
     );
 }
 
-/// §11.5/§9.2/§7.6 (#222): the **spot flash**. A guard the player cannot see
-/// that *freshly* detects them lights the straight sightline to the player red
-/// — where the threat is, and which way to run — for exactly that one beat, then
-/// clears on the next action. The spotter keeps its orange **sensed** position
-/// dot (§9.2), with the red line running up to it. The lifetime (one action) is
-/// a **[START]** choice, pinned here.
+/// Every cell of the board that renders as `Danger`, in row order — the painted
+/// detection set, for the tests that assert on the *whole* of it.
+fn danger_cells(g: &Grid) -> Vec<Cell> {
+    (0..g.height())
+        .flat_map(|y| (0..g.width()).map(move |x| Cell::new(x, y)))
+        .filter(|&c| g.get(c.x, c.y).bg == Some(Category::Danger))
+        .collect()
+}
+
+/// §11.5/§9.2/§7.6 (#222/#465): the **watcher line** is *standing*. A guard the
+/// player cannot see that detects them lights the straight sightline to the player
+/// red — where the threat is, and which way to run — and keeps lighting it on every
+/// turn it still has them, because *"it is still looking at you"* is the question
+/// the player has for the whole encounter. The watcher keeps its orange **sensed**
+/// position dot (§9.2), with the red line running up to it.
 #[test]
-fn a_fresh_spot_flashes_the_sightline_then_clears() {
+fn a_watchers_sightline_stands_for_every_turn_it_watches() {
     // Guard at (10,5) facing south (spawn, §7.1); the player five cells south at
     // (10,10) facing *south* too — the guard is directly behind them, out of the
     // forward FOV, but its cone runs straight down over the player. So at level
-    // start the guard freshly detects a player it is unseen by (§9.2): a spot with
+    // start the guard detects a player it is unseen by (§9.2): a detection with
     // nothing on screen to say where it came from — exactly what #222 fixes.
     let mut s = State::new(
         open_room(20, 20),
@@ -1756,9 +1765,9 @@ fn a_fresh_spot_flashes_the_sightline_then_clears() {
         Cell::new(18, 18),
     )
     .without_the_opening_look();
-    // Precondition: the spotter is *not* seen (it is behind the player). Within
+    // Precondition: the watcher is *not* seen (it is behind the player). Within
     // sense range, so it is Sensed — its orange dot is the position channel the
-    // flash draws a line up to (§9.2), not over.
+    // line runs up to (§9.2), not over.
     assert!(
         !s.player_fov().contains(Cell::new(10, 5)),
         "the guard is behind the player, unseen",
@@ -1768,65 +1777,185 @@ fn a_fresh_spot_flashes_the_sightline_then_clears() {
         Some(GuardPerception::Sensed),
     );
 
-    // The detection beat: the sightline from the spotter down to the player is
+    // The detection turn: the sightline from the watcher down to the player is
     // red — the cells (10,6)..=(10,10), the player's own cell included (they *are*
-    // detected, the lose condition painted). The spotter's own cell keeps its
+    // detected, the lose condition painted). The watcher's own cell keeps its
     // orange sensed dot; the red line stops there rather than painting over it.
     let g = render(&s);
     assert_eq!(
         g.get(10, 5).bg,
         Some(Category::Sensed),
-        "the spotter keeps its orange position dot",
+        "the watcher keeps its orange position dot",
     );
-    for y in 6..=10 {
-        assert_eq!(
-            g.get(10, y).bg,
-            Some(Category::Danger),
-            "the spot sightline is red at (10,{y})",
-        );
-    }
-    // It is a *line*, not the cone: a cell beside it is untouched.
     assert_eq!(
-        g.get(12, 8).bg,
-        None,
-        "off the sightline stays clear — a line, not the whole cone",
+        danger_cells(&g),
+        (6..=10).map(|y| Cell::new(10, y)).collect::<Vec<_>>(),
+        "the whole red set is the sightline — a line, not the cone",
     );
 
-    // The next quiet turn: the flash is momentary. Step *south*, away from the
-    // guard and still facing away, so it stays behind and unseen (a Wait would
-    // instead widen sight to 360° and reveal it, §8.3). The guard re-detects but
-    // not *freshly*, so no line is drawn. The ambient sensed dot legitimately
-    // stays — the guard is still there to be felt — but no **red** lingers
-    // anywhere: the line is gone and, still unseen, its cone paints nothing
-    // (§9.2/§11.5 [SETTLED] held).
+    // The turns after: nothing is fresh any more, and the line stays. Step *south*,
+    // away from the guard and still facing away, so it stays behind and unseen (a
+    // Wait would instead widen sight to 360° and reveal it, §8.3). It still has the
+    // player, so it still says so — the one-beat flash #465 replaced would have gone
+    // dark here and left the board claiming safety.
+    for turn in 1..=3 {
+        s.step(Input::Step(Direction::South));
+        assert!(
+            !s.player_fov().contains(Cell::new(10, 5)),
+            "turn {turn}: the guard is still behind the player, unseen",
+        );
+        let g = render(&s);
+        assert_eq!(
+            danger_cells(&g),
+            (6..=10 + turn)
+                .map(|y| Cell::new(10, y))
+                .collect::<Vec<_>>(),
+            "turn {turn}: the standing line follows the player it watches",
+        );
+        assert_eq!(
+            g.get(10, 5).bg,
+            Some(Category::Sensed),
+            "turn {turn}: the sensed dot is unchanged under the line's far end",
+        );
+    }
+}
+
+/// §11.5/§9.2 (#465): the line means *"it can see you **right now**"*, never *"it
+/// is after you"*. The turn a watcher loses sight of the player — here to a wall
+/// the player steps behind — the line goes, even though the guard is still chasing
+/// and still felt through that wall.
+#[test]
+fn a_watcher_that_loses_sight_stops_drawing() {
+    // A wall stub at (11,8) throws a widening shadow south-east of the guard at
+    // (10,5), which faces south (spawn). The player starts at (13,10), just clear
+    // of that shadow and so detected, and steps *south* into it — keeping their
+    // own facing, so the guard stays behind them and unseen throughout, and the
+    // only thing that changes is whether it can see them.
+    let mut layout = open_room(20, 20);
+    layout.place(Cell::new(11, 8), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(13, 10),
+        Direction::South,
+        vec![Guard::stationary(Cell::new(10, 5))],
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .without_the_opening_look();
+    assert!(
+        !s.player_fov().contains(Cell::new(10, 5)),
+        "precondition: the watcher is unseen",
+    );
+    assert!(
+        s.guard_detects_now(&s.guards()[0]),
+        "precondition: it has the player to begin with",
+    );
+    assert!(
+        !danger_cells(&render(&s)).is_empty(),
+        "precondition: the line is drawn while it watches",
+    );
+
     s.step(Input::Step(Direction::South));
     assert!(
         !s.player_fov().contains(Cell::new(10, 5)),
-        "the guard is still behind the player, unseen",
+        "the watcher is still unseen — only its sight of the player changed",
+    );
+    assert!(
+        !s.guard_detects_now(&s.guards()[0]),
+        "the wall broke the sightline",
+    );
+    assert_eq!(
+        s.guards()[0].state(),
+        crate::GuardState::Chasing,
+        "it is still after the player — the line is about sight, not pursuit",
     );
     let g = render(&s);
-    for y in 0..g.height() {
-        for x in 0..g.width() {
-            assert_ne!(
-                g.get(x, y).bg,
-                Some(Category::Danger),
-                "no red lingers after the flash beat at ({x},{y})",
-            );
-        }
-    }
+    assert!(
+        danger_cells(&g).is_empty(),
+        "a chaser that has lost the player draws nothing",
+    );
     assert_eq!(
         g.get(10, 5).bg,
         Some(Category::Sensed),
-        "the sensed dot remains — only the flash line was momentary",
+        "the sensed dot remains — only the line went",
+    );
+}
+
+/// §10.3/§11.5 (#465): the line carries the danger overlay's own spare. A player
+/// **concealed** from the watcher is not detected, so nothing is drawn — red under
+/// you means detected, in this channel exactly as in the overlay's.
+#[test]
+fn a_concealed_player_draws_no_watcher_line() {
+    // The same scene as the standing golden, but the player stands *in a cupboard*
+    // (§10.3): the guard's cone still runs straight over the cell, and it detects
+    // nothing there.
+    let mut layout = open_room(20, 20);
+    layout.place(Cell::new(10, 10), Terrain::Hideout);
+    let s = State::new(
+        layout,
+        Cell::new(10, 10),
+        Direction::South,
+        vec![Guard::stationary(Cell::new(10, 5))],
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .without_the_opening_look();
+    assert!(s.hidden(), "precondition: the player is in the cupboard");
+    assert!(
+        s.guards()[0].fov().contains(Cell::new(10, 10)),
+        "precondition: the cone genuinely covers the cell — only concealment spares it",
+    );
+    assert_eq!(
+        s.watcher_lines().count(),
+        0,
+        "a concealed player is not detected, so there is no line to draw",
+    );
+    assert!(danger_cells(&render(&s)).is_empty(), "no red anywhere");
+}
+
+/// §8.3/§11.5 (#240/#465): a **confused** guard is blind — it takes no part in the
+/// sense pass, so its cone is last turn's frozen reading and it has nothing honest
+/// to draw. The line goes out with the cone, and what remains on its cell is the
+/// cyan "held" mark.
+#[test]
+fn a_confused_watcher_draws_no_line() {
+    use crate::AbilityId;
+    // The standing scene, with Confusion in hand and the watcher inside the blast.
+    let mut s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::South,
+        vec![Guard::stationary(Cell::new(10, 5))],
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion))
+    .without_the_opening_look();
+    assert!(
+        !danger_cells(&render(&s)).is_empty(),
+        "precondition: the unseen watcher draws its line",
+    );
+
+    s.step(Input::Activate(AbilityId::Confusion));
+    assert!(s.guard_confused(&s.guards()[0]), "precondition: dazed");
+    let g = render(&s);
+    assert!(
+        danger_cells(&g).is_empty(),
+        "a blind guard watches nothing, so it draws no line",
+    );
+    assert_eq!(
+        g.get(10, 5).bg,
+        Some(Category::Effect),
+        "its cell now says held instead",
     );
 }
 
 /// §9.2 [SETTLED] held: a guard the player **can see** when it detects them gets
-/// no separate flash line — its full cone already paints the danger overlay, so a
+/// no separate line — its full cone already paints the danger overlay, so a
 /// sightline would only double-draw. The overlay is unchanged from the plain
 /// visible-cone golden.
 #[test]
-fn a_seen_guard_that_detects_gets_no_extra_flash_line() {
+fn a_seen_guard_that_detects_gets_no_extra_watcher_line() {
     // Guard adjacent at (9,9), in the FOV of a north-facing player at (10,10),
     // looking south so its cone covers the player: seen, and detecting.
     let s = State::new(
@@ -1842,8 +1971,8 @@ fn a_seen_guard_that_detects_gets_no_extra_flash_line() {
         Some(GuardPerception::Seen),
         "the guard is in view",
     );
-    // No spot-flash cells are produced for a seen guard.
-    assert_eq!(s.spot_flash().count(), 0, "a seen spotter flashes nothing");
+    // No watcher-line cells are produced for a seen guard.
+    assert_eq!(s.watcher_lines().count(), 0, "a seen watcher draws no line");
 
     // The painted danger set is *exactly* the guard's cone — no line beyond it.
     let g = render(&s);
