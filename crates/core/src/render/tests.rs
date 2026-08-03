@@ -2848,3 +2848,113 @@ fn any_effect_ink(grid: &Grid) -> bool {
         })
     })
 }
+
+/// **The criterion that protects §11.1** (#466): the opening walk is a picture, not
+/// a world. A frame drawn with the walk somewhere along its route and the frame
+/// drawn with no walk at all differ in exactly one way — where the `@` sits — and
+/// the moment the walk reaches the player the two are *byte-identical*. So an
+/// animation played, skipped or absent leaves turn zero the same turn zero, which
+/// is what makes a golden grid and a seed reproduction survive it.
+#[test]
+fn the_tunnel_walk_moves_the_player_glyph_and_nothing_else() {
+    let mut s = state(14, 14, Cell::new(4, 9), Vec::new());
+    // The first frame is the wait's look (#383) — the frame the walk plays over.
+    s.step(Input::Wait);
+
+    let plain = render_screen(&s, ScreenUi::default());
+    let walk = crate::tunnel_walk(&s);
+    assert!(walk.len() > 2, "a walk with somewhere to be partway along");
+
+    // Ending the walk on the player is the same frame as never having walked.
+    let arrived = ScreenUi {
+        walk: walk.last().copied(),
+        ..ScreenUi::default()
+    };
+    assert_eq!(
+        render_screen(&s, arrived).to_text(),
+        plain.to_text(),
+        "the walk's last cell *is* the player: control begins on today's frame",
+    );
+
+    // Partway along, the only cells that differ are the two the `@` moved between.
+    let midway = walk[walk.len() / 2];
+    let during = render_screen(
+        &s,
+        ScreenUi {
+            walk: Some(midway),
+            ..ScreenUi::default()
+        },
+    );
+    assert_eq!(
+        (during.width(), during.height()),
+        (plain.width(), plain.height())
+    );
+    let mut differing: Vec<(u32, u32)> = (0..plain.height())
+        .flat_map(|y| (0..plain.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| plain.get(x, y) != during.get(x, y))
+        .collect();
+    differing.sort_unstable();
+    let mut moved = vec![
+        (midway.x, midway.y + TOP_ROWS),
+        (s.player().x, s.player().y + TOP_ROWS),
+    ];
+    moved.sort_unstable();
+    assert_eq!(
+        differing, moved,
+        "only the cell the `@` is shown on and the one it left behind move",
+    );
+
+    // And what each of those two cells became is the substitution, not a duplicate.
+    assert_eq!(during.get(midway.x, midway.y + TOP_ROWS).glyph, '@');
+    assert_eq!(
+        during.get(s.player().x, s.player().y + TOP_ROWS),
+        render(&s).get(midway.x, midway.y),
+        "the cell the player really stands on draws as the floor beside it, \
+         not as a second `@`",
+    );
+}
+
+/// The walk is drawn over the **frozen** turn-zero board (#466): stepping the `@`
+/// along it does not move the turn counter, a guard, the fog, or the danger overlay
+/// — the shell only ever asks for a different picture of the same state. Pinned on a
+/// state with a guard in view, so the whole live layer is in the comparison.
+#[test]
+fn the_tunnel_walk_freezes_the_world_it_is_drawn_over() {
+    let mut s = state(
+        16,
+        16,
+        Cell::new(4, 4),
+        vec![Guard::stationary(Cell::new(6, 8))],
+    );
+    s.step(Input::Wait);
+    let turn = s.turn();
+
+    let plain = render_screen(&s, ScreenUi::default());
+    for &cell in &crate::tunnel_walk(&s) {
+        let frame = render_screen(
+            &s,
+            ScreenUi {
+                walk: Some(cell),
+                ..ScreenUi::default()
+            },
+        );
+        // Every row outside the map is the world's own report, and untouched.
+        for y in (0..TOP_ROWS).chain(frame.height() - BOTTOM_ROWS..frame.height()) {
+            for x in 0..frame.width() {
+                assert_eq!(frame.get(x, y), plain.get(x, y), "row {y} moved at {x}");
+            }
+        }
+        // On the map, only the `@` may have moved: fog, memory and every background
+        // are the same cell for cell.
+        for y in 0..s.layout().facility().height() {
+            for x in 0..s.layout().facility().width() {
+                let (a, b) = (plain.get(x, y + TOP_ROWS), frame.get(x, y + TOP_ROWS));
+                if Cell::new(x, y) == cell || Cell::new(x, y) == s.player() {
+                    continue;
+                }
+                assert_eq!(a, b, "({x},{y}) changed under the walk");
+            }
+        }
+    }
+    assert_eq!(s.turn(), turn, "nothing about drawing spends a turn");
+}

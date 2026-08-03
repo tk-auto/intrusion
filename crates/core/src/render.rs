@@ -303,6 +303,14 @@ impl Grid {
 /// dimming to act on. An open door panel stays blank (§10.3): the gap in the
 /// wall *is* its rendering.
 pub fn render(state: &State) -> Grid {
+    render_map(state, None)
+}
+
+/// [`render`], plus the one thing a shell may say about the picture that state does
+/// not: where the player's `@` is shown while the tunnel walk plays
+/// ([`ScreenUi::walk`], §4.5/#466). Everything else is unchanged — the world is
+/// frozen at the turn this renders, and the override moves a glyph, never a fact.
+pub(crate) fn render_map(state: &State, walk: Option<Cell>) -> Grid {
     let facility = state.layout().facility();
     let (width, height) = (facility.width(), facility.height());
 
@@ -313,7 +321,7 @@ pub fn render(state: &State) -> Grid {
     let mut cells = terrain_pass(state);
     spent_console_recolour(state, &mut cells);
     duct_pass(state, &mut cells);
-    entity_pass(state, &mut cells);
+    entity_pass(state, walk, &mut cells);
     crouch_signal(state, &mut cells);
     stowed_body_memory(state, &mut cells);
     effect_wash(state, &mut cells);
@@ -437,7 +445,7 @@ fn duct_pass(state: &State, cells: &mut [GlyphCell]) {
 /// are already looking. Out of view it draws `Remembered`, not `Live`: the
 /// marker persists at full Owned colour while the three-state discipline
 /// (§11.5a) keeps telling the truth about what is actually being seen.
-fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
+fn entity_pass(state: &State, walk: Option<Cell>, cells: &mut [GlyphCell]) {
     let facility = state.layout().facility();
     let width = facility.width();
     let fov = state.player_fov();
@@ -508,8 +516,20 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
     // Owned (§10.3/§11.3) — the "you are hidden here" signal — instead of drawing
     // the `@`. Read through the same `hidden` query the loop and vision use, so
     // the picture cannot disagree.
+    //
+    // While the tunnel walk plays ([`ScreenUi::walk`], §4.5/#466) the `@` is drawn
+    // on the walk's cell instead — the one thing about the picture the shell's
+    // clock decides. It is a *substitution*, not a second entity: the cell the
+    // player really stands on keeps whatever the passes above put there, so there
+    // is never a moment with two of you on the board. Concealment is read from the
+    // real pose either way: a walk that ended on a cupboard shows the `}` it will
+    // show a frame later, and nothing about the walk can invent a hiding place.
     let player_glyph = if state.hidden() { '}' } else { PLAYER_GLYPH };
-    put(state.player(), player_glyph, Category::Owned);
+    put(
+        walk.unwrap_or(state.player()),
+        player_glyph,
+        Category::Owned,
+    );
 }
 
 /// The crouch signal (§10.3/§11.3): while the player is crouched, the whole

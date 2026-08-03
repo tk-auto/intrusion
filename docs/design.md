@@ -1872,6 +1872,28 @@ The renderer is a **separate concern behind one interface**. ASCII now; a tile
 renderer later is a second implementation of the same interface, swapping
 `fillText` for `drawImage`. The core must not know which is in use.
 
+**Animation, and the rule it must not break** (#466). The game may animate, and
+the purity rule above says exactly how: an animation is *a sequence of frames of
+one frozen state*, never a state that moves. So the clock is the shell's, the
+picture stays the core's, and the seam between them is the view state a shell
+already hands to the renderer (`ScreenUi`) — never a second renderer, and never a
+shell that draws a glyph of its own. The test that keeps this honest is that the
+frame the animation ends on is **byte-identical** to the frame drawn with no
+animation at all.
+
+The **opening walk** is the first of them, and the model for the rest. §1 says you
+dug the tunnel and came up through it, so a run opens with the player drawn at `E`
+walking the cells to their spawn — roughly five seconds, over a board frozen at
+turn 0, with the turn counter still 0 when control begins. It solves "there is
+nothing on forty by forty glyphs to draw the eye" by *movement* rather than by a
+marker: a marker says where you are, a walk says how you got there, and it leaves
+the eye where you will be standing. Its route is the player's own shortest route
+(§10.6 already guarantees one), it exposes nothing — the exit's position is free
+information from turn one (§11.5a) — and **any key or tap skips it**, with the
+skipping press not also played as an action (§11.6: five seconds is a trap by the
+twentieth run). The **departure** — the walk back down the hole once the intel is
+taken (§4.5) — is the same walk reversed. **[START]** on the pace.
+
 ### 11.2 Colour
 
 Colours are **not chosen by game systems**. Systems declare an **information

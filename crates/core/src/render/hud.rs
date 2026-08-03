@@ -29,6 +29,7 @@
 
 use super::*;
 use crate::ability::{AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
+use crate::cell::Cell;
 use crate::mnemonic;
 use crate::place::LevelConfig;
 use crate::status::near_line;
@@ -166,6 +167,26 @@ pub struct ScreenUi {
     /// The shell answers only *is this a touch session?*; the core keeps the words
     /// and the layout, so the hint stays inside the golden tests (§11.2/§12.1).
     pub modality: InputModality,
+    /// Where to draw the player's `@` **instead of** where they stand, while the
+    /// tunnel walk is playing (§4.5/#466) — the arrival, and later the departure
+    /// ([`tunnel_walk`](crate::tunnel_walk)).
+    ///
+    /// The animation is a shell concern from end to end: the shell owns the clock,
+    /// steps this along the walk's cells, and drops it back to `None` when the beat
+    /// is over. What it must *not* own is the drawing, because the shell decides no
+    /// glyph (§11.1) — so it says only **which cell the player is shown at**, and
+    /// [`render`](super::render) does the rest: the `@` lands there with its own
+    /// category and priority, and the cell they really occupy draws as whatever is
+    /// under them.
+    ///
+    /// It is view state in the strictest sense — no world moves, no turn is spent,
+    /// no guard sees it, and [`State`](crate::State) never hears of it. Turn zero is
+    /// byte-identical whether this animates, is skipped, or never runs, which is the
+    /// property that lets the game have an animation at all without §11.1 giving way.
+    ///
+    /// `None` in every other frame, which is every frame the sim, the replay viewer
+    /// and every test draw.
+    pub walk: Option<Cell>,
 }
 
 /// The input vocabulary the player is actually using (§11.6/#323) — the one thing
@@ -366,7 +387,11 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
 
     let statuses = state.ability_statuses();
 
-    let map = render(state);
+    // The map, with the one override a shell may ask for: the cell the player is
+    // *shown* at while the tunnel walk plays ([`ScreenUi::walk`], §4.5/#466). Every
+    // other row of the screen is untouched by it — the status lines and the bar
+    // report the world, and the world has not moved.
+    let map = super::render_map(state, ui.walk);
 
     // The near line (§11.4/§11.7): the loudest live message as a category band —
     // or the ambient floor when nothing is live — plus the right-aligned help

@@ -61,6 +61,59 @@ pub(crate) fn first_step_toward(
     None
 }
 
+/// The whole shortest path from `from` to `to` across cells where `passable`
+/// holds — every cell of the walk, both ends included — or `None` when nothing
+/// connects them. The sibling of [`first_step_toward`] for a caller that needs the
+/// *route* rather than the next move, sharing its search and so its answer: the same
+/// [`Direction::ALL`] expansion order, hence the same deterministic path (§12.4).
+///
+/// Both ends are exempt from `passable`, for the same reason the first-step search
+/// exempts the goal: a route may be asked for between two cells nobody may stand on
+/// — the exit is a goal reached by a bump and never crossed (§4.3/§4.5), and the
+/// opening walk starts on it ([`tunnel_walk`](crate::tunnel_walk)). Only the cells
+/// walked *through* must pass.
+///
+/// Coincident ends are a path of one cell, not `None`: there is a route, it is
+/// simply zero steps long.
+pub(crate) fn route_between(
+    from: Cell,
+    to: Cell,
+    passable: impl Fn(Cell) -> bool,
+) -> Option<Vec<Cell>> {
+    let mut came_from: HashMap<Cell, Cell> = HashMap::new();
+    came_from.insert(from, from);
+    let mut frontier = VecDeque::new();
+    frontier.push_back(from);
+    while let Some(cell) = frontier.pop_front() {
+        if cell == to {
+            // Walk the parent chain back to `from`, then read it forwards.
+            let mut route = vec![to];
+            let mut step = to;
+            while step != from {
+                step = came_from[&step];
+                route.push(step);
+            }
+            route.reverse();
+            return Some(route);
+        }
+        for dir in Direction::ALL {
+            let Some(next) = cell.step(dir) else {
+                continue;
+            };
+            if next != to && !passable(next) {
+                continue;
+            }
+            // As in [`first_step_toward`]: only the *first* visit fixes a cell's
+            // parent, or the reconstruction above could cycle.
+            if let Entry::Vacant(slot) = came_from.entry(next) {
+                slot.insert(cell);
+                frontier.push_back(next);
+            }
+        }
+    }
+    None
+}
+
 /// The cells reachable from `origin` across `passable` cells without leaving the
 /// `radius` Manhattan disc — a bounded flood fill, returned in breadth-first order.
 /// `origin` is included when it is itself passable; an impassable origin yields an
@@ -208,6 +261,57 @@ mod tests {
             first_step_toward(Cell::new(1, 1), Cell::new(3, 1), &passable),
             Some(Direction::East),
             "the goal is reachable even when not passable; only the path through is",
+        );
+    }
+
+    /// The route is the whole walk, both ends included, and it agrees with
+    /// [`first_step_toward`] on where it starts — one search, so the opening walk
+    /// and a guard's next move can never disagree about the board.
+    #[test]
+    fn route_between_returns_the_whole_walk_and_agrees_on_its_first_step() {
+        let passable = open_box(6, 6, &[Cell::new(2, 2)]);
+        let route = route_between(Cell::new(2, 1), Cell::new(2, 3), &passable)
+            .expect("a route around the wall");
+        assert_eq!(route.first(), Some(&Cell::new(2, 1)), "starts at `from`");
+        assert_eq!(route.last(), Some(&Cell::new(2, 3)), "ends at `to`");
+        assert_eq!(route.len(), 5, "four steps around the blocked cell");
+        assert!(
+            route.windows(2).all(|w| w[0].manhattan_distance(w[1]) == 1),
+            "each cell is one step from the last",
+        );
+        assert!(
+            !route.contains(&Cell::new(2, 2)),
+            "the wall is never walked through",
+        );
+        assert_eq!(
+            Direction::between(route[0], route[1]),
+            first_step_toward(Cell::new(2, 1), Cell::new(2, 3), &passable),
+            "the two searches take the same first step",
+        );
+    }
+
+    /// The ends are exempt from `passable` — the opening walk starts on the exit,
+    /// which is a goal nobody crosses (§4.3/§4.5) — and coincident ends are a
+    /// one-cell path rather than no path at all.
+    #[test]
+    fn route_between_exempts_both_ends_and_answers_a_standing_start() {
+        let passable = open_box(6, 6, &[Cell::new(3, 1), Cell::new(1, 1)]);
+        let route =
+            route_between(Cell::new(1, 1), Cell::new(3, 1), &passable).expect("both ends exempt");
+        assert_eq!(route.first(), Some(&Cell::new(1, 1)));
+        assert_eq!(route.last(), Some(&Cell::new(3, 1)));
+
+        assert_eq!(
+            route_between(Cell::new(2, 2), Cell::new(2, 2), &passable),
+            Some(vec![Cell::new(2, 2)]),
+            "nowhere to walk is still a route",
+        );
+
+        let boxed_in = open_box(6, 6, &[Cell::new(0, 1), Cell::new(1, 0)]);
+        assert_eq!(
+            route_between(Cell::new(0, 0), Cell::new(5, 5), &boxed_in),
+            None,
+            "no path exists",
         );
     }
 

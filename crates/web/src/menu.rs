@@ -283,6 +283,10 @@ impl Game {
             self.ui.end.options = options;
             seed::reflect_level(&level);
             set_screen(SCREEN_PLAY);
+            // The board is up: walk into it (§4.5/#466). Last, so the opening beat
+            // plays over a frame that is already the run's — the reset above, the
+            // token in the address bar, and the page chrome all settled.
+            self.begin_tunnel_walk();
         }
     }
 

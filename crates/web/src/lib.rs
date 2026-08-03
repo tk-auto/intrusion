@@ -53,6 +53,7 @@ mod palette;
 mod replay;
 mod seed;
 mod tap;
+mod walk;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -176,6 +177,8 @@ pub fn start() -> Result<(), JsValue> {
             replay_hud: None,
             key_ramp: replay::ScrubRamp::default(),
             recorded: Vec::new(),
+            walk: None,
+            clock: None,
             handle: handle.clone(),
         })
     });
@@ -188,11 +191,20 @@ pub fn start() -> Result<(), JsValue> {
         input::install_input(&document, &game)?;
         input::install_gestures(&document, &game)?;
         menu::install(&document, &game)?;
+        // The frame clock (§4.5/#466), wired on the live-play path **only**: a replay
+        // re-runs recorded inputs and never animates, so it is never given one.
+        let clock = walk::Clock::install(&game);
+        game.borrow_mut().clock = Some(clock);
         // A run the load already named is live from the first frame, so its token
         // belongs in the address bar straight away (§13.1/#110). A run chosen from
         // the menu reflects itself when it starts, not before.
         if game.borrow().ui.menu.is_none() {
             seed::reflect_level(&level);
+            // …and it is walked into from the first frame too: a load that was told
+            // which run to play opens on the board, so the opening beat belongs here.
+            // A load that opens on the title screen walks in when the player picks a
+            // run instead ([`Game::start_run`]).
+            game.borrow_mut().begin_tunnel_walk();
         }
     }
     install_resize(&game)?;
@@ -256,6 +268,17 @@ struct Game {
     /// `debug-tools` builds only; empty for the page's lifetime everywhere else,
     /// and always empty in replay mode, whose inputs drive a cursor, not a world.
     recorded: Vec<Input>,
+    /// The tunnel walk playing over this run's opening frame, or `None` once it has
+    /// finished or been skipped (§4.5/#466) — the timeline only; where the `@` is
+    /// *drawn* is [`ScreenUi::walk`], written from it each frame. Never `Some` in
+    /// replay mode or before a run starts, and it holds no world: the game underneath
+    /// is frozen at turn zero for its whole duration ([`walk`]).
+    walk: Option<walk::Walk>,
+    /// The page's frame clock ([`walk::Clock`]), or `None` where there is nothing to
+    /// animate — a replay, which plays back inputs and never a beat. Installed once
+    /// at boot and shared by every run of the page, so restarting from the end screen
+    /// costs no second closure.
+    clock: Option<Rc<walk::Clock>>,
     /// A weak handle back to the shell's own cell, closed at construction
     /// (`Rc::new_cyclic`). Every other input the shell takes is answered inside the
     /// call that raised it, so nothing else needs this; the clipboard write (§13.1/
@@ -325,6 +348,10 @@ impl Game {
         // fed to a run that no longer exists, and a replay stitched across two
         // worlds would reproduce neither.
         self.recorded.clear();
+        // …and a fresh board means the old walk is over: its cells belong to a
+        // facility that no longer exists. The new run's own beat is started by
+        // [`Game::start_run`], after this reset has cleared the view state.
+        self.walk = None;
         // A clean view state, except for what the *player* is — the modality the
         // hint speaks (§11.6/#323) is a fact about their hands, not about the run,
         // so a fresh facility must not send a touch player back to reading keys —

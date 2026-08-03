@@ -35,6 +35,15 @@ impl State {
         self.facing
     }
 
+    /// The exit (§1/§4.5): the mouth of the tunnel the player dug and came up
+    /// through, and the only way out — there is no second door. Its position is free
+    /// information from turn one (§11.5a draws it as itself, never schematic), so
+    /// handing it out here reveals nothing the board is not already showing; it is
+    /// the anchor the opening walk starts from ([`tunnel_walk`](crate::tunnel_walk)).
+    pub fn exit(&self) -> Cell {
+        self.exit
+    }
+
     /// Open a targeting session (§8.4) for `mode`, anchored on the player's cell
     /// and facing (§5). The shell drives the returned [`Targeting`] — steering the
     /// cursor with cardinals and confirming — while core owns validity: a `Tile`

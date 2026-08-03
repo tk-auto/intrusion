@@ -79,6 +79,15 @@ impl Game {
         // It folds onto the arrows rather than onto `8` `2` `4` `6` deliberately
         // (#369): those characters are the top row's too, and the top row is the bar's.
         let key = key_for_code(code).unwrap_or(key);
+        // The opening walk (§4.5/#466) is answered before every table, because the
+        // whole point of it is that *any* key gets out of it: a five-second beat you
+        // have to sit through every run is the trap §11.6 forbids. The press ends the
+        // beat and does nothing else — it is consumed, so the page never scrolls on
+        // it, and it is not fed to the loop, so the arrow that skipped the intro does
+        // not also take the first step of the run.
+        if self.skip_tunnel_walk() {
+            return true;
+        }
         // Before a run starts, the menu owns the keyboard (§14/#268): it is modal in
         // the strongest sense — there is no world to step underneath it. Everything
         // the game would claim is swallowed; a genuinely unowned key (F5, a browser
@@ -899,6 +908,14 @@ impl GesturePump {
         // vocabulary on the frame this press draws.
         if let Some(modality) = modality_of_pointer(&e.pointer_type()) {
             self.game.borrow_mut().note_modality(modality);
+        }
+        // A tap skips the opening walk (§4.5/#466), the keyboard's half of which is in
+        // [`Game::handle_key`]. No drag is started, so the lift that follows finds no
+        // active pointer and fires nothing: the press that ended the beat cannot also
+        // be read as a Wait or the beginning of a swipe.
+        if self.game.borrow_mut().skip_tunnel_walk() {
+            e.prevent_default();
+            return;
         }
         let (x, y) = (e.client_x() as f64, e.client_y() as f64);
         let tap = self.game.borrow().tap_at(x, y);

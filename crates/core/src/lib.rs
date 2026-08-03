@@ -74,6 +74,7 @@ mod status;
 mod targeting;
 #[cfg(test)]
 mod test_support;
+mod tunnel;
 mod verdict;
 mod vision;
 
@@ -123,6 +124,7 @@ pub use state::{
 };
 pub use status::{live_messages, message_for, near_line, Message, MessageHistory, HISTORY_ACTIONS};
 pub use targeting::{within_range, Target, Targeting, TileCursor};
+pub use tunnel::tunnel_walk;
 pub use verdict::{EndExit, Ending, RunMode, RunOptions, RunStats, Verdict};
 pub use vision::{
     field_of_view, field_of_view_with_blind_spot, field_of_view_with_peek, BlindPolicy, BlindTier,
