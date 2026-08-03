@@ -505,7 +505,9 @@ mod tests {
                     );
                 }
                 // A real span: the two mouths open onto two different regions.
-                let [a, b] = duct.entries();
+                let [a, b] = duct.entries()[..] else {
+                    panic!("a shortcut duct has two entries")
+                };
                 let ra = regions.region_at(mouth(facility, a));
                 let rb = regions.region_at(mouth(facility, b));
                 assert!(ra.is_some() && rb.is_some());
@@ -593,7 +595,9 @@ mod tests {
             let layout = level(seed);
             let facility = layout.facility();
             for duct in layout.ducts() {
-                let [a, b] = duct.entries();
+                let [a, b] = duct.entries()[..] else {
+                    panic!("a shortcut duct has two entries")
+                };
                 let walk = floor_distance(facility, mouth(facility, a), mouth(facility, b))
                     .expect("mouths are reachable on a §10.6-valid level");
                 assert!(

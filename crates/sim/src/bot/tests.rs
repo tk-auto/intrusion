@@ -196,13 +196,15 @@ fn the_balanced_profile_is_the_default_bot() {
 /// assertion when the levels underneath it move.
 ///
 /// **#383 opened the run with the wait's look, and moved 17 of the 48 rows, 5 of
-/// them changing outcome.** The first frame is now computed as if the previous turn
+/// them changing outcome.** The first frame was computed as if the previous turn
 /// had been a Wait (§5/§8.3/§9.1) — 360° sight and the widened guard sense — so the
-/// bot's very first decision is taken against a different picture of the entry room
-/// and every run diverges from there. It is not a policy change: the same cues read
-/// a perception the game hands them one turn earlier. The **outcome mix barely
-/// moves** (19 wins before and after; one loss more), and `balanced 2`'s stall
-/// (`playing 1000`) resolves into a 47-turn loss, leaving `careless 10` as the pin's
+/// bot's very first decision was taken against a different picture of the entry room
+/// and every run diverged from there. (#466 has since removed that opening look
+/// altogether, along with the materialising it was there to soften.) It was not a
+/// policy change: the same cues read a perception the game handed them one turn
+/// earlier. The **outcome mix barely moved** (19 wins before and after; one loss
+/// more), and `balanced 2`'s stall
+/// (`playing 1000`) resolved into a 47-turn loss, leaving `careless 10` as the pin's
 /// only run at the cap. Twelve seeds are a pin, not a balance signal (§13.4); the
 /// 100-seed baseline refreshed in the same PR is what judges the change.
 ///
@@ -304,6 +306,16 @@ fn the_balanced_profile_is_the_default_bot() {
 /// change-detector, not a balance signal (§13.4) — and against a re-rolled level set
 /// it is not even that, only a new reference point.
 ///
+/// **#466 moved all 48 rows, and again it means nothing row to row.** The exit is now
+/// the mouth of a tunnel the player starts inside (§4.5), so placement chooses a
+/// different `E`, the draw shifts behind it (the comms console moved ahead of the guards
+/// so the #232 knob stops perturbing it), and every seed carves a *different facility* —
+/// 48 different levels, played from a different opening. The aggregate (**25 wins to
+/// 20**) is not a difficulty finding either; the committed baseline refreshed in the
+/// same PR runs 100 seeds per profile and is what judges that. What is worth noting is
+/// that the `playing 999` row this pin used to carry is gone: no seed here now spends
+/// its whole input budget without ending.
+///
 /// **Merging #451 and #452 moved four more rows**, all `aggressive`/`careless` and
 /// none of them a win/loss flip: the extra turn a fetch now costs (#451) lands on
 /// levels #452 re-carved, so the two interact only where a profile both stows a body
@@ -320,54 +332,54 @@ fn the_balanced_profile_is_the_default_bot() {
 #[test]
 fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
     const PINNED: [&str; 48] = [
-        "balanced 0 lost 74 rcr",
-        "balanced 1 won 149 rr",
-        "balanced 2 won 125 ",
-        "balanced 3 lost 118 r",
-        "balanced 4 lost 117 r",
-        "balanced 5 lost 87 cr",
-        "balanced 6 lost 35 r",
-        "balanced 7 won 53 ",
-        "balanced 8 lost 45 rd",
-        "balanced 9 won 62 ",
-        "balanced 10 won 158 rcdcrdc",
-        "balanced 11 lost 64 rrdr",
-        "cautious 0 won 101 ",
-        "cautious 1 won 186 rdrd",
-        "cautious 2 won 293 ",
-        "cautious 3 won 231 ",
-        "cautious 4 lost 190 drrc",
-        "cautious 5 won 111 c",
-        "cautious 6 lost 99 rrc",
-        "cautious 7 won 53 ",
-        "cautious 8 lost 216 rdrrrr",
-        "cautious 9 won 62 ",
-        "cautious 10 lost 65 rcd",
-        "cautious 11 lost 58 rdr",
-        "aggressive 0 lost 150 rrrrr",
-        "aggressive 1 won 129 r",
-        "aggressive 2 won 129 ",
-        "aggressive 3 lost 110 rr",
-        "aggressive 4 lost 116 rcrcrrdc",
-        "aggressive 5 lost 13 rc",
-        "aggressive 6 lost 98 rccrd",
-        "aggressive 7 won 53 ",
-        "aggressive 8 lost 70 rdrc",
-        "aggressive 9 won 62 ",
-        "aggressive 10 lost 44 r",
-        "aggressive 11 lost 174 rrdrcrdrr",
-        "careless 0 lost 65 rrc",
-        "careless 1 lost 89 r",
-        "careless 2 won 129 ",
-        "careless 3 lost 110 rr",
-        "careless 4 lost 46 r",
-        "careless 5 lost 13 rc",
-        "careless 6 playing 999 rcrcrcrcrcr",
-        "careless 7 won 53 ",
-        "careless 8 lost 109 rcrrr",
-        "careless 9 won 62 ",
-        "careless 10 lost 44 r",
-        "careless 11 lost 99 rrcrrc",
+        "balanced 0 won 76 ",
+        "balanced 1 won 145 rr",
+        "balanced 2 won 247 rdrrd",
+        "balanced 3 lost 41 r",
+        "balanced 4 lost 203 crdrdrd",
+        "balanced 5 won 135 c",
+        "balanced 6 lost 219 r",
+        "balanced 7 won 60 ",
+        "balanced 8 lost 162 rdrd",
+        "balanced 9 won 59 ",
+        "balanced 10 lost 63 cr",
+        "balanced 11 lost 78 rrdrc",
+        "cautious 0 won 76 ",
+        "cautious 1 won 118 ",
+        "cautious 2 won 315 rdr",
+        "cautious 3 lost 51 r",
+        "cautious 4 lost 327 ccrdrdrd",
+        "cautious 5 lost 387 crrdcrdr",
+        "cautious 6 won 350 rdrrdrr",
+        "cautious 7 won 60 ",
+        "cautious 8 lost 308 drdrdr",
+        "cautious 9 won 59 ",
+        "cautious 10 won 151 ",
+        "cautious 11 lost 61 rdrc",
+        "aggressive 0 won 76 ",
+        "aggressive 1 won 100 rcr",
+        "aggressive 2 won 169 rr",
+        "aggressive 3 lost 41 r",
+        "aggressive 4 lost 43 rc",
+        "aggressive 5 lost 115 rr",
+        "aggressive 6 won 320 rrrcrrcdrrd",
+        "aggressive 7 won 60 ",
+        "aggressive 8 lost 51 rdr",
+        "aggressive 9 won 59 ",
+        "aggressive 10 won 180 crrdrr",
+        "aggressive 11 lost 205 rrrrr",
+        "careless 0 won 76 ",
+        "careless 1 lost 99 rr",
+        "careless 2 won 169 rr",
+        "careless 3 lost 41 r",
+        "careless 4 lost 40 rc",
+        "careless 5 lost 117 rr",
+        "careless 6 lost 60 r",
+        "careless 7 won 60 ",
+        "careless 8 lost 61 rdcr",
+        "careless 9 won 59 ",
+        "careless 10 won 154 crrdrc",
+        "careless 11 lost 205 rrrrr",
     ];
 
     let mut played = Vec::new();
@@ -1031,9 +1043,9 @@ fn every_profile_ducks_behind_a_bench() {
         // temperaments rather than asserted per profile: `aggressive` only ducks
         // with a patrol already on top of it (`threat_radius` 3), which over the
         // sim preset is about **two crouches in 200 seeds** — a 60-seed batch
-        // measures that rarity rather than the seam, and #383's opening look was
-        // enough to take its count here from one to none. What the row must never
-        // be is structurally empty.
+        // measures that rarity rather than the seam — #383's opening look was once
+        // enough to take its count here from one to none, and #466 removing that look
+        // moves it again. What the row must never be is structurally empty.
         let records = run_batch(0..60, DEFAULT_INPUT_CAP, move |_| {
             StealthBot::with_profile(profile)
         })
@@ -1216,35 +1228,39 @@ fn every_profile_finishes_its_runs() {
     }
 }
 
-/// Regression (#171): the endless stalls #165 tipped the bot into now *finish*.
-/// The close-behind/automatic doors (§10.4) reshaped guard coverage enough to
-/// surface two self-inflicted stalls, both of which spent the whole input budget
-/// without the run ending:
+/// Regression (#171): the endless stalls #165 tipped the bot into now *finish* — and
+/// what "stall" means is the point. #165's two failures burned the whole **input**
+/// budget while the **turn** counter barely moved, because the bot kept choosing free
+/// actions (§4.4) that changed nothing:
 ///
-/// - **Marching onto its own exit.** Hunted with no reachable hideout, the flee
-///   routine used to fall back on the exit cell; with objectives still out, a step
-///   onto the exit is a refused, *free* bump (§4.5), so the turn never advanced and
-///   the hunt never cooled (seeds 30, 43). It now cloaks or retreats instead.
+/// - **Marching onto its own exit.** Hunted with no reachable hideout, the flee routine
+///   used to fall back on the exit cell; with objectives still out, a step onto the exit
+///   was a refused, *free* bump (§4.5), so the turn never advanced and the hunt never
+///   cooled. It now cloaks or retreats instead — and since #466 the shape cannot recur
+///   at all: a step onto `E` climbs into the tunnel, which spends the turn.
 /// - **Sealing itself into a cupboard.** Waiting out a guard parked on a hideout's
 ///   only mouth, the bot would eventually push on, take the guard down, and drop
-///   the body across that mouth — the §7.2/#170 soft-lock (seeds 33, 34, 44, 58,
-///   64, 65). It now leaves such a guard be and waits for the patrol to step off.
+///   the body across that mouth — the §7.2/#170 soft-lock. It now leaves such a guard
+///   be, and #187 made a loose body non-solid, so a body across a mouth stops nobody.
 ///
-/// The second stall could no longer happen either way: #187 made a loose body
-/// non-solid, so a body across a mouth stops nobody (#316). The seeds are kept
-/// under **`balanced`**, which still declines the strike, so this stays a
-/// regression test for the stalls rather than becoming a test of the new play.
-///
-/// Each seed must reach a real end (win or capture), never the input cap.
+/// So the assertion is about **free actions**, not about the outcome: a run that spends
+/// every input on a real turn and still runs the clock out is a hard level, and one that
+/// ends on turn 40 with a thousand inputs spent is the bug. The seeds are #165's own,
+/// kept under **`balanced`** — though what facility each carves has moved since (#466
+/// re-anchored placement on the exit), so they are a spread of levels now rather than
+/// the exact scenes that failed.
 #[test]
-fn the_close_behind_door_stalls_now_finish() {
+fn the_bot_never_burns_its_inputs_on_free_actions() {
     for seed in [30, 43, 33, 34, 44, 58, 64, 65] {
         let record = run_one(seed, &mut StealthBot::new(), DEFAULT_INPUT_CAP).expect("generates");
-        assert_ne!(
-            record.outcome,
-            RunOutcome::Timeout,
-            "seed {seed}: the bot should play the run to an end, not stall out",
-        );
+        if record.outcome == RunOutcome::Timeout {
+            assert_eq!(
+                record.turns, DEFAULT_INPUT_CAP,
+                "seed {seed}: {} inputs bought only {} turns — the bot is stalling on \
+                 free actions rather than playing",
+                DEFAULT_INPUT_CAP, record.turns,
+            );
+        }
     }
 }
 

@@ -9,7 +9,7 @@
 use crate::guard::GuardState;
 use crate::state::*;
 use crate::targeting::Target;
-use crate::test_support::{captured_at, open_room, solo};
+use crate::test_support::{captured_at, leave_by_the_tunnel, open_room, room_with_tunnel, solo};
 use crate::vision::field_of_view;
 use crate::{LevelModifiers, Rng};
 
@@ -296,9 +296,10 @@ fn an_ability_is_protected_for_its_full_duration_then_locked_out() {
 /// with intel still out refuses and is free.
 #[test]
 fn win_requires_all_intel_then_the_exit() {
-    // Player at (4,4); one intel at (5,4); exit at (4,5).
+    // Player at (4,4); one intel at (5,4); the exit at (4,5), with its tunnel running
+    // south to the border (§4.5/#466).
     let mut s = State::new(
-        open_room(10, 10),
+        room_with_tunnel(10, 10, Cell::new(4, 5), Direction::South),
         Cell::new(4, 4),
         Direction::North,
         Vec::new(),
@@ -306,13 +307,18 @@ fn win_requires_all_intel_then_the_exit() {
         Cell::new(4, 5),
     );
 
-    // Bumping the exit early: refused, free, still playing.
-    let events = s.step(Input::Step(Direction::South));
+    // Leaving early: the crawl in is free to make, but the step off the board at the
+    // far end refuses, changes nothing and costs nothing (§4.5).
+    let events = leave_by_the_tunnel(&mut s);
     assert_eq!(events, vec![Event::ExitRefused { still_needed: 1 }]);
     assert_eq!(s.outcome(), Outcome::Playing);
-    assert_eq!(s.turn(), 0);
+    let refused_on = s.turn();
 
-    // Take the intel by bumping the console to the east.
+    // Crawl back out and take the intel by bumping the console to the east.
+    while s.in_duct() {
+        s.step(Input::Step(Direction::North));
+    }
+    assert_eq!(s.player(), Cell::new(4, 4), "back out where we came in");
     let events = s.step(Input::Step(Direction::East));
     assert_eq!(
         events,
@@ -327,9 +333,10 @@ fn win_requires_all_intel_then_the_exit() {
         Cell::new(4, 4),
         "taking intel is a bump, not a move"
     );
+    assert!(s.turn() > refused_on, "the crawl back was real turns");
 
-    // Now the exit accepts.
-    let events = s.step(Input::Step(Direction::South));
+    // Now the way out accepts.
+    let events = leave_by_the_tunnel(&mut s);
     assert_eq!(events, vec![Event::Won]);
     assert_eq!(s.outcome(), Outcome::Won);
 
@@ -549,7 +556,7 @@ fn moving_off_a_hideout_climbs_out() {
 #[test]
 fn one_intel_opens_the_exit() {
     let mut s = State::new(
-        open_room(12, 12),
+        room_with_tunnel(12, 12, Cell::new(5, 6), Direction::South),
         Cell::new(5, 5),
         Direction::North,
         Vec::new(),
@@ -557,21 +564,24 @@ fn one_intel_opens_the_exit() {
         Cell::new(5, 6),
     );
     assert!(!s.exit_ready(), "empty-handed: the exit is not yet open");
-    // Bumping the exit with no intel refuses (free, §4.5).
-    let events = s.step(Input::Step(Direction::South));
+    // Leaving with no intel refuses at the way out (free, §4.5).
+    let events = leave_by_the_tunnel(&mut s);
     assert!(
         events.contains(&Event::ExitRefused { still_needed: 1 }),
         "refused empty-handed, wanting the one intel the gate asks for",
     );
     assert_eq!(s.outcome(), Outcome::Playing);
 
-    // Take one console (bump north), leaving the other out.
+    // Back out of the tunnel and take one console (bump north), leaving the other out.
+    while s.in_duct() {
+        s.step(Input::Step(Direction::North));
+    }
     s.step(Input::Step(Direction::North));
     assert_eq!(s.objectives_remaining(), 1, "one intel still out");
     assert!(s.exit_ready(), "one intel in hand opens the exit");
 
-    // Reach the exit and leave — a win on a single objective.
-    let events = s.step(Input::Step(Direction::South));
+    // Leave the way we came in — a win on a single objective.
+    let events = leave_by_the_tunnel(&mut s);
     assert!(events.contains(&Event::Won), "one intel + exit is a win");
     assert_eq!(s.outcome(), Outcome::Won);
 }
@@ -584,7 +594,7 @@ fn one_intel_opens_the_exit() {
 fn the_all_intel_gate_requires_the_full_set() {
     use crate::modifiers::IntelGate;
     let mut s = State::new(
-        open_room(12, 12),
+        room_with_tunnel(12, 12, Cell::new(5, 6), Direction::South),
         Cell::new(5, 5),
         Direction::North,
         Vec::new(),
@@ -603,21 +613,24 @@ fn the_all_intel_gate_requires_the_full_set() {
         !s.exit_ready(),
         "the all-intel gate holds the exit shut on a partial set",
     );
-    let events = s.step(Input::Step(Direction::South));
+    let events = leave_by_the_tunnel(&mut s);
     assert!(
         events.contains(&Event::ExitRefused { still_needed: 1 }),
         "the exit refuses a partial set under the all-intel gate, wanting the rest",
     );
     assert_eq!(s.outcome(), Outcome::Playing);
 
-    // Take the second console (bump east): now the whole set is in hand.
+    // Back out, and take the second console (bump east): the whole set is in hand.
+    while s.in_duct() {
+        s.step(Input::Step(Direction::North));
+    }
     s.step(Input::Step(Direction::East));
     assert_eq!(s.objectives_remaining(), 0, "the full set is in hand");
     assert!(
         s.exit_ready(),
         "the all-intel gate opens once every intel is taken"
     );
-    let events = s.step(Input::Step(Direction::South));
+    let events = leave_by_the_tunnel(&mut s);
     assert!(events.contains(&Event::Won), "all intel + exit is a win");
     assert_eq!(s.outcome(), Outcome::Won);
 }
@@ -802,9 +815,10 @@ fn a_crouched_player_is_still_captured_by_contact() {
 /// built [`State`] already carries the player's sight and every guard's cone — and a
 /// guard that has not moved is looking **south**, its initial facing (§7.1).
 ///
-/// That opening sight is the **wait's**, not the half-disc (#383): behind the spawn
-/// facing is lit too. The half-disc is what the *next* frame draws, which the second
-/// half of this test pins — so the posture is legible here as a thing that ends.
+/// That opening sight is the **ordinary half-disc** (§5/#466): two ahead lit, two behind
+/// dark, from the very first frame. There is no free 360° opening look any more — the
+/// posture #383 added to show a player the room they materialised in went with the
+/// materialising (§4.5: you crawl in through your own tunnel now).
 #[test]
 fn the_startup_turn_establishes_sight() {
     let mut s = State::new(
@@ -816,11 +830,11 @@ fn the_startup_turn_establishes_sight() {
         Cell::new(10, 10),
     );
 
-    // The opening look is 360° (§5/§8.3/§9.1): two ahead *and* two behind are lit.
+    // The opening look is the half-disc (§5/#466): two ahead lit, two behind dark.
     assert!(s.player_fov().contains(Cell::new(5, 3)));
     assert!(
-        s.player_fov().contains(Cell::new(5, 7)),
-        "the run opens looking all round the entry room",
+        !s.player_fov().contains(Cell::new(5, 7)),
+        "the run opens with the ordinary forward arc, not a free look all round",
     );
 
     // The stationary guard looks south from spawn (§7.1): its wedge covers two
@@ -830,13 +844,13 @@ fn the_startup_turn_establishes_sight() {
     assert!(g.fov().contains(Cell::new(8, 10)));
     assert!(!g.fov().contains(Cell::new(8, 6)));
 
-    // One spent step and sight is the ordinary half-disc again: from (5,4) facing
-    // north, two ahead is lit and two behind is dark.
+    // And it stays the half-disc: from (5,4) facing north, two ahead is lit and two
+    // behind is dark.
     s.step(Input::Step(Direction::North));
     assert!(s.player_fov().contains(Cell::new(5, 2)));
     assert!(
         !s.player_fov().contains(Cell::new(5, 6)),
-        "the first spent action ends the opening posture",
+        "the arc is the same on every turn — there is no posture to end",
     );
 }
 

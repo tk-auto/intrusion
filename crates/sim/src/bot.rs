@@ -199,6 +199,15 @@ impl PlayerPolicy for StealthBot {
             return input;
         }
 
+        // 0.2. Inside the tunnel (§4.5/§10.7/#466). Every run starts here and — if it
+        // is won — ends here, and a crawlspace admits exactly one plan: crawl. Nothing
+        // below this can apply, since a crawler is concealed, contact-safe, and confined
+        // to the path (there is no cover to take, no guard to strike and no console to
+        // reach from inside a wall), so it sits at the top rather than in the ladder.
+        if state.in_duct() {
+            return self.crawl(state);
+        }
+
         // 0.5. Phased inside a solid: get out, before anything else is considered.
         // A duration that expires in there costs a safety eject *plus* a stun as long
         // as the throw (§8.3), which is worse than anything the other branches are
@@ -246,6 +255,91 @@ impl PlayerPolicy for StealthBot {
 }
 
 impl StealthBot {
+    /// Crawl (§10.7), which is the whole of what a bot inside a duct can do — and, for
+    /// the exit tunnel, the opening and closing beats of every run (§4.5/#466).
+    ///
+    /// Which way depends on the errand, and there are only two:
+    ///
+    /// - **Out into the facility**, when there is still a run to play: crawl toward the
+    ///   mouth and climb out of it. This is the opening of every run — the bot starts on
+    ///   the way-out cell of its own tunnel — and it is also how it leaves a §10.7
+    ///   shortcut it took as a route.
+    /// - **Out of the building**, when the intel gate is met and the bot is in its own
+    ///   tunnel: crawl to the way out and step off the board. The last step is read off
+    ///   the **usable line** rather than computed here, so the bot presses exactly the
+    ///   key the game offers a player (§11.4).
+    ///
+    /// It plans no further than that: the crawl is confined to the path (§10.7), so
+    /// there is nothing to weigh and no cost field to descend. Waiting mid-crawl would
+    /// be a wasted turn — it does not even widen the sense in here (§9.1/§10.7) — so
+    /// the bot never does.
+    fn crawl(&mut self, state: &State) -> Input {
+        // Standing on the way out with the gate met: the row says `exit: leave`, and
+        // pressing it is the win (§4.5). It says `exit: needs the intel` otherwise, and
+        // pressing *that* would be a free no-op — so the bot turns round instead.
+        if state.exit_ready() {
+            if let Some(dir) = aimed_at(state, Affordance::Leave) {
+                return Input::Step(dir);
+            }
+        }
+        let Some(duct) = state.occupied_duct() else {
+            return Input::Wait; // unreachable: `decide` asked because we are in one
+        };
+        let cells = duct.cells();
+        let Some(i) = cells.iter().position(|&c| c == state.player()) else {
+            return Input::Wait; // ditto: a crawler is always on its own path
+        };
+        // Which end to make for. Leaving the building means the way out, and it is only
+        // ever the far end of the exit tunnel; anything else means the mouth.
+        let leaving = state.exit_ready() && duct.way_out().is_some();
+        let next = if leaving {
+            cells.get(i + 1)
+        } else if i > 0 {
+            cells.get(i - 1)
+        } else {
+            None
+        };
+        if let Some(&next) = next {
+            if let Some(dir) = Direction::between(state.player(), next) {
+                return Input::Step(dir);
+            }
+        }
+        // On the mouth: climb out onto the floor it opens into (§10.7). Prefer a cell no
+        // guard is watching — the mouth peek is exactly the look this decision is for —
+        // and take a watched one only if that is all there is, since sitting in the
+        // crawlspace makes no progress and the run has a clock (§13.2).
+        //
+        // **Never back onto the path**, even when the next cell along it is walkable
+        // floor: a duct's interior may overlie a room (§10.7 cross-room routing), and a
+        // step onto that cell is a *crawl*, not a climb-out. Without this the bot walks
+        // the first two cells of the exit tunnel for the rest of the run.
+        let danger = danger_cells(state);
+        let blocked = blocked_cells(state);
+        let facility = state.layout().facility();
+        let out = |avoid_danger: bool| {
+            Direction::ALL.into_iter().find(|&dir| {
+                state.player().step(dir).is_some_and(|cell| {
+                    routable(facility, cell)
+                        && !cells.contains(&cell)
+                        // Not into a cupboard, either: it has one mouth (§10.1.6), and
+                        // if that mouth is the cell we are standing on the only way out
+                        // is back in here. Hiding is a decision the flee routine makes
+                        // from the floor, never a way to arrive.
+                        && facility.terrain(cell) != Some(Terrain::Hideout)
+                        && !blocked.contains(&cell)
+                        && !(avoid_danger && danger.contains(&cell))
+                })
+            })
+        };
+        out(true).or_else(|| out(false)).map_or(
+            // Every way out is watched *and* occupied: hold on the entry cell and let
+            // the peek keep reading the room. This is the one wait a crawl ever makes,
+            // and it is the §10.7 counterplay — the deliberate pause at the mouth.
+            Input::Wait,
+            Input::Step,
+        )
+    }
+
     /// Break contact (§7.6): open a gap with Run, make for a bolthole, and wait the
     /// hunt out from inside a hideout — the one place a guard's contact cannot reach
     /// (§4.5). Getting *to safety* is the whole job here, so it drives straight for
@@ -799,16 +893,7 @@ impl StealthBot {
         if self.profile.comms_reach == 0 {
             return None;
         }
-        state
-            .affordances()
-            .into_iter()
-            // The direction is an `Option` since #451 — the line carries one
-            // standing-on entry that has none — but `SilenceRadio` is a bump, so a
-            // `None` here would be core contradicting itself. `find_map` reads the
-            // direction rather than asserting it, and a shape that cannot happen
-            // simply yields no press.
-            .find_map(|(dir, a)| (a == Affordance::SilenceRadio).then_some(dir?))
-            .map(Input::Step)
+        aimed_at(state, Affordance::SilenceRadio).map(Input::Step)
     }
 
     /// Pursue the objective — nearest known untaken console, then the exit — or, when
@@ -1445,6 +1530,20 @@ fn rear_strike_cells(state: &State, danger: &HashSet<Cell>, blocked: &HashSet<Ce
             routable(facility, spot) && !danger.contains(&spot) && !blocked.contains(&spot)
         })
         .collect()
+}
+
+/// The direction the usable line (§11.4) aims `want` in, or `None` when the row does
+/// not offer it from where the bot stands.
+///
+/// The direction is an `Option` since #451 — the line carries one standing-on entry that
+/// has none — so a bump affordance with no direction would be core contradicting itself.
+/// This reads the direction rather than asserting it, and a shape that cannot happen
+/// simply yields no press.
+fn aimed_at(state: &State, want: Affordance) -> Option<Direction> {
+    state
+        .affordances()
+        .into_iter()
+        .find_map(|(dir, a)| (a == want).then_some(dir?))
 }
 
 /// The exit cell — the player's own tunnel, known from the start (§4.5). Found by

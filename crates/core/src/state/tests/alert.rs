@@ -375,6 +375,9 @@ fn no_rung_ever_speeds_a_guard_up_or_falls_back_down() {
         p.exit(),
     )
     .with_rng(rng);
+    // Out of the tunnel first (§4.5/#466): the crawl is concealed and contact-safe, so
+    // nothing about the ladder can happen while the run is still in it.
+    crate::test_support::climb_out_of_the_tunnel(&mut s);
 
     let positions = |s: &State| -> Vec<Cell> { s.guards().iter().map(|g| g.pos()).collect() };
     let mut before = positions(&s);

@@ -2168,10 +2168,7 @@ fn the_blast_is_clamped_to_the_guard_sense_inside_a_duct() {
     let (inside, past) = (Cell::new(3, 6), Cell::new(3, 7));
     let mut s =
         super::ducts::duct_world_with(vec![Guard::stationary(inside), Guard::stationary(past)])
-            .with_loadout(Loadout::innate().with(AbilityId::Confusion))
-            // The plain box is what this measures, so the scene starts past the run's
-            // opening look (#383), which would otherwise widen it to the wait's 20.
-            .without_the_opening_look();
+            .with_loadout(Loadout::innate().with(AbilityId::Confusion));
 
     // On the floor first: the clamp is inert, and the guard at 6 is caught.
     assert_eq!(

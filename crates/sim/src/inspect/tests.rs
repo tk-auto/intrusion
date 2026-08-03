@@ -13,123 +13,118 @@ const PASTED: &str = "https://6dcafcf6-cb7b-4f80-9d6f-db85c4366efa.frame.claudeu
 
 /// **The whole point, end to end**: a pasted link becomes the run it names.
 ///
-/// The player walked five north up a corridor, turned east into its head, was
-/// carried one more cell by the #57 **auto-slide**, then spent four inputs pressed
-/// against the wall before turning south and ducking behind a table. Every claim
-/// here is one a reader of the report needs to be able to trust: the trajectory, the
-/// slide that moved them somewhere their key did not name, and the inputs that spent
-/// a turn without moving — the free actions (§4.4) a bare position list would hide.
+/// What this one names, since #466 re-carved it, is a player who never left their own
+/// tunnel. They opened on the **way out** — the border cell at the far end of the
+/// crawlspace they dug (§4.5) — pressed north five times into the border wall, pressed
+/// east six times *off the board* and were refused for want of intel, and finished with
+/// two more presses into the wall to the south. Thirteen inputs, thirteen free actions,
+/// nought turns spent.
 ///
-/// **The run this link names changes with every generation change** — #387, and now
-/// #452 — and that is worth understanding rather than papering over: a level-seed
+/// That is a *better* fixture than the one it replaces, because it is exactly the case
+/// this mode's own doc names as the question a pasted link is really asking: `--script`
+/// would have reported "capture at turn 61", when the true answer is "they never got
+/// out of the tunnel, and the exit refused them six times". Every claim below is one a
+/// reader of the report has to be able to trust: where they started, that nothing moved,
+/// and which presses were the refusal rather than the wall.
+///
+/// **The run this link names changes with every generation change** — #387, then #452,
+/// now #466 — and that is worth understanding rather than papering over: a level-seed
 /// token encodes the *seed*, and the level is a function of the seed **and the
 /// generator**. Any generation change therefore re-carves every previously shared
 /// token; the link still parses and still names a v1 level, but not the one the
 /// player walked. The fixture is refreshed with the generator, exactly as the
 /// committed sim baseline is.
 ///
-/// The assertions are rewritten with it rather than loosened, which is the point: the
-/// facts this fixture exists to pin are *kinds* of turn — a real move, a spent turn
-/// that changed posture instead of position, a blocked press, and the #57 auto-slide
-/// that carries the player perpendicular to the key. Every one of them survives the
-/// re-carve on this link; only which input is which has moved.
+/// The assertions are rewritten with it rather than loosened. The *kinds* of turn this
+/// file pins — a real move, a spent turn that changed posture instead of position, the
+/// #57 auto-slide — moved with the re-carve to
+/// [`inspecting_is_deterministic_and_matches_a_plain_boot`] and
+/// [`the_opening_crawl_reads_as_the_moves_it_is`], which drive their own scripts and so
+/// cannot be emptied out by the next one.
 #[test]
 fn the_pasted_link_reproduces_the_run_that_was_played() {
     let (level, inputs) = parse_replay_link(PASTED).expect("a real link");
     let seen = inspect(&level, &inputs).expect("the v1 footprint carves");
 
-    assert_eq!(seen.start, Cell { x: 36, y: 12 }, "where they opened");
+    assert_eq!(seen.start, Cell { x: 39, y: 1 }, "where they opened");
     assert_eq!(seen.turns.len(), 13, "one record per pasted input");
 
-    // Four north up the corridor, every one of them a real move.
-    for turn in &seen.turns[..4] {
-        assert!(!turn.stayed_put(), "input {} moved", turn.index);
+    // Nobody moved, all thirteen inputs: the report has to show that, or a bare
+    // position list would read as a player standing still by choice.
+    for turn in &seen.turns {
+        assert!(turn.stayed_put(), "input {} moved", turn.index);
     }
     assert_eq!(
-        seen.turns[3].to,
-        Cell { x: 36, y: 8 },
-        "after the four north"
+        seen.state.turn(),
+        0,
+        "and every one of them was free (§4.4)"
     );
 
-    // The fifth is pressed north too and the player does **not** move: the cell
-    // ahead is a table, so the press ducks behind it instead (§10.3). Worth pinning
-    // for the same reason the auto-slide was: it is a spent turn the report has to
-    // show as a change of *posture*, not of position, or a reader cannot trust it.
-    assert!(
-        seen.turns[4].stayed_put(),
-        "the crouch is a pose, not a step"
-    );
-    assert!(
-        seen.turns[4]
-            .events
-            .iter()
-            .any(|e| matches!(e, Event::Crouched { .. })),
-        "input 5 ducked behind the table ahead: {:?}",
-        seen.turns[4].events,
-    );
+    // The five norths are the border wall — a plain blocked bump.
+    for turn in &seen.turns[..5] {
+        assert!(
+            turn.events
+                .iter()
+                .any(|e| matches!(e, Event::Bumped { .. })),
+            "input {} was a wall bump: {:?}",
+            turn.index,
+            turn.events,
+        );
+    }
 
-    // The sixth turns east and moves; the seventh is pressed east and ducks again,
-    // this time behind the bench on that side.
-    assert_eq!(seen.turns[5].to, Cell { x: 37, y: 8 }, "east off the table");
-    assert_eq!(seen.turns[6].input, Input::Step(Direction::East));
-    assert!(seen.turns[6].stayed_put(), "another duck, not a step");
+    // The six easts are the **way out** (§4.5/#466), aimed off the board from the
+    // tunnel's border cell — refused, and saying what the gate still wants.
+    for turn in &seen.turns[5..11] {
+        assert!(
+            turn.events
+                .iter()
+                .any(|e| matches!(e, Event::ExitRefused { still_needed: 3 })),
+            "input {} was the refused way out: {:?}",
+            turn.index,
+            turn.events,
+        );
+    }
 
-    // Then the #57 auto-slide: pressed east against the bench, the player is carried
-    // **north** instead — a move the key did not name, which the report must show
-    // rather than leave a reader suspecting it.
-    assert_eq!(
-        seen.turns[7].to,
-        Cell { x: 37, y: 7 },
-        "the auto-slide carried them on, perpendicular to the key pressed",
-    );
-
-    // An east against the wall: a turn spent, nobody moved.
-    assert!(
-        seen.turns[10].stayed_put(),
-        "input 11 was blocked and should show as stayed: {:?}",
-        seen.turns[10].events,
-    );
-
-    // The twelfth goes south; the thirteenth is pressed south and ducks behind the
-    // bench there — a spent turn that changes posture rather than position (§10.3).
+    // …and the last two are the wall again, so the report ends where it began.
     let last = seen.turns.last().expect("thirteen records");
     assert_eq!(last.input, Input::Step(Direction::South));
-    assert!(last.stayed_put(), "the crouch is a pose, not a step");
-    assert!(
-        last.events
-            .iter()
-            .any(|e| matches!(e, Event::Crouched { .. })),
-        "the last input ducked behind the table: {:?}",
-        last.events,
-    );
+    assert_eq!(last.to, seen.start);
     assert_eq!(seen.outcome(), Outcome::Playing, "the run was still live");
 }
 
-/// The report says the things a reader came for, in the game's own words: the
-/// level, the rule that was bending the run, the refusal, and how it ended.
+/// The **opening crawl** reads as what it is (§4.5/§10.7/#466): every run now begins
+/// inside the player's own tunnel, and the first inputs are real moves along it — not
+/// the blocked presses a reader might take them for, and not free actions.
+///
+/// This is where the "a real move" claim lives now that the pasted link above spends
+/// all thirteen of its inputs standing still. It drives its own script, so a later
+/// re-carve moves *which* level it crawls out of, never whether there is a crawl.
 #[test]
-fn the_report_narrates_the_run_in_the_games_own_words() {
-    let (level, inputs) = parse_replay_link(PASTED).expect("a real link");
-    let report = inspect(&level, &inputs)
-        .expect("the v1 footprint carves")
-        .report();
+fn the_opening_crawl_reads_as_the_moves_it_is() {
+    let level = LevelSeed::sim(7);
+    // West, because this seed's tunnel comes out through the east border — the crawl
+    // runs inward from the way-out cell it opens on.
+    let inputs = parse_script("WWW").expect("a legal script");
+    let seen = inspect(&level, &inputs).expect("the v1 footprint carves");
 
-    assert!(report.contains("hwqcwzlhzanrdsdfzd"), "the level's token");
-    assert!(report.contains("seed 18900"));
-    assert!(report.contains("Intel to exit"), "the rule in force");
-    assert!(report.contains("stayed"), "the input that did not move");
-    // The near line's own words for what the run actually did, not a second
-    // vocabulary. The event is whichever one this level's run produces — the claim
-    // being pinned is that the report quotes the game rather than paraphrasing it.
-    let crouch = intrusion_core::message_for(Event::Crouched {
-        behind: Cell { x: 27, y: 4 },
-    })
-    .expect("the crouch speaks");
-    assert!(
-        report.contains(&crouch.text),
-        "the report speaks the game's words: {report}",
+    let crawls = seen
+        .turns
+        .iter()
+        .filter(|t| {
+            t.events
+                .iter()
+                .any(|e| matches!(e, Event::DuctCrawled { .. }))
+        })
+        .count();
+    assert!(crawls > 0, "the run opens with a crawl: {:?}", seen.turns);
+    for turn in seen.turns.iter().take(crawls) {
+        assert!(!turn.stayed_put(), "input {} moved a cell", turn.index);
+    }
+    assert_eq!(
+        seen.state.turn(),
+        crawls as u32,
+        "a crawl is a spent turn (§4.4/§10.7)",
     );
-    assert!(report.contains("still playing"), "how it ended");
 }
 
 /// **It stops when the inputs stop** — the difference from `--script`, which pads

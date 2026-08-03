@@ -23,13 +23,17 @@ use crate::Rng;
 
 /// A player holding Pierce Wall in a `w × h` walled box, facing north.
 fn borer(layout: Layout, player: Cell) -> State {
+    // A generated layout carries the player's own tunnel (§4.5/#466) and its mouth *is*
+    // the exit, so the state must be told the same cell the layout was laid around; a
+    // hand-built one has no tunnel and keeps the unused corner it always had.
+    let exit = layout.exit_duct().map_or(Cell::new(1, 1), |d| d.cells()[0]);
     State::new(
         layout,
         player,
         Direction::North,
         Vec::new(),
         Vec::new(),
-        Cell::new(1, 1),
+        exit,
     )
     .with_loadout(Loadout::innate().with(AbilityId::PierceWall))
 }
@@ -604,15 +608,7 @@ fn borable_stand(layout: &Layout, within: &HashSet<Cell>) -> Option<Cell> {
             if facility.terrain(cell) != Some(Terrain::Floor) || !within.contains(&cell) {
                 continue;
             }
-            let probe = State::new(
-                layout.clone(),
-                cell,
-                Direction::North,
-                Vec::new(),
-                Vec::new(),
-                Cell::new(1, 1),
-            )
-            .with_loadout(Loadout::innate().with(AbilityId::PierceWall));
+            let probe = borer(layout.clone(), cell);
             if probe.bore_target().is_ok() {
                 return Some(cell);
             }

@@ -417,6 +417,14 @@ pub enum Affordance {
     Hide,
     /// A duct entry: bump to climb into the crawlspace shortcut (§10.7).
     EnterDuct,
+    /// The exit `E` from the facility side (§4.5/§10.7/#466): bump to climb into the
+    /// tunnel you dug — the way home, whose far end is the level border and the world.
+    ///
+    /// Its own label rather than [`EnterDuct`](Affordance::EnterDuct)'s, because the two
+    /// bumps behave identically and mean completely different things: one is a shortcut
+    /// you *found*, the other is the only way out of the building. The one row that
+    /// tells you what a bump does should not read the same for both.
+    EnterExit,
     /// A table: bump to crouch behind it (§10.3).
     Crouch,
     /// The exit, with the intel gate met (§10.2): bump to win (§4.5).
@@ -432,7 +440,7 @@ impl Affordance {
     /// a variant missing from here is a label nothing checks, which is exactly the
     /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
     /// against it so a new variant cannot quietly skip the list.
-    pub(crate) const ALL: [Affordance; 13] = [
+    pub(crate) const ALL: [Affordance; 14] = [
         Affordance::Takedown,
         Affordance::ReleaseBody,
         Affordance::TakeBody,
@@ -443,6 +451,7 @@ impl Affordance {
         Affordance::SilenceRadio,
         Affordance::Hide,
         Affordance::EnterDuct,
+        Affordance::EnterExit,
         Affordance::Crouch,
         Affordance::Leave,
         Affordance::ExitRefused,
@@ -465,6 +474,7 @@ impl Affordance {
             Affordance::SilenceRadio => "comms: silence radio",
             Affordance::Hide => "cupboard: hide",
             Affordance::EnterDuct => "duct: enter",
+            Affordance::EnterExit => "exit: enter",
             Affordance::Crouch => "table: crouch",
             Affordance::Leave => "exit: leave",
             Affordance::ExitRefused => "exit: needs the intel",
@@ -493,8 +503,12 @@ impl Affordance {
             | Affordance::StoreBody
             | Affordance::EnterDuct
             | Affordance::Crouch => Category::System,
+            // The exit is the goal at both ends of the run — climbing into your own
+            // tunnel is Interest, not the System colour a found duct's mouth wears
+            // (§4.5/#466): what it is *for* is leaving.
             Affordance::TakeIntel
             | Affordance::SilenceRadio
+            | Affordance::EnterExit
             | Affordance::Leave
             | Affordance::ExitRefused => Category::Interest,
         }
@@ -526,6 +540,7 @@ mod affordance_tests {
                 | Affordance::SilenceRadio
                 | Affordance::Hide
                 | Affordance::EnterDuct
+                | Affordance::EnterExit
                 | Affordance::Crouch
                 | Affordance::Leave
                 | Affordance::ExitRefused => true,

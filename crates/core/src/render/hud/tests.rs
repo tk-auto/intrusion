@@ -378,7 +378,6 @@ fn the_full_screen_renders_golden() {
         [Cell::new(3, 2)], // a console east of the player
         Cell::new(38, 4),
     )
-    .without_the_opening_look()
     .with_loadout(granted());
     let text = render_screen(&s, ScreenUi::default()).to_text();
     assert_eq!(

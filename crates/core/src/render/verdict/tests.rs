@@ -11,7 +11,7 @@ use crate::level_seed::LevelSeed;
 use crate::place::LevelConfig;
 use crate::render::{render_screen, ScreenUi};
 use crate::state::{Input, Outcome, State};
-use crate::test_support::open_room;
+use crate::test_support::{leave_by_the_tunnel, open_room, room_with_tunnel};
 use crate::verdict::{RunMode, RunOptions};
 use crate::Cell;
 
@@ -39,17 +39,17 @@ fn captured_run() -> State {
 }
 
 /// A run that ends **won**: no objectives, so the intel gate is vacuously satisfied
-/// (§4.5), and the player bumps the exit beside them.
+/// (§4.5), and the player climbs into the tunnel beside them and crawls out (#466).
 fn won_run() -> State {
     let mut state = State::new(
-        open_room(BOARD.0, BOARD.1),
+        room_with_tunnel(BOARD.0, BOARD.1, Cell::new(5, 4), Direction::East),
         Cell::new(4, 4),
         Direction::North,
         Vec::new(),
         Vec::new(),
         Cell::new(5, 4),
     );
-    state.step(Input::Step(Direction::East));
+    leave_by_the_tunnel(&mut state);
     assert_eq!(state.outcome(), Outcome::Won, "the fixture ends won");
     state
 }

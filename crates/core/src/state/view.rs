@@ -842,6 +842,17 @@ impl State {
             out.push((None, Affordance::TakeBody));
         }
         for dir in Direction::ALL {
+            // The way out (§4.5/#466): from the exit tunnel's border cell, the step
+            // that leaves the board is the run's last decision, and it is the first
+            // affordance whose arrow points **off** the grid (§11.4/#384). It carries
+            // no FOV gate — there is no cell out there to have seen, and the tunnel
+            // you dug yourself is not something the fog can hide from you.
+            if let Some(kind) = self.way_out_kind(dir) {
+                if let Some(a) = kind.affordance() {
+                    out.push((Some(dir), a));
+                }
+                continue;
+            }
             let Some(target) = self.player.step(dir) else {
                 continue;
             };
