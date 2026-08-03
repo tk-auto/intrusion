@@ -118,6 +118,111 @@ pub(crate) fn region_strip() -> Layout {
     Layout::from_parts(f, g)
 }
 
+/// The player's own tunnel (§4.5/§10.7/#466), hand-laid: the straight run of cells from
+/// `exit` out to the border along `dir`, `exit` first and the way-out cell last. The
+/// fixture twin of the generator's `carve_exit_duct`, for a state that needs a real way
+/// in and out without running a carve.
+pub(crate) fn exit_tunnel_cells(w: u32, h: u32, exit: Cell, dir: Direction) -> Vec<Cell> {
+    let mut cells = vec![exit];
+    let mut cell = exit;
+    while let Some(next) = cell.step(dir) {
+        assert!(next.x < w && next.y < h, "the run left the grid");
+        cells.push(next);
+        if next.x == 0 || next.y == 0 || next.x == w - 1 || next.y == h - 1 {
+            return cells;
+        }
+        cell = next;
+    }
+    panic!("a straight run always meets the border");
+}
+
+/// [`open_room`] with the player's own tunnel on it (§4.5/#466) — an empty `w × h` box
+/// whose `exit` is the inner mouth of a crawlspace running out to the border along
+/// `dir`. Pair it with [`exit_tunnel_cells`] to name the way-out cell a run starts on.
+pub(crate) fn room_with_tunnel(w: u32, h: u32, exit: Cell, dir: Direction) -> Layout {
+    let mut layout = open_room(w, h);
+    layout.set_exit_duct(crate::duct::Duct::exit_tunnel(exit_tunnel_cells(
+        w, h, exit, dir,
+    )));
+    layout
+}
+
+/// Crawl out of the tunnel the run starts in (§4.5/#466) and step into the facility —
+/// the opening every real run plays, for a fixture whose subject is what happens
+/// *after* it. Leaves the player standing on the floor beside `E`; a no-op for a
+/// hand-built state that starts on foot.
+pub(crate) fn climb_out_of_the_tunnel(state: &mut State) {
+    use crate::state::Input;
+    for _ in 0..64 {
+        let Some(duct) = state.occupied_duct() else {
+            return;
+        };
+        let cells = duct.cells().to_vec();
+        let i = cells
+            .iter()
+            .position(|&c| c == state.player())
+            .expect("the crawler is on its own path");
+        let dir = if i > 0 {
+            // Crawl on toward the mouth.
+            Direction::between(cells[i], cells[i - 1]).expect("the path is contiguous")
+        } else {
+            // On the mouth: climb out onto the floor it opens into. **Straight ahead**
+            // where that works — the mouth faces out along the tunnel's own axis, so
+            // this is the cell a player who kept crawling would come up on — and any
+            // other side otherwise. Never back onto the path, whose cells may themselves
+            // be floor the crawl merely overlies (§10.7 cross-room routing); a step onto
+            // one of those is another crawl.
+            let facility = state.layout().facility();
+            let out_of = |n: Cell| !cells.contains(&n) && facility.can_enter(n, 1.0);
+            let ahead = state.player().step(state.facing()).filter(|&n| out_of(n));
+            let out = ahead
+                .or_else(|| facility.neighbours(state.player()).find(|&n| out_of(n)))
+                .expect("a mouth opens onto somewhere");
+            Direction::between(state.player(), out).expect("a neighbour is one step away")
+        };
+        state.step(Input::Step(dir));
+    }
+    panic!("the tunnel is not that long")
+}
+
+/// Leave by the tunnel (§4.5/#466), the way a player does: climb in at `E`, crawl to the
+/// border, and step off the board. Returns the events of that **last** step — the win, or
+/// the §4.5 refusal if the intel gate is not met (in which case the player is left
+/// standing on the way-out cell, exactly as a real refusal leaves them).
+///
+/// It drives itself off the **usable line** ([`State::affordances`]), so a fixture that
+/// uses it is asserting through the same row the player reads.
+pub(crate) fn leave_by_the_tunnel(state: &mut State) -> Vec<Event> {
+    use crate::state::{Affordance, Input};
+    let aimed = |state: &State, want: Affordance| {
+        state
+            .affordances()
+            .into_iter()
+            .find_map(|(dir, a)| (a == want).then_some(dir?))
+    };
+    for _ in 0..64 {
+        if let Some(dir) =
+            aimed(state, Affordance::Leave).or_else(|| aimed(state, Affordance::ExitRefused))
+        {
+            return state.step(Input::Step(dir));
+        }
+        let dir = if let Some(dir) = aimed(state, Affordance::EnterExit) {
+            dir
+        } else {
+            // Inside the tunnel: crawl on, away from the mouth.
+            let duct = state.occupied_duct().expect("at the mouth or inside it");
+            let cells = duct.cells();
+            let i = cells
+                .iter()
+                .position(|&c| c == state.player())
+                .expect("the crawler is on its own path");
+            Direction::between(cells[i], cells[i + 1]).expect("the path is contiguous")
+        };
+        state.step(Input::Step(dir));
+    }
+    panic!("the tunnel is not that long")
+}
+
 /// A player in an empty room, facing north, no guards or objectives, exit unused
 /// in a far corner.
 pub(crate) fn solo(player: Cell) -> State {

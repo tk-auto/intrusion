@@ -275,8 +275,22 @@ If you are adding an ability and about to make it free, re-read §2.3.
   no damage. **[SETTLED]**
 - **Being seen is not losing.** It is the beginning of a problem.
 - **Win: grab the intel, then return to your entry point.** You leave the
-  way you came in. Bumping the exit before you hold enough intel refuses, with a
-  message. **How much is "enough" is a level modifier** (`intel_to_exit`, §12.6/#244),
+  way you came in — and the way you came in is a **place**, not a tile (§10.7/#466).
+  `E` is the inner mouth of a **linear duct** running from it out through the level
+  border to the outside world; the run **starts with you inside that duct, on the
+  border cell**, and the first inputs crawl you to `E` and out into the facility.
+  Leaving is the same thing backwards: bump `E` to climb in (the usable line reads
+  **`exit: enter`**, never `duct: enter` — one is a shortcut you found and the other is
+  the way home), crawl back to the border cell, and **bump outward**, off the grid. That
+  step off the board is the win.
+
+  **The gate is answered at the mouth.** Bumping `E` before you hold enough intel
+  refuses, with the message, exactly as bumping the exit always did — you are told in
+  the facility, where you can act on it, rather than after a crawl that ends in a wall.
+  The border cell answers a press too, since that is where the run *begins* and you can
+  stand there empty-handed — but the usable line (§11.4) **does not offer** the way out
+  until you have set foot inside. A row whose only entry is *leave* is the wrong first
+  thing to say to someone who has not been in yet. **How much is "enough" is a level modifier** (`intel_to_exit`, §12.6/#244),
   not one fixed rule, so the modes gate the *same* facility differently:
   - **Quick play — all the intel** (§10.2/#244). Gather the whole set, then get out:
     a complete objective, and v1's default mode.
@@ -319,14 +333,15 @@ sight, though its *cone* stays hidden until you can actually see it. This
 asymmetry is the foundation of the whole game: **avoidance is viable because you
 see them first.** Do not erode it casually.
 
-**The run opens with the wait's look** (#383). The first frame is computed as if the
-previous turn had been a *Wait* (§8.3/§9.1) — the full 360° arc and the widened
-guard sense — so the entry room you have just climbed into is live and remembered
-before you move. It costs **no turn**: it is the run's starting posture, not a queued
-action, and the first spent non-Wait action ends it. You dug the tunnel and came up
-through it; opening the game by making the player spend a turn on the room they are
-standing in is the wrong first beat, and §10.6's "the starting area should be safe" is
-better confirmed by looking than taken on faith.
+**The run opens with the ordinary arc.** There is no free opening look: the player is
+never dropped anywhere to need one. They start inside their own tunnel (§4.5/§10.7),
+crawl to its mouth, read the room through the **entry-cell peek** (§6.1) — the one live
+window a crawlspace grants — and climb out looking where they chose to look. That is a
+*decision* where a free 360° frame was a fact, and §10.6's "the starting area should be
+safe" is enforced by the crawlspace's own concealment rather than confirmed by a
+handout. *(This replaced the #383 wait's-look opening, whose whole job was to show a
+player the room they had materialised standing in; #466 deleted the materialising and
+the exemption with it — appendix 32.)*
 
 One thing erodes it **on purpose**: the **Vision** passive (§8.3/#265) lifts the
 held player's arc to 360° and their range to 20, removing the "can't see behind
@@ -1734,7 +1749,8 @@ guard cooperation, assigned patrols, keys and circuits unbuilt (appendix 16).
 | Corridor network connected | Each corridor punches into its parent → the network is a tree |
 | Every room reaches a corridor | Every room is bounded by corridor walls, which qualify as door candidates |
 | Every room ≥ 6×6, ≤ ~12 rooms | Partition constants |
-| **A path exists: start → every objective → the comms console → exit** | **Assert it. See below.** |
+| **A path exists: start → every objective → the comms console → exit** | **Assert it. See below.** The flood starts where the player first sets foot in the facility: the cells they can climb out of `E` onto (#466) |
+| **The exit's tunnel reaches the border, over inert geometry** | A straight run of plain wall or floor, 4–12 cells, sharing no cell with a §10.7 shortcut; a candidate `E` without one is redrawn |
 | **The comms console is a real detour** | ≥ 16 cells from the spawn, non-start room **[START]** (§7.3) |
 | **One usable beside any floor cell (preferred)** | Conflict-aware stamping, best-effort; the arrow disambiguates the rest. See below. |
 
@@ -1765,6 +1781,11 @@ Two more spacing rules, both fixing real old-generator faults (appendix 17):
 - **Space the placements.** Nothing used to separate the player from the exit (they
   could spawn adjacent), spread the intel out, or keep a guard from spawning where it
   saw you on turn one. The pillar says *"the starting area should be safe"*; make it so.
+  Since #466 the first of those is the **tunnel's own length** rather than a spawn-to-exit
+  distance — the player starts at the way out, so `EXIT_DUCT_MIN_CELLS` (**[START]** = 8,
+  cap 16) is what keeps a run from starting on top of its objective — and the turn-one
+  cone rule now protects the **mouth** they climb out of, the crawl itself being
+  concealed and contact-safe (§10.7).
 - **Fail loudly or retry the seed.** Placement must never fail silently — asking for 5
   guards and getting 4 with a log line nobody reads is not acceptable.
 
@@ -1776,6 +1797,19 @@ player can use: a shortcut between two far-apart parts, paid for not in time but
 guard experiences a duct's **entries** as ordinary wall and never perceives the crawl
 route at all; the interior cells it may pass over keep their own terrain, so nothing a
 guard sees, paths on, or looks through changes.
+
+**The player's own tunnel is a duct too** (§4.5/#466, appendix 32). The exit `E` is the
+inner mouth of a **linear** run of duct cells going out to the level border, and the
+far end of it is not an entry but the **way out**: no mouth, nothing to climb onto but
+the world, and a step off the board there is the §4.5 win. Its mouth answers the intel
+gate before it lets you in, so a crawl home is never begun in vain; and the occupied run
+is drawn in the **exit's** colour rather than the crawlspace's (§11.2), so the opening
+frame is one line from the border to `E`. It is the same model in
+every other respect — concealed and contact-safe inside, memory and a shortened sense for
+perception, the mouth peek at `E` — and it stamps nothing: the border cell keeps its wall
+terrain (so §10.6's enclosure is untouched) and `E` keeps its own glyph. The one thing it
+adds is where the run *starts*: on that border cell, inside the crawlspace, a few crawl
+steps from the mouth.
 
 **Shape.** A duct is a path of cells with an **entry at each end, drawn `=`**
 (`DuctEntry`, §10.3/§11.3). Each entry is **recessed like a cupboard** (§10.1.6):
@@ -2712,7 +2746,8 @@ Two rules for a player-facing word:
 | patrol **dwell** (§7.5) | **pause** — *"Guards never calm: pause 1–3 turns"* | help panel |
 | `Hideout` (§10.3) | **cupboard** — *"cupboard — bump to hide"* | glyph legend, messages |
 | `PartialCover` (§10.3) | **table** — *"table — bump to crouch"* | glyph legend, usable line |
-| `DuctEntry` (§10.7) | **duct** — *"duct — bump to crawl in"* | glyph legend, usable line |
+| `DuctEntry` (§10.7) | **duct** — *"duct — bump to crawl in"*, `duct: enter` | glyph legend, usable line |
+| `Exit` **from the facility side** (§4.5/#466) | **exit** — `exit: enter`, never `duct: enter`: one is a shortcut you found, the other is the way home | usable line |
 | `Console` (§10.3) | **intel** — *"intel — bump to take"* | glyph legend, usable line |
 | `CommsConsole` (§7.3) | **comms** — *"comms — bump to kill the radio"* | glyph legend, usable line |
 | `Dephase` (§8.3) | **Phase Out** — the bar's short `Phase` reads as its *opposite* beside *Dephase*, so the short name taught the wrong verb | ability bar (as `Phase`), help panel, near line |

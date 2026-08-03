@@ -42,7 +42,7 @@
 //! Downstream code only ever sees a layout that passed.
 
 use crate::cell::{Cell, Direction};
-use crate::duct::Duct;
+use crate::duct::{Duct, DuctKind};
 use crate::facility::{Facility, Terrain};
 use crate::modifiers::LevelModifiers;
 use crate::path;
@@ -57,6 +57,7 @@ use std::collections::HashSet;
 mod carve;
 mod doors;
 mod ducts;
+mod exit_duct;
 mod features;
 mod hideouts;
 mod sightlines;
@@ -68,6 +69,14 @@ use features::*;
 use hideouts::*;
 use sightlines::*;
 use walls::*;
+
+// The player's own tunnel (§4.5/#466) is laid by placement, which is where `E` is
+// chosen, so its carve is re-exported to that one caller rather than run here.
+pub(crate) use exit_duct::carve_exit_duct;
+// The tunnel's length bounds are asserted where the tunnels are measured — placement's
+// seed sweep — rather than used by the orchestrator here.
+#[cfg(test)]
+pub(crate) use exit_duct::{EXIT_DUCT_MAX_CELLS, EXIT_DUCT_MIN_CELLS};
 
 /// Corridor width is random 2–4, **never single-file** (§10.1). **[SETTLED]** — a
 /// single-file corridor is a death trap with no counterplay.
@@ -286,9 +295,32 @@ impl Layout {
         &self.regions
     }
 
-    /// The duct crawlspaces on this level (§10.7), for the turn loop and renderer.
+    /// The duct crawlspaces on this level (§10.7), for the turn loop and renderer —
+    /// the found shortcuts **and** the player's own exit tunnel (§4.5/#466), which is
+    /// a duct in every respect the loop cares about and is appended last.
     pub fn ducts(&self) -> &[Duct] {
         &self.ducts
+    }
+
+    /// The player's own tunnel (§4.5/#466): the crawlspace from the exit `E` out to the
+    /// level border, where the run begins and ends. `None` on a bare carve or a
+    /// hand-built fixture — the tunnel is laid by placement, which is where `E` is
+    /// chosen.
+    pub fn exit_duct(&self) -> Option<&Duct> {
+        self.ducts.iter().find(|d| d.kind() == DuctKind::Exit)
+    }
+
+    /// Record the player's own tunnel on this layout (§4.5/#466) — the placement half
+    /// of generation, run once by [`generate_level`] after `E` is chosen. It stamps
+    /// nothing: `E` is stamped with the other usables in
+    /// [`State::new`](crate::State::new) and every other cell of the tunnel keeps the
+    /// terrain it was born with, the border wall included (§10.6).
+    pub(crate) fn set_exit_duct(&mut self, duct: Duct) {
+        debug_assert!(
+            self.exit_duct().is_none(),
+            "a level has exactly one way in and out (§4.5)"
+        );
+        self.ducts.push(duct);
     }
 
     /// Where the comms console goes (§7.3/§7.7), or `None` on a facility without one.
@@ -440,12 +472,26 @@ pub fn generate_level(
         // before `place` — whose §10.1.9 turn-one cone check must see the open
         // doorways a guard's cone now reaches through.
         open_initial_doors(&mut layout, rng);
+        // **A rejected placement costs the carve, not the stream.** Placement draws as
+        // it goes and gives up wherever it first cannot honour a §10.6 guarantee, so how
+        // much of `rng` a *failed* attempt eats depends on which rule it tripped — and
+        // the next carve would then depend on that too. That is how a knob which only
+        // reaches placement (the #232 guard count) could quietly hand back a different
+        // *building*: three settings that fail at three different points resume the
+        // stream in three different places. So a failed attempt is rewound, and the
+        // redraw is a pure function of the attempts before it (§12.4).
+        let before_placement = rng.clone();
         if let Some(placement) = place(&layout, config, rng) {
             // Record where the comms console goes; `State::new` stamps it, with the
             // other solid usables — see the doc comment above.
             layout.comms_console = Some(placement.comms());
+            // …and the player's own tunnel (§4.5/#466), laid by placement from the `E`
+            // it chose. Recorded rather than stamped, for the same reason: the carve
+            // handed back stays bare, and the tunnel changes no cell's terrain anyway.
+            layout.set_exit_duct(placement.exit_duct().clone());
             return Ok((layout, placement));
         }
+        *rng = before_placement;
     }
     Err(GenError::RetriesExhausted {
         attempts: MAX_GEN_ATTEMPTS,

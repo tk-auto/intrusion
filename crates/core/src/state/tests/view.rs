@@ -7,7 +7,7 @@
 //! guarantee that the offer can never drift from the action.
 
 use crate::state::*;
-use crate::test_support::{open_room, solo};
+use crate::test_support::{leave_by_the_tunnel, open_room, room_with_tunnel, solo};
 
 /// The #141 report, pinned: a crouched player must not be seen by a guard
 /// whose sight line crosses *any* table of the bench they are behind. The
@@ -251,11 +251,13 @@ fn events_declare_their_message_category() {
 
 /// The usable line's contract (§11.4): [`State::affordances`] offers exactly
 /// what a bump would do. A live console reads `TakeIntel`; once taken it is
-/// just solid and offers nothing; the exit answers by whether the intel is
-/// in hand; an empty cupboard offers `Hide`.
+/// just solid and offers nothing; an empty cupboard offers `Hide`; and the exit
+/// answers the **intel gate at its mouth** (§4.5/#466) — `exit: needs the intel`
+/// short of it, `exit: enter` once it is met, since climbing into the tunnel is
+/// what a bump on `E` does when it does anything.
 #[test]
 fn affordances_mirror_what_a_bump_would_do() {
-    let mut layout = open_room(12, 12);
+    let mut layout = room_with_tunnel(12, 12, Cell::new(5, 4), Direction::North);
     layout.place(Cell::new(4, 5), Terrain::Hideout);
     let mut s = State::new(
         layout,
@@ -266,8 +268,8 @@ fn affordances_mirror_what_a_bump_would_do() {
         Cell::new(5, 4),   // the exit north
     );
 
-    // Console east, exit north (intel still out), cupboard west — each with
-    // the direction to bump it.
+    // Console east, the tunnel's mouth north — refusing, with the intel still out —
+    // and a cupboard west, each with the direction to bump it.
     assert_eq!(
         s.affordances(),
         vec![
@@ -278,20 +280,65 @@ fn affordances_mirror_what_a_bump_would_do() {
         "Direction::ALL order: north, east, … west"
     );
 
-    // Take the intel: the console goes solid and the exit opens up.
+    // Take the intel: the console goes solid, and the mouth opens — the same cell, the
+    // same bump, now a climb into the tunnel home.
     s.step(Input::Step(Direction::East));
     assert_eq!(
         s.affordances(),
         vec![
-            (Some(Direction::North), Affordance::Leave),
+            (Some(Direction::North), Affordance::EnterExit),
             (Some(Direction::West), Affordance::Hide)
         ],
-        "a spent console offers nothing; the exit now offers the win"
+        "a spent console offers nothing; the mouth is now the way in"
     );
 
     // In the middle of open floor, the line is empty.
     let s = solo(Cell::new(4, 4));
     assert_eq!(s.affordances(), Vec::new());
+}
+
+/// The **way out** on the usable line (§4.5/§11.4/#466): from the tunnel's border cell
+/// the row offers `exit: leave`, aimed **off the board** — which no affordance has ever
+/// been before (#384) — once the player has been inside the facility. On the opening
+/// crawl it stays quiet: the run starts on that cell, and the way home is not what turn
+/// one is about.
+///
+/// Inside the tunnel it is the only thing the row ever carries: a crawler can bump
+/// nothing else.
+#[test]
+fn the_way_out_offers_leave_or_the_refusal_aimed_off_the_board() {
+    // Both start where a run starts — on the way-out cell, inside the tunnel (#466) —
+    // which is also the one place a player can stand on it empty-handed, since the
+    // mouth refuses them short of the gate.
+    let build = |intel: Vec<Cell>| {
+        let s = State::new(
+            room_with_tunnel(12, 12, Cell::new(5, 4), Direction::North),
+            Cell::new(5, 0),
+            Direction::North,
+            Vec::new(),
+            intel,
+            Cell::new(5, 4),
+        );
+        assert!(s.in_duct(), "the run opens inside the tunnel");
+        s
+    };
+
+    // On the way in, the row is quiet whatever the gate says.
+    let refused = build(vec![Cell::new(6, 5)]);
+    assert_eq!(refused.affordances(), Vec::new(), "nothing on the way in");
+    let mut ready = build(Vec::new());
+    assert_eq!(ready.affordances(), Vec::new());
+
+    // Come home — out of the mouth and back down the tunnel — and the same cell offers
+    // the win, aimed north, off the top border.
+    crate::test_support::climb_out_of_the_tunnel(&mut ready);
+    while ready.player() != Cell::new(5, 0) {
+        ready.step(Input::Step(Direction::North));
+    }
+    assert_eq!(
+        ready.affordances(),
+        vec![(Some(Direction::North), Affordance::Leave)],
+    );
 }
 
 /// An adjacent **aware** guard offers nothing: its bump is a free no-op
@@ -349,8 +396,7 @@ fn guards_classify_as_seen_sensed_or_neither() {
         ],
         Vec::new(),
         Cell::new(38, 38),
-    )
-    .without_the_opening_look();
+    );
 
     assert!(
         s.player_fov().contains(seen),
@@ -430,8 +476,7 @@ fn an_unseen_guards_cone_is_not_visible_danger() {
         vec![Guard::stationary(guard)],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     assert!(
         !s.player_fov().contains(guard),
         "precondition: the guard is unseen"
@@ -479,8 +524,7 @@ fn an_unseen_watchers_line_is_visible_danger() {
         vec![Guard::stationary(Cell::new(10, 5))],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     assert!(
         !s.player_fov().contains(Cell::new(10, 5)),
         "precondition: the watcher is behind the player, unseen",
@@ -540,10 +584,10 @@ fn the_sense_passes_through_walls() {
 /// guard 11 cells away — just outside the box, no line of sight — is *not* sensed;
 /// the same guard becomes Sensed the turn the player waits (10 → 20).
 ///
-/// The run **opens** on the widened box, because it opens as if the previous turn had
-/// been a Wait (#383): the guard is sensed from frame one, the first spent step
-/// narrows the box to 10 and drops it, and a Wait pulls it back. All three readings
-/// come off the same walled-off guard, so the widening is the only thing that moves.
+/// The run **opens** on the plain box (#466 — there is no free opening look any more):
+/// the guard 11 cells off is not sensed at all, and a Wait is what pulls it in. Both
+/// readings come off the same walled-off guard, so the widening is the only thing that
+/// moves.
 #[test]
 fn the_sense_range_is_ten_and_twenty_on_wait() {
     assert_eq!(PLAYER_SENSE_RANGE, 10, "the [START] sense range");
@@ -568,22 +612,12 @@ fn the_sense_range_is_ten_and_twenty_on_wait() {
         Cell::new(38, 38),
     );
 
-    // The opening look is the wait's, both halves of it (#383).
-    assert_eq!(s.sense_range(), 20, "the run opens on the widened box");
-    assert_eq!(
-        s.perceive_guard(&s.guards()[0]),
-        Some(GuardPerception::Sensed),
-        "11 cells away is inside the opening 20-box",
-    );
-
-    // A spent step south clears the posture — and takes the guard a cell further off,
-    // so it is outside the plain box twice over.
-    s.step(Input::Step(Direction::South));
-    assert_eq!(s.sense_range(), 10, "the first spent turn: the base box");
+    // The run opens on the plain box (§9.1/#466).
+    assert_eq!(s.sense_range(), 10, "the run opens on the base box");
     assert_eq!(
         s.perceive_guard(&s.guards()[0]),
         None,
-        "12 cells away is outside the 10-box",
+        "11 cells away is outside the 10-box",
     );
 
     s.step(Input::Wait);
@@ -882,7 +916,6 @@ fn the_debug_reveal_makes_the_players_sight_the_whole_level() {
             Vec::new(),
             Cell::new(38, 38),
         )
-        .without_the_opening_look()
     };
     let fogged = build();
     assert_eq!(fogged.perceive_guard(&fogged.guards()[0]), None);
@@ -1037,21 +1070,18 @@ fn the_gate_says_how_much_intel_is_needed_not_how_much_is_out() {
     }
 }
 
-/// **The run opens with the wait's look** (§5/§8.3/§9.1, #383): the opening frame is
-/// computed as if the previous turn had been a Wait, so the entry room *behind* the
-/// spawn facing is live on frame one and goes into memory with the rest of it.
+/// **The run opens with the ordinary arc** (§5/#466). There is no free 360° look any
+/// more: the #383 opening posture existed to show a player the room they had
+/// materialised standing in, and with the diegetic entrance nobody materialises. The
+/// player crawls in through their own tunnel, reads the room through the mouth peek
+/// (§6.1/§10.7), and climbs out looking where they chose to look.
 ///
-/// You dug the tunnel and climbed out of it — you looked around before stepping off.
-/// The alternative opens the game by teaching the player that they have to spend a
-/// turn on the room they are standing in, which is the wrong first beat.
-///
-/// The first spent action ends the posture and sight is the ordinary half-disc from
-/// then on; what the look already lit stays **remembered**, because memory is
-/// monotonic (§11.5a).
+/// So the cell behind the spawn facing is dark on frame one, exactly as it is on every
+/// other frame — the arc is a rule, not a posture with an end.
 #[test]
-fn the_run_opens_looking_all_round_the_entry_room() {
+fn the_run_opens_with_the_ordinary_forward_arc() {
     let behind = Cell::new(5, 7); // two south of a north-facing spawn
-    let mut s = State::new(
+    let s = State::new(
         open_room(12, 12),
         Cell::new(5, 5),
         Direction::North,
@@ -1061,29 +1091,27 @@ fn the_run_opens_looking_all_round_the_entry_room() {
     );
 
     assert!(
-        s.player_fov().contains(behind),
-        "the opening look is 360°, so behind the spawn facing is live",
-    );
-    assert!(s.memory().contains(behind), "and it enters memory with it");
-
-    // A spent step north: the arc narrows, and the cell it lit is remembered rather
-    // than lost.
-    s.step(Input::Step(Direction::North));
-    assert!(
         !s.player_fov().contains(behind),
-        "the first spent action ends the posture",
+        "the opening arc is §5's half-disc: behind the facing is dark",
     );
     assert!(
-        s.memory().contains(behind),
-        "what the opening look saw stays seen (§11.5a)",
+        !s.memory().contains(behind),
+        "so nothing remembers it either"
+    );
+    assert!(
+        s.player_fov().contains(Cell::new(5, 3)),
+        "…and ahead of the facing is live",
     );
 }
 
-/// The opening look reaches the **usable line** too (§11.4/#383): `affordances` is
-/// FOV-gated, so before this the console you came up beside was not offered until you
-/// turned to look at it — a bump you could make but were not told about.
+/// The usable line is FOV-gated (§11.4/§11.5a), but the **touching ring is always in
+/// the FOV** (§6.2 arc 3) — so a bump you could make is a bump you are told about, the
+/// one behind you included, and from the very first frame. That used to lean on the
+/// #383 opening look for its first frame; with the look gone (#466) it falls out of the
+/// ring rule alone, which is where it always belonged. Two cells away is a different
+/// matter: that is not a bump at all.
 #[test]
-fn the_opening_look_offers_the_console_behind_you() {
+fn the_usable_line_offers_every_bump_including_the_one_behind_you() {
     let mut s = State::new(
         open_room(12, 12),
         Cell::new(5, 5),
@@ -1095,25 +1123,23 @@ fn the_opening_look_offers_the_console_behind_you() {
     assert_eq!(
         s.affordances(),
         vec![(Some(Direction::South), Affordance::TakeIntel)],
-        "the opening look offers the bump behind you",
+        "the ring is always seen, so the row offers the bump behind you",
     );
 
-    // And the gate is genuinely the look: spend the posture on a step and the same
-    // console, now behind again, drops off the line.
+    // Step away and the console is two cells off — nothing to bump, nothing to say.
     s.step(Input::Step(Direction::North));
     assert_eq!(s.affordances(), Vec::new());
 }
 
-/// **The opening look costs no turn** (#383): it is the run's starting posture, not a
-/// queued action. Everything but perception on the opening frame is what it was before
-/// the posture existed — the turn counter, the guards where placement put them and
-/// facing their §7.1 spawn direction, a quiet alert, and every ability ready.
-///
-/// The perception half is pinned on both sides: the sense reads §9.1's **waiting**
-/// box, while an ability fired *now* still measures off the plain one (#325/#345) —
-/// an action taken on turn one is not that look.
+/// **The run opens having spent nothing** (§4.2): the startup turn establishes sight
+/// and settles the guards, and that is all. The turn counter is zero, the guards are
+/// where placement put them facing their §7.1 spawn direction, the alert is quiet and
+/// every ability is ready — and perception is the plain §9.1 box, the same one an
+/// ability fired now measures off (#325/#345). The free widened look #383 opened on is
+/// gone with #466: nobody materialises in a room any more, so nothing has to be shown
+/// to them for free.
 #[test]
-fn the_opening_look_spends_no_turn() {
+fn the_run_opens_having_spent_nothing() {
     let guard = Cell::new(8, 8);
     let s = State::new(
         open_room(12, 12),
@@ -1138,13 +1164,13 @@ fn the_opening_look_spends_no_turn() {
 
     assert_eq!(
         s.sense_range(),
-        PLAYER_SENSE_RANGE_WAITING,
-        "the wait is one posture with two halves (§9.1)",
+        PLAYER_SENSE_RANGE,
+        "the plain box, from the first frame (§9.1/#466)",
     );
     assert_eq!(
         s.acting_sense_range(),
         PLAYER_SENSE_RANGE,
-        "but a blast fired on turn one measures off the plain box (#325/#345)",
+        "and a blast fired on turn one measures off the same one (#325/#345)",
     );
 }
 
@@ -1209,14 +1235,15 @@ fn a_capture_latches_its_cause_and_the_runs_ledger() {
 #[test]
 fn reaching_the_exit_latches_the_win() {
     let mut s = State::new(
-        open_room(10, 10),
+        room_with_tunnel(10, 10, Cell::new(5, 4), Direction::East),
         Cell::new(4, 4),
         Direction::North,
         Vec::new(),
         Vec::new(),
         Cell::new(5, 4),
     );
-    s.step(Input::Step(Direction::East));
+    // Climb into the tunnel beside us, crawl to the border, and step off the board.
+    leave_by_the_tunnel(&mut s);
     assert_eq!(s.outcome(), Outcome::Won);
     assert_eq!(s.ending(), Some(Ending::Escaped));
     assert!(s.ending().expect("an ending").won(), "the one win there is");

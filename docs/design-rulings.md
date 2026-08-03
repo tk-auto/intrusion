@@ -1412,3 +1412,114 @@ and in §10.2, so that "the game has no permadeath" is never discovered as a bug
 campaign: if its end screen ever grows a way to play the run again — an "undo the last
 hour" mercy, the prison level of appendix 3 taken too far — that is a change to §2.2
 itself and belongs there, not in a mode's exit list.
+
+---
+
+## Appendix 32 — The way in is a real duct: play the entrance, don't watch it
+
+*(§1, §4.5, §5, §10.6, §10.7, §11.4, §11.5a, #466 — closing #468, the animation this
+replaced. Decided while building the diegetic entrance.)*
+
+**The problem was legibility, and it was real.** Turn one on a 40×40 board draws forty
+rows of fog and one `@`, and nothing points the eye at where you are. §1 has always said
+*"you dug the tunnel and came up through it"*, but the tunnel was narration attached to a
+single solid cell: `E` was a tile in a room, the player materialised beside it, and the
+fiction was a sentence in a design document rather than anything the game did.
+
+**The first answer was an animation** (#468): open on the exit, hold, pan or fade to the
+player. It was closed unmerged. It cost a frame clock, a timeline and a skip control —
+none of which the game has, all of which would have to be maintained — and it bought a
+beat the player *watches*. Worse, it would have been five seconds of held control at the
+one moment the player is most impatient to act, and a second time through it is pure
+tax.
+
+**The answer that shipped is that the tunnel is terrain.** §10.7 already had everything
+needed and needed no new vocabulary: a duct is a path of cells with a mouth-bearing
+entry, its crawler is concealed and contact-safe, its information is degraded to memory
+plus a shortened sense, and it has exactly one live window — the entry cell's auto-peek
+out of its mouth (§6.1). So `E` becomes the inner mouth of a **linear** duct running to
+the level border, and the run starts inside it, on the border cell.
+
+Everything the animation was for falls out of that, and is *played*:
+
+- **The eye is pointed.** §10.7 draws the whole occupied run as one connected `=`, so
+  turn one opens on a bright line from the border to the mouth you are about to climb
+  out of. Nothing was added to the renderer to get this; the rule was already there —
+  only the *colour* is the tunnel's own (Interest, the exit's band, where a found
+  shortcut stays System), so the line and the letter it ends in read as one thing.
+- **The row says where you are.** Turn one has no action behind it and so no message, so
+  the §11.4 ambient floor gained the arm it was missing: *"your own tunnel — crawl out"*,
+  standing for the length of the crawl, next to the cupboard's and the crouch's. A
+  crawlspace is a state you are in, and the floor is where a standing fact belongs.
+- **The opening is the player's own inputs.** Three or four crawl steps and a climb-out
+  — real turns, so the facility is already moving when you arrive and you arrive knowing
+  it, rather than materialising into a frozen tableau.
+- **The first decision is a decision.** From the mouth, the peek reads the room; you
+  climb out now, or hold on the entry cell and look again. The old opening handed the
+  player a free 360° frame of the room they were standing in — a *fact* where this is a
+  choice with a cost.
+
+**It deleted a rule rather than adding one.** §5's wait's-look opening (#383) existed
+precisely because the player materialised standing in a room and had to be shown it. With
+a diegetic entrance nobody materialises, so the exemption had nothing left to paper over
+and came out — implementation, tests and all. That is the §2.3 debt rule paying out in
+the right direction: the new mechanic *removed* a special case.
+
+**The fog needed no exception, which was the worry.** §10.7 hides a duct's interior
+completely — no tell on the base map, not remembered once you climb out — and the fear
+was that this would hide the player's own tunnel. It does not, because you **start
+inside it**: the occupied-run rule draws it while you crawl, and `E` itself is drawn as
+itself from turn one (§11.5a, *"Yours."*), so once you climb out what is hidden is only
+the crawl behind the mouth — the same secret every other duct keeps. Nothing about
+§10.7 or §11.5a changed.
+
+**Three consequences worth naming, because each is a real change and not a detail.**
+
+1. **The win check moved off the grid; the gate stayed at the mouth.** The *win* is no
+   longer a cell you bump — it is a step **off the board** from the tunnel's border cell,
+   and that is the first affordance whose arrow points off the grid (§11.4/#384). But the
+   **intel gate** is answered at `E`, where it always was: bumping the mouth short of it
+   refuses, free, with the same words. Splitting them that way is deliberate and was the
+   first thing playtesting corrected. A gate at the far end only is *technically* the same
+   rule and a worse game: the player is told no after four turns of crawling, in a
+   crawlspace where the answer is useless to them, and the row that promised
+   `exit: enter` turns out to have promised a dead end. Refusing at the mouth keeps the
+   refusal where the player can still do something about it, and keeps the §11.4 rule that
+   the row never says a bump will do what it will not. `E` with the gate met means *climb
+   in*, so it gets its own label (`exit: enter`): two bumps that behave identically and
+   mean completely different things must not read identically on the one row that says
+   what a bump does. The **row** goes one step further and says nothing about the way out
+   until the player has been inside: the run opens standing on that very cell, and an
+   opening line reading *leave* points at the end of a run that has not started. The press
+   still answers — the gate is a rule, the row is a prediction, and holding a prediction
+   back is not the same as lying in one (§11.4's own FOV gate is the precedent).
+2. **`PLAYER_EXIT_MIN_DISTANCE` retired.** Eight cells between the spawn and the exit
+   existed so that no run started won. There is no spawn-to-exit distance any more — the
+   player starts *at* the way out — so the hazard is re-closed as a floor on the
+   **tunnel's own length** (`EXIT_DUCT_MIN_CELLS` = 8, capped at 16 because every cell of
+   it is a turn the guards get). It shipped at 4–12 and the first playtest moved it: four
+   cells reads as a hole in the skirting rather than something you dug, and the opening
+   was over before it had said where you were. The pair is the knob the whole entrance
+   hangs on, and it is the number to watch first. Placement's other spacing rules re-anchor on `E`: the
+   comms detour is measured from it, and the turn-one guard-cone rule protects the mouth
+   the player comes up out of rather than a cell they no longer stand on.
+3. **You can dive into your own tunnel to break contact.** It is a duct, so it conceals
+   and it is contact-safe, and nothing forbids climbing in mid-chase. That is a genuinely
+   new escape and it is left in deliberately: it costs the walk back to `E`, it is the
+   one place a pursuer knows to look, and coming out means coming out of the same mouth
+   you went in by. If the sim ever shows it dominant, the fix is §10.7's own — add cost —
+   not a rule saying your own tunnel is different from every other one.
+
+**Two things the placement rules had to learn, both found by the bot timing out.** A
+mouth must open onto the **building**: a candidate `E` whose only walkable neighbours are
+its own tunnel path (the interior may overlie floor, §10.7) or a single cupboard leaves
+the player sealed in a crawlspace on turn four, and the seed is now redrawn. And a
+console must never be stamped on a duct cell, the exit tunnel's or a §10.7 shortcut's —
+which nothing had ever checked, because before this ticket no crawl route was chosen
+after placement had run.
+
+**What would change the answer.** How long the opening takes is the number to watch: the
+tunnel length is a `[START]`, and if the crawl reads as a chore the cap comes down before
+anything else does. If the *entrance* turns out to feel worse than materialising — which
+is the only thing the animation was ever competing for — the thing to revisit is this
+appendix, not #468's branch.

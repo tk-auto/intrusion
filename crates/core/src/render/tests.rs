@@ -905,8 +905,7 @@ fn a_table_is_discovered_not_given() {
         Vec::new(),
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     let cell = render(&s).get(10, 14);
     assert_eq!(
         (cell.glyph, cell.fg, cell.vis),
@@ -949,8 +948,7 @@ fn exploring_promotes_the_schematic_to_real_geometry_for_good() {
         Vec::new(),
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     // A stretch of the south wall, behind the north-facing player.
     let behind = Cell::new(10, 19);
     let cell = render(&s).get(behind.x, behind.y);
@@ -1005,8 +1003,7 @@ fn nothing_unexplored_is_distinguishable_from_its_neighbours() {
         Vec::new(),
         [Cell::new(14, 16)], // an intel console too
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     let g = render(&s);
 
     let mut seen: Vec<(char, Category)> = Vec::new();
@@ -1083,8 +1080,7 @@ fn an_unscouted_doorway_reads_as_a_gap_in_the_wall_line() {
         Vec::new(),
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     let g = render(&s);
 
     let run: String = (6..=12).map(|x| g.get(x, 15).glyph).collect();
@@ -1125,7 +1121,6 @@ fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
             [Cell::new(14, 16)],
             Cell::new(18, 18),
         )
-        .without_the_opening_look()
         .with_modifiers(LevelModifiers {
             full_layout_known: layout_known,
             ..LevelModifiers::default()
@@ -1238,8 +1233,7 @@ fn contents_are_remembered_but_live_state_is_not() {
         vec![Guard::stationary(guard)],
         [Cell::new(10, 14)],
         Cell::new(38, 38),
-    )
-    .without_the_opening_look();
+    );
 
     // Never seen and out of sense range: the intel masks as the schematic floor
     // of the unexplored room it stands in, and the guard is not drawn at all.
@@ -1399,8 +1393,7 @@ fn an_unseen_hideout_masks_as_wall_until_scouted() {
         Vec::new(),
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
 
     // A cupboard is an alcove recessed into a wall run, so on the plans it is
     // fabric: schematic wall, exactly like the run it sits in (#307). Both the
@@ -1450,8 +1443,7 @@ fn a_scouted_duct_mouth_is_remembered_like_a_cupboard() {
         Vec::new(),
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
 
     // Glyph *and* category come from the mask, as with the hideout: a lone System-tan
     // mark among Neutral ones would give the mouth away through the colour channel.
@@ -1498,8 +1490,7 @@ fn a_doors_pose_is_live_state_never_remembered() {
         Vec::new(),
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
 
     // Never explored: the opening shows, the pose does not.
     let cell = render(&s).get(10, 14);
@@ -1539,8 +1530,7 @@ fn floor_renders_as_dots_but_an_open_panel_stays_blank() {
         Vec::new(),
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     let g = render(&s);
 
     let lit = g.get(10, 8); // ahead: floor in the FOV
@@ -1611,8 +1601,7 @@ fn watched_cells_outside_the_players_fov_still_paint_red() {
         vec![Guard::stationary(Cell::new(9, 9))],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     let watched_unseen = Cell::new(9, 13);
     assert!(s.guards()[0].fov().contains(watched_unseen), "in the cone");
     assert!(!s.player_fov().contains(watched_unseen), "not in the FOV");
@@ -1647,8 +1636,7 @@ fn an_unseen_guards_cone_paints_no_danger() {
         vec![Guard::stationary(guard)],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     assert!(!s.player_fov().contains(guard));
 
     let g = render(&s);
@@ -1683,7 +1671,6 @@ fn the_show_vision_cones_modifier_paints_an_unseen_guards_cone() {
             Vec::new(),
             Cell::new(18, 18),
         )
-        .without_the_opening_look()
     };
     let danger_cells = |g: &Grid| -> Vec<(u32, u32)> {
         let mut cells = Vec::new();
@@ -1763,8 +1750,7 @@ fn a_watchers_sightline_stands_for_every_turn_it_watches() {
         vec![Guard::stationary(Cell::new(10, 5))],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     // Precondition: the watcher is *not* seen (it is behind the player). Within
     // sense range, so it is Sensed — its orange dot is the position channel the
     // line runs up to (§9.2), not over.
@@ -1840,8 +1826,7 @@ fn a_watcher_that_loses_sight_stops_drawing() {
         vec![Guard::stationary(Cell::new(10, 5))],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     assert!(
         !s.player_fov().contains(Cell::new(10, 5)),
         "precondition: the watcher is unseen",
@@ -1898,8 +1883,7 @@ fn a_concealed_player_draws_no_watcher_line() {
         vec![Guard::stationary(Cell::new(10, 5))],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     assert!(s.hidden(), "precondition: the player is in the cupboard");
     assert!(
         s.guards()[0].fov().contains(Cell::new(10, 10)),
@@ -1929,8 +1913,7 @@ fn a_confused_watcher_draws_no_line() {
         Vec::new(),
         Cell::new(18, 18),
     )
-    .with_loadout(Loadout::innate().with(AbilityId::Confusion))
-    .without_the_opening_look();
+    .with_loadout(Loadout::innate().with(AbilityId::Confusion));
     assert!(
         !danger_cells(&render(&s)).is_empty(),
         "precondition: the unseen watcher draws its line",
@@ -2004,8 +1987,7 @@ fn a_sensed_guard_paints_an_orange_background_no_cone() {
         vec![Guard::stationary(Cell::new(10, 14))],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
     assert!(
         !s.player_fov().contains(Cell::new(10, 14)),
         "not in the FOV"
@@ -2060,8 +2042,7 @@ fn a_sensed_highlight_blooms_to_a_seen_guard_across_the_fov_boundary() {
         vec![Guard::stationary(guard)],
         Vec::new(),
         Cell::new(18, 18),
-    )
-    .without_the_opening_look();
+    );
 
     // North-facing: the guard is behind, only sensed — an orange cell, no `g`, no
     // danger overlay anywhere.
@@ -2107,8 +2088,7 @@ fn an_out_of_range_guard_draws_nothing() {
         vec![Guard::stationary(guard)],
         Vec::new(),
         Cell::new(22, 22),
-    )
-    .without_the_opening_look();
+    );
     assert_eq!(
         s.perceive_guard(&s.guards()[0]),
         None,
@@ -2388,8 +2368,7 @@ fn the_debug_reveal_draws_the_whole_level_live() {
         vec![Guard::stationary(guard)],
         [Cell::new(10, 14)],
         Cell::new(38, 38),
-    )
-    .without_the_opening_look();
+    );
     let g = render(&fogged);
     assert_eq!(
         g.get(10, 14).glyph,
@@ -2847,4 +2826,85 @@ fn any_effect_ink(grid: &Grid) -> bool {
             cell.fg == Category::Effect || cell.bg == Some(Category::Effect)
         })
     })
+}
+
+// --- The player's own tunnel (§4.5/§11.5a, #466) --------------------------------
+
+/// **Turn one opens on the tunnel** (§4.5/§10.7/#466): the run begins inside it, and
+/// §10.7's occupied-run rule — unmodified — draws the *whole* crawlspace at once. So the
+/// first frame a player ever sees is a bright line running from the border cell they are
+/// standing on to the mouth they are about to climb out of, which is the thing nothing on
+/// a 40×40 board did before: it points the eye at where you are.
+///
+/// **`E` keeps its own face** through it, and the run wears the exit's own colour
+/// (§11.2/#466): §11.5a draws the exit as itself from turn one — *yours* — so the frame
+/// is one continuous Interest line from the border to the mouth, `=` up to `E` and `E`
+/// at the end of it, rather than a gray thread finishing in a purple letter.
+#[test]
+fn turn_one_draws_the_whole_exit_tunnel_and_e_keeps_its_face() {
+    let exit = Cell::new(4, 4);
+    let tunnel = crate::test_support::exit_tunnel_cells(9, 9, exit, Direction::North);
+    let way_out = *tunnel.last().expect("a way out");
+    let s = State::new(
+        crate::test_support::room_with_tunnel(9, 9, exit, Direction::North),
+        way_out,
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        exit,
+    );
+    let g = render(&s);
+
+    // The player stands on the way out; every other cell of the run is lit `=`, live,
+    // and connected — the whole tunnel, not the part behind them.
+    assert_eq!(g.get(way_out.x, way_out.y).glyph, '@', "the player, on top");
+    for &c in &tunnel[1..tunnel.len() - 1] {
+        let cell = g.get(c.x, c.y);
+        assert_eq!(cell.glyph, '=', "the run is drawn end to end at {c:?}");
+        assert_eq!(cell.vis, Visibility::Live);
+        assert_eq!(
+            cell.fg,
+            Category::Interest,
+            "your own tunnel wears the exit's colour, not the furniture band",
+        );
+    }
+
+    // …and the mouth is the exit, drawn as itself.
+    let mouth = g.get(exit.x, exit.y);
+    assert_eq!(mouth.glyph, 'E', "the exit is not an anonymous `=`");
+    assert_eq!(mouth.fg, Category::Interest, "and it is yours (§11.2)");
+}
+
+/// Climb out and the tunnel hides again (§11.5a/§10.7) — the same secret every duct
+/// keeps once you are outside it, and no exception is needed for this one: `E` is still
+/// drawn as itself, so the way back is never lost, and what is hidden is only the crawl
+/// behind it.
+#[test]
+fn climbing_out_hides_the_tunnel_but_never_the_exit() {
+    let exit = Cell::new(4, 4);
+    let tunnel = crate::test_support::exit_tunnel_cells(9, 9, exit, Direction::North);
+    let mut s = State::new(
+        crate::test_support::room_with_tunnel(9, 9, exit, Direction::North),
+        *tunnel.last().expect("a way out"),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        exit,
+    );
+    crate::test_support::climb_out_of_the_tunnel(&mut s);
+    assert!(!s.in_duct(), "out on the floor");
+
+    let g = render(&s);
+    for &c in &tunnel[1..] {
+        assert_ne!(
+            g.get(c.x, c.y).glyph,
+            '=',
+            "the crawl behind the mouth is hidden again at {c:?}",
+        );
+    }
+    assert_eq!(
+        g.get(exit.x, exit.y).glyph,
+        'E',
+        "the way back is never lost"
+    );
 }

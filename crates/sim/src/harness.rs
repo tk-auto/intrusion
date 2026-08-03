@@ -290,12 +290,19 @@ mod tests {
     /// The row is the *game's* output, so a change to the game moves it and the refresh
     /// belongs in that PR with the delta read.
     ///
-    /// **#452 moved it for a reason that is not about the game at all**: making
-    /// automatic doors a level modifier dropped the per-doorway RNG draw, so seed 42
-    /// carves a **different facility** and this row describes a different level rather
-    /// than a different outcome on the same one. A 130-turn win becomes a capture at
-    /// 98 with seven detections; nothing about that comparison means anything, and the
-    /// PR's 100-seed batches on both door settings are where the actual reading is.
+    /// **#466 moved it, and again for a reason that is only half about the game**: the
+    /// exit is now the mouth of a tunnel the player starts inside (§4.5), so placement
+    /// picks a different `E`, the whole draw shifts behind it (the comms console moved
+    /// ahead of the guards so the #232 knob stops perturbing it), and seed 42 carves a
+    /// **different facility** — and moving the tunnel's [START] length to 8–16 after the
+    /// first playtest re-carved it again, to a 168-turn win. Any run's turns now include
+    /// the crawl in and the crawl out, which every run pays.
+    /// Nothing about that comparison means anything on its own; the PR's 100-seed
+    /// batches are where the reading is.
+    ///
+    /// **#452 moved it the same way before that**: making automatic doors a level
+    /// modifier dropped the per-doorway RNG draw, so seed 42 re-carved and a 130-turn
+    /// win became the capture at 98 this row held until #466.
     ///
     /// Before that it moved when the guards began **partitioning the whole level**
     /// (§7.5) — seed 42 was a 111-turn win with zero detections through ground nobody
@@ -304,7 +311,7 @@ mod tests {
     /// history: a re-carve makes the row incomparable, a rule change makes it evidence.
     #[test]
     fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
-        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"capture\",\"turns\":98,\"detections\":7,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":3,\"run\":3,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":1,\"alert_escalations\":[{\"turn\":11,\"rung\":1,\"trigger\":\"sighting\"}],\"reinforcements\":0}";
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"win\",\"turns\":168,\"detections\":8,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":44,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":25,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":124,\"rung\":2,\"trigger\":\"console-tampered\"}],\"reinforcements\":1}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.

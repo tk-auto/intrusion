@@ -411,12 +411,33 @@ fn spent_console_recolour(state: &State, cells: &mut [GlyphCell]) {
 /// away to nobody. The two **entries** are the exception — they are geometry, drawn
 /// `=` from turn one by the terrain fog whether occupied or not — so nothing here
 /// needs to draw an unoccupied duct at all.
+///
+/// **The exit keeps its own face** (§11.5a/#466). The player's own tunnel lights by this
+/// same rule — one connected run from the border cell to the mouth, which is what turn
+/// one opens on, a bright line pointing from where you are to where you are about to be
+/// — but `E` itself is left alone. §11.5a draws it as itself from turn one, and it is
+/// *yours*: not an anonymous `=`.
 fn duct_pass(state: &State, cells: &mut [GlyphCell]) {
-    let width = state.layout().facility().width();
+    let facility = state.layout().facility();
+    let width = facility.width();
     if let Some(duct) = state.occupied_duct() {
+        // **Your own tunnel wears the exit's colour** (§11.2/#466). A found shortcut is
+        // System — the furniture band, where the doors and cupboards are — but the
+        // tunnel is the thing `E` anchors, so lighting the run in Interest makes the
+        // opening frame one continuous purple line from the border to the mouth rather
+        // than a gray thread ending in a purple letter. Same glyph either way: `=` is
+        // what a crawlspace is (§11.3), and a second `E` on the board would be a lie
+        // about where the mouth is.
+        let band = if duct.way_out().is_some() {
+            Category::Interest
+        } else {
+            Category::System
+        };
         for &c in duct.cells() {
-            cells[(c.y * width + c.x) as usize] =
-                GlyphCell::on_board('=', Category::System, Visibility::Live);
+            if facility.terrain(c) == Some(Terrain::Exit) {
+                continue;
+            }
+            cells[(c.y * width + c.x) as usize] = GlyphCell::on_board('=', band, Visibility::Live);
         }
     }
 }

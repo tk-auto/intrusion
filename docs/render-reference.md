@@ -148,12 +148,28 @@ the glyph channel is hiding. Both channels have to mask, or neither does.
 **The exit is the one exception.** It keeps its `E` and its Interest purple from
 turn one, never schematic, because the player dug that tunnel and came in by it
 (§4.5) — it is the one part of this building that is theirs, and it anchors every
-escape plan (§7.6).
+escape plan (§7.6). It keeps that face **while you are crawling it**, too (#466): the
+occupied-run pass below lights the tunnel `=` up to the mouth and leaves the mouth alone,
+so `E` is never an anonymous stretch of crawlspace.
 
 **A duct's interior is not on this ladder at all.** The crawl path between two
 mouths is a private fourth layer (§10.7): it is never absorbed into tile memory, so
 after crawling it the cells still read as whatever the building around them reads
 as. Only the two mouths are ever drawn — and, being fabric, they must be found.
+
+**The player's own tunnel is drawn by that same rule, and turn one is when you see it**
+(§4.5/#466). Every run begins *inside* it, on the level border, so the occupied run —
+border cell to `E`, one connected `=` — is the opening frame: a bright line pointing from
+where you are to where you are about to be, on a board that otherwise gives the eye
+nothing. Climb out and it hides again like any other duct; `E` stays drawn, so the way
+back is never lost.
+
+**It wears Interest, where a found shortcut wears System.** A shortcut is furniture — the
+band the doors and cupboards are in — but the tunnel is the thing `E` anchors, so the run
+takes the exit's own colour and the opening frame reads as one continuous purple line
+rather than a gray thread ending in a purple letter. The **glyph** stays `=` either way:
+that is what a crawlspace is, and a second `E` on the board would lie about where the
+mouth is.
 
 ### 2.4 Why shape rather than a fourth brightness level
 

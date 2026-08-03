@@ -9,8 +9,8 @@
 //! guards its top two rungs send in, [`bore`] for [`super::bore`], [`lockdown`] for
 //! [`super::lockdown`], [`traversal`] for
 //! [`super::traversal`], [`ducts`] for
-//! the §10.7 crawlspace, and [`comms`] for the §7.7 comms console that kills the
-//! radio net. They share [`crate::test_support`]'s builders rather than a common
+//! the §10.7 crawlspace, [`tunnel`] for the player's own way in and out (§4.5/#466),
+//! and [`comms`] for the §7.7 comms console that kills the radio net. They share [`crate::test_support`]'s builders rather than a common
 //! harness here, so each file stands alone.
 
 mod abilities;
@@ -25,5 +25,6 @@ mod guards;
 mod lockdown;
 mod reinforcements;
 mod traversal;
+mod tunnel;
 mod turn;
 mod view;

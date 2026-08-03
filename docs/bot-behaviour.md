@@ -56,9 +56,18 @@ tried in priority order, and the first that applies wins:
    detections are avoided: the player senses a guard as far out as it could see
    them (both range 10, §9.1), so there is time to get out of the way.
 3. **`Pursue`** — head for the nearest *known* untaken console; once the intel is in
-   hand, head for the exit (§4.5).
+   hand, head for the exit (§4.5) and bump it, which climbs into the tunnel home.
 4. **`Explore`** — nothing known to head for, so sweep toward the nearest frontier
    (a seen cell bordering the unseen) until the consoles reveal themselves.
+
+**Above all four sits the crawl** (§4.5/§10.7/#466). Inside a duct there is exactly one
+thing to do, so a crawler never reaches the ladder: it makes for the mouth and climbs out
+— never back onto the path (an interior cell may overlie ordinary floor, so a step onto
+one is another crawl) and never into a cupboard (one mouth, and it is the cell you are
+standing on). The exception is its own tunnel with the intel gate met: then it makes for
+the **way out** instead and presses the `exit: leave` the usable line offers, off the
+board. That is the opening and closing beat of every run — the bot starts on the border
+cell like any player and crawls in, and it leaves the same way.
 
 Three **steps without an `Intent` of their own** bracket those four, because each is
 about a physical commitment rather than a plan (§7.2/§7.7/§8.3), and each is silent
@@ -446,9 +455,12 @@ The checklist, in the order that keeps the metrics attributable:
 
 Stated so they read as decisions rather than oversights:
 
-- **Ducts.** The bot has no crawl policy (§10.7): climbing in is a mode change into
-  the crawlspace with degraded perception, not a step a floor route can take, so duct
-  entries are simply not routable for it.
+- **Found ducts are still not routed to** (§10.7). Since #466 the bot *crawls* — it has
+  to, since every run begins and ends inside the player's own tunnel — but a §10.7
+  shortcut is still not something its cost field will plan through: climbing in is a mode
+  change into a crawlspace with degraded perception, not a step a floor route can take,
+  so a shortcut's entries remain unroutable and a duct only ever gets used by accident.
+  What the crawl policy covers is being *in* one, whichever one it is.
 - **The avoidance-first profiles land no takedowns, and that is correct.** `balanced`
   and `cautious` carry `takedown_reach: 0`: they steer wide of guards rather than
   hunting them, so a flat zero in their takedown row is the temperament working, not

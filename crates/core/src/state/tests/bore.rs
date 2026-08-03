@@ -23,13 +23,17 @@ use crate::Rng;
 
 /// A player holding Pierce Wall in a `w × h` walled box, facing north.
 fn borer(layout: Layout, player: Cell) -> State {
+    // A generated layout carries the player's own tunnel (§4.5/#466) and its mouth *is*
+    // the exit, so the state must be told the same cell the layout was laid around; a
+    // hand-built one has no tunnel and keeps the unused corner it always had.
+    let exit = layout.exit_duct().map_or(Cell::new(1, 1), |d| d.cells()[0]);
     State::new(
         layout,
         player,
         Direction::North,
         Vec::new(),
         Vec::new(),
-        Cell::new(1, 1),
+        exit,
     )
     .with_loadout(Loadout::innate().with(AbilityId::PierceWall))
 }
@@ -554,8 +558,18 @@ fn a_bore_only_ever_adds_reachability() {
     // puts the first borable wall face inside such a pocket, at which point the
     // §10.6 assertion below is measuring the wrong set of cells; #452's stream shift
     // is what walked seed 7 into exactly that.
+    //
+    // The flood starts where the player first sets foot in the facility (§4.5/#466) —
+    // a floor neighbour of the exit `E` — because the spawn itself is the border cell
+    // *inside* their own tunnel, and a flood from a wall reaches nothing.
     let stamped = borer(layout.clone(), placement.player());
-    let from_start = reachable(stamped.layout().facility(), placement.player());
+    let foothold = stamped
+        .layout()
+        .facility()
+        .neighbours(placement.exit())
+        .find(|&n| stamped.layout().facility().terrain(n) == Some(Terrain::Floor))
+        .expect("the mouth opens onto the building");
+    let from_start = reachable(stamped.layout().facility(), foothold);
     let stand = borable_stand(&layout, &from_start)
         .expect("a 40×40 facility has a lone wall face the player can reach");
     let mut s = borer(layout, stand);
@@ -604,15 +618,7 @@ fn borable_stand(layout: &Layout, within: &HashSet<Cell>) -> Option<Cell> {
             if facility.terrain(cell) != Some(Terrain::Floor) || !within.contains(&cell) {
                 continue;
             }
-            let probe = State::new(
-                layout.clone(),
-                cell,
-                Direction::North,
-                Vec::new(),
-                Vec::new(),
-                Cell::new(1, 1),
-            )
-            .with_loadout(Loadout::innate().with(AbilityId::PierceWall));
+            let probe = borer(layout.clone(), cell);
             if probe.bore_target().is_ok() {
                 return Some(cell);
             }

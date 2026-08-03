@@ -93,7 +93,10 @@ fn every_near_line_message_fits() {
         Event::Moved { to: at },
         Event::Bumped { into: at },
         Event::EnteredHideout { at },
-        Event::EnteredDuct { at },
+        Event::EnteredDuct {
+            at,
+            own_tunnel: false,
+        },
         Event::DuctCrawled { to: at },
         Event::Crouched { behind: at },
         Event::DoorOpened {
@@ -378,7 +381,6 @@ fn the_full_screen_renders_golden() {
         [Cell::new(3, 2)], // a console east of the player
         Cell::new(38, 4),
     )
-    .without_the_opening_look()
     .with_loadout(granted());
     let text = render_screen(&s, ScreenUi::default()).to_text();
     assert_eq!(

@@ -1,13 +1,20 @@
 //! Entity placement — §10.1 steps 7–9, with the §10.6 spacing guarantees.
 //!
 //! Generation so far carves the board (#7–#11); this module puts the pieces on it:
-//! the entry/exit tile, the player, the intel consoles, the comms console, and the
-//! guards. The rules are §10.1's — entry/exit and player in the **largest room**,
-//! objectives and guards in any room *except* the start room — plus the spacing
-//! guarantees the old generator entirely lacked (§10.6): the player never spawns next
-//! to the exit, the intel never clumps into one room, the comms console is a real
-//! detour away (§7.7), and no guard's turn-one cone covers the spawn. *"The starting
-//! area should be safe" — make it so.*
+//! the exit `E` and the tunnel behind it, the intel consoles, the comms console, and
+//! the guards. The rules are §10.1's — the exit in the **largest room**, objectives and
+//! guards in any room *except* the start room — plus the spacing guarantees the old
+//! generator entirely lacked (§10.6): the intel never clumps into one room, the comms
+//! console is a real detour away (§7.7), and no guard's turn-one cone covers the mouth
+//! the player comes up out of. *"The starting area should be safe" — make it so.*
+//!
+//! **The player is not placed any more** (§4.5/#466). They start inside their own
+//! tunnel, on its way-out cell at the level border, and crawl in — so what placement
+//! chooses is the exit, and the spawn falls out of it
+//! ([`carve_exit_duct`](crate::generate::carve_exit_duct)). The old
+//! `PLAYER_EXIT_MIN_DISTANCE` — eight cells between spawn and exit, so that no run
+//! started won — retires with it: the distance is the tunnel's own length now, and it is
+//! floored in the carve (`EXIT_DUCT_MIN_CELLS`).
 //!
 //! Two lessons from the old generator shape the module:
 //!
@@ -27,8 +34,9 @@
 
 use crate::beat::coordinated_beat_cells;
 use crate::cell::Cell;
+use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
-use crate::generate::{has_adjacent_usable, shuffle, Layout};
+use crate::generate::{carve_exit_duct, has_adjacent_usable, shuffle, Layout};
 use crate::guard::{Guard, GUARD_INITIAL_FACING};
 use crate::modifiers::GuardCount;
 use crate::path;
@@ -38,29 +46,25 @@ use crate::rng::Rng;
 use crate::vision::{field_of_view_with_blind_spot, BlindTier, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
 use std::collections::HashSet;
 
-/// The player and the exit spawn at least this far apart (Manhattan) **[START]**.
-/// The old generator let them land adjacent — a run that starts won (§10.6). The
-/// largest room on the v1 footprint comfortably spans this; a cramped draw that
-/// cannot honour it is rejected and redrawn rather than quietly shrunk.
-const PLAYER_EXIT_MIN_DISTANCE: u32 = 8;
-
-/// The **comms console** spawns at least this far (Manhattan) from the player's
-/// spawn cell **[START]**.
+/// The **comms console** spawns at least this far (Manhattan) from the exit `E`
+/// **[START]** — the cell the player climbs out of the tunnel into, and so the point
+/// their run through the facility starts and ends at (§4.5/#466).
 ///
 /// The console silences the radio net for the whole level (§7.3/§7.7), which is the
 /// only cost a permanent takedown carries — so a console found in the first few turns
 /// would make every later takedown free. Distance is the balance knob the counterplay
 /// hangs on: far enough that reaching it is a deliberate detour costing turns and
 /// exposure (§2.3 — cost is load-bearing), not a switch on the way out of the start
-/// room. Chosen larger than [`PLAYER_EXIT_MIN_DISTANCE`] for exactly that reason, and
-/// asserted so; on the 40×40 v1 footprint it still leaves most non-start rooms
-/// eligible, and a draw with no far-enough cell is rejected and redrawn like any other
-/// §10.6 shortfall.
+/// room. On the 40×40 v1 footprint it still leaves most non-start rooms eligible, and a
+/// draw with no far-enough cell is rejected and redrawn like any other §10.6 shortfall.
+///
+/// It used to be measured from a separate player spawn, and to be asserted larger than
+/// the spawn-to-exit floor `PLAYER_EXIT_MIN_DISTANCE` — "reaching the radio must cost
+/// more than reaching the way out". Both are gone with #466: the player now *starts* at
+/// the way out, inside their own tunnel, so there is no spawn-to-exit distance for
+/// placement to choose (the tunnel's own length is it, `EXIT_DUCT_MIN_CELLS`) and
+/// nothing left for the relation to compare against.
 const PLAYER_COMMS_MIN_DISTANCE: u32 = 16;
-
-// Reaching the radio must cost more than reaching the way out, whatever these
-// [START]s are retuned to — held at compile time, like the §7.3 radio relations.
-const _: () = assert!(PLAYER_COMMS_MIN_DISTANCE > PLAYER_EXIT_MIN_DISTANCE);
 
 // The shipped recipe sits **strictly inside** the guard-count envelope (#232), so
 // both ends of the knob always bite on the level the game actually ships. Held at
@@ -157,6 +161,12 @@ impl LevelConfig {
 pub struct Placement {
     player: Cell,
     exit: Cell,
+    /// The player's own tunnel (§4.5/§10.7/#466): the crawlspace from the exit `E` out
+    /// to the level border. Pure geometry — it stamps nothing — so it is computed here,
+    /// where `E` is chosen, and recorded on the layout by
+    /// [`generate_level`](crate::generate_level). [`player`](Self::player) is its
+    /// way-out cell: the run *begins* inside it.
+    exit_duct: Duct,
     intel: Vec<Cell>,
     /// The facility's one comms console (§7.3/§7.7) — the radio terminal a bump
     /// silences. Exactly one per facility: "one interaction shuts the whole net" is
@@ -171,15 +181,23 @@ pub struct Placement {
 }
 
 impl Placement {
-    /// The player's spawn cell, in the largest room (§10.1.7).
+    /// The player's spawn cell (§4.5/#466): the **way out** of their own tunnel, on the
+    /// level border. The run begins inside the crawlspace, facing in — the first inputs
+    /// crawl to `E` and climb out into the facility.
     pub fn player(&self) -> Cell {
         self.player
     }
 
-    /// The entry/exit tile (§4.5: the run ends where it began), in the largest
-    /// room, at least [`PLAYER_EXIT_MIN_DISTANCE`] from the spawn.
+    /// The exit `E` (§4.5: the run ends where it began), in the largest room — the
+    /// **inner mouth** of the player's tunnel (§10.7/#466), which they climb out of at
+    /// the start and back into at the end.
     pub fn exit(&self) -> Cell {
         self.exit
+    }
+
+    /// The player's own tunnel (§4.5/§10.7/#466), `E` first and the way-out cell last.
+    pub fn exit_duct(&self) -> &Duct {
+        &self.exit_duct
     }
 
     /// The intel consoles — one per room, never the start room (§10.1.8, §10.6).
@@ -266,33 +284,74 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         .map(|(i, _)| i)?;
     let mut start_floor = rooms[start_idx].1.clone();
 
-    // Exit first, then the player: the first shuffled pair far enough apart. A
-    // cramped largest room with no such pair fails the draw rather than seating
-    // them adjacent (§10.6). The exit is a usable (§11.4), so among the valid
-    // pairs a shuffled scan prefers an exit that keeps every floor cell to one
-    // adjacent usable — but that is a preference, not a gate: if no conflict-free
-    // exit has a far-enough partner, any valid pair is taken rather than failing
+    // The exit `E`, and with it the tunnel behind it (§4.5/§10.7/#466): the first
+    // shuffled cell of the start room with a clean straight run to the border. There is
+    // no separate player spawn to space out any more — the player starts *in* the
+    // tunnel, at its far end, so the distance that used to be placement's business is
+    // now the tunnel's own length (`EXIT_DUCT_MIN_CELLS`). A start room whose every
+    // cell is walled in from the border (or too deep inside the building) fails the draw
+    // and the carve is redrawn, like any other §10.6 shortfall.
+    //
+    // The exit is a usable (§11.4), so the scan prefers an `E` that keeps every floor
+    // cell to one adjacent usable — a preference, not a gate: with no conflict-free
+    // candidate that can host a tunnel, any tunnelled cell is taken rather than failing
     // the draw (the arrow keeps a doubled cell unambiguous).
     shuffle(&mut start_floor, rng);
-    let far_partner = |i: usize, exit: Cell| {
-        start_floor[i + 1..]
-            .iter()
-            .find(|&&p| p.manhattan_distance(exit) >= PLAYER_EXIT_MIN_DISTANCE)
-            .map(|&p| (exit, p))
-    };
-    let (exit, player) = start_floor
+    // Cells the §10.7 shortcuts already claim: the tunnel may not share one, or "which
+    // duct am I crawling" would have two answers.
+    let ducted: HashSet<Cell> = layout
+        .ducts()
         .iter()
-        .enumerate()
-        .filter(|&(_, &exit)| !placement_conflict(layout, exit, &[]))
-        .find_map(|(i, &exit)| far_partner(i, exit))
+        .flat_map(|d| d.cells().iter().copied())
+        .collect();
+    // A candidate `E` needs a tunnel behind it **and** a facility in front of it: at
+    // least one cell to climb out onto that is not itself part of the tunnel. The
+    // interior may overlie floor (§10.7 cross-room routing), and a step onto a path cell
+    // is a *crawl*, not a climb-out (§10.7's confinement) — so a mouth whose only
+    // walkable neighbours are its own path is a mouth that opens onto nothing, and a run
+    // that starts sealed inside its own tunnel. Rejected here, where another `E` costs
+    // nothing.
+    let tunnel_from = |exit: Cell| {
+        // `E` itself must be unclaimed too, not just the run behind it: a shortcut's
+        // interior may overlie ordinary room floor (§10.7 cross-room routing), so a
+        // candidate can sit *on* one without looking any different — and the exit stamped
+        // there would put a solid usable under someone else's crawl.
+        if ducted.contains(&exit) {
+            return None;
+        }
+        let duct = carve_exit_duct(facility, exit, &ducted)?;
+        let opens_onto_the_building = footholds(facility, exit, duct.cells()).next().is_some();
+        opens_onto_the_building.then_some(duct)
+    };
+    let (exit, exit_duct) = start_floor
+        .iter()
+        .filter(|&&exit| !placement_conflict(layout, exit, &[]))
+        .find_map(|&exit| Some((exit, tunnel_from(exit)?)))
         .or_else(|| {
             start_floor
                 .iter()
-                .enumerate()
-                .find_map(|(i, &exit)| far_partner(i, exit))
+                .find_map(|&exit| Some((exit, tunnel_from(exit)?)))
         })?;
+    // The run begins on the tunnel's way-out cell, inside the crawlspace (§4.5/#466).
+    let player = exit_duct
+        .way_out()
+        .expect("carve_exit_duct lays an exit-kind duct");
 
+    // Nothing else may land on the tunnel's own cells: a console or the exit stamped on
+    // one would put an interactable under the crawl, which is exactly what §10.7 forbids
+    // a duct's interior to overlie. (Guards may stand on one — a guard walks straight
+    // over a concealed crawler, §10.7.) The §10.7 shortcuts are held to the same rule
+    // here, which nothing used to do.
     let mut taken: Vec<Cell> = vec![exit, player];
+    taken.extend(exit_duct.cells().iter().copied());
+    // Read off the layout rather than the `ducted` set: the list is ordered, and every
+    // draw below this one has to be a function of the seed alone (§12.4).
+    taken.extend(
+        layout
+            .ducts()
+            .iter()
+            .flat_map(|d| d.cells().iter().copied()),
+    );
     // The usables placed so far — what later usable picks prefer not to crowd
     // (§11.4, one usable per cell — a preference, not a gate).
     let mut usables: Vec<Cell> = vec![exit];
@@ -324,14 +383,50 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         usables.push(console);
     }
 
+    // The comms console (§7.3/§7.7): the facility's radio terminal, treated like an
+    // objective for the §10.6 guarantees — a non-start room, bump-reachable (asserted
+    // below with the rest), and at least `PLAYER_COMMS_MIN_DISTANCE` from the spawn so
+    // the counterplay costs a real detour rather than a switch on the way out of the
+    // start room. Unlike intel it does *not* claim a room of its own: it may share one
+    // with an objective (a different cell), which keeps a four-room carve placeable.
+    //
+    // Drawn **before the guards**, and that ordering is load-bearing (#232/#466). The
+    // §12.6 guard-count knob is supposed to reach the guard *set* and nothing else — the
+    // three settings carve one building and place one board, so a paired A/B can
+    // attribute what it measures. Drawing the console from a pool that excluded the
+    // guards broke that quietly: a pool one cell smaller shuffles differently, so each
+    // setting sat the console somewhere else, and a console that pinched a route failed
+    // the solvability check below at one setting and not another — which redraws the
+    // *carve*. Ahead of the guards, every draw before `take(n)` is knob-independent and
+    // the guard sets stay strictly nested.
+    let mut comms_pool: Vec<Cell> = others
+        .iter()
+        .flat_map(|&i| rooms[i].1.iter().copied())
+        .filter(|&c| !taken.contains(&c) && c.manhattan_distance(exit) >= PLAYER_COMMS_MIN_DISTANCE)
+        .collect();
+    shuffle(&mut comms_pool, rng);
+    // A usable like any other (§11.4): prefer a cell that leaves every floor
+    // neighbour with one adjacent usable, but fall back rather than fail the draw.
+    let comms = comms_pool
+        .iter()
+        .copied()
+        .find(|&c| !placement_conflict(layout, c, &usables))
+        .or_else(|| comms_pool.first().copied())?;
+
+    // Claimed, so no guard spawns on top of the console it is standing on.
+    taken.push(comms);
+
     // §10.1.9 + §10.6: guards in any room except the start room, and never where
     // the turn-one detection set — the real §6 field of view from the spawn cell,
     // facing south as every guard does at spawn (§7.1), with the §155 rear blind
-    // spot carved out — covers the player. This is the same function the sight
-    // phase runs, not a conservative box, so "safe on turn one" is exact: a guard
-    // that only has the player in its rear blind spot is genuinely safe. Candidates
-    // pool across all non-start rooms (guards may share a room; intel cells are
-    // already taken), shuffled once; too few safe cells fails the draw —
+    // spot carved out — covers the **exit `E`**. That is where the player comes up
+    // (§4.5/#466): the crawl itself is concealed and contact-safe (§10.7), so "the
+    // starting area should be safe" is now a claim about the mouth they climb out of
+    // rather than about a cell they materialise on. This is the same function the sight
+    // phase runs, not a conservative box, so it is exact: a guard
+    // that only has the mouth in its rear blind spot is genuinely safe. Candidates
+    // pool across all non-start rooms (guards may share a room; the intel and comms
+    // cells are already taken), shuffled once; too few safe cells fails the draw —
     // asked-for-5-got-4 is precisely the old bug (§10.6).
     let mut guard_pool: Vec<Cell> = others
         .iter()
@@ -360,44 +455,13 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
                 GUARD_SIGHT_RANGE,
                 BlindTier::REAR,
             );
-            !cone.contains(player)
+            !cone.contains(exit)
         })
         .take(config.guards)
         .collect();
     if guards.len() < config.guards {
         return None;
     }
-
-    // The comms console (§7.3/§7.7): the facility's radio terminal, treated like an
-    // objective for the §10.6 guarantees — a non-start room, bump-reachable (asserted
-    // below with the rest), and at least `PLAYER_COMMS_MIN_DISTANCE` from the spawn so
-    // the counterplay costs a real detour rather than a switch on the way out of the
-    // start room. Unlike intel it does *not* claim a room of its own: it may share one
-    // with an objective (a different cell), which keeps a four-room carve placeable.
-    //
-    // Drawn **last of the geometry**, after the guards, for the same reason the radio
-    // clocks below are: every draw before this one is byte-identical to before the comms
-    // console existed, so a seed still spawns the same player, exit, intel and *guards*
-    // it always did. Ordering it earlier would have shifted the guard pool's shuffle and
-    // silently re-stationed every guard on every seed — a much bigger change than the
-    // one this ticket is making.
-    let mut comms_pool: Vec<Cell> = others
-        .iter()
-        .flat_map(|&i| rooms[i].1.iter().copied())
-        .filter(|&c| {
-            !taken.contains(&c)
-                && !guards.contains(&c)
-                && c.manhattan_distance(player) >= PLAYER_COMMS_MIN_DISTANCE
-        })
-        .collect();
-    shuffle(&mut comms_pool, rng);
-    // A usable like any other (§11.4): prefer a cell that leaves every floor
-    // neighbour with one adjacent usable, but fall back rather than fail the draw.
-    let comms = comms_pool
-        .iter()
-        .copied()
-        .find(|&c| !placement_conflict(layout, c, &usables))
-        .or_else(|| comms_pool.first().copied())?;
 
     // The post-placement solvability assertion: on the grid as it will actually
     // be played (consoles and exit solid), the player still reaches every
@@ -409,6 +473,7 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     let mut placement = Placement {
         player,
         exit,
+        exit_duct,
         intel,
         comms,
         guards,
@@ -425,6 +490,30 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     let guard_count = placement.guards.len();
     placement.guard_clocks = (0..guard_count).map(|_| RadioClock::draw(rng)).collect();
     Some(placement)
+}
+
+/// The cells the player can climb out of the mouth `exit` onto and **go somewhere**
+/// (§4.5/§10.7/#466): its walkable neighbours that are neither cells of the tunnel itself
+/// nor a cupboard.
+///
+/// Two exclusions, both about dead ends. Stepping onto a path cell is a *crawl* rather
+/// than a climb-out (§10.7's confinement), so the tunnel is no way into the facility. And
+/// a **cupboard** is recessed with exactly one mouth (§10.1.6) — if that mouth is `E`,
+/// the only way out of it is back onto `E`, which is solid and can only be bumped: a
+/// mouth opening onto nothing else would strand the player in a wardrobe on turn four.
+///
+/// This is what "the mouth opens onto the building" means, and the same set the
+/// solvability flood starts from — the player picks whichever side they come up on.
+fn footholds<'a>(
+    facility: &'a Facility,
+    exit: Cell,
+    tunnel: &'a [Cell],
+) -> impl Iterator<Item = Cell> + 'a {
+    facility.neighbours(exit).filter(move |&n| {
+        !tunnel.contains(&n)
+            && facility.terrain(n) != Some(Terrain::Hideout)
+            && facility.can_enter(n, crate::state::ACTOR_FILL)
+    })
 }
 
 /// Whether placing a usable (a console, the exit) at `cell` would give some
@@ -493,9 +582,17 @@ fn solvable(facility: &Facility, placement: &Placement) -> bool {
     };
 
     let (w, h) = (facility.width(), facility.height());
-    let reached: HashSet<Cell> = path::flood_from(placement.player, w, h, enterable)
-        .into_iter()
+    // The run starts inside the tunnel (§4.5/#466), so the flood starts where the
+    // player first sets foot in the facility: the cells they can climb out of `E`
+    // onto. Every one of them, unioned — the player chooses which side to come up on,
+    // so ground reachable from any of them is ground they can reach.
+    let reached: HashSet<Cell> = footholds(facility, placement.exit, placement.exit_duct.cells())
+        .filter(|&n| enterable(n))
+        .flat_map(|foothold| path::flood_from(foothold, w, h, enterable))
         .collect();
+    if reached.is_empty() {
+        return false; // a mouth with nothing to climb out onto is not a way in
+    }
 
     // Consoles and the exit are bump-interactions, so each must be *adjacent* to the
     // flooded set rather than inside it.
@@ -507,7 +604,7 @@ fn solvable(facility: &Facility, placement: &Placement) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generate::generate_level;
+    use crate::generate::{generate_level, EXIT_DUCT_MAX_CELLS, EXIT_DUCT_MIN_CELLS};
     use crate::guard::Guard;
     use crate::state::State;
     use crate::test_support::seed_sweep;
@@ -744,8 +841,10 @@ mod tests {
             assert_eq!(p.intel().len(), LevelConfig::V1.intel, "seed {seed}");
             assert_eq!(p.guard_cells().len(), LevelConfig::V1.guards, "seed {seed}");
 
-            // Every piece on its own plain floor cell — no stacking, no walls.
-            let mut all = vec![p.player(), p.exit(), p.comms()];
+            // Every piece on its own plain floor cell — no stacking, no walls. The
+            // player is not among them any more (§4.5/#466): they start inside the
+            // tunnel, on the border wall it comes out through.
+            let mut all = vec![p.exit(), p.comms()];
             all.extend_from_slice(p.intel());
             all.extend_from_slice(p.guard_cells());
             for &c in &all {
@@ -775,21 +874,23 @@ mod tests {
     /// This pins the **[START]** distance so a later tune is a visible edit, and pins
     /// "exactly one" so no seed ever ships a second switch for a net already dead.
     #[test]
-    fn the_comms_console_is_one_real_detour_from_the_spawn() {
+    fn the_comms_console_is_one_real_detour_from_the_way_in() {
         assert_eq!(
             PLAYER_COMMS_MIN_DISTANCE, 16,
             "the [START] comms detour distance"
         );
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
-            let distance = p.comms().manhattan_distance(p.player());
+            // Measured from the exit `E` (§4.5/#466) — where the player comes up, and
+            // so where their route through the facility starts.
+            let distance = p.comms().manhattan_distance(p.exit());
             assert!(
                 distance >= PLAYER_COMMS_MIN_DISTANCE,
-                "seed {seed}: the comms console spawned {distance} from the player"
+                "seed {seed}: the comms console spawned {distance} from the way in"
             );
             assert_ne!(
                 room_of(&layout, p.comms()),
-                room_of(&layout, p.player()),
+                room_of(&layout, p.exit()),
                 "seed {seed}: comms console in the start room"
             );
 
@@ -826,18 +927,21 @@ mod tests {
         }
     }
 
-    /// §10.1.7 + §10.6 spacing: entry/exit and player share the **largest room**
-    /// and never spawn within [`PLAYER_EXIT_MIN_DISTANCE`] of each other.
+    /// §10.1.7: the exit sits in the **largest room**, and behind it runs the player's
+    /// own tunnel (§4.5/#466) — straight, short, and ending on the level border, where
+    /// the run begins.
+    ///
+    /// This is what became of `player_and_exit_share_the_largest_room_well_apart`: there
+    /// is no second spawn to space out any more, so the guarantee that no run starts won
+    /// is now the tunnel's own length floor.
     #[test]
-    fn player_and_exit_share_the_largest_room_well_apart() {
+    fn the_exit_sits_in_the_largest_room_with_its_tunnel_behind_it() {
+        assert_eq!(EXIT_DUCT_MIN_CELLS, 8, "the [START] tunnel length floor");
+        assert_eq!(EXIT_DUCT_MAX_CELLS, 16, "the [START] tunnel length cap");
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
-            let start = room_of(&layout, p.player());
-            assert_eq!(
-                start,
-                room_of(&layout, p.exit()),
-                "seed {seed}: split spawn"
-            );
+            let facility = layout.facility();
+            let start = room_of(&layout, p.exit());
 
             let start_area = floor_area(&layout, start);
             for (id, _) in layout.regions().regions() {
@@ -849,10 +953,70 @@ mod tests {
                 }
             }
 
+            let duct = p.exit_duct();
+            let cells = duct.cells();
+            assert_eq!(cells[0], p.exit(), "seed {seed}: the tunnel starts at E");
+            assert_eq!(
+                duct.way_out(),
+                Some(p.player()),
+                "seed {seed}: the run starts on the way out"
+            );
             assert!(
-                p.player().manhattan_distance(p.exit()) >= PLAYER_EXIT_MIN_DISTANCE,
-                "seed {seed}: player and exit spawned {} apart",
-                p.player().manhattan_distance(p.exit())
+                (EXIT_DUCT_MIN_CELLS..=EXIT_DUCT_MAX_CELLS).contains(&cells.len()),
+                "seed {seed}: a {}-cell tunnel",
+                cells.len()
+            );
+            // Straight: one axis varies, and it varies by one cell at a time.
+            let straight =
+                cells.iter().all(|c| c.x == cells[0].x) || cells.iter().all(|c| c.y == cells[0].y);
+            assert!(straight, "seed {seed}: the tunnel bends");
+            for w in cells.windows(2) {
+                assert_eq!(w[0].manhattan_distance(w[1]), 1, "seed {seed}");
+            }
+            // It comes out **through** the border ring, which stays the unbroken wall
+            // §10.6 asserts — the tunnel stamps nothing.
+            let out = p.player();
+            assert!(
+                out.x == 0
+                    || out.y == 0
+                    || out.x == facility.width() - 1
+                    || out.y == facility.height() - 1,
+                "seed {seed}: the way out is not on the border"
+            );
+            assert_eq!(
+                facility.terrain(out),
+                Some(Terrain::Wall),
+                "seed {seed}: the way out was stamped"
+            );
+            // Inert geometry only (§10.7): nothing interactable under the crawl.
+            for &interior in &cells[1..cells.len() - 1] {
+                assert!(
+                    matches!(
+                        facility.terrain(interior),
+                        Some(Terrain::Floor) | Some(Terrain::Wall)
+                    ),
+                    "seed {seed}: the tunnel crawls over {:?}",
+                    facility.terrain(interior)
+                );
+            }
+            // No cell is shared with a §10.7 shortcut, so "which duct am I in" has one
+            // answer — and the layout records the tunnel among the ducts.
+            let shortcuts: HashSet<Cell> = layout
+                .ducts()
+                .iter()
+                .filter(|d| d.way_out().is_none())
+                .flat_map(|d| d.cells().iter().copied())
+                .collect();
+            for c in cells {
+                assert!(
+                    !shortcuts.contains(c),
+                    "seed {seed}: ducts overlap at {c:?}"
+                );
+            }
+            assert_eq!(
+                layout.exit_duct().map(|d| d.cells()),
+                Some(cells),
+                "seed {seed}: the layout's tunnel disagrees with the placement"
             );
         }
     }
@@ -863,7 +1027,7 @@ mod tests {
     fn intel_spreads_across_distinct_non_start_rooms() {
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
-            let start = room_of(&layout, p.player());
+            let start = room_of(&layout, p.exit());
             let rooms: Vec<RegionId> = p.intel().iter().map(|&c| room_of(&layout, c)).collect();
             assert!(
                 !rooms.contains(&start),
@@ -880,13 +1044,14 @@ mod tests {
 
     /// §10.1.9 + §10.6 "the starting area should be safe": guards spawn outside
     /// the start room, and — checked through the **real** turn loop, consoles
-    /// stamped and the startup turn run — no guard's turn-one cone covers the
-    /// player's spawn.
+    /// stamped and the startup turn run — no guard's turn-one cone covers the **mouth
+    /// the player comes up out of** (§4.5/#466). The spawn itself needs no such rule
+    /// any more: it is inside the tunnel, which conceals absolutely (§10.7).
     #[test]
-    fn no_guard_eyes_the_spawn_on_turn_one() {
+    fn no_guard_eyes_the_way_in_on_turn_one() {
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
-            let start = room_of(&layout, p.player());
+            let start = room_of(&layout, p.exit());
             for &g in p.guard_cells() {
                 assert_ne!(
                     room_of(&layout, g),
@@ -915,10 +1080,17 @@ mod tests {
             assert_eq!(state.outcome(), Outcome::Playing, "seed {seed}");
             for guard in state.guards() {
                 assert!(
-                    !guard.fov().contains(state.player()),
-                    "seed {seed}: the guard at {:?} sees the spawn on turn one",
+                    !guard.fov().contains(p.exit()),
+                    "seed {seed}: the guard at {:?} watches the mouth on turn one",
                     guard.pos()
                 );
+            }
+            // And the crawl itself is safe by a stronger rule than placement's
+            // (§10.7): the player starts *inside* the tunnel, concealed from every
+            // guard on the board and beyond any contact.
+            assert!(state.in_duct(), "seed {seed}: the run starts in the tunnel");
+            for guard in state.guards() {
+                assert!(state.concealed_from(guard.pos()), "seed {seed}");
             }
         }
     }
@@ -1013,8 +1185,19 @@ mod tests {
         // A placement with `pocket` holding the named piece and everything else out
         // in the open, so each target can be sealed in turn.
         let with_intel = |pocket: Cell| Placement {
-            player: Cell::new(5, 5),
+            player: Cell::new(0, 8),
             exit: Cell::new(8, 8),
+            exit_duct: crate::duct::Duct::exit_tunnel(vec![
+                Cell::new(8, 8),
+                Cell::new(7, 8),
+                Cell::new(6, 8),
+                Cell::new(5, 8),
+                Cell::new(4, 8),
+                Cell::new(3, 8),
+                Cell::new(2, 8),
+                Cell::new(1, 8),
+                Cell::new(0, 8),
+            ]),
             intel: vec![pocket],
             comms: Cell::new(8, 5),
             guards: Vec::new(),

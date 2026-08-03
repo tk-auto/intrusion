@@ -285,9 +285,27 @@ enum BumpKind {
     /// body inside and locks the cupboard — it is no longer a hideout. A spent
     /// turn; the player stays put and their hands come free.
     DepositBody,
-    /// The exit; `ready` is [`exit_ready`](State::exit_ready) — the run's intel gate
-    /// met (§4.5/§12.6): win vs. refused.
+    /// The **exit**, answered by the run's intel gate (§4.5/§12.6, `ready` is
+    /// [`exit_ready`](State::exit_ready)) — win vs. refused. Two bumps reach it since
+    /// #466, and only one of them can win:
+    ///
+    /// - the step **off the board** from the tunnel's border cell, the one target that
+    ///   is not a cell of the grid, classified by
+    ///   [`way_out_kind`](State::way_out_kind) rather than by
+    ///   [`bump_kind`](State::bump_kind), which only ever looks at cells;
+    /// - the mouth `E` bumped short of the gate, which refuses at the near end rather
+    ///   than sending the player down a crawl that will refuse at the far one. A bump
+    ///   on `E` *with* the gate met is [`EnterExitDuct`](BumpKind::EnterExitDuct): the
+    ///   climb in, not the win.
     Exit { ready: bool },
+    /// The exit `E` bumped from the facility side **with the intel gate met**
+    /// (§4.5/§10.7/#466): the inner mouth of the player's own tunnel, climbed into
+    /// exactly as any duct entry is. Distinct from [`EnterDuct`](BumpKind::EnterDuct)
+    /// only in what the usable line calls it — one of the two is a shortcut and the
+    /// other is the way home, and the row that tells you what a bump does should not
+    /// read the same for both. Short of the gate the same cell is
+    /// [`Exit { ready: false }`](BumpKind::Exit) — the refusal.
+    EnterExitDuct,
     /// An objective console still holding its intel.
     Intel,
     /// The comms console while the radio net is still live (§7.3/§7.7): bumping it
@@ -367,6 +385,7 @@ impl BumpKind {
             } => Some(Affordance::CloseDoor),
             BumpKind::Hide => Some(Affordance::Hide),
             BumpKind::EnterDuct => Some(Affordance::EnterDuct),
+            BumpKind::EnterExitDuct => Some(Affordance::EnterExit),
             BumpKind::Crouch => Some(Affordance::Crouch),
             // A crawl is movement, not an offered interaction (§10.7) — like a plain
             // Move it shows nothing on the usable line.
@@ -463,6 +482,20 @@ pub struct State {
     /// and cleared when they step out ([`Move`](BumpKind::Move)); derived purely from
     /// those transitions, so it stays deterministic (§12.4).
     in_duct: Option<usize>,
+    /// Whether the player has **set foot in the facility** this run (§4.5/#466) — false
+    /// only during the opening crawl, before they first climb out of their own tunnel.
+    ///
+    /// It gates one thing: whether the §11.4 usable line offers the **way out**. On the
+    /// border cell the row would otherwise open every run by pointing at the way home,
+    /// which is the one thing turn one is not about — you have not been in yet. The gate
+    /// is the *predictor's* alone, exactly like the FOV gate beside it: the bump itself
+    /// still answers (§4.5's refusal), so a player who presses outward anyway is told
+    /// why, and nothing the row does say has changed.
+    ///
+    /// Set the moment a step lands the player on facility floor
+    /// ([`walk_into`](Self::walk_into) — a crawl is not one), and true from the start for
+    /// a state that begins outside a duct, which is every hand-built fixture.
+    entered_the_facility: bool,
     /// Whether the last **spent** turn was a Wait — which widens the next sight
     /// computation to the full 360° (§8.3). A free action (a wall bump) spends
     /// nothing and changes nothing (§4.4), so it does not clear this.
@@ -691,12 +724,18 @@ impl State {
     /// One full turn — sight, then guards — runs before this returns, so the first
     /// [`step`](Self::step) already faces settled guards (§4.2).
     ///
-    /// That opening frame is computed **as if the previous turn had been a Wait**
-    /// (§5/§8.3/§9.1, #383): the full 360° arc and the waiting sense range, so the
-    /// entry room behind the spawn facing is live and remembered from the start. It
-    /// costs no turn — the counter, the guard phase, the ability clocks and the alert
-    /// are exactly what they were before the posture existed — and the first spent
-    /// non-Wait action clears it.
+    /// **The run opens inside the tunnel** (§4.5/§10.7/#466). When `player` is the
+    /// way-out cell of the layout's exit duct — which is where placement puts it — the
+    /// state starts *in* that duct, facing along it into the facility: concealed,
+    /// contact-safe, perceiving only the shortened sense (§10.7), and a few crawl steps
+    /// from the mouth at `E`. The first inputs of the run are that crawl, and the peek
+    /// out of the mouth is what reads the room before the player climbs out.
+    ///
+    /// That replaced the **opening look** (#383), where the first frame was computed as
+    /// if the previous turn had been a Wait — a free 360° arc and the widened sense, to
+    /// show a player the room they had materialised in. Nobody materialises any more, so
+    /// the exemption has nothing left to paper over: the opening posture is now an
+    /// ordinary consequence of §10.7, and the player looks where they chose to look.
     pub fn new(
         mut layout: Layout,
         player: Cell,
@@ -724,23 +763,52 @@ impl State {
         // hand-built fixture that stamped its own console without a placement.
         let comms_console = layout.facility().find(Terrain::CommsConsole);
 
+        // The run begins **inside the tunnel** (§4.5/§10.7/#466), on its way-out cell at
+        // the border — the one spawn that is not on the floor. Derived from the layout
+        // rather than passed in, so no boot path has to remember it, and narrow on
+        // purpose: only the way-out cell starts a player crawling, never an interior
+        // cell a duct's path merely overlies (which is ordinary floor to anyone walking
+        // it, §10.7). A hand-built fixture with no exit duct starts on foot, as before.
+        // (Only the exit tunnel has a way out at all, so matching on it is the whole
+        // test — no need to ask which duct is which.)
+        let in_duct = layout
+            .ducts()
+            .iter()
+            .position(|duct| duct.way_out() == Some(player));
+        // Facing **into the facility**: along the tunnel, the way the crawl runs. The
+        // caller's `facing` is what a player standing on the floor was given, and there
+        // is nothing to see behind you in a crawlspace anyway (§10.7).
+        let facing = in_duct
+            .and_then(|i| {
+                let cells = layout.ducts()[i].cells();
+                Direction::between(cells[cells.len() - 1], cells[cells.len() - 2])
+            })
+            .unwrap_or(facing);
+        debug_assert!(
+            layout
+                .exit_duct()
+                .is_none_or(|duct| duct.cells()[0] == exit),
+            "the exit tunnel must start at the exit it is the way out of (§4.5)"
+        );
+
         let mut state = Self {
             layout,
             player,
             facing,
             player_fov: VisibleSet::default(),
             memory: VisibleSet::default(),
-            in_duct: None,
-            // **The opening look** (§5/§8.3/§9.1, #383): the run starts *as if* the
-            // previous turn had been a Wait, so the startup turn below computes sight
-            // over the full 360° and the whole entry room lands in memory on frame
-            // one. You dug the tunnel and climbed out of it; you looked around before
-            // stepping off it, and the game should not open by asking you to spend a
-            // turn on the room you are standing in. No turn is spent — this is the
-            // run's starting posture, not a queued action — and the first spent
-            // non-Wait action clears it, after which sight is the ordinary half-disc.
-            // Do not "fix" this back to `false`.
-            waited: true,
+            in_duct,
+            // A run that opens in the tunnel has not been inside yet (§4.5/#466); every
+            // other state — a hand-built fixture, a scene staged mid-run — begins on the
+            // floor and so begins having been.
+            entered_the_facility: in_duct.is_none(),
+            // The run opens with the **ordinary** posture — §5's half-disc and the plain
+            // sense box. The free 360° opening look (#383) is gone with #466: it existed
+            // to show a player the room they had materialised standing in, and nobody
+            // materialises any more. You crawl in, you peek out of the mouth (§6.1/§10.7)
+            // and you climb out looking where you chose to look — which is a decision,
+            // where the old rule handed out a fact.
+            waited: false,
             moved_this_turn: false,
             stunned: 0,
             crouched_behind: None,
@@ -789,29 +857,6 @@ impl State {
         // The level-start full turn (§4.2): sight and guards, no player phase.
         let _ = state.run_world_phases();
         state
-    }
-
-    /// The scene as it stands once the run's **opening look has been spent**
-    /// (§5/§8.3/#383): the ordinary half-disc and the plain sense box, remembering
-    /// only what that lights.
-    ///
-    /// A test seam, and a narrow one. A fixture assembled to say something about the
-    /// schematic layer ("unexplored, a table is indistinguishable from the floor") or
-    /// about the guard sense is a scene **mid-run**, not one at the mouth of the
-    /// tunnel; without this it would have to be staged in a room big enough to put its
-    /// subject beyond sight range, which is a fixture about arithmetic rather than
-    /// about the thing under test. The tests that *are* about the opening posture say
-    /// so by not calling this.
-    ///
-    /// It spends no turn — no guard steps, no clock ticks, no event — so everything
-    /// but the player's perception is exactly as [`new`](Self::new) left it.
-    #[cfg(test)]
-    pub(crate) fn without_the_opening_look(mut self) -> Self {
-        self.waited = false;
-        self.player_fov = VisibleSet::default();
-        self.memory = VisibleSet::default();
-        self.recompute_sight();
-        self
     }
 
     /// Kill the radio net directly (§7.3/§7.7) — the seam a test uses to reach the
@@ -1300,15 +1345,24 @@ impl State {
     /// Resolve a step into a move or a bump (§4.3), pushing the event and reporting
     /// whether the turn was spent.
     fn resolve_step(&mut self, dir: Direction, events: &mut Vec<Event>) -> bool {
-        let Some(target) = self.player.step(dir) else {
-            // Off the north/west edge — the border is wall anyway, so a free mis-input.
-            return false;
-        };
-
+        // A step **off the board** is resolved first, because it has no target cell to
+        // classify. On the exit tunnel's way-out cell, aimed outward, it is the win
+        // check (§4.5/#466); everywhere else it is the free mis-input a wall bump has
+        // always been (§4.3) — the border is solid wall, and there is nothing beyond it.
+        //
         // One ladder decides what a bump does — the same `bump_kind` the usable line
-        // reads — so execution and prediction can never disagree (§11.4). This match
-        // performs the effect; the classification and its priority live in one place.
-        let kind = self.bump_kind(target);
+        // reads — so execution and prediction can never disagree (§11.4). The match
+        // below performs the effect; the classification and its priority live in one
+        // place, and the off-board step gets the one classifier that can answer for a
+        // target which is not a cell. It yields only `Exit`, whose arms read no target,
+        // so the player's own cell stands in for one.
+        let (target, kind) = match self.player.step(dir) {
+            Some(cell) if self.layout.facility().in_bounds(cell) => (cell, self.bump_kind(cell)),
+            _ => match self.way_out_kind(dir) {
+                Some(kind) => (self.player, kind),
+                None => return false,
+            },
+        };
 
         // The half-speed drag (§8.3): a step that would *move* the player while a
         // haul debt is owed pays the debt instead — the turn is spent hauling the
@@ -1370,8 +1424,10 @@ impl State {
                 events.push(Event::BodyStored { at: target });
                 true
             }
-            // The exit: win if the objectives are done, else refuse — a refused exit
-            // changes nothing and is free (§4.5).
+            // The way out (§4.5/#466): a step off the board from the tunnel's border
+            // cell. Win if the intel gate is met, else refuse — a refused exit changes
+            // nothing and is free (§4.5), and the refusal is the same one it always was;
+            // only the cell you are standing on when you read it has moved.
             BumpKind::Exit { ready: true } => {
                 self.outcome = Outcome::Won;
                 events.push(Event::Won);
@@ -1504,14 +1560,27 @@ impl State {
             // leans through the mouth to read the room before you climb out. No body
             // can be in hand here (`bump_kind` refuses EnterDuct while dragging), so
             // there is nothing to haul.
-            BumpKind::EnterDuct => {
+            // The exit `E` from the facility side (§4.5/#466): climbing into the tunnel
+            // you dug. Mechanically the duct entry above — the same spent turn, the same
+            // concealment, the same mouth peek — so it shares its arm. What differs is
+            // only what the usable line called it on the way in (`exit: enter`).
+            BumpKind::EnterDuct | BumpKind::EnterExitDuct => {
                 self.player = target;
-                self.facing = dir.opposite();
                 // Record *which* duct we climbed into — the entry belongs to exactly
                 // one (§10.7), and from here "in a duct" is this stored index, not the
                 // cell (an interior cell may overlie floor the player could also walk).
                 self.in_duct = self.layout.duct_index_containing(target);
-                events.push(Event::EnteredDuct { at: target });
+                // Facing out the mouth, read from the duct itself rather than from the
+                // bump, so the stored facing and the peek that is cast from it can never
+                // disagree: for a recessed entry that is `dir.opposite()` anyway, and for
+                // the exit `E` — whose mouth is the whole room it comes up in — it is the
+                // tunnel's own axis, the way a crawl arrives. The fallback covers a
+                // hand-built duct with no derivable mouth.
+                self.facing = self.duct_entry_facing(target).unwrap_or(dir.opposite());
+                events.push(Event::EnteredDuct {
+                    at: target,
+                    own_tunnel: matches!(kind, BumpKind::EnterExitDuct),
+                });
                 true
             }
             // A crawl one cell along the duct (§10.7): a spent turn that moves the
@@ -1577,6 +1646,10 @@ impl State {
         // clears the stored state. (A phase-out, the one other way a Move fires from a
         // duct cell, ends the crawl just the same.)
         self.in_duct = None;
+        // And a step onto the facility's floor is the run beginning in earnest
+        // (§4.5/#466): from here the usable line offers the way out, which it holds back
+        // while the player has still never left the tunnel they started in.
+        self.entered_the_facility = true;
         let vacated = self.player;
         self.haul_body_to(vacated);
         self.player = target;
@@ -1630,11 +1703,49 @@ impl State {
         if !duct.is_entry(cell) {
             return None;
         }
+        // The exit `E` (§4.5/#466) is the one entry with no *recessed* mouth: it is a
+        // cell of the room it comes up in, so it may have floor on several sides and
+        // "the single floor neighbour" has no answer. Its mouth is the tunnel's own
+        // **axis** — you come up looking the way the tunnel points, which is also the
+        // direction a crawl arrives from, so the peek reads the room ahead of you.
+        if duct.way_out().is_some() {
+            return Direction::between(duct.cells()[1], cell);
+        }
         let facility = self.layout.facility();
         let mouth = facility
             .neighbours(cell)
             .find(|&n| facility.can_enter(n, ACTOR_FILL))?;
         Direction::between(cell, mouth)
+    }
+
+    /// What a step **off the board** would do (§4.5/§10.7/#466) — the classifier for
+    /// the one target that is not a cell, and the twin of [`bump_kind`](Self::bump_kind)
+    /// that both [`resolve_step`](Self::resolve_step) (which executes) and
+    /// [`affordances`](Self::affordances) (which labels the §11.4 usable line) read, so
+    /// the row can no more promise a wrong exit than a wrong door.
+    ///
+    /// `Some(BumpKind::Exit { .. })` only from the exit tunnel's **way-out cell**, aimed
+    /// **outward** — off the level border, the direction the tunnel points. Everywhere
+    /// else, and in every other direction, a step off the grid is the free mis-input it
+    /// has always been (§4.3): the border is wall, and there is nothing beyond it.
+    ///
+    /// **Phased, it offers nothing** (§8.3): while Dephase is up there is no bump at
+    /// all — no door opens, no intel is taken, the exit does not win — and walking out
+    /// through your own tunnel's wall is not an exception to that.
+    fn way_out_kind(&self, dir: Direction) -> Option<BumpKind> {
+        if self.abilities.effect_active(Effect::Phase) {
+            return None;
+        }
+        let duct = self.occupied_duct()?;
+        if duct.way_out() != Some(self.player) {
+            return None;
+        }
+        // Outward is *away from the tunnel*: the way-out cell's one neighbour on the
+        // path is the cell behind it, so the step that leaves the board is the opposite.
+        let inward = Direction::between(self.player, duct.cells()[duct.cells().len() - 2])?;
+        (dir == inward.opposite()).then_some(BumpKind::Exit {
+            ready: self.exit_ready(),
+        })
     }
 
     /// What bumping the orthogonally adjacent `target` would do (§4.3) — the **single**
@@ -1694,9 +1805,26 @@ impl State {
                 return BumpKind::BodyRelease;
             }
         }
+        // The exit `E` from the facility side (§4.5/#466): the inner mouth of the
+        // player's own tunnel.
+        //
+        // **The intel gate is answered here**, at the mouth, not at the far end of the
+        // crawl: short of it the bump refuses exactly as bumping the exit always did —
+        // free, with the §4.5 message — rather than letting the player crawl four cells
+        // to be told no somewhere they can do nothing about it. With the gate met the
+        // bump **climbs in**, exactly as a §10.7 shortcut's entry does, and the win is
+        // the step off the board at the far end ([`way_out_kind`](Self::way_out_kind)),
+        // which is the one the run *starts* inside and so still answers the gate itself.
+        //
+        // Like any duct entry it refuses a dragging player: a body cannot follow into
+        // the walls, so let it go before you leave.
         if target == self.exit {
-            return BumpKind::Exit {
-                ready: self.exit_ready(),
+            return if self.dragging.is_some() {
+                BumpKind::Solid
+            } else if self.exit_ready() {
+                BumpKind::EnterExitDuct
+            } else {
+                BumpKind::Exit { ready: false }
             };
         }
         if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
