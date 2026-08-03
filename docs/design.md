@@ -2242,6 +2242,7 @@ visibility is drawn.
 | In player's FOV | Full category colour |
 | Outside player's FOV | Same glyph, dark gray — dim but legible. Two exceptions: Ground dims further (the dots whisper), and the exit keeps a dark Interest tint — it anchors every escape plan (§7.6) and must not sink into wall gray |
 | Watched by a guard, in player's FOV | **Red background** — the danger overlay |
+| Watched by a guard the player **cannot see** | The straight sightline from that guard to the player is red — the **watcher line**, standing for as long as it has them. See below |
 | Watched by a guard, outside player's FOV | Dark gray on dark gray — *unreadable* |
 | A guard **sensed but not seen** (§9.2), any FOV | Its cell gets the orange **Sensed** background highlight regardless of line of sight; **no cone, no danger overlay** — position is known, attention is not. Where a *seen* guard's cone also watches the cell, the red danger overlay wins (being seen outranks) |
 
@@ -2256,6 +2257,26 @@ detection set — the same data the AI queries. If your cell isn't red, no guard
 can see will detect you. **The lose condition, painted.** It makes stealth
 plannable rather than guessy, which is the whole "enough information to strategise"
 pillar. **[SETTLED]** — keep it.
+
+**The watcher line closes the overlay's one hole** (#222/#465). The overlay is built
+from the cones of guards you can *see*; a guard watching from a room you cannot see
+into paints nothing, so the board would say you are safe right up to the capture. So
+a guard that (a) detects you right now, (b) is not confused (§8.3 — a dazed guard is
+blind, so it has no cone to be honest about) and (c) is one you cannot see draws the straight sightline between it and you in red. It is
+**standing**, not a flash: drawn on every turn it has you, gone the turn it loses
+you. It means *"it can see you right now"* and never *"it is after you"* — a chaser
+that has lost you draws nothing. A guard you *can* see draws none: its real cone
+already paints the overlay, and the line must never double-draw one. A player
+concealed from it (§10.3) draws none either, matching the overlay's own spare — red
+under you means detected.
+
+The cost should be stated rather than discovered: **while an unseen guard is looking
+at you, you get its exact position, through walls, at any distance, for free.** That
+is a deliberate exception to §9's bound on what may be known about a guard — the
+sense range, the wait's widening, the duct's shrinking. §2.2/§2.3 buy it: you may not
+be caught by something you could not perceive, and a guard with eyes on you is the
+definition of something about to catch you. The exception is bounded by the same
+condition it exists for, and expires with it.
 
 **The effect layer is advisory and never outranks red** (§8.3/#308/#325/#338). An
 ability effect of the player's own making marks the board in cyan, always as a

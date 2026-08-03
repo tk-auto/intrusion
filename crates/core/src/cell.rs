@@ -48,8 +48,8 @@ impl Cell {
     /// geometric: it names the squares a taut string between the two cells would lie
     /// over, with no regard for walls or occupancy (whoever holds the grid decides
     /// what those cells mean). Deterministic and, being pure integer arithmetic,
-    /// safe for the seeded model (§12.4). Used to draw the spot-flash sightline from
-    /// a guard to the player (§11.5/#222); a single cell yields just itself.
+    /// safe for the seeded model (§12.4). Used to draw the watcher line from an
+    /// unseen guard to the player (§11.5/#222/#465); a single cell yields just itself.
     pub fn line_to(self, other: Cell) -> Vec<Cell> {
         let (mut x, mut y) = (i64::from(self.x), i64::from(self.y));
         let (x1, y1) = (i64::from(other.x), i64::from(other.y));

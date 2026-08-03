@@ -317,7 +317,7 @@ pub fn render(state: &State) -> Grid {
     crouch_signal(state, &mut cells);
     stowed_body_memory(state, &mut cells);
     effect_wash(state, &mut cells);
-    spot_flash_pass(state, &mut cells);
+    watcher_line_pass(state, &mut cells);
     door_cue_wash(state, &mut cells);
     sensed_guard_wash(state, &mut cells);
     effect_thing_wash(state, &mut cells);
@@ -568,20 +568,23 @@ fn effect_wash(state: &State, cells: &mut [GlyphCell]) {
     }
 }
 
-/// The spot flash (§11.5/§9.2/§7.6, #222): the one-beat sightline of a guard that
-/// *freshly* spotted the player from **outside their view** — the "a guard just saw
-/// you, and here is where it is" cue the loop was missing (§7.6). It lights the
-/// straight line between spotter and player red (`Danger`): honest, because that
-/// guard's cone genuinely watches those cells, and a strict momentary *subset* of
-/// the overlay, gone on the next action. Painted among the **weakest** background
-/// cues, so the later marks win where they coincide: a *sensed* spotter keeps its
-/// orange position dot with the red line running up to it, and a guard that is
-/// neither seen nor sensed is marked by the red line's own endpoint. Guards the
-/// player can see are filtered upstream ([`State::spot_flash`]) — their real cone
-/// paints anyway (§9.2), so this never double-draws or restates a seen cone.
-fn spot_flash_pass(state: &State, cells: &mut [GlyphCell]) {
+/// The watcher lines (§11.5/§9.2/§7.6, #222/#465): the sightline of every guard
+/// **currently** detecting the player from **outside their view** — the "something is
+/// watching you, and here is where it is" cue the loop was missing (§7.6). It lights
+/// the straight line between watcher and player red (`Danger`): honest, because that
+/// guard's cone genuinely watches those cells, and a strict *subset* of the overlay.
+/// **Standing**, not a flash (#465): drawn on every turn the watcher has the player
+/// and gone the turn it loses them, so it keeps answering *"it is still looking at
+/// you"* for as long as that is true. Painted among the **weakest** background cues,
+/// so the later marks win where they coincide: a *sensed* watcher keeps its orange
+/// position dot with the red line running up to it, and a guard that is neither seen
+/// nor sensed is marked by the red line's own endpoint. Guards the player can see,
+/// dazed guards and a concealed player are filtered upstream
+/// ([`State::watcher_lines`]) — a seen guard's real cone paints anyway (§9.2), so this
+/// never double-draws or restates a seen cone.
+fn watcher_line_pass(state: &State, cells: &mut [GlyphCell]) {
     let width = state.layout().facility().width();
-    for cell in state.spot_flash() {
+    for cell in state.watcher_lines() {
         cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Danger);
     }
 }

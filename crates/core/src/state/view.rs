@@ -360,25 +360,53 @@ impl State {
             .flat_map(move |cue| regions.door(cue.door).cells())
     }
 
-    /// The cells of the momentary **spot flash** (§11.5/§9.2/§7.6, #222): when a
-    /// guard *freshly* detects the player from **outside the player's view**, the
-    /// straight sightline from that guard to the player lights red
-    /// ([`Category::Danger`]) for that one beat — the "a guard just saw you, and here
-    /// is where it is" cue the loop was missing, so a spot is a direction to run
-    /// *from* rather than a dice roll (§7.6). The line is honest danger: the spotting
-    /// guard's cone genuinely watches those cells (it detected the player along them),
-    /// so this is a strict, momentary *subset* of the danger overlay, never a new kind
-    /// of claim — and it clears on the next action ([`spotters`](Self::spotters)).
+    /// The cells of the **watcher lines** (§11.5/§9.2/§7.6, #222/#465): for every
+    /// guard that detects the player **right now** and that the player cannot *see*,
+    /// the straight sightline from that guard to the player lights red
+    /// ([`Category::Danger`]) — the "something is watching you, and here is where it
+    /// is" cue, so being spotted is a direction to run *from* rather than a dice roll
+    /// (§7.6). The line is honest danger: the watching guard's cone genuinely covers
+    /// those cells (it is detecting the player along them), so this stays a strict
+    /// *subset* of the danger overlay, never a new kind of claim.
     ///
-    /// A guard the player *can* see is excluded: its facing and full cone already
-    /// paint every turn (§9.2), so flashing a line to it would only double-draw. The
-    /// flash is the **exception §9.2 permits** — a deliberate, detection-fired reveal
-    /// of an unseen guard's line, never a standing cone for one that stays unseen.
-    pub fn spot_flash(&self) -> impl Iterator<Item = Cell> + '_ {
+    /// It is **standing**, not a flash (#465). Derived live each frame, it is drawn on
+    /// every turn the watcher has the player and gone the turn that stops being true,
+    /// so it answers *"it can see you right now"* — the question the player has for the
+    /// whole encounter — and never *"it is after you"*. A chaser that has lost the
+    /// player draws nothing. That continuity is what makes §11.5's **[SETTLED]**
+    /// promise — *if your cell isn't red, no guard detects you* — hold against a guard
+    /// watching from a room the player cannot see into, which paints no overlay at all.
+    ///
+    /// The set is derived, never recorded, and each guard is judged by three questions:
+    ///
+    /// - It detects the player, read **live** through
+    ///   [`guard_detects_now`](Self::guard_detects_now) rather than the per-turn
+    ///   [`detected_player`](Guard::detected_player) latch. The two agree except for a
+    ///   guard that moved during phase 3, whose latch is a turn stale; the live read is
+    ///   the one that matches what the line claims, and it is the same predicate the
+    ///   overlay's cones are drawn from, so picture and rule cannot disagree. It also
+    ///   carries the overlay's own §10.3 spare for free: a player
+    ///   [`concealed_from`](Self::concealed_from) that guard — cupboard, crouch,
+    ///   camouflage — is not detected, so no line is drawn.
+    /// - It is not [`confused`](Self::guard_confused). A dazed guard is blind
+    ///   (§8.3/#240) and takes no part in the sense pass, so its cone is last turn's
+    ///   frozen reading and it has nothing honest to draw.
+    /// - The player does not *see* it. A seen guard's facing and full cone already
+    ///   paint every turn (§9.2), so a line to it would only double-draw.
+    ///
+    /// The line is the **exception §9.2 permits**, and it is worth naming: while an
+    /// unseen guard is looking at you, you get its exact position, through walls, at
+    /// any distance, for free — a deliberate breach of the §9 bound on what may be
+    /// known about a guard ([`sense_range`](Self::sense_range)). §2.2/§2.3 buy it: you
+    /// may not be caught by something you could not perceive, and a guard with eyes on
+    /// you is the definition of something about to catch you. It is still a line to a
+    /// *watcher*, never a standing cone for a guard that merely stays unseen.
+    pub fn watcher_lines(&self) -> impl Iterator<Item = Cell> + '_ {
         let player = self.player;
-        self.spotters
+        self.guards
             .iter()
-            .filter_map(move |&index| self.guards.get(index))
+            .filter(move |guard| self.guard_detects_now(guard))
+            .filter(move |guard| !self.guard_confused(guard))
             .filter(move |guard| self.perceive_guard(guard) != Some(GuardPerception::Seen))
             .flat_map(move |guard| guard.pos().line_to(player))
     }
@@ -422,15 +450,15 @@ impl State {
 
     /// Whether the player currently sees `cell` painted by the §11.5 danger overlay:
     /// inside a seen guard's cone ([`visible_cone_cells`](Self::visible_cone_cells)),
-    /// or on the momentary spot-flash sightline of a guard that has *just* detected
-    /// them from out of view ([`spot_flash`](Self::spot_flash)/#250) — both are red
+    /// or on the standing sightline of a guard that is detecting them from out of view
+    /// ([`watcher_lines`](Self::watcher_lines)/#250/#465) — both are red
     /// the player can act on ("don't get blindly walked into detection"). Exposed so
     /// the shell's held-movement guard (#223) reuses the overlay's own set rather
     /// than recomputing detection: a held key or swipe stops auto-repeating the
     /// moment a step would carry the player into one of these cells, or they already
     /// stand in one.
     pub fn in_visible_danger(&self, cell: Cell) -> bool {
-        self.visible_cone_cells().any(|c| c == cell) || self.spot_flash().any(|c| c == cell)
+        self.visible_cone_cells().any(|c| c == cell) || self.watcher_lines().any(|c| c == cell)
     }
 
     /// How the player perceives `guard` this frame (§9.2), or `None` if it is neither

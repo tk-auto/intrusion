@@ -441,7 +441,11 @@ fn an_unseen_guards_cone_is_not_visible_danger() {
         0,
         "an unseen guard contributes no visible cone",
     );
-    assert_eq!(s.spot_flash().count(), 0, "it faces away — no fresh spot");
+    assert_eq!(
+        s.watcher_lines().count(),
+        0,
+        "it faces away — it watches nobody"
+    );
     // A cell the guard's cone genuinely covers (south of it, out of the FOV) is not
     // danger: knowledge the player does not have.
     let in_cone = Cell::new(10, 16);
@@ -459,12 +463,12 @@ fn an_unseen_guards_cone_is_not_visible_danger() {
     );
 }
 
-/// #223 with #250: a guard the player cannot see that **freshly** detects them
-/// contributes no cone (it is unseen), but its momentary spot-flash sightline *is*
-/// visible danger — the "you just got spotted, don't blindly march on" case. The
-/// shell's held-movement guard reads it through the same query.
+/// #223 with #250/#465: a guard the player cannot see that detects them contributes
+/// no cone (it is unseen), but its standing watcher line *is* visible danger — the
+/// "something has eyes on you, don't blindly march on" case. The shell's
+/// held-movement guard reads it through the same query.
 #[test]
-fn a_fresh_spot_from_an_unseen_guard_is_visible_danger() {
+fn an_unseen_watchers_line_is_visible_danger() {
     // Guard at (10,5) facing south; player five south at (10,10) facing south too —
     // the guard is directly behind, unseen, but its cone runs down over the player,
     // so at level start it freshly detects a player it is unseen by (§9.2).
@@ -479,18 +483,18 @@ fn a_fresh_spot_from_an_unseen_guard_is_visible_danger() {
     .without_the_opening_look();
     assert!(
         !s.player_fov().contains(Cell::new(10, 5)),
-        "precondition: the spotter is behind the player, unseen",
+        "precondition: the watcher is behind the player, unseen",
     );
     assert_eq!(
         s.visible_cone_cells().count(),
         0,
         "the unseen cone paints no danger on its own",
     );
-    // The fresh spot-flash sightline (10,6)..=(10,10) is danger the player can act on.
+    // The watcher line (10,6)..=(10,10) is danger the player can act on.
     for y in 6..=10 {
         assert!(
             s.in_visible_danger(Cell::new(10, y)),
-            "the spot sightline at (10,{y}) is visible danger",
+            "the watcher line at (10,{y}) is visible danger",
         );
     }
     assert!(
