@@ -298,11 +298,13 @@ fn affordances_mirror_what_a_bump_would_do() {
 }
 
 /// The **way out** on the usable line (§4.5/§11.4/#466): from the tunnel's border cell
-/// the row offers `exit: leave` when the intel gate is met and `exit: needs the intel`
-/// when it is not — the same two words for the same decision the exit tile used to
-/// carry, aimed **off the board**, which no affordance has ever been before (#384).
+/// the row offers `exit: leave`, aimed **off the board** — which no affordance has ever
+/// been before (#384) — once the player has been inside the facility. On the opening
+/// crawl it stays quiet: the run starts on that cell, and the way home is not what turn
+/// one is about.
 ///
-/// Inside the tunnel it is the only thing on the row: a crawler can bump nothing else.
+/// Inside the tunnel it is the only thing the row ever carries: a crawler can bump
+/// nothing else.
 #[test]
 fn the_way_out_offers_leave_or_the_refusal_aimed_off_the_board() {
     // Both start where a run starts — on the way-out cell, inside the tunnel (#466) —
@@ -321,16 +323,18 @@ fn the_way_out_offers_leave_or_the_refusal_aimed_off_the_board() {
         s
     };
 
-    // Empty-handed with an objective still out: the row says what the bump will do.
+    // On the way in, the row is quiet whatever the gate says.
     let refused = build(vec![Cell::new(6, 5)]);
-    assert_eq!(
-        refused.affordances(),
-        vec![(Some(Direction::North), Affordance::ExitRefused)],
-        "the refusal is aimed north, off the top border",
-    );
+    assert_eq!(refused.affordances(), Vec::new(), "nothing on the way in");
+    let mut ready = build(Vec::new());
+    assert_eq!(ready.affordances(), Vec::new());
 
-    // Nothing to fetch: the gate is vacuously met, so the same cell offers the win.
-    let ready = build(Vec::new());
+    // Come home — out of the mouth and back down the tunnel — and the same cell offers
+    // the win, aimed north, off the top border.
+    crate::test_support::climb_out_of_the_tunnel(&mut ready);
+    while ready.player() != Cell::new(5, 0) {
+        ready.step(Input::Step(Direction::North));
+    }
     assert_eq!(
         ready.affordances(),
         vec![(Some(Direction::North), Affordance::Leave)],

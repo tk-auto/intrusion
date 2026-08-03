@@ -312,6 +312,13 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     // that starts sealed inside its own tunnel. Rejected here, where another `E` costs
     // nothing.
     let tunnel_from = |exit: Cell| {
+        // `E` itself must be unclaimed too, not just the run behind it: a shortcut's
+        // interior may overlie ordinary room floor (§10.7 cross-room routing), so a
+        // candidate can sit *on* one without looking any different — and the exit stamped
+        // there would put a solid usable under someone else's crawl.
+        if ducted.contains(&exit) {
+            return None;
+        }
         let duct = carve_exit_duct(facility, exit, &ducted)?;
         let opens_onto_the_building = footholds(facility, exit, duct.cells()).next().is_some();
         opens_onto_the_building.then_some(duct)
@@ -929,8 +936,8 @@ mod tests {
     /// is now the tunnel's own length floor.
     #[test]
     fn the_exit_sits_in_the_largest_room_with_its_tunnel_behind_it() {
-        assert_eq!(EXIT_DUCT_MIN_CELLS, 4, "the [START] tunnel length floor");
-        assert_eq!(EXIT_DUCT_MAX_CELLS, 12, "the [START] tunnel length cap");
+        assert_eq!(EXIT_DUCT_MIN_CELLS, 8, "the [START] tunnel length floor");
+        assert_eq!(EXIT_DUCT_MAX_CELLS, 16, "the [START] tunnel length cap");
         for seed in seed_sweep(SEEDS) {
             let (layout, p) = v1(seed);
             let facility = layout.facility();

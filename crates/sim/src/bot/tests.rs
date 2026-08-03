@@ -310,11 +310,12 @@ fn the_balanced_profile_is_the_default_bot() {
 /// the mouth of a tunnel the player starts inside (§4.5), so placement chooses a
 /// different `E`, the draw shifts behind it (the comms console moved ahead of the guards
 /// so the #232 knob stops perturbing it), and every seed carves a *different facility* —
-/// 48 different levels, played from a different opening. The aggregate (**25 wins to
-/// 20**) is not a difficulty finding either; the committed baseline refreshed in the
-/// same PR runs 100 seeds per profile and is what judges that. What is worth noting is
-/// that the `playing 999` row this pin used to carry is gone: no seed here now spends
-/// its whole input budget without ending.
+/// 48 different levels, played from a different opening. Moving the tunnel's [START]
+/// length to 8–16 after the first playtest re-carved all 48 once more. The aggregate
+/// (**18 wins to 20**) is not a difficulty finding either; the committed baseline
+/// refreshed in the same PR runs 100 seeds per profile and is what judges that. What is
+/// worth noting is that the `playing 999` row this pin used to carry is gone: no seed
+/// here now spends its whole input budget without ending.
 ///
 /// **Merging #451 and #452 moved four more rows**, all `aggressive`/`careless` and
 /// none of them a win/loss flip: the extra turn a fetch now costs (#451) lands on
@@ -332,54 +333,54 @@ fn the_balanced_profile_is_the_default_bot() {
 #[test]
 fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
     const PINNED: [&str; 48] = [
-        "balanced 0 won 76 ",
+        "balanced 0 won 104 ",
         "balanced 1 won 145 rr",
-        "balanced 2 won 247 rdrrd",
-        "balanced 3 lost 41 r",
+        "balanced 2 lost 181 rrcdr",
+        "balanced 3 lost 366 rrcrcrrrdrdr",
         "balanced 4 lost 203 crdrdrd",
-        "balanced 5 won 135 c",
-        "balanced 6 lost 219 r",
-        "balanced 7 won 60 ",
-        "balanced 8 lost 162 rdrd",
-        "balanced 9 won 59 ",
-        "balanced 10 lost 63 cr",
-        "balanced 11 lost 78 rrdrc",
-        "cautious 0 won 76 ",
+        "balanced 5 lost 38 rc",
+        "balanced 6 lost 48 rdr",
+        "balanced 7 won 64 ",
+        "balanced 8 lost 40 rd",
+        "balanced 9 lost 389 crrrrrrrrrrrrrdr",
+        "balanced 10 lost 39 rc",
+        "balanced 11 lost 59 crdr",
+        "cautious 0 won 112 c",
         "cautious 1 won 118 ",
-        "cautious 2 won 315 rdr",
-        "cautious 3 lost 51 r",
+        "cautious 2 won 226 rd",
+        "cautious 3 won 450 rrrd",
         "cautious 4 lost 327 ccrdrdrd",
-        "cautious 5 lost 387 crrdcrdr",
-        "cautious 6 won 350 rdrrdrr",
-        "cautious 7 won 60 ",
-        "cautious 8 lost 308 drdrdr",
-        "cautious 9 won 59 ",
-        "cautious 10 won 151 ",
-        "cautious 11 lost 61 rdrc",
-        "aggressive 0 won 76 ",
+        "cautious 5 won 221 rcdcrrc",
+        "cautious 6 lost 65 rr",
+        "cautious 7 won 64 ",
+        "cautious 8 lost 44 rd",
+        "cautious 9 lost 43 cr",
+        "cautious 10 won 102 c",
+        "cautious 11 lost 246 crdcrrdrr",
+        "aggressive 0 lost 73 rdc",
         "aggressive 1 won 100 rcr",
-        "aggressive 2 won 169 rr",
-        "aggressive 3 lost 41 r",
+        "aggressive 2 won 192 ",
+        "aggressive 3 lost 53 r",
         "aggressive 4 lost 43 rc",
-        "aggressive 5 lost 115 rr",
-        "aggressive 6 won 320 rrrcrrcdrrd",
-        "aggressive 7 won 60 ",
-        "aggressive 8 lost 51 rdr",
-        "aggressive 9 won 59 ",
-        "aggressive 10 won 180 crrdrr",
-        "aggressive 11 lost 205 rrrrr",
-        "careless 0 won 76 ",
+        "aggressive 5 lost 38 rc",
+        "aggressive 6 lost 104 rrrc",
+        "aggressive 7 won 64 ",
+        "aggressive 8 won 118 rdcr",
+        "aggressive 9 lost 51 rc",
+        "aggressive 10 lost 39 rc",
+        "aggressive 11 won 142 rc",
+        "careless 0 won 164 rcrcd",
         "careless 1 lost 99 rr",
-        "careless 2 won 169 rr",
-        "careless 3 lost 41 r",
+        "careless 2 lost 153 rrdc",
+        "careless 3 lost 53 r",
         "careless 4 lost 40 rc",
-        "careless 5 lost 117 rr",
-        "careless 6 lost 60 r",
-        "careless 7 won 60 ",
-        "careless 8 lost 61 rdcr",
-        "careless 9 won 59 ",
-        "careless 10 won 154 crrdrc",
-        "careless 11 lost 205 rrrrr",
+        "careless 5 lost 38 rc",
+        "careless 6 lost 75 rcrc",
+        "careless 7 won 64 ",
+        "careless 8 won 118 rdcr",
+        "careless 9 lost 131 rcrrcd",
+        "careless 10 lost 39 rc",
+        "careless 11 lost 89 rcrd",
     ];
 
     let mut played = Vec::new();

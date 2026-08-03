@@ -294,8 +294,9 @@ mod tests {
     /// exit is now the mouth of a tunnel the player starts inside (§4.5), so placement
     /// picks a different `E`, the whole draw shifts behind it (the comms console moved
     /// ahead of the guards so the #232 knob stops perturbing it), and seed 42 carves a
-    /// **different facility** — a capture at 150 rather than the one at 98. Any run's
-    /// turns now include the crawl in, which every run pays.
+    /// **different facility** — and moving the tunnel's [START] length to 8–16 after the
+    /// first playtest re-carved it again, to a 168-turn win. Any run's turns now include
+    /// the crawl in and the crawl out, which every run pays.
     /// Nothing about that comparison means anything on its own; the PR's 100-seed
     /// batches are where the reading is.
     ///
@@ -310,7 +311,7 @@ mod tests {
     /// history: a re-carve makes the row incomparable, a rule change makes it evidence.
     #[test]
     fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
-        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"capture\",\"turns\":150,\"detections\":5,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":44,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":1,\"alert_escalations\":[{\"turn\":150,\"rung\":1,\"trigger\":\"sighting\"}],\"reinforcements\":0}";
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"win\",\"turns\":168,\"detections\":8,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":44,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":25,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":124,\"rung\":2,\"trigger\":\"console-tampered\"}],\"reinforcements\":1}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.

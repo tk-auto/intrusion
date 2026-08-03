@@ -1488,12 +1488,19 @@ the crawl behind the mouth — the same secret every other duct keeps. Nothing a
    the row never says a bump will do what it will not. `E` with the gate met means *climb
    in*, so it gets its own label (`exit: enter`): two bumps that behave identically and
    mean completely different things must not read identically on the one row that says
-   what a bump does.
+   what a bump does. The **row** goes one step further and says nothing about the way out
+   until the player has been inside: the run opens standing on that very cell, and an
+   opening line reading *leave* points at the end of a run that has not started. The press
+   still answers — the gate is a rule, the row is a prediction, and holding a prediction
+   back is not the same as lying in one (§11.4's own FOV gate is the precedent).
 2. **`PLAYER_EXIT_MIN_DISTANCE` retired.** Eight cells between the spawn and the exit
    existed so that no run started won. There is no spawn-to-exit distance any more — the
    player starts *at* the way out — so the hazard is re-closed as a floor on the
-   **tunnel's own length** (`EXIT_DUCT_MIN_CELLS` = 4, capped at 12 because every cell of
-   it is a turn the guards get). Placement's other spacing rules re-anchor on `E`: the
+   **tunnel's own length** (`EXIT_DUCT_MIN_CELLS` = 8, capped at 16 because every cell of
+   it is a turn the guards get). It shipped at 4–12 and the first playtest moved it: four
+   cells reads as a hole in the skirting rather than something you dug, and the opening
+   was over before it had said where you were. The pair is the knob the whole entrance
+   hangs on, and it is the number to watch first. Placement's other spacing rules re-anchor on `E`: the
    comms detour is measured from it, and the turn-one guard-cone rule protects the mouth
    the player comes up out of rather than a cell they no longer stand on.
 3. **You can dive into your own tunnel to break contact.** It is a duct, so it conceals

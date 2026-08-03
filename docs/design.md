@@ -287,8 +287,10 @@ If you are adding an ability and about to make it free, re-read §2.3.
   **The gate is answered at the mouth.** Bumping `E` before you hold enough intel
   refuses, with the message, exactly as bumping the exit always did — you are told in
   the facility, where you can act on it, rather than after a crawl that ends in a wall.
-  The border cell answers it too, since that is where the run *begins* and you can stand
-  there empty-handed. **How much is "enough" is a level modifier** (`intel_to_exit`, §12.6/#244),
+  The border cell answers a press too, since that is where the run *begins* and you can
+  stand there empty-handed — but the usable line (§11.4) **does not offer** the way out
+  until you have set foot inside. A row whose only entry is *leave* is the wrong first
+  thing to say to someone who has not been in yet. **How much is "enough" is a level modifier** (`intel_to_exit`, §12.6/#244),
   not one fixed rule, so the modes gate the *same* facility differently:
   - **Quick play — all the intel** (§10.2/#244). Gather the whole set, then get out:
     a complete objective, and v1's default mode.
@@ -1780,8 +1782,8 @@ Two more spacing rules, both fixing real old-generator faults (appendix 17):
   could spawn adjacent), spread the intel out, or keep a guard from spawning where it
   saw you on turn one. The pillar says *"the starting area should be safe"*; make it so.
   Since #466 the first of those is the **tunnel's own length** rather than a spawn-to-exit
-  distance — the player starts at the way out, so `EXIT_DUCT_MIN_CELLS` (**[START]** = 4,
-  cap 12) is what keeps a run from starting on top of its objective — and the turn-one
+  distance — the player starts at the way out, so `EXIT_DUCT_MIN_CELLS` (**[START]** = 8,
+  cap 16) is what keeps a run from starting on top of its objective — and the turn-one
   cone rule now protects the **mouth** they climb out of, the crawl itself being
   concealed and contact-safe (§10.7).
 - **Fail loudly or retry the seed.** Placement must never fail silently — asking for 5

@@ -558,8 +558,18 @@ fn a_bore_only_ever_adds_reachability() {
     // puts the first borable wall face inside such a pocket, at which point the
     // §10.6 assertion below is measuring the wrong set of cells; #452's stream shift
     // is what walked seed 7 into exactly that.
+    //
+    // The flood starts where the player first sets foot in the facility (§4.5/#466) —
+    // a floor neighbour of the exit `E` — because the spawn itself is the border cell
+    // *inside* their own tunnel, and a flood from a wall reaches nothing.
     let stamped = borer(layout.clone(), placement.player());
-    let from_start = reachable(stamped.layout().facility(), placement.player());
+    let foothold = stamped
+        .layout()
+        .facility()
+        .neighbours(placement.exit())
+        .find(|&n| stamped.layout().facility().terrain(n) == Some(Terrain::Floor))
+        .expect("the mouth opens onto the building");
+    let from_start = reachable(stamped.layout().facility(), foothold);
     let stand = borable_stand(&layout, &from_start)
         .expect("a 40×40 facility has a lone wall face the player can reach");
     let mut s = borer(layout, stand);

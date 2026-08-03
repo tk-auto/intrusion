@@ -847,6 +847,18 @@ impl State {
             // affordance whose arrow points **off** the grid (§11.4/#384). It carries
             // no FOV gate — there is no cell out there to have seen, and the tunnel
             // you dug yourself is not something the fog can hide from you.
+            //
+            // It is held back until the player has **been inside** though
+            // ([`entered_the_facility`]): the run opens standing on that very cell, and a
+            // row whose only entry is *leave* is the wrong first thing to say to someone
+            // who has not been in yet. Like the FOV gate below, this is the predictor's
+            // alone — the bump still answers (§4.5), so pressing outward anyway is
+            // told why rather than silently refused.
+            //
+            // [`entered_the_facility`]: Self::entered_the_facility
+            if !self.entered_the_facility {
+                continue;
+            }
             if let Some(kind) = self.way_out_kind(dir) {
                 if let Some(a) = kind.affordance() {
                     out.push((Some(dir), a));

@@ -30,23 +30,29 @@ use crate::facility::{Facility, Terrain};
 /// The fewest cells the exit tunnel may span, `E` and the way-out cell included
 /// (§4.5/#466 **[START]**).
 ///
-/// Four: `E`, two crawl cells, and the border — three crawl steps and a climb-out, so
-/// the opening is a real passage rather than a hole in the skirting, and the way out is
-/// never adjacent to the room `E` opens into. This is what
-/// `PLAYER_EXIT_MIN_DISTANCE` became (§10.6): the old constant kept the *player* away
-/// from the exit so a run could not start won, and now that the player starts **in** the
-/// tunnel with the way out behind them, the distance placement chooses is the tunnel's
-/// own length. Pinned by a test.
-pub(crate) const EXIT_DUCT_MIN_CELLS: usize = 4;
+/// **Eight** — seven crawl steps and a climb-out. It began at four and came up on the
+/// first playtest: a four-cell tunnel reads as a hole in the skirting rather than
+/// something you dug, and the opening was over before it had established where you were.
+/// The length is what makes the entrance a *passage*, and the passage is the whole point
+/// of the ticket.
+///
+/// It is also what `PLAYER_EXIT_MIN_DISTANCE` became (§10.6): the old constant kept the
+/// *player* away from the exit so a run could not start won, and now that the player
+/// starts **in** the tunnel with the way out behind them, the distance placement chooses
+/// is the tunnel's own length. Pinned by a test.
+pub(crate) const EXIT_DUCT_MIN_CELLS: usize = 8;
 
 /// The most cells the exit tunnel may span (§4.5/#466 **[START]**).
 ///
-/// Twelve. Every cell of it is a **turn** — guards patrol while you crawl, which is the
-/// point (§4.4) — so this is the knob that decides how long every run takes to start.
-/// Long enough that a candidate `E` well inside the building still works; short enough
-/// that the opening is never a chore. Pinned by a test, and measured over the seed sweep
-/// (`the_exit_tunnel_is_a_short_straight_run`).
-pub(crate) const EXIT_DUCT_MAX_CELLS: usize = 12;
+/// **Sixteen.** Every cell of it is a **turn** — guards patrol while you crawl, which is
+/// the point (§4.4) — so this is the knob that decides how long every run takes to start,
+/// and the pair with [`EXIT_DUCT_MIN_CELLS`] is what the opening's whole character hangs
+/// on. Wide enough above the floor that a candidate `E` still has somewhere to come out
+/// (the two together are a band `E` must sit inside: at least seven cells from the border
+/// it tunnels to, at most fifteen), short enough that the crawl never becomes a chore.
+/// Pinned by a test, and measured over the seed sweep
+/// (`the_exit_sits_in_the_largest_room_with_its_tunnel_behind_it`).
+pub(crate) const EXIT_DUCT_MAX_CELLS: usize = 16;
 
 // A tunnel must be able to *be* a tunnel: the range has to admit at least one length.
 const _: () = assert!(EXIT_DUCT_MIN_CELLS >= 3 && EXIT_DUCT_MIN_CELLS <= EXIT_DUCT_MAX_CELLS);
@@ -133,17 +139,22 @@ mod tests {
         Facility::walled_box(20, 20)
     }
 
-    /// The tunnel runs straight out of `E` to the **nearest** border, ends on the border
-    /// ring, and keeps that cell's wall terrain (§4.5/#466/§10.6).
+    /// The tunnel runs straight out of `E` to the **nearest** border it may reach, ends
+    /// on the border ring, and keeps that cell's wall terrain (§4.5/#466/§10.6).
     #[test]
     fn the_tunnel_runs_straight_to_the_nearest_border() {
         let f = box20();
-        // (4, 9) is 4 cells from the west border and 15 from the east: west wins.
-        let duct = carve_exit_duct(&f, Cell::new(4, 9), &HashSet::new()).expect("a clear run");
+        // From (8, 9) the four runs are 9 west, 12 east, 10 north, 11 south — every one
+        // of them a legal length, so the shortest wins.
+        let duct = carve_exit_duct(&f, Cell::new(8, 9), &HashSet::new()).expect("a clear run");
         assert_eq!(duct.kind(), DuctKind::Exit);
         assert_eq!(
             duct.cells(),
             [
+                Cell::new(8, 9),
+                Cell::new(7, 9),
+                Cell::new(6, 9),
+                Cell::new(5, 9),
                 Cell::new(4, 9),
                 Cell::new(3, 9),
                 Cell::new(2, 9),
@@ -159,24 +170,24 @@ mod tests {
         );
     }
 
-    /// The **minimum** bites: a cell too close to one border takes the next-nearest one
-    /// instead, so the way out is never a step from the room `E` opens into.
+    /// The **minimum** bites: a cell too close to one border takes a further one
+    /// instead, so the opening is always a passage rather than a hole in the skirting.
     #[test]
     fn a_run_shorter_than_the_minimum_is_refused() {
         let f = box20();
-        // (2, 9): west is 3 cells (E, 1, 0) — under the minimum — so it goes north,
-        // which is 10.
+        // (2, 9): west is 3 cells — well under the floor — and east is 18, over the cap,
+        // so the run goes north (10) rather than out of the wall it stands against.
         let duct = carve_exit_duct(&f, Cell::new(2, 9), &HashSet::new()).expect("a clear run");
         assert!(duct.cells().len() >= EXIT_DUCT_MIN_CELLS);
-        assert_eq!(duct.way_out(), Some(Cell::new(2, 0)));
+        assert_eq!(duct.way_out(), Some(Cell::new(2, 0)), "not the near border");
     }
 
     /// The **maximum** bites: a cell in the middle of a footprint wider than twice the
     /// cap has no usable run at all, and placement must try another `E` (§10.6).
     #[test]
     fn a_cell_too_deep_inside_the_building_has_no_tunnel() {
-        let f = Facility::walled_box(40, 40);
-        assert!(carve_exit_duct(&f, Cell::new(20, 20), &HashSet::new()).is_none());
+        let f = Facility::walled_box(60, 60);
+        assert!(carve_exit_duct(&f, Cell::new(30, 30), &HashSet::new()).is_none());
     }
 
     /// A crawl crosses **inert** geometry only (§10.7): a door, a console, a cupboard or
@@ -191,8 +202,8 @@ mod tests {
             Terrain::DuctEntry,
         ] {
             let mut f = box20();
-            f.set_terrain(2, 9, blocker);
-            let duct = carve_exit_duct(&f, Cell::new(4, 9), &HashSet::new())
+            f.set_terrain(4, 9, blocker);
+            let duct = carve_exit_duct(&f, Cell::new(8, 9), &HashSet::new())
                 .expect("the other directions are still clear");
             assert_ne!(
                 duct.way_out(),
@@ -207,8 +218,8 @@ mod tests {
     #[test]
     fn a_cell_claimed_by_another_duct_refuses_the_run() {
         let f = box20();
-        let used: HashSet<Cell> = [Cell::new(2, 9)].into_iter().collect();
-        let duct = carve_exit_duct(&f, Cell::new(4, 9), &used).expect("other directions are clear");
+        let used: HashSet<Cell> = [Cell::new(4, 9)].into_iter().collect();
+        let duct = carve_exit_duct(&f, Cell::new(8, 9), &used).expect("other directions are clear");
         assert_ne!(duct.way_out(), Some(Cell::new(0, 9)));
     }
 }

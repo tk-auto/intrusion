@@ -482,6 +482,20 @@ pub struct State {
     /// and cleared when they step out ([`Move`](BumpKind::Move)); derived purely from
     /// those transitions, so it stays deterministic (§12.4).
     in_duct: Option<usize>,
+    /// Whether the player has **set foot in the facility** this run (§4.5/#466) — false
+    /// only during the opening crawl, before they first climb out of their own tunnel.
+    ///
+    /// It gates one thing: whether the §11.4 usable line offers the **way out**. On the
+    /// border cell the row would otherwise open every run by pointing at the way home,
+    /// which is the one thing turn one is not about — you have not been in yet. The gate
+    /// is the *predictor's* alone, exactly like the FOV gate beside it: the bump itself
+    /// still answers (§4.5's refusal), so a player who presses outward anyway is told
+    /// why, and nothing the row does say has changed.
+    ///
+    /// Set the moment a step lands the player on facility floor
+    /// ([`walk_into`](Self::walk_into) — a crawl is not one), and true from the start for
+    /// a state that begins outside a duct, which is every hand-built fixture.
+    entered_the_facility: bool,
     /// Whether the last **spent** turn was a Wait — which widens the next sight
     /// computation to the full 360° (§8.3). A free action (a wall bump) spends
     /// nothing and changes nothing (§4.4), so it does not clear this.
@@ -784,6 +798,10 @@ impl State {
             player_fov: VisibleSet::default(),
             memory: VisibleSet::default(),
             in_duct,
+            // A run that opens in the tunnel has not been inside yet (§4.5/#466); every
+            // other state — a hand-built fixture, a scene staged mid-run — begins on the
+            // floor and so begins having been.
+            entered_the_facility: in_duct.is_none(),
             // The run opens with the **ordinary** posture — §5's half-disc and the plain
             // sense box. The free 360° opening look (#383) is gone with #466: it existed
             // to show a player the room they had materialised standing in, and nobody
@@ -1628,6 +1646,10 @@ impl State {
         // clears the stored state. (A phase-out, the one other way a Move fires from a
         // duct cell, ends the crawl just the same.)
         self.in_duct = None;
+        // And a step onto the facility's floor is the run beginning in earnest
+        // (§4.5/#466): from here the usable line offers the way out, which it holds back
+        // while the player has still never left the tunnel they started in.
+        self.entered_the_facility = true;
         let vacated = self.player;
         self.haul_body_to(vacated);
         self.player = target;

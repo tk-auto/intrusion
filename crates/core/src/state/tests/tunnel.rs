@@ -155,6 +155,28 @@ fn the_way_out_wins_or_refuses_and_a_refusal_is_free() {
     assert_eq!(s.outcome(), Outcome::Won);
 }
 
+/// **The row offers the way out once you have been inside** (§4.5/§11.4/#466), and not
+/// before: it is held back through the opening crawl, and it is there — `exit: leave`,
+/// aimed off the board — the moment a run that has actually been played comes home.
+#[test]
+fn the_way_out_is_offered_once_the_run_has_been_inside() {
+    let mut s = tunnelled(Vec::new());
+    assert_eq!(s.affordances(), Vec::new(), "not on the way in");
+
+    // Out into the facility, and straight back down the tunnel: nothing was fetched
+    // (there is nothing to fetch), so this is the same cell under the same gate.
+    climb_out_of_the_tunnel(&mut s);
+    while s.player() != the_way_out() {
+        s.step(Input::Step(Direction::North));
+    }
+    assert!(s.in_duct(), "back on the border cell");
+    assert_eq!(
+        s.affordances(),
+        vec![(Some(Direction::North), Affordance::Leave)],
+        "now the row offers exactly one thing, aimed off the board",
+    );
+}
+
 /// **The gate is answered at the mouth** (§4.5/#466). Short of the intel, bumping `E`
 /// from the facility side refuses — free, with the §4.5 message — instead of letting the
 /// player climb in and crawl to the border to be told no somewhere they can do nothing
@@ -201,6 +223,11 @@ fn the_mouth_refuses_short_of_the_intel_gate() {
 /// board is the free mis-input a wall bump has always been (§4.3), and every other cell
 /// of the tunnel is walled in — the §10.7 confinement, which is what keeps a crawl a
 /// crawl.
+///
+/// And on the opening crawl the row is **silent about it**: the run starts on that cell,
+/// and a usable line whose only entry is *leave* is the wrong first thing to say to a
+/// player who has not been in yet. The press still answers (below, and in
+/// [`the_way_out_wins_or_refuses_and_a_refusal_is_free`]) — it is the offer that waits.
 #[test]
 fn only_the_border_cell_leaves_and_only_outward() {
     let mut s = tunnelled(Vec::new());
@@ -216,12 +243,12 @@ fn only_the_border_cell_leaves_and_only_outward() {
     }
     assert_eq!(
         s.affordances(),
-        vec![(Some(Direction::North), Affordance::Leave)],
-        "the row offers exactly one thing, aimed off the board",
+        Vec::new(),
+        "and the row says nothing about the way home before we have been inside (#466)",
     );
 
-    // One crawl inward, and the way out is behind us: the row goes quiet, and the step
-    // that would have won is now a plain crawl.
+    // One crawl inward, and the way out is behind us: the step that would have won is
+    // now a plain crawl.
     s.step(Input::Step(Direction::South));
     assert_eq!(s.affordances(), Vec::new(), "no exit from mid-tunnel");
     let events = s.step(Input::Step(Direction::North));
