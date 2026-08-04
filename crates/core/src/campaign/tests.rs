@@ -13,7 +13,9 @@ use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::guard::GuardState;
 use crate::level_seed::start_level;
+use crate::modifiers::{LevelModifiers, ModifierSources};
 use crate::path::first_step_toward;
+use crate::place::LevelConfig;
 use crate::render::render;
 use crate::state::{Input, State};
 use crate::verdict::EndExit;
@@ -153,17 +155,31 @@ fn captured() -> Verdict {
     }
 }
 
+/// Complete the current raid and walk on: bank a modest haul, then take the **first
+/// open offer** the map makes.
+///
+/// The choice is deliberately the dullest possible one — these tests are about the
+/// transitions and what carries across them, and *which* successor is taken is the
+/// map's own business, tested in [`map`](super::map).
+fn walk_on(run: &mut Campaign, intel: usize) {
+    run.complete(&extracted(intel, 0));
+    if run.stage() == CampaignStage::Choosing {
+        let next = run.offers()[0].node;
+        assert!(run.choose(next), "an offered node is takeable");
+    }
+}
+
 /// **A run starts with nothing** (§2.2): the innate verbs, an empty wallet, a facility
-/// that has not noticed anybody — and it starts *between* facilities, on the approach
-/// to the first one.
+/// that has not noticed anybody — and it starts standing on the first facility of the
+/// country, with the raid ahead of it.
 #[test]
 fn a_fresh_run_carries_nothing_it_did_not_walk_in_with() {
     let run = Campaign::new(11);
     assert_eq!(run.stage(), CampaignStage::Approach);
     assert_eq!(run.outcome(), Outcome::Playing);
-    assert_eq!(run.position(), 0);
-    assert_eq!(run.route().len(), CAMPAIGN_LENGTH);
-    assert_eq!(run.node(), Some(NodeId::new(0)));
+    assert_eq!(run.path(), [run.map().start()]);
+    assert_eq!(run.node().depth(), 0);
+    assert_eq!(run.map().depth(), DEPTH_TO_ARCHIVE);
     assert_eq!(run.intel(), 0);
     assert_eq!(run.alert(), 0);
     assert_eq!(
@@ -181,7 +197,7 @@ fn a_fresh_run_carries_nothing_it_did_not_walk_in_with() {
 #[test]
 fn every_facility_derives_its_seed_from_the_run_seed() {
     let golden: Vec<u64> = (0..4)
-        .map(|id| facility_seed(8371, NodeId::new(id)))
+        .map(|lane| facility_seed(8371, NodeId::at(0, lane)))
         .collect();
     assert_eq!(
         golden,
@@ -190,16 +206,18 @@ fn every_facility_derives_its_seed_from_the_run_seed() {
     );
 
     // Stable, and a different run seed is a different campaign.
-    assert_eq!(facility_seed(8371, NodeId::new(2)), golden[2]);
-    assert_ne!(facility_seed(8372, NodeId::new(2)), golden[2]);
+    assert_eq!(facility_seed(8371, NodeId::at(0, 2)), golden[2]);
+    assert_ne!(facility_seed(8372, NodeId::at(0, 2)), golden[2]);
 
-    for id in 0..64 {
-        let seed = facility_seed(4242, NodeId::new(id));
-        assert_eq!(
-            LevelSeed::quick_play(seed).encode().map(|t| t.len()),
-            Some(crate::level_seed::TOKEN_LEN),
-            "facility {id}'s seed must fit the level-seed token",
-        );
+    for depth in 0..=DEPTH_TO_ARCHIVE {
+        for lane in 0..map::LANES {
+            let seed = facility_seed(4242, NodeId::at(depth, lane));
+            assert_eq!(
+                LevelSeed::quick_play(seed).encode().map(|t| t.len()),
+                Some(crate::level_seed::TOKEN_LEN),
+                "the facility at ({depth}, {lane}) must fit the level-seed token",
+            );
+        }
     }
 }
 
@@ -209,11 +227,12 @@ fn every_facility_derives_its_seed_from_the_run_seed() {
 #[test]
 fn entering_starts_the_raid_and_does_not_start_it_twice() {
     let mut run = Campaign::new(7);
+    let node = run.node();
     let level = run.enter().expect("the first facility is ahead");
     assert_eq!(run.stage(), CampaignStage::Inside);
     assert_eq!(run.enter(), None, "a raid is already under way");
 
-    assert_eq!(level.seed, facility_seed(7, NodeId::new(0)));
+    assert_eq!(level.seed, facility_seed(7, node));
     assert_eq!(
         level.modifiers.intel_to_exit,
         IntelGate::None,
@@ -221,29 +240,184 @@ fn entering_starts_the_raid_and_does_not_start_it_twice() {
     );
     assert_eq!(level.abilities, run.loadout(), "the run's own loadout");
     assert_eq!(
-        Some(level),
+        level,
         run.next_level(),
         "the config is readable without starting the raid",
     );
 }
 
-/// **Completing a raid banks the haul and moves the run on** — and the next facility is
-/// a different one.
+/// **What the map offered is what the run walks into** (§2.3/§14 v3). The offer's
+/// flavour resolves into the facility's modifiers through the §12.6 seam, so the row
+/// that said *Vault* and the building with the extra console are one statement.
+///
+/// It also **travels**: the flavour rides in the level-seed token's modifier slots, so
+/// a campaign facility handed to someone else is the facility as it was played (§12.7).
 #[test]
-fn completing_a_raid_banks_the_haul_and_moves_on() {
-    let mut run = Campaign::of_length(99, 3);
+fn the_facility_is_the_flavour_the_map_offered() {
+    // Walk the country until a run has stood on one of each offered flavour, and check
+    // each facility against its own flavour's contribution.
+    let mut seen: Vec<Flavour> = Vec::new();
+    for seed in 0..40 {
+        let mut run = Campaign::new(seed);
+        while run.stage() != CampaignStage::Won {
+            let flavour = run.flavour();
+            let level = run.enter().expect("a facility to raid");
+            let expected = ModifierSources {
+                chosen: LevelModifiers {
+                    intel_to_exit: IntelGate::None,
+                    ..LevelModifiers::default()
+                },
+                alert: None,
+                flavour: Some(flavour.modifiers()),
+            }
+            .resolve();
+            assert_eq!(level.modifiers, expected, "{flavour:?} was not honoured");
+            assert_eq!(
+                LevelSeed::decode(&level.encode().expect("a campaign facility is sayable")),
+                Some(level),
+                "{flavour:?} must survive the token round-trip (§12.7)",
+            );
+            if !seen.contains(&flavour) {
+                seen.push(flavour);
+            }
+            walk_on(&mut run, 1);
+        }
+    }
+    for flavour in Flavour::OFFERED.into_iter().chain([Flavour::Archive]) {
+        assert!(seen.contains(&flavour), "{flavour:?} was never played");
+    }
+}
+
+/// **A Vault really is richer and a Vault really is watched** (§2.3's anti-facade rule).
+/// The flavours differ where they say they differ — in the facility that gets built —
+/// rather than only in the word on the map row.
+#[test]
+fn the_flavours_build_different_facilities() {
+    let recipe = |flavour: Flavour| {
+        let modifiers = flavour.modifiers();
+        let config = LevelConfig::V1
+            .with_guard_count(modifiers.guard_count)
+            .with_intel_count(modifiers.intel_count);
+        (config.guards, config.intel)
+    };
+    let (base_guards, base_intel) = recipe(Flavour::Depot);
+    assert_eq!(
+        (base_guards, base_intel),
+        (LevelConfig::V1.guards, LevelConfig::V1.intel),
+        "a Depot is the §10.2 recipe, untouched",
+    );
+    assert_eq!(recipe(Flavour::Vault), (base_guards + 1, base_intel + 1));
+    assert_eq!(recipe(Flavour::Outpost), (base_guards - 1, base_intel - 1));
+    assert_eq!(
+        recipe(Flavour::Archive).0,
+        base_guards + 1,
+        "the last raid is the hard one",
+    );
+    assert!(Flavour::Archive.modifiers().guards_always_search_hideouts);
+}
+
+/// **Every flavour actually carves.** The recipe arithmetic above is one thing; a
+/// facility asking placement for four consoles and five guards on a 40×40 board is
+/// another, and a campaign that hit `RetriesExhausted` on its richest node would be a
+/// shipped bug nothing else here would catch (§10.6).
+///
+/// So: boot a **real** facility of each flavour and count what stands in it.
+#[test]
+fn every_flavour_carves_the_facility_it_promises() {
+    for flavour in Flavour::OFFERED.into_iter().chain([Flavour::Archive]) {
+        let modifiers = ModifierSources {
+            chosen: LevelModifiers {
+                intel_to_exit: IntelGate::None,
+                ..LevelModifiers::default()
+            },
+            alert: None,
+            flavour: Some(flavour.modifiers()),
+        }
+        .resolve();
+        let expected = LevelConfig::V1
+            .with_guard_count(modifiers.guard_count)
+            .with_intel_count(modifiers.intel_count);
+        for seed in 0..8 {
+            let level = LevelSeed {
+                seed,
+                modifiers,
+                abilities: Loadout::innate(),
+            };
+            let state = start_level(&level)
+                .unwrap_or_else(|e| panic!("a {flavour:?} at seed {seed} must carve: {e:?}"));
+            assert_eq!(state.guards().len(), expected.guards, "{flavour:?}");
+            assert_eq!(
+                state.objectives_remaining(),
+                expected.intel,
+                "{flavour:?} did not seat the consoles it promised",
+            );
+        }
+    }
+}
+
+/// **Completing a raid banks the haul and puts the run at a choice point** — and the
+/// facility it then walks to is a different one.
+#[test]
+fn completing_a_raid_banks_the_haul_and_offers_the_way_on() {
+    let mut run = Campaign::to_depth(99, 3);
     let first = run.enter().expect("a facility to raid");
 
-    assert_eq!(run.complete(&extracted(2, 1)), CampaignStage::Approach);
-    assert_eq!(run.position(), 1);
+    assert_eq!(run.complete(&extracted(2, 1)), CampaignStage::Choosing);
     assert_eq!(run.intel(), 2, "the raid's consoles bank");
+    assert_eq!(
+        run.enter(),
+        None,
+        "a run at a choice point has not chosen yet",
+    );
 
-    let second = run.enter().expect("the next facility is ahead");
+    let next = run.offers()[0].node;
+    assert!(run.choose(next));
+    assert_eq!(run.stage(), CampaignStage::Approach);
+    assert_eq!(run.node(), next);
+    let second = run.enter().expect("the chosen facility");
     assert_ne!(second.seed, first.seed, "a new facility, not the last one");
 
     // Intel accumulates across facilities — that is the whole of §2.2's currency row.
     run.complete(&extracted(1, 0));
     assert_eq!(run.intel(), 3);
+}
+
+/// **The run only ever moves at a choice point, and only along an edge the map offered**
+/// (§2.2's forward-only arc, §14 v3's real edges). Everything else is refused with the
+/// run left exactly where it was.
+#[test]
+fn the_run_moves_only_along_an_offer() {
+    let mut run = Campaign::to_depth(4, 3);
+    let start = run.node();
+    assert!(
+        run.offers().is_empty(),
+        "there is nothing to choose before the first raid is done",
+    );
+    assert!(!run.choose(NodeId::at(1, 0)), "and nothing to choose it on");
+
+    run.enter();
+    assert!(
+        run.offers().is_empty(),
+        "nor from inside a facility (§2.2: no backtracking mid-raid)",
+    );
+    run.complete(&extracted(1, 0));
+
+    let offers = run.offers();
+    let locked = offers.iter().find(|o| o.locked).expect("a locked edge");
+    assert!(
+        !run.choose(locked.node),
+        "the intel-locked edge is inert until #212 opens it",
+    );
+    assert!(
+        !run.choose(NodeId::at(2, 0)),
+        "and a node the map never offered is not reachable by asking",
+    );
+    assert!(
+        !run.choose(start),
+        "least of all the facility just emptied (§2.2: no backtracking)",
+    );
+    assert_eq!(run.node(), start, "every refusal left the run where it was");
+    assert_eq!(run.stage(), CampaignStage::Choosing);
 }
 
 /// **A loud raid does not follow the run out of the facility — yet** (#210). The
@@ -252,14 +426,21 @@ fn completing_a_raid_banks_the_haul_and_moves_on() {
 /// campaign is not quietly inventing a difficulty curve of its own.
 #[test]
 fn a_raids_loudness_does_not_scale_the_next_facility_yet() {
-    let mut run = Campaign::of_length(66, 3);
-    let quiet = run.enter().expect("a facility to raid");
+    let mut run = Campaign::to_depth(66, 3);
+    run.enter();
     run.complete(&extracted(1, TOP_RUNG));
     assert_eq!(run.alert(), 0, "the alert contribution is #210's to define");
 
-    let after = run.enter().expect("the next facility");
+    // Against a run of the same country that was **quiet** in the same facility and
+    // walked the same way: the facility it arrives at must be identical.
+    let mut quiet = Campaign::to_depth(66, 3);
+    quiet.enter();
+    quiet.complete(&extracted(1, 0));
+    let node = run.offers()[0].node;
+    assert!(run.choose(node) && quiet.choose(node));
     assert_eq!(
-        after.modifiers, quiet.modifiers,
+        run.enter(),
+        quiet.enter(),
         "so the facility after a loud raid is the facility after a quiet one",
     );
 }
@@ -274,9 +455,10 @@ fn capture_ends_the_whole_run() {
             at: Cell::new(2, 2),
         },
     ] {
-        let mut run = Campaign::of_length(5, 4);
+        let mut run = Campaign::to_depth(5, 4);
         run.enter();
-        run.complete(&extracted(2, 1));
+        walk_on(&mut run, 2);
+        let reached = run.node();
         run.enter();
         let verdict = Verdict {
             ending,
@@ -290,26 +472,36 @@ fn capture_ends_the_whole_run() {
         assert_eq!(run.outcome(), Outcome::Lost);
         assert!(run.stage().is_over());
         assert_eq!(run.enter(), None, "a lost run has no next facility");
-        assert_eq!(run.position(), 1, "and it got no further than it got");
+        assert!(run.offers().is_empty(), "and nowhere left to go");
+        assert_eq!(run.node(), reached, "it got no further than it got");
         assert_eq!(run.intel(), 2, "the last raid banked nothing");
     }
 }
 
-/// **Reaching the end of the sequence wins the run.** The archive that will stand at
-/// the far end, and the ending it earns, are #217's; that the sequence *ends* is this
-/// layer's.
+/// **Reaching the archive and leaving it wins the run.** What the archive holds and what
+/// arriving there concludes are #217's; that the graph *ends* at a distinguished node,
+/// and that leaving it ends the run won, is this layer's.
 #[test]
-fn the_end_of_the_sequence_wins_the_run() {
-    let mut run = Campaign::of_length(3, 2);
+fn leaving_the_archive_wins_the_run() {
+    let mut run = Campaign::to_depth(3, 2);
     run.enter();
-    assert_eq!(run.complete(&extracted(1, 0)), CampaignStage::Approach);
+    assert_eq!(run.complete(&extracted(1, 0)), CampaignStage::Choosing);
+    let next = run.offers()[0].node;
+    run.choose(next);
+    run.enter();
+    assert_eq!(run.complete(&extracted(1, 0)), CampaignStage::Choosing);
+
+    let last = run.offers();
+    assert_eq!(last.len(), 1, "every route converges on the archive");
+    assert_eq!(last[0].flavour, Flavour::Archive);
+    assert_eq!(last[0].node, run.map().archive());
+    run.choose(last[0].node);
     run.enter();
     assert_eq!(run.complete(&extracted(1, 0)), CampaignStage::Won);
 
     assert_eq!(run.outcome(), Outcome::Won);
     assert!(run.stage().is_over());
-    assert_eq!(run.node(), None, "the route is walked out");
-    assert_eq!(run.next_level(), None);
+    assert!(run.offers().is_empty(), "there is nothing past the archive");
     assert_eq!(run.enter(), None);
 }
 
@@ -317,12 +509,12 @@ fn the_end_of_the_sequence_wins_the_run() {
 /// campaign exists for, and the seam an equipment cache writes (#209).
 #[test]
 fn salvaged_tech_rides_into_the_next_facility() {
-    let mut run = Campaign::of_length(21, 3);
+    let mut run = Campaign::to_depth(21, 3);
     let first = run.enter().expect("a facility to raid");
     assert!(!first.abilities.contains(AbilityId::Dephase));
 
     run.salvage(AbilityId::Dephase);
-    run.complete(&extracted(1, 0));
+    walk_on(&mut run, 1);
     let second = run.enter().expect("the next facility");
     assert!(
         second.abilities.contains(AbilityId::Dephase),
@@ -348,11 +540,14 @@ fn the_campaign_offers_no_way_to_play_the_run_again() {
     assert_eq!(options.mode.exits(), &[EndExit::Menu]);
 }
 
-/// **A one-facility campaign is the game v1 already ships**: enter, raid, leave, and
-/// the run is over — a strict superset, not a rewrite of the turn loop.
+/// **A depth-zero campaign is the game v1 already ships**: the start node *is* the
+/// archive, so it is enter, raid, leave, and the run is over — a strict superset of the
+/// turn loop, not a rewrite of it.
 #[test]
 fn a_one_facility_campaign_is_a_single_raid() {
-    let mut run = Campaign::of_length(PLAYED_SEED, 1);
+    let mut run = Campaign::to_depth(PLAYED_SEED, 0);
+    assert_eq!(run.node(), run.map().archive());
+    assert_eq!(run.flavour(), Flavour::Archive);
     let level = run.enter().expect("the one facility");
     let played = raid(&level);
 
@@ -368,41 +563,54 @@ fn a_one_facility_campaign_is_a_single_raid() {
     );
 }
 
-/// **A whole run reproduces from its seed and its inputs** (§12.4), across more than
+/// **A whole run reproduces from its seed and its choices** (§12.4), across more than
 /// one facility — the property every golden test above the level rests on, and the one
 /// the player never gets to use (§2.2: the run is one-shot).
 ///
-/// The second pass replays the *recorded inputs*, so what is asserted is the engine's
-/// determinism rather than the test routine's.
+/// On a graph the replay's input is wider than it was on a list: `(run seed, [choices],
+/// [inputs])`. That is exactly §12.4's promise about a campaign — the path is a function
+/// of the player's inputs, so the run is a function of the seed and the inputs — and the
+/// second pass here replays the *recorded* choices and inputs rather than re-deriving
+/// either.
 #[test]
 fn a_two_facility_run_replays_byte_for_byte() {
-    let mut first = Campaign::of_length(PLAYED_SEED, 2);
-    let mut script: Vec<(LevelSeed, Vec<Input>)> = Vec::new();
+    let mut first = Campaign::to_depth(PLAYED_SEED, 1);
+    let mut script: Vec<(NodeId, LevelSeed, Vec<Input>)> = Vec::new();
     let mut grids: Vec<Vec<String>> = Vec::new();
 
     while let Some(level) = first.enter() {
+        let node = first.node();
         let played = raid(&level);
         assert_eq!(
             played.state.outcome(),
             Outcome::Won,
-            "facility {} was raided and left",
-            first.position(),
+            "the facility at depth {} was raided and left",
+            node.depth(),
         );
         grids.push(render(&played.state).to_text());
-        script.push((level, played.inputs));
+        script.push((node, level, played.inputs));
         first.complete(&played.state.verdict().expect("the raid ended"));
+        if first.stage() == CampaignStage::Choosing {
+            let next = first.offers()[0].node;
+            first.choose(next);
+        }
     }
     assert_eq!(script.len(), 2, "both facilities were played");
     assert_eq!(first.stage(), CampaignStage::Won);
     assert_ne!(
-        script[0].0.seed, script[1].0.seed,
+        script[0].1.seed, script[1].1.seed,
         "two facilities, not the same one twice",
     );
 
-    // Same run seed, same inputs — same run, from the campaign's carried state down to
-    // the last glyph of each facility's final frame.
-    let mut second = Campaign::of_length(PLAYED_SEED, 2);
-    for (facility, (level, inputs)) in script.iter().enumerate() {
+    // Same run seed, same choices, same inputs — same run, from the campaign's carried
+    // state down to the last glyph of each facility's final frame.
+    let mut second = Campaign::to_depth(PLAYED_SEED, 1);
+    for (facility, (node, level, inputs)) in script.iter().enumerate() {
+        assert_eq!(
+            second.node(),
+            *node,
+            "facility {facility} is a different one"
+        );
         assert_eq!(second.enter().as_ref(), Some(level), "facility {facility}");
         let state = replay(level, inputs);
         assert_eq!(
@@ -411,6 +619,15 @@ fn a_two_facility_run_replays_byte_for_byte() {
             "facility {facility} replayed to a different board",
         );
         second.complete(&state.verdict().expect("the raid ended"));
+        // Replay the *recorded* choice rather than picking one again: what is under
+        // test is that the same choices grow the same graph, not that the map hands
+        // back a stable first row.
+        if let Some((next, _, _)) = script.get(facility + 1) {
+            assert!(
+                second.choose(*next),
+                "the recorded choice is still an offer"
+            );
+        }
     }
     assert_eq!(second, first, "the whole run, carried state and all");
 }

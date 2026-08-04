@@ -39,8 +39,11 @@
 //! [`Category`] (§11.2); the platform shell owns the concrete table.
 //!
 //! **The run.** [`Campaign`] (§14 v3/§2.2): the layer above a single level — a forward
-//! sequence of facilities, each seeded from `(run seed, node id)`, with the salvaged
-//! tech and the intel the run carries between them. Nothing survives the run itself,
+//! walk through the facility map ([`FacilityMap`]), each facility seeded from `(run
+//! seed, node id)`, with the salvaged tech and the intel the run carries between them.
+//! The map is a **graph with real edges, grown lazily**: an open edge only ever reaches
+//! an adjacent lane, so where the run stands decides what is in front of it, and each
+//! offer names its facility's [`Flavour`] outright. Nothing survives the run itself,
 //! which is what permadeath means here (§2.2).
 //!
 //! **Configuration.** [`LevelModifiers`] (§12.6) resolved once per run, and
@@ -89,7 +92,11 @@ pub use ability::{
 };
 pub use alert::{AlertEffect, AlertReadout, AlertTrigger, AlertTuning, TOP_RUNG};
 pub use body::Body;
-pub use campaign::{facility_seed, Campaign, CampaignStage, NodeId, CAMPAIGN_LENGTH};
+pub use campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
+pub use campaign::{
+    facility_seed, Campaign, CampaignStage, FacilityMap, Flavour, MapPos, NodeId, Offer,
+    DEPTH_TO_ARCHIVE,
+};
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
 pub use difficulty::{Difficulty, SPAN as DIFFICULTY_SPAN};
@@ -105,8 +112,8 @@ pub use input::{
 };
 pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
-    ActiveModifier, DebugModifiers, GuardCount, IntelGate, LevelModifiers, ModifierDirection,
-    ModifierSources,
+    ActiveModifier, DebugModifiers, GuardCount, IntelCount, IntelGate, LevelModifiers,
+    ModifierDirection, ModifierSources,
 };
 pub use place::{LevelConfig, Placement};
 pub use region::{
