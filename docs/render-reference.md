@@ -49,7 +49,7 @@ outranks knowledge**, always.
 | `@` | The player | Owned |
 | `@` | A decoy you placed | Owned |
 | `g` | A guard you can see | Caution / Warning / Danger, by its state |
-| *(none)* | A guard you only sense through a wall | Sensed — a background highlight on its cell, no glyph |
+| *(none)* | A guard you only sense through a wall | Sensed — a background highlight on its cell, no glyph, with a short fading trail behind it (§5) |
 | `z` | A body | Caution — trouble waiting to be found |
 | `z` | A body in your hands | Owned — yours, and in play |
 | `z` | A body stowed in a cupboard | Neutral — the cupboard is spent |
@@ -342,7 +342,7 @@ system anywhere names a colour.
 | **Danger** | Red | `#ff3333` | A threat that has you |
 | **Interest** | Purple | `#bd6bd6` | Goals and rewards |
 | **System** | Tan | `#9a7040` | Doors, cupboards — neutral furniture |
-| **Sensed** | Orange | `#e69f00` | Felt through a wall — **background only** |
+| **Sensed** | Orange | `#e69f00` | Felt through a wall — **background only**, two strengths (fresh / fading) |
 | **Effect** | Cyan | `#2ee6d6` | An ability effect of your own making — **background only** |
 
 The base palette is a **16-colour, colour-blind-safe qualitative set**, hues leaning
@@ -358,16 +358,20 @@ shipped without anything objecting:
 
 - **Every pair is visibly distinct** at a minimum RGB distance. The old palette had
   a tan that blurred into Caution's yellow; that specific regression is pinned. The
-  background half measures what the screen actually paints, so an out-of-view `Sensed`
+  background half measures what the screen actually paints, so an out-of-view `Effect`
   fill (full strength, never fogged) is compared against an out-of-view `Danger` fill
-  (dimmed) — the pair a player really has side by side.
+  (dimmed) — the pair a player really has side by side. Both `Sensed` shades are held
+  to the same bar against red, since a fading trail mark is as much a sensed cell as a
+  live dot.
 - **The threat ladder is separated by luminance as well as hue**, so
   yellow → orange → red survives a red-green deficiency — and so does the band of a
   near line carrying the alert condition, which is what the fills are for.
 - **A cell you can see and a cell beyond it are tellable apart**, for every category
   that paints a fill — the general form of §11.5's *watched must never look safe*,
-  which had only ever been checked for the danger overlay. `Sensed` and `Effect` are
-  outside it: they have no second shade by design (§5).
+  which had only ever been checked for the danger overlay. `Effect` is outside it: it
+  has no second shade by design (§5). `Sensed` has two, but they are not this claim —
+  they are *fresh* and *fading* (§5), and they are asserted tellable apart on their
+  own terms.
 - **The near line's words read over every band.** The row is a solid category band
   with its text in Neutral (§11.4), so how far the backgrounds may be lifted off the
   page is bounded by the ink that has to stay legible on them.
@@ -390,6 +394,12 @@ ever paints a *background*, never a glyph, and Warning only ever a glyph. A hunt
 guard you can see is an orange `g`; a guard you can only feel through a wall is an
 orange *filled cell* with no glyph at all. The bloom from one to the other, the
 moment you round the corner, is the seen/sensed distinction made visible.
+
+Sensed uses **both** of its row's background shades, and they mean something no other
+row's pair means: the bright fill is a mark made **this turn**, the quiet one the
+fading tail behind it (§9.5). Everything sensed is out of the field of view by
+construction, so the fog has nothing to say about the channel and freshness is the
+only thing a strength here could honestly carry.
 
 ### 4.3 Full range
 
@@ -540,13 +550,15 @@ table is a developer reference, so it says rung.)*
 
 Backgrounds are the threat channel, and there is a fixed precedence:
 
-**Danger > Effect mark on a thing > Sensed > Effect wash.**
+**Danger > Effect mark on a thing > Sensed (live dot) > watcher line > Sensed (fading
+mark) > Effect wash.**
 
 | Background | Means |
 |---|---|
 | **Danger** (red) | This cell is watched by a guard **you can see** — or it lies on the **watcher line**, the sightline of a guard you cannot see that is watching you right now |
 | **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; the `@` here is you, hidden by Camouflage *this turn*; or the `@` here is you **inside a solid with Phase Out running** — the cell the safety eject would throw you out of if the window ended now |
-| **Sensed** (orange) | A guard felt through a wall, or a door that just changed away from you |
+| **Sensed**, full (orange) | A guard felt through a wall right now — its exact cell, position only |
+| **Sensed**, quiet (orange) | Where the sense felt something a turn or two ago: the trail behind a moving guard, the ghost of one that left the box, a door that changed away from you (§9.5). It fades to nothing over a couple of turns — *was just here*, never a heading |
 | **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
 
 The effect layer appears twice on purpose (#338). Its **wash** is advisory geometry and
@@ -602,12 +614,13 @@ line must never double-draw one), a **confused** guard (blind, §8.3, so it has 
 cone to be honest about), and a player **concealed** from it (§10.3, matching the
 overlay's own spare — red under you means detected).
 
-It is painted among the *weakest* backgrounds, below the marks and the sensed dot,
-even though it is red: the line is a route, and the cues along it are about
+It is painted among the *weakest* backgrounds, below the marks and the live sensed
+dot, even though it is red: the line is a route, and the cues along it are about
 particular cells. So a **sensed** watcher keeps its orange position dot with the red
 line running up to it, and a watcher that is neither seen nor sensed is marked only
-by the line's own far end. The danger overlay still paints last and still outranks
-everything.
+by the line's own far end. It does outrank the sense channel's **fading** marks: a
+trace of where something was a turn ago must never cover a line that says a guard has
+you now. The danger overlay still paints last and still outranks everything.
 
 **What it costs, stated rather than discovered:** while an unseen guard is looking at
 you, you get its exact position, through walls, at any distance, for free. That is a
@@ -624,7 +637,8 @@ and every cell of a **sealed door** while Lockdown holds it (#242). A mark says 
 one*, where the footprint said *this far*.
 
 **Sensed and Effect are not fogged.** Both are certain, position-only knowledge that
-travels through walls, so they paint at full strength regardless of the knowledge
-state of the cell underneath. Fogging an effect's footprint would teach you its
-extent only where you were already looking, which is exactly the corner the flash
-exists to light.
+travels through walls, so neither dims with the knowledge state of the cell
+underneath. Fogging an effect's footprint would teach you its extent only where you
+were already looking, which is exactly the corner the flash exists to light — so
+`Effect` paints one strength everywhere. `Sensed` is not fogged either; its two
+strengths are spent on **age** instead (§4.2).

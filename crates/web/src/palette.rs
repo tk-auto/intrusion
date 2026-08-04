@@ -262,24 +262,23 @@ pub(crate) fn swatch(theme: Theme, category: Category) -> Swatch {
 /// its variants ready. The §7.6 certain/glimpse zones add two *detection* shades when
 /// two-zone detection lands; until then the whole cone is one zone.
 ///
-/// **Sensed is the exception**: a guard sensed through a wall (§9.2) and a door-change
-/// cue (§9.4) — the same channel — are certain, position-only knowledge, not fogged,
-/// so Sensed paints at full strength (the bright [`Swatch::bg`]) regardless of `vis`,
-/// an eye-catching fill rather than sinking into the dim shade the fog would otherwise
-/// pick.
+/// **`Sensed` reads the same two shades, but they mean something else** (§9/#192). The
+/// sense channel is certain, position-only knowledge painted through walls, so the fog
+/// never has anything to say about it — every sensed cell is out of the FOV by
+/// construction. What its two strengths carry instead is **age**: the core stamps
+/// [`Fill::Full`] on a mark made this turn (a guard's live cell, a door that just
+/// changed) and [`Fill::Quiet`] on the fading tail behind it, so one table paints
+/// "sensed" and "sensed, and fading" without a second row to learn. The shell reads the
+/// answer and never the reason — the core does not name colours, and here it does not
+/// name fog either.
 pub(crate) fn bg_color(theme: Theme, bg: Category, fill: Fill) -> &'static str {
     let swatch = swatch(theme, bg);
-    // Sensed is certain, position-only knowledge painted through walls (§9.2/§9.4) —
-    // both a guard and a door change — never fogged, so it paints at full strength
-    // (the bright [`Swatch::bg`]) regardless of `vis`, rather than sinking into the dim
-    // shade the fog would otherwise pick for an out-of-FOV cell.
-    //
-    // The **effect layer** (§8.3/#308) takes the same exception, and for the same
-    // reason: how far your own gadget reaches is certain knowledge, through walls and
-    // over ground you have never seen. Most of a 13×13 footprint falls outside the
-    // forward FOV, so fogging it would teach the extent only where the player was
-    // already looking — which is precisely the corner the flash exists to light.
-    if matches!(bg, Category::Sensed | Category::Effect) {
+    // The **effect layer** (§8.3/#308) is the one category that ignores `fill` outright:
+    // how far your own gadget reaches is certain knowledge, through walls and over
+    // ground you have never seen. Most of a 13×13 footprint falls outside the forward
+    // FOV, so fogging it would teach the extent only where the player was already
+    // looking — which is precisely the corner the flash exists to light.
+    if matches!(bg, Category::Effect) {
         return swatch.bg;
     }
     match fill {
@@ -400,10 +399,10 @@ mod tests {
     /// answered by lifting them until the words stop being.
     const MIN_BAND_CONTRAST: i32 = 300;
 
-    /// The background variant a category paints at each knowledge state, as the board
-    /// actually paints it ([`bg_color`]) — so the `Sensed`/`Effect` full-strength
-    /// exception is honoured here rather than re-derived, and a check can never assert
-    /// something about a shade the screen never shows.
+    /// The background variant a category paints at each fill, as the board actually
+    /// paints it ([`bg_color`]) — so the `Effect` full-strength exception is honoured
+    /// here rather than re-derived, and a check can never assert something about a shade
+    /// the screen never shows.
     fn bg_shades(theme: Theme, c: Category) -> [&'static str; 2] {
         [
             bg_color(theme, c, Fill::Full),
@@ -462,9 +461,9 @@ mod tests {
     /// distinctness guarantee was asserted on the `fg` column alone.
     ///
     /// Measured through [`bg_color`] rather than off the [`Swatch`], so it compares what
-    /// the screen actually paints: an out-of-FOV `Sensed` or `Effect` cell paints its
-    /// full-strength fill beside an out-of-FOV `Danger` cell's dimmed one, and those two
-    /// are exactly the pair a player has to tell apart.
+    /// the screen actually paints: an out-of-FOV `Effect` cell paints its full-strength
+    /// fill beside an out-of-FOV `Danger` cell's dimmed one, and those two are exactly
+    /// the pair a player has to tell apart.
     #[test]
     fn background_fills_are_all_visibly_distinct() {
         for theme in THEMES {
@@ -489,15 +488,17 @@ mod tests {
     /// not look the same**, for every category that paints a fill — not only for the
     /// danger overlay, which was the one pair the suite happened to check.
     ///
-    /// `Sensed` and `Effect` are excluded because they have no second shade *by design*
-    /// (§9.2/§8.3): both are certain, position-only knowledge and paint at full strength
-    /// in and out of the FOV. Their exemption is asserted where it belongs — in the two
-    /// tests that own it — rather than weakened into a skip here.
+    /// `Effect` is excluded because it has no second shade *by design* (§8.3): how far
+    /// your own gadget reaches is certain knowledge, so it paints at full strength in
+    /// and out of the FOV. Its exemption is asserted where it belongs — in the test that
+    /// owns it — rather than weakened into a skip here. `Sensed` has two shades but they
+    /// are not this claim at all (#192): they are *fresh* and *fading*, and their
+    /// separation is asserted in the test that owns the sense channel.
     #[test]
     fn each_row_separates_the_seen_cell_from_the_one_beyond_it() {
         for theme in THEMES {
             for c in BG_CATEGORIES {
-                if matches!(c, Category::Sensed | Category::Effect) {
+                if matches!(c, Category::Effect) {
                     continue;
                 }
                 let s = swatch(theme, c);
@@ -573,8 +574,8 @@ mod tests {
     /// both of the meanings it sits beside — red detection and orange attention — or
     /// the board degrades into "some coloured backgrounds", which is the one risk the
     /// ticket names. Its wash is deliberately quiet (it covers a 13×13 box) but must
-    /// still read against the page, and like `Sensed` it paints at full strength in and
-    /// out of the FOV: how far your own gadget reaches is certain knowledge.
+    /// still read against the page, and it paints at full strength in and out of the
+    /// FOV: how far your own gadget reaches is certain knowledge.
     ///
     /// Since #338 it is a **background only**, so the check that matters most is the
     /// last one: every glyph that can stand on an effect mark keeps its own colour, and
@@ -607,6 +608,7 @@ mod tests {
                 bg_color(theme, Category::Danger, Fill::Full),
                 bg_color(theme, Category::Danger, Fill::Quiet),
                 bg_color(theme, Category::Sensed, Fill::Full),
+                bg_color(theme, Category::Sensed, Fill::Quiet),
             ] {
                 let d = dist2(rgb(effect), rgb(other));
                 assert!(
@@ -668,42 +670,55 @@ mod tests {
     /// §9.2: the **sensed** background is the eye-catching orange parallel of the red
     /// danger overlay — it must read on the page background, read as *orange* (not
     /// red), and stay clearly tellable from the danger fill so a sensed cell is never
-    /// mistaken for a watched one. It is painted at full strength regardless of `vis`
-    /// (the position is certain knowledge, §11.5a), so both visibilities agree.
+    /// mistaken for a watched one.
+    ///
+    /// Both of its shades are held to all of that (#192). The channel's two strengths
+    /// are **fresh** and **fading**, not seen and unseen — nothing sensed is ever inside
+    /// the FOV — so a faded trail mark is as much a sensed cell as a live dot, and a
+    /// player must be able to tell it from the page and from red just as surely. The
+    /// pair must also be tellable from *each other*, or the fade is not a fade.
     #[test]
     fn the_sensed_background_is_orange_and_distinct_from_danger() {
         for theme in THEMES {
-            let sensed = bg_color(theme, Category::Sensed, Fill::Quiet);
-            assert_eq!(
-                sensed,
-                bg_color(theme, Category::Sensed, Fill::Full),
-                "{theme:?}: the sensed fill is full-strength in and out of the FOV alike",
-            );
-
-            let d = dist2(rgb(sensed), rgb(page(theme)));
+            let fresh = bg_color(theme, Category::Sensed, Fill::Full);
+            let fading = bg_color(theme, Category::Sensed, Fill::Quiet);
+            let d = dist2(rgb(fresh), rgb(fading));
             assert!(
                 d >= MIN_BG_DIST2,
-                "{theme:?}: the sensed fill vanishes into the page background (dist^2 {d})"
-            );
-            // Orange, not red: red and green both present, and green clearly above blue.
-            let (r, g, b) = rgb(sensed);
-            assert!(
-                r > b + 30 && g > b + 20,
-                "{theme:?}: the sensed fill must read as orange"
+                "{theme:?}: the fresh and fading sensed fills blur (dist^2 {d})"
             );
 
-            // Clearly apart from the danger red, both shades — a sensed cell and a
-            // watched cell must never look alike.
-            for danger in [
-                bg_color(theme, Category::Danger, Fill::Full),
-                bg_color(theme, Category::Danger, Fill::Quiet),
-            ] {
-                let d = dist2(rgb(sensed), rgb(danger));
+            for sensed in [fresh, fading] {
+                let d = dist2(rgb(sensed), rgb(page(theme)));
                 assert!(
                     d >= MIN_BG_DIST2,
-                    "{theme:?}: the sensed orange blurs into the danger red {danger} \
-                     (dist^2 {d})"
+                    "{theme:?}: the sensed fill {sensed} vanishes into the page \
+                     background (dist^2 {d})"
                 );
+                // Orange, not red: red and green both present, and green clearly above
+                // blue.
+                let (r, g, b) = rgb(sensed);
+                assert!(
+                    r > b + 30 && g > b + 20,
+                    "{theme:?}: the sensed fill {sensed} must read as orange"
+                );
+            }
+
+            // Clearly apart from the danger red — every pairing of the two channels'
+            // shades, since a sensed cell and a watched cell must never look alike
+            // however fresh either of them is.
+            for sensed in [fresh, fading] {
+                for danger in [
+                    bg_color(theme, Category::Danger, Fill::Full),
+                    bg_color(theme, Category::Danger, Fill::Quiet),
+                ] {
+                    let d = dist2(rgb(sensed), rgb(danger));
+                    assert!(
+                        d >= MIN_BG_DIST2,
+                        "{theme:?}: the sensed orange {sensed} blurs into the danger red \
+                         {danger} (dist^2 {d})"
+                    );
+                }
             }
         }
     }

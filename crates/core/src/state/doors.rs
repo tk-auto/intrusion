@@ -1,19 +1,15 @@
-//! Doors, as the world works them (§10.4) and as the player feels them (§9.4).
+//! Doors, as the world works them (§10.4).
 //!
-//! Two halves of one subsystem, kept together and out of [`state.rs`](super):
+//! [`door_phase`](super::State::door_phase) ticks every automatic door's self-close
+//! (§10.4), and the Calm guard's chance to pull a hinged door shut behind itself rides
+//! on [`door_exited`](super::State::door_exited) /
+//! [`close_behind_door`](super::State::close_behind_door). Guard traffic opens the
+//! facility up over a level; this is the counter-pressure.
 //!
-//! - **The world's door turn.** [`door_phase`](super::State::door_phase) ticks every
-//!   automatic door's self-close (§10.4), and the Calm guard's chance to pull a
-//!   hinged door shut behind itself rides on
-//!   [`door_exited`](super::State::door_exited) /
-//!   [`close_behind_door`](super::State::close_behind_door). Guard traffic opens the
-//!   facility up over a level; this is the counter-pressure.
-//! - **The cues the player reads.** A door that opens or shuts out of sight is a
-//!   *discrete* event — there is no standing position to re-read each frame — so it
-//!   is latched the turn it happens ([`record_door_cues`](super::State::record_door_cues))
-//!   and fades over [`DOOR_CUE_DECAY_TURNS`](super::DOOR_CUE_DECAY_TURNS) world turns
-//!   ([`decay_door_cues`](super::State::decay_door_cues)). The renderer reads the
-//!   footprint through [`door_cues`](super::State::door_cues) (§9.4).
+//! **What the player *feels* of all this lives next door**, in [`sense`](super::sense):
+//! a door that opens or shuts out of sight is a discrete event, latched the turn it
+//! happens and faded over a few turns — the same persist-and-fade machinery as the
+//! guard sense, because they are one channel (§9.4/#192).
 //!
 //! The **Autodoors** ability's close-behind set (§8.3/§7.6) lives here too: a door it
 //! opened in the player's path is armed
@@ -25,59 +21,6 @@
 use super::*;
 
 impl State {
-    /// Fade the door-change cues by one world turn (§9.4/§10.4), dropping any that
-    /// have burned out. Runs once per spent turn, at the head of the world phases.
-    pub(super) fn decay_door_cues(&mut self) {
-        self.door_cues.retain_mut(|cue| {
-            cue.ttl -= 1;
-            cue.ttl > 0
-        });
-    }
-
-    /// Latch a fading on-grid cue (§9.4/§10.4) on every door that changed state this
-    /// turn **away from the player** and within [`door_sense_range`](Self::door_sense_range):
-    /// the guard-driven opens and the guard/automatic closes (all `by_player: false`).
-    /// A door *you* operated keeps its quiet near-line self-narration (§11.7) and
-    /// lights no cue. A change beyond the door-sense box is felt as nothing. Range is
-    /// measured to the panel the event named; the cue then lights the door's whole
-    /// footprint (§9.4).
-    pub(super) fn record_door_cues(&mut self, events: &[Event]) {
-        let range = self.door_sense_range();
-        for event in events {
-            let at = match *event {
-                Event::DoorOpened {
-                    at,
-                    by_player: false,
-                }
-                | Event::DoorClosed {
-                    at,
-                    by_player: false,
-                } => at,
-                _ => continue,
-            };
-            if self.player.sight_distance(at) > range {
-                continue;
-            }
-            if let Some(door) = self.layout.regions().door_at(at) {
-                self.mark_door_cue(door);
-            }
-        }
-    }
-
-    /// Light or refresh the cue on `door` to full life (§9.4/§10.4). A door that
-    /// changes again while its mark still shows simply resets the fade — one door,
-    /// one cue, its whole footprint lit.
-    fn mark_door_cue(&mut self, door: DoorId) {
-        if let Some(cue) = self.door_cues.iter_mut().find(|cue| cue.door == door) {
-            cue.ttl = DOOR_CUE_DECAY_TURNS;
-        } else {
-            self.door_cues.push(DoorCue {
-                door,
-                ttl: DOOR_CUE_DECAY_TURNS,
-            });
-        }
-    }
-
     /// The automatic doors' self-close tick (§10.4/#147), run once per world turn
     /// after everyone has moved so it reads final positions. Each open automatic door
     /// whose doorway is clear counts down and, when its timer runs out, shuts —
