@@ -203,6 +203,13 @@ impl Terrain {
     /// surprise: a **closed door panel does not**. Guards route through closed
     /// doors and open them by walking in, so guard traffic monotonically opens the
     /// facility up over a level (§10.4).
+    ///
+    /// **Narrower than §10.3's pathing column, and deliberately so.** The table has
+    /// the solid usables — console, comms console, exit — blocking pathing, and they
+    /// do: nothing a bump does to one lets anyone past. This answers `false` for them
+    /// anyway, because generation asks it of a carve those cells are not stamped into
+    /// yet (ducts, hideouts, the region beat). The routing predicates pair it with the
+    /// move check, which is where a usable becomes solid — see `guard::routable`.
     pub fn blocks_pathing(self) -> bool {
         match self {
             // A hideout blocks pathing too: guard routes flow around it while the

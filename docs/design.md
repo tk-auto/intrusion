@@ -1576,15 +1576,15 @@ fail**. Guard the minimum.
 | Floor | (blank) | No | No | No |
 | **Wall** | `#` | Yes | Yes | Yes |
 | **Door hinge** | `×` | Yes | Yes | Yes |
-| **Door panel, closed** | `+` | Yes | Yes | **No** — see below |
+| **Door panel, closed** | `+` | Yes | Yes | **No** — the bump *opens* it |
 | **Door panel, open** | (blank) | No | No | No |
 | **Hideout, empty** | `}` | **Bump** | No | Yes |
 | **Hideout, occupied** | `}` **(you)** | Yes | No | Yes |
 | **Duct entry** | `=` | Yes (**player: Bump**) | Yes | Yes |
 | **Partial cover (table)** | `π` | Yes | **No** | Yes |
-| **Console** | `$` | Yes | No | No |
-| **Comms console** | `Ψ` | Yes | No | No |
-| **Exit** | `E` | Yes | No | No |
+| **Console** | `$` | Yes | No | Yes — the bump *uses* it |
+| **Comms console** | `Ψ` | Yes | No | Yes — the bump *uses* it |
+| **Exit** | `E` | Yes | No | Yes — the bump *uses* it |
 | **Player** | `@` | Yes | No | No |
 | **Guard** | `g` | Yes | No | No |
 | **Body** | `z` | No | No | No |
@@ -1595,6 +1595,13 @@ still all-or-nothing, no half-shadows, no glass. **Partial cover exists as the
 table**, and its concealment is *behavioural*, not optical: sight passes over it
 freely; what it grants is the crouch (below). **[START]** — low walls / vaulting
 stay a future axis.
+
+**A bump that *uses* is not a bump that *opens*.** A closed panel is pathable
+because walking into it opens the way (§10.4); a console or the exit is not,
+because nothing a bump does to one lets anyone past. So a solid usable stamped
+into a one-cell throat seals the ground behind it off from guards and player
+alike — which §10.6's assert does not catch, since it proves the objective route
+and orphaned ground holds no objective (#477, #481).
 
 > **The table is partial cover, and the crouch is a bump.** A table blocks
 > movement and pathing like a wall — patrols route around it — but a guard sees
