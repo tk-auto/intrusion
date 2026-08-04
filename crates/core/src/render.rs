@@ -106,13 +106,16 @@ pub enum Visibility {
 /// How strongly a cell's **background** paints (§11.4/§11.5/#420) — which of the two
 /// fills every palette row carries this cell is asking for.
 ///
-/// Two surfaces ask the question and they answer it from different facts. The **map**
+/// Three surfaces ask the question and they answer it from different facts. The **map**
 /// answers from fog: a cell inside the FOV paints the full fill, a cell beyond it the
 /// quiet one ([`Fill::fogged`]). The **HUD** has no fog to consult and answers from
 /// what the row is: a band announcing something that just happened paints full, and
 /// the ambient floor — a standing fact, permanently on screen — paints quiet, so the
 /// row's colour distinguishes *the facility's mood* from *something that just
-/// happened*.
+/// happened*. The **sense channel** (§9/#192) answers from **age**: everything it marks
+/// is outside the FOV by construction and is certain knowledge regardless (§11.5a), so
+/// fog has nothing to say about it — what its two strengths carry instead is a mark made
+/// this turn (full) against the fading tail behind it (quiet).
 ///
 /// Carrying the answer rather than the reason is the point. Reaching for
 /// [`Visibility::Explored`] on a HUD row would pick the quiet fill for free and would
@@ -244,14 +247,18 @@ impl Grid {
 /// hideout alcove or a duct mouth — the scouting reward of §11.5a). **Live state** — guards, and a door's
 /// open/closed pose — draws only inside the FOV and is never remembered: an
 /// out-of-view panel always shows its canonical closed `+`, whatever it really is.
-/// The one exception is a guard's *position*, known through walls within the
-/// guard-sense box (§9): a guard out of the FOV but in range gets a flat orange
-/// Sensed background on its cell — position only, no cone, and still never remembered
-/// once out of range. A door's *change* is sensed the same way, in the same
-/// [`Category::Sensed`] channel, but at its own longer range (§9.4/§10.4): a door that
-/// opens or shuts away from the player leaves a fading orange background over its
-/// **whole footprint** — evidence someone passed, also position only and also painted
-/// through walls. The **decoy** is the other exception (§8.3/#321): it is the player's
+/// The one exception is the **sense channel** (§9, #192), which is one system with two
+/// halves and one persist-and-fade model. A guard out of the FOV but inside the
+/// guard-sense box gets a full-strength orange `Sensed` background on its exact cell —
+/// position only, no cone — and the cells it was felt in over the last couple of turns
+/// keep a quieter mark behind it, a **trail** that says *was just here* and fades to
+/// nothing (never a heading, §9.2). A door's *change* is sensed the same way, in the
+/// same [`Category::Sensed`] channel, at its own longer range and its own slightly
+/// longer life (§9.4/§10.4): a door that opens or shuts away from the player fades over
+/// its **whole footprint** — evidence someone passed, also position only and also
+/// painted through walls. None of it is *remembered*: a mark is the sense's own short
+/// clock running out, not tile memory (§11.5a). The **decoy** is the other exception
+/// (§8.3/#321): it is the player's
 /// own placed object rather than the facility's live state, so it draws at its cell in
 /// or out of the FOV, `Remembered` while unseen — see the decoy layer below.
 ///
@@ -317,8 +324,8 @@ pub fn render(state: &State) -> Grid {
     crouch_signal(state, &mut cells);
     stowed_body_memory(state, &mut cells);
     effect_wash(state, &mut cells);
+    sense_mark_wash(state, &mut cells);
     watcher_line_pass(state, &mut cells);
-    door_cue_wash(state, &mut cells);
     sensed_guard_wash(state, &mut cells);
     effect_thing_wash(state, &mut cells);
     danger_overlay(state, &mut cells);
@@ -599,7 +606,10 @@ fn effect_wash(state: &State, cells: &mut [GlyphCell]) {
 /// you"* for as long as that is true. Painted among the **weakest** background cues,
 /// so the later marks win where they coincide: a *sensed* watcher keeps its orange
 /// position dot with the red line running up to it, and a guard that is neither seen
-/// nor sensed is marked by the red line's own endpoint. Guards the player can see,
+/// nor sensed is marked by the red line's own endpoint. It does outrank the sense
+/// channel's **fading** marks (#192), which paint before it: a trace of where something
+/// was a turn or two ago must never cover a line that says a guard has you *now*.
+/// Guards the player can see,
 /// dazed guards and a concealed player are filtered upstream
 /// ([`State::watcher_lines`]) — a seen guard's real cone paints anyway (§9.2), so this
 /// never double-draws or restates a seen cone.
@@ -610,34 +620,59 @@ fn watcher_line_pass(state: &State, cells: &mut [GlyphCell]) {
     }
 }
 
-/// The door-change cue (§9.4/§10.4): the whole footprint of every door that opened
-/// or shut away from the player, within `DOOR_SENSE_RANGE`, gets a
-/// `Category::Sensed` background — the *same* orange "sensed through a wall" channel
-/// as a guard felt through a wall, a filled highlight that fades over a few turns
-/// (evidence someone passed, position only, never who or which way). Painted
-/// *before* the danger overlay so a coincident cone outranks it (§11.5: being seen
-/// outranks). Painted with [`sensed_guard_wash`], which shares the category.
-fn door_cue_wash(state: &State, cells: &mut [GlyphCell]) {
+/// The sense channel's **fading marks** (§9/§9.4, #192): every cell the player has felt
+/// something through a wall in recently enough for the mark to still show — the trail
+/// behind each sensed guard, and the whole footprint of each door that opened or shut
+/// away from them — gets a `Category::Sensed` background, shaded by age.
+///
+/// The ramp is two steps, and it is the *core's* age that picks it, not the fog: a mark
+/// stamped **this turn** paints [`Fill::Full`], an older one [`Fill::Quiet`]. Every mark
+/// in this channel sits outside the FOV by construction (it is sensed, not seen), so the
+/// fog has nothing to say about it; freshness is the only thing a strength here can
+/// honestly mean (§11.5a — the position is certain either way).
+///
+/// Painted in two sub-passes, stale before fresh, so the freshest claim on a cell always
+/// wins however the marks are ordered — a guard's live cell stays bright with its own
+/// trail running back through it.
+///
+/// It is the **weakest** cue on the board after the effect wash: it paints before the
+/// watcher line (#465), so a stale orange trace never covers a red line that says a
+/// guard is looking at you *right now*, and long before the danger overlay (§11.5: being
+/// seen outranks).
+fn sense_mark_wash(state: &State, cells: &mut [GlyphCell]) {
     let width = state.layout().facility().width();
-    for cell in state.door_cues() {
-        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Sensed);
+    for fill in [Fill::Quiet, Fill::Full] {
+        let fresh = fill == Fill::Full;
+        for mark in state.sense_marks().filter(|m| (m.age == 0) == fresh) {
+            let cell = &mut cells[(mark.cell.y * width + mark.cell.x) as usize];
+            cell.bg = Some(Category::Sensed);
+            cell.fill = fill;
+        }
     }
 }
 
-/// The sensed highlight (§9.2): every guard the player *senses* through a wall but
-/// cannot see gets an orange `Category::Sensed` background on its exact cell — a
-/// filled, eye-catching marker over whatever geometry masks the cell, position only
-/// and never a glyph of its own. It carries no cone and no danger overlay: knowing
-/// where a guard is is not knowing whether it can see you. Painted *before* the
-/// danger overlay so a coincident red still wins — a sensed guard's cell that a
-/// *seen* guard also watches reads danger first (§11.5: being seen outranks) — and
-/// *after* the door cue, so a sensed guard sitting on a just-changed door reads as
-/// the guard, not the trace.
+/// The **live** sensed dot (§9.2): every guard the player *senses* through a wall but
+/// cannot see gets a full-strength orange `Category::Sensed` background on its exact
+/// cell — a filled, eye-catching marker over whatever geometry masks the cell, position
+/// only and never a glyph of its own. It carries no cone and no danger overlay: knowing
+/// where a guard is is not knowing whether it can see you.
+///
+/// Derived live from [`State::perceive_guard`] rather than read off the recorded marks,
+/// so the dot is exactly the §9.2 classification at the moment of the render and can
+/// never lag it. The turn's own mark lands on the same cell at the same strength; what
+/// this pass guarantees is that the *live* position is never the thing that fades.
+///
+/// Painted *after* [`sense_mark_wash`] and the watcher line — the dot is the sharpest
+/// claim the sense makes, and the line's own endpoint is this very guard (§9.2/#465) —
+/// and *before* the danger overlay, so a coincident red still wins: a sensed guard's
+/// cell that a *seen* guard also watches reads danger first (§11.5: being seen outranks).
 fn sensed_guard_wash(state: &State, cells: &mut [GlyphCell]) {
     let width = state.layout().facility().width();
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Sensed) {
-            cells[(guard.pos().y * width + guard.pos().x) as usize].bg = Some(Category::Sensed);
+            let cell = &mut cells[(guard.pos().y * width + guard.pos().x) as usize];
+            cell.bg = Some(Category::Sensed);
+            cell.fill = Fill::Full;
         }
     }
 }
