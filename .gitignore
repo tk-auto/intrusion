@@ -11,3 +11,6 @@
 # Editor / OS cruft
 .DS_Store
 *.swp
+
+# Python bytecode from the repo scripts (scripts/*.py).
+__pycache__/

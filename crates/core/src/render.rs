@@ -149,9 +149,39 @@ impl Fill {
     }
 }
 
+/// Which **surface** a cell belongs to: the facility being drawn, or the frame drawn
+/// around and over it (§11.4).
+///
+/// This is a fact about *what a cell is*, not about how it looks — the same kind of
+/// presentation-neutral declaration [`Category`] and [`Visibility`] are, and it names
+/// no colour and no glyph for the same §11.2 reason. The core has always known the
+/// answer: it is the difference between [`GlyphCell::on_board`] and
+/// [`GlyphCell::blank`], the two constructors every cell in every render comes from.
+/// #460 gave it a name because a renderer needs it.
+///
+/// **Why a renderer needs it.** A tile renderer draws a sprite chosen by the glyph, so
+/// it can only ever be right on cells whose glyph *is* the world. On chrome the glyph
+/// is a letter of a sentence, and a sentence run through a glyph → sprite table shows a
+/// guard wherever it happens to contain a `g`. Row geometry cannot answer this: the
+/// deployed message log (§11.7) and the verdict card (§14 v2) lay prose **across the
+/// map rows**, so "which rows are the map" is the wrong question and "what is this
+/// cell" is the right one.
+///
+/// Nothing about the text renderer changes: it draws both the same way, which is why
+/// the picture is identical whether or not anything reads this.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Surface {
+    /// A cell **of the facility** — terrain, an entity, a mark on the ground. Its
+    /// glyph says what is there (§11.3).
+    Board,
+    /// A cell of the **frame**: a status line, the ability bar, a panel, the deployed
+    /// log, the verdict card. Its glyph is a character of text.
+    Chrome,
+}
+
 /// One rendered cell: a glyph, its foreground category, an optional background
-/// category (§11.1), the knowledge state it is drawn in (§11.5a), and how strongly
-/// that background paints (§11.4/#420).
+/// category (§11.1), the knowledge state it is drawn in (§11.5a), how strongly that
+/// background paints (§11.4/#420), and which surface it belongs to (§11.4/#460).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GlyphCell {
     /// The character to draw; a space is empty, painted as background only.
@@ -170,6 +200,10 @@ pub struct GlyphCell {
     /// Which fill [`bg`](Self::bg) paints in (§11.4/§11.5). Meaningless — and
     /// ignored — when `bg` is `None`.
     pub fill: Fill,
+    /// Whether this cell is the facility or the frame around it ([`Surface`]).
+    /// Carried per cell rather than derived from the row, because the log and the
+    /// verdict lay chrome *over* the map (#460).
+    pub surface: Surface,
 }
 
 impl GlyphCell {
@@ -186,12 +220,18 @@ impl GlyphCell {
             bg: None,
             vis,
             fill: Fill::fogged(vis),
+            surface: Surface::Board,
         }
     }
 
     /// An empty, live, uncoloured cell — the starting point of every **chrome** surface
     /// (a status row, a panel, the deployed log), which has no fog to consult and paints
     /// its own bands (§11.4).
+    ///
+    /// Every chrome cell in every render is built from this one, including the
+    /// overlays that write *over* the map, so [`Surface::Chrome`] arrives here and
+    /// nowhere else — which is what makes the split exhaustive rather than a list
+    /// somebody has to remember to extend.
     pub(crate) fn blank() -> Self {
         Self {
             glyph: ' ',
@@ -199,6 +239,7 @@ impl GlyphCell {
             bg: None,
             vis: Visibility::Live,
             fill: Fill::Full,
+            surface: Surface::Chrome,
         }
     }
 }

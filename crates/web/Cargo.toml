@@ -66,4 +66,9 @@ features = [
     # the clipboard itself is reached by property lookup, because whether it is there
     # at all is the question (see `clipboard`).
     "Navigator",
+    # The tile renderer (§11.1/#460): the spritesheet decodes through an
+    # `HtmlImageElement` fed a `data:` URI, and each tinted copy of it is baked into
+    # an unmounted canvas — so the tile layer needs no binding the text renderer did
+    # not already have beyond the image itself.
+    "HtmlImageElement",
 ]
