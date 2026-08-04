@@ -1,4 +1,4 @@
-//! The **tile renderer** (§11.1 / #460) — the shell's second cell primitive, and
+//! The **tile renderer** (§11.1 / #460, #461) — the shell's second cell primitive, and
 //! the whole of what `?tiles=1` turns on.
 //!
 //! §11.1 **[SETTLED]** says the renderer is *"a separate concern behind one
@@ -10,16 +10,37 @@
 //! grid the core emits is identical with tiles on and off — what differs is only
 //! whether [`crate::paint`] answers a cell with `fill_text` or with `draw_image`.
 //!
-//! # One tile per glyph, tinted by the colour the glyph would have been
+//! # A sprite per glyph, tinted by the colour the glyph would have been
 //!
-//! Step 1 makes the simplest art rule it can: **a sprite is chosen by the cell's
-//! glyph and by nothing else** — no autotiling, no neighbour lookup, no rotation, no
-//! animation. The colour is not chosen here either. [`crate::paint`] has already
-//! resolved the cell to a concrete colour through the §11.2 table (the category's
-//! `fg` live, its `dim` beyond the FOV, the memory slate for a remembered content),
-//! and the tile is drawn *in that colour*. So a tile and a glyph carry exactly the
-//! same information, in all three knowledge states and both themes, and swapping
-//! between them can never change what a cell means.
+//! Step 1's rule was **a sprite is chosen by the cell's glyph and by nothing else**.
+//! The colour is not chosen here either: [`crate::paint`] has already resolved the
+//! cell to a concrete colour through the §11.2 table (the category's `fg` live, its
+//! `dim` beyond the FOV, the memory slate for a remembered content), and the tile is
+//! drawn *in that colour*. So a tile and a glyph carry exactly the same information,
+//! in all three knowledge states and both themes, and swapping between them can never
+//! change what a cell means.
+//!
+//! **Step 2 lets a sprite be turned** (#461), which is the first thing to widen that
+//! rule, and it widens it in exactly two places:
+//!
+//! - **Autotiling.** A glyph that reads as a continuous surface ([`AUTOTILED`] — the
+//!   wall, so far) picks its sprite from which of its four neighbours draw the same
+//!   glyph, so runs join and corners turn. The neighbours come from the **grid this
+//!   module was handed** and from nowhere else; see [`neighbour_mask`] for why that
+//!   sentence is the whole of the fog safety.
+//! - **Facing.** A cell that declares a [`GlyphCell::facing`] is drawn turned to face
+//!   it. That is information the character grid does not carry — the ticket's one
+//!   deliberate *addition*, licensed by §5 making "you cannot see behind you" a rule —
+//!   and the core decides who gets one, so a sensed guard cannot acquire a facing by
+//!   the tileset's choice.
+//!
+//! Both are **rotations of one sprite**, never separate art: sixteen wall
+//! neighbourhoods are six shapes at four angles, and an actor is one shape at four.
+//! The sheet stores what cannot be derived and the draw path turns the rest
+//! ([`canonical`], [`turned`]).
+//!
+//! What is still refused: animation, and any sprite chosen by anything the grid does
+//! not say.
 //!
 //! Sprites are authored **greyscale with alpha**: the alpha channel is the shape and
 //! the greys are shading. Tinting bakes a whole copy of the sheet per colour
@@ -41,8 +62,16 @@
 //! square [`TILE`] it was authored at, so `fit_and_draw`'s arithmetic and every hit
 //! test — the help button, the ability bar, the tab bar — are untouched. Square
 //! *cells* would mean the map keeping its own metric while the HUD rows keep the text
-//! one, which breaks the single-grid fit; that is step 2's problem and step 1 refuses
-//! it.
+//! one, which breaks the single-grid fit.
+//!
+//! #461 is where that was supposed to be reopened — corners and joins are what make a
+//! non-square tile look wrong — and it is **refused again**, on the evidence of the
+//! joins themselves: the wall run's boundary lines sit on the cell's edges, so the
+//! squash stretches where the line *is* without moving it, and a room still reads as a
+//! rectangle with a lit border. Nothing about the autotiling wants a square cell; what
+//! would want one is art with circles in it. The cost of the change has not moved
+//! (the map gets its own metric, every hit test in §11.4 gets a second one), so the
+//! trade is still bad and this ticket is not the one to make it.
 //!
 //! **Text.** Tiling letters would be a font, not a tileset, so a tile is drawn only
 //! where the glyph *is the world*: on cells the core tags [`Surface::Board`]. The near
@@ -75,9 +104,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::f64::consts::FRAC_PI_2;
 use std::rc::Rc;
 
-use intrusion_core::{GlyphCell, Surface};
+use intrusion_core::{Direction, GlyphCell, Grid, Surface};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
@@ -134,7 +164,7 @@ const SHEET_ROWS: u32 = 16;
 const TILE: u32 = 48;
 
 /// How many rows of the sheet a tinted atlas has to cover — enough for the highest
-/// slot [`SPRITES`] indexes, and not one row more.
+/// slot the mapping can index, and not one row more.
 ///
 /// The sheet is an **authoring surface with headroom**, so most of it is empty and
 /// will stay that way for a long time. Baking that emptiness would be the one place
@@ -146,6 +176,16 @@ const fn atlas_rows() -> u32 {
     while i < SPRITES.len() {
         if SPRITES[i].1 > highest {
             highest = SPRITES[i].1;
+        }
+        i += 1;
+    }
+    // An autotile band is indexed `base + mask`, so its last reachable slot is the
+    // all-four-neighbours one — 15 past its base, whether or not that mask's sprite is
+    // one the sheet draws or one it turns.
+    let mut i = 0;
+    while i < AUTOTILED.len() {
+        if AUTOTILED[i].1 + 15 > highest {
+            highest = AUTOTILED[i].1 + 15;
         }
         i += 1;
     }
@@ -173,8 +213,8 @@ const TILES_OFF: &str = "0";
 /// These are the sheet's **glyph band**, slots 0-15, in the order the render
 /// reference §2 walks them: building fabric and furniture first, then the goals a
 /// plan is drawn around, then the things that move. Slots 16-31 are the wall
-/// autotile run, which step 1 deliberately cannot use — one tile per glyph, no
-/// neighbour lookup — and which step 2 will index by a neighbour bitmask.
+/// autotile run, indexed through [`AUTOTILED`] instead — a glyph that autotiles keeps
+/// its entry here as the sprite it draws when nothing else applies.
 ///
 /// The tests below assert this covers every glyph `docs/render-reference.md` §2
 /// lists, *and* that each entry matches what [`SLOT_TABLE`] says that slot is for.
@@ -202,6 +242,164 @@ fn sprite_index(glyph: char) -> Option<u32> {
         .iter()
         .find(|(g, _)| *g == glyph)
         .map(|(_, index)| *index)
+}
+
+/// The glyphs that **autotile**, and where each one's run starts (#461).
+///
+/// A glyph listed here reads as a *continuous surface*: its sprite is chosen from
+/// which of its four neighbours draw the same glyph, so runs join up and corners
+/// turn. Everything not listed keeps step 1's rule — one sprite, chosen by the glyph
+/// and nothing else.
+///
+/// Only the wall so far, because only the wall has a run drawn for it. The
+/// schematic's `□` is the obvious next one — it is exactly as continuous — and
+/// costs a band and nothing else when somebody draws it.
+const AUTOTILED: [(char, u32); 1] = [('#', 16)];
+
+/// Where `glyph`'s autotile run starts, or `None` for a glyph that draws one sprite.
+fn autotile_base(glyph: char) -> Option<u32> {
+    AUTOTILED
+        .iter()
+        .find(|(g, _)| *g == glyph)
+        .map(|(_, base)| *base)
+}
+
+/// The four neighbour bits of an autotile mask, **clockwise from north** — the same
+/// order and the same sense as [`Direction::ALL`], so "turn the mask a quarter" and
+/// "turn the tile a quarter" are the same operation ([`turn_mask`]).
+const NORTH: u8 = 1;
+const EAST: u8 = 2;
+const SOUTH: u8 = 4;
+const WEST: u8 = 8;
+
+/// The **six masks the sheet actually draws** — one per rotation orbit of the sixteen
+/// (#461). Every other mask is one of these turned, so the sheet holds the shape once
+/// and the draw path turns it:
+///
+/// | Slot | Mask | Shape |
+/// |---|---|---|
+/// | 16 | none | an isolated block, exposed on all four sides |
+/// | 17 | N | an end cap |
+/// | 19 | N-E | a corner |
+/// | 21 | N-S | a straight run |
+/// | 23 | N-E-S | a T |
+/// | 31 | N-E-S-W | a crossing, and the plain interior of a mass of wall |
+///
+/// **The other ten slots of the band are tombstones**, not free space: the band's
+/// index is still `base + mask`, and slot 18 is still where mask `E` would live if a
+/// later ticket ever drew it a sprite of its own rather than turning slot 17. They are
+/// listed in `web/assets/tiles.txt` as the rotations they are, for the reason a
+/// retired `AbilityId` keeps its slot (`CLAUDE.md`) — a gap that closes is a gap that
+/// silently repaints its neighbours.
+///
+/// Derived by [`canonical`] rather than written down, and so **test-only** — like
+/// [`SLOT_TABLE`], it exists to be asserted against, and to be the one place a reader
+/// can see the layout stated rather than computed.
+#[cfg(test)]
+const CANONICAL: [u8; 6] = [
+    0,
+    NORTH,
+    NORTH | EAST,
+    NORTH | SOUTH,
+    NORTH | EAST | SOUTH,
+    15,
+];
+
+/// The **rest facing** every directional sprite is drawn in: a sprite that faces
+/// anywhere is drawn facing **south**, down the screen, and turned from there
+/// (§11.1/#461).
+///
+/// South rather than north because that is how the source art was drawn — a top-down
+/// figure faces the viewer — and picking the art's own rest costs no rotation in the
+/// commonest case a player looks at.
+const REST_FACING: Direction = Direction::South;
+
+/// One sprite, ready to draw: where it is on the sheet and how far round it goes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Sprite {
+    /// The slot index on the sheet.
+    index: u32,
+    /// Quarter turns **clockwise** to draw it through, 0-3. Zero is the overwhelming
+    /// majority of cells and costs no canvas transform at all ([`Tiles::draw`]).
+    turns: u8,
+}
+
+/// A neighbour mask turned one quarter **clockwise**: N→E→S→W→N, the same rotation
+/// [`Direction::clockwise`] describes and the same one the canvas applies.
+fn turn_mask(mask: u8) -> u8 {
+    (mask << 1 | mask >> 3) & 0xf
+}
+
+/// The mask's **orbit representative and the turns back to it**: the smallest mask
+/// this one can be turned into, and how many quarter turns clockwise take that
+/// representative back to `mask`.
+///
+/// This is the whole of the deduplication (#461). Sixteen neighbourhoods, six shapes:
+/// the four end caps are one sprite at four angles, the four corners another, the two
+/// straights a third. Turning at draw time is what lets the sheet hold six images and
+/// the band still be indexed by a plain bitmask.
+fn canonical(mask: u8) -> (u8, u8) {
+    let (mut rep, mut turns) = (mask, 0);
+    let mut candidate = mask;
+    for back in 0..4 {
+        // `candidate` is `mask` turned `back` quarters *anticlockwise*, so turning it
+        // `back` quarters clockwise is `mask` again — the invariant a test pins.
+        if candidate < rep {
+            rep = candidate;
+            turns = back;
+        }
+        candidate = turn_mask(turn_mask(turn_mask(candidate)));
+    }
+    (rep, turns)
+}
+
+/// The quarter turns that take a sprite from its [`REST_FACING`] to `facing`.
+fn turns_to_face(facing: Direction) -> u8 {
+    let mut turns = 0;
+    let mut at = REST_FACING;
+    while at != facing {
+        at = at.clockwise();
+        turns += 1;
+    }
+    turns
+}
+
+/// Which of `(x, y)`'s four neighbours draw the same glyph it does — the autotile
+/// mask, computed from **the grid the renderer was handed and from nothing else**.
+///
+/// **This is the ticket's whole fog risk** (#461/§11.5a). Geometry the player has
+/// never seen is masked by the core as the schematic's `□`, not as `#`, so a wall
+/// cannot join to it: the join follows the *drawn* glyph, which means the shape
+/// channel can say no more than the glyph channel already said. Ask the `State`
+/// instead — "is there really a wall there?" — and the masking is defeated through
+/// shape while glyph and colour are still telling the truth, which is precisely the
+/// leak §2.3 warns about and is invisible in a screenshot because it looks like
+/// better art.
+///
+/// Two neighbours never join, for the same reason: one off the grid, and one on the
+/// **chrome** surface. A message log laid across the map rows (§11.7) must not weld a
+/// sentence's `#` onto the facility's wall.
+fn neighbour_mask(grid: &Grid, x: u32, y: u32, glyph: char) -> u8 {
+    const STEPS: [(u8, i64, i64); 4] = [(NORTH, 0, -1), (EAST, 1, 0), (SOUTH, 0, 1), (WEST, -1, 0)];
+    STEPS
+        .iter()
+        .filter(|(_, dx, dy)| joins(grid, x, y, *dx, *dy, glyph))
+        .fold(0, |mask, (bit, _, _)| mask | bit)
+}
+
+/// Whether the cell `(dx, dy)` away from `(x, y)` continues `glyph`'s surface.
+fn joins(grid: &Grid, x: u32, y: u32, dx: i64, dy: i64, glyph: char) -> bool {
+    let (Ok(nx), Ok(ny)) = (
+        u32::try_from(i64::from(x) + dx),
+        u32::try_from(i64::from(y) + dy),
+    ) else {
+        return false; // off the top or left edge
+    };
+    if nx >= grid.width() || ny >= grid.height() {
+        return false; // off the bottom or right edge
+    }
+    let neighbour = grid.get(nx, ny);
+    neighbour.surface == Surface::Board && neighbour.glyph == glyph
 }
 
 /// The tile layer: whether the mode is on, and — once the browser has decoded the
@@ -252,18 +450,49 @@ impl Tiles {
         self.on.then_some(self)
     }
 
-    /// The sprite this cell would be drawn with, or `None` when it draws as a
-    /// character: the mode is off, the cell is chrome, or its glyph has no art.
+    /// The sprite cell `(x, y)` would be drawn with, and how far round, or `None` when
+    /// it draws as a character: the mode is off, the cell is chrome, or its glyph has
+    /// no art.
     ///
     /// **The whole tile/text decision, in one place**, so [`Tiles::draw`] and the
     /// tests below are asking the same question rather than two questions that agree
     /// today. The one condition it does not answer is whether the sheet has finished
     /// decoding — that is a fact about the moment, not about the cell.
-    fn sprite_for(&self, cell: GlyphCell) -> Option<u32> {
+    ///
+    /// It takes the **grid** and a position rather than a cell (#461), because a
+    /// continuous surface is drawn from its neighbourhood: that argument is the seam
+    /// the fog constraint lives on, and taking nothing else is what makes
+    /// [`neighbour_mask`]'s promise checkable.
+    fn sprite_for(&self, grid: &Grid, x: u32, y: u32) -> Option<Sprite> {
+        let cell = grid.get(x, y);
+        self.sprite_for_cell(cell, || neighbour_mask(grid, x, y, cell.glyph))
+    }
+
+    /// The decision itself, given the cell and — lazily, because only a continuous
+    /// surface ever asks — the neighbourhood it sits in.
+    ///
+    /// Split from [`Tiles::sprite_for`] so the two halves can be tested for what each
+    /// is: this one against cells a test can state outright, and [`neighbour_mask`]
+    /// against grids the core actually rendered.
+    fn sprite_for_cell(&self, cell: GlyphCell, mask: impl FnOnce() -> u8) -> Option<Sprite> {
         if !self.on || cell.surface != Surface::Board {
             return None;
         }
-        sprite_index(cell.glyph)
+        if let Some(base) = autotile_base(cell.glyph) {
+            let (shape, turns) = canonical(mask());
+            return Some(Sprite {
+                index: base + u32::from(shape),
+                turns,
+            });
+        }
+        Some(Sprite {
+            index: sprite_index(cell.glyph)?,
+            // A cell that faces somewhere is drawn turned to face it (§11.1/#461).
+            // Asked of every glyph rather than of a list of actors: a facing is a fact
+            // about the cell, and the core only ever writes one on something with a
+            // front (the player, a guard it can see).
+            turns: cell.facing.map_or(0, turns_to_face),
+        })
     }
 
     /// Take the decoded sheet. Any tint baked from an earlier sheet is dropped with
@@ -281,37 +510,83 @@ impl Tiles {
     pub(crate) fn draw(
         &self,
         ctx: &CanvasRenderingContext2d,
-        x: f64,
-        y: f64,
-        cell: GlyphCell,
+        grid: &Grid,
+        x: u32,
+        y: u32,
         colour: &'static str,
         m: &Metrics,
     ) -> bool {
-        let Some(index) = self.sprite_for(cell) else {
+        let Some(sprite) = self.sprite_for(grid, x, y) else {
             return false;
         };
         let Some(atlas) = self.atlases.borrow_mut().tinted(colour) else {
             return false;
         };
         let (sx, sy) = (
-            f64::from((index % SHEET_COLS) * TILE),
-            f64::from((index / SHEET_COLS) * TILE),
+            f64::from((sprite.index % SHEET_COLS) * TILE),
+            f64::from((sprite.index / SHEET_COLS) * TILE),
         );
+        let (dx, dy) = (f64::from(x) * m.cell_w, f64::from(y) * m.cell_h);
         // Errors here mean an invalid surface, the same condition `fill_text` ignores;
         // there is nothing a frame can do about it and nothing to fall back *to*.
-        ctx.draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
-            &atlas,
-            sx,
-            sy,
-            f64::from(TILE),
-            f64::from(TILE),
-            x * m.cell_w,
-            y * m.cell_h,
-            m.cell_w,
-            m.cell_h,
-        )
-        .is_ok()
+        if sprite.turns == 0 {
+            return ctx
+                .draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
+                    &atlas,
+                    sx,
+                    sy,
+                    f64::from(TILE),
+                    f64::from(TILE),
+                    dx,
+                    dy,
+                    m.cell_w,
+                    m.cell_h,
+                )
+                .is_ok();
+        }
+        ctx.save();
+        let drawn = turned(ctx, &atlas, (sx, sy), (dx, dy), sprite.turns, m).is_ok();
+        ctx.restore();
+        drawn
     }
+}
+
+/// Draw a sprite through `turns` quarter turns, into the cell whose top-left corner
+/// is `at` (#461). The caller has already saved the context and restores it after.
+///
+/// **The order of the transform is the whole of it.** The cell is 14x20 and the sprite
+/// is square, so translate-scale-rotate and translate-rotate-scale are *not* the same
+/// picture: scaling first means the sprite turns in its own square space and the
+/// squash into the cell happens after, which is what puts a join line that was along
+/// the sprite's north edge along the north edge of the cell. Rotate first and the
+/// squash lands on the turned axis instead, and a quarter-turned wall comes out
+/// sheared to the wrong proportion.
+///
+/// Quarter turns are otherwise exact: no resampling beyond the squash every tile
+/// already takes.
+fn turned(
+    ctx: &CanvasRenderingContext2d,
+    atlas: &HtmlCanvasElement,
+    from: (f64, f64),
+    at: (f64, f64),
+    turns: u8,
+    m: &Metrics,
+) -> Result<(), JsValue> {
+    let tile = f64::from(TILE);
+    ctx.translate(at.0 + m.cell_w / 2.0, at.1 + m.cell_h / 2.0)?;
+    ctx.scale(m.cell_w / tile, m.cell_h / tile)?;
+    ctx.rotate(f64::from(turns) * FRAC_PI_2)?;
+    ctx.draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
+        atlas,
+        from.0,
+        from.1,
+        tile,
+        tile,
+        -tile / 2.0,
+        -tile / 2.0,
+        tile,
+        tile,
+    )
 }
 
 impl Atlases {
@@ -469,7 +744,9 @@ fn base64(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use intrusion_core::{Category, Fill, Terrain, Visibility};
+    use intrusion_core::{
+        render, start_level, Category, Fill, Input, LevelSeed, Terrain, Visibility,
+    };
 
     /// A tile layer in a known mode, with nothing decoded — every test here is about
     /// the *decision*, which is the half a native test can reach.
@@ -489,7 +766,32 @@ mod tests {
             vis: Visibility::Live,
             fill: Fill::Full,
             surface,
+            facing: None,
         }
+    }
+
+    /// The sprite for a cell standing alone — no neighbours of its own kind, which is
+    /// the neighbourhood most of these tests do not care about.
+    fn sprite_of(tiles: &Tiles, cell: GlyphCell) -> Option<Sprite> {
+        tiles.sprite_for_cell(cell, || 0)
+    }
+
+    /// A real board grid: a run of `seed` walked `steps` paces in from its tunnel,
+    /// rendered. The deterministic boot the live shell, the sim and the replay viewer
+    /// all share (§12.4/§13.2), so "the grid" here is the one the game really draws.
+    ///
+    /// The walk is **west**, and it has to be: a run opens inside the player's own
+    /// entry tunnel (§10.7/#466) with the whole facility still unexplored, so a frame
+    /// taken before they crawl out has no wall drawn anywhere and would make an
+    /// autotile test pass by having nothing to test. Ten paces is enough to be
+    /// standing in the building with walls in sight on every seed used here.
+    fn board(seed: u64, steps: usize) -> Grid {
+        let mut state =
+            start_level(&LevelSeed::quick_play(seed)).expect("the v1 footprint always carves");
+        for _ in 0..steps {
+            state.step(Input::Step(Direction::West));
+        }
+        render(&state)
     }
 
     /// **The mapping covers every glyph the board can draw** — the terrain table
@@ -572,10 +874,13 @@ mod tests {
     /// somebody drew a console, with nothing to notice it by.
     ///
     /// Checked in both directions: every glyph here is at the slot the table gives it,
-    /// and every `glyph:` slot the table declares is claimed here. The wall band is
-    /// deliberately *not* claimed — step 1 does no neighbour lookup — so it is asserted
-    /// present-and-unmapped rather than skipped, which is what keeps step 2's slots
-    /// reserved instead of merely unused.
+    /// and every `glyph:` slot the table declares is claimed here.
+    ///
+    /// The band is checked the same way (#461). A `wall:` slot is one the sheet draws
+    /// and the autotiler indexes; a `rotation:` slot is one it reaches by *turning*
+    /// another, and must therefore be indexed by nothing — the assertion that keeps the
+    /// ten empty slots deliberate rather than forgotten, and that would fail the day
+    /// somebody drew art into one without telling the mapping.
     #[test]
     fn the_mapping_agrees_with_the_slot_table() {
         let table = slot_table();
@@ -600,16 +905,51 @@ mod tests {
                     "the table declares {glyph:?} at slot {index}, but the mapping does not",
                 );
             } else {
-                assert!(
-                    key.starts_with("wall:"),
-                    "slot {index} has an unknown kind of key {key:?}",
+                let (kind, mask) = key.split_once(':').expect("a `kind:value` key");
+                let mask: u8 = mask.parse().expect("a band key names its mask");
+                let base = autotile_base('#').expect("the wall autotiles");
+                assert_eq!(
+                    *index,
+                    base + u32::from(mask),
+                    "slot {index} claims mask {mask}, which the band puts elsewhere",
                 );
-                // The wall band is reserved for step 2's autotiler, not forgotten.
                 assert!(
                     !SPRITES.iter().any(|(_, i)| i == index),
-                    "slot {index} ({key}) is the wall band — step 1 must not claim it",
+                    "slot {index} ({key}) is in the band — no glyph may claim it",
                 );
+                let drawn_upright = canonical(mask) == (mask, 0);
+                match kind {
+                    // A drawn shape: the autotiler indexes it, and does so upright.
+                    "wall" => assert!(
+                        drawn_upright,
+                        "slot {index} is drawn art, but mask {mask} is {:?} turned",
+                        canonical(mask),
+                    ),
+                    // A tombstone: allocated, empty, and reached only by turning.
+                    "rotation" => {
+                        assert!(
+                            !drawn_upright,
+                            "slot {index} is declared a rotation, but mask {mask} is a \
+                             shape of its own",
+                        );
+                        assert!(
+                            (0..16u8).all(|m| base + u32::from(canonical(m).0) != *index),
+                            "slot {index} is declared a rotation, but the autotiler \
+                             indexes it — it would sample an empty slot",
+                        );
+                    }
+                    _ => panic!("slot {index} has an unknown kind of key {key:?}"),
+                }
             }
+        }
+        // And every drawn shape is declared: the band's six `wall:` lines, no fewer.
+        for shape in CANONICAL {
+            let index = autotile_base('#').expect("the wall autotiles") + u32::from(shape);
+            let declared = format!("wall:{shape}");
+            assert!(
+                table.iter().any(|(i, key)| *i == index && *key == declared),
+                "the autotiler draws slot {index}, but the table does not declare it",
+            );
         }
     }
 
@@ -633,6 +973,170 @@ mod tests {
             assert!(!seen.contains(&index), "{glyph:?} reuses index {index}");
             seen.push(index);
         }
+    }
+
+    /// **Every neighbourhood is one of the six shapes, turned** (#461) — the property
+    /// the whole deduplication rests on, and the one that makes ten empty slots safe.
+    ///
+    /// Three things at once, because they are one statement: the representative is a
+    /// shape the sheet draws, turning it by the quarters reported gets the mask back,
+    /// and a representative is its own representative at no turns (so the six drawn
+    /// slots are drawn upright).
+    #[test]
+    fn every_neighbourhood_is_a_drawn_shape_turned() {
+        for mask in 0..16u8 {
+            let (rep, turns) = canonical(mask);
+            assert!(
+                CANONICAL.contains(&rep),
+                "mask {mask} reduces to {rep}, which the sheet does not draw",
+            );
+            assert!(turns < 4, "mask {mask} asks for {turns} quarter turns");
+            let mut turned = rep;
+            for _ in 0..turns {
+                turned = turn_mask(turned);
+            }
+            assert_eq!(
+                turned, mask,
+                "slot for {rep} turned {turns} quarters is {turned}, not {mask}",
+            );
+        }
+        for rep in CANONICAL {
+            assert_eq!(
+                canonical(rep),
+                (rep, 0),
+                "a drawn shape must be drawn upright",
+            );
+        }
+    }
+
+    /// **The sixteen masks reach exactly six slots** (#461). Stated separately from the
+    /// arithmetic above because it is the thing a sheet author needs to know: these six
+    /// have art, and every other slot of the band is reached by turning one of them.
+    #[test]
+    fn the_band_indexes_six_slots_and_no_others() {
+        let base = autotile_base('#').expect("the wall autotiles");
+        let mut reached: Vec<u32> = (0..16u8)
+            .map(|mask| base + u32::from(canonical(mask).0))
+            .collect();
+        reached.sort_unstable();
+        reached.dedup();
+        let expected: Vec<u32> = CANONICAL.iter().map(|&m| base + u32::from(m)).collect();
+        assert_eq!(reached, expected);
+        assert_eq!(reached.len(), 6, "six images for sixteen neighbourhoods");
+    }
+
+    /// **A wall joins only to what the grid draws** (#461/§11.5a) — the fog test the
+    /// ticket says to write first.
+    ///
+    /// Geometry the player has never seen is masked as the schematic's `□`, so a wall
+    /// cannot join to it; the join follows the *drawn* glyph and can therefore say no
+    /// more than the glyph already said. Asserted over a real opening frame, where
+    /// almost the whole facility is still unexplored, in both directions: every bit of
+    /// every mask is exactly a same-glyph board neighbour, and — the witness that keeps
+    /// this from passing vacuously (#482) — some wall really does sit against
+    /// unexplored fabric, with that fabric not counted.
+    #[test]
+    fn a_wall_never_joins_to_geometry_the_player_has_not_seen() {
+        let grid = board(4242, 10);
+        let mut walls = 0;
+        let mut against_the_fog = 0;
+        for y in 0..grid.height() {
+            for x in 0..grid.width() {
+                if grid.get(x, y).glyph != '#' || grid.get(x, y).surface != Surface::Board {
+                    continue;
+                }
+                walls += 1;
+                let mask = neighbour_mask(&grid, x, y, '#');
+                for (bit, dx, dy) in [(NORTH, 0, -1), (EAST, 1, 0), (SOUTH, 0, 1), (WEST, -1, 0)] {
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    let neighbour = (0..grid.width() as i64).contains(&nx)
+                        && (0..grid.height() as i64).contains(&ny)
+                        && grid.get(nx as u32, ny as u32).surface == Surface::Board;
+                    let drawn = neighbour.then(|| grid.get(nx as u32, ny as u32).glyph);
+                    assert_eq!(
+                        mask & bit != 0,
+                        drawn == Some('#'),
+                        "({x},{y}) joins by bit {bit} but its neighbour draws {drawn:?}",
+                    );
+                    if drawn == Some('□') {
+                        against_the_fog += 1;
+                        assert_eq!(
+                            mask & bit,
+                            0,
+                            "({x},{y}) joined to fabric the player has never seen",
+                        );
+                    }
+                }
+            }
+        }
+        assert!(walls > 0, "the opening frame draws some wall");
+        assert!(
+            against_the_fog > 0,
+            "the opening frame puts some wall against unexplored fabric — \
+             without one this test proves nothing",
+        );
+    }
+
+    /// **Lifting the fog changes the joins** (#461), and every change is a neighbour
+    /// that changed glyph. Walking turns `□` into `#` as the player sees it, and the
+    /// wall's shape follows — which is the truthful behaviour, not a glitch: the joins
+    /// state what is known, and what is known grows.
+    #[test]
+    fn lifting_the_fog_changes_the_joins() {
+        let opening = board(4242, 10);
+        let walked = board(4242, 16);
+        let mut moved = 0;
+        for y in 0..opening.height() {
+            for x in 0..opening.width() {
+                if opening.get(x, y).glyph != '#' || walked.get(x, y).glyph != '#' {
+                    continue;
+                }
+                let before = neighbour_mask(&opening, x, y, '#');
+                let after = neighbour_mask(&walked, x, y, '#');
+                if before != after {
+                    moved += 1;
+                }
+            }
+        }
+        assert!(
+            moved > 0,
+            "seeing more of the facility must join more of its walls",
+        );
+    }
+
+    /// **An actor is turned to the way it faces** (#461), and the sprite's own rest
+    /// costs no turn at all — the commonest case a player looks at.
+    #[test]
+    fn a_facing_turns_the_sprite_and_the_rest_facing_costs_nothing() {
+        assert_eq!(turns_to_face(REST_FACING), 0);
+        // Clockwise, one quarter at a time, all the way round and back.
+        let mut facing = REST_FACING;
+        for expected in 0..4 {
+            assert_eq!(turns_to_face(facing), expected);
+            facing = facing.clockwise();
+        }
+        assert_eq!(facing, REST_FACING, "four quarters is the whole turn");
+
+        let tiles = tiles(true);
+        for facing in Direction::ALL {
+            let turned = GlyphCell {
+                facing: Some(facing),
+                ..cell('@', Surface::Board)
+            };
+            assert_eq!(
+                sprite_of(&tiles, turned),
+                Some(Sprite {
+                    index: sprite_index('@').expect("the player has art"),
+                    turns: turns_to_face(facing),
+                }),
+                "the `@` facing {facing:?} is its one sprite, turned",
+            );
+        }
+        // A cell that faces nowhere is drawn upright — a body, a console, a wall.
+        assert_eq!(
+            sprite_of(&tiles, cell('z', Surface::Board)).map(|s| s.turns),
+            Some(0),
+        );
     }
 
     /// **The flag's whole grammar** (#460). `1` and `0` are choices in either
@@ -676,24 +1180,20 @@ mod tests {
     fn a_chrome_cell_is_never_a_candidate_for_a_tile() {
         for glyph in SPRITES.map(|(glyph, _)| glyph) {
             assert!(
-                tiles(true)
-                    .sprite_for(cell(glyph, Surface::Chrome))
-                    .is_none(),
+                sprite_of(&tiles(true), cell(glyph, Surface::Chrome)).is_none(),
                 "{glyph:?} in chrome must draw as a character"
             );
             assert!(
-                tiles(true)
-                    .sprite_for(cell(glyph, Surface::Board))
-                    .is_some(),
+                sprite_of(&tiles(true), cell(glyph, Surface::Board)).is_some(),
                 "{glyph:?} on the board is a tile"
             );
         }
         // And an unmapped glyph is text on either surface.
         for surface in [Surface::Board, Surface::Chrome] {
-            assert!(tiles(true).sprite_for(cell('a', surface)).is_none());
+            assert!(sprite_of(&tiles(true), cell('a', surface)).is_none());
         }
         // With the mode off, nothing is ever a candidate.
-        assert!(tiles(false).sprite_for(cell('#', Surface::Board)).is_none());
+        assert!(sprite_of(&tiles(false), cell('#', Surface::Board)).is_none());
     }
 
     /// The sheet is embedded and is a **PNG** — a build that lost the asset, or
