@@ -197,6 +197,7 @@ pub fn watch_one(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::pinned_sweep;
     use crate::{Profile, StealthBot, DEFAULT_INPUT_CAP};
 
     /// The instrument itself: an errand that ends in a search reads `Searched`, one
@@ -247,6 +248,11 @@ mod tests {
     /// the journey shows up as a red test rather than as a quiet balance drift.
     #[test]
     fn a_dispatch_that_can_get_there_does() {
+        // A **rate** cannot be witnessed by one seed (appendix 36), so this pins a
+        // prefix instead: `0..15` across the four temperaments already resolves 15
+        // errands, comfortably over the "enough to conclude anything" floor asserted
+        // below, and `INTRUSION_SLOW_TESTS` restores the full sweep the 19%-to-none
+        // collapse was measured over.
         let config = RunConfig::sim();
         let mut tally = DispatchTally::default();
         for profile in [
@@ -255,7 +261,7 @@ mod tests {
             Profile::AGGRESSIVE,
             Profile::CARELESS,
         ] {
-            for seed in 0..50 {
+            for seed in pinned_sweep(0..15, 0..50) {
                 let mut bot = StealthBot::with_profile(profile);
                 let run = watch_one(&config, seed, &mut bot, DEFAULT_INPUT_CAP)
                     .expect("the sim config generates");

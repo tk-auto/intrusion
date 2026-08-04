@@ -1773,3 +1773,82 @@ level's token plus the input script, carrying no debug state. The cost is a smal
 `Copy` enum pushed per turn in every session — a couple of thousand of them across a
 long run, tens of kilobytes — for a strange run being reproducible by whoever it
 happened to.
+
+## Appendix 36 — An existence test pins its witness; the search is CI's
+
+*(§13.2/§13.4; `crates/sim/src/test_support.rs`, `crates/sim/src/bot/tests.rs`.)*
+
+The sim's tests are the only ones in the workspace that pay for **whole runs**. A run
+costs ~30 ms to carve its facility and ~100 ms more to walk to an ending, and the bot
+tests walk between 40 and 400 of them each. Measured on a 4-core runner: 88 sim tests
+took **94 s** against 944 core tests in **14 s**, and ten tests accounted for 75% of it.
+
+The cost was not the assertions. It was **searching for the thing being asserted
+about**. A cue like the §7.7 comms bump only fires on a seed whose layout walks the bot
+past a console — roughly one seed in fifty — so the test swept until it found one. Every
+gate run, on every machine, re-derived the same seed number.
+
+### The three shapes, and what each one gets
+
+- **Existence** — "walk runs until the bot bores a wall, and assert every bore opens a
+  route". **Pin one seed** on which the verb fires, in a `const WITNESS` beside the
+  test, and walk that alone. `witness_sweep(WITNESS, 0..40)` returns the witness by
+  default and the whole range under `INTRUSION_SLOW_TESTS`, so CI still checks the
+  universal half at its original width.
+- **Negative** — "`careless` never crouches". There is nothing to pin; that is what
+  makes it a negative. `negative_sweep(0..60)` samples 8 spread seeds locally and the
+  full range in CI — core's #60 bargain, unchanged.
+- **Statistical** — "over a batch the outcomes are mixed", "fewer than 10% of dispatches
+  stand down". These genuinely need the batch. They do not get a witness; they get
+  `profile_batch`, which walks **one** batch per temperament for the whole test binary.
+
+### Why a pinned seed, when #387 rejected a pinned window
+
+#442's comment in `every_profile_ducks_behind_a_bench` argued the opposite case, and it
+was right about the thing it was arguing against. A hand-picked **window** (`100..170`,
+chosen because a duck happened to land inside it) fails *dishonestly*: a generation
+change moves every seed's geometry, the window empties, and the red test reads as "§10.3
+went inert" when the behaviour is intact. The fix then was to widen the range and search
+it — correct, and it cost 43 s on every gate run.
+
+A **witness** is not a window. It is one seed, named, with the verb it witnesses written
+beside it, and a failure message that says what to do: *sweep with
+`INTRUSION_SLOW_TESTS=1`, take a seed that still does it, pin that one*. The distinction
+that matters is where the cost of re-finding lands. A window makes everyone pay a search
+forever to protect against a change that may never come; a witness makes **the change
+that moved generation** pay it, once, in the PR that moved it. That is the same trade
+the repo already makes everywhere else: the expensive check runs in CI, the local gate
+runs the cheap one, and a stale pin fails loudly rather than quietly widening.
+
+The dishonest-failure worry survives intact, and is answered by the message rather than
+by the search. `stale_witness` spells it once, so no red line ever reads as a bare "the
+bot never bored a wall" and invites the next person to widen the sweep again.
+
+### What it bought
+
+Sim suite wall-clock **94 s → 50 s** on a 4-core runner, with no assertion weakened:
+every universal claim keeps its full range under `INTRUSION_SLOW_TESTS`, which is what
+CI runs. Three parts, measured separately:
+
+- **The witnesses.** The searching tests collapse to one run each: the comms bump went
+  from hunting up to 400 seeds to walking seed 3, the duck sweep from up to 400 per
+  temperament to one, the ability-cue sweeps from 40 seeds to one.
+- **`boot` memoised** — worth ~7 s on its own (93.6 → 86.7 measured in isolation).
+  Cloning a booted `State` costs 25 µs against 30 ms to carve one.
+- **`profile_batch`** — five tests were walking their own batches of the same four
+  temperaments: 760 runs between them, now 240 walked once and shared.
+
+**What is left is the shared batch**, and deliberately so. Those 240 runs are ~25 s of
+the remaining 50, and they are the floor for a reason: the claims that read them are
+*statistical* — a temperament's outcomes are mixed, `aggressive` stows some bodies,
+`careless` gets some found — and a narrower batch would make them flap rather than fail.
+Width is what those assertions are made of, so it stays; what the fixture removed was
+paying for that width five times over.
+
+Two tests keep a full sweep on purpose. `a_swept_alert_threshold_moves_the_measured_ladder`
+compares two ladders over 40 seeds and its own comment records that 12 was too narrow to
+see the difference — narrowing it again would re-make the mistake it documents. And
+`the_bot_never_detours_to_the_comms_console` compares two policies turn by turn, where
+the sweep *is* the claim rather than a hunt for an instance.
+
+The convention is written up for the next test in `crates/sim/README.md`.

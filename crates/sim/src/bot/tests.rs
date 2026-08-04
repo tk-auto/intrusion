@@ -1,6 +1,6 @@
 use super::*;
-use crate::test_support::boot;
-use crate::{run_batch, run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
+use crate::test_support::{boot, negative_sweep, profile_batch, stale_witness, witness_sweep};
+use crate::{run_one, RunOutcome, UsageHistogram, Verb, DEFAULT_INPUT_CAP};
 use intrusion_core::{Event, Loadout, Outcome};
 
 /// #276: the bot routes by **the core's rule**, never a table of its own.
@@ -465,8 +465,11 @@ fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
 /// is not looking for anybody.
 #[test]
 fn every_decoy_the_bot_drops_is_dropped_at_a_search() {
+    /// The pinned seed on which `balanced` drops a fake (see [`witness_sweep`]).
+    const WITNESS: u64 = 2;
+
     let mut dropped = 0;
-    for seed in 0..40 {
+    for seed in witness_sweep(WITNESS, 0..40) {
         let (state, _) = boot(seed);
         let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Decoy));
         let mut bot = StealthBot::with_profile(Profile::BALANCED);
@@ -500,10 +503,7 @@ fn every_decoy_the_bot_drops_is_dropped_at_a_search() {
             state.step(input);
         }
     }
-    assert!(
-        dropped > 0,
-        "no decoy in 40 seeds — this test would prove nothing",
-    );
+    assert!(dropped > 0, "{}", stale_witness("drops a decoy", WITNESS));
 }
 
 /// **Every autodoors press is a press with a door on the way out** — §8.3's *"a
@@ -512,8 +512,11 @@ fn every_decoy_the_bot_drops_is_dropped_at_a_search() {
 /// that closes nothing, so the cue's job is exactly this precondition.
 #[test]
 fn every_autodoors_press_has_a_door_on_the_route() {
+    /// The pinned seed on which `balanced` opens the doors (see [`witness_sweep`]).
+    const WITNESS: u64 = 1;
+
     let mut pressed = 0;
-    for seed in 0..40 {
+    for seed in witness_sweep(WITNESS, 0..40) {
         let (state, _) = boot(seed);
         let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Autodoors));
         let mut bot = StealthBot::with_profile(Profile::BALANCED);
@@ -548,7 +551,8 @@ fn every_autodoors_press_has_a_door_on_the_route() {
     }
     assert!(
         pressed > 0,
-        "no autodoors in 40 seeds — this test would prove nothing",
+        "{}",
+        stale_witness("opens the autodoors", WITNESS),
     );
 }
 
@@ -562,8 +566,11 @@ fn every_autodoors_press_has_a_door_on_the_route() {
 /// refusal absorb it.
 #[test]
 fn every_confusion_is_fired_at_a_guard_it_catches() {
+    /// The pinned seed on which `balanced` panics into the blast (see [`witness_sweep`]).
+    const WITNESS: u64 = 1;
+
     let mut fired = 0;
-    for seed in 0..40 {
+    for seed in witness_sweep(WITNESS, 0..40) {
         let (state, _) = boot(seed);
         let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Confusion));
         let mut bot = StealthBot::with_profile(Profile::BALANCED);
@@ -593,7 +600,8 @@ fn every_confusion_is_fired_at_a_guard_it_catches() {
     }
     assert!(
         fired > 0,
-        "no confusion in 40 seeds — this test would prove nothing",
+        "{}",
+        stale_witness("fires the confusion", WITNESS),
     );
 }
 
@@ -626,10 +634,21 @@ fn every_confusion_is_fired_at_a_guard_it_catches() {
 /// original two policies.
 #[test]
 fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
+    /// A pinned seed per temperament on which that profile both phases *and* spends
+    /// a turn phased-and-sprinting — the pair the eject is sharpest against, so the
+    /// witness has to exhibit both (see [`witness_sweep`]).
+    fn witness(profile: Profile) -> u64 {
+        match profile.name {
+            "cautious" => 8,
+            "balanced" => 22,
+            _ => 32,
+        }
+    }
+
     let mut crossings = 0;
     let mut sprinted = 0;
-    for seed in 0..40 {
-        for profile in Profile::ALL {
+    for profile in Profile::ALL {
+        for seed in witness_sweep(witness(profile), 0..40) {
             let (state, _) = boot(seed);
             let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Dephase));
             let mut bot = StealthBot::with_profile(profile);
@@ -666,12 +685,14 @@ fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
     }
     assert!(
         crossings > 0,
-        "no phase in 40 seeds × 4 profiles — this test would prove nothing",
+        "no witness seed phased at all — {}",
+        stale_witness("phases", witness(Profile::BALANCED)),
     );
     assert!(
         sprinted > 0,
-        "no turn in the batch was both phased and sprinting — the two-cell step is \
-         the sharpest way into the eject and this batch never exercises it",
+        "no witness turn was both phased and sprinting — the two-cell step is the \
+         sharpest way into the eject, so a witness that stops exercising it stops \
+         being one; re-run with INTRUSION_SLOW_TESTS=1 and pin a seed that does",
     );
 }
 
@@ -687,9 +708,19 @@ fn the_bot_is_never_ejected_from_a_wall_it_phased_into() {
 /// two-thick wall would open.
 #[test]
 fn every_bore_opens_a_route_the_bot_has_seen() {
+    /// A pinned seed per temperament on which that profile bores (see [`witness_sweep`]).
+    fn witness(profile: Profile) -> u64 {
+        match profile.name {
+            "balanced" => 2,
+            "cautious" => 3,
+            "careless" => 19,
+            _ => 25,
+        }
+    }
+
     let mut bored = 0;
-    for seed in 0..40 {
-        for profile in Profile::ALL {
+    for profile in Profile::ALL {
+        for seed in witness_sweep(witness(profile), 0..40) {
             let (state, _) = boot(seed);
             let mut state = state.with_loadout(Loadout::innate().with(AbilityId::PierceWall));
             let mut bot = StealthBot::with_profile(profile);
@@ -732,7 +763,8 @@ fn every_bore_opens_a_route_the_bot_has_seen() {
     }
     assert!(
         bored > 0,
-        "no bore in 40 seeds × 4 profiles — this test would prove nothing",
+        "no witness seed bored — {}",
+        stale_witness("bores a wall", witness(Profile::BALANCED)),
     );
 }
 
@@ -742,8 +774,11 @@ fn every_bore_opens_a_route_the_bot_has_seen() {
 /// bumping it open costs the turn and leaves the door standing open.
 #[test]
 fn every_lockdown_seals_doors_that_are_not_on_the_way_out() {
+    /// The pinned seed on which `balanced` fires a lockdown (see [`witness_sweep`]).
+    const WITNESS: u64 = 1;
+
     let mut sealed = 0;
-    for seed in 0..40 {
+    for seed in witness_sweep(WITNESS, 0..40) {
         let (state, _) = boot(seed);
         let mut state = state.with_loadout(Loadout::innate().with(AbilityId::Lockdown));
         let mut bot = StealthBot::with_profile(Profile::BALANCED);
@@ -775,10 +810,7 @@ fn every_lockdown_seals_doors_that_are_not_on_the_way_out() {
             state.step(input);
         }
     }
-    assert!(
-        sealed > 0,
-        "no lockdown in 40 seeds — this test would prove nothing",
-    );
+    assert!(sealed > 0, "{}", stale_witness("fires a lockdown", WITNESS),);
 }
 
 /// The profiles are **distinguishable** over a batch — a shape assertion, never
@@ -804,15 +836,7 @@ fn every_lockdown_seals_doors_that_are_not_on_the_way_out() {
 /// could lead).
 #[test]
 fn the_profiles_play_the_same_seeds_differently() {
-    let seeds = 30..70;
-    let batch = |profile: Profile| {
-        crate::Summary::of(
-            &run_batch(seeds.clone(), DEFAULT_INPUT_CAP, move |_| {
-                StealthBot::with_profile(profile)
-            })
-            .expect("generates"),
-        )
-    };
+    let batch = |profile: Profile| crate::Summary::of(&profile_batch(profile));
     let cautious = batch(Profile::CAUTIOUS);
     let aggressive = batch(Profile::AGGRESSIVE);
 
@@ -869,10 +893,7 @@ fn the_profiles_play_the_same_seeds_differently() {
 #[test]
 fn the_striking_profiles_work_the_body_chain() {
     let batch = |profile: Profile| {
-        let records = run_batch(0..60, DEFAULT_INPUT_CAP, move |_| {
-            StealthBot::with_profile(profile)
-        })
-        .expect("generates");
+        let records = profile_batch(profile);
         let usage = records
             .iter()
             .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage));
@@ -976,26 +997,41 @@ fn the_striking_profiles_work_the_body_chain() {
 fn every_profile_ducks_behind_a_bench() {
     let mut histogram = 0u32;
     for profile in Profile::ALL {
-        // **The sweep searches and stops; it does not pin a window (#442/#387).**
-        // Adopting the flank rule gave the bot a better answer than ducking when a
-        // *calm* guard is close: walk to its blind side and take it. `aggressive`,
-        // which keeps moving and strikes what it walks past, reaches for the crouch
-        // vanishingly rarely — a handful of ducks in hundreds of seeds, against far
-        // more for `balanced` and `cautious`. That is a temperament finding a
-        // different tool, not §10.3 going inert.
+        // A pinned seed per crouching temperament: one where that profile both ducks
+        // and holds the pose for more than the turn it took (see [`witness_sweep`]).
+        // `careless` declines the pose outright and so has no witness — that is the
+        // negative below.
+        fn duck_witness(profile: Profile) -> u64 {
+            match profile.name {
+                "balanced" => 3,
+                "cautious" => 4,
+                _ => 58,
+            }
+        }
+
+        // **The witness is pinned; the search is CI's (appendix 36).** Adopting the
+        // flank rule gave the bot a better answer than ducking when a *calm* guard is
+        // close: walk to its blind side and take it. `aggressive`, which keeps moving
+        // and strikes what it walks past, reaches for the crouch vanishingly rarely —
+        // a handful of ducks in hundreds of seeds, against far more for `balanced` and
+        // `cautious`. That is a temperament finding a different tool, not §10.3 going
+        // inert, and it is why its witness sits so much further out than the others'.
         //
-        // It used to be spelled as a hand-picked window (`100..170`, chosen because a
-        // duck happened to land in it). That made a *generation* change — which moves
-        // every seed's geometry — look like a §10.3 regression, which is exactly what
-        // #387 hit: the window emptied while the behaviour was intact. So the range is
-        // generous and the loop **stops at the first seed that satisfies the
-        // assertions**: fast in the ordinary case, and it still fails honestly if the
-        // crouch really does go inert.
+        // This used to be a hand-picked *window* (`100..170`, chosen because a duck
+        // happened to land in it), which made a generation change — moving every
+        // seed's geometry — read as a §10.3 regression; that is #387, and the fix then
+        // was to search hundreds of seeds on every run. A pinned witness keeps what
+        // the search bought (a seed that genuinely ducks, found by sweeping) without
+        // re-buying it every gate run: locally it walks the one seed, and under
+        // `INTRUSION_SLOW_TESTS` the original search runs, early exit and all.
         //
         // A temperament that declines the pose proves the opposite — that it *never*
-        // crouches — and a search cannot exit early on a negative, so it keeps a short
-        // fixed sweep rather than paying for the long one.
-        let seeds = if profile.crouches { 0..400 } else { 0..60 };
+        // crouches — and a negative has no witness to pin, so it keeps a sampled sweep.
+        let seeds = if profile.crouches {
+            witness_sweep(duck_witness(profile), 0..400)
+        } else {
+            negative_sweep(0..60)
+        };
         let (mut ducks, mut crouched_turns) = (0u32, 0u32);
         for seed in seeds {
             // Everything this profile has to prove is proved — stop paying for more.
@@ -1030,8 +1066,9 @@ fn every_profile_ducks_behind_a_bench() {
         }
         assert!(
             ducks > 0,
-            "{}: never ducked behind a bench over its seed sweep — §10.3 is inert again",
+            "{}: never ducked behind a bench, so §10.3 is inert again — {}",
             profile.name,
+            stale_witness("ducks", duck_witness(profile)),
         );
         assert!(
             crouched_turns > ducks,
@@ -1047,11 +1084,11 @@ fn every_profile_ducks_behind_a_bench() {
         // measures that rarity rather than the seam — #383's opening look was once
         // enough to take its count here from one to none, and #466 removing that look
         // moves it again. What the row must never be is structurally empty.
-        let records = run_batch(0..60, DEFAULT_INPUT_CAP, move |_| {
-            StealthBot::with_profile(profile)
-        })
-        .expect("generates");
-        histogram += records
+        //
+        // The batch is the *shared* one ([`profile_batch`]): this test used to walk
+        // its own 60 runs per temperament on top of the sweep above, which is the
+        // same 240 runs three other tests were each buying separately.
+        histogram += profile_batch(profile)
             .iter()
             .fold(UsageHistogram::new(), |acc, r| acc.merged(&r.usage))
             .count(Verb::Crouch);
@@ -1078,8 +1115,12 @@ fn every_profile_ducks_behind_a_bench() {
 /// bench is what it settles for when a patrol arrives and none is near.
 #[test]
 fn the_bots_crouch_beats_a_live_cone() {
+    /// The pinned seed on which `cautious` crouches inside a live cone and is
+    /// concealed from it anyway (see [`witness_sweep`]).
+    const WITNESS: u64 = 26;
+
     let mut beat_a_cone = 0;
-    for seed in 0..60 {
+    for seed in witness_sweep(WITNESS, 0..60) {
         let (mut state, _) = boot(seed);
         let mut bot = StealthBot::with_profile(Profile::CAUTIOUS);
         for _ in 0..DEFAULT_INPUT_CAP {
@@ -1099,8 +1140,8 @@ fn the_bots_crouch_beats_a_live_cone() {
     }
     assert!(
         beat_a_cone > 0,
-        "no crouched turn ever had a cone on the player it was concealed from — \
-             the bench's run geometry is not being exercised",
+        "no crouched turn had a cone on the player it was concealed from — {}",
+        stale_witness("beats a cone from behind a bench", WITNESS),
     );
 }
 
@@ -1115,9 +1156,17 @@ fn the_bots_crouch_beats_a_live_cone() {
 /// `crouch_walked` predicate observed from outside.
 #[test]
 fn the_bot_crouch_walks_along_the_bench() {
+    /// A pinned seed per temperament on which the shuffle happens (see [`witness_sweep`]).
+    fn witness(profile: Profile) -> u64 {
+        match profile.name {
+            "cautious" => 4,
+            _ => 3,
+        }
+    }
+
     let mut walks = 0;
     for profile in [Profile::CAUTIOUS, Profile::BALANCED] {
-        for seed in 0..60 {
+        for seed in witness_sweep(witness(profile), 0..60) {
             let (mut state, _) = boot(seed);
             let mut bot = StealthBot::with_profile(profile);
             for _ in 0..DEFAULT_INPUT_CAP {
@@ -1137,8 +1186,8 @@ fn the_bot_crouch_walks_along_the_bench() {
     }
     assert!(
         walks > 0,
-        "the bot never crouch-walked — §10.3's `run_hugs` is unexercised, so the \
-             bot only ever ducks and waits",
+        "the bot never crouch-walked, so §10.3's `run_hugs` is unexercised — {}",
+        stale_witness("crouch-walks", witness(Profile::CAUTIOUS)),
     );
 }
 
@@ -1161,8 +1210,11 @@ fn the_bot_crouch_walks_along_the_bench() {
 /// right answer rather than a gap to close.
 #[test]
 fn every_takedown_the_bot_lands_is_a_legal_one() {
+    /// The pinned seed on which `careless` strikes (see [`witness_sweep`]).
+    const WITNESS: u64 = 1;
+
     let mut struck = 0;
-    for seed in 0..40 {
+    for seed in witness_sweep(WITNESS, 0..40) {
         let (state, _) = boot(seed);
         let mut state = state;
         let mut bot = StealthBot::with_profile(Profile::CARELESS);
@@ -1191,10 +1243,7 @@ fn every_takedown_the_bot_lands_is_a_legal_one() {
             state.step(input);
         }
     }
-    assert!(
-        struck > 0,
-        "no strike happened in 40 seeds — this test would prove nothing",
-    );
+    assert!(struck > 0, "{}", stale_witness("strikes a guard", WITNESS),);
 }
 
 /// Every shipped profile still **plays the game** (§13.4), not just the
@@ -1205,16 +1254,13 @@ fn every_takedown_the_bot_lands_is_a_legal_one() {
 /// mixed-outcome test: the exact counts are free to move.
 #[test]
 fn every_profile_finishes_its_runs() {
-    let runs = 40;
     for profile in Profile::ALL {
-        let records = run_batch(30..30 + runs, DEFAULT_INPUT_CAP, move |_| {
-            StealthBot::with_profile(profile)
-        })
-        .expect("generates");
+        let records = profile_batch(profile);
+        let runs = records.len();
         let count = |o: RunOutcome| records.iter().filter(|r| r.outcome == o).count();
         let timeouts = count(RunOutcome::Timeout);
         assert!(
-            timeouts <= runs as usize / 5,
+            timeouts <= runs / 5,
             "{}: too many timeouts ({timeouts}/{runs}) — this temperament \
                  stalls rather than plays",
             profile.name,
@@ -1335,9 +1381,8 @@ fn the_bot_cannot_route_to_unseen_intel() {
 /// [`the_striking_profiles_work_the_body_chain`] is where it is asserted.
 #[test]
 fn over_a_batch_the_outcome_profile_is_mixed() {
-    let runs = 40;
-    let records =
-        run_batch(30..30 + runs, DEFAULT_INPUT_CAP, |_| StealthBot::new()).expect("generates");
+    let records = profile_batch(StealthBot::new().profile());
+    let runs = records.len();
     let count = |o: RunOutcome| records.iter().filter(|r| r.outcome == o).count();
     let wins = count(RunOutcome::Win);
     let captures = count(RunOutcome::Capture);
@@ -1348,7 +1393,7 @@ fn over_a_batch_the_outcome_profile_is_mixed() {
     // "Few" timeouts: the bot should almost always *finish* a run one way or the
     // other, never stall out en masse (the whole point over a hand-player).
     assert!(
-        timeouts <= runs as usize / 5,
+        timeouts <= runs / 5,
         "too many timeouts: {timeouts}/{runs} — the bot is stalling, not playing"
     );
 
@@ -1471,9 +1516,21 @@ fn the_bot_plays_identically_while_holding_pierce_wall() {
 /// Loose and direction-only (§13.4): the counts are free to move, the split is not.
 #[test]
 fn the_careful_temperaments_silence_the_comms_console() {
-    // Generous, because it bounds a search rather than describing the sweep: the
-    // hit normally lands far inside it.
-    const HUNT: u64 = 400;
+    /// The pinned seed on which each opting-in temperament makes the bump (see
+    /// [`witness_sweep`]). The encounter is rare — roughly one seed in fifty at
+    /// §7.7's current placement distance **[START]** — which is exactly why it is
+    /// pinned rather than hunted for: the search that found these seeds cost
+    /// hundreds of runs, and it re-derived a fact that does not move between
+    /// commits.
+    fn witness(profile: Profile) -> u64 {
+        match profile.name {
+            "balanced" => 3,
+            _ => 78,
+        }
+    }
+
+    /// The range the pinned seeds were found in, and the one CI re-sweeps.
+    const HUNT: std::ops::Range<u64> = 0..400;
     const ZERO_SWEEP: std::ops::Range<u64> = 0..60;
 
     let silences = |profile: Profile, seed: u64| {
@@ -1485,16 +1542,21 @@ fn the_careful_temperaments_silence_the_comms_console() {
     };
 
     for profile in [Profile::BALANCED, Profile::CAUTIOUS] {
-        let found = (0..HUNT).any(|seed| silences(profile, seed) > 0);
+        let found = witness_sweep(witness(profile), HUNT)
+            .into_iter()
+            .any(|seed| silences(profile, seed) > 0);
         assert!(
             found,
-            "{}: the opportunistic bump never happened in {HUNT} seeds — \
-             a zero here is a broken policy, not a temperament",
+            "{}: the opportunistic bump never happened — {}",
             profile.name,
+            stale_witness("makes the bump", witness(profile)),
         );
     }
     for profile in [Profile::AGGRESSIVE, Profile::CARELESS] {
-        let total: u32 = ZERO_SWEEP.map(|seed| silences(profile, seed)).sum();
+        let total: u32 = negative_sweep(ZERO_SWEEP)
+            .into_iter()
+            .map(|seed| silences(profile, seed))
+            .sum();
         assert_eq!(
             total, 0,
             "{}: comms_reach 0 declines the verb outright",
@@ -1519,8 +1581,12 @@ fn the_careful_temperaments_silence_the_comms_console() {
 /// have been *seen*.
 #[test]
 fn the_silence_is_the_cores_affordance_and_never_a_terrain_scan() {
+    /// The pinned seed on which `balanced` walks past a live console and throws the
+    /// switch (see [`witness_sweep`]).
+    const WITNESS: u64 = 3;
+
     let mut silences = 0;
-    for seed in 0..120 {
+    for seed in witness_sweep(WITNESS, 0..120) {
         let (mut state, _) = boot(seed);
         let mut bot = StealthBot::with_profile(Profile::BALANCED);
         for _ in 0..DEFAULT_INPUT_CAP {
@@ -1553,7 +1619,9 @@ fn the_silence_is_the_cores_affordance_and_never_a_terrain_scan() {
     }
     assert!(
         silences > 0,
-        "the sweep never threw the switch — the assertions above passed vacuously",
+        "the sweep never threw the switch, so the assertions above passed \
+         vacuously — {}",
+        stale_witness("throws the switch", WITNESS),
     );
 }
 
@@ -1611,7 +1679,12 @@ fn the_bot_never_detours_to_the_comms_console() {
 /// checking that no turn ever both wants cover and takes the switch.
 #[test]
 fn a_closing_patrol_outranks_the_comms_switch() {
-    for seed in 0..40 {
+    /// The pinned seed on which `cautious` actually throws the switch — without
+    /// one, every assertion below passes vacuously (see [`witness_sweep`]).
+    const WITNESS: u64 = 24;
+
+    let mut silences = 0;
+    for seed in witness_sweep(WITNESS, 0..40) {
         let (mut state, _) = boot(seed);
         let mut bot = StealthBot::with_profile(Profile::CAUTIOUS);
         for _ in 0..DEFAULT_INPUT_CAP {
@@ -1629,7 +1702,14 @@ fn a_closing_patrol_outranks_the_comms_switch() {
                     !being_hunted(&state, &danger_cells(&state)),
                     "seed {seed}: the switch was thrown on a turn the bot was hunted",
                 );
+                silences += 1;
             }
         }
     }
+    assert!(
+        silences > 0,
+        "the sweep never threw the switch, so the ranking above was never \
+         exercised — {}",
+        stale_witness("throws the switch", WITNESS),
+    );
 }
