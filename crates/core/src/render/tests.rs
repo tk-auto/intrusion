@@ -187,7 +187,10 @@ fn a_body_in_view_draws_as_a_caution_z() {
         s.step(Input::Step(Direction::South));
     }
     let masked = render(&s).get(5, 4);
-    assert_eq!(masked.glyph, '·', "an unseen body draws as the floor dot");
+    assert_eq!(
+        masked.glyph, ' ',
+        "an unseen body draws as the bare floor it is lying on"
+    );
     assert_eq!(masked.vis, Visibility::Explored);
 }
 
@@ -909,7 +912,7 @@ fn a_table_is_discovered_not_given() {
     let cell = render(&s).get(10, 14);
     assert_eq!(
         (cell.glyph, cell.fg, cell.vis),
-        (SCHEMATIC_GROUND, Category::Ground, Visibility::Unexplored),
+        (' ', Category::Ground, Visibility::Unexplored),
         "unscouted, a table is indistinguishable from the floor around it"
     );
 
@@ -981,11 +984,12 @@ fn exploring_promotes_the_schematic_to_real_geometry_for_good() {
     );
 }
 
-/// The schematic must not leak through **either** channel (§11.5a, #307). Every
-/// unexplored cell wears one of exactly two glyphs and one of exactly two
-/// categories, whatever is really on it — so a cupboard cannot be spotted as the
-/// one System-tan mark in a Neutral wall run, nor a console as the odd glyph in a
-/// field of floor. If this ever fails, the fog has a hole in it.
+/// The schematic must not leak through **either** channel (§11.5a, #307/#470). Every
+/// unexplored cell wears one of exactly two appearances — the fabric mark, or nothing
+/// at all — and one of exactly two categories, whatever is really on it, so a cupboard
+/// cannot be spotted as the one System-tan mark in a Neutral wall run, nor a console
+/// as the odd glyph in a field of blank floor. If this ever fails, the fog has a hole
+/// in it.
 #[test]
 fn nothing_unexplored_is_distinguishable_from_its_neighbours() {
     let mut layout = open_room(20, 20);
@@ -1023,22 +1027,19 @@ fn nothing_unexplored_is_distinguishable_from_its_neighbours() {
     seen.sort_by_key(|&(glyph, _)| glyph);
     assert_eq!(
         seen,
-        vec![
-            (SCHEMATIC_GROUND, Category::Ground),
-            (SCHEMATIC_WALL, Category::Neutral),
-        ],
-        "unexplored geometry must speak exactly two marks in two colours",
+        vec![(' ', Category::Ground), (SCHEMATIC_WALL, Category::Neutral),],
+        "unexplored geometry must speak one mark and one absence, in two colours",
     );
 
     // And spot-check the maskings individually, so a failure says which leaked.
     for (cell, mark) in [
         (Cell::new(8, 15), SCHEMATIC_WALL), // hideout alcove — backed by structure
         (Cell::new(9, 15), SCHEMATIC_WALL), // duct mouth — likewise
-        (Cell::new(10, 15), SCHEMATIC_GROUND), // doorway — an opening, bears no load
+        (Cell::new(10, 15), ' '),           // doorway — an opening, bears no load
         (Cell::new(11, 15), SCHEMATIC_WALL), // door frame — structure
-        (Cell::new(12, 16), SCHEMATIC_GROUND), // table
-        (Cell::new(13, 16), SCHEMATIC_GROUND), // comms console
-        (Cell::new(14, 16), SCHEMATIC_GROUND), // intel console
+        (Cell::new(12, 16), ' '),           // table
+        (Cell::new(13, 16), ' '),           // comms console
+        (Cell::new(14, 16), ' '),           // intel console
     ] {
         assert_eq!(
             g.get(cell.x, cell.y).glyph,
@@ -1056,12 +1057,12 @@ fn nothing_unexplored_is_distinguishable_from_its_neighbours() {
     );
 }
 
-/// A doorway in an unscouted wall run reads as a **gap** (#307): the run draws
-/// `≈`, the opening `~`, so the ways between rooms you have never entered are
-/// still plannable. This is §11.5a's *"you can plan your escape route before
-/// you're spotted"* holding under the schematic, and the reason the fabric line
-/// is load-bearing structure rather than "anything solid" — a door bears no
-/// load, and a plan draws it as a break in the wall.
+/// A doorway in an unscouted wall run reads as a **gap** (#307/#470): the run draws
+/// the fabric mark and the opening draws nothing, so the ways between rooms you have
+/// never entered are still plannable. This is §11.5a's *"you can plan your escape
+/// route before you're spotted"* holding under the schematic, and the reason the
+/// fabric line is load-bearing structure rather than "anything solid" — a door bears
+/// no load, and a plan draws it as a break in the wall.
 #[test]
 fn an_unscouted_doorway_reads_as_a_gap_in_the_wall_line() {
     // A wall run across the room, well behind the north-facing player, with a
@@ -1084,11 +1085,7 @@ fn an_unscouted_doorway_reads_as_a_gap_in_the_wall_line() {
     let g = render(&s);
 
     let run: String = (6..=12).map(|x| g.get(x, 15).glyph).collect();
-    let expected = format!(
-        "{w}{w}{w}{g}{w}{w}{w}",
-        w = SCHEMATIC_WALL,
-        g = SCHEMATIC_GROUND,
-    );
+    let expected = format!("{w}{w}{w} {w}{w}{w}", w = SCHEMATIC_WALL);
     assert_eq!(
         run, expected,
         "the wall run should show its doorway as a gap, frame included",
@@ -1131,11 +1128,11 @@ fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
     let g = render(&build(false));
     assert_eq!(
         g.get(8, 15).glyph,
-        SCHEMATIC_GROUND,
+        ' ',
         "the doorway shows only as a gap — the panel's pose is unknown",
     );
     assert_eq!(g.get(9, 15).glyph, SCHEMATIC_WALL, "duct mouth hidden");
-    assert_eq!(g.get(12, 16).glyph, SCHEMATIC_GROUND, "table hidden");
+    assert_eq!(g.get(12, 16).glyph, ' ', "table hidden");
 
     // Modifier on: the building, drawn — and still honestly reported as
     // never-explored on the seam, because it has not been.
@@ -1156,7 +1153,11 @@ fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
         '#',
         "a cupboard stays hidden — the modifier buys the building, not the goals",
     );
-    assert_eq!(g.get(14, 16).glyph, '·', "and so does an unscouted console");
+    assert_eq!(
+        g.get(14, 16).glyph,
+        ' ',
+        "and so does an unscouted console — masked by the floor space around it",
+    );
 }
 
 /// Terrain categories follow §11.2: an exit and a console are Interest, a hideout
@@ -1174,7 +1175,7 @@ fn terrain_carries_its_category() {
 
 /// §11.5a: **geometry is never fogged.** Walls far beyond sight range still
 /// draw, so a route can be planned before the first risky step — as the
-/// schematic `≈` where the player has never been (#307), the real `#` where
+/// schematic mark where the player has never been (#307), the real `#` where
 /// they have. What is fogged is what is *in* the building, never the building.
 ///
 /// The **exit** is the exception that never fogs at all: the player dug that
@@ -1238,11 +1239,7 @@ fn contents_are_remembered_but_live_state_is_not() {
     // Never seen and out of sense range: the intel masks as the schematic floor
     // of the unexplored room it stands in, and the guard is not drawn at all.
     let g = render(&s);
-    assert_eq!(
-        g.get(10, 14).glyph,
-        SCHEMATIC_GROUND,
-        "unseen intel is invisible"
-    );
+    assert_eq!(g.get(10, 14).glyph, ' ', "unseen intel is invisible");
     assert_eq!(
         g.get(10, 14).fg,
         Category::Ground,
@@ -1250,7 +1247,7 @@ fn contents_are_remembered_but_live_state_is_not() {
     );
     assert_eq!(
         g.get(guard.x, guard.y).glyph,
-        SCHEMATIC_GROUND,
+        ' ',
         "an out-of-range guard is not drawn",
     );
 
@@ -1277,7 +1274,7 @@ fn contents_are_remembered_but_live_state_is_not() {
     );
     assert_eq!(
         g.get(guard.x, guard.y).glyph,
-        '·',
+        ' ',
         "a guard does not persist out of FOV",
     );
     assert_eq!(g.get(guard.x, guard.y).vis, Visibility::Explored);
@@ -1496,7 +1493,7 @@ fn a_doors_pose_is_live_state_never_remembered() {
     let cell = render(&s).get(10, 14);
     assert_eq!(
         (cell.glyph, cell.fg, cell.vis),
-        (SCHEMATIC_GROUND, Category::Ground, Visibility::Unexplored),
+        (' ', Category::Ground, Visibility::Unexplored),
         "an unscouted doorway reads as a gap in the wall line"
     );
 
@@ -1516,14 +1513,22 @@ fn a_doors_pose_is_live_state_never_remembered() {
     );
 }
 
-/// §11.5 fix #2: **floor renders as dots**, in and out of the FOV alike, so
-/// the sight boundary reads across open ground and not just where it crosses
-/// a wall. An open door panel stays blank (§10.3) — the gap is its rendering.
+/// §11.5 fix #2, by its stronger mechanism (#470): **the dot is the field of
+/// view's own ink.** Floor you can see draws `·` and floor you cannot draws
+/// nothing — explored or never-seen alike — so the sight boundary across an open
+/// room is a hard edge between dotted ground and bare page rather than the gap
+/// between two shades of dot it used to be.
+///
+/// This is not fix #2 being reverted. Its goal was the boundary reading across
+/// open ground at all, which a blank floor everywhere defeated; that goal is what
+/// the dot still serves, and confining it to the FOV serves it better (appendix
+/// 33). An open door panel stays blank in every state (§10.3) — the gap is its
+/// rendering.
 #[test]
-fn floor_renders_as_dots_but_an_open_panel_stays_blank() {
+fn only_floor_you_can_see_is_dotted() {
     let mut layout = open_room(20, 20);
     layout.place(Cell::new(12, 8), Terrain::DoorPanelOpen);
-    let s = State::new(
+    let mut s = State::new(
         layout,
         Cell::new(10, 10),
         Direction::North,
@@ -1531,19 +1536,39 @@ fn floor_renders_as_dots_but_an_open_panel_stays_blank() {
         Vec::new(),
         Cell::new(18, 18),
     );
-    let g = render(&s);
 
-    let lit = g.get(10, 8); // ahead: floor in the FOV
-    assert_eq!((lit.glyph, lit.vis), ('·', Visibility::Live));
-    // Behind: never-explored floor takes the schematic mark instead of the dot,
-    // which is the sight boundary reading across open ground just as well —
-    // by shape now rather than only by shade (#307).
-    let dark = g.get(10, 14);
-    assert_eq!(
-        (dark.glyph, dark.vis),
-        (SCHEMATIC_GROUND, Visibility::Unexplored)
-    );
+    // The whole edge at once: on an open board the dotted set is *exactly* the
+    // floor inside the FOV, so the boundary is drawn everywhere it runs and not
+    // only where it happens to cross a wall.
+    let g = render(&s);
+    let fov = s.player_fov();
+    for y in 0..g.height() {
+        for x in 0..g.width() {
+            let cell = Cell::new(x, y);
+            if cell == s.player() {
+                continue; // the entity pass draws `@` over the dot
+            }
+            let floor = s.layout().facility().terrain_at(x, y) == Some(Terrain::Floor);
+            assert_eq!(
+                g.get(x, y).glyph == '·',
+                floor && fov.contains(cell),
+                "{cell:?}: the dots must be the FOV's own ink",
+            );
+        }
+    }
+    let dark = g.get(10, 14); // behind: never explored
+    assert_eq!((dark.glyph, dark.vis), (' ', Visibility::Unexplored));
     assert_eq!(g.get(12, 8).glyph, ' ', "an open panel renders blank");
+
+    // And explored floor is blank too, so leaving a room takes its dots with it —
+    // the one case where the old scheme still drew ink outside the FOV.
+    s.step(Input::Step(Direction::South)); // to (10,11), facing south
+    let left_behind = render(&s).get(10, 8);
+    assert_eq!(
+        (left_behind.glyph, left_behind.vis),
+        (' ', Visibility::Explored),
+        "floor you have walked past is out of sight, so it is off the board",
+    );
 }
 
 /// The §11.5 golden test: a guard cone the player can see paints the expected
@@ -1614,8 +1639,8 @@ fn watched_cells_outside_the_players_fov_still_paint_red() {
     // fix #1 holds on a cell in a wing the player has not entered.
     assert_eq!(
         (cell.glyph, cell.vis),
-        (SCHEMATIC_GROUND, Visibility::Unexplored),
-        "the glyph below stays the geometry, schematic here"
+        (' ', Visibility::Unexplored),
+        "the glyph below stays the geometry — blank floor space, schematic here"
     );
 }
 
@@ -2008,8 +2033,8 @@ fn a_sensed_guard_paints_an_orange_background_no_cone() {
     // room being unexplored), *not* a glyph of the guard's own — the sensed
     // marker is a background, not a `g`.
     assert_eq!(
-        cell.glyph, SCHEMATIC_GROUND,
-        "the geometry shows through, no guard glyph"
+        cell.glyph, ' ',
+        "the geometry shows through — blank here, and no guard glyph"
     );
     assert_eq!(
         cell.fg,
@@ -2096,10 +2121,7 @@ fn an_out_of_range_guard_draws_nothing() {
     );
 
     let cell = render(&s).get(guard.x, guard.y);
-    assert_eq!(
-        cell.glyph, SCHEMATIC_GROUND,
-        "the guard's cell is just unexplored floor"
-    );
+    assert_eq!(cell.glyph, ' ', "the guard's cell is just unexplored floor");
     assert_eq!(cell.fg, Category::Ground, "…not a sensed highlight");
     assert_eq!(cell.bg, None, "…and no orange background");
     assert_eq!(cell.vis, Visibility::Unexplored);
@@ -2372,19 +2394,15 @@ fn the_debug_reveal_draws_the_whole_level_live() {
     let g = render(&fogged);
     assert_eq!(
         g.get(10, 14).glyph,
-        SCHEMATIC_GROUND,
-        "the console masks as schematic floor"
+        ' ',
+        "the console masks as the schematic's blank floor space"
     );
     assert_eq!(
         g.get(20, 30).glyph,
         SCHEMATIC_WALL,
         "the cupboard masks as schematic wall"
     );
-    assert_eq!(
-        g.get(guard.x, guard.y).glyph,
-        SCHEMATIC_GROUND,
-        "no guard drawn"
-    );
+    assert_eq!(g.get(guard.x, guard.y).glyph, ' ', "no guard drawn");
 
     let revealed = fogged.with_debug(DebugModifiers {
         reveal_whole_level: true,

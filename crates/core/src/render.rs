@@ -47,20 +47,30 @@ use crate::state::{GuardPerception, State};
 pub(crate) const PLAYER_GLYPH: char = '@';
 pub(crate) const GUARD_GLYPH: char = 'g';
 pub(crate) const BODY_GLYPH: char = 'z';
-/// Floor draws as a dot, not blank (§11.5): a glyph for the FOV dimming to act on
-/// across open ground. Named so the legend shows the same mark the board does.
+/// Floor draws as a dot **while you can see it**, and as nothing once you cannot
+/// (§11.5, #470): the dot is the FOV's own ink, so the sight boundary is the edge
+/// between dots and bare page rather than a gap between two shades of dot. Named so
+/// the legend shows the same mark the board does.
 pub(crate) const FLOOR_DOT: char = '·';
 
-/// The **schematic** glyphs (§11.5a, #307): how geometry the player has never had
+/// The **schematic** mark (§11.5a, #307/#470): how geometry the player has never had
 /// eyes on is drawn — the building as its *plans* give it, not as it has been seen.
 ///
-/// A cell that has never been in the player's FOV collapses to one of these two
-/// marks. `≈` is the building's **fabric** — a wall run and the recesses and
-/// openings cut into it — and `~` is the **floor space** between it. Both are
-/// deliberately *approximate*: `≈` is the mathematical "approximately", which is
-/// exactly the claim the plan makes about a stretch of building nobody has walked.
-/// Standing somewhere resolves the schematic into what is really there, and
-/// permanently — tile memory is monotonic (§11.5a).
+/// A cell that has never been in the player's FOV collapses to this one mark or to
+/// nothing at all: `□` is the building's **fabric** — a wall run and the recesses and
+/// openings cut into it — and the **floor space** between it is left blank. Standing
+/// somewhere resolves the schematic into what is really there, and permanently —
+/// tile memory is monotonic (§11.5a).
+///
+/// **Why an outline square.** Fabric fills its cell the way `#` does, so a wall run
+/// on the plan reads as structure; a baseline-hugging mark like `~` drew the same run
+/// as a dotted line, which is the wrong reading for the load-bearing half of a plan.
+/// It carries roughly a third of `#`'s ink, so the plan stays quieter than the
+/// building, and it cannot be mistaken for `#`, `+`, `×` or `=`. The `≈` it replaced
+/// could: at the cell sizes the board is fitted to, a double tilde reads as an equals
+/// sign, and `=` is the duct mouth — so the mark for *unseen fabric* looked like a
+/// specific piece of terrain, and an unseen duct mouth is itself fabric, which put the
+/// confusion exactly where it cost most (#470).
 ///
 /// **Why shape rather than a darker shade.** The obvious alternative was a fourth
 /// rung on the §11.5 brightness ladder, and it is the worse channel: on a dark
@@ -68,12 +78,8 @@ pub(crate) const FLOOR_DOT: char = '·';
 /// phone, and pushing it darker turns the readout into de-facto fog, which §11.5a
 /// settles against. Shape costs no colour, cannot compete with the threat channels
 /// (§11.2 Danger and Sensed keep the background to themselves), and needs nothing
-/// extra from a second palette (#189). It also degrades safely: even where the two
-/// marks blur at a small font, wall and floor keep their own colour rows, so the
-/// layout stays as readable as it is today.
-pub(crate) const SCHEMATIC_WALL: char = '≈';
-/// The floor half of the schematic — see [`SCHEMATIC_WALL`].
-pub(crate) const SCHEMATIC_GROUND: char = '~';
+/// extra from a second palette (#189).
+pub(crate) const SCHEMATIC_WALL: char = '□';
 
 /// How much the player currently knows about what a drawn cell shows — the
 /// visual states of §11.5a's implementation note (live / remembered / never-seen).
@@ -89,8 +95,8 @@ pub enum Visibility {
     Explored,
     /// Never in the player's FOV — geometry known from the building's plans and
     /// nothing else (§11.5a). Drawn as the **schematic** (see [`SCHEMATIC_WALL`]):
-    /// the fabric of the building and the floor between it, with everything
-    /// standing in the rooms yet to be discovered.
+    /// the fabric of the building, with the floor between it — and everything
+    /// standing in the rooms yet to be discovered — left blank.
     ///
     /// It is the *knowledge* that is recorded here, not the styling — the shell
     /// paints this in the same dim shade as [`Explored`](Self::Explored), because
@@ -295,12 +301,14 @@ impl Grid {
 /// thing > `Sensed` > the wash — because an advisory layer must never masquerade as the
 /// detection set, nor hide it (§11.5 **[SETTLED]**).
 ///
-/// # Floor dots (§11.5)
+/// # Floor dots (§11.5/#470)
 ///
-/// Floor draws as `·`, not blank: a blank cell has no foreground, so the FOV
-/// boundary was undetectable across open ground — you could only see the sight
-/// edge where it crossed a wall. Dots give every floor cell a glyph for the
-/// dimming to act on. An open door panel stays blank (§10.3): the gap in the
+/// Floor you can see draws `·`; floor you cannot draws blank. The dot exists so the
+/// FOV boundary reads across open ground — without a foreground there is nothing for
+/// the sight edge to act on, and you could only see it where it crossed a wall. It
+/// now carries that job by **being the FOV's own ink**: the boundary is the edge
+/// between dotted ground and bare page, a harder line than the two shades of dot it
+/// replaced. An open door panel stays blank in every state (§10.3): the gap in the
 /// wall *is* its rendering.
 pub fn render(state: &State) -> Grid {
     let facility = state.layout().facility();
@@ -362,17 +370,21 @@ fn terrain_pass(state: &State) -> Vec<GlyphCell> {
             } else {
                 fogged_view(terrain, memory.contains(cell), layout_known)
             };
-            // Floor dots (§11.5): give open ground a foreground so the FOV edge
-            // reads across it. Masked contents dot too — they *show* floor.
+            // Floor dots (§11.5/#470): give open ground a foreground so the FOV edge
+            // reads across it — and **only** inside the FOV, so the edge is dots
+            // against bare page rather than two shades of dot. Masked contents dot
+            // too, while they are in sight: they *show* floor.
             //
             // Unexplored geometry draws the schematic instead (§11.5a/#307).
             // `fogged_view` has already collapsed it to bare wall or bare floor, so
-            // the swap is total: every unexplored cell wears one of two marks and
-            // none of them can be told apart by glyph *or* by category.
+            // the swap is total: unexplored fabric wears the one mark, unexplored
+            // floor space wears none, and neither can be told apart from its
+            // neighbours by glyph *or* by category.
             let glyph = match (schematic, shown) {
                 (true, Terrain::Wall) => SCHEMATIC_WALL,
-                (true, Terrain::Floor) => SCHEMATIC_GROUND,
-                (_, Terrain::Floor) => FLOOR_DOT,
+                // Out-of-FOV floor — remembered or schematic alike — falls through to
+                // `Terrain::Floor`'s own blank glyph.
+                (_, Terrain::Floor) if vis == Visibility::Live => FLOOR_DOT,
                 _ => shown.glyph(),
             };
             GlyphCell::on_board(glyph, shown.category(), vis)
@@ -714,28 +726,28 @@ struct Fogged {
 /// been in the FOV at some point — draws the building as the player found it:
 /// real glyphs, contents they saw kept as [`Remembered`](Visibility::Remembered).
 /// **Unexplored** draws the **schematic** ([`SCHEMATIC_WALL`]) instead: the
-/// player has the building's plans, so they read the fabric and the floor space,
-/// and nothing else.
+/// player has the building's plans, so they read the fabric, and the floor space
+/// between it as blank.
 ///
-/// The line the schematic draws is architectural rather than mechanical: `≈` is
+/// The line the schematic draws is architectural rather than mechanical: `□` is
 /// the building's **load-bearing fabric** — a wall run, and the recesses cut back
-/// into it — and `~` is everything that is not holding the building up. So a
-/// hideout alcove and a duct mouth are backed by structure and read `≈`; a table
-/// and a console stand in a room and read `~`. Neither reading follows
+/// into it — and blank is everything that is not holding the building up. So a
+/// hideout alcove and a duct mouth are backed by structure and read `□`; a table
+/// and a console stand in a room and draw nothing. Neither reading follows
 /// passability, and deliberately so — the plan shows the building's bones, not
 /// what has been put in it.
 ///
 /// A **doorway** is the case that makes the rule concrete: it bears no load, so it
-/// reads `~` and shows on the plans as a **gap in the wall line**, exactly as an
-/// architectural plan draws one. Its *frame* is still structure and stays `≈`, so
-/// an unexplored wing reads `≈≈≈~≈≈≈` and the ways between its rooms can be
+/// draws blank and shows on the plans as a **gap in the wall line**, exactly as an
+/// architectural plan draws one. Its *frame* is still structure and stays `□`, so
+/// an unexplored wing reads `□□□ □□□` and the ways between its rooms can be
 /// planned before setting foot in them — which is §11.5a's *"you can plan your
 /// escape route before you're spotted"* surviving the schematic intact.
 ///
-/// **Everything unexplored must collapse to exactly two appearances**, or the
-/// schematic leaks what it is meant to withhold: a lone real glyph among the
-/// schematic marks would advertise the very content the player has not found.
-/// That is why the masking here returns bare [`Terrain::Wall`] and
+/// **Everything unexplored must collapse to exactly two appearances**, one of them
+/// being nothing at all, or the schematic leaks what it is meant to withhold: a lone
+/// real glyph among the schematic marks would advertise the very content the player
+/// has not found. That is why the masking here returns bare [`Terrain::Wall`] and
 /// [`Terrain::Floor`] — the glyph *and* the §11.2 category then both come from
 /// the mask, so the colour channel cannot give away what the glyph channel hides.
 ///
@@ -784,9 +796,9 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         // The schematic (§11.5a/#307). Fabric — what holds the building up: a wall
         // run, a door's *frame*, and the recesses cut back into a run (a hideout
         // alcove, a duct mouth), which are backed by structure and read as part of
-        // it. Everything else is floor space: the room's own area, the furniture and
-        // equipment standing in it, and a **doorway**, which bears no load and so
-        // draws as the gap in the wall line that a plan would show.
+        // it. Everything else is floor space — the room's own area, the furniture and
+        // equipment standing in it, and a **doorway**, which bears no load — and
+        // floor space draws blank, which is how a plan shows the gap in a wall line.
         //
         // The crawl *path* between a duct's two entries is not classified here at
         // all: its interior cells keep their own terrain and are never in memory

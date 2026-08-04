@@ -674,8 +674,8 @@ then being quietly dropped, so you asked for 5 and got 4 with a log line nobody 
 *(§11.5a, §10.7.)*
 
 > **The shape-versus-shade argument is in the render reference, not here.** *Why unseen geometry
-> draws as a schematic (`≈` fabric, `~` floor space) rather than as a fourth rung on the §11.5
-> dimming ladder*, *why a doorway is `~` and its frame `≈`*, and the A/B against a denser `▒` mark
+> draws as a schematic (`□` fabric, blank floor space) rather than as a fourth rung on the §11.5
+> dimming ladder*, *why a doorway is a gap and its frame `□`*, and the A/B against a denser `▒` mark
 > on a real 40×40 board that was built and rejected, are
 > [`docs/render-reference.md`](render-reference.md) §2.3–§2.4. That is the authority on what the
 > schematic draws and why; this appendix covers only what the fog decided to *hide*.
@@ -1523,3 +1523,84 @@ tunnel length is a `[START]`, and if the crawl reads as a chore the cap comes do
 anything else does. If the *entrance* turns out to feel worse than materialising — which
 is the only thing the animation was ever competing for — the thing to revisit is this
 appendix, not #468's branch.
+
+---
+
+## Appendix 33 — The dot is the field of view's own ink
+
+*(§11.5, §11.5a; `docs/render-reference.md` §2.2–§2.3, §3, §4.1/§4.3. Ticket #470.)*
+
+Two changes that only work together: **floor is dotted only inside the FOV**, and the
+schematic's fabric mark moved from `≈` to **`□`**.
+
+### This is not appendix 1's fix #2 coming undone
+
+The render reference used to state fix #2 flatly — *floor draws as a dot rather than a
+blank, because a blank cell has no foreground and the dimming that encodes the sight
+boundary was invisible across open ground* — and a reader who finds that sentence in
+the annex must not read what follows as the bug returning.
+
+The **goal** of fix #2 is the sight boundary being legible across open floor. That goal
+is kept. What changed is the mechanism, for a stronger one: instead of two shades of
+dot either side of the boundary, there are **dots on one side and nothing on the
+other**. The edge of vision becomes a hard edge rather than a shade difference — which
+is what fix #2 wanted and had to approximate with a luminance step, on a row that is
+deliberately the quietest on the board and therefore had the least room to make that
+step with. A board with no dots anywhere is what fix #2 was written against, and that
+board is not what this produces: inside your sight, every floor cell still carries one.
+
+### Why `≈` had to go, and why `□`
+
+`≈` was chosen as the mathematical *approximately* — exactly the claim a plan makes
+about a stretch of building nobody has walked. Good reasoning, wrong glyph in practice:
+at the cell sizes the board is fitted to (§11.4 puts the whole level on screen, so the
+cells are small), a double tilde reads as an **equals sign**, and `=` is the duct mouth.
+The mark for *unseen fabric* looked like a specific piece of terrain — and an unseen
+duct mouth is *itself* fabric, so the confusion landed exactly where it did most damage.
+
+`□` was picked for the cell it fills. Fabric fills its cell the way `#` does, so a wall
+run on the plan reads as **structure**; a baseline-hugging mark drew the same run as a
+dotted line, which is the wrong reading for the load-bearing half of a plan. It carries
+roughly a third of `#`'s ink, so the plan stays quieter than the building, and an
+outline square *is* the claim: the shape of a wall, without the substance of one you
+have seen. `░` (light shade) is the traditional roguelike answer and reads heavier; it
+was passed over because the shell scales cells by device pixel ratio, so a dither is
+resampled at arbitrary fractional sizes and shimmers where an outline stays clean. It
+stays the fallback if a heavier read is ever wanted — checked at several window sizes
+and DPRs first.
+
+**The two changes depend on each other.** Freeing the cell of floor dots is what lets
+the schematic carry its whole message in one channel: afterwards the plan is **one
+shape and one absence**, fabric drawn and space blank, and `~` leaves the game with
+`≈`.
+
+### The consequences, taken deliberately
+
+- **Explored and unexplored floor are now the same blank.** The distinction does not
+  disappear; it moves entirely into the fabric channel, where explored geometry reads
+  `#`/`×`/`}` and unexplored reads `□`. A room you cleared still reads as cleared —
+  by its geometry, not by its floor. The knowledge-state table (`render-reference.md`
+  §3) calls floor out as the exception: drawn only when Live.
+- **Ground's dim shade became dead ink.** Floor was the only Ground glyph ever drawn
+  outside the FOV — an open door panel was already blank — so nothing is painted in it
+  now. The palette test asserting *"its live and dim shades stay far enough apart that
+  the sight boundary reads across open floor"* was guarding a property nothing depends
+  on, and that half of the test was removed rather than left standing as a claim about
+  a mechanism the game had stopped using. The bullet that Ground **recedes beneath
+  every other category** is untouched and still live: the dots must whisper. The dim
+  *value* stays in the table, like `Effect`'s, because a row with a hole in it is worse
+  than a row whose value is currently unused.
+- **Backgrounds are unaffected**, and that is what makes the change cheap. They paint
+  per cell regardless of glyph, so the §11.5 danger overlay, the Sensed cue and the
+  effect layer are identical — an out-of-FOV watched cell still paints red, now without
+  a dot on top of it.
+- **Contents in memory are untouched**: `}`, `=`, `$`, `Ψ` keep the memory slate.
+
+### What would change the answer
+
+A board with fewer marks on it is a quieter board, and quiet is the point (§11.5 — the
+overlay is what matters). The thing to watch in play is the other end of it: whether an
+unexplored wing goes so empty that it reads as *nothing there* rather than *not been
+there*. The fabric glyph is now carrying that whole message alone, so if the plan stops
+registering, the lever is the glyph's weight — `░`, or `▒` with a dim of its own
+(`render-reference.md` §2.4) — and not putting the floor marks back.

@@ -212,7 +212,7 @@ pub struct LevelModifiers {
     pub always_show_vision_cones: bool,
     /// **Easier.** Hand over the **full layout** (§11.5a): geometry the player has
     /// never had eyes on draws as the real building rather than as the schematic
-    /// `≈`/`~`, so doorways, duct mouths and furniture are all on the map from turn
+    /// `□`, so doorways, duct mouths and furniture are all on the map from turn
     /// one. Exactly the picture the game gave everyone before the schematic landed
     /// (#307), which is what makes the modifier easy to state and easy to price.
     ///

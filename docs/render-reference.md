@@ -6,7 +6,7 @@ the reasoning behind each choice.
 This is a **reference, not a design document**. [`docs/design.md`](design.md) owns
 the rules — §11.1 the grid, §11.2 colour, §11.3 glyphs, §11.5 field of view,
 §11.5a fog — and this file records the concrete values those rules resolve to, in
-one place, so a question like *"what does `≈` mean?"* or *"why is the exit purple?"*
+one place, so a question like *"what does `□` mean?"* or *"why is the exit purple?"*
 has an answer that is not spread across four sections and two source files. Where
 the two disagree, the design doc wins and this file is stale.
 
@@ -74,7 +74,7 @@ put two opposite readings in one ink on one piece of furniture.
 | Glyph | Terrain | Category |
 |---|---|---|
 | `#` | Wall | Neutral |
-| `·` | Floor | Ground |
+| `·` | Floor **you can see** — floor beyond your sight draws blank | Ground |
 | `+` | Door panel, closed | System |
 | *(blank)* | Door panel, open | Ground — the gap in the wall *is* its rendering |
 | `×` | Door frame (hinge) | System |
@@ -85,11 +85,19 @@ put two opposite readings in one ink on one piece of furniture.
 | `Ψ` | Comms console | Interest; **Neutral** once used |
 | `E` | The exit | Interest |
 
-Floor draws as a **dot rather than a blank** (§11.5 fix #2). A blank cell has no
-foreground, so the dimming that encodes the sight boundary was invisible across
-open ground — you could only see the edge of your vision where it happened to
-cross a wall. The dots give every floor cell something for the lighting to act on.
-They are deliberately the quietest thing on the board.
+Floor draws as a **dot inside your field of view and as nothing outside it**
+(§11.5 fix #2, sharpened by #470). The dot exists because a blank cell has no
+foreground: the dimming that encodes the sight boundary was invisible across open
+ground, and you could only see the edge of your vision where it happened to cross a
+wall. Confining the dot to the FOV serves that same goal harder — the boundary is now
+the edge between dotted ground and bare page, a hard line rather than a step between
+two shades of dot. The dots stay deliberately the quietest thing on the board.
+
+**This is not fix #2 being undone.** Fix #2's goal was *the sight boundary reading
+across open ground*, and a board with no dots at all defeats it. The dots are still
+what carries it; they have simply stopped being drawn where they were carrying
+nothing. The full argument, and the consequences that fell out of it, are
+[`docs/design-rulings.md`](design-rulings.md) appendix 33.
 
 Two glyphs recolour rather than change shape when their meaning shifts — a spent
 console (`$` Interest → Neutral) and a hiding place holding *you* (`}` System →
@@ -104,23 +112,47 @@ whose layer moved (#450) and the note is there to stop it drifting back.
 
 | Glyph | Means | Category |
 |---|---|---|
-| `≈` | Building fabric you have never had eyes on | Neutral |
-| `~` | Floor space you have never had eyes on | Ground |
+| `□` | Building fabric you have never had eyes on | Neutral |
 
 You always have the building's **plans** (§11.5a **[SETTLED]**: geometry is never
 fogged, from turn one), but plans are not the same as having been there. The
 schematic is what the plans give you: the **load-bearing fabric** — wall runs and
-the recesses cut back into them — and everything that is **not** holding the
-building up. Walk in and it resolves into what is really there, permanently (tile
-memory is monotonic).
+the recesses cut back into them — drawn, and everything that is **not** holding the
+building up left blank. Walk in and it resolves into what is really there,
+permanently (tile memory is monotonic).
 
-`≈` is the mathematical *approximately*, which is exactly the claim a plan makes
-about a stretch of building nobody has walked.
+The schematic is therefore **one shape and one absence**, which is what it can afford
+to be now that floor beyond your sight draws blank too (§2.2): the plan carries its
+whole message in the fabric channel, and the room shapes read as the negative space
+inside it.
+
+**Why `□`.** Fabric fills its cell the way `#` does, so a wall run on the plan reads
+as *structure*; a baseline-hugging mark draws the same run as a dotted line, which is
+the wrong reading for the load-bearing half of a plan. It carries roughly a third of
+`#`'s ink, so the plan stays quieter than the building — the point of a schematic —
+and an outline square *is* the claim being made: the shape of a wall, without the
+substance of one you have seen. It is also unmistakable against `#`, `+`, `×` and `=`.
+
+> **What `≈` was, and why it went** (#470). The old mark was the mathematical
+> *approximately* — exactly the claim a plan makes about a stretch of building nobody
+> has walked, and good reasoning. It was the wrong glyph in practice: at the cell sizes
+> the board is fitted to, a double tilde reads as an **equals sign**, and `=` is the
+> duct mouth (§2.2). So the mark for *unseen fabric* looked like a specific piece of
+> terrain — and an unseen duct mouth is *itself* fabric, which put the confusion exactly
+> where it cost most. `░` (light shade) was the considered alternative and was passed
+> over: the shell scales cells by device pixel ratio, so a dither pattern is resampled
+> at arbitrary fractional sizes and shimmers, where an outline stays clean. It remains
+> the fallback if a heavier read is ever wanted.
+>
+> **Font coverage is a real constraint** for any replacement, not a formality: the
+> artifact build ships one self-contained page, so a glyph the available fonts lack
+> renders as tofu with nothing to fall back on. Whatever is chosen, look at it in a
+> real build at several window sizes and device pixel ratios, in both themes.
 
 **What is fabric and what is floor** is an architectural line, not a mechanical
 one — it does not follow passability:
 
-| Reads as `≈` fabric | Reads as `~` floor space |
+| Reads as `□` fabric | Drawn blank — floor space |
 |---|---|
 | Wall | Floor |
 | Door **frame** | Door**way** |
@@ -130,20 +162,22 @@ one — it does not follow passability:
 The test is *does it hold the building up*. A cupboard alcove and a duct mouth are
 recesses cut back into a run, still backed by structure, so they belong to the run.
 A **doorway** bears no load, so it draws as the **gap in the wall line** an
-architectural plan would show — its frame stays `≈`, so an unexplored wing reads
-`≈≈≈~≈≈≈` and the ways between its rooms can be planned before you set foot in
+architectural plan would show — its frame stays `□`, so an unexplored wing reads
+`□□□ □□□` and the ways between its rooms can be planned before you set foot in
 them. What the doorway does *not* tell you is the panel's pose: a door's
 open/closed state is live state and is never remembered.
 
-A table stands *in* a room rather than holding it up, so it reads `~` — and a table
+A table stands *in* a room rather than holding it up, so it draws blank — and a table
 blocks movement, which means the schematic can be optimistic about a route through
 an unscouted room. That is deliberate: what you can plan is the building, and what
 a room turns out to contain is what exploring is for.
 
-**Everything unexplored collapses to exactly two glyphs in exactly two colours.**
-This is load-bearing, not tidiness: a cupboard drawn as the one System-tan mark in
-a Neutral wall run would give away, through the colour channel, precisely the alcove
-the glyph channel is hiding. Both channels have to mask, or neither does.
+**Everything unexplored collapses to exactly two appearances in exactly two
+colours** — the fabric mark, or nothing at all. This is load-bearing, not tidiness: a
+cupboard drawn as the one System-tan mark in a Neutral wall run would give away,
+through the colour channel, precisely the alcove the glyph channel is hiding. Both
+channels have to mask, or neither does. (A blank cell paints no ink, so the colour
+channel has nothing to leak through there either.)
 
 **The exit is the one exception.** It keeps its `E` and its Interest purple from
 turn one, never schematic, because the player dug that tunnel and came in by it
@@ -177,8 +211,8 @@ The alternative was a fourth rung on the §11.5 dimming ladder: never-explored
 geometry drawn darker than explored. It was rejected, and the reasons are worth
 keeping:
 
-- **There is no room at the bottom.** Ground's dim shade is already deliberately
-  quiet (the dots whisper). A step below it, on a true-black backdrop, is close to
+- **There is no room at the bottom.** Ground was already the quietest row on the
+  board. A step below the standard dim, on a true-black backdrop, is close to
   invisible — and geometry that cannot be read is de-facto fog, which §11.5a settles
   against.
 - **Shape survives a small screen.** The board is fitted whole, with no camera
@@ -191,15 +225,18 @@ keeping:
   for a shape channel.
 
 > **Tried against a denser mark, and kept.** The schematic was built twice on the
-> same seed and compared on a real 40×40 board: `≈` as shipped, and `▒` — a shade
-> block, the architectural hatch for a wall in section.
+> same seed and compared on a real 40×40 board: `≈` as it then shipped, and `▒` — a
+> shade block, the architectural hatch for a wall in section.
 >
-> `▒` unquestionably reads the *building* better. Corridors, room shapes and
-> doorway gaps are legible across the whole unexplored region at a glance, where
-> with `≈` they are closer to texture. The reason is worth knowing: in the explored
+> `▒` unquestionably read the *building* better. Corridors, room shapes and
+> doorway gaps were legible across the whole unexplored region at a glance, where
+> with `≈` they were closer to texture. The reason is worth knowing: in the explored
 > picture wall-versus-floor is carried by **ink density** (`#` is dense, `·` is one
 > dot) far more than by the colour gap between the Neutral and Ground dims, and two
-> marks of similar density leave that colour gap working alone.
+> marks of similar density leave that colour gap working alone. `□` (#470) is the
+> answer to that complaint from the other direction: it keeps the cell footprint that
+> made `▒` legible without the fill that made it loud, and it no longer has a
+> similarly-dense floor mark beside it to blur against.
 >
 > It was rejected anyway, because it **inverts the lighting**. A filled block puts
 > down so much ink that unexplored territory becomes the loudest thing on the
@@ -208,7 +245,7 @@ keeping:
 > heavy fill in the register the danger overlay needs to own. A quieter plan that
 > never competes with threat beat a legible one that does.
 >
-> The live option if this is revisited is neither mark but a third: `▒`'s density
+> The live option if this is revisited is neither of those but a third: `▒`'s density
 > with a **darker shade of its own** for the schematic fabric, so structure reads
 > without shouting. That spends a palette value, which the shape channel was chosen
 > to avoid — so it is a real trade, not a free improvement. Whatever is tried, judge
@@ -229,6 +266,13 @@ one of these.
 | **Explored** | You have had eyes on it; not right now | Real glyph, the row's dim shade |
 | **Unexplored** | Never in your field of view | The schematic, same dim shade |
 | **Remembered** | A *content* you saw earlier | Its real glyph, in the memory slate |
+
+**Floor is the exception, and the only one: it is drawn when Live and never
+otherwise** (§2.2/#470). Out of your sight it draws blank in both middle states, so
+explored and unexplored floor are the same absence. The distinction between them has
+not gone anywhere — it moved entirely into the fabric channel, where explored geometry
+reads `#`/`×`/`}` and unexplored reads `□`. The room shapes are what tell you where you
+have been.
 
 `Explored` and `Unexplored` share a colour on purpose — the schematic separates
 itself by shape, so the distinction needs no shade of its own. The core still
@@ -268,7 +312,7 @@ for two different reasons:
 
 Furniture keeps the same shade for the second reason. Neither is a claim that a door
 is load-bearing: on the *schematic* a doorway still draws as the gap in the wall line
-a plan would show, and a table still draws as floor space, which is §2.3–§2.4's
+a plan would show, and a table still draws as blank floor space, which is §2.3–§2.4's
 question, not this one.
 
 **A duct mouth is Contents** (#450) — it moved here from Geometry, where it drew its
@@ -327,8 +371,12 @@ shipped without anything objecting:
 - **The near line's words read over every band.** The row is a solid category band
   with its text in Neutral (§11.4), so how far the backgrounds may be lifted off the
   page is bounded by the ink that has to stay legible on them.
-- **Ground recedes beneath every other category**, and its live and dim shades stay
-  far enough apart that the sight boundary reads across open floor.
+- **Ground recedes beneath every other category** — the floor dots must whisper.
+  (This bullet used to carry a second claim, that Ground's live and dim shades stay far
+  enough apart for the sight boundary to read across open floor. #470 retired it with
+  its mechanism: floor out of the FOV draws blank, so no Ground glyph is ever painted
+  dimmed, and the boundary is ink against bare page instead of one shade against
+  another. See appendix 33.)
 - **The memory slate stands apart from every live colour** and from the dim gray —
   memory that could be mistaken for a live glyph would defeat the whole three-state
   scheme.
@@ -387,6 +435,8 @@ Compression gets added back only if something demands it. **[START]**
 Three rows carry their own dim rather than the shared gray, each for a reason:
 
 - **Ground** recedes further than everything else — the floor dots must whisper.
+  (Since #470 the board draws no floor at all outside your sight, so like `Effect`
+  below this row's dim shade is a value the table keeps rather than board ink.)
 - **Interest** keeps a readable purple tint, because the exit anchors every escape
   plan and must never sink into wall gray.
 - **Effect** keeps its cyan tint, so the help card's colour key names it in a shade

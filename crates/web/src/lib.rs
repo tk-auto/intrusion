@@ -455,8 +455,9 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics, theme: Theme)
                 // dark gray for most, quieter for Ground, tinted for the exit.
                 //
                 // Unexplored geometry takes **the same shade** (§11.5a/#307): the
-                // schematic separates itself by shape (`≈`/`~`), so it needs no
-                // colour of its own. That is the point of choosing the glyph
+                // schematic separates itself by shape (`□`, and blank where a plan
+                // shows floor space), so it needs no colour of its own. That is the
+                // point of choosing the glyph
                 // channel — a fourth brightness rung would have had to fit below
                 // Ground's already-quiet dim, where a dark palette has no room,
                 // and it would have owed a second set of values to light mode
