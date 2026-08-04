@@ -369,8 +369,11 @@ fn the_boards_fills_still_follow_the_fog() {
 /// whole-frame golden shows better than any single assertion: the player's own
 /// ~180° half-disc reads in real glyphs, and everything they have never had eyes
 /// on — the run of wall behind them, the far two-thirds of the room — reads as
-/// `≈` fabric and `~` floor space. The exit keeps its `E` out there regardless,
-/// the one thing on this map that is theirs (§4.5).
+/// `□` fabric with blank floor space between it (#470). It shows the two absences
+/// meeting, too: the far room is blank because it has never been seen, and the
+/// strip of floor west of the player is blank because it has been walked and left
+/// behind — the dots are the FOV's own ink. The exit keeps its `E` out there
+/// regardless, the one thing on this map that is theirs (§4.5).
 #[test]
 fn the_full_screen_renders_golden() {
     let s = State::new(
@@ -390,12 +393,12 @@ fn the_full_screen_renders_golden() {
             // The console is east of the player, so its entry is flush right
             // with the arrow trailing — the row aims where it points (#384).
             "                  console: take intel → ".to_string(),
-            "##################≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈".to_string(),
-            "#·················~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
-            "#·@$··············~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
-            "#·················~~~~~~~~~~~~~~~~~~~~~≈".to_string(),
-            "≈~~~~~············~~~~~~~~~~~~~~~~~~~~E≈".to_string(),
-            "≈≈≈≈≈≈≈≈##########≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈".to_string(),
+            "##################□□□□□□□□□□□□□□□□□□□□□□".to_string(),
+            "#·················                     □".to_string(),
+            "#·@$··············                     □".to_string(),
+            "#·················                     □".to_string(),
+            "□     ············                    E□".to_string(),
+            "□□□□□□□□##########□□□□□□□□□□□□□□□□□□□□□□".to_string(),
             "Run       Camo      Decoy     Phase     ".to_string(),
         ]
     );

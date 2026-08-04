@@ -90,7 +90,8 @@ impl Palette {
 /// one dark gray — dim but legible — for most rows, receding toward the black page.
 /// Distinct from the memory slate so the three knowledge states never collapse into
 /// two (§11.5a's note; asserted below). Three rows carry their own dim instead:
-/// Ground recedes further (the dots must whisper), Interest keeps a readable purple
+/// Ground recedes further (nothing draws it since #470 took floor out of the board
+/// beyond your sight — it is a value the table keeps, not board ink), Interest keeps a readable purple
 /// tint — the exit anchors every escape plan (§7.6) and §11.5a keeps it always
 /// visible, so it must not vanish into wall gray — and Effect keeps its cyan for the
 /// help card's colour key.
@@ -797,11 +798,21 @@ mod tests {
 
     /// The floor-dot readability rule (§11.5): **Ground recedes**. It stands off the
     /// page less than every other category — the dots are there to carry the FOV
-    /// edge, not to compete with walls and entities — and its own dim shade sits far
-    /// enough below it that the edge still reads across open ground.
+    /// edge, not to compete with walls and entities.
     ///
     /// On black "recedes" meant darker and on white it means lighter, which is why
     /// this is measured from the page rather than by luminance (#189).
+    ///
+    /// **What used to be asserted here as well, and why it went** (#470): that
+    /// Ground's live and dim shades stay far enough apart for *the sight boundary to
+    /// read across open floor*. That guarantee has no subject any more. The dot is now
+    /// the FOV's own ink — floor outside it draws blank, and an open door panel always
+    /// did — so no Ground glyph is ever painted in the dim shade, on the board or in
+    /// the chrome. The boundary reads as ink against bare page, which is a stronger
+    /// edge than any pair of shades, and a test still asserting the pair would be
+    /// guarding a mechanism the game stopped using. The palette keeps Ground's own dim
+    /// value (§4.3): every row carries one, and nothing is gained by punching a hole in
+    /// the table for a row that may draw dimmed again.
     #[test]
     fn ground_recedes_beneath_every_other_category() {
         for theme in THEMES {
@@ -820,12 +831,6 @@ mod tests {
                     "{theme:?}: a floor dot outshines {c:?}"
                 );
             }
-            let d = dist2(rgb(ground.fg), rgb(ground.dim));
-            assert!(
-                d >= 2500,
-                "{theme:?}: live and dimmed ground blur (dist^2 {d}) — the FOV edge \
-                 would vanish"
-            );
         }
     }
 
