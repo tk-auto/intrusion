@@ -27,14 +27,13 @@ pub(super) fn quiet_alert() -> AlertReadout {
     }
 }
 
-/// The view state a test renders the panel under: the tab up, whether this build
-/// offers the replay control (#411), and the copy acknowledgement to print — the
-/// three [`ScreenUi`] fields the panel reads, spelled positionally so a test says
-/// all three where it renders.
-pub(super) fn show(tab: HelpTab, offer_replay: bool, copy: SeedCopy) -> ScreenUi {
+/// The view state a test renders the panel under: the tab up and the copy
+/// acknowledgement to print — the two [`ScreenUi`] fields the panel reads for an
+/// ordinary session, spelled positionally so a test says both where it renders. A
+/// test about the Debug tab spreads `debug_mode` over this (see [`debug_ui`]).
+pub(super) fn show(tab: HelpTab, copy: SeedCopy) -> ScreenUi {
     ScreenUi {
         help_tab: tab,
-        offer_replay_copy: offer_replay,
         seed_copy: copy,
         ..ScreenUi::default()
     }
@@ -66,7 +65,7 @@ pub(super) fn render_tab(tab: HelpTab, loadout: Loadout) -> Grid {
     render_help(
         W,
         H,
-        show(tab, false, SeedCopy::default()),
+        show(tab, SeedCopy::default()),
         panel_run(None, LevelModifiers::default(), &quiet_alert(), loadout),
     )
 }
@@ -261,7 +260,7 @@ fn the_level_info_tab_lists_active_modifiers_or_none() {
     let baseline = render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, false, SeedCopy::default()),
+        show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(
             None,
             LevelModifiers::default(),
@@ -286,7 +285,7 @@ fn the_level_info_tab_lists_active_modifiers_or_none() {
     let g = render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, false, SeedCopy::default()),
+        show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(None, modified, &quiet_alert(), Loadout::innate()),
     );
     let text = text_of(&g);
@@ -330,7 +329,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
         let g = render_help(
             W,
             H,
-            show(HelpTab::LevelInfo, false, SeedCopy::default()),
+            show(HelpTab::LevelInfo, SeedCopy::default()),
             panel_run(None, all_on, &quiet_alert(), Loadout::innate()),
         );
         let text = text_of(&g);
@@ -380,7 +379,7 @@ fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
         let g = render_help(
             W,
             H,
-            show(HelpTab::LevelInfo, false, SeedCopy::default()),
+            show(HelpTab::LevelInfo, SeedCopy::default()),
             panel_run(
                 Some(level),
                 level.modifiers,
@@ -415,7 +414,7 @@ fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
     let g = render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, false, SeedCopy::default()),
+        show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(
             Some(quick),
             quick.modifiers,
@@ -433,7 +432,7 @@ fn the_level_info_tab_shows_a_token_that_decodes_to_this_run() {
     let none = render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, false, SeedCopy::default()),
+        show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(
             None,
             LevelModifiers::default(),
@@ -459,7 +458,7 @@ fn the_level_info_tab_shows_the_alert_rung_and_what_it_is_doing() {
         text_of(&render_help(
             W,
             H,
-            show(HelpTab::LevelInfo, false, SeedCopy::default()),
+            show(HelpTab::LevelInfo, SeedCopy::default()),
             panel_run(None, LevelModifiers::default(), alert, Loadout::innate()),
         ))
     };
@@ -564,7 +563,7 @@ fn the_seed_section_shifts_the_modifier_list_without_changing_it() {
     let g = render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, false, SeedCopy::default()),
+        show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(
             Some(level),
             level.modifiers,
@@ -604,7 +603,7 @@ fn the_caption_reads_in_its_direction_cue_colour() {
     let g = render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, false, SeedCopy::default()),
+        show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(None, harder, &quiet_alert(), Loadout::innate()),
     );
     // The MODIFIERS heading is at row 4 (THIS RUN@2, blank, heading@4), the first
@@ -624,7 +623,7 @@ fn the_caption_reads_in_its_direction_cue_colour() {
     let g = render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, false, SeedCopy::default()),
+        show(HelpTab::LevelInfo, SeedCopy::default()),
         panel_run(None, easier, &quiet_alert(), Loadout::innate()),
     );
     assert_eq!(g.get(3, 5).glyph, 'A');
@@ -647,7 +646,7 @@ fn the_tab_bar_highlights_the_active_tab() {
         for &active in HelpTab::shown(debug) {
             let ui = ScreenUi {
                 debug_mode: debug,
-                ..show(active, false, SeedCopy::default())
+                ..show(active, SeedCopy::default())
             };
             let g = render_help(
                 W,
@@ -691,7 +690,7 @@ fn hit_on(height: u32, x: u32, y: u32) -> Option<HelpHit> {
     help_hit(
         W,
         height,
-        show(HelpTab::default(), false, SeedCopy::default()),
+        show(HelpTab::default(), SeedCopy::default()),
         None,
         x,
         y,
@@ -757,19 +756,12 @@ fn run_with_a_token() -> LevelSeed {
 }
 
 /// The Level info panel for `level`, with the seed-copy acknowledgement in
-/// `copy` — the frame the copy control is drawn on. A build that does not offer
-/// the replay control (`offer_replay` false), which is every public one (#411).
+/// `copy` — the frame the copy control is drawn on.
 fn level_info(level: Option<LevelSeed>, copy: SeedCopy) -> Grid {
-    level_info_offering(level, false, copy)
-}
-
-/// The same panel with the build's word on the `replay [r]` control spelled out —
-/// the replay-control tests drive both answers through here.
-fn level_info_offering(level: Option<LevelSeed>, offer_replay: bool, copy: SeedCopy) -> Grid {
     render_help(
         W,
         H,
-        show(HelpTab::LevelInfo, offer_replay, copy),
+        show(HelpTab::LevelInfo, copy),
         panel_run(
             level,
             LevelModifiers::default(),
@@ -795,7 +787,7 @@ fn the_token_row_carries_a_copy_control_and_its_neighbours_do_not() {
         help_hit(
             W,
             H,
-            show(HelpTab::LevelInfo, false, SeedCopy::default()),
+            show(HelpTab::LevelInfo, SeedCopy::default()),
             level,
             x,
             y,
@@ -840,7 +832,7 @@ fn a_run_with_no_token_offers_nothing_to_copy() {
             help_hit(
                 W,
                 H,
-                show(HelpTab::LevelInfo, false, SeedCopy::default()),
+                show(HelpTab::LevelInfo, SeedCopy::default()),
                 None,
                 x,
                 SEED_TOKEN_ROW
@@ -870,7 +862,7 @@ fn the_copy_control_is_the_level_info_tabs_alone() {
         // the Debug tab is tested as itself rather than falling back to Level info.
         let ui = ScreenUi {
             debug_mode: true,
-            ..show(tab, false, SeedCopy::default())
+            ..show(tab, SeedCopy::default())
         };
         // Not *nothing* — the Debug tab's own control column reaches these very
         // cells (#459) — but never the seed copy, which is the claim: a tap on
@@ -979,21 +971,20 @@ fn the_copy_key_is_the_same_on_the_control_and_in_the_table() {
 
 // --- The Debug tab (§12.6/#459) ----------------------------------------------
 
-/// The Debug tab as a debug session draws it: `offer_replay` is the build's word on
-/// the replay control (#411), `reveal` the live state of omni-vision, and `copy` the
-/// acknowledgement under whichever control was last pressed.
-fn debug_ui(offer_replay: bool, copy: SeedCopy) -> ScreenUi {
+/// The Debug tab as a debug session draws it: `copy` is the acknowledgement under
+/// whichever control was last pressed, and `reveal` the live state of omni-vision.
+fn debug_ui(copy: SeedCopy) -> ScreenUi {
     ScreenUi {
         debug_mode: true,
-        ..show(HelpTab::Debug, offer_replay, copy)
+        ..show(HelpTab::Debug, copy)
     }
 }
 
-fn debug_tab(level: Option<LevelSeed>, offer_replay: bool, reveal: bool, copy: SeedCopy) -> Grid {
+fn debug_tab(level: Option<LevelSeed>, reveal: bool, copy: SeedCopy) -> Grid {
     render_help(
         W,
         H,
-        debug_ui(offer_replay, copy),
+        debug_ui(copy),
         PanelRun {
             debug: DebugModifiers {
                 reveal_whole_level: reveal,
@@ -1010,34 +1001,31 @@ fn debug_tab(level: Option<LevelSeed>, offer_replay: bool, reveal: bool, copy: S
 
 /// **The Level info tab is the panel that shipped, minus one control** (#459): the
 /// token and its `copy [c]` are exactly where they were, and the `replay [r]` that
-/// lodged on the acknowledgement's row is gone from the tab entirely — offered or
-/// not, token or not. Its row is the acknowledgement's spacer again, which is what
-/// it was before the lodger arrived.
+/// lodged on the acknowledgement's row is gone from the tab entirely. Its row is the
+/// acknowledgement's spacer again, which is what it was before the lodger arrived.
 #[test]
 fn the_level_info_tab_no_longer_carries_the_replay_control() {
     let level = Some(run_with_a_token());
-    for offer in [false, true] {
-        let g = level_info_offering(level, offer, SeedCopy::Idle);
-        assert!(
-            !text_of(&g).contains(REPLAY_CONTROL),
-            "the replay control left this tab (offered: {offer})",
+    let g = level_info(level, SeedCopy::Idle);
+    assert!(
+        !text_of(&g).contains(REPLAY_CONTROL),
+        "the replay control left this tab",
+    );
+    // …and its cells hit nothing, so a tap that used to copy a run is body again.
+    let start = replay_control_start(W);
+    for x in start..start + REPLAY_CONTROL_LEN {
+        assert_eq!(
+            help_hit(
+                W,
+                H,
+                show(HelpTab::LevelInfo, SeedCopy::default()),
+                level,
+                x,
+                SEED_ACK_ROW
+            ),
+            None,
+            "cell {x} of the acknowledgement row",
         );
-        // …and its cells hit nothing, so a tap that used to copy a run is body again.
-        let start = replay_control_start(W);
-        for x in start..start + REPLAY_CONTROL_LEN {
-            assert_eq!(
-                help_hit(
-                    W,
-                    H,
-                    show(HelpTab::LevelInfo, offer, SeedCopy::default()),
-                    level,
-                    x,
-                    SEED_ACK_ROW
-                ),
-                None,
-                "cell {x} of the acknowledgement row",
-            );
-        }
     }
     // The acknowledgement still has that row to itself, and reads whole on it.
     let g = level_info(level, SeedCopy::Unavailable);
@@ -1051,8 +1039,8 @@ fn the_level_info_tab_no_longer_carries_the_replay_control() {
 /// "this is on" ink when it is on.
 #[test]
 fn the_omni_vision_row_reads_the_live_switch() {
-    let on = debug_tab(None, false, true, SeedCopy::Idle);
-    let off = debug_tab(None, false, false, SeedCopy::Idle);
+    let on = debug_tab(None, true, SeedCopy::Idle);
+    let off = debug_tab(None, false, SeedCopy::Idle);
     assert!(row_text(&on, OMNI_ROW).contains(OMNI_ON), "{OMNI_ON:?}");
     assert!(row_text(&off, OMNI_ROW).contains(OMNI_OFF));
     assert_eq!(on.get(CONTENT_INDENT, OMNI_ROW).fg, Category::Interest);
@@ -1068,7 +1056,7 @@ fn the_omni_vision_row_reads_the_live_switch() {
 #[test]
 fn the_omni_control_is_reachable_by_touch_in_a_debug_session() {
     let start = omni_control_start(W);
-    let g = debug_tab(None, false, false, SeedCopy::Idle);
+    let g = debug_tab(None, false, SeedCopy::Idle);
     let drawn: String = (start..start + OMNI_CONTROL_LEN)
         .map(|x| g.get(x, OMNI_ROW).glyph)
         .collect();
@@ -1077,14 +1065,7 @@ fn the_omni_control_is_reachable_by_touch_in_a_debug_session() {
 
     for x in start..start + OMNI_CONTROL_LEN {
         assert_eq!(
-            help_hit(
-                W,
-                H,
-                debug_ui(false, SeedCopy::default()),
-                None,
-                x,
-                OMNI_ROW
-            ),
+            help_hit(W, H, debug_ui(SeedCopy::default()), None, x, OMNI_ROW),
             Some(HelpHit::ToggleReveal),
             "cell {x}",
         );
@@ -1093,7 +1074,7 @@ fn the_omni_control_is_reachable_by_touch_in_a_debug_session() {
         help_hit(
             W,
             H,
-            debug_ui(false, SeedCopy::default()),
+            debug_ui(SeedCopy::default()),
             None,
             start - 1,
             OMNI_ROW
@@ -1105,7 +1086,7 @@ fn the_omni_control_is_reachable_by_touch_in_a_debug_session() {
         help_hit(
             W,
             H,
-            debug_ui(false, SeedCopy::default()),
+            debug_ui(SeedCopy::default()),
             None,
             start,
             OMNI_ROW + 1
@@ -1119,7 +1100,7 @@ fn the_omni_control_is_reachable_by_touch_in_a_debug_session() {
         help_hit(
             W,
             H,
-            show(HelpTab::Debug, false, SeedCopy::default()),
+            show(HelpTab::Debug, SeedCopy::default()),
             None,
             start,
             OMNI_ROW
@@ -1129,44 +1110,40 @@ fn the_omni_control_is_reachable_by_touch_in_a_debug_session() {
     );
 }
 
-/// **The run is takeable where a build offers it** (§12.4/#411), on the tab it moved
-/// to (#459): with `offer_replay` set, the Debug tab carries a `replay [r]` control —
-/// drawn where it is hit-tested, every cell of the label a target, in the HUD-control
-/// colour the panel's other controls wear — and without it, drawn nowhere and hit
-/// nowhere. A public deploy has neither the tab nor the control.
+/// **The run is takeable, and every build can take it** (§12.4/#411/#478), on the tab
+/// it moved to (#459): the Debug tab carries a `replay [r]` control — drawn where it
+/// is hit-tested, every cell of the label a target, in the HUD-control colour the
+/// panel's other controls wear.
+///
+/// Two conditions are left on it, and both are tested: the tab has to be there, and
+/// the run has to have a token for the link to name (#333). The third — whether the
+/// *build* had a recorder behind the control — is gone with the `debug-tools` feature
+/// (#478), which is what let the deployed page export a run at all.
 #[test]
-fn the_replay_control_appears_only_when_a_build_offers_it() {
+fn the_replay_control_is_on_the_debug_tab_of_a_run_with_a_token() {
     let level = Some(run_with_a_token());
     let start = replay_control_start(W);
-
-    // Offered: every cell of the control resolves, and the drawn row matches.
     let hit = |ui, x, y| help_hit(W, H, ui, level, x, y);
+
+    // Every cell of the control resolves, and the drawn row matches.
     for x in start..start + REPLAY_CONTROL_LEN {
         assert_eq!(
-            hit(debug_ui(true, SeedCopy::default()), x, REPLAY_CONTROL_ROW),
+            hit(debug_ui(SeedCopy::default()), x, REPLAY_CONTROL_ROW),
             Some(HelpHit::CopyReplay),
             "cell {x}"
         );
     }
     assert_eq!(
-        hit(
-            debug_ui(true, SeedCopy::default()),
-            start - 1,
-            REPLAY_CONTROL_ROW
-        ),
+        hit(debug_ui(SeedCopy::default()), start - 1, REPLAY_CONTROL_ROW),
         None,
         "the gap is inert",
     );
     assert_eq!(
-        hit(
-            debug_ui(true, SeedCopy::default()),
-            start,
-            REPLAY_CONTROL_ROW + 1
-        ),
+        hit(debug_ui(SeedCopy::default()), start, REPLAY_CONTROL_ROW + 1),
         None,
         "the row beneath",
     );
-    let g = debug_tab(level, true, false, SeedCopy::Idle);
+    let g = debug_tab(level, false, SeedCopy::Idle);
     let drawn: String = (start..start + REPLAY_CONTROL_LEN)
         .map(|x| g.get(x, REPLAY_CONTROL_ROW).glyph)
         .collect();
@@ -1174,40 +1151,42 @@ fn the_replay_control_appears_only_when_a_build_offers_it() {
     assert_eq!(g.get(start, REPLAY_CONTROL_ROW).fg, Category::System);
     assert!(row_text(&g, REPLAY_CONTROL_ROW).contains(REPLAY_NOTE));
 
-    // Not offered: the same cells are body, and nothing is drawn there — the
-    // regression this guards is the control leaking into the public deploy.
-    for x in start..start + REPLAY_CONTROL_LEN {
-        assert_eq!(
-            hit(debug_ui(false, SeedCopy::default()), x, REPLAY_CONTROL_ROW),
-            None,
-            "public cell {x}",
-        );
-    }
-    assert!(!text_of(&debug_tab(level, false, false, SeedCopy::Idle)).contains(REPLAY_CONTROL));
-
-    // No token, no run to hand over — like the seed control (#353), the offer
-    // means nothing on a run no link can name.
+    // No token, no run to hand over — like the seed control (#353), there is nothing
+    // for a link to name, so the control is drawn nowhere and hits nothing.
     assert_eq!(
         help_hit(
             W,
             H,
-            debug_ui(true, SeedCopy::default()),
+            debug_ui(SeedCopy::default()),
             None,
             start,
             REPLAY_CONTROL_ROW
         ),
         None,
     );
-    assert!(!text_of(&debug_tab(None, true, false, SeedCopy::Idle)).contains(REPLAY_CONTROL));
+    assert!(!text_of(&debug_tab(None, false, SeedCopy::Idle)).contains(REPLAY_CONTROL));
 
-    // And it belongs to the Debug tab alone now.
+    // No debug session, no control: an ordinary panel draws Level info in its place,
+    // where those cells mean nothing — the regression this guards is the export
+    // leaking onto a panel every player can see.
+    assert_eq!(
+        hit(
+            show(HelpTab::Debug, SeedCopy::default()),
+            start,
+            REPLAY_CONTROL_ROW
+        ),
+        None,
+        "an ordinary session has no export",
+    );
+
+    // And it belongs to the Debug tab alone.
     for tab in HelpTab::ALL {
         if tab == HelpTab::Debug {
             continue;
         }
         let ui = ScreenUi {
             debug_mode: true,
-            ..show(tab, true, SeedCopy::default())
+            ..show(tab, SeedCopy::default())
         };
         assert_eq!(
             hit(ui, start, REPLAY_CONTROL_ROW),
@@ -1227,7 +1206,7 @@ fn the_debug_tab_acknowledges_its_own_copy() {
         (SeedCopy::Copied, COPIED_ACK),
         (SeedCopy::Unavailable, UNAVAILABLE_ACK),
     ] {
-        let g = debug_tab(level, true, false, copy);
+        let g = debug_tab(level, false, copy);
         assert!(
             row_text(&g, REPLAY_ACK_ROW).contains(expected),
             "the acknowledgement reads whole: {:?}",
@@ -1237,7 +1216,7 @@ fn the_debug_tab_acknowledges_its_own_copy() {
         assert!(row_text(&g, REPLAY_CONTROL_ROW).contains(REPLAY_CONTROL));
     }
     // Idle says nothing at all, as on the Level info tab.
-    let idle = debug_tab(level, true, false, SeedCopy::Idle);
+    let idle = debug_tab(level, false, SeedCopy::Idle);
     assert_eq!(row_text(&idle, REPLAY_ACK_ROW).trim(), "");
 }
 
@@ -1368,13 +1347,13 @@ fn a_session_without_the_debug_tab_never_reaches_it() {
     assert_eq!(HelpTab::Debug.next(false), HelpTab::Abilities);
     assert_eq!(HelpTab::Debug.prev(false), HelpTab::Help);
     assert_eq!(
-        shown_tab(show(HelpTab::Debug, false, SeedCopy::default())),
+        shown_tab(show(HelpTab::Debug, SeedCopy::default())),
         HelpTab::LevelInfo,
     );
     assert_eq!(
         shown_tab(ScreenUi {
             debug_mode: true,
-            ..show(HelpTab::Debug, false, SeedCopy::default())
+            ..show(HelpTab::Debug, SeedCopy::default())
         }),
         HelpTab::Debug,
     );

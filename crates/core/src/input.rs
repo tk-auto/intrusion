@@ -96,11 +96,10 @@ pub enum HelpNav {
     CopySeed,
     /// Copy the whole **run** — a `…#seed=<token>&inputs=<script>` replay link — to
     /// the clipboard (§12.4/§13.1/#411): the keyboard half of the Debug tab's
-    /// `replay [r]` control, [`CopySeed`](Self::CopySeed)'s sibling. The control
-    /// exists only in builds whose shell records the input stream (a preview-build
-    /// affordance, [`ScreenUi::offer_replay_copy`](crate::ScreenUi)); the shell
-    /// mirrors it exactly, so in every other build the key does nothing, as the
-    /// absent control does.
+    /// `replay [r]` control, [`CopySeed`](Self::CopySeed)'s sibling. Every build
+    /// records its input stream (#478), so the only thing that can be missing is a
+    /// run with no token for the link to name; the shell mirrors the drawn control
+    /// exactly, and there the key does nothing, as the absent control does.
     CopyReplay,
     /// Flip **omni-vision** — [`DebugModifiers::reveal_whole_level`](crate::DebugModifiers)
     /// — for the running game (§12.6/#459): the keyboard half of the Debug tab's

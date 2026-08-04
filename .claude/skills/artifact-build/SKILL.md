@@ -36,15 +36,14 @@ crates.io is the path that works.
 
 ## 2. Build and generate the glue
 
-Same pipeline as `pages.yml`, run locally (from the repo root; `$SCRATCH` is the
-session scratchpad directory) — plus `--features debug-tools`, which is what
-separates a preview from the deploy (#411): it switches on the input recorder
-and the help panel's `replay [r]` control, so a playtester can copy the whole
-run they just had as a `…#seed=<token>&inputs=<script>` link. `pages.yml` builds
-without it, so the public deploy carries neither.
+Exactly the pipeline `pages.yml` runs, run locally (from the repo root; `$SCRATCH`
+is the session scratchpad directory) — **no feature flags**. There used to be a
+`--features debug-tools` here, switching on the input recorder behind the panel's
+`replay [r]` control; every build records now (#478), and what separates a preview
+from the deploy is only what `assemble.py` stamps into the page (§6/§6b).
 
 ```
-cargo build -p intrusion-web --release --target wasm32-unknown-unknown --features debug-tools
+cargo build -p intrusion-web --release --target wasm32-unknown-unknown
 rm -rf "$SCRATCH/dist" && mkdir -p "$SCRATCH/dist"
 wasm-bindgen target/wasm32-unknown-unknown/release/intrusion_web.wasm \
   --out-dir "$SCRATCH/dist" --target web --no-typescript
@@ -192,11 +191,14 @@ the menu. Hand this form over only for the live Pages URL, never for an artifact
 ## 6b. The Debug tab, and lifting the fog (`--debug reveal`, §12.6/#459)
 
 **Every artifact boots as a debug session**: the help panel (`?`) carries a fourth
-**Debug** tab, with the omni-vision switch on it and — because artifact builds are
-built `--features debug-tools` — the `replay [r]` export. That is the preview
-channel's whole point: the artifact is for *looking at* the game. `assemble.py` stamps
-the session global on every build; pass `--no-debug-mode` for a preview meant to be
-judged exactly as the public deploy behaves (no tab, no switches).
+**Debug** tab, with the omni-vision switch and the `replay [r]` export on it. That is
+the preview channel's whole point: the artifact is for *looking at* the game.
+`assemble.py` stamps the session global on every build; pass `--no-debug-mode` for a
+preview meant to be judged exactly as the public deploy behaves (no tab, no switches).
+
+The **deploy** has the same tab and the same two controls behind `?debug=intruded`
+(#478) — a run that misbehaves there can be exported and handed over, which is what
+the export is for.
 
 The same session can be opened on the **Pages deploy** with `?debug=intruded` — a
 shibboleth, not a documented switch, and the shell strips it from the address bar the

@@ -219,11 +219,11 @@ impl Game {
     /// everything that reaches the world — a held key's repeats, a free wall bump, a
     /// swallowed post-end press — is appended exactly as fed, so the recording *is*
     /// the run and a stream taken anywhere shallower would drift from what was
-    /// played. `debug-tools` builds only; elsewhere the branch is compiled out.
+    /// played. **Every build records** (#478): the recording costs one small `Copy`
+    /// enum per turn and is what makes a strange run on the deployed page handable
+    /// to someone else, which is the whole reason the debug session exists.
     pub(crate) fn step_and_draw(&mut self, input: Input) {
-        if cfg!(feature = "debug-tools") {
-            self.recorded.push(input);
-        }
+        self.recorded.push(input);
         self.state.step(input);
         // The frame a run ends on belongs to the verdict (§14 v2/#138): the deployed
         // message list is folded away as the loop stops, so what reads behind the
@@ -470,9 +470,8 @@ impl Game {
     }
 
     /// The replay link the panel is currently offering to copy (§12.4/#411), or
-    /// `None` when it is offering none — no Debug tab in this session (#459), no
-    /// control in this build ([`ScreenUi::offer_replay_copy`](intrusion_core::ScreenUi)),
-    /// a different tab up, or a run with no token for the link to carry. The link is
+    /// `None` when it is offering none — no Debug tab in this session (#459), a
+    /// different tab up, or a run with no token for the link to carry. The link is
     /// the recording so far over this page's own URL ([`crate::replay::replay_url`]),
     /// so what a mid-run copy hands over is the run *up to this turn* — and a later
     /// copy, the longer one.
@@ -481,7 +480,7 @@ impl Game {
     /// the input script, exactly as before the Debug tab existed, so replaying it hands
     /// over the run and never the session it was exported from.
     fn replay_to_copy(&self) -> Option<String> {
-        if !self.ui.offer_replay_copy || !self.ui.debug_mode || self.ui.help_tab != HelpTab::Debug {
+        if !self.ui.debug_mode || self.ui.help_tab != HelpTab::Debug {
             return None;
         }
         let token = self.state.level()?.encode()?;

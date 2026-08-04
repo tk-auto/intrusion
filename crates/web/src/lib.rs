@@ -160,15 +160,13 @@ pub fn start() -> Result<(), JsValue> {
     } else {
         ScreenUi::default()
     };
-    // Whether this build offers the help panel's copy-replay control (#411) is a
-    // fact about the build, decided once here: exactly the builds whose recorder
-    // runs ([`Game::step_and_draw`]) offer the control, so it can never be drawn
-    // with nothing behind it. Whether the panel carries the **Debug tab** it now lives
-    // on is a fact about the *session* (#459), decided the same once and never again:
-    // no run, and nothing a player can be handed, may switch it on.
+    // Whether the panel carries the **Debug tab** — and with it the copy-replay
+    // control (#411/#478) — is a fact about the *session* (#459), decided once here
+    // and never again: no run, and nothing a player can be handed, may switch it on.
+    // It used to take a second flag for whether the *build* had a recorder behind
+    // that control; every build has one now, so there is one question left to ask.
     let ui = ScreenUi {
         modality,
-        offer_replay_copy: cfg!(feature = "debug-tools"),
         debug_mode: debug.mode,
         ..ui
     };
@@ -264,9 +262,16 @@ struct Game {
     /// the run, and re-feeding it reproduces the run byte-for-byte. Appended at the
     /// one seam every input crosses ([`Game::step_and_draw`]) and cleared only when
     /// a fresh run replaces the world ([`Game::reseed`]) — never by the panel, so
-    /// copying twice hands over the run so far, then the run so further. Pushed in
-    /// `debug-tools` builds only; empty for the page's lifetime everywhere else,
-    /// and always empty in replay mode, whose inputs drive a cursor, not a world.
+    /// copying twice hands over the run so far, then the run so further.
+    ///
+    /// **Every build records** (#478). It used to be a `debug-tools` build's alone,
+    /// from back when the control lived on a tab every player could see (#411); the
+    /// Debug tab (#459) is the gate now, and a deployed page that could lift the fog
+    /// but not hand over the run was missing the more useful half. The cost is one
+    /// small `Copy` enum per turn — a couple of thousand of them in a long session,
+    /// tens of kilobytes — against a strange run being reproducible by whoever it
+    /// happened to. Always empty in replay mode, whose inputs drive a cursor, not a
+    /// world.
     recorded: Vec<Input>,
     /// A weak handle back to the shell's own cell, closed at construction
     /// (`Rc::new_cyclic`). Every other input the shell takes is answered inside the

@@ -19,7 +19,7 @@
 //! - **Help** ([`HelpTab::Help`]) — the glyph legend, the colour key, and the
 //!   **standing** controls, the original reference card (#139/#296).
 //! - **Debug** ([`HelpTab::Debug`]) — **present only in a debug session** (§12.6/#459):
-//!   the omni-vision switch and, where the build records inputs, the replay export.
+//!   the omni-vision switch and the replay export (§12.4/#411/#478).
 //!   It is the one tab that is not always there, which is why
 //!   [`HelpTab::shown`] rather than [`HelpTab::ALL`] is what the bar, the cycle and
 //!   the hit-test are laid out from.
@@ -111,8 +111,8 @@ pub enum HelpTab {
     /// The glyph legend, colour key, and standing controls (#139) — the reference
     /// card, the same one for every run (#296).
     Help,
-    /// The **debug session's** own tab (§12.6/#459): the omni-vision switch, and the
-    /// replay export in a build that records its inputs. Present only when the shell
+    /// The **debug session's** own tab (§12.6/#459): the omni-vision switch and the
+    /// replay export. Present only when the shell
     /// says this session is a debug one
     /// ([`ScreenUi::debug_mode`](super::ScreenUi::debug_mode)) — a baked artifact or a
     /// page opened with the activation parameter. **Last**, so the tabs a player
@@ -223,10 +223,9 @@ pub enum HelpHit {
     /// clipboard as a `…#seed=<token>&inputs=<script>` link (§12.4/§13.1/#411), the
     /// seed control's bigger sibling: that one hands over the level, this one hands
     /// over what just happened on it. The shell owns the recorder and the write, as
-    /// with [`CopySeed`]; the core owns the geometry. Only ever produced when the
-    /// shell says this build offers the control at all
-    /// ([`ScreenUi::offer_replay_copy`](super::ScreenUi)) — a preview-build
-    /// affordance, absent from the public deploy.
+    /// with [`CopySeed`]; the core owns the geometry. Only ever produced on the Debug
+    /// tab, and only for a run with a token for the link to carry — every build
+    /// records its inputs (#478), so there is nothing else left to ask.
     ///
     /// It sat on the Level info tab until #459 gave debugging a tab of its own.
     /// Exporting a run is a debugging affordance; the Level info tab is where a
@@ -644,9 +643,7 @@ pub(super) fn seed_token(level: Option<LevelSeed>) -> Option<String> {
 /// conditional on one of them, and reading the same values [`render_help`] draws from
 /// is what keeps a tap landing on exactly the cells the frame painted: the tab up
 /// ([`ScreenUi::help_tab`](super::ScreenUi)), whether this session has a Debug tab at
-/// all ([`ScreenUi::debug_mode`](super::ScreenUi), #459), whether this build carries
-/// the `replay [r]` control ([`ScreenUi::offer_replay_copy`](super::ScreenUi), #411) —
-/// and the token itself, through the same [`seed_token`] the drawing uses, so a run
+/// all ([`ScreenUi::debug_mode`](super::ScreenUi), #459) — and the token itself, through the same [`seed_token`] the drawing uses, so a run
 /// whose panel shows no seed section offers nothing to copy.
 #[must_use]
 pub fn help_hit(
@@ -695,7 +692,7 @@ pub fn help_hit(
                     return Some(HelpHit::ToggleReveal);
                 }
             }
-            if ui.offer_replay_copy && seed_token(level).is_some() && y == REPLAY_CONTROL_ROW {
+            if seed_token(level).is_some() && y == REPLAY_CONTROL_ROW {
                 let replay = replay_control_start(width);
                 if x >= replay && x < replay + REPLAY_CONTROL_LEN {
                     return Some(HelpHit::CopyReplay);
@@ -734,11 +731,11 @@ fn shown_tab(ui: ScreenUi) -> HelpTab {
 /// on that clamp, because a clipped sentence is a wrong sentence (see
 /// [`abilities`]).
 ///
-/// `ui` is the shell's whole view state; the panel reads the four fields that are
+/// `ui` is the shell's whole view state; the panel reads the three fields that are
 /// its own — the tab up ([`ScreenUi::help_tab`]), whether this session has a Debug tab
-/// ([`ScreenUi::debug_mode`], #459), the copy acknowledgement
-/// ([`ScreenUi::seed_copy`], #353) and whether this build offers the replay control
-/// ([`ScreenUi::offer_replay_copy`], #411) — and ignores the rest, which
+/// ([`ScreenUi::debug_mode`], #459),
+/// and the copy acknowledgement ([`ScreenUi::seed_copy`], #353) — and ignores the
+/// rest, which
 /// [`render_screen`](super::render_screen) has already adjudicated. `run` is what the
 /// panel draws *about*: the facts of the run itself, bundled so the tabs' one entry
 /// point stays readable as they multiply.
@@ -913,10 +910,11 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
 ///   (§12.6). Turning it back off does not restore what was already seen — tile memory
 ///   (§11.5a) accumulates from sight like it does for any other cell — which is honest
 ///   rather than surprising: you did see it.
-/// - **`replay [r]`** copies the whole run as a link (§12.4/#411), drawn only in a
-///   build whose shell records inputs and only for a run that has a token to name.
-///   Exporting a run is a debugging affordance, which is why it lives here rather than
-///   on the tab that tells a player what their run's rules are.
+/// - **`replay [r]`** copies the whole run as a link (§12.4/#411), drawn for any run
+///   that has a token for the link to name (#333's rule, unchanged). Exporting a run
+///   is a debugging affordance, which is why it lives here rather than on the tab that
+///   tells a player what their run's rules are — and every build records its inputs
+///   now (#478), so a strange run on the deployed page is one its player can hand over.
 ///
 /// Nothing on this tab may ever change the facility. The gate in front of it is a
 /// convention (a parameter anyone reading the wasm can find), so what sits behind it
@@ -950,9 +948,10 @@ fn draw_debug(grid: &mut Grid, y: u32, ui: ScreenUi, run: &PanelRun<'_>) {
         Category::Ground,
     );
 
-    // The replay export, on the same terms it was offered on before it moved here: a
-    // build that records (#411), and a run with a token for the link to carry (#333).
-    if ui.offer_replay_copy && seed_token(run.level).is_some() {
+    // The replay export (§12.4/#411): drawn whenever there is a run for the link to
+    // name (#333). It took a second condition until #478 — whether the build had a
+    // recorder behind it — and every build has one now.
+    if seed_token(run.level).is_some() {
         draw(grid, 2, REPLAY_CONTROL_ROW - 1, "RUN", Category::System);
         draw(
             grid,
