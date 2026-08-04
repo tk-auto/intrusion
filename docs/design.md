@@ -3171,6 +3171,43 @@ stream**, so every seed shared before it names a different building. Both are wo
 paying, but they are the price of this horizon and should be stated when a new
 modifier asks to sit on it.
 
+### 12.7 The campaign layer — the run above the level
+
+Everything above describes **one facility**. The run is a sequence of them (§2.2/§14
+v3), so one layer sits above the turn loop: a **campaign** owning the facilities a run
+will raid, where it stands in them, and what it carries between them. The level below
+it is untouched — a campaign facility is an ordinary level with ordinary modifiers, and
+a campaign of **one** facility is exactly the game v1 ships.
+
+- **The sequence is forward-only.** You traverse toward the archive; there is no
+  backtracking and no retry (§2.2). *(Its geography — a graph with real edges, grown
+  lazily, offering a choice at each node — is the facility map, §14 v3.)*
+- **Each facility's seed is derived from `(run seed, node id)`** — never a fresh
+  source (§12.4). A whole run therefore reproduces from `(run seed, [inputs])` exactly
+  as one level does, which is what makes bug repro and golden tests possible across a
+  2–3 hour run. It is derived **narrowed to the level-seed token's seed field**, so
+  every facility of a campaign is also a *sayable level*: a token you can hand to
+  someone, or to the sim, and play on its own (§13.1).
+- **Three things carry between facilities, and nothing carries out of the run**
+  (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** — intel
+  is currency in the campaign, not an exit key, so the gate is `IntelGate::None`
+  (§4.5) and extraction is voluntary — and the **campaign alert**, the run-level layer
+  above the per-facility §7.3 ladder. Nothing persists a campaign anywhere, so
+  "nothing carries across runs" is a property of the type rather than a rule to
+  enforce.
+- **The transitions are the whole layer:** *enter* a facility (the campaign hands out
+  its level-seed), *complete* one (the haul is banked, the facility is dropped —
+  geometry, guards and bodies do not persist), *capture* (terminal for the run,
+  anywhere, §2.2), and *reach the end of the sequence* (the run is won).
+
+**[START]** on the campaign's length (six facilities) — the coarsest knob on the 2–3
+hour target, and the map's depth-to-archive takes it over.
+
+The alert's *contribution* is deliberately not settled here: a raid's loudness does not
+yet raise the campaign alert, and every facility starts at base alert. What a loud raid
+is worth, how it decays, and which modifiers a raised alert switches on are one
+decision (§14 v3), and until it is taken the seam carries no number nobody designed.
+
 ---
 
 ## 13. The experiment loop
@@ -3289,7 +3326,9 @@ scaffolding.**
 ### v3 — the campaign
 
 **The campaign is the run** (§2.2): 2–3 hours, progression throughout, nothing
-carried to the next one.
+carried to the next one. The **layer** it all hangs off — the sequence of facilities,
+the per-facility seed derivation, and what carries between them — is §12.7; each
+bullet below fills one of its seams.
 
 - The facility map. **A graph with real edges** — the old "map" was a flat list
   with no adjacency and no geography, where every unlocked facility was always
