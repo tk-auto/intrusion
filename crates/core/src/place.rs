@@ -38,7 +38,7 @@ use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
 use crate::generate::{carve_exit_duct, has_adjacent_usable, shuffle, Layout};
 use crate::guard::{Guard, GUARD_INITIAL_FACING};
-use crate::modifiers::GuardCount;
+use crate::modifiers::{GuardCount, IntelCount};
 use crate::path;
 use crate::radio::RadioClock;
 use crate::region::{RegionId, RegionKind};
@@ -127,6 +127,24 @@ impl LevelConfig {
     /// guards, not by any one of them being cleverer.
     pub const GUARDS_MAX: usize = 5;
 
+    /// The fewest intel consoles the [`IntelCount`] modifier may leave a facility with
+    /// (§10.2/#207).
+    ///
+    /// **Two.** Under the campaign's [`IntelGate::None`](crate::IntelGate::None) intel
+    /// is currency (§2.2), so a thin facility is a poor raid rather than an unwinnable
+    /// one — but a facility with a *single* console is not a raid at all: there is one
+    /// place worth going and no route to choose between. Two is the last count that
+    /// still asks the player where to go first.
+    pub const INTEL_MIN: usize = 2;
+
+    /// The most intel consoles the [`IntelCount`] modifier may add (§10.2/#207).
+    ///
+    /// **Four, one over the §10.2 baseline.** The bound is placement, not balance: each
+    /// console wants a room the §10.6 flood can reach and the exit-cone rule allows, and
+    /// asking a 40×40 carve for more of them raises the rejection rate for no design
+    /// gain. One over is what the ±1 knob needs and all it needs.
+    pub const INTEL_MAX: usize = 4;
+
     /// This recipe with the §12.6 **guard-count knob** applied (#232) — the effective
     /// config [`generate_level`](crate::generate_level) places from.
     ///
@@ -147,6 +165,27 @@ impl LevelConfig {
             GuardCount::Fewer | GuardCount::More => self.guards,
         };
         Self { guards, ..self }
+    }
+
+    /// This recipe with the §12.6 **intel-count knob** applied (#207) — the reward half
+    /// of the map's flavour (§14 v3), resolved into the recipe beside the guard count.
+    ///
+    /// **A step, not a setter**, on exactly [`with_guard_count`](Self::with_guard_count)'s
+    /// terms: one console either way, stopping at the
+    /// [`INTEL_MIN`](Self::INTEL_MIN)…[`INTEL_MAX`](Self::INTEL_MAX) envelope, and a
+    /// recipe already outside that envelope is left where it is rather than dragged into
+    /// range — a sim sweep at six consoles must not have "one more" quietly place two
+    /// fewer.
+    #[must_use]
+    pub const fn with_intel_count(self, knob: IntelCount) -> Self {
+        let intel = match knob {
+            IntelCount::Baseline => self.intel,
+            IntelCount::Fewer if self.intel > Self::INTEL_MIN => self.intel - 1,
+            IntelCount::More if self.intel < Self::INTEL_MAX => self.intel + 1,
+            // Already at or past the envelope's edge in the direction asked for.
+            IntelCount::Fewer | IntelCount::More => self.intel,
+        };
+        Self { intel, ..self }
     }
 }
 

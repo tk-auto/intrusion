@@ -84,7 +84,7 @@ use crate::ability::{AbilityId, Loadout};
 use crate::cell::Direction;
 use crate::difficulty::Difficulty;
 use crate::generate::{generate_level, GenError};
-use crate::modifiers::{GuardCount, IntelGate, LevelModifiers};
+use crate::modifiers::{GuardCount, IntelCount, IntelGate, LevelModifiers};
 use crate::place::LevelConfig;
 use crate::rng::Rng;
 use crate::state::State;
@@ -666,6 +666,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         calm_guards_detect_only_their_cone,
         automatic_doors,
         guard_count,
+        intel_count,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -691,6 +692,13 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         // run at the §10.2 count encodes byte-for-byte as it did before this existed.
         matches!(guard_count, GuardCount::More),
         matches!(guard_count, GuardCount::Fewer),
+        // Slots 9 and 10, appended (#207): the intel-count knob's two ends, on the
+        // guard knob's terms and for the same price — two more of the 256 reserved
+        // slots, no radix moved, and a run at the §10.2 count naming neither. This is
+        // what makes a campaign facility's flavour ride in its **token** (§12.7): the
+        // level you are handed is the level the map offered, consoles and all.
+        matches!(intel_count, IntelCount::More),
+        matches!(intel_count, IntelCount::Fewer),
     ]
     .into_iter()
     .enumerate()
@@ -717,13 +725,21 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel] =
         active;
     let guard_count = match (more_guards, fewer_guards) {
         (false, false) => GuardCount::Baseline,
         (true, false) => GuardCount::More,
         (false, true) => GuardCount::Fewer,
         (true, true) => return None, // both ends at once is not a config a run can hold
+    };
+    // The same rejection over the intel knob (#207): a knob holds one value, so a set
+    // naming both its ends describes a config no run can be in.
+    let intel_count = match (more_intel, fewer_intel) {
+        (false, false) => IntelCount::Baseline,
+        (true, false) => IntelCount::More,
+        (false, true) => IntelCount::Fewer,
+        (true, true) => return None,
     };
     Some(LevelModifiers {
         guards_always_search_hideouts,
@@ -734,15 +750,16 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         calm_guards_detect_only_their_cone,
         automatic_doors,
         guard_count,
+        intel_count,
         intel_to_exit: gate,
     })
 }
 
 /// How many modifier slots this build actually uses — the live count, against which
 /// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
-/// the format. Not the same as the number of *fields*: the guard-count knob (#232)
-/// spends one slot per end.
-const MODIFIER_FIELDS: usize = 9;
+/// the format. Not the same as the number of *fields*: the guard-count knob (#232) and
+/// the intel-count knob (#207) spend one slot per end.
+const MODIFIER_FIELDS: usize = 11;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1115,7 +1132,14 @@ mod tests {
             let on = |field: u32| bits & (1 << field) != 0;
             let (search, sighting, body, cones, layout, cone_only, doors) =
                 (on(0), on(1), on(2), on(3), on(4), on(5), on(6));
-            for guard_count in [GuardCount::Baseline, GuardCount::More, GuardCount::Fewer] {
+            for (guard_count, intel_count) in [
+                (GuardCount::Baseline, IntelCount::Baseline),
+                (GuardCount::More, IntelCount::More),
+                (GuardCount::Fewer, IntelCount::Fewer),
+                // The two knobs crossed the other way, so the sweep covers a set
+                // holding one end of each rather than only matched pairs (#207).
+                (GuardCount::More, IntelCount::Fewer),
+            ] {
                 for gate in gates {
                     for abilities in loadouts {
                         let modifiers = LevelModifiers {
@@ -1127,6 +1151,7 @@ mod tests {
                             calm_guards_detect_only_their_cone: cone_only,
                             automatic_doors: doors,
                             guard_count,
+                            intel_count,
                             intel_to_exit: gate,
                         };
                         let level = LevelSeed {
@@ -1144,7 +1169,8 @@ mod tests {
                             .into_iter()
                             .filter(|&flag| flag)
                             .count()
-                            + usize::from(guard_count != GuardCount::Baseline);
+                            + usize::from(guard_count != GuardCount::Baseline)
+                            + usize::from(intel_count != IntelCount::Baseline);
                         if active > MODIFIER_CAP {
                             assert_eq!(
                                 level.encode(),
@@ -1259,6 +1285,10 @@ mod tests {
                 // baseline, which is the run this token has always named.
                 automatic_doors: false,
                 guard_count: GuardCount::Baseline,
+                // Slots 9 and 10 (#207) are the third telling of the same story: the
+                // intel knob decodes at its baseline, so the token still names the run
+                // it named the day it was minted.
+                intel_count: IntelCount::Baseline,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1381,20 +1411,21 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 8, the guard knob's easier end (#232).
-        // Slots 7 and 8 are the knob's two ends and cannot both be held, so the fifth
-        // comes from slot 3 rather than from both of them. Holding more than five at
-        // once is over the cap and refused outright, asserted in
-        // `every_config_round_trips`.
+        // actually hold, which now reaches slot 10, the intel knob's scarce end (#207).
+        // Each knob's two ends cannot both be held, so the highest five are one end of
+        // each knob (8 and 10) plus the three highest toggles below them (4, 5, 6).
+        // Holding more than five at once is over the cap and refused outright, asserted
+        // in `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
             guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
-            always_show_vision_cones: true,
+            always_show_vision_cones: false,
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guard_count: GuardCount::Fewer,
+            intel_count: IntelCount::Fewer,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {

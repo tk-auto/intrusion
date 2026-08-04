@@ -20,8 +20,11 @@
 //! - **Alert** (endogenous) — the campaign alert (#210): a loud raid raises the
 //!   alert, and a higher alert switches on harder modifiers for later facilities.
 //!   [`ModifierSources`] exposes the hook it plugs into; it is `None` here.
-//! - **Flavour** (per-node) — a facility's own character (#207), a third future
-//!   source.
+//! - **Flavour** (per-node) — a facility's own character on the campaign map (#207):
+//!   an [`Outpost`](crate::Flavour::Outpost) is thin and thinly guarded, a
+//!   [`Vault`](crate::Flavour::Vault) rich and watched. It is what makes a branch on
+//!   the map a decision rather than a coin flip, and it is *only* the modifier set it
+//!   contributes here — there is no second vocabulary for what a facility is.
 //!
 //! They all resolve into the *same* [`LevelModifiers`] the systems read
 //! ([`ModifierSources::resolve`]), so a new source is a new field and a line in
@@ -155,6 +158,67 @@ impl GuardCount {
             (Self::Baseline, end) | (end, Self::Baseline) => end,
             (Self::More, _) | (_, Self::More) => Self::More,
             (Self::Fewer, Self::Fewer) => Self::Fewer,
+        }
+    }
+}
+
+/// The facility's **intel count** (§10.2/#207) — one step either side of the recipe's
+/// own number, the second bounded knob of [`GuardCount`]'s shape and the campaign's
+/// **reward** axis.
+///
+/// It exists because the facility map (#207) offers a choice between facilities and a
+/// choice needs two axes to be a choice: a successor that is only ever *harder* is one
+/// no player picks, and one that is only ever *easier* is one they always do. Guards
+/// are the risk axis and this is the reward — a [`Vault`](crate::Flavour::Vault) holds
+/// one console more than the recipe asks for and posts one more guard over it, an
+/// [`Outpost`](crate::Flavour::Outpost) one fewer of each.
+///
+/// **Which end is "harder" is the opposite of the guard knob's**, and follows from
+/// what intel *is* rather than from arithmetic. Under the campaign's
+/// [`IntelGate::None`] (§4.5) intel is currency (§2.2), so fewer consoles is a thinner
+/// run: [`Fewer`](Self::Fewer) is the harder end and composes as one
+/// ([`harder_of`](Self::harder_of)). Under quick play's [`IntelGate::All`] the same
+/// step would move the **win condition** instead — which is exactly why this knob is
+/// not in the §12.6 directed pool (see [`POOL`]): the difficulty draw would be
+/// deciding how much of the game you have to do, under a change that is not about
+/// quick play at all.
+///
+/// The ±1 envelope is [`LevelConfig::INTEL_MIN`]…[`LevelConfig::INTEL_MAX`]
+/// (`crate::LevelConfig`), and lives there with the recipe for the same reason the
+/// guard envelope does: how many consoles a carve can *seat* is a fact about
+/// generation (§10.6), not about this seam.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IntelCount {
+    /// **Harder.** One console fewer than the recipe asks for — never below
+    /// [`LevelConfig::INTEL_MIN`](crate::LevelConfig::INTEL_MIN), the floor that keeps
+    /// a facility worth raiding at all.
+    Fewer,
+    /// The recipe's own count, unchanged — §10.2's three **[START]** for
+    /// [`LevelConfig::V1`](crate::LevelConfig::V1). [`Default`], so a hand-built state,
+    /// quick play and the sim all play the unchanged §10.2 game.
+    #[default]
+    Baseline,
+    /// **Easier.** One console more — never above
+    /// [`LevelConfig::INTEL_MAX`](crate::LevelConfig::INTEL_MAX), the cap that keeps
+    /// the intel pool inside what a 40×40 carve reliably seats.
+    More,
+}
+
+impl IntelCount {
+    /// Compose two contributions **harder-ward**, the [`LevelModifiers::union`] rule
+    /// for this knob — [`GuardCount::harder_of`]'s rule with the ends swapped, because
+    /// here the *scarce* end is the hard one.
+    ///
+    /// The invariant is the one that matters everywhere in §12.6: **no contribution can
+    /// relieve pressure another one asked for**. A baseline source stayed quiet and
+    /// yields to whichever end its partner names; when two sources genuinely disagree,
+    /// [`Fewer`](Self::Fewer) wins.
+    #[must_use]
+    pub fn harder_of(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Baseline, end) | (end, Self::Baseline) => end,
+            (Self::Fewer, _) | (_, Self::Fewer) => Self::Fewer,
+            (Self::More, Self::More) => Self::More,
         }
     }
 }
@@ -322,6 +386,25 @@ pub struct LevelModifiers {
     /// a pool the guards are excluded from, and each guard draws a radio clock — so
     /// the two settings are the same *level* played out differently, not the same run.
     pub guard_count: GuardCount,
+    /// How many intel consoles the facility holds (§10.2/#207) — one step either side
+    /// of the recipe's count, [`Fewer`](IntelCount::Fewer) harder and
+    /// [`More`](IntelCount::More) easier. Baseline [`IntelCount::Baseline`]: the
+    /// recipe's own number, untouched.
+    ///
+    /// **The third modifier that reaches generation**, and it reaches the same part of
+    /// it the guard count does — placement (§10.1.9), never the carve. The pieces come
+    /// off the same shuffled pool by `take(n)` from the same stream, so from one seed
+    /// the three settings put the **same player, exit and guards** in the **same
+    /// building** and their console sets are strictly **nested**: `Fewer` is the
+    /// baseline's consoles minus its last, `More` is them plus one more.
+    ///
+    /// That nesting is what makes the flavour honest (§2.3): a [`Vault`] really does
+    /// hold a console an [`Outpost`] does not, on the same ground, rather than being a
+    /// differently-worded label on the same facility.
+    ///
+    /// [`Vault`]: crate::Flavour::Vault
+    /// [`Outpost`]: crate::Flavour::Outpost
+    pub intel_count: IntelCount,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -389,7 +472,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 10] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 12] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
@@ -398,6 +481,8 @@ pub(crate) const CAPTIONS: [ActiveModifier; 10] = [
     ALL_DOORS_AUTOMATIC,
     GUARDS_MORE,
     GUARDS_FEWER,
+    CONSOLES_MORE,
+    CONSOLES_FEWER,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -455,6 +540,22 @@ const GUARDS_FEWER: ActiveModifier = ActiveModifier {
     detail: Some("one fewer"),
 };
 
+/// The intel knob's two ends, worded as the guard knob's are — a **count**, said as a
+/// departure from the recipe rather than as an absolute the card would have to print
+/// the baseline beside. "Intel" alone would read as the gate one row down, so the
+/// caption names the thing counted: the consoles standing in the building.
+const CONSOLES_MORE: ActiveModifier = ActiveModifier {
+    name: "Consoles",
+    direction: ModifierDirection::Easier,
+    detail: Some("one more"),
+};
+
+const CONSOLES_FEWER: ActiveModifier = ActiveModifier {
+    name: "Consoles",
+    direction: ModifierDirection::Harder,
+    detail: Some("one fewer"),
+};
+
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
     name: "Intel to exit",
     direction: ModifierDirection::Harder,
@@ -494,6 +595,13 @@ pub(crate) struct PoolEntry {
 /// [`LevelModifiers::union`] composes it *harder-ward*, so an easier draw could not
 /// relax it without the draw learning to replace a knob rather than compose with it.
 /// Relaxing the gate is therefore a decision the pool does not quietly make.
+///
+/// **The intel count is out too, and for a sharper reason** (#207). It is symmetric
+/// like [`GuardCount`], so the mechanical objection above does not apply — but under
+/// quick play's [`IntelGate::All`] it moves the **win condition**, not the pressure on
+/// it, and a difficulty draw that quietly decided how many consoles a run must clear
+/// would be tuning quick play from inside a campaign ticket. It is driven by node
+/// flavour ([`Flavour`](crate::Flavour)) and by nothing else until someone measures it.
 ///
 /// **A symmetric knob is a different case, and both its ends are in** (#232,
 /// appendix 30). [`GuardCount`]'s baseline is a neutral middle rather than one end of
@@ -583,6 +691,7 @@ impl LevelModifiers {
             calm_guards_detect_only_their_cone,
             automatic_doors,
             guard_count,
+            intel_count,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -618,6 +727,14 @@ impl LevelModifiers {
             GuardCount::More => active.push(GUARDS_MORE),
             GuardCount::Fewer => active.push(GUARDS_FEWER),
         }
+        // The reward end of the same shape (§10.2/#207) — surfaced beside the guard
+        // count, so a Vault's card reads as the one trade it is: one more console,
+        // one more guard over it.
+        match intel_count {
+            IntelCount::Baseline => {} // the recipe's own count — nothing to surface
+            IntelCount::More => active.push(CONSOLES_MORE),
+            IntelCount::Fewer => active.push(CONSOLES_FEWER),
+        }
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
         // settings are "active", each with the direction its exposure rank implies.
         match intel_to_exit {
@@ -626,6 +743,28 @@ impl LevelModifiers {
             IntelGate::None => active.push(INTEL_GATE_NONE),
         }
         active
+    }
+
+    /// **The identity for [`union`](Self::union)** — a contribution that asks for
+    /// nothing: every toggle off, and every knob at the value that adds no pressure.
+    ///
+    /// **This is not [`default`](Self::default), and the difference is a trap worth
+    /// naming** (#207). The default is the *game's* baseline — §4.5's
+    /// [`IntelGate::AtLeastOne`], the middle of the exposure axis — and union composes
+    /// the gate *harder-ward*, so a source built from the default silently asks for a
+    /// gate one rung tighter than [`None`](IntelGate::None). A campaign facility, whose
+    /// chosen set says `None` because intel is currency (§2.2), would then have its exit
+    /// locked by a *flavour* that never mentioned the exit at all.
+    ///
+    /// So every **contributing source** ([`ModifierSources`]) starts from this, and only
+    /// the `chosen` source — the one that speaks for the whole run — starts from the
+    /// default. A source is a set of *departures*; this is the empty one.
+    #[must_use]
+    pub fn neutral() -> Self {
+        Self {
+            intel_to_exit: IntelGate::None,
+            ..Self::default()
+        }
     }
 
     /// Compose two contributions into one active set. A toggle is active if
@@ -656,6 +795,10 @@ impl LevelModifiers {
             // baseline wins, pressure breaking a tie" — the same promise over a knob
             // whose baseline is a neutral middle (#232).
             guard_count: self.guard_count.harder_of(other.guard_count),
+            // The same rule with the ends swapped (#207): scarcity is this knob's
+            // hard direction, so a flavour asking for fewer consoles cannot be talked
+            // out of it by a source that asked for more.
+            intel_count: self.intel_count.harder_of(other.intel_count),
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
         }
     }
@@ -666,10 +809,10 @@ impl LevelModifiers {
 ///
 /// This is the **activation hook** (§12.6): the campaign alert (#210) owns the
 /// *mapping* from alert level to a modifier contribution and drops it into
-/// [`alert`](Self::alert); node flavour (#207) is a future field. Each stays a
-/// distinct source — alert is endogenous, choice is exogenous, flavour is
-/// per-node — and [`resolve`](Self::resolve) is the single place they merge, so
-/// no source grows a private knob set the seam should own.
+/// [`alert`](Self::alert), and node flavour (#207) drops its own into
+/// [`flavour`](Self::flavour). Each stays a distinct source — alert is endogenous,
+/// choice is exogenous, flavour is per-node — and [`resolve`](Self::resolve) is the
+/// single place they merge, so no source grows a private knob set the seam should own.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ModifierSources {
     /// **Choice** — the player's chosen or seeded baseline (this crate's source).
@@ -677,7 +820,11 @@ pub struct ModifierSources {
     /// **Alert** — the campaign-alert contribution (#210), or `None` when no
     /// campaign layer is driving difficulty (all of v1 quick play).
     pub alert: Option<LevelModifiers>,
-    // Flavour (#207) is the third source: `pub flavour: Option<LevelModifiers>`.
+    /// **Flavour** — what the map node you chose makes of the facility (#207), or
+    /// `None` outside a campaign. A [`Flavour`](crate::Flavour)'s whole mechanical
+    /// existence is the set it puts here: the offer on the map screen and the facility
+    /// you walk into are then the same statement, one drawn and one played.
+    pub flavour: Option<LevelModifiers>,
 }
 
 impl ModifierSources {
@@ -689,6 +836,7 @@ impl ModifierSources {
         Self {
             chosen,
             alert: None,
+            flavour: None,
         }
     }
 
@@ -699,6 +847,9 @@ impl ModifierSources {
         let mut active = self.chosen;
         if let Some(alert) = self.alert {
             active = active.union(alert);
+        }
+        if let Some(flavour) = self.flavour {
+            active = active.union(flavour);
         }
         active
     }
@@ -806,9 +957,14 @@ mod tests {
             guards_always_search_hideouts: true,
             ..LevelModifiers::default()
         };
+        let flavour = LevelModifiers {
+            intel_count: IntelCount::More,
+            ..LevelModifiers::default()
+        };
         let resolved = ModifierSources {
             chosen,
             alert: Some(alert),
+            flavour: Some(flavour),
         }
         .resolve();
         assert!(resolved.always_show_vision_cones);
@@ -896,7 +1052,7 @@ mod tests {
         assert_eq!(fewer.active()[0].detail, Some("one fewer"));
 
         // Several sources at once: every active field is listed, in reading order.
-        // **Eight, not nine, with every field set** — `calm_guards_detect_only_their_cone`
+        // **Nine, not ten, with every field set** — `calm_guards_detect_only_their_cone`
         // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
         // asked for is the rule the level plays regardless, so a caption for it would
         // tell the player about a difference that no longer exists.
@@ -909,9 +1065,10 @@ mod tests {
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guard_count: GuardCount::More,
+            intel_count: IntelCount::Fewer,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 8);
+        assert_eq!(stacked.active().len(), 9);
         assert!(
             !stacked
                 .active()
@@ -969,6 +1126,7 @@ mod tests {
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
             guard_count: GuardCount::Baseline,
+            intel_count: IntelCount::Baseline,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -980,6 +1138,7 @@ mod tests {
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guard_count: GuardCount::Fewer,
+            intel_count: IntelCount::More,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);
@@ -991,6 +1150,9 @@ mod tests {
         // nothing, `b` asked for fewer guards, and the source that stayed quiet does
         // not get to overrule the one that spoke.
         assert_eq!(both.guard_count, GuardCount::Fewer);
+        // And the intel knob the same way, with its ends the other way up: `b` asked
+        // for one more console and nothing objected, so one more it is (#207).
+        assert_eq!(both.intel_count, IntelCount::More);
         // Union with the baseline changes nothing.
         assert_eq!(a.union(LevelModifiers::default()), a);
     }
@@ -1029,6 +1191,7 @@ mod tests {
                 guard_count: Fewer,
                 ..LevelModifiers::default()
             },
+            flavour: None,
             alert: Some(LevelModifiers {
                 guard_count: More,
                 ..LevelModifiers::default()

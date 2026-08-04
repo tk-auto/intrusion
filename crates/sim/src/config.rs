@@ -25,7 +25,8 @@
 //! a paired A/B (#257) rests on.
 
 use intrusion_core::{
-    AbilityId, AlertTuning, GuardCount, IntelGate, LevelConfig, LevelModifiers, LevelSeed, Loadout,
+    AbilityId, AlertTuning, GuardCount, IntelCount, IntelGate, LevelConfig, LevelModifiers,
+    LevelSeed, Loadout,
 };
 
 /// What every run in a batch boots from (§13.2): the facility recipe, the modifiers
@@ -266,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 8] = [
+const MODIFIERS: [(&str, SetModifier); 10] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -291,6 +292,13 @@ const MODIFIERS: [(&str, SetModifier); 8] = [
     // sweep makes, now reachable as a level modifier rather than as a recipe override.
     ("guard-count-more", |m| m.guard_count = GuardCount::More),
     ("guard-count-fewer", |m| m.guard_count = GuardCount::Fewer),
+    // The **intel-count knob**'s two ends (§10.2/#207) — the campaign map's reward axis,
+    // reachable here for the same reason the guard knob is: it changes what placement
+    // seats and nothing about the carve, so a batch that names one plays the baseline's
+    // building with a console added or dropped. Worth sweeping on its own account under
+    // `--intel-gate all`, where a console is an objective rather than loot.
+    ("intel-count-more", |m| m.intel_count = IntelCount::More),
+    ("intel-count-fewer", |m| m.intel_count = IntelCount::Fewer),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -579,6 +587,7 @@ mod tests {
             calm_guards_detect_only_their_cone,
             automatic_doors,
             guard_count,
+            intel_count,
             intel_to_exit,
         } = all.modifiers;
         assert!(guards_always_search_hideouts);
@@ -590,6 +599,7 @@ mod tests {
         // The knob's two ends are two names over one field, so naming both leaves the
         // one named last rather than accumulating — see [`RunConfig::with_modifier`].
         assert_eq!(guard_count, GuardCount::Fewer);
+        assert_eq!(intel_count, IntelCount::Fewer);
         assert!(
             !calm_guards_detect_only_their_cone,
             "the retired slot has no name, so naming every modifier must not set it",
