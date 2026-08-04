@@ -1376,7 +1376,7 @@ fn the_open_frame_is_the_panel_showing_the_run_modifiers() {
     let row0: String = (0..g.width()).map(|x| g.get(x, 0).glyph).collect();
     // The tab bar, not the near line: both tabs and the close control.
     assert!(
-        row0.contains("[Level info]"),
+        row0.contains("[Level]"),
         "the tab bar heads the panel: {row0:?}"
     );
     assert!(row0.contains("[Abilities]") && row0.contains("[Help]"));
@@ -1447,20 +1447,16 @@ fn the_panel_is_reachable_to_open_and_escapable_once_open() {
 
     // Open: the panel is escapable by touch — the `[x]` closes, a tab switches.
     let height = closed.height;
+    let open = ScreenUi {
+        help_open: true,
+        ..ScreenUi::default()
+    };
     assert!(matches!(
-        help_hit(
-            width,
-            height,
-            HelpTab::default(),
-            s.level(),
-            false,
-            width - 2,
-            0
-        ),
+        help_hit(width, height, open, s.level(), width - 2, 0),
         Some(HelpHit::Close)
     ));
     assert!(matches!(
-        help_hit(width, height, HelpTab::default(), s.level(), false, 2, 0),
+        help_hit(width, height, open, s.level(), 2, 0),
         Some(HelpHit::Tab(_))
     ));
 }

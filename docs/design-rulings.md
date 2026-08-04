@@ -1604,3 +1604,80 @@ unexplored wing goes so empty that it reads as *nothing there* rather than *not 
 there*. The fabric glyph is now carrying that whole message alone, so if the plan stops
 registering, the lever is the glyph's weight — `░`, or `▒` with a dim of its own
 (`render-reference.md` §2.4) — and not putting the floor marks back.
+
+---
+
+## Appendix 34 — Debug mode ships hidden in every build
+
+*(§12.6; `crates/web/src/debug.rs`, `crates/core/src/render/help.rs`. Ticket #459.)*
+
+This appendix exists because the decision it records **reverses a stated one**, and the
+reversed decision was right for the reasons it gave. Both halves need to survive
+together, or the next reader will re-argue whichever half is missing.
+
+### What was decided before, and why it was right
+
+`DebugModifiers` sits beside the level modifiers *as the contrast* (§12.6): a level is
+shared, and everything in it is part of what the run **is**; a debug switch is the
+opposite of shared. So the two got separate carriers, and the debug one was
+deliberately narrow — a `window.__intrusionDebug` global that only a build could stamp.
+The module said so in as many words: *there is deliberately no URL form and no in-game
+surface — a `?debug=` parameter would make the fog liftable by anyone who read a link,
+which is exactly what the split exists to prevent.*
+
+That argument is sound. A link is the one thing that travels between people, and a
+level travelling with the fog pre-lifted would be a level that plays a different game
+than the one its sender played.
+
+### What was wrong with it anyway
+
+**A deployed build you cannot inspect is a build you cannot debug.** Every switch was
+reachable only by rebuilding — which is available for an artifact preview and not at
+all for the Pages deploy. So the loop for "a run on the live page did something
+strange" was: fail to reproduce it, rebuild with `--debug reveal`, roll a different
+run, and look at that instead. The switch was in the wrong place to be used at the one
+moment it was wanted.
+
+### The reversal, and the three things that keep it honest
+
+Debug mode is now **compiled into every build, hidden rather than stripped**: on by
+default in artifact builds, and activatable anywhere with `?debug=intruded`. It puts a
+fourth **Debug** tab on the help panel carrying the omni-vision switch (now flippable
+mid-run) and the replay export.
+
+The residual risk — that the activation, once done, rides along in a link — is designed
+against rather than accepted:
+
+1. **The value is a shibboleth.** `intruded`, not `1`. Nobody arrives at it by reading
+   a link or trying the obvious parameter; you have to have been told.
+2. **The parameter is stripped the moment it is consumed** (`history.replaceState`).
+   This is the load-bearing one. `seed.rs` reflects the live run into the URL hash to
+   keep the address bar shareable, and a query parameter survives that untouched — so
+   without the strip, "copy the URL, send it to someone" would hand over the reveal
+   along with the run, which is *precisely* the failure the split was built to stop.
+   With it, activation is a thing you **do**, not a thing the page carries.
+3. **Nothing behind the gate may touch the facility.** The gate is a convention, not a
+   mechanism: the string is in the shipped wasm for anyone who reads it. That is
+   acceptable for a switch that only alters what one person sees, and it is exactly why
+   the §12.6 line has to stay sharp. A future switch that would change the *game* does
+   not belong on this tab; it is a level modifier and belongs in the token.
+
+Neither the level-seed token nor the replay link may ever encode debug state, and
+`State::with_debug` stays documented as not part of the level. The omni-vision toggle
+is safe to expose at runtime for the same reason the baked switch was safe: it is
+applied in the sight phase and read by no rule, which the tests assert (a run flipped
+mid-way replays identically to one never flipped) rather than assume.
+
+### Two consequences taken deliberately
+
+- **`replay [r]` left the Level info tab.** Exporting a run is a debugging affordance;
+  the Level info tab describes the run's rules, and its `copy [c]` — the level, for
+  sharing — is what belongs there. The key moved with the control, and
+  `help_nav_for_key` stops offering it where the tab is absent: a key that silently
+  does nothing teaches a control that is not on screen to contradict it.
+- **The tab bar had to give up a word.** Four `[Label]`s plus the `[x]` do not fit 40
+  columns (§10.2), so *Level info* became **`[Level]`** on the bar — the tab's own
+  heading already says `THIS RUN`, which made the extra word the most expendable five
+  cells on the panel. The bar's fit is now a **compile-time** check over the whole tab
+  vocabulary, so the fifth tab (§14 v2's options) fails the build rather than arriving
+  half-drawn over the close control.

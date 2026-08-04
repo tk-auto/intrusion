@@ -1000,6 +1000,94 @@ fn the_debug_reveal_leaves_the_guards_and_the_world_alone() {
     }
 }
 
+/// **The switch may be flipped mid-run, and the run does not notice** (§12.6/#459).
+/// This is the property the Debug tab's `omni [v]` control rests on: the reveal is
+/// applied in the sight phase and read by no rule, so a run played with it flipped on
+/// and off partway through steps exactly as the same run played without it — same
+/// poses, same guard states, same detection, same alert, same outcome.
+///
+/// Asserted rather than assumed, because it is the whole argument for putting a
+/// runtime control behind a gate that is a convention rather than a mechanism: what
+/// sits behind it must only ever change the picture.
+#[test]
+fn flipping_the_reveal_mid_run_changes_nothing_but_the_picture() {
+    let build = || {
+        State::new(
+            open_room(20, 20),
+            Cell::new(5, 5),
+            Direction::South,
+            vec![Guard::patrolling_to(Cell::new(12, 12), Cell::new(12, 16))],
+            [Cell::new(9, 9)],
+            Cell::new(18, 18),
+        )
+    };
+    let script = [
+        Input::Step(Direction::South),
+        Input::Step(Direction::East),
+        Input::Wait,
+        Input::Step(Direction::South),
+        Input::Step(Direction::East),
+        Input::Wait,
+    ];
+    let mut plain = build();
+    let mut flipped = build();
+    for (i, input) in script.into_iter().enumerate() {
+        // On before the third input, off again before the fifth — the switch moving
+        // under a run in progress, which is what a watcher actually does.
+        if i == 2 || i == 4 {
+            flipped.toggle_reveal();
+        }
+        plain.step(input);
+        flipped.step(input);
+    }
+    assert!(
+        !flipped.debug().reveal_whole_level,
+        "the run ends with the switch back off",
+    );
+    assert_eq!(plain.player(), flipped.player());
+    assert_eq!(plain.facing(), flipped.facing());
+    assert_eq!(plain.turn(), flipped.turn());
+    assert_eq!(plain.outcome(), flipped.outcome());
+    assert_eq!(plain.alert(), flipped.alert());
+    assert_eq!(plain.intel_in_hand(), flipped.intel_in_hand());
+    for (a, b) in plain.guards().iter().zip(flipped.guards()) {
+        assert_eq!(a.pos(), b.pos(), "a guard walks the same beat");
+        assert_eq!(a.state(), b.state(), "…in the same state of mind");
+        assert_eq!(a.detected_player(), b.detected_player());
+    }
+}
+
+/// The switch takes hold **on the frame it is flipped**, not on the next action
+/// (§12.6/#459) — the same reason [`State::with_debug`] re-runs the sight phase. A
+/// control that only worked once you had moved would read as broken.
+#[test]
+fn the_reveal_takes_hold_on_the_frame_it_is_flipped() {
+    let guard = Cell::new(20, 34);
+    let mut state = State::new(
+        open_room(40, 40),
+        Cell::new(20, 20),
+        Direction::North,
+        vec![Guard::stationary(guard)],
+        Vec::new(),
+        Cell::new(38, 38),
+    );
+    assert!(!state.player_fov().contains(guard), "precondition: fogged");
+
+    state.toggle_reveal();
+    assert!(state.debug().reveal_whole_level);
+    assert!(
+        state.player_fov().contains(guard),
+        "the fog lifts without stepping the world",
+    );
+
+    state.toggle_reveal();
+    assert!(!state.debug().reveal_whole_level);
+    assert!(
+        !state.player_fov().contains(guard),
+        "…and sight is the player's own again",
+    );
+}
+
 /// #310: what is still **out** is not what is still **needed**. The tally counts
 /// consoles; [`State::intel_needed_to_exit`] answers the run's gate (§4.5/#244), and
 /// [`State::exit_ready`] is exactly that count at zero — the one fact every objective

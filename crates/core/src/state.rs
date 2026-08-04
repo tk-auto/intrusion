@@ -947,11 +947,30 @@ impl State {
         self
     }
 
-    /// The debug modifiers this build was baked with (§12.6) — read in the sight
-    /// phase, and nowhere in the rules.
+    /// The debug modifiers in force (§12.6) — read in the sight phase, and nowhere in
+    /// the rules.
     #[must_use]
     pub fn debug(&self) -> DebugModifiers {
         self.debug
+    }
+
+    /// Flip the **omni-vision** switch on a running game (§12.6/#459) — the live half
+    /// of [`with_debug`](Self::with_debug), for the debug session's `omni [v]` control.
+    ///
+    /// A mid-run flip is safe for exactly the reason the baked switch is: it is applied
+    /// in the sight phase and read by no rule, so the recompute it triggers changes
+    /// what the player perceives and nothing else. Sight is pure (no RNG, §12.4), so
+    /// this consumes nothing from the run's stream and the run replays identically
+    /// whether it was flipped or not — the property the panel's control rests on, and
+    /// the one the tests pin rather than assume.
+    ///
+    /// It costs no turn (§4.4): the world does not step, no guard moves, and the frame
+    /// after is the frame before with more (or less) of it visible. What was seen while
+    /// it was on stays **remembered** afterwards (§11.5a), because memory accumulates
+    /// from sight like it does for any cell — switching it off is not a way to unsee.
+    pub fn toggle_reveal(&mut self) {
+        self.debug.reveal_whole_level = !self.debug.reveal_whole_level;
+        self.recompute_sight();
     }
 
     /// Thread the run's whole [`LevelSeed`] into the state (§12.4/#245) — the boot
