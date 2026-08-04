@@ -1,0 +1,1 @@
+player.ase => tile=48*48 sheet=768*768 (16x16)
