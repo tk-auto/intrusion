@@ -532,3 +532,64 @@ The check is **exact**, not tolerant, because determinism makes it able to be: a
 single moved digit is a real behaviour change, and whether that change is *good*
 is the human judgement the playtest skill owns (§13.4). A red run says the
 snapshot is stale, not that the game is broken — refresh it and commit.
+
+## Writing a test here: pin the witness, never hunt for one
+
+This crate's tests are the only ones in the workspace that pay for **whole runs**,
+and a run is expensive: ~30 ms to carve the facility, ~100 ms more to walk it to an
+ending. A test that sweeps for a rare verb — "somewhere in 400 seeds the bot bumps a
+comms console" — buys hundreds of runs on every gate run to re-derive a fact that
+does not change between commits. Left unchecked that is how this suite grew to 94
+seconds while the 944 tests in `intrusion-core` took 14.
+
+So the rule, for **every** existence-shaped test — one that walks runs until the bot
+does some particular thing and then asserts about it:
+
+**Pin one seed on which the thing happens. Do not search for one at test time.**
+
+```rust
+/// The pinned seed on which `balanced` drops a fake (see [`witness_sweep`]).
+const WITNESS: u64 = 2;
+
+for seed in witness_sweep(WITNESS, 0..40) {
+    // … walk the run, assert the rule on every press …
+}
+assert!(dropped > 0, "{}", stale_witness("drops a decoy", WITNESS));
+```
+
+[`witness_sweep`](src/test_support.rs) walks **the witness alone** by default and the
+**whole range** under `INTRUSION_SLOW_TESTS`, which CI sets — so the universal half of
+the claim ("*every* decoy is dropped at a search") keeps its original width on every
+push, while the local gate pays for one run.
+
+Three things follow from the rule, and they are the point of it:
+
+- **A red witness is a finding, not a chore.** When generation moves and the pinned
+  seed stops exhibiting the verb, the test fails naming its own remedy: sweep with
+  `INTRUSION_SLOW_TESTS=1`, take a seed that still does, pin that one. The cost of
+  re-finding a witness falls on the change that moved it, which is the change that
+  should be paying it — not on every gate run by everybody else.
+- **It is not the hand-picked *window* that #387 rejected.** A window (`100..170`,
+  chosen because a duck happened to land in it) hides the failure: the range empties
+  and the test reads as a policy regression. A witness is one seed, named, with the
+  verb it witnesses written beside it — when it goes stale the message says so and
+  says what to do.
+- **Negatives keep a sweep.** "This temperament *never* does X" has no witness to pin,
+  because that is what makes it a negative. Use
+  [`negative_sweep`](src/test_support.rs): a spread of 8 seeds locally, the full range
+  in CI — core's own #60 bargain.
+
+Two companions to reach for while you are there:
+
+- **[`boot`](src/test_support.rs) is memoised** — booting a seed twice costs 25 µs the
+  second time, not 30 ms. Always boot through it rather than calling `generate_level`.
+- **[`profile_batch`](src/test_support.rs) is the one shared batch per temperament.**
+  A test that asserts on a batch's *shape* — outcomes are mixed, the striking profiles
+  work the body chain, two temperaments do not play alike — reads this rather than
+  walking its own 60 runs. Those tests were each buying the same four batches
+  separately; now they share one walk. If you need a batch that differs (a modifier, a
+  loadout, another seed range) walk your own, and say in the doc comment why the shared
+  one would not do.
+
+The rulings appendix for all of this is **appendix 36** in
+[`docs/design-rulings.md`](../../docs/design-rulings.md).
