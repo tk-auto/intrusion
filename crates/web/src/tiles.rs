@@ -37,11 +37,12 @@
 //! radius of the tile mode — with tiles on it paints identically, because it is
 //! literally the same code.
 //!
-//! **The cell size.** Sprites are authored to the 14x20 glyph cell's aspect (at 2x,
-//! [`TILE_W`] x [`TILE_H`]), so `fit_and_draw`'s arithmetic and every hit test — the
-//! help button, the ability bar, the tab bar — are untouched. Square tiles would mean
-//! the map keeping its own metric while the HUD rows keep the text one, which breaks
-//! the single-grid fit; that is step 2's problem and step 1 refuses it.
+//! **The cell size.** A sprite is drawn *into* the 14x20 glyph cell, squashed from the
+//! square [`TILE`] it was authored at, so `fit_and_draw`'s arithmetic and every hit
+//! test — the help button, the ability bar, the tab bar — are untouched. Square
+//! *cells* would mean the map keeping its own metric while the HUD rows keep the text
+//! one, which breaks the single-grid fit; that is step 2's problem and step 1 refuses
+//! it.
 //!
 //! **Text.** Tiling letters would be a font, not a tileset, so a tile is drawn only
 //! where the glyph *is the world*: on cells the core tags [`Surface::Board`]. The near
@@ -83,10 +84,9 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{Game, Metrics};
 
-/// The placeholder tileset, embedded in the wasm (see the module note on delivery).
-/// Regenerate it with `scripts/make-placeholder-tiles.py`, which also documents the
-/// sheet contract real art has to satisfy; `docs/render-reference.md` §6 is the prose
-/// form of the same rule.
+/// The tileset, embedded in the wasm (see the module note on delivery). Built by
+/// `scripts/build-tileset.py` out of the source art beside it, which also states the
+/// sheet contract; `docs/render-reference.md` §6 is the prose form of the same rule.
 const SHEET: &[u8] = include_bytes!("../../../web/assets/tiles.png");
 
 /// The sheet's cells per row. A sprite's index is `row * SHEET_COLS + col`, so the
@@ -94,11 +94,19 @@ const SHEET: &[u8] = include_bytes!("../../../web/assets/tiles.png");
 /// existing one.
 const SHEET_COLS: u32 = 8;
 
-/// One sprite's source size: the 14x20 glyph cell ([`crate::CELL_W`]/[`crate::CELL_H`])
-/// at **2x**, so a board fitted to a high-DPI screen has real pixels to draw from.
-/// The *destination* is always the fitted cell, so this number is invisible to layout.
-const TILE_W: f64 = 28.0;
-const TILE_H: f64 = 40.0;
+/// One sprite's source size on the sheet. **Square**, while the destination cell is
+/// the 14x20 glyph box ([`crate::CELL_W`]/[`crate::CELL_H`]) scaled to the fit — so a
+/// sprite is squashed about 30% narrower than it was drawn.
+///
+/// That is the deliberate trade #460 makes. Authoring square is what tile art *is*,
+/// and squashing at draw time costs nothing but the aspect; the alternative — giving
+/// the map its own square metric while the §11.4 HUD rows keep the text one — breaks
+/// the single-grid fit that every hit test is built on, and is step 2's problem.
+///
+/// Kept at the source art's own 48px rather than pre-scaled to the cell: the board is
+/// routinely fitted *larger* than that, so downsampling here would throw away
+/// resolution the browser then wishes it had.
+const TILE: f64 = 48.0;
 
 /// The URL field that turns the tile mode on, and the two values it answers to.
 ///
@@ -120,8 +128,8 @@ const TILES_OFF: &str = "0";
 ///
 /// The order is the sheet's own layout, in index order: building fabric and furniture
 /// first, then the goals a plan is drawn around, then the things that move.
-/// `scripts/make-placeholder-tiles.py` writes its sprites in this same order, and the
-/// tests below assert the set covers every glyph `docs/render-reference.md` §2 lists.
+/// `scripts/build-tileset.py` writes its sprites in this same order, and the tests
+/// below assert the set covers every glyph `docs/render-reference.md` §2 lists.
 const SPRITES: [(char, u32); 14] = [
     ('#', 0),  // wall
     ('□', 1),  // the schematic's building fabric (§11.5a)
@@ -238,8 +246,8 @@ impl Tiles {
             return false;
         };
         let (sx, sy) = (
-            f64::from(index % SHEET_COLS) * TILE_W,
-            f64::from(index / SHEET_COLS) * TILE_H,
+            f64::from(index % SHEET_COLS) * TILE,
+            f64::from(index / SHEET_COLS) * TILE,
         );
         // Errors here mean an invalid surface, the same condition `fill_text` ignores;
         // there is nothing a frame can do about it and nothing to fall back *to*.
@@ -247,8 +255,8 @@ impl Tiles {
             &atlas,
             sx,
             sy,
-            TILE_W,
-            TILE_H,
+            TILE,
+            TILE,
             x * m.cell_w,
             y * m.cell_h,
             m.cell_w,

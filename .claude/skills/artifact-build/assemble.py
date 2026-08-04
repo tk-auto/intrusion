@@ -81,6 +81,17 @@ def main() -> None:
                          "included. The build boots straight into the replay viewer "
                          "at K=0. It carries its own level, so do not also pass "
                          "--seed.")
+    ap.add_argument("--tiles", action="store_true",
+                    help="bake the TILE RENDERER on (§11.1/#460): the map draws "
+                         "sprites from the embedded spritesheet instead of "
+                         "characters, in the same colours. The page carries it as "
+                         "`window.__intrusionTiles`, which is how a preview reaches "
+                         "the mode at all — the artifact host strips the URL hash and "
+                         "frames the page, so `?tiles=1` cannot get in. A viewer can "
+                         "still turn it back OFF with `?tiles=0` if the host passes a "
+                         "query through, so one build shows both renderers. It "
+                         "changes only how the grid is PAINTED: the core emits the "
+                         "identical grid either way.")
     ap.add_argument("--debug", default=None, metavar="FLAGS",
                     help="bake playtest-only DEBUG switches into the page: a "
                          "comma-separated list from " + ", ".join(DEBUG_FLAGS) +
@@ -199,6 +210,13 @@ def main() -> None:
     # --no-debug-mode leaves it off, for a preview meant to be judged as the deploy.
     if not args.no_debug_mode:
         globals_js += f"window.__intrusionDebug = {json.dumps(','.join(debug_flags))};\n"
+    # The tile mode's carrier (crates/web/src/tiles.rs), separate again and for a
+    # narrower reason: it is neither part of what a run *is* (so not the level token)
+    # nor a playtest switch (so not the debug list) — it is a presentation preference,
+    # and the only reason it needs a global at all is that this host eats the URL a
+    # player would otherwise set it in. Its PRESENCE is the mode.
+    if args.tiles:
+        globals_js += 'window.__intrusionTiles = "1";\n'
     seed_line = globals_js
 
     boot = f"""

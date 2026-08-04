@@ -642,3 +642,71 @@ underneath. Fogging an effect's footprint would teach you its extent only where 
 were already looking, which is exactly the corner the flash exists to light — so
 `Effect` paints one strength everywhere. `Sensed` is not fogged either; its two
 strengths are spent on **age** instead (§4.2).
+
+---
+
+## 6. Tiles
+
+An **optional second renderer** (§11.1 **[SETTLED]**, #460), off by default and turned
+on with `?tiles=1`. The character grid stays the game's real picture; a tile is a
+second way of painting the same grid, and the fact that it changes nothing about what
+the grid *says* is the whole point of the seam.
+
+**The rule is one tile per glyph.** A sprite is chosen by the cell's glyph and by
+nothing else — no neighbour lookup, no autotiling, no rotation, no animation. The
+colour is not chosen by the tileset either: the cell resolves to a colour through §4
+exactly as a character would, and the sprite is drawn *in that colour*. So a tile and
+a glyph carry identical information, in all four knowledge states (§3) and both themes
+(§4.4), and the two renderers can never disagree about what a cell means.
+
+Sprites are therefore authored **greyscale with alpha**: the alpha is the shape, and
+the greys are shading that the category tint multiplies through. Full-colour art is
+not an option and never will be while §11.2 stands — a guard's yellow → orange → red
+*is* the AI state machine made visible (§2.1), so a sprite carrying its own palette
+would leave the threat ladder nowhere to live.
+
+**What tiles do not touch:**
+
+- **Backgrounds.** The §5 danger overlay, the sensed cue and the effect wash are the
+  same `fill_rect`s in the same order, painted before the glyph layer. The board's
+  most important read is outside the tile mode entirely.
+- **The cell.** A sprite is squashed into the same 14×20 box a character is drawn in,
+  so the fit and every hit test are untouched. Sprites are authored square, so they
+  come out about 30% narrower than drawn — the price of not moving the grid. Square
+  *cells* would need the map to carry its own metric while the §11.4 HUD rows kept the
+  text one, and that is a much larger change.
+- **Text.** A tile is drawn only where the glyph *is* the world — on cells the core
+  tags `Surface::Board`. Status lines, the ability bar, panels, the deployed log and
+  the verdict card are `Surface::Chrome` and always draw characters. That distinction
+  is per **cell**, not per row, because the log and the verdict lay prose *across the
+  map rows*: asked by row, every `g` in "a guard has seen you" would sprout a guard.
+
+**An unmapped glyph draws as its character.** The table is allowed to be incomplete —
+so is a sheet that has not finished decoding — and neither is an error. A glyph nobody
+has drawn yet must render as itself, never as a hole.
+
+### 6.1 The sheet
+
+`web/assets/tiles.png`, built by `scripts/build-tileset.py` from the source art in
+`web/assets/source/` (which has its own README, including the autotile legend the
+source sheet's first sixteen tiles follow). It is embedded in the wasm and handed to
+the browser as a `data:` URI, because the artifact build packs one self-contained page
+under a CSP that blocks every external request — and embedding for the Pages deploy
+too keeps it to one code path.
+
+| | |
+|---|---|
+| Format | PNG, RGBA, 8 cells per row, each cell 48×48 |
+| Index | `row × 8 + col`, listed in `crates/web/src/tiles.rs` |
+| Alpha | The shape |
+| Greys | Shading, multiplied through by the category tint |
+
+Tinting bakes one copy of the whole sheet per colour rather than compositing per cell
+— a 40×40 board every frame is what would make this expensive — and the colour set is
+closed and small (§4's categories × the knowledge states × the two themes, with most
+rows sharing the one dim shade), so the cache is bounded by construction.
+
+The art is **placeholder** and says so: the source sheets came out of an earlier Godot
+experiment, and their most useful part is an autotile run that step 1 deliberately
+cannot spend. Two of the fourteen sprites are lifted from them; the rest are crude
+generated shapes, waiting for step 2's autotiler to make the rest worth cutting.
