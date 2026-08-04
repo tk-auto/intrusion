@@ -168,6 +168,39 @@ pub struct ScreenUi {
     pub modality: InputModality,
 }
 
+impl ScreenUi {
+    /// The view state a **fresh facility** opens with (#473): a clean default,
+    /// except for what the *player* is and what the *build* is. A run is a new
+    /// world and the screen should not carry the last one's — no menu still up,
+    /// no help panel left open, no stale end screen — but three of these fields
+    /// are not about the run at all:
+    ///
+    /// - [`modality`](Self::modality) is a fact about the player's hands
+    ///   (§11.6/#323), so a fresh facility must not send a touch player back to
+    ///   reading keys;
+    /// - [`theme`](Self::theme) is a fact about the person looking at the screen
+    ///   (§11.2/#189) — the one they chose on the title screen is the one the run
+    ///   must open in;
+    /// - [`offer_replay_copy`](Self::offer_replay_copy) is a fact about the build
+    ///   (#411), set once at boot and true of every run it plays.
+    ///
+    /// It lives here, next to the fields, rather than being spelled out at the
+    /// shell's reset: that is how the theme came to be dropped in the first place —
+    /// the second theme landed (#189) and the shell's hand-written carry list was
+    /// simply not extended, so the choice made on the title screen died on the way
+    /// into the run. One named seam means the next field added answers the question
+    /// once, where the field is declared, and a test can name what survives.
+    #[must_use]
+    pub fn for_fresh_run(self) -> Self {
+        Self {
+            modality: self.modality,
+            theme: self.theme,
+            offer_replay_copy: self.offer_replay_copy,
+            ..Self::default()
+        }
+    }
+}
+
 /// The input vocabulary the player is actually using (§11.6/#323) — the one thing
 /// a shell knows about the player's hands that the core cannot derive from state.
 /// It decides how the usable line's floor words the two innate verbs

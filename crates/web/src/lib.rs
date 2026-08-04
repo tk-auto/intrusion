@@ -326,15 +326,13 @@ impl Game {
         // worlds would reproduce neither.
         self.recorded.clear();
         // A clean view state, except for what the *player* is — the modality the
-        // hint speaks (§11.6/#323) is a fact about their hands, not about the run,
-        // so a fresh facility must not send a touch player back to reading keys —
-        // and for what the *build* is: the copy-replay offer (#411) is the page's,
-        // not the run's.
-        self.ui = ScreenUi {
-            modality: self.ui.modality,
-            offer_replay_copy: self.ui.offer_replay_copy,
-            ..ScreenUi::default()
-        };
+        // hint speaks (§11.6/#323) is a fact about their hands and the colour theme
+        // (§11.2/#189) a fact about their eyes, neither of them about the run, so a
+        // fresh facility must not send a touch player back to reading keys nor open
+        // in a theme they turned off — and for what the *build* is: the copy-replay
+        // offer (#411) is the page's, not the run's. The carried set is named once,
+        // beside the fields, so a new one cannot be forgotten here (#473).
+        self.ui = self.ui.for_fresh_run();
         self.fit_and_draw();
         Ok(())
     }
