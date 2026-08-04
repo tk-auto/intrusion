@@ -252,6 +252,52 @@ keeping:
 > it on a screenshot of a full board and never on a unit test: the text frame looks
 > correct in every one of these variants.
 
+### 2.5 The campaign map (§14 v3, #208)
+
+A **different screen**, drawn in the same grid — the facility graph between raids, not
+the inside of a facility. Its glyphs are listed here because the whole point of one
+table is that a glyph is not free to mean two things.
+
+| Glyph | Means | Category |
+|---|---|---|
+| `@` | The facility you are standing on | Owned |
+| `o` | An **Outpost** — thin, and thinly guarded | Neutral; **Interest** when marked |
+| `▪` | A **Depot** — the ordinary facility | Neutral; **Interest** when marked |
+| `$` | A **Vault** — worth robbing, and watched | Neutral; **Interest** when marked |
+| `★` | The **archive** — the run's terminus | Interest |
+| `?` | An intel-locked route, not yet bought | Ground |
+| `▫` | A facility on the map, not on offer | Ground |
+| `·` | A road between two facilities | Ground |
+| *(any of the above)* | A facility already raided | Ground |
+
+**Three glyphs are borrowed, and each says the same thing it says on the board.** `@`
+is you, so *you are here* needs no legend. `$` is the intel console, so the rich
+facility reads as *the place with the loot in it*. And a facility that has been raided
+recolours to Ground exactly as a spent console does (§2.2's recolour rule): shape is
+what it is, colour is what it means to you now.
+
+`★` is the one glyph on this screen the game does not use elsewhere, which is right
+for the one place a run is trying to reach.
+
+**Why `▫` and not the flavour.** The country's *shape* is public and its *contents* are
+not — the §11.5a rule one scale up, which is why it reads without being taught.
+There is no fog on the map (§14 v3): every facility is drawn, so a glance says how far
+the archive is and how much room there is either side of your route. But a facility
+says **what** it is when it is offered, and not a hop before — drawing every flavour
+across the whole country would hand over for free what the scout sinks exist to sell
+(#215). `▫` is the schematic's `□` one screen over, and deliberately so: it is making
+the same claim about a facility that `□` makes about a wall — *something stands here,
+and you have not been*. Most monospace fonts draw the two at much the same weight, and
+nothing is lost by that, because **the two never share a screen**: `□` is only ever on
+the board and `▫` only ever on the map.
+
+**`▪` rather than `■` for a known facility.** The two squares are a matched pair at one
+size, so *known* against *unknown* differs by **fill and nothing else** — the single
+distinction the map is drawing. The large block was tried first and rejected on the
+light theme for §2.4's reason, one screen over: it is the heaviest ink the grid can put
+down, and it made an *unmarked* option pull the eye harder than the marked one, which
+is the selection marker's job.
+
 ---
 
 ## 3. Knowledge states

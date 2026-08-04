@@ -45,6 +45,7 @@
 //! actors (§7.5) straight from `Placement::guards`, so the shell never decides what
 //! a placed guard is; it just hands what placement built to the core.
 
+mod campaign;
 mod clipboard;
 mod debug;
 mod input;
@@ -59,8 +60,8 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use intrusion_core::{
-    render_screen, start_level, DebugModifiers, Grid, Input, LevelSeed, ScreenUi, State, Theme,
-    Visibility, BOTTOM_ROWS, TOP_ROWS,
+    render_map, render_screen, start_level, Campaign, DebugModifiers, Grid, Input, LevelSeed,
+    ScreenUi, State, Theme, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -193,6 +194,7 @@ pub fn start() -> Result<(), JsValue> {
             key_ramp: replay::ScrubRamp::default(),
             recorded: Vec::new(),
             tiles: tiles::Tiles::boot(),
+            campaign: None,
             handle: handle.clone(),
         })
     });
@@ -289,6 +291,13 @@ struct Game {
     /// they are the shell's, like the canvas, not the run's: [`Game::reseed`] leaves
     /// them alone, since a fresh facility is drawn with the same art.
     tiles: tiles::Tiles,
+    /// The **campaign** this run is part of (§14 v3/§12.7), or `None` in quick play —
+    /// the layer above [`state`](Game::state), which knows only its own facility.
+    ///
+    /// Held here rather than on [`ui`](Game::ui) because it is not view state: it is the
+    /// run, and it survives every facility the run walks through. `MapUi` on the view
+    /// state says whether the map is *showing*; this says whether there is a map at all.
+    campaign: Option<Campaign>,
     /// A weak handle back to the shell's own cell, closed at construction
     /// (`Rc::new_cyclic`). Every other input the shell takes is answered inside the
     /// call that raised it, so nothing else needs this; the clipboard write (§13.1/
@@ -306,13 +315,8 @@ impl Game {
     /// element itself fits (no scrolling), and paint. Called at boot and on every
     /// resize / orientation change.
     fn fit_and_draw(&mut self) {
-        let facility = self.state.layout().facility();
-        // The screen is the map plus the §11.4 status lines above it and the
-        // ability bar beneath it.
-        let (cols, rows) = (
-            facility.width() as f64,
-            (facility.height() + TOP_ROWS + BOTTOM_ROWS) as f64,
-        );
+        let (cols, rows) = self.screen_size();
+        let (cols, rows) = (cols as f64, rows as f64);
         let win = web_sys::window().expect("a window");
 
         let avail_w = viewport(&win, Window::inner_width).unwrap_or(cols * CELL_W);
@@ -342,6 +346,18 @@ impl Game {
         // rather than a fixed one that would tower over a small fit ([`menu`]).
         menu::set_glyph_size((CELL_H - 2.0) * scale);
         self.draw();
+    }
+
+    /// The whole frame's size in cells: the board plus the §11.4 status lines above it
+    /// and the ability bar beneath it.
+    ///
+    /// **Every screen is this size**, including the ones with no board behind them — the
+    /// menu, the end screen, the campaign map. Sizing them to the board is what keeps
+    /// starting a run a change to what is *drawn* and never to the fit, so no screen
+    /// transition ever resizes the canvas under the player.
+    fn screen_size(&self) -> (u32, u32) {
+        let facility = self.state.layout().facility();
+        (facility.width(), facility.height() + TOP_ROWS + BOTTOM_ROWS)
     }
 
     /// Rebuild the run from a new [`LevelSeed`] and repaint (§13.1 seed sharing /
@@ -378,9 +394,25 @@ impl Game {
     /// line, usable line — glyphs, overlaps and categories all decided there),
     /// then blit it — colour by category, glyph as given.
     fn draw(&self) {
+        // The campaign map is the one screen that is **not** a view of a [`State`]
+        // (§14 v3/#208): it draws the run, which sits above the facility, so it is asked
+        // for by name rather than composed by `render_screen`. Everything else about the
+        // frame — the fit, the paint, the theme, the tile layer — is identical, so the
+        // map is a full screen like the menu and never an overlay.
+        //
+        // It needs no tile decision of its own: every cell it draws is
+        // [`Surface::Chrome`](intrusion_core::Surface) — it is a panel, like the title
+        // screen and the help card — and the tile renderer draws only board cells
+        // (#460). So the layer is passed through the one paint call and declines by
+        // itself, rather than by this branch knowing anything about art.
+        let (cols, rows) = self.screen_size();
+        let grid = match (self.map_open(), self.campaign.as_ref()) {
+            (true, Some(run)) => render_map(cols, rows, run, self.ui.map.unwrap_or_default()),
+            _ => render_screen(&self.state, self.ui),
+        };
         paint(
             &self.ctx,
-            &render_screen(&self.state, self.ui),
+            &grid,
             &self.metrics,
             self.ui.theme,
             self.tiles.layer(),

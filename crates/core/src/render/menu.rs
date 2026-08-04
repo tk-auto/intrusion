@@ -4,12 +4,16 @@
 //! It is deliberately **thin**. §14 v1 is "quick play, and nothing else", and its
 //! warning is about exactly this kind of screen: *"everything outside the loop was
 //! scaffolding around an unanswered question. Don't do that again."* So the menu
-//! offers the two things that actually start a run today — **Quick play** (a fresh
-//! seeded facility off the clock) and **Seed play** (the level-seed token re-entry
-//! that used to be the always-on seed bar, §13.1/#110/#245) — and lists **Options**
-//! (§14 v2) and **Story mode** (§14 v3) as visibly *later*, inert entries. They are
-//! there so the menu has room to grow, and they do nothing at all: the moment one of
-//! them acts, it is v2/v3 work, not this screen.
+//! offers the things that actually start a run — **Quick play** (a fresh seeded
+//! facility off the clock), **Seed play** (the level-seed token re-entry that used to be
+//! the always-on seed bar, §13.1/#110/#245) and, since #208, **Story mode**, which opens
+//! the campaign map (§14 v3) — and lists **Options** (§14 v2) as a visibly *later*,
+//! inert entry. It is there so the menu has room to grow, and it does nothing at all:
+//! the moment it acts, it is v2 work, not this screen.
+//!
+//! Story mode was one of those inert entries until the map it needed existed, which is
+//! the shape this screen is meant to grow in: an entry becomes live when the thing
+//! behind it does, and not a ticket before.
 //!
 //! **Drawn in the character grid** (§11.1), like the help card ([`super::help`]) and
 //! for the same reasons: the whole screen is a pure function of its view state, so
@@ -27,8 +31,9 @@ use super::{blank_grid, draw, Grid};
 use crate::category::Category;
 use crate::difficulty::Difficulty;
 
-/// The entries on the main menu, top to bottom. Two start a run today; the other
-/// two are the §14 v2/v3 surfaces, listed as *later* and inert ([`enabled`]).
+/// The entries on the main menu, top to bottom. Three start a run today — quick play,
+/// a shared level, and the campaign; [`Options`](Self::Options) is the one §14 v2
+/// surface still listed as *later* and inert ([`enabled`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MenuEntry {
     /// A fresh seeded facility, straight in — the §14 v1 loop and the default
@@ -40,7 +45,8 @@ pub enum MenuEntry {
     SeedPlay,
     /// Settings (§14 v2 "options"; #189 light mode, #237 difficulty). **Later.**
     Options,
-    /// The campaign (§14 v3). **Later.**
+    /// **The campaign** (§14 v3/#208): a run as a forward walk through the facility
+    /// map. Opens the map screen, which is where a campaign is played from.
     StoryMode,
 }
 
@@ -70,7 +76,10 @@ impl MenuEntry {
     /// by tap — is a no-op. **This is the whole of their behaviour** (#268): a menu
     /// with room to grow, with nothing yet growing in it.
     pub fn enabled(self) -> bool {
-        matches!(self, MenuEntry::QuickPlay | MenuEntry::SeedPlay)
+        matches!(
+            self,
+            MenuEntry::QuickPlay | MenuEntry::SeedPlay | MenuEntry::StoryMode
+        )
     }
 
     /// The next **enabled** entry below this one, wrapping past the last. Disabled
@@ -786,17 +795,21 @@ mod tests {
         );
     }
 
-    /// §14's scaffolding warning, pinned: Options and Story mode are **visible but
-    /// inert** — tagged *later* on screen and answering `false` to
-    /// [`MenuEntry::enabled`], while the two that start a run answer `true`. If one
-    /// of them ever does something, this test is the reminder that it became v2/v3
-    /// work.
+    /// §14's scaffolding warning, pinned: an entry that is not built yet is **visible
+    /// but inert** — tagged *later* on screen and answering `false` to
+    /// [`MenuEntry::enabled`], while the ones that start a run answer `true`. If one of
+    /// them ever does something, this test is the reminder that it became v2/v3 work.
+    ///
+    /// **Story mode graduated** with #208: the campaign map it opens now exists, so it
+    /// answers `true` and carries no tag. That is the shape this screen is meant to grow
+    /// in — an entry goes live when the thing behind it does — and the row moving from
+    /// one side of this assertion to the other is the record of it.
     #[test]
     fn the_unbuilt_entries_are_listed_but_do_nothing() {
         assert!(MenuEntry::QuickPlay.enabled());
         assert!(MenuEntry::SeedPlay.enabled());
+        assert!(MenuEntry::StoryMode.enabled());
         assert!(!MenuEntry::Options.enabled());
-        assert!(!MenuEntry::StoryMode.enabled());
 
         let rows = render_menu(W, H, MenuUi::default()).to_text();
         for (i, entry) in MenuEntry::ALL.iter().enumerate() {
@@ -816,13 +829,18 @@ mod tests {
         assert_eq!(MenuEntry::QuickPlay.next(), MenuEntry::SeedPlay);
         assert_eq!(
             MenuEntry::SeedPlay.next(),
+            MenuEntry::StoryMode,
+            "next steps over the inert Options entry between them",
+        );
+        assert_eq!(
+            MenuEntry::StoryMode.next(),
             MenuEntry::QuickPlay,
             "next past the last enabled entry wraps to the first",
         );
         assert_eq!(MenuEntry::SeedPlay.prev(), MenuEntry::QuickPlay);
         assert_eq!(
             MenuEntry::QuickPlay.prev(),
-            MenuEntry::SeedPlay,
+            MenuEntry::StoryMode,
             "prev past the first wraps to the last enabled entry",
         );
         // A disabled entry can never be reached from either direction.

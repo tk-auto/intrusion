@@ -46,7 +46,10 @@ const SCREEN_ATTR: &str = "data-screen";
 const SCREEN_MENU: &str = "menu";
 const SCREEN_SEED: &str = "seed";
 const SCREEN_OPTIONS: &str = "options";
-const SCREEN_PLAY: &str = "play";
+pub(crate) const SCREEN_PLAY: &str = "play";
+/// The campaign map (§14 v3/#208). Like `play` it hides the seed box; it is named
+/// separately so the headless smoke check can tell a map from a board.
+pub(crate) const SCREEN_MAP: &str = "map";
 
 /// The view state a fresh load opens on: the menu's entry list, Quick play selected.
 pub(crate) fn opening_ui() -> ScreenUi {
@@ -81,7 +84,7 @@ pub(crate) fn set_glyph_size(css_px: f64) {
 /// Mirror the current surface onto `<body data-screen>`. Best-effort: a page whose
 /// body is somehow unavailable simply keeps the seed box hidden, which is the safe
 /// direction — the box is never the only way out of anything.
-fn set_screen(screen: &str) {
+pub(crate) fn set_screen(screen: &str) {
     if let Some(body) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.body())
@@ -183,7 +186,12 @@ impl Game {
             // *global* settings screen, a different thing entirely.
             MenuEntry::QuickPlay => self.show_level_options(),
             MenuEntry::SeedPlay => self.show_seed_prompt(),
-            MenuEntry::Options | MenuEntry::StoryMode => {}
+            // Story mode goes **straight to the map** (§14 v3/#208), with no dialog in
+            // front of it. There is nothing to ask: a campaign scales through its own
+            // alert (#210) rather than through the §12.6 difficulty axis, so the one
+            // control the quick-play dialog carries would have nothing to set.
+            MenuEntry::StoryMode => self.start_campaign(),
+            MenuEntry::Options => {}
         }
     }
 
@@ -276,6 +284,11 @@ impl Game {
     /// footprint always carves, so this is belt-and-braces).
     pub(crate) fn start_run(&mut self, level: LevelSeed, options: RunOptions) {
         if self.reseed(level).is_ok() {
+            // **A quick-play run is not part of a campaign**, so the last one is dropped
+            // here (§2.2: nothing survives a run). Without this a finished campaign would
+            // still be listening, and the verdict of a *quick-play* facility would arrive
+            // at a layer that has nothing to do with it (#208).
+            self.campaign = None;
             // The framing outlives the reset [`Game::reseed`] performs, because it is
             // a fact about *how the player is playing*, not about the facility they
             // are about to walk into — the same reasoning that keeps the modality and
@@ -300,6 +313,10 @@ impl Game {
     /// run can show through a modal menu that is drawn instead of the frame, nor survive
     /// the next run's own reset.
     pub(crate) fn show_menu(&mut self) {
+        // Leaving for the title screen ends the run, whatever kind it was — and a
+        // campaign is a run (§2.2). Dropping it here is the whole of "nothing carries
+        // across runs": the value goes, and the next campaign is built from scratch.
+        self.campaign = None;
         self.ui = ScreenUi {
             menu: Some(MenuUi::default()),
             ..self.ui

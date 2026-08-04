@@ -33,8 +33,8 @@
 //! at all (§11.6), so the band never leaves a player unable to wait.
 
 use intrusion_core::{
-    ability_at, help_hit, is_help_button, is_message_button, menu_hit, message_log_rows,
-    verdict_hit, AbilityId, EndExit, HelpHit, MenuHit, UiCommand, TOP_ROWS,
+    ability_at, help_hit, is_help_button, is_message_button, map_hit, menu_hit, message_log_rows,
+    verdict_hit, AbilityId, EndExit, HelpHit, MapHit, MenuHit, UiCommand, TOP_ROWS,
 };
 
 use crate::input::SWIPE_THRESHOLD_PX;
@@ -48,6 +48,8 @@ pub(crate) enum Control {
     /// A title-screen entry (§14/#268). The menu is modal, so while it is up this is
     /// the only control there is.
     Menu(MenuHit),
+    /// A control on the campaign map (§14 v3/#208) — a facility to raid, or the theme.
+    Map(MapHit),
     /// A control inside the open help panel (§14 v2/#248) — a tab, or the `[x]` close
     /// that keeps the touch path from ever trapping (§11.6).
     Help(HelpHit),
@@ -229,7 +231,10 @@ impl Game {
             // A finished run is modal too: the board behind the verdict is evidence
             // to read, not a surface to tap (§14 v2/#138) — and a stray wait on it
             // would be an input to a loop that is already over.
-            modal: self.ui.menu.is_some() || self.ui.help_open || self.state.verdict().is_some(),
+            modal: self.ui.menu.is_some()
+                || self.map_open()
+                || self.ui.help_open
+                || self.state.verdict().is_some(),
         }
     }
 
@@ -245,6 +250,13 @@ impl Game {
         let width = self.state.layout().facility().width();
         if let Some(menu) = self.ui.menu {
             return menu_hit(width, self.screen_height(), menu, col, row).map(Control::Menu);
+        }
+        // The campaign map is modal in the same strong sense (§14 v3/#208), and it comes
+        // **before** the verdict: between facilities there is a finished raid sitting on
+        // the `State` underneath, and its end screen must not answer a press aimed at the
+        // map that is drawn over it.
+        if let Some(run) = self.campaign.as_ref().filter(|_| self.map_open()) {
+            return map_hit(width, self.screen_height(), run, col, row).map(Control::Map);
         }
         // A finished run's verdict owns the frame next (§14 v2/#138) — the panel is
         // drawn over everything, so the chrome underneath must not answer a press
@@ -298,6 +310,7 @@ impl Game {
     pub(crate) fn apply_control(&mut self, control: Control) {
         match control {
             Control::Menu(hit) => self.apply_menu_hit(hit),
+            Control::Map(hit) => self.apply_map_hit(hit),
             Control::Help(hit) => {
                 self.apply_help_hit(hit);
                 self.draw();

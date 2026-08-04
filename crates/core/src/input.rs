@@ -214,6 +214,60 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
     }
 }
 
+/// A navigation command on the **campaign map** (§14 v3/#208) — the surface a campaign
+/// is played from between raids.
+///
+/// The same shape as [`MenuNav`], because it is the same shape of screen: a vertical
+/// list of facilities, walked by `↑`/`↓` and fired by `Enter`. A player who has used the
+/// title screen has already learned this one, which is most of why the map's list is a
+/// list rather than something cleverer.
+///
+/// There is deliberately **no `Back`**. The map is not a panel you opened over
+/// something: between facilities it *is* the game, and there is nothing underneath it to
+/// return to (§2.2 — no retry, no snapshot, and the last facility is gone).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MapNav {
+    /// Move the marker to the previous takeable facility, wrapping.
+    Prev,
+    /// Move the marker to the next takeable facility, wrapping.
+    Next,
+    /// **Raid the marked facility** — the one irreversible key on the screen (§2.1).
+    Activate,
+    /// Flip the colour theme (§11.2/#189), as on every other modal surface.
+    ToggleTheme,
+}
+
+/// Map a key to the [`MapNav`] it drives **while the campaign map is up**, or `None` for
+/// a key the modal screen swallows (§14 v3/#208).
+pub fn map_nav_for_key(key: &str) -> Option<MapNav> {
+    match key {
+        "ArrowUp" => Some(MapNav::Prev),
+        "ArrowDown" => Some(MapNav::Next),
+        "Enter" | " " => Some(MapNav::Activate),
+        "n" => Some(MapNav::ToggleTheme),
+        // `Escape` is **not** bound: there is nowhere back from the map, and a key that
+        // looked like a way out and did nothing is worse than one that is plainly not
+        // there (§11.6's no-trap rule read the other way round).
+        _ => None,
+    }
+}
+
+/// Map a gesture to the [`MapNav`] it drives (§11.6/#208) — the touch half of
+/// [`map_nav_for_key`].
+///
+/// **A press is deliberately unbound**, for the reason [`menu_nav_for_gesture`] gives
+/// and then some: entering a facility is not undoable in a permadeath game (§2.1), and
+/// on this screen a stray tap would not merely start a run, it would spend the one
+/// choice the map exists to offer. A facility is raided by pressing *its row*, and by
+/// nothing else.
+pub fn map_nav_for_gesture(gesture: Gesture) -> Option<MapNav> {
+    match gesture {
+        Gesture::Swipe(Direction::North) => Some(MapNav::Prev),
+        Gesture::Swipe(Direction::South) => Some(MapNav::Next),
+        _ => None,
+    }
+}
+
 /// A navigation command on the **end screen** (§14 v2/#138) — the third modal
 /// surface, and the narrowest: a finished run has nothing to step, so the only thing
 /// left to do is choose a way on.
