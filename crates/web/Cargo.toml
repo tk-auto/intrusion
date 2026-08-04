@@ -11,15 +11,14 @@ description = "Thin wasm-bindgen + canvas2d shell for Intrusion. Renders and fee
 # native gate (`cargo test/clippy --workspace`) can still compile and lint it.
 crate-type = ["cdylib", "rlib"]
 
-[features]
-# The preview-build tools (#411): the input recorder and the help panel's
-# `replay [r]` control, which copies the whole run as a `…#seed=&inputs=` link.
-# Off by default, so the Pages deploy ships without them; the artifact-build
-# skill switches them on, which is what makes an artifact preview capturable.
-# Deliberately a feature and not `cfg(debug_assertions)`: both builds a human
-# plays are `--release`, so a debug-assertions gate would put the tools in
-# exactly the builds nobody plays.
-debug-tools = []
+# There is deliberately **no feature list** (#478). The input recorder and the
+# help panel's `replay [r]` control were a `debug-tools` feature (#411), off in the
+# Pages deploy, from when the control sat on a tab every player could see. The
+# Debug tab is the gate now (#459), so the feature was asking "was this build made
+# for previewing?" when the live question is "is this a debug session?" — and once
+# the deploy wanted it too, the axis had one setting everywhere and was no longer
+# a switch. The recorder ships in every build; `ScreenUi::debug_mode` decides
+# whether anything can reach it.
 
 [dependencies]
 intrusion-core = { path = "../core" }

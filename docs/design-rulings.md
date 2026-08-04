@@ -1755,3 +1755,21 @@ mid-way replays identically to one never flipped) rather than assume.
   cells on the panel. The bar's fit is now a **compile-time** check over the whole tab
   vocabulary, so the fifth tab (§14 v2's options) fails the build rather than arriving
   half-drawn over the close control.
+
+### Follow-up: the recorder ships everywhere (#478)
+
+The tab shipped with `replay [r]` still behind the `debug-tools` cargo feature it had
+carried since #411, which `pages.yml` does not build with — so the first deployed debug
+session could lift the fog and could not hand over the run, which is the more useful
+half. The feature was answering *"was this build made for previewing?"* when the live
+question had become *"is this a debug session?"*, and the tab above already answers
+that. Turning it on for the deploy would have left an axis with one setting in every
+build shipped, so the feature is gone instead: every build records, and
+`ScreenUi::offer_replay_copy` collapsed into `debug_mode` — one flag, one question.
+
+It widens what the shibboleth unlocks, so it is worth restating that the rule holds:
+exporting a replay **reads** the run and changes nothing in it, and the link is the
+level's token plus the input script, carrying no debug state. The cost is a small
+`Copy` enum pushed per turn in every session — a couple of thousand of them across a
+long run, tens of kilobytes — for a strange run being reproducible by whoever it
+happened to.

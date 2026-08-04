@@ -146,16 +146,15 @@ pub struct ScreenUi {
     /// only decides what that outcome *looks like*, so [`render_help`] keeps writing
     /// no state and the copy still costs no turn (§4.4).
     pub seed_copy: SeedCopy,
-    /// Whether this build offers the Debug tab's `replay [r]` control
-    /// (§12.4/§13.1/#411) — the copy-the-whole-run affordance of preview builds. A
-    /// shell built with its recorder switched on sets this once at boot; the core
-    /// only owns what the control looks like and where it is
-    /// ([`help_hit`](crate::help_hit)). Default `false`, so the public deploy, the
-    /// sim and every test draw the panel without it.
-    pub offer_replay_copy: bool,
     /// Whether this is a **debug session** (§12.6/#459) — the one thing that puts the
     /// help panel's [`HelpTab::Debug`] tab on the bar, with the omni-vision switch and
-    /// (where the build has a recorder) the replay export on it.
+    /// the replay export (§12.4/§13.1/#411) on it.
+    ///
+    /// It used to take a second flag beside this one, for whether the *build* had an
+    /// input recorder behind that export. Every build has one since #478, so the two
+    /// always agreed and one of them was answering a question nobody was asking any
+    /// more: the live question is not "was this build made for previewing?" but "is
+    /// this a debug session?", which is this.
     ///
     /// It is the shell's word, decided once at boot and never by the run: a build that
     /// stamped it in (the artifact preview channel) or a page opened with the
@@ -192,8 +191,6 @@ impl ScreenUi {
     /// - [`theme`](Self::theme) is a fact about the person looking at the screen
     ///   (§11.2/#189) — the one they chose on the title screen is the one the run
     ///   must open in;
-    /// - [`offer_replay_copy`](Self::offer_replay_copy) is a fact about the build
-    ///   (#411), set once at boot and true of every run it plays;
     /// - [`debug_mode`](Self::debug_mode) is a fact about the **session**
     ///   (§12.6/#459) — a page opened as a debug session stays one, whatever run it
     ///   is playing, and nothing a run can do turns it on or off.
@@ -209,7 +206,6 @@ impl ScreenUi {
         Self {
             modality: self.modality,
             theme: self.theme,
-            offer_replay_copy: self.offer_replay_copy,
             debug_mode: self.debug_mode,
             ..Self::default()
         }
