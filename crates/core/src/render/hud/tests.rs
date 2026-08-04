@@ -1515,8 +1515,9 @@ fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
 
 /// #473: **what outlives a run, named one by one.** The theme a player picks on
 /// the title screen has to be the theme the run opens in — it is a fact about
-/// their eyes, not about the facility — and so does the modality and the build's
-/// replay offer; everything else is the last screen's and must go.
+/// their eyes, not about the facility — and so does the modality, the build's
+/// replay offer and the debug session's tab (#459); everything else is the last
+/// screen's and must go.
 ///
 /// The result is destructured field-by-field rather than compared against a
 /// hand-built `ScreenUi`, so adding a field to the struct fails to compile *here*
@@ -1533,6 +1534,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         theme: Theme::default().toggled(),
         seed_copy: SeedCopy::Copied,
         offer_replay_copy: true,
+        debug_mode: true,
         end: EndUi {
             options: RunOptions {
                 mode: RunMode::Campaign,
@@ -1544,10 +1546,11 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
     };
 
     let ScreenUi {
-        // Kept — the player's, and the build's.
+        // Kept — the player's, the build's, and the session's.
         modality,
         theme,
         offer_replay_copy,
+        debug_mode,
         // Dropped — the last screen's.
         message_log_open,
         help_open,
@@ -1560,6 +1563,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
     assert_eq!(modality, carried.modality, "the player's hands (§11.6)");
     assert_eq!(theme, carried.theme, "the player's eyes (§11.2)");
     assert!(offer_replay_copy, "the build's own offer (#411)");
+    assert!(debug_mode, "the session's own tab (§12.6/#459)");
 
     assert!(
         !message_log_open,
