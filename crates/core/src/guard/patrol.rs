@@ -93,6 +93,11 @@ impl Guard {
     /// guard that walked to it anyway would spend the trip patrolling a colleague's
     /// wing. It is dropped here rather than at the recut so the guard finishes the turn
     /// it is in and picks again on its own schedule.
+    ///
+    /// **A replacement is only ever drawn from ground the guard can walk to**
+    /// ([`walkable_ground`](Self::walkable_ground)) — the fix for #477, and the reason
+    /// the *keep* clause above needs no route test of its own: see that method for why
+    /// a target that was walkable when it was picked stays walkable for the whole trip.
     pub(super) fn repick_patrol_target(
         &mut self,
         facility: &Facility,
@@ -109,7 +114,63 @@ impl Guard {
                 return;
             }
         }
-        self.destination = self.next_target_in(&territory, style, rng);
+        let walkable = self.walkable_ground(facility);
+        let within_reach: Vec<Cell> = territory
+            .into_iter()
+            .filter(|cell| walkable.contains(cell))
+            .collect();
+        self.destination = self.next_target_in(&within_reach, style, rng);
+    }
+
+    /// Every cell this guard could walk to from where it stands, over bare terrain
+    /// (§7.5/#477): [`routable`](super::routable) ground flooded from its own cell,
+    /// **colleagues ignored**.
+    ///
+    /// # Why the sweep has to ask
+    ///
+    /// A beat is cut from the region graph (§10.5, [`crate::beat`]), and that graph does
+    /// not know about the **solid usables** stamped into the building afterwards. An
+    /// intel console, the comms console or the exit dropped into a one-cell throat seals
+    /// the cells behind it off from every guard while the region it was cut from still
+    /// claims them — they are §10.3's one asymmetry, terrain that blocks a *route*
+    /// without blocking *pathing*, so neither the region graph nor §10.6's
+    /// player-route assert has any reason to notice. Such a cell is then the farthest
+    /// thing in the beat from the opposite corner, and it can never be struck off the
+    /// guard's inspected memory either, because the guard can never get eyes into the
+    /// pocket. Left in the candidate set it is picked, kept, and re-picked for the rest
+    /// of the run, and the guard stands on one cell forever (#477).
+    ///
+    /// # Why colleagues are ignored
+    ///
+    /// That distinction is the whole of it. A route sealed by a guard standing in it is
+    /// a *this turn* problem, and holding and retrying through it is exactly right
+    /// (§7.8) — folding colleagues in here would make a guard throw away a good target
+    /// every time one crossed the corridor ahead. A route sealed by the building never
+    /// clears. So this is drawn over bare terrain, and only the step is blocked-aware.
+    ///
+    /// # Why picking is the only place that has to check
+    ///
+    /// Guard-routability only ever *grows* during a run: the sole terrain writes in play
+    /// are a door panel swapping open/closed — [`routable`](super::routable) either way,
+    /// §10.4 — and Bore turning a wall into floor (§8.3), which opens ground and never
+    /// closes it. Reachability is symmetric within a component and the guard cannot
+    /// leave the one it stands in, so a target walkable when it was picked is walkable
+    /// from every cell of the walk. And a Calm destination has no other author: the
+    /// reactive states all clear theirs on the way out (`stand_down`,
+    /// `release_from_search`, `begin_search`), so nothing else can hand the sweep a
+    /// target it never vetted. Checking here rather than every turn keeps the flood off
+    /// the per-turn path — it runs once per patrol leg — which the §13.2 sweeps care
+    /// about; the invariant itself is pinned by `a_calm_guard_never_holds_a_target_it_cannot_reach`.
+    ///
+    /// The guard's own cell is always in the set, so a guard walled into a one-cell
+    /// pocket ends up with nothing to pick and holds — §7.5's stated answer for a guard
+    /// with nowhere to sweep, rather than the freeze that used to pass for it.
+    fn walkable_ground(&self, facility: &Facility) -> HashSet<Cell> {
+        path::flood_from(self.pos, facility.width(), facility.height(), |cell| {
+            routable(facility, cell)
+        })
+        .into_iter()
+        .collect()
     }
 
     /// The next cell to walk to in `territory` (§7.5): the **farthest** one the guard
