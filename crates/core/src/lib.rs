@@ -38,6 +38,11 @@
 //! remembered, live state only in the current FOV. Colour is named only as a
 //! [`Category`] (§11.2); the platform shell owns the concrete table.
 //!
+//! **The run.** [`Campaign`] (§14 v3/§2.2): the layer above a single level — a forward
+//! sequence of facilities, each seeded from `(run seed, node id)`, with the salvaged
+//! tech and the intel the run carries between them. Nothing survives the run itself,
+//! which is what permadeath means here (§2.2).
+//!
 //! **Configuration.** [`LevelModifiers`] (§12.6) resolved once per run, and
 //! [`LevelSeed`] composing seed, modifiers and loadout into one shareable token — the
 //! same entry point the shell and the §13.2 sim both boot through, which is what makes
@@ -49,6 +54,7 @@ mod ability;
 mod alert;
 mod beat;
 mod body;
+mod campaign;
 mod category;
 mod cell;
 mod cover;
@@ -83,6 +89,7 @@ pub use ability::{
 };
 pub use alert::{AlertEffect, AlertReadout, AlertTrigger, AlertTuning, TOP_RUNG};
 pub use body::Body;
+pub use campaign::{facility_seed, Campaign, CampaignStage, NodeId, CAMPAIGN_LENGTH};
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
 pub use difficulty::{Difficulty, SPAN as DIFFICULTY_SPAN};
