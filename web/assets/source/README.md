@@ -1,8 +1,9 @@
 # Source art
 
-The sheets `scripts/build-tileset.py` cuts `web/assets/tiles.png` from, kept
-verbatim rather than pre-cut so a re-cut needs no new asset and what a sprite was
-lifted from stays checkable.
+The sheets `scripts/seed-tileset.py` seeded `web/assets/tiles.png` from, kept verbatim
+rather than pre-cut so a re-cut needs no new asset and what a sprite was lifted from
+stays checkable. The sheet it seeded is **authored by hand** from there on; these are
+its starting point, not its master.
 
 They came out of an **earlier Godot experiment**, not from a brief for this game, so
 they are incomplete and carry ideas that are not in scope — ropes for traversal, a
@@ -28,10 +29,15 @@ The autotile run is indexed by which sides the wall run continues along:
 | SW | NW | NE | NSE | EWS | NWS | NWE |
 
 **Indices 1–15 are a step-2 asset.** #460 is one tile per glyph with no neighbour
-lookup, so it can only take index 1 — a wall with no wall against it — as its
-representative `#`. The other fourteen are exactly what the autotiler in tiles step 2
-will want, which is why the legend is written down here rather than rediscovered
-later. Index 16, the floor, needs no neighbours and is used as it is.
+lookup, so its glyph band can only take index 1 — a wall with no wall against it — as
+its representative `#`. Index 16, the floor, needs no neighbours and is used as it is.
+
+The run is nonetheless seeded into the built sheet's **wall band** (slots 16–31),
+remapped from the order above into a **neighbour bitmask** — `N=1, E=2, S=4, W=8` — so
+step 2's autotiler can compute a slot instead of keeping a table. Doing that once, at
+the seam, is the whole point of remapping rather than copying the order across. The
+source has no all-four-sides tile, so slot 31 is seeded empty and is the first thing
+worth drawing.
 
 ## `player.png` — 768×768, 48×48 cells, content in row 0 only
 

@@ -1,53 +1,77 @@
 #!/usr/bin/env python3
-"""Build `web/assets/tiles.png`, the sheet the tile renderer embeds (§11.1 / #460).
+"""Seed `web/assets/tiles.png` and `web/assets/tiles.txt` — the **authoring sheet**
+for the tile renderer (§11.1 / #460) and the slot table that names every cell of it.
 
-Run it from the repo root; it takes no arguments and overwrites its one output:
+    python3 scripts/seed-tileset.py [--force]
 
-    python3 scripts/build-tileset.py
+**This script seeds; it does not own.** It laid down the first version of a sheet
+that is authored **by hand** from here on, so it refuses to overwrite an existing
+sheet unless `--force` is passed — re-running it by reflex must never quietly discard
+somebody's art. What it is still good for is re-cutting from the source sheets in
+`web/assets/source/` after a change to the mapping, or starting over deliberately.
 
-**The sheet is built, not drawn**, so it has provenance: every sprite on it is
-either a tile lifted out of a source sheet in `web/assets/source/` or a crude
-placeholder shape defined below, and `SPRITES` is the
-single table saying which. `crates/web/src/tiles.rs` holds the same glyph -> index
-mapping and its tests assert the set is complete, so the two cannot drift without
-one of them failing.
+# The sheet
 
-**The sheet contract** (stated in prose in `docs/render-reference.md` §6):
+`SHEET_COLS` x `SHEET_ROWS` cells of `TILE` x `TILE`, most of them empty. The
+headroom is the point: a slot's index is `row * SHEET_COLS + col` and **an index is
+permanent**, exactly as an `AbilityId` slot is (see `CLAUDE.md`). Art is drawn against
+a slot number, so moving one silently repaints every cell that referenced it. Claim
+the next free slot; never close a gap.
 
-* PNG, RGBA, `SHEET_COLS` cells per row, each cell `TILE` x `TILE` **square**. The
-  shell squashes a sprite into the 14x20 glyph cell at draw time, so a sprite is
-  authored square and comes out about 30% narrower than tall. Nothing about the fit
-  or the hit tests changes, which is the point (§11.4); square *cells* are a much
-  larger change and are step 2's problem.
-* **Alpha carries the shape**, and the colour channels carry *shading* as grey. The
-  shell tints a sprite with the colour the glyph would have been drawn in, by
+The allocation, with room left after each band:
+
+| Slots | Band |
+|---|---|
+| 0-15 | One sprite per **glyph** — what #460 step 1 draws |
+| 16-31 | The **wall autotile** run, indexed by a neighbour bitmask — step 2 |
+| 32+ | Free |
+
+# The slot table
+
+`web/assets/tiles.txt`, written beside the sheet and **hand-editable from here on**:
+one line per allocated slot, `index`, `key`, description. It is not decoration —
+`crates/web/src/tiles.rs` embeds it and a test asserts its own glyph -> index mapping
+agrees with it, so the sheet, the table and the code cannot drift apart in silence.
+
+# What the art has to satisfy
+
+* PNG, RGBA. **Alpha carries the shape**; the colour channels carry *shading* as grey.
+  The shell tints a sprite with the colour the glyph would have been drawn in, by
   multiplying the tint through the greys and restoring the alpha — so a flat white
   sprite comes out as the flat category colour, and a shaded one keeps its shading.
-* A sprite's index is `row * SHEET_COLS + col`, and this script writes them in the
-  order of `SPRITES`.
-
-**Source art is desaturated on the way in, and that is not negotiable** (§11.2
-**[SETTLED]**): no game system names a colour, and a guard's yellow -> orange -> red
-*is* the AI state machine made visible. Art carrying its own palette would leave the
-threat ladder nowhere to live. What survives is the art's *structure* — the
-luminance becomes the shading the tint multiplies through, so a dark fill with light
-edge detail stays a mid tone with light edges rather than flattening to a block.
+* Cells are **square**, and the shell squashes a sprite into the 14x20 glyph cell at
+  draw time, so it comes out about 30% narrower than tall. That keeps the fit and
+  every hit test untouched (§11.4); square *cells* are a much larger change.
+* **Colour is not yours to choose** (§11.2 **[SETTLED]**): no game system names a
+  colour, and a guard's yellow -> orange -> red *is* the AI state machine made
+  visible. Art carrying its own palette would leave the threat ladder nowhere to
+  live, which is why lifted source art is desaturated on the way in — its luminance
+  becomes the shading, and the category supplies the hue.
 
 There is deliberately no image library in play: the repo has no Python dependencies,
 so this reads and writes PNG itself.
 """
 
+import argparse
 import pathlib
 import struct
 import zlib
 
-# The built sheet's geometry — mirrored by `crates/web/src/tiles.rs`.
-SHEET_COLS = 8
+# The sheet's geometry — mirrored by `crates/web/src/tiles.rs`.
+SHEET_COLS = 16
+SHEET_ROWS = 16
 TILE = 48
+
+# Where each band of slots starts. Bands are generous and their starts are fixed: a
+# band filling up is answered by claiming free slots after 32, never by sliding the
+# next band along (see the module note on permanence).
+GLYPH_BASE = 0
+WALL_BASE = 16
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "web" / "assets" / "source"
-OUT = ROOT / "web" / "assets" / "tiles.png"
+SHEET_OUT = ROOT / "web" / "assets" / "tiles.png"
+TABLE_OUT = ROOT / "web" / "assets" / "tiles.txt"
 
 # The source sheets, as they came out of the Godot experiment they were drawn for
 # (#460). Kept verbatim rather than pre-cut, so what a sprite was lifted from is
@@ -416,38 +440,90 @@ def squared(tile):
     return out
 
 
-# --- The table ---------------------------------------------------------------
+# --- The slots ---------------------------------------------------------------
 
-# Glyph -> where its sprite comes from, in **sheet index order**: fabric and furniture
-# first, then the goals a plan is drawn around, then the things that move.
-# `crates/web/src/tiles.rs` holds the same order.
+# The **glyph band** (slots 0-15): one sprite per glyph, in the order the render
+# reference §2 walks them — building fabric and furniture first, then the goals a plan
+# is drawn around, then the things that move. `crates/web/src/tiles.rs` holds the same
+# mapping and a test asserts it against the written slot table.
 #
-# A source entry is `(sheet, tile index)`; a callable is a placeholder shape below.
-#
-# **The source art supplies three of the fourteen, and that is the honest yield**
-# (see `web/assets/source/README.md`). Its tiles 1-15 are an *autotile* run keyed by
-# which sides a wall joins, which is precisely what step 1 refuses to do — one tile per
-# glyph, no neighbour lookup — so only index 1, a wall with no wall against it, says
-# something a single tile can say. Index 16 is the floor and needs no neighbours at
-# all. The player sheet is animation frames, so it gives frame 0 and nothing else.
-# Everything else stays a crude placeholder until step 2's autotiler can spend the
-# rest.
-SPRITES = [
-    ("#", ("tiles", 1)),  # a wall with no wall against it
-    ("\u25a1", schematic),
-    ("+", door_panel),
-    ("\u00d7", door_hinge),
-    ("}", cupboard),
-    ("\u03c0", table),
-    ("=", duct),
-    ("\u00b7", ("tiles", 16)),  # the floor
-    ("E", exit_tile),
-    ("$", console),
-    ("\u03a8", comms),
-    ("@", ("player", 0)),  # the hooded figure, frame 0
-    ("g", guard),
-    ("z", body),
+# A source entry is `(sheet, tile index)` lifted from `web/assets/source/`; a callable
+# is a crude placeholder shape below. **The source art supplies three of the fourteen
+# and that is its honest yield**: its own tiles 1-15 are a wall autotile run, which
+# step 1 refuses to use (one tile per glyph, no neighbour lookup), so only index 1 — a
+# wall with no wall against it — says something a single tile can say. Index 16 is the
+# floor. The player sheet is animation frames, so it gives frame 0.
+GLYPHS = [
+    ("#", "Wall", ("tiles", 1)),
+    ("\u25a1", "Building fabric on the plans, never seen (\u00a711.5a)", schematic),
+    ("+", "Door panel, closed", door_panel),
+    ("\u00d7", "Door frame (hinge)", door_hinge),
+    ("}", "Cupboard \u2014 a hiding place", cupboard),
+    ("\u03c0", "Table \u2014 partial cover", table),
+    ("=", "Duct mouth", duct),
+    ("\u00b7", "Floor, inside your field of view", ("tiles", 16)),
+    ("E", "The exit \u2014 your own tunnel's mouth", exit_tile),
+    ("$", "Intel console", console),
+    ("\u03a8", "Comms console", comms),
+    ("@", "You, and a decoy you placed", ("player", 0)),
+    ("g", "A guard you can see", guard),
+    ("z", "A body", body),
 ]
+
+# The **wall autotile band** (slots 16-31): a wall drawn for each combination of
+# neighbouring walls, so step 2 can pick one by looking at four cells.
+#
+# The slot is the **bitmask itself** — N=1, E=2, S=4, W=8 — so the lookup is
+# arithmetic rather than a table anybody has to keep. The source art's run is ordered
+# differently (see `web/assets/source/README.md`), so it is mapped in here rather than
+# copied across in its own order: doing that once, at the seam, is what buys step 2 an
+# index it can compute. The source has no all-four-sides tile, so slot 31 is seeded
+# empty and is the first thing worth drawing.
+NORTH, EAST, SOUTH, WEST = 1, 2, 4, 8
+WALL_SOURCE = {
+    0: 1,                            # no wall against it
+    EAST: 2,
+    NORTH: 3,
+    WEST: 4,
+    SOUTH: 5,
+    EAST | WEST: 6,
+    NORTH | SOUTH: 7,
+    SOUTH | EAST: 8,
+    SOUTH | WEST: 9,
+    NORTH | WEST: 10,
+    NORTH | EAST: 11,
+    NORTH | SOUTH | EAST: 12,
+    EAST | WEST | SOUTH: 13,
+    NORTH | WEST | SOUTH: 14,
+    NORTH | WEST | EAST: 15,
+    # NORTH | EAST | SOUTH | WEST has no source tile \u2014 slot 31 stays empty.
+}
+
+
+def sides(mask):
+    """A bitmask spelled out, for the slot table: `N-E-S-W`, or `none`."""
+    named = [n for bit, n in ((NORTH, "N"), (EAST, "E"), (SOUTH, "S"), (WEST, "W")) if mask & bit]
+    return "-".join(named) or "none"
+
+
+def slots():
+    """Every allocated slot, as `(index, key, description, source or None)`.
+
+    One list, walked by both outputs, so the sheet and the table it is described by
+    are built from the same statement and cannot disagree.
+    """
+    out = []
+    for i, (glyph, description, source) in enumerate(GLYPHS):
+        out.append((GLYPH_BASE + i, f"glyph:{glyph}", description, source))
+    for mask in range(16):
+        source = WALL_SOURCE.get(mask)
+        out.append((
+            WALL_BASE + mask,
+            f"wall:{mask}",
+            f"Wall autotile \u2014 wall neighbours {sides(mask)}",
+            ("tiles", source) if source is not None else None,
+        ))
+    return out
 
 
 def png(width, height, rows):
@@ -474,24 +550,76 @@ def png(width, height, rows):
     )
 
 
+def write_table(path, allocated):
+    """Write the slot table beside the sheet — the file an author reads to know what
+    each cell of it is for, and the one `crates/web/src/tiles.rs` checks itself
+    against."""
+    lines = [
+        "# Intrusion tileset — slot table",
+        "#",
+        "# One line per allocated slot of `tiles.png`: index, key, description.",
+        "# A slot's index is `row * %d + col`, and **an index is permanent** — art is"
+        % SHEET_COLS,
+        "# drawn against a slot number, so moving one silently repaints every cell that",
+        "# referenced it. Claim the next free slot; never close a gap.",
+        "#",
+        "# Bands, with room left after each. Free slots start at %d." % (WALL_BASE + 16),
+        "#",
+        "#   %3d-%-3d  one sprite per glyph (§11.3)" % (GLYPH_BASE, GLYPH_BASE + 15),
+        "#   %3d-%-3d  the wall autotile run, keyed by a neighbour bitmask"
+        % (WALL_BASE, WALL_BASE + 15),
+        "#",
+        "# A slot listed here with nothing drawn in it is a slot waiting for art; the",
+        "# renderer falls back to drawing the character, which is never an error.",
+        "#",
+        "# Seeded by `scripts/seed-tileset.py`; hand-edited from here on.",
+        "",
+    ]
+    for index, key, description, _ in allocated:
+        lines.append(f"{index:<5} {key:<12} {description}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main():
-    rows_of_tiles = (len(SPRITES) + SHEET_COLS - 1) // SHEET_COLS
-    width, height = SHEET_COLS * TILE, rows_of_tiles * TILE
-    # A transparent sheet, then each sprite blitted into its slot: a cell the table
-    # does not fill stays empty, and an empty slot is never referenced.
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing sheet. Off by default because the sheet is "
+             "hand-authored once seeded, and a reflexive re-run must not discard art.",
+    )
+    args = ap.parse_args()
+    if SHEET_OUT.exists() and not args.force:
+        raise SystemExit(
+            f"{SHEET_OUT} already exists — it is authored by hand from here on.\n"
+            "Pass --force to re-seed it from the source art, discarding any drawing."
+        )
+
+    allocated = slots()
+    width, height = SHEET_COLS * TILE, SHEET_ROWS * TILE
     canvas = [[(0, 0, 0, 0)] * width for _ in range(height)]
-    for index, (glyph, source) in enumerate(SPRITES):
+    drawn = 0
+    for index, key, _description, source in allocated:
+        if source is None:
+            continue  # an allocated slot with no art yet; the renderer falls back
         tile = squared(source()) if callable(source) else lift(*source)
         ox, oy = (index % SHEET_COLS) * TILE, (index // SHEET_COLS) * TILE
         for y in range(TILE):
             for x in range(TILE):
                 grey, alpha = tile.px[y][x]
                 canvas[oy + y][ox + x] = (grey, grey, grey, alpha)
+        drawn += 1
         origin = source.__name__ if callable(source) else f"{source[0]}[{source[1]}]"
-        print(f"  {index:2}  {glyph}  {origin}")
+        print(f"  {index:3}  {key:<12} {origin}")
 
-    OUT.write_bytes(png(width, height, canvas))
-    print(f"{OUT}: {width}x{height}, {len(SPRITES)} sprites in {rows_of_tiles} row(s)")
+    SHEET_OUT.write_bytes(png(width, height, canvas))
+    write_table(TABLE_OUT, allocated)
+    print(
+        f"{SHEET_OUT}: {width}x{height}, {SHEET_COLS}x{SHEET_ROWS} slots of {TILE}px — "
+        f"{drawn} drawn, {len(allocated) - drawn} allocated and empty, "
+        f"{SHEET_COLS * SHEET_ROWS - len(allocated)} free"
+    )
+    print(f"{TABLE_OUT}: {len(allocated)} slots described")
 
 
 if __name__ == "__main__":

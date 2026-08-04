@@ -1,0 +1,47 @@
+# Intrusion tileset — slot table
+#
+# One line per allocated slot of `tiles.png`: index, key, description.
+# A slot's index is `row * 16 + col`, and **an index is permanent** — art is
+# drawn against a slot number, so moving one silently repaints every cell that
+# referenced it. Claim the next free slot; never close a gap.
+#
+# Bands, with room left after each. Free slots start at 32.
+#
+#     0-15   one sprite per glyph (§11.3)
+#    16-31   the wall autotile run, keyed by a neighbour bitmask
+#
+# A slot listed here with nothing drawn in it is a slot waiting for art; the
+# renderer falls back to drawing the character, which is never an error.
+#
+# Seeded by `scripts/seed-tileset.py`; hand-edited from here on.
+
+0     glyph:#      Wall
+1     glyph:□      Building fabric on the plans, never seen (§11.5a)
+2     glyph:+      Door panel, closed
+3     glyph:×      Door frame (hinge)
+4     glyph:}      Cupboard — a hiding place
+5     glyph:π      Table — partial cover
+6     glyph:=      Duct mouth
+7     glyph:·      Floor, inside your field of view
+8     glyph:E      The exit — your own tunnel's mouth
+9     glyph:$      Intel console
+10    glyph:Ψ      Comms console
+11    glyph:@      You, and a decoy you placed
+12    glyph:g      A guard you can see
+13    glyph:z      A body
+16    wall:0       Wall autotile — wall neighbours none
+17    wall:1       Wall autotile — wall neighbours N
+18    wall:2       Wall autotile — wall neighbours E
+19    wall:3       Wall autotile — wall neighbours N-E
+20    wall:4       Wall autotile — wall neighbours S
+21    wall:5       Wall autotile — wall neighbours N-S
+22    wall:6       Wall autotile — wall neighbours E-S
+23    wall:7       Wall autotile — wall neighbours N-E-S
+24    wall:8       Wall autotile — wall neighbours W
+25    wall:9       Wall autotile — wall neighbours N-W
+26    wall:10      Wall autotile — wall neighbours E-W
+27    wall:11      Wall autotile — wall neighbours N-E-W
+28    wall:12      Wall autotile — wall neighbours S-W
+29    wall:13      Wall autotile — wall neighbours N-S-W
+30    wall:14      Wall autotile — wall neighbours E-S-W
+31    wall:15      Wall autotile — wall neighbours N-E-S-W

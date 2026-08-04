@@ -84,15 +84,40 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{Game, Metrics};
 
-/// The tileset, embedded in the wasm (see the module note on delivery). Built by
-/// `scripts/build-tileset.py` out of the source art beside it, which also states the
-/// sheet contract; `docs/render-reference.md` §6 is the prose form of the same rule.
+/// The tileset, embedded in the wasm (see the module note on delivery). An
+/// **authoring sheet**, hand-drawn from here on and seeded once by
+/// `scripts/seed-tileset.py`; `docs/render-reference.md` §6 is the prose form of the
+/// contract it satisfies.
 const SHEET: &[u8] = include_bytes!("../../../web/assets/tiles.png");
+
+/// The **slot table** beside the sheet, naming every allocated cell of it. Embedded
+/// so the tests below can hold [`SPRITES`] against it: the sheet, the table an
+/// artist draws against and this mapping are three statements of one fact, and
+/// nothing but a test stops them drifting apart in silence.
+///
+/// Test-only, and that is the right shape: the running game reads the mapping, and
+/// the table's job is to make sure the mapping is the one somebody drew against.
+#[cfg(test)]
+const SLOT_TABLE: &str = include_str!("../../../web/assets/tiles.txt");
 
 /// The sheet's cells per row. A sprite's index is `row * SHEET_COLS + col`, so the
 /// layout is a pure function of the index and adding a sprite never moves an
 /// existing one.
-const SHEET_COLS: u32 = 8;
+///
+/// **An index is permanent**, for the reason an `AbilityId` slot is (`CLAUDE.md`):
+/// art is drawn against a slot number, so moving one silently repaints every cell
+/// that referenced it. The sheet is mostly empty on purpose — claim the next free
+/// slot, never close a gap.
+const SHEET_COLS: u32 = 16;
+
+/// The sheet's rows, and with [`SHEET_COLS`] its whole capacity. Mostly empty and
+/// meant to stay that way for a while: the headroom is what lets a slot number be
+/// permanent, since claiming the next free one is always available.
+///
+/// Test-only, like [`SLOT_TABLE`]: the draw path indexes a slot and never asks how
+/// many there are, so this exists to bound what the mapping may claim.
+#[cfg(test)]
+const SHEET_ROWS: u32 = 16;
 
 /// One sprite's source size on the sheet. **Square**, while the destination cell is
 /// the 14x20 glyph box ([`crate::CELL_W`]/[`crate::CELL_H`]) scaled to the fit — so a
@@ -106,7 +131,26 @@ const SHEET_COLS: u32 = 8;
 /// Kept at the source art's own 48px rather than pre-scaled to the cell: the board is
 /// routinely fitted *larger* than that, so downsampling here would throw away
 /// resolution the browser then wishes it had.
-const TILE: f64 = 48.0;
+const TILE: u32 = 48;
+
+/// How many rows of the sheet a tinted atlas has to cover — enough for the highest
+/// slot [`SPRITES`] indexes, and not one row more.
+///
+/// The sheet is an **authoring surface with headroom**, so most of it is empty and
+/// will stay that way for a long time. Baking that emptiness would be the one place
+/// the headroom cost something real: an atlas per colour, at the full sheet size, is
+/// megabytes of canvas apiece for pixels no cell ever samples. Derived rather than
+/// written down, so growing the mapping grows the atlas by itself.
+const fn atlas_rows() -> u32 {
+    let (mut highest, mut i) = (0, 0);
+    while i < SPRITES.len() {
+        if SPRITES[i].1 > highest {
+            highest = SPRITES[i].1;
+        }
+        i += 1;
+    }
+    highest / SHEET_COLS + 1
+}
 
 /// The URL field that turns the tile mode on, and the two values it answers to.
 ///
@@ -126,10 +170,14 @@ const TILES_OFF: &str = "0";
 /// draws as a character (see the module note) — so this lists what has art rather
 /// than what exists.
 ///
-/// The order is the sheet's own layout, in index order: building fabric and furniture
-/// first, then the goals a plan is drawn around, then the things that move.
-/// `scripts/build-tileset.py` writes its sprites in this same order, and the tests
-/// below assert the set covers every glyph `docs/render-reference.md` §2 lists.
+/// These are the sheet's **glyph band**, slots 0-15, in the order the render
+/// reference §2 walks them: building fabric and furniture first, then the goals a
+/// plan is drawn around, then the things that move. Slots 16-31 are the wall
+/// autotile run, which step 1 deliberately cannot use — one tile per glyph, no
+/// neighbour lookup — and which step 2 will index by a neighbour bitmask.
+///
+/// The tests below assert this covers every glyph `docs/render-reference.md` §2
+/// lists, *and* that each entry matches what [`SLOT_TABLE`] says that slot is for.
 const SPRITES: [(char, u32); 14] = [
     ('#', 0),  // wall
     ('□', 1),  // the schematic's building fabric (§11.5a)
@@ -246,8 +294,8 @@ impl Tiles {
             return false;
         };
         let (sx, sy) = (
-            f64::from(index % SHEET_COLS) * TILE,
-            f64::from(index / SHEET_COLS) * TILE,
+            f64::from((index % SHEET_COLS) * TILE),
+            f64::from((index / SHEET_COLS) * TILE),
         );
         // Errors here mean an invalid surface, the same condition `fill_text` ignores;
         // there is nothing a frame can do about it and nothing to fall back *to*.
@@ -255,8 +303,8 @@ impl Tiles {
             &atlas,
             sx,
             sy,
-            TILE,
-            TILE,
+            f64::from(TILE),
+            f64::from(TILE),
             x * m.cell_w,
             y * m.cell_h,
             m.cell_w,
@@ -283,7 +331,10 @@ impl Atlases {
             return Some(cached.clone());
         }
         let sheet = self.sheet.as_ref()?;
-        let canvas = new_canvas(sheet.natural_width(), sheet.natural_height())?;
+        // Only the rows the mapping reaches, never the whole authoring sheet — see
+        // [`atlas_rows`]. Drawing the sheet at its natural size into a shorter canvas
+        // simply clips the empty remainder away.
+        let canvas = new_canvas(sheet.natural_width(), atlas_rows() * TILE)?;
         let ctx = canvas_context(&canvas)?;
 
         ctx.draw_image_with_html_image_element(sheet, 0.0, 0.0)
@@ -494,18 +545,90 @@ mod tests {
         }
     }
 
-    /// Every sprite index lands **inside the sheet**, and no two glyphs share one.
-    /// The sheet is `SHEET_COLS`-wide and the generator writes `SPRITES.len()`
-    /// sprites, so an index past that would sample transparent pixels — a tile that
-    /// is silently invisible, the failure hardest to spot on a dark board.
+    /// Parse the slot table into `(index, key)` pairs — the same two fields an author
+    /// reads off it, and the whole of what a test needs from it.
+    fn slot_table() -> Vec<(u32, &'static str)> {
+        SLOT_TABLE
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                let index = fields
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or_else(|| panic!("slot table line has no index: {line:?}"));
+                let key = fields
+                    .next()
+                    .unwrap_or_else(|| panic!("slot table line has no key: {line:?}"));
+                (index, key)
+            })
+            .collect()
+    }
+
+    /// **The mapping and the slot table say the same thing.** The sheet is authored by
+    /// hand against `web/assets/tiles.txt`, so that file is what an artist believes
+    /// each cell is for — and if this table disagrees, the game draws a cupboard where
+    /// somebody drew a console, with nothing to notice it by.
+    ///
+    /// Checked in both directions: every glyph here is at the slot the table gives it,
+    /// and every `glyph:` slot the table declares is claimed here. The wall band is
+    /// deliberately *not* claimed — step 1 does no neighbour lookup — so it is asserted
+    /// present-and-unmapped rather than skipped, which is what keeps step 2's slots
+    /// reserved instead of merely unused.
     #[test]
-    fn sprite_indices_are_unique_and_on_the_sheet() {
+    fn the_mapping_agrees_with_the_slot_table() {
+        let table = slot_table();
+        for (glyph, index) in SPRITES {
+            let key = table
+                .iter()
+                .find(|(i, _)| *i == index)
+                .map(|(_, key)| *key)
+                .unwrap_or_else(|| panic!("slot {index} ({glyph:?}) is not in the slot table"));
+            assert_eq!(
+                key,
+                format!("glyph:{glyph}"),
+                "slot {index} is {key:?} in the slot table but {glyph:?} here",
+            );
+        }
+        for (index, key) in &table {
+            if let Some(glyph) = key.strip_prefix("glyph:") {
+                let glyph = glyph.chars().next().expect("a glyph after the prefix");
+                assert_eq!(
+                    sprite_index(glyph),
+                    Some(*index),
+                    "the table declares {glyph:?} at slot {index}, but the mapping does not",
+                );
+            } else {
+                assert!(
+                    key.starts_with("wall:"),
+                    "slot {index} has an unknown kind of key {key:?}",
+                );
+                // The wall band is reserved for step 2's autotiler, not forgotten.
+                assert!(
+                    !SPRITES.iter().any(|(_, i)| i == index),
+                    "slot {index} ({key}) is the wall band — step 1 must not claim it",
+                );
+            }
+        }
+    }
+
+    /// Every sprite index lands **inside the sheet**, in the glyph band, and no two
+    /// glyphs share one. An index off the sheet samples transparent pixels — a tile
+    /// that is silently invisible, which is the failure hardest to spot on a dark
+    /// board — and one past the glyph band would be squatting on the wall run step 2
+    /// has reserved.
+    #[test]
+    fn sprite_indices_are_unique_and_in_the_glyph_band() {
         let mut seen = Vec::new();
         for (glyph, index) in SPRITES {
             assert!(
-                (index as usize) < SPRITES.len(),
-                "{glyph:?} indexes {index}, past the {} sprites on the sheet",
-                SPRITES.len()
+                index < SHEET_COLS * SHEET_ROWS,
+                "{glyph:?} indexes {index}, off a {SHEET_COLS}x{SHEET_ROWS} sheet",
+            );
+            assert!(
+                index < SHEET_COLS,
+                "{glyph:?} indexes {index}, past the glyph band's first row",
             );
             assert!(!seen.contains(&index), "{glyph:?} reuses index {index}");
             seen.push(index);

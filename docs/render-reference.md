@@ -687,26 +687,51 @@ has drawn yet must render as itself, never as a hole.
 
 ### 6.1 The sheet
 
-`web/assets/tiles.png`, built by `scripts/build-tileset.py` from the source art in
-`web/assets/source/` (which has its own README, including the autotile legend the
-source sheet's first sixteen tiles follow). It is embedded in the wasm and handed to
-the browser as a `data:` URI, because the artifact build packs one self-contained page
-under a CSP that blocks every external request — and embedding for the Pages deploy
-too keeps it to one code path.
+`web/assets/tiles.png` — a **16×16 grid of 48×48 slots**, most of them empty. It is
+embedded in the wasm and handed to the browser as a `data:` URI, because the artifact
+build packs one self-contained page under a CSP that blocks every external request,
+and embedding for the Pages deploy too keeps it to one code path.
 
 | | |
 |---|---|
-| Format | PNG, RGBA, 8 cells per row, each cell 48×48 |
-| Index | `row × 8 + col`, listed in `crates/web/src/tiles.rs` |
+| Format | PNG, RGBA, 16 cells per row, each cell 48×48 |
+| Slot | `row × 16 + col` |
 | Alpha | The shape |
 | Greys | Shading, multiplied through by the category tint |
 
-Tinting bakes one copy of the whole sheet per colour rather than compositing per cell
-— a 40×40 board every frame is what would make this expensive — and the colour set is
+**A slot number is permanent**, for the same reason an `AbilityId` slot is: art is
+drawn against a number, so moving one silently repaints every cell that referenced
+it. The headroom is what makes that affordable — claim the next free slot, never close
+a gap. The bands, each with room left after it:
+
+| Slots | Band |
+|---|---|
+| 0–15 | One sprite per **glyph** — what this section describes |
+| 16–31 | The **wall autotile** run, keyed by a neighbour bitmask (`N=1, E=2, S=4, W=8`) — step 2 |
+| 32+ | Free |
+
+**`web/assets/tiles.txt` names every allocated slot** — index, key, description — and
+is the file an artist reads while drawing. It is not documentation that can rot:
+`crates/web/src/tiles.rs` embeds it and a test asserts its own glyph → slot mapping
+agrees with it in both directions, so the sheet, the table and the code cannot drift
+apart in silence. The same test asserts the wall band stays *reserved* rather than
+merely unused.
+
+A slot listed in the table with nothing drawn in it is a slot waiting for art, not a
+bug: the renderer falls back to the character.
+
+Tinting bakes one copy of the sheet per colour rather than compositing per cell — a
+40×40 board every frame is what would make this expensive — and only over the rows the
+mapping actually reaches, so the empty headroom costs no canvas. The colour set is
 closed and small (§4's categories × the knowledge states × the two themes, with most
 rows sharing the one dim shade), so the cache is bounded by construction.
 
-The art is **placeholder** and says so: the source sheets came out of an earlier Godot
-experiment, and their most useful part is an autotile run that step 1 deliberately
-cannot spend. Two of the fourteen sprites are lifted from them; the rest are crude
-generated shapes, waiting for step 2's autotiler to make the rest worth cutting.
+The sheet was **seeded** by `scripts/seed-tileset.py` from the source art in
+`web/assets/source/` (which has its own README, including the autotile legend that
+art's own run follows) and is **authored by hand from there on** — the script refuses
+to overwrite it without `--force`, so a reflexive re-run cannot discard drawing.
+
+The art is still **placeholder** and says so: the source sheets came out of an earlier
+Godot experiment, and only three of the fourteen glyph sprites could honestly be cut
+from them. The rest are crude generated shapes, and the wall band is seeded from the
+source run with one slot (all four neighbours) left empty.
