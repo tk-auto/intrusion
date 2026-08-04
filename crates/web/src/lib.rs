@@ -53,6 +53,7 @@ mod palette;
 mod replay;
 mod seed;
 mod tap;
+mod tiles;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -69,6 +70,11 @@ use crate::palette::{bg_color, memory, page, swatch};
 
 /// The glyph cell's base aspect (width:height); a monospace glyph reads best in a
 /// slightly tall box. Actual on-screen cell size is this scaled to fit the viewport.
+///
+/// **The tile renderer ([`tiles`], #460) authors to this same box**, so turning it on
+/// changes nothing about the fit or about where a hit test lands. A square-cell tile
+/// mode would need the map to carry its own metric while the HUD rows kept the text
+/// one, which is a different and much larger change.
 const CELL_W: f64 = 14.0;
 const CELL_H: f64 = 20.0;
 
@@ -186,10 +192,15 @@ pub fn start() -> Result<(), JsValue> {
             replay_hud: None,
             key_ramp: replay::ScrubRamp::default(),
             recorded: Vec::new(),
+            tiles: tiles::Tiles::boot(),
             handle: handle.clone(),
         })
     });
     game.borrow_mut().fit_and_draw(); // size to the viewport and paint the first frame
+                                      // The spritesheet decodes asynchronously, so this only *starts* the load; the
+                                      // frames before it lands paint as text, and the shell redraws when it arrives
+                                      // (§11.1/#460). A no-op unless the load asked for tiles.
+    tiles::install(&game)?;
     if game.borrow().replay.is_some() {
         // A replay is a pure view: only the scrub pump is wired, never the live
         // pumps or the seed bar — so the gesture maps cannot collide (§11.6).
@@ -273,6 +284,11 @@ struct Game {
     /// happened to. Always empty in replay mode, whose inputs drive a cursor, not a
     /// world.
     recorded: Vec<Input>,
+    /// The tile renderer (§11.1/#460), or an inert one when this load did not ask for
+    /// tiles. Held here because the sheet and its tinted atlases outlive a frame —
+    /// they are the shell's, like the canvas, not the run's: [`Game::reseed`] leaves
+    /// them alone, since a fresh facility is drawn with the same art.
+    tiles: tiles::Tiles,
     /// A weak handle back to the shell's own cell, closed at construction
     /// (`Rc::new_cyclic`). Every other input the shell takes is answered inside the
     /// call that raised it, so nothing else needs this; the clipboard write (§13.1/
@@ -367,6 +383,7 @@ impl Game {
             &render_screen(&self.state, self.ui),
             &self.metrics,
             self.ui.theme,
+            self.tiles.layer(),
         );
         reflect_theme(self.ui.theme);
         // In replay mode, keep the `K / total` HUD in step with the board every
@@ -442,7 +459,21 @@ fn install_resize(game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
 /// `theme` picks which of [`palette`]'s two columns every colour is read from
 /// (§11.2/#189) and is the only thing about it this loop knows: the grid is
 /// identical either way, because the core never named a colour to begin with.
-fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics, theme: Theme) {
+///
+/// `tiles` is the same shape of argument one step further out (§11.1/#460): the
+/// **second implementation of the cell primitive**, or `None` for the text renderer
+/// this shell has always been. It is consulted after the colour is resolved and never
+/// before — a tile is drawn in exactly the colour the glyph would have been — and it
+/// answers `false` for any cell it did not draw, which falls straight through to
+/// [`draw_char`]. So the tile mode adds a branch to one line of this loop and changes
+/// nothing else about it: same grid, same colours, same backgrounds, same order.
+fn paint(
+    ctx: &CanvasRenderingContext2d,
+    grid: &Grid,
+    m: &Metrics,
+    theme: Theme,
+    tiles: Option<&tiles::Tiles>,
+) {
     ctx.set_fill_style_str(page(theme));
     ctx.fill_rect(
         0.0,
@@ -485,8 +516,14 @@ fn paint(ctx: &CanvasRenderingContext2d, grid: &Grid, m: &Metrics, theme: Theme)
                 // Remembered contents read as memory, not as the live thing (§11.5a).
                 Visibility::Remembered => memory(theme),
             };
+            // The one line the tile mode touches: a sprite in that same colour if
+            // this cell has one, and the character otherwise (§11.1/#460).
+            let (x, y) = (x as f64, y as f64);
+            if tiles.is_some_and(|tiles| tiles.draw(ctx, x, y, cell, color, m)) {
+                continue;
+            }
             ctx.set_fill_style_str(color);
-            draw_char(ctx, x as f64, y as f64, cell.glyph, m);
+            draw_char(ctx, x, y, cell.glyph, m);
         }
     }
 }
