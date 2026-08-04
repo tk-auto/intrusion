@@ -189,10 +189,23 @@ the menu. Hand this form over only for the live Pages URL, never for an artifact
 > from the build (`--seed`) or the URL, not a box. If you re-enable it, the box loads
 > any level-seed token live and this section's "type it in" path returns.
 
-## 6b. Lift the fog for a playtest (`--debug reveal`, §12.6)
+## 6b. The Debug tab, and lifting the fog (`--debug reveal`, §12.6/#459)
 
-A build can be baked with **debug switches** — playtest-only changes to what is
-*drawn*. There is one so far:
+**Every artifact boots as a debug session**: the help panel (`?`) carries a fourth
+**Debug** tab, with the omni-vision switch on it and — because artifact builds are
+built `--features debug-tools` — the `replay [r]` export. That is the preview
+channel's whole point: the artifact is for *looking at* the game. `assemble.py` stamps
+the session global on every build; pass `--no-debug-mode` for a preview meant to be
+judged exactly as the public deploy behaves (no tab, no switches).
+
+The same session can be opened on the **Pages deploy** with `?debug=intruded` — a
+shibboleth, not a documented switch, and the shell strips it from the address bar the
+moment it is consumed, so the URL you then copy is a clean shareable level link and
+never an activation (`crates/web/src/debug.rs`).
+
+A build can also be baked with the **debug switches** themselves — playtest-only
+changes to what is *drawn*, which set what the tab's toggle **starts** as. There is one
+so far:
 
 ```
 python3 .claude/skills/artifact-build/assemble.py \
@@ -214,15 +227,17 @@ what they would have detected, and walk the same beats, so the run plays identic
 that is what makes watching it worth anything. Seeing everything is not being
 everywhere: you can still be spotted, and contact still catches you.
 
-**It is not part of the level.** A debug switch never travels in a level-seed token
-and has no `?debug=` URL form (`crates/web/src/debug.rs`) — a build is the only way to
-set one, so a level you hand to someone else can never arrive with the fog lifted.
+**It is not part of the level.** A debug switch never travels in a level-seed token,
+and the URL activation carries no switches with it — it only opens the tab, with
+omni-vision off (`crates/web/src/debug.rs`). So a level you hand to someone else can
+never arrive with the fog lifted; baking it is the only way to *start* a page revealed.
 Flag names are validated at build time against the set the shell knows, so a typo
 fails here rather than publishing a build that quietly lacks its switch.
 
 Name the artifact with a `-reveal` slug (as above) and **say in the handoff that the
 fog is lifted** — a revealed frame looks nothing like the shipped game, and a stale
-tab shouldn't be mistaken for one.
+tab shouldn't be mistaken for one. (Whoever is playing can turn it off from the Debug
+tab, and the run underneath is the same run either way.)
 
 ## 7. Hand off a **bot replay** (§13.3/#197)
 

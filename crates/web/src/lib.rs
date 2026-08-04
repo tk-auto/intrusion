@@ -58,8 +58,8 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use intrusion_core::{
-    render_screen, start_level, Grid, Input, LevelSeed, ScreenUi, State, Theme, Visibility,
-    BOTTOM_ROWS, TOP_ROWS,
+    render_screen, start_level, DebugModifiers, Grid, Input, LevelSeed, ScreenUi, State, Theme,
+    Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -85,16 +85,19 @@ const CELL_H: f64 = 20.0;
 ///
 /// `pub(crate)` so the replay viewer ([`replay`]) can re-run a level through
 /// `inputs[0..K]` to derive the state at its cursor (replay-minus-N, §12.4).
-pub(crate) fn new_run(level: &LevelSeed) -> Result<State, JsValue> {
+pub(crate) fn new_run(level: &LevelSeed, debug: DebugModifiers) -> Result<State, JsValue> {
     start_level(level)
-        // The build's debug switches (§12.6), applied on top of — never inside — the
+        // The session's debug switches (§12.6), applied on top of — never inside — the
         // level: they are not part of what the run *is*, so they ride the boot rather
         // than the token, and a run under them plays the identical game (they widen
         // what the player perceives, never the facility or the guards). This is the
         // shell's one funnel for a fresh run — the
-        // first frame, the menu's Quick play, and each replay re-run — so a baked
-        // switch holds for every run of the page.
-        .map(|state| state.with_debug(debug::baked_debug()))
+        // first frame, the menu's Quick play, and each replay re-run — so the switches
+        // hold for every run of the page. They are **passed**, not read from the build:
+        // since #459 a debug session can flip omni-vision mid-run, and a fresh facility
+        // should carry on with the switch the watcher last set rather than snapping
+        // back to whatever the build stamped.
+        .map(|state| state.with_debug(debug))
         .map_err(|e| JsValue::from_str(&format!("generation failed: {e:?}")))
 }
 
@@ -124,12 +127,18 @@ pub fn start() -> Result<(), JsValue> {
     // play. The mode is fixed here, at boot, behind this one flag: the two input maps
     // are wired mutually exclusively below, so a time-scrub swipe and a movement
     // swipe can never reach the same handler.
+    // The debug channel (§12.6/#459), read once here: whether this session has the
+    // panel's Debug tab, and the switches it starts under. Read *before* the run is
+    // built, because the switches ride the boot — and it is what consumes and strips
+    // a `?debug=intruded` activation, so the address bar is already clean by the time
+    // the run reflects its own token into it below.
+    let debug = debug::boot_debug();
     let chosen = seed::explicit_level();
     let level = chosen.unwrap_or_else(seed::random_level);
     let replay = replay::initial_replay(level);
     let state = match &replay {
-        Some(view) => view.state_at()?,
-        None => new_run(&level)?,
+        Some(view) => view.state_at(debug.flags)?,
+        None => new_run(&level, debug.flags)?,
     };
 
     let document = web_sys::window()
@@ -154,10 +163,13 @@ pub fn start() -> Result<(), JsValue> {
     // Whether this build offers the help panel's copy-replay control (#411) is a
     // fact about the build, decided once here: exactly the builds whose recorder
     // runs ([`Game::step_and_draw`]) offer the control, so it can never be drawn
-    // with nothing behind it.
+    // with nothing behind it. Whether the panel carries the **Debug tab** it now lives
+    // on is a fact about the *session* (#459), decided the same once and never again:
+    // no run, and nothing a player can be handed, may switch it on.
     let ui = ScreenUi {
         modality,
         offer_replay_copy: cfg!(feature = "debug-tools"),
+        debug_mode: debug.mode,
         ..ui
     };
 
@@ -319,7 +331,10 @@ impl Game {
     /// generation error only if the seed somehow fails to carve (the v1 footprint
     /// always does, §10.6).
     fn reseed(&mut self, level: LevelSeed) -> Result<(), JsValue> {
-        self.state = new_run(&level)?;
+        // The session's live debug switches carry over (§12.6/#459): a watcher who
+        // turned omni-vision on is watching the *page*, not one facility, so a fresh
+        // run keeps the switch rather than snapping back to the build's stamp.
+        self.state = new_run(&level, self.state.debug())?;
         self.level = level;
         // A fresh world means a fresh recording (§12.4/#411): the old inputs were
         // fed to a run that no longer exists, and a replay stitched across two
@@ -329,9 +344,10 @@ impl Game {
         // hint speaks (§11.6/#323) is a fact about their hands and the colour theme
         // (§11.2/#189) a fact about their eyes, neither of them about the run, so a
         // fresh facility must not send a touch player back to reading keys nor open
-        // in a theme they turned off — and for what the *build* is: the copy-replay
-        // offer (#411) is the page's, not the run's. The carried set is named once,
-        // beside the fields, so a new one cannot be forgotten here (#473).
+        // in a theme they turned off — and for what the *build and the session* are:
+        // the copy-replay offer (#411) and the debug session's tab (#459) are the
+        // page's, not the run's. The carried set is named once, beside the fields, so
+        // a new one cannot be forgotten here (#473).
         self.ui = self.ui.for_fresh_run();
         self.fit_and_draw();
         Ok(())

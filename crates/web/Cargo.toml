@@ -47,6 +47,10 @@ features = [
     # active seed is read from / reflected into the page URL as `…#seed=N`.
     "HtmlInputElement",
     "Location",
+    # The debug session's URL activation (§12.6/#459): `?debug=intruded` is stripped
+    # from the address bar the moment it is consumed, through `history.replaceState`,
+    # so the reflected `…#seed=` link a player copies never carries the activation.
+    "History",
     # The title screen (#268): the seed box is the one piece of DOM chrome, so the
     # shell tests where a press landed inside it (`Node`) and publishes the board's
     # glyph size to the stylesheet as a custom property (`HtmlElement`'s inline

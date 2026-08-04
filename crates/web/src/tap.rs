@@ -263,9 +263,8 @@ impl Game {
             return help_hit(
                 width,
                 self.screen_height(),
-                self.ui.help_tab,
+                self.ui,
                 self.state.level(),
-                self.ui.offer_replay_copy,
                 col,
                 row,
             )

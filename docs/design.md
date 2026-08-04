@@ -3119,12 +3119,24 @@ special case: the §11.5a fog lifts into the ordinary live picture, every guard 
 as seen, and the §11.5 danger overlay paints every cone. It touches nothing else —
 guards look with their own cones and walk the same beats, so the run plays identically
 (seeing everything is not being everywhere). It is **never encoded into a level-seed
-string** and has no URL form, so no shared level can arrive with the fog lifted; no
-generation seam sees it; and it is baked into a build and nowhere else (the
-artifact-build skill's `assemble.py --debug reveal`). The line is worth keeping sharp:
+string**, so no shared level can arrive with the fog lifted, and no generation seam
+sees it. The line is worth keeping sharp:
 **a level modifier changes the game, a debug modifier changes only what you get to see
 of it** — anything that bends a rule is a level modifier and belongs in the token with
 the rest of the run's identity.
+
+**Debug mode ships hidden in every build** (#459, *appendix 35*). The switches used to
+be reachable only by rebuilding, which meant a run that misbehaved on the deployed page
+could not be looked at at all. So there is a **debug session**: the help panel grows a
+fourth **Debug** tab carrying the switches — omni-vision, flippable mid-run — and the
+replay export, and it is present when the build stamped it (every artifact preview) or
+when the page was opened with `?debug=intruded`. The parameter is a **shibboleth**, not
+a documented switch, and it is **stripped from the URL the moment it is consumed**, so
+the address bar goes straight back to the shareable `#seed=` link: activation is a
+thing you *do*, never a thing a link carries. That the gate is a convention rather than
+a mechanism — anyone reading the shipped wasm can find the string — is exactly why the
+rule above is load-bearing: **nothing behind it may ever touch the facility**, only the
+picture. A switch that bent a rule would be a level modifier, and belongs in the token.
 
 **Constraints.** The *"full layout known"* modifier reveals the **architecture and
 nothing else**: contents stay fogged (§11.5a), so it never shortcuts the scouting

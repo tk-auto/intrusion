@@ -109,7 +109,7 @@ impl Game {
         // ability, a UI toggle) — keeping the world frozen — but a genuinely unowned
         // key (F5, a browser shortcut) is still left to the page, as it is in play.
         if self.ui.help_open {
-            if let Some(nav) = help_nav_for_key(key) {
+            if let Some(nav) = help_nav_for_key(key, self.ui.debug_mode) {
                 self.apply_help_nav(nav);
                 self.draw();
                 return true;
@@ -339,13 +339,15 @@ impl Game {
     /// the shown tab, or copy the run's token (#353). Still a pure view action: no
     /// [`State`], no turn (§4.4), whichever arm runs.
     fn apply_help_nav(&mut self, nav: HelpNav) {
+        let debug = self.ui.debug_mode;
         match nav {
             HelpNav::Close => self.close_help(),
-            HelpNav::NextTab => self.show_help_tab(self.ui.help_tab.next()),
-            HelpNav::PrevTab => self.show_help_tab(self.ui.help_tab.prev()),
+            HelpNav::NextTab => self.show_help_tab(self.ui.help_tab.next(debug)),
+            HelpNav::PrevTab => self.show_help_tab(self.ui.help_tab.prev(debug)),
             HelpNav::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
             HelpNav::CopySeed => self.copy_seed(),
             HelpNav::CopyReplay => self.copy_replay(),
+            HelpNav::ToggleReveal => self.toggle_reveal(),
         }
     }
 
@@ -361,7 +363,23 @@ impl Game {
             HelpHit::ToggleTheme => self.apply_ui_command(UiCommand::ToggleTheme),
             HelpHit::CopySeed => self.copy_seed(),
             HelpHit::CopyReplay => self.copy_replay(),
+            HelpHit::ToggleReveal => self.toggle_reveal(),
         }
+    }
+
+    /// Flip the debug session's **omni-vision** switch (§12.6/#459) — the shell half of
+    /// the Debug tab's `omni [v]` control, key and tap alike.
+    ///
+    /// It mirrors the drawn control exactly, like every other handler here: no Debug
+    /// tab in this session, or a different tab up, and the press does nothing. The flip
+    /// itself is the core's ([`State::toggle_reveal`](intrusion_core::State)) — a sight
+    /// recompute, no turn (§4.4), and no world change, which is what makes it a view
+    /// action at all.
+    fn toggle_reveal(&mut self) {
+        if !self.ui.debug_mode || self.ui.help_tab != HelpTab::Debug {
+            return;
+        }
+        self.state.toggle_reveal();
     }
 
     /// Dismiss the panel, dropping the seed-copy acknowledgement with it (#353).
@@ -452,17 +470,21 @@ impl Game {
     }
 
     /// The replay link the panel is currently offering to copy (§12.4/#411), or
-    /// `None` when it is offering none — no control in this build
-    /// ([`ScreenUi::offer_replay_copy`](intrusion_core::ScreenUi)), a different tab
-    /// up, or a run with no token for the link to carry. The link is the recording
-    /// so far over this page's own URL ([`crate::replay::replay_url`]), so what a
-    /// mid-run copy hands over is the run *up to this turn* — and a later copy, the
-    /// longer one.
+    /// `None` when it is offering none — no Debug tab in this session (#459), no
+    /// control in this build ([`ScreenUi::offer_replay_copy`](intrusion_core::ScreenUi)),
+    /// a different tab up, or a run with no token for the link to carry. The link is
+    /// the recording so far over this page's own URL ([`crate::replay::replay_url`]),
+    /// so what a mid-run copy hands over is the run *up to this turn* — and a later
+    /// copy, the longer one.
+    ///
+    /// **The link carries no debug state** (§12.6/#459): it is the level's token plus
+    /// the input script, exactly as before the Debug tab existed, so replaying it hands
+    /// over the run and never the session it was exported from.
     fn replay_to_copy(&self) -> Option<String> {
-        if !self.ui.offer_replay_copy {
+        if !self.ui.offer_replay_copy || !self.ui.debug_mode || self.ui.help_tab != HelpTab::Debug {
             return None;
         }
-        let token = self.seed_to_copy()?;
+        let token = self.state.level()?.encode()?;
         crate::replay::replay_url(&token, &intrusion_core::to_script(&self.recorded))
     }
 
@@ -1622,7 +1644,7 @@ mod tests {
         ] {
             assert_eq!(
                 surface_command(false, false, true, gesture),
-                help_nav_for_key(key).map(GestureCommand::Help),
+                help_nav_for_key(key, false).map(GestureCommand::Help),
             );
         }
     }

@@ -146,13 +146,24 @@ pub struct ScreenUi {
     /// only decides what that outcome *looks like*, so [`render_help`] keeps writing
     /// no state and the copy still costs no turn (§4.4).
     pub seed_copy: SeedCopy,
-    /// Whether this build offers the Level info tab's `replay [r]` control
+    /// Whether this build offers the Debug tab's `replay [r]` control
     /// (§12.4/§13.1/#411) — the copy-the-whole-run affordance of preview builds. A
     /// shell built with its recorder switched on sets this once at boot; the core
     /// only owns what the control looks like and where it is
     /// ([`help_hit`](crate::help_hit)). Default `false`, so the public deploy, the
     /// sim and every test draw the panel without it.
     pub offer_replay_copy: bool,
+    /// Whether this is a **debug session** (§12.6/#459) — the one thing that puts the
+    /// help panel's [`HelpTab::Debug`] tab on the bar, with the omni-vision switch and
+    /// (where the build has a recorder) the replay export on it.
+    ///
+    /// It is the shell's word, decided once at boot and never by the run: a build that
+    /// stamped it in (the artifact preview channel) or a page opened with the
+    /// activation parameter. Deliberately **not** part of [`State`](crate::State) or of
+    /// the level-seed token — nothing a player can be handed may switch it on, which is
+    /// what keeps a shared link a shared *level* (§13.1). Default `false`, so the
+    /// public deploy, the sim and every test draw the three-tab panel.
+    pub debug_mode: bool,
     /// The end screen's view state (§14 v2/#138) — the run's mode, which gates the
     /// exits it offers, and the exit the marker rests on.
     ///
@@ -182,7 +193,10 @@ impl ScreenUi {
     ///   (§11.2/#189) — the one they chose on the title screen is the one the run
     ///   must open in;
     /// - [`offer_replay_copy`](Self::offer_replay_copy) is a fact about the build
-    ///   (#411), set once at boot and true of every run it plays.
+    ///   (#411), set once at boot and true of every run it plays;
+    /// - [`debug_mode`](Self::debug_mode) is a fact about the **session**
+    ///   (§12.6/#459) — a page opened as a debug session stays one, whatever run it
+    ///   is playing, and nothing a run can do turns it on or off.
     ///
     /// It lives here, next to the fields, rather than being spelled out at the
     /// shell's reset: that is how the theme came to be dropped in the first place —
@@ -196,6 +210,7 @@ impl ScreenUi {
             modality: self.modality,
             theme: self.theme,
             offer_replay_copy: self.offer_replay_copy,
+            debug_mode: self.debug_mode,
             ..Self::default()
         }
     }
@@ -390,10 +405,13 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
             width,
             height,
             ui,
-            state.level(),
-            state.modifiers(),
-            &state.alert_readout(),
-            state.loadout(),
+            super::help::PanelRun {
+                level: state.level(),
+                modifiers: state.modifiers(),
+                alert: &state.alert_readout(),
+                loadout: state.loadout(),
+                debug: state.debug(),
+            },
         );
     }
 

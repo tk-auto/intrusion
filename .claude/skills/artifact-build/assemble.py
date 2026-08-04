@@ -90,10 +90,18 @@ def main() -> None:
                          "every cone — so a playtest can watch patrols it has not "
                          "met. These change only what the PLAYER PERCEIVES: guards "
                          "look with their own cones, so the run plays identically. "
-                         "They are "
-                         "deliberately not part of a level-seed token, and there "
-                         "is no URL form — a build is the only way to set one, so a "
-                         "shared level can never arrive with the fog lifted.")
+                         "They are deliberately not part of a level-seed token. "
+                         "Every artifact boots as a DEBUG SESSION regardless (the "
+                         "help panel's Debug tab, #459) — this only sets what the "
+                         "tab's omni-vision switch starts as, and the switch can be "
+                         "flipped from the tab either way. Pass --no-debug-mode for "
+                         "an artifact that behaves exactly like the public deploy.")
+    ap.add_argument("--no-debug-mode", action="store_true",
+                    help="do NOT stamp the debug session global: the artifact boots "
+                         "with no Debug tab, exactly as the Pages deploy does (#459). "
+                         "For a preview meant to be judged as the shipped page. "
+                         "Cannot be combined with --debug, which needs the session "
+                         "the tab lives on.")
     ap.add_argument("--title", default=None,
                     help="set the page <title>, which is what NAMES the published "
                          "artifact (the Artifact tool's own title arg is overridden "
@@ -109,6 +117,9 @@ def main() -> None:
     # switch it was built for.
     debug_flags = []
     if args.debug is not None:
+        if args.no_debug_mode:
+            sys.exit("assemble: pass --debug or --no-debug-mode, not both "
+                     "(the switches live on the Debug tab the session provides)")
         debug_flags = [f.strip() for f in args.debug.split(",") if f.strip()]
         unknown = [f for f in debug_flags if f not in DEBUG_FLAGS]
         if unknown or not debug_flags:
@@ -181,7 +192,12 @@ def main() -> None:
     # the level: a playtest switch must not be able to ride along with a level someone
     # hands to someone else. It applies to whatever the page plays — a baked level, a
     # replay, or a run rolled from the menu.
-    if debug_flags:
+    #
+    # Its PRESENCE is the debug session (the help panel's Debug tab, #459) and its
+    # value is the switch list, so an artifact is stamped either way: the preview
+    # channel exists for looking at the game, and the tab is how you look. Only
+    # --no-debug-mode leaves it off, for a preview meant to be judged as the deploy.
+    if not args.no_debug_mode:
         globals_js += f"window.__intrusionDebug = {json.dumps(','.join(debug_flags))};\n"
     seed_line = globals_js
 

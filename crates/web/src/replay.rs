@@ -20,7 +20,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use intrusion_core::{field_in, parse_script, replay_fragment, Input, LevelSeed, State};
+use intrusion_core::{
+    field_in, parse_script, replay_fragment, DebugModifiers, Input, LevelSeed, State,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, KeyboardEvent, PointerEvent};
@@ -78,8 +80,12 @@ impl ReplayView {
     /// design's intended cheap path — so forward and backward to the same `K` are
     /// byte-identical by construction. `pub(crate)` so the boot can paint the
     /// opening frame (`K = 0`) before the input pumps are wired.
-    pub(crate) fn state_at(&self) -> Result<State, JsValue> {
-        let mut state = new_run(&self.level)?;
+    ///
+    /// `debug` is the session's perception switches (§12.6/#459), carried through every
+    /// re-simulation so a scrub does not silently drop the reveal a watcher is watching
+    /// under. They change sight alone, so the state at `K` is the same run either way.
+    pub(crate) fn state_at(&self, debug: DebugModifiers) -> Result<State, JsValue> {
+        let mut state = new_run(&self.level, debug)?;
         for &input in &self.inputs[..self.cursor] {
             state.step(input);
         }
@@ -280,7 +286,8 @@ impl Game {
         if moved {
             // Re-borrow immutably to re-simulate; keep the old frame if generation
             // somehow fails (the v1 footprint always carves, §10.6).
-            if let Ok(state) = self.replay.as_ref().expect("checked above").state_at() {
+            let debug = self.state.debug();
+            if let Ok(state) = self.replay.as_ref().expect("checked above").state_at(debug) {
                 self.state = state;
             }
             self.draw();
