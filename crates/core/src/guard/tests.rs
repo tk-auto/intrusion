@@ -182,6 +182,17 @@ fn a_silenced_nets_watch_is_the_plain_disc() {
 /// territory straddles a wall into a space it cannot reach), and the corridors
 /// adjacent to its rooms are genuinely part of the beat, not ground crossed
 /// incidentally.
+///
+/// **On the carve as generated, which is a weaker claim than it reads as** (#477).
+/// [`generate_level`](crate::generate_level) hands back a *bare* board: the intel
+/// consoles, the comms console and the exit are stamped in later, by
+/// [`State::new`](crate::State::new), so on the board this test sees they are all
+/// still plain floor. They are the one terrain that blocks a guard's route without
+/// blocking pathing (§10.3), and one of them landing in a one-cell throat is exactly
+/// what strands a beat cell — which is why this test passed over the whole seed range
+/// while guards froze in play. The property **on the board a run is played on** is
+/// [`a_calm_guard_never_walks_at_ground_it_cannot_reach`]; keep both, they check
+/// different boards.
 #[test]
 fn placed_guard_territories_are_reachable_and_cover_corridors() {
     use crate::generate::generate_level;
@@ -224,6 +235,145 @@ fn placed_guard_territories_are_reachable_and_cover_corridors() {
             // pins that every region — corridors included — is in some beat.
         }
     }
+}
+
+/// §7.5/#477 on the board a run is actually played on: **a Calm guard is never
+/// walking at ground it cannot reach.**
+///
+/// The freeze this pins was a permanent one. A solid usable stamped into a one-cell
+/// throat seals the cells behind it off from every guard (§10.3 — it blocks a route
+/// without blocking pathing) while the region beat cut from the graph still claims
+/// them. The sealed cell is then the farthest thing in the beat from the opposite
+/// corner and can never be marked inspected, so the sweep picked it, could not walk a
+/// step toward it, kept it, and re-picked it — and the guard stood on one cell for the
+/// rest of the run. Measured before the fix: 38 of 300 quick-play seeds froze a guard
+/// for 100+ unbroken turns, several for the whole 500-turn window.
+///
+/// Booted through [`start_level`](crate::start_level), deliberately — the one boot path
+/// the web shell, the replay viewer and the sim all share, and the only one that has
+/// the usables stamped in. Run idle, because the freeze is a property of the patrol and
+/// wants no player pushing the guards around.
+#[test]
+fn a_calm_guard_never_walks_at_ground_it_cannot_reach() {
+    use crate::level_seed::{start_level, LevelSeed};
+    use crate::test_support::seed_sweep;
+    use crate::Input;
+    use std::collections::HashSet;
+
+    /// Long enough that every guard has finished several patrol legs — the freeze
+    /// only appears once a sweep reaches the corner the sealed pocket is farthest
+    /// from, which on the reported seed took ~150 turns.
+    const TURNS: usize = 300;
+    /// A Calm guard holds for a dwell (3–7, §7.5) plus up to two turns of slow
+    /// turning, and longer when a colleague seals the only route (§7.8). Well past
+    /// all of that, and far short of the permanent hold this exists to catch.
+    const LONGEST_HONEST_HOLD: u32 = 60;
+
+    for seed in seed_sweep(64) {
+        let mut state = start_level(&LevelSeed::quick_play(seed)).expect("quick play generates");
+        let mut held: Vec<(u32, Cell)> = state.guards().iter().map(|g| (0, g.pos())).collect();
+        for turn in 0..TURNS {
+            state.step(Input::Wait);
+            let facility = state.layout().facility();
+            for (i, guard) in state.guards().iter().enumerate() {
+                let Some(destination) = guard.destination() else {
+                    held[i] = (0, guard.pos());
+                    continue;
+                };
+                if guard.state() == GuardState::Calm {
+                    let walkable: HashSet<Cell> =
+                        path::flood_from(guard.pos(), facility.width(), facility.height(), |c| {
+                            routable(facility, c)
+                        })
+                        .into_iter()
+                        .collect();
+                    assert!(
+                        walkable.contains(&destination),
+                        "seed {seed}, turn {turn}: the guard at {:?} is walking at \
+                         {destination:?}, which no route reaches",
+                        guard.pos(),
+                    );
+                }
+                // The symptom as a player sees it, independent of the mechanism: a
+                // guard standing on one cell with somewhere it still means to be.
+                if guard.pos() == held[i].1 && destination != guard.pos() {
+                    held[i].0 += 1;
+                    assert!(
+                        held[i].0 <= LONGEST_HONEST_HOLD,
+                        "seed {seed}, turn {turn}: the guard at {:?} has held one cell \
+                         for {} turns with {destination:?} still to walk to",
+                        guard.pos(),
+                        held[i].0,
+                    );
+                } else {
+                    held[i] = (0, guard.pos());
+                }
+            }
+        }
+    }
+}
+
+/// §7.5/#477, the mechanism in one room: the sweep will not target ground sealed off
+/// by a **solid usable**, however far away — and being farthest is exactly what used
+/// to get such a cell picked.
+///
+/// ```text
+///   0        9 11
+///   ############   row 0
+///   #@........$.#   $ = the console sealing the alcove behind it
+///   ############   row 2
+/// ```
+///
+/// The guard stands at the west end with the whole strip as its beat. `(11, 1)` is the
+/// farthest uninspected cell in it and the one [`pick_farthest`] would take; the
+/// console at `(10, 1)` is the only way to it, and a console is solid to a guard
+/// (§10.3), so it must take the farthest cell on *its* side instead.
+#[test]
+fn the_sweep_will_not_target_ground_a_console_has_sealed_off() {
+    let mut facility = Facility::walled_box(13, 3);
+    facility.set_terrain(10, 1, Terrain::Console);
+    let beat: Vec<Cell> = (1..12).map(|x| Cell::new(x, 1)).collect();
+    let mut guard = Guard::patrolling(Cell::new(1, 1)).with_beat(beat);
+
+    guard.repick_patrol_target(&facility, PatrolStyle::Beat, &mut Rng::new(0));
+
+    assert_eq!(
+        guard.destination(),
+        Some(Cell::new(9, 1)),
+        "the farthest cell it can actually walk to, not the farthest cell",
+    );
+}
+
+/// §7.8 kept intact: a colleague standing in the only route is a **this turn**
+/// problem, and the guard holds and retries rather than throwing its target away.
+///
+/// This is the case the #477 fix must not swallow. The route test it added is drawn
+/// over bare terrain for exactly this reason — fold colleagues into it and a guard
+/// would discard a perfectly good destination every time one crossed the corridor
+/// ahead of it, which is a patrol that never gets anywhere.
+#[test]
+fn a_colleague_in_the_way_does_not_cost_the_guard_its_target() {
+    // A one-cell-wide corridor: there is no way round a colleague standing in it.
+    let facility = Facility::walled_box(10, 3);
+    let far = Cell::new(8, 1);
+    let mut guard = Guard::patrolling_to(Cell::new(1, 1), far).with_beat(open_beat(10, 3));
+    let colleague = [Cell::new(2, 1)];
+
+    let step = guard.decide(
+        &facility,
+        &colleague,
+        &mut Rng::new(0),
+        Dwell::NEVER,
+        PatrolStyle::Beat,
+        BlindPolicy::Rear,
+    );
+
+    assert_eq!(step, None, "sealed in this turn, the guard holds");
+    assert_eq!(
+        guard.destination(),
+        Some(far),
+        "…and keeps the target it was walking to",
+    );
 }
 
 /// §7.6: the post-search raised-coverage watch overrides the beat exactly as
