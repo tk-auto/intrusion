@@ -14,11 +14,12 @@ grid floor you can see through, stairs. Treat them as a quarry, not a spec.
 | Index | What it is |
 |---|---|
 | 0 | Default — no information |
-| 1–15 | **Wall autotile patterns**, by which sides the wall joins (see below) |
+| 1–15 | **Wall autotile patterns**, by which sides the wall is exposed (see below) |
 | 16 | Floor |
 | 17–23 | Unassigned experiments — **not in use** |
 
-The autotile run is indexed by which sides the wall run continues along:
+The autotile run is indexed by which sides the wall is **exposed** on — the sides where
+the run *stops*, not where it continues:
 
 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|
@@ -28,25 +29,41 @@ The autotile run is indexed by which sides the wall run continues along:
 |---|---|---|---|---|---|---|
 | SW | NW | NE | NSE | EWS | NWS | NWE |
 
-**Indices 1–15 are a step-2 asset.** #460 is one tile per glyph with no neighbour
-lookup, so its glyph band can only take index 1 — a wall with no wall against it — as
-its representative `#`. Index 16, the floor, needs no neighbours and is used as it is.
+**This legend used to be written the other way round, and it was wrong** (#461). The
+art settles it: index 1 is a plain block with no line anywhere, and every line the run
+adds is a bright boundary along the named side. A plain block is what a wall in the
+*middle* of a mass of wall looks like; an isolated pillar is the one that needs a
+boundary on all four sides. Read the other way, the run draws a seam down the middle of
+every corridor wall, and the tile the source is missing becomes the commonest cell in
+the facility instead of the rarest.
 
-The run is nonetheless seeded into the built sheet's **wall band** (slots 16–31),
-remapped from the order above into a **neighbour bitmask** — `N=1, E=2, S=4, W=8` — so
-step 2's autotiler can compute a slot instead of keeping a table. Doing that once, at
-the seam, is the whole point of remapping rather than copying the order across. The
-source has no all-four-sides tile, so slot 31 is seeded empty and is the first thing
-worth drawing.
+Index 16, the floor, needs no neighbours and is used as it is.
+
+The run is seeded into the built sheet's **wall band** (slots 16–31), remapped from the
+order above into a **neighbour bitmask** — `N=1, E=2, S=4, W=8`, the complement of the
+exposed set — so the autotiler can compute a slot instead of keeping a table. Only the
+six rotation representatives are written; the other ten neighbourhoods are those six
+turned at draw time (see `docs/render-reference.md` §6.2). The source has no
+all-four-sides-exposed tile, so the isolated pillar is **composed** from the run: each
+single-exposed tile is the same fill with one boundary line added, so the union of the
+four is the tile the artist would have drawn.
 
 ## `player.png` — 768×768, 48×48 cells, content in row 0 only
 
-An **animation sheet**: ten frames of one hooded figure. #460 has no animation, so it
-takes frame 0 and nothing else.
+An **animation sheet**: ten frames of one hooded figure, seen from above.
+
+**Nothing is lifted from it, and that is a decision** (#461). #460 took frame 0 as the
+`@`; step 2 took it back out. The frames are a walk cycle of a **single facing** with
+no cue for which way the figure is looking, so turned through the four quarters one
+reads as a blob that has moved rather than as somebody facing west — and a renderer
+whose job is to draw facing cannot use art that cannot show it. The `@` is a crude
+placeholder body plan, with a brim that says where the front is, until somebody draws
+the cue into these. They stay here for that day; the slot is one line from taking them
+back.
 
 ## What happens to them on the way in
 
-`build-tileset.py` desaturates every lifted tile to greyscale + alpha and normalises
+`seed-tileset.py` desaturates every lifted tile to greyscale + alpha and normalises
 its range. The desaturation is not a choice: §11.2 **[SETTLED]** says no game system
 names a colour, and a guard's yellow → orange → red *is* the AI state machine made
 visible, so art carrying its own palette would leave the threat ladder nowhere to

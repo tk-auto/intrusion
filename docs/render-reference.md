@@ -698,12 +698,14 @@ on with `?tiles=1`. The character grid stays the game's real picture; a tile is 
 second way of painting the same grid, and the fact that it changes nothing about what
 the grid *says* is the whole point of the seam.
 
-**The rule is one tile per glyph.** A sprite is chosen by the cell's glyph and by
-nothing else — no neighbour lookup, no autotiling, no rotation, no animation. The
-colour is not chosen by the tileset either: the cell resolves to a colour through §4
-exactly as a character would, and the sprite is drawn *in that colour*. So a tile and
-a glyph carry identical information, in all four knowledge states (§3) and both themes
-(§4.4), and the two renderers can never disagree about what a cell means.
+**The rule is one sprite per glyph, and the sprite may be turned.** A sprite is chosen
+by the cell's glyph, by which of its neighbours draw that same glyph (§6.2), and by the
+facing the cell declares (§6.3) — and by nothing else. No animation, and nothing read
+from game state. The colour is not chosen by the tileset either: the cell resolves to a
+colour through §4 exactly as a character would, and the sprite is drawn *in that
+colour*. So a tile and a glyph carry identical information, in all four knowledge
+states (§3) and both themes (§4.4) — with the single, deliberate exception of facing
+(§6.3) — and the two renderers can never disagree about what a cell means.
 
 Sprites are therefore authored **greyscale with alpha**: the alpha is the shape, and
 the greys are shading that the category tint multiplies through. Full-colour art is
@@ -753,18 +755,19 @@ a gap. The bands, each with room left after it:
 | Slots | Band |
 |---|---|
 | 0–15 | One sprite per **glyph** — what this section describes |
-| 16–31 | The **wall autotile** run, keyed by a neighbour bitmask (`N=1, E=2, S=4, W=8`) — step 2 |
+| 16–31 | The **wall autotile** run, keyed by a neighbour bitmask (`N=1, E=2, S=4, W=8`) — §6.2 |
 | 32+ | Free |
 
 **`web/assets/tiles.txt` names every allocated slot** — index, key, description — and
 is the file an artist reads while drawing. It is not documentation that can rot:
 `crates/web/src/tiles.rs` embeds it and a test asserts its own glyph → slot mapping
 agrees with it in both directions, so the sheet, the table and the code cannot drift
-apart in silence. The same test asserts the wall band stays *reserved* rather than
-merely unused.
+apart in silence. The same test asserts that every shape the autotiler draws is
+declared, and that no slot the table calls a **rotation** is ever indexed.
 
-A slot listed in the table with nothing drawn in it is a slot waiting for art, not a
-bug: the renderer falls back to the character.
+A `glyph:` or `wall:` slot listed in the table with nothing drawn in it is a slot
+waiting for art, not a bug: the renderer falls back to the character. A `rotation:`
+slot is empty *on purpose* — see §6.2.
 
 Tinting bakes one copy of the sheet per colour rather than compositing per cell — a
 40×40 board every frame is what would make this expensive — and only over the rows the
@@ -778,6 +781,89 @@ art's own run follows) and is **authored by hand from there on** — the script 
 to overwrite it without `--force`, so a reflexive re-run cannot discard drawing.
 
 The art is still **placeholder** and says so: the source sheets came out of an earlier
-Godot experiment, and only three of the fourteen glyph sprites could honestly be cut
-from them. The rest are crude generated shapes, and the wall band is seeded from the
-source run with one slot (all four neighbours) left empty.
+Godot experiment, and only two of the fourteen glyph sprites could honestly be cut from
+them — the wall and the floor. The rest are crude generated shapes, including both
+actors: the player sheet's hooded figure is drawn from above but carries no cue for
+which way it is looking, and a renderer that turns sprites cannot use a facing nobody
+can name (§6.3).
+
+### 6.2 Autotiling: a surface is drawn from its neighbours
+
+A glyph that reads as a **continuous surface** picks its sprite from which of its four
+neighbours draw that same glyph — so a wall run joins along its length, turns at a
+corner and closes at a crossing, instead of being the same block repeated. Only `#`
+autotiles today, because only `#` has a run drawn for it; `□` is exactly as continuous
+and costs a band and nothing else the day somebody draws it.
+
+The neighbourhood is a **bitmask** — `N=1, E=2, S=4, W=8` — and the slot is `16 + mask`,
+so the lookup is arithmetic and no table has to be kept in step with anything.
+
+**The neighbours are read from the drawn grid, and from nothing else.** This is the
+rule the whole feature rests on. Geometry the player has never seen is masked as the
+schematic's `□` (§2.3/§11.5a), not as `#`, so a wall *cannot* join to it: joins follow
+the glyph that is drawn, which means the shape channel can say no more than the glyph
+channel already said. Ask the game state instead — "is there really a wall there?" —
+and the masking is defeated through shape while glyph and colour are still telling the
+truth, which is the §2.4 leak in its most invisible form, because it looks like better
+art. Two other neighbours never join, for the same reason: one off the grid, and one on
+the **chrome** surface, so a `#` in a sentence laid across the map (§11.7) is never
+welded to the facility.
+
+It follows that **the joins change as the fog lifts** — a wall that ended in a cap
+grows into a run as the player sees what it continues into. That is correct, and it is
+the visible form of the guarantee: what is drawn is what is known.
+
+**Six shapes, sixteen neighbourhoods.** The masks fall into six rotation orbits, and
+the shell turns a sprite at draw time, so the sheet stores each shape **once**:
+
+| Slot | Mask | Shape |
+|---|---|---|
+| 16 | none | an isolated block, exposed on all four sides |
+| 17 | N | an end cap |
+| 19 | N–E | a corner |
+| 21 | N–S | a straight run |
+| 23 | N–E–S | a T |
+| 31 | all four | a crossing — and the plain interior of a mass of wall |
+
+The band's **other ten slots stay allocated and empty**, listed in `tiles.txt` as
+`rotation:` with the slot and quarter-turn that reach them. They are not free space:
+the band is indexed `16 + mask`, so closing the gap would slide every slot after it and
+silently repaint whatever referenced them — the reason an `AbilityId` slot is permanent
+(`CLAUDE.md`). Drawing one is still allowed; it is what a sheet does when a corner
+deserves art its rotation cannot give it.
+
+*(The band could in principle be deduplicated further — every tile is the plain fill
+plus one boundary line per exposed side, so two images and four draws per cell would
+do. It stores six because a cell must stay **one** draw: a 40×40 board every frame is
+what makes anything here expensive. The measurements behind both the deduplication and
+the source run's corrected legend are in `docs/design-rulings.md` appendix 37.)*
+
+### 6.3 Facing: the one thing tiles say that characters do not
+
+A cell may declare a **facing**, and its sprite is drawn turned to it. `GlyphCell`
+carries it, so the grid is still the single interface and the ASCII renderer is
+unchanged — it ignores the field, and the character picture is identical byte for byte.
+
+**Who has one:**
+
+| | Facing |
+|---|---|
+| The player | Yes — §5 makes "you cannot see behind you" a rule, so which way you are turned is worth drawing |
+| A **seen** guard (§9.2) | Yes — the same facing its cone is drawn from, said a second way |
+| A **sensed** guard (§9.2) | **No.** Position only, "no facing, no cone" — and it has no glyph to turn in the first place |
+| Your decoy (§8.3) | Yes, and it is **yours**: the fake wears your glyph, your colour and your stance, so tiles cannot tell you from it when characters cannot |
+| A player inside a hideout | No — the glyph is the cupboard, and a cupboard faces nowhere |
+| Everything else | No |
+
+**This is an addition of information, and it is the only one.** A character grid says
+nothing about which way anything is turned; a tile does. That is deliberate for the
+player and defensible for a seen guard (whose facing the danger overlay already gives),
+and it is exactly why a sensed guard must not have one — the sense channel is *defined*
+as position without state, and a turned sprite behind a wall would hand over the one
+thing it withholds.
+
+A directional sprite is drawn at a **rest facing of south** — down the screen, toward
+the viewer, which is how top-down art is drawn — and turned from there, so the
+commonest case costs no rotation. Such a sprite must be authored **square and
+aspect-neutral**: a placeholder drawn in the cell's own 14×20 proportion would have its
+squash land on the wrong axis the moment it was turned.

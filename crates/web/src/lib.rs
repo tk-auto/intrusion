@@ -549,13 +549,14 @@ fn paint(
                 Visibility::Remembered => memory(theme),
             };
             // The one line the tile mode touches: a sprite in that same colour if
-            // this cell has one, and the character otherwise (§11.1/#460).
-            let (x, y) = (x as f64, y as f64);
-            if tiles.is_some_and(|tiles| tiles.draw(ctx, x, y, cell, color, m)) {
+            // this cell has one, and the character otherwise (§11.1/#460). It is
+            // handed the **grid**, not the cell (#461): a wall's sprite is chosen from
+            // its neighbours, and the grid is the only thing it may read them from.
+            if tiles.is_some_and(|tiles| tiles.draw(ctx, grid, x, y, color, m)) {
                 continue;
             }
             ctx.set_fill_style_str(color);
-            draw_char(ctx, x, y, cell.glyph, m);
+            draw_char(ctx, x as f64, y as f64, cell.glyph, m);
         }
     }
 }

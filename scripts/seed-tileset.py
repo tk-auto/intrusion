@@ -23,8 +23,30 @@ The allocation, with room left after each band:
 | Slots | Band |
 |---|---|
 | 0-15 | One sprite per **glyph** — what #460 step 1 draws |
-| 16-31 | The **wall autotile** run, indexed by a neighbour bitmask — step 2 |
+| 16-31 | The **wall autotile** run, indexed by a neighbour bitmask — #461 |
 | 32+ | Free |
+
+# Rotation, and the ten slots that are not drawn
+
+The autotile run is indexed `16 + mask` with `N=1, E=2, S=4, W=8`, but **only six of
+its sixteen slots carry art** (#461). The sixteen neighbourhoods are six shapes at
+four angles — the four end caps are one sprite turned, so are the four corners and
+the four Ts — and the shell turns a sprite at draw time, so a sheet that stored all
+sixteen would be storing ten images it already had. What is drawn is the orbit
+representative: masks 0, N, N-E, N-S, N-E-S and all four.
+
+The other ten slots stay **allocated and empty**, listed in the slot table as the
+rotations they are. They are not free space: the index is still `16 + mask`, and slot
+18 is still where mask `E` lives if a later ticket ever wants a sprite of its own
+there instead of slot 17 turned. Closing the gap would slide the band and silently
+repaint every cell after it — the reason an `AbilityId` slot is permanent (`CLAUDE.md`).
+
+Actor sprites are turned by the same machinery, from the same sheet slot: the `@` and
+the `g` are drawn at their **rest facing** (south, toward the viewer, which is how the
+source art was drawn) and turned to whichever way the actor faces. So a directional
+sprite must be authored **square and aspect-neutral** — the crude placeholders below
+that are drawn in the cell's own 28x40 box and stretched cannot be turned, because
+the stretch would land on the wrong axis once they were.
 
 # The slot table
 
@@ -204,6 +226,15 @@ def read_png(path):
 
 
 def lift(sheet, index):
+    """Tile `index` of a source sheet, desaturated and range-normalised on its own.
+
+    The single-tile case: see `lift_raw` for the desaturation and `stretch` for the
+    normalisation, which the wall band deliberately does *not* use tile by tile.
+    """
+    return stretch(lift_raw(sheet, index))
+
+
+def lift_raw(sheet, index):
     """Tile `index` of a source sheet, desaturated to `(grey, alpha)`.
 
     Sources are laid out row-major at their own tile size and the tile is resampled
@@ -233,7 +264,7 @@ def lift(sheet, index):
                     alpha_sum += a
                     count += 1
             tile.px[y][x] = (grey_sum // count, alpha_sum // count)
-    return stretch(tile)
+    return tile
 
 
 def stretch(tile, floor=40):
@@ -269,6 +300,34 @@ def stretch(tile, floor=40):
                 if alpha:
                     tile.px[y][x] = (255, alpha)
         return tile
+    return rescale(tile, low, high, floor)
+
+
+def stretch_group(tiles, floor=40):
+    """Normalise a whole band of tiles **through one range**, taken across all of them.
+
+    A band whose tiles share a fill has to be stretched as a group or not at all
+    (#461). Per tile, the wall run comes out incoherent: the interior block is one flat
+    grey, so `stretch` reads no range in it and hands back a full-strength silhouette,
+    while every tile that carries a join line normalises its dark fill down to the
+    floor. The band would then draw a *lone pillar brighter than the wall it is part
+    of* — the fill saying something about the tile's own contrast rather than about the
+    wall, which is the one thing a continuous surface may not do.
+
+    One range across the band keeps the relation the artist drew: the same fill lands
+    on the same grey in all six, and the join lines stay the bright thing.
+    """
+    inked = [g for tile in tiles for row in tile.px for (g, a) in row if a > 0]
+    if not inked:
+        return tiles
+    low, high = min(inked), max(inked)
+    if high == low:
+        return tiles
+    return [rescale(tile, low, high, floor) for tile in tiles]
+
+
+def rescale(tile, low, high, floor):
+    """Map greys from `low..high` onto `floor..255`, in place, ink only."""
     span = 255 - floor
     for y in range(tile.h):
         for x in range(tile.w):
@@ -394,27 +453,36 @@ def comms():
     return t
 
 
-def figure(head_r, shoulder, grey=255):
-    """The shared body plan for the two standing entities — so the player and a
-    guard read as the same *kind* of thing, told apart by build and by colour."""
-    t = Tile(DRAW_W, DRAW_H)
-    t.disc(DRAW_W // 2, 8, head_r, grey=grey)
-    t.rect(DRAW_W // 2 - shoulder, 14, DRAW_W // 2 + shoulder, 27, grey=grey)
-    t.rect(DRAW_W // 2 - 4, 28, DRAW_W // 2 - 2, DRAW_H - 4, grey=grey)
-    t.rect(DRAW_W // 2 + 2, 28, DRAW_W // 2 + 4, DRAW_H - 4, grey=grey)
+def figure(body_r, head_r, brim, grey=255):
+    """The shared body plan for the two actors, **seen from above and facing south**.
+
+    Square and centred, because an actor's sprite is *turned* to the way it faces
+    (#461) and only an aspect-neutral tile survives that — the cell-box placeholders
+    above would have their stretch land on the wrong axis the moment they were turned.
+    South is the rest facing: down the screen, toward the viewer, which is the way the
+    lifted player art was drawn.
+
+    The read from above is three rings: the shoulders as the broad mass, the head
+    sitting forward on them, and a bright **brim** across the face. The brim is the
+    facing cue — the only part that is not symmetric, and so the only part that says
+    which way this thing is looking once it has been turned.
+    """
+    cx, cy = TILE // 2, TILE // 2
+    t = Tile()
+    t.disc(cx, cy - 1, body_r, grey=grey * 45 // 100)
+    t.disc(cx, cy + 2, head_r, grey=grey * 80 // 100)
+    t.rect(cx - brim, cy + head_r, cx + brim, cy + head_r + 3, grey=grey)
     return t
 
 
 def player():
     """`@` — you: the narrower build, and the one the board is drawn around."""
-    return figure(head_r=4, shoulder=5)
+    return figure(body_r=13, head_r=7, brim=6)
 
 
 def guard():
-    """`g` — a guard: broader at the shoulder, and wearing a helmet brim."""
-    t = figure(head_r=5, shoulder=7)
-    t.rect(DRAW_W // 2 - 7, 3, DRAW_W // 2 + 7, 4)
-    return t
+    """`g` — a guard: broader at the shoulder, and wearing a deeper helmet brim."""
+    return figure(body_r=17, head_r=9, brim=9)
 
 
 def body():
@@ -424,6 +492,19 @@ def body():
     t.rect(12, DRAW_H - 16, DRAW_W - 6, DRAW_H - 9, grey=220)
     t.rect(DRAW_W - 8, DRAW_H - 8, DRAW_W - 4, DRAW_H - 6, grey=180)
     return t
+
+
+def wall_interior():
+    """`#` — the wall's own glyph sprite, which is the band's fully-surrounded
+    interior (mask 15) and not a separately normalised copy of it.
+
+    The glyph slot is what a `#` draws when nothing autotiles it — the sheet still
+    decoding, a later renderer that does no neighbour lookup — and a fallback that
+    came out a different shade from the run it falls back *from* would make the wall
+    flicker as the sheet landed. Defers to `wall_band` at call time, so the two cannot
+    drift.
+    """
+    return wall_band()[0xF]
 
 
 def squared(tile):
@@ -448,13 +529,19 @@ def squared(tile):
 # mapping and a test asserts it against the written slot table.
 #
 # A source entry is `(sheet, tile index)` lifted from `web/assets/source/`; a callable
-# is a crude placeholder shape below. **The source art supplies three of the fourteen
-# and that is its honest yield**: its own tiles 1-15 are a wall autotile run, which
-# step 1 refuses to use (one tile per glyph, no neighbour lookup), so only index 1 — a
-# wall with no wall against it — says something a single tile can say. Index 16 is the
-# floor. The player sheet is animation frames, so it gives frame 0.
+# is a crude placeholder shape below. **The source art supplies two of the fourteen and
+# that is its honest yield**: its own tiles 1-15 are the wall autotile run, which the
+# band takes whole and the glyph band draws the interior of, and index 16 is the floor.
+#
+# The player sheet is **not one of them any more** (#461). Its frames are a walk cycle
+# of a single facing, and a hooded figure seen from above carries no cue for which way
+# it is looking — turned through the four quarters it reads as a blob that has moved,
+# not as somebody facing west. A renderer whose whole job this ticket is cannot show a
+# facing nobody can name, so the `@` takes the same placeholder body plan the guard
+# does, where the brim says it. The frames are still in `web/assets/source/`, and the
+# slot is one line from taking them back the day somebody draws the cue in.
 GLYPHS = [
-    ("#", "Wall", ("tiles", 1)),
+    ("#", "Wall", wall_interior),
     ("\u25a1", "Building fabric on the plans, never seen (\u00a711.5a)", schematic),
     ("+", "Door panel, closed", door_panel),
     ("\u00d7", "Door frame (hinge)", door_hinge),
@@ -465,23 +552,33 @@ GLYPHS = [
     ("E", "The exit \u2014 your own tunnel's mouth", exit_tile),
     ("$", "Intel console", console),
     ("\u03a8", "Comms console", comms),
-    ("@", "You, and a decoy you placed", ("player", 0)),
+    ("@", "You, and a decoy you placed", player),
     ("g", "A guard you can see", guard),
     ("z", "A body", body),
 ]
 
 # The **wall autotile band** (slots 16-31): a wall drawn for each combination of
-# neighbouring walls, so step 2 can pick one by looking at four cells.
+# neighbouring walls, so the shell can pick one by looking at four cells.
 #
 # The slot is the **bitmask itself** — N=1, E=2, S=4, W=8 — so the lookup is
-# arithmetic rather than a table anybody has to keep. The source art's run is ordered
-# differently (see `web/assets/source/README.md`), so it is mapped in here rather than
-# copied across in its own order: doing that once, at the seam, is what buys step 2 an
-# index it can compute. The source has no all-four-sides tile, so slot 31 is seeded
-# empty and is the first thing worth drawing.
+# arithmetic rather than a table anybody has to keep.
 NORTH, EAST, SOUTH, WEST = 1, 2, 4, 8
-WALL_SOURCE = {
-    0: 1,                            # no wall against it
+
+# How dark the wall fill is allowed to get once the band is normalised — the grey the
+# tint multiplies through, and so the fraction of the category colour a solid wall
+# comes out at. High enough that a wall reads as filled mass, low enough that the join
+# lines stay clearly the brightest thing in the tile.
+WALL_FLOOR = 120
+
+# The source art's own run, keyed by the sides where the wall is **exposed** — where it
+# does *not* continue (see `web/assets/source/README.md`). That is the reading its
+# pixels support: index 1 is a plain block with no edge anywhere, which is a wall in
+# the middle of a mass of wall, and every line the art adds is a boundary where the
+# wall stops. Read the other way round — as the sides where it joins — the run draws a
+# seam down the middle of every corridor wall, and the commonest cell in the facility,
+# the fully surrounded interior, is the one the source is missing (#461).
+WALL_EXPOSED_SOURCE = {
+    0: 1,                            # nothing exposed: the interior of a mass of wall
     EAST: 2,
     NORTH: 3,
     WEST: 4,
@@ -496,8 +593,70 @@ WALL_SOURCE = {
     EAST | WEST | SOUTH: 13,
     NORTH | WEST | SOUTH: 14,
     NORTH | WEST | EAST: 15,
-    # NORTH | EAST | SOUTH | WEST has no source tile \u2014 slot 31 stays empty.
+    # All four exposed \u2014 the isolated pillar \u2014 has no source tile; `pillar()` builds it.
 }
+
+# The six masks the sheet draws, one per rotation orbit of the sixteen (#461). Every
+# other mask is one of these turned, and the shell turns it at draw time.
+WALL_CANONICAL = [0, NORTH, NORTH | EAST, NORTH | SOUTH, NORTH | EAST | SOUTH, 15]
+
+
+def turn_mask(mask):
+    """A neighbour mask turned one quarter clockwise: N->E->S->W->N."""
+    return (mask << 1 | mask >> 3) & 0xF
+
+
+def canonical(mask):
+    """`(representative, quarter turns)` \u2014 the smallest mask this one turns into, and
+    how many clockwise quarters take that representative back to `mask`.
+
+    The same arithmetic `crates/web/src/tiles.rs` does, and the reason the two agree
+    about which ten slots are left empty: both compute it, neither keeps a list.
+    """
+    rep, turns, candidate = mask, 0, mask
+    for back in range(4):
+        if candidate < rep:
+            rep, turns = candidate, back
+        candidate = turn_mask(turn_mask(turn_mask(candidate)))  # one quarter back
+    return rep, turns
+
+
+def pillar():
+    """The **isolated wall**: exposed on all four sides, which the source run lacks.
+
+    Composed from the run rather than drawn, because the art turns out to be additive
+    \u2014 each single-exposed tile is the same dark fill with one bright boundary line
+    added, so the union of the four *is* the tile the artist would have drawn. Built
+    from the four real tiles rather than one tile turned four times, which keeps
+    whatever asymmetry they carry where the lines meet at the corners.
+    """
+    tile = lift_raw("tiles", WALL_EXPOSED_SOURCE[0])
+    for side in (NORTH, EAST, SOUTH, WEST):
+        edge = lift_raw("tiles", WALL_EXPOSED_SOURCE[side])
+        for y in range(TILE):
+            for x in range(TILE):
+                grey, alpha = tile.px[y][x]
+                edge_grey, edge_alpha = edge.px[y][x]
+                tile.px[y][x] = (max(grey, edge_grey), max(alpha, edge_alpha))
+    return tile
+
+
+def wall_band():
+    """The band's drawn slots as `{mask: tile}`, normalised as one group.
+
+    A mask absent from this mapping is a slot the shell reaches by *turning* another,
+    and there is deliberately nothing to draw there.
+    """
+    tiles = {mask: wall_tile(mask) for mask in WALL_CANONICAL}
+    normalised = stretch_group(list(tiles.values()), floor=WALL_FLOOR)
+    return dict(zip(tiles.keys(), normalised))
+
+
+def wall_tile(mask):
+    """The raw source tile for a wall with neighbours `mask` \u2014 the run is keyed by
+    what is *exposed*, which is the complement."""
+    source = WALL_EXPOSED_SOURCE.get(0xF ^ mask)
+    return pillar() if source is None else lift_raw("tiles", source)
 
 
 def sides(mask):
@@ -507,23 +666,56 @@ def sides(mask):
 
 
 def slots():
-    """Every allocated slot, as `(index, key, description, source or None)`.
+    """Every allocated slot, as `(index, key, description, tile or None, origin)`.
 
     One list, walked by both outputs, so the sheet and the table it is described by
-    are built from the same statement and cannot disagree.
+    are built from the same statement and cannot disagree. A `None` tile is a slot
+    that is allocated with nothing in it \u2014 either art nobody has drawn yet, or, in the
+    band, a mask the shell reaches by turning another slot.
     """
     out = []
     for i, (glyph, description, source) in enumerate(GLYPHS):
-        out.append((GLYPH_BASE + i, f"glyph:{glyph}", description, source))
+        tile, origin = resolve(source)
+        out.append((GLYPH_BASE + i, f"glyph:{glyph}", description, tile, origin))
+
+    band = wall_band()
     for mask in range(16):
-        source = WALL_SOURCE.get(mask)
-        out.append((
-            WALL_BASE + mask,
-            f"wall:{mask}",
-            f"Wall autotile \u2014 wall neighbours {sides(mask)}",
-            ("tiles", source) if source is not None else None,
-        ))
+        neighbours = f"wall neighbours {sides(mask)}"
+        if mask in band:
+            exposed = 0xF ^ mask
+            origin = "tiles[composed]" if exposed not in WALL_EXPOSED_SOURCE \
+                else f"tiles[{WALL_EXPOSED_SOURCE[exposed]}]"
+            out.append((
+                WALL_BASE + mask,
+                f"wall:{mask}",
+                f"Wall autotile \u2014 {neighbours}",
+                band[mask],
+                origin,
+            ))
+        else:
+            # A tombstone, not a hole: the slot stays allocated at `16 + mask` and
+            # says which slot is turned to reach it (#461).
+            rep, turns = canonical(mask)
+            quarters = "quarter" if turns == 1 else "quarters"
+            out.append((
+                WALL_BASE + mask,
+                f"rotation:{mask}",
+                f"Wall autotile \u2014 {neighbours}: slot {WALL_BASE + rep} "
+                f"turned {turns} {quarters} clockwise",
+                None,
+                "",
+            ))
     return out
+
+
+def resolve(source):
+    """A slot's art as `(tile, origin)` \u2014 the origin being what to print in the log so
+    a re-cut says where every sprite came from."""
+    if source is None:
+        return None, ""
+    if callable(source):
+        return squared(source()), source.__name__
+    return lift(*source), f"{source[0]}[{source[1]}]"
 
 
 def png(width, height, rows):
@@ -569,13 +761,21 @@ def write_table(path, allocated):
         "#   %3d-%-3d  the wall autotile run, keyed by a neighbour bitmask"
         % (WALL_BASE, WALL_BASE + 15),
         "#",
-        "# A slot listed here with nothing drawn in it is a slot waiting for art; the",
-        "# renderer falls back to drawing the character, which is never an error.",
+        "# A `glyph:` or `wall:` slot listed here with nothing drawn in it is a slot",
+        "# waiting for art; the renderer falls back to drawing the character, which is",
+        "# never an error.",
+        "#",
+        "# A `rotation:` slot is different: it is allocated and **deliberately empty**.",
+        "# Its neighbourhood is another slot's shape turned a quarter or two, and the",
+        "# shell turns it at draw time, so drawing it again would be storing the same",
+        "# image twice. The slot stays claimed because the band is indexed `%d + mask`"
+        % WALL_BASE,
+        "# and closing the gap would slide every slot after it.",
         "#",
         "# Seeded by `scripts/seed-tileset.py`; hand-edited from here on.",
         "",
     ]
-    for index, key, description, _ in allocated:
+    for index, key, description, _, _ in allocated:
         lines.append(f"{index:<5} {key:<12} {description}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -599,24 +799,24 @@ def main():
     width, height = SHEET_COLS * TILE, SHEET_ROWS * TILE
     canvas = [[(0, 0, 0, 0)] * width for _ in range(height)]
     drawn = 0
-    for index, key, _description, source in allocated:
-        if source is None:
-            continue  # an allocated slot with no art yet; the renderer falls back
-        tile = squared(source()) if callable(source) else lift(*source)
+    for index, key, _description, tile, origin in allocated:
+        if tile is None:
+            continue  # allocated and empty: art nobody has drawn, or a rotation
         ox, oy = (index % SHEET_COLS) * TILE, (index // SHEET_COLS) * TILE
         for y in range(TILE):
             for x in range(TILE):
                 grey, alpha = tile.px[y][x]
                 canvas[oy + y][ox + x] = (grey, grey, grey, alpha)
         drawn += 1
-        origin = source.__name__ if callable(source) else f"{source[0]}[{source[1]}]"
         print(f"  {index:3}  {key:<12} {origin}")
 
+    rotations = sum(1 for _, key, _, _, _ in allocated if key.startswith("rotation:"))
     SHEET_OUT.write_bytes(png(width, height, canvas))
     write_table(TABLE_OUT, allocated)
     print(
         f"{SHEET_OUT}: {width}x{height}, {SHEET_COLS}x{SHEET_ROWS} slots of {TILE}px — "
-        f"{drawn} drawn, {len(allocated) - drawn} allocated and empty, "
+        f"{drawn} drawn, {len(allocated) - drawn - rotations} allocated and empty, "
+        f"{rotations} reached by turning another slot, "
         f"{SHEET_COLS * SHEET_ROWS - len(allocated)} free"
     )
     print(f"{TABLE_OUT}: {len(allocated)} slots described")

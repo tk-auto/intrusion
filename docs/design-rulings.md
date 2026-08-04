@@ -1852,3 +1852,68 @@ see the difference — narrowing it again would re-make the mistake it documents
 the sweep *is* the claim rather than a hunt for an instance.
 
 The convention is written up for the next test in `crates/sim/README.md`.
+
+## Appendix 37 — The wall run's legend was inverted, and ten of its sixteen tiles were the same six turned
+
+*(§11.1/§11.5a; #461, on top of #460. `scripts/seed-tileset.py`, `crates/web/src/tiles.rs`,
+`web/assets/source/README.md`.)*
+
+Two findings from putting the autotiler in front of the tile sheet #460 seeded. Neither
+was visible before, because nothing had ever *drawn* the wall band: it was reserved art
+waiting for a consumer, and a reserved band cannot be wrong in a way anybody notices.
+
+### The sixteen slots hold six images
+
+The band was seeded as one slot per neighbourhood, `16 + mask` with `N=1, E=2, S=4,
+W=8`, and fifteen of the sixteen were drawn from the source run. Compared pixel by
+pixel, they are **bit-identical to rotations of five images** — mean absolute
+difference 0.00 over all four channels for every one of the ten duplicates. The
+sixteen neighbourhoods are six rotation orbits: an isolated block, an end cap, a
+corner, a straight, a T and a crossing. Four end caps are one sprite at four angles;
+so are the corners and the Ts.
+
+So the sheet stores the six and the shell turns them. A canvas quarter-turn is exact
+and costs nothing measurable, the mapping stays the same arithmetic (`16 + canonical
+mask`), and the ten duplicate slots become **tombstones** — allocated, listed in
+`tiles.txt` as the rotation that reaches them, never drawn. Not closed up: the band is
+indexed by mask, so closing a gap slides every slot after it and silently repaints
+whatever referenced it, which is why an `AbilityId` slot is permanent too.
+
+The same machinery does the actors' facing, which is why one ticket carries both: a
+sprite that faces is one image at four angles, exactly as an end cap is.
+
+**Why not go further.** Every tile in the run is the plain fill plus one boundary line
+per exposed side — verified: the max-composition of the single-sided tiles reproduces
+the two- and three-sided ones to within a pixel at the corners. Two images and four
+draws per cell would deduplicate it completely. It stores six because **a cell must
+stay one draw**: a 40×40 board painted every frame is the only thing here with a
+performance budget worth respecting.
+
+### The legend was the wrong way round
+
+`web/assets/source/README.md` recorded the source run as indexed by *which sides the
+wall continues along*, and #460's seed mapped it in that way. The art does not support
+it. Source index 1 is a plain block with no line anywhere; every other index adds a
+bright boundary line along the side it names.
+
+Under the recorded reading, a plain block is a wall with **no** neighbours — so a lone
+pillar would draw as featureless fill while every wall inside a corridor drew a seam
+down the join, and the one tile the source lacks (all four sides) would be the *fully
+surrounded interior*: the commonest cell in a facility, missing.
+
+Under the inverted reading the lines are boundaries: a plain block is the interior of a
+mass of wall, a run shows its two long edges and nothing across the joins, and the
+missing tile is the isolated pillar — rare, and composable from the run. A mock render
+of a hand-drawn board settles it visually: rooms come out as outlined rectangles with
+solid wall between them, corners turning correctly.
+
+Two consequences beyond the mapping:
+
+- **The band is normalised as a group, not per tile.** Per tile, the interior block has
+  no range to stretch, so the old code handed it back at full strength while every
+  tile carrying a line normalised its fill down to the floor — a lone pillar brighter
+  than the wall it belongs to. One range across the band keeps the fill the same grey
+  in all six.
+- **The `#` glyph sprite is the band's interior tile**, not a separately normalised
+  copy of the same source. It is what a wall draws when nothing autotiles it, and a
+  fallback in a different shade would make the wall flicker as the sheet decoded.
