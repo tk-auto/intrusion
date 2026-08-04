@@ -36,7 +36,7 @@
 //! (§11.2); this module only speaks in categories.
 
 use crate::category::{Category, Theme};
-use crate::cell::Cell;
+use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
 use crate::state::{GuardPerception, State};
 
@@ -204,6 +204,27 @@ pub struct GlyphCell {
     /// Carried per cell rather than derived from the row, because the log and the
     /// verdict lay chrome *over* the map (#460).
     pub surface: Surface,
+    /// Which way the thing in this cell is **facing**, or `None` when it faces
+    /// nowhere — which is every cell but an actor's (§11.1/#461).
+    ///
+    /// **Why the grid carries it at all.** A facing cannot be derived from the
+    /// picture: `@` is `@` whichever way you are turned, so a renderer that wanted to
+    /// draw a turned sprite would have to read [`State`] — and the moment a renderer
+    /// reads state, the grid stops being the single interface and the two renderers
+    /// can disagree about a cell without any test noticing (§11.1 **[SETTLED]**). So
+    /// the fact travels the way every other fact does. It is a statement about the
+    /// *actor*, not about tiles: a facing is as presentation-neutral as a
+    /// [`Category`], and the ASCII renderer ignores it exactly as it ignores nothing
+    /// else — the character grid is unchanged, byte for byte, by this field existing.
+    ///
+    /// **What may carry one, and what may not.** The player (§5 makes "you cannot see
+    /// behind you" a rule, so drawing which way you face *adds* information, and that
+    /// addition is deliberate) and a guard the player can **see**. Never a **sensed**
+    /// guard: §9.2 gives the sense position and nothing else — "no facing, no cone" —
+    /// and a sensed guard has no glyph in the first place, so a facing here would hand
+    /// over through the shape channel the one thing that channel is defined not to
+    /// give.
+    pub facing: Option<Direction>,
 }
 
 impl GlyphCell {
@@ -221,6 +242,21 @@ impl GlyphCell {
             vis,
             fill: Fill::fogged(vis),
             surface: Surface::Board,
+            facing: None,
+        }
+    }
+
+    /// The same **board** cell, turned: what is drawn here faces `facing` (§11.1/#461).
+    ///
+    /// A separate constructor rather than a fifth argument to
+    /// [`on_board`](Self::on_board), because a facing is the rare case — every cell of
+    /// the terrain layer and every mark on the ground faces nowhere — and threading an
+    /// `Option` through the hundreds of calls that would always pass `None` would put
+    /// the exception in front of the rule.
+    pub(crate) fn facing(glyph: char, fg: Category, vis: Visibility, facing: Direction) -> Self {
+        Self {
+            facing: Some(facing),
+            ..Self::on_board(glyph, fg, vis)
         }
     }
 
@@ -240,6 +276,7 @@ impl GlyphCell {
             vis: Visibility::Live,
             fill: Fill::Full,
             surface: Surface::Chrome,
+            facing: None,
         }
     }
 }
@@ -523,7 +560,14 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
     let width = facility.width();
     let fov = state.player_fov();
     if let Some(decoy) = state.decoy() {
-        cells[(decoy.y * width + decoy.x) as usize] = GlyphCell::on_board(
+        // **The decoy wears your stance as well as your glyph** (§8.3/#461). It has no
+        // facing of its own — it is a thing you put down, not a thing that looks — but a
+        // decoy the player can tell from themselves at a glance is a decoy that has
+        // stopped being a copy, and a renderer able to make that distinction would be
+        // carrying information the character grid does not (§11.1). Reflecting the
+        // player's own facing gives the two `@`s one appearance without inventing a
+        // fact: what is drawn is *your* facing, on both of the cells that are you.
+        cells[(decoy.y * width + decoy.x) as usize] = GlyphCell::facing(
             PLAYER_GLYPH,
             Category::Owned,
             if fov.contains(decoy) {
@@ -531,13 +575,18 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
             } else {
                 Visibility::Remembered
             },
+            state.facing(),
         );
     }
 
-    // Entities are live state: whatever is drawn here is being seen right now.
-    let mut put = |cell: Cell, glyph: char, fg: Category| {
-        cells[(cell.y * width + cell.x) as usize] =
-            GlyphCell::on_board(glyph, fg, Visibility::Live);
+    // Entities are live state: whatever is drawn here is being seen right now. The
+    // fourth argument is the §11.1 facing (#461) — `None` for everything that faces
+    // nowhere, which is every entity but an actor.
+    let mut put = |cell: Cell, glyph: char, fg: Category, facing: Option<Direction>| {
+        cells[(cell.y * width + cell.x) as usize] = match facing {
+            Some(facing) => GlyphCell::facing(glyph, fg, Visibility::Live, facing),
+            None => GlyphCell::on_board(glyph, fg, Visibility::Live),
+        };
     };
     // A body (§7.2) is live state like any entity — drawn inside the FOV as the `z`
     // a downed guard reads as (§10.3), in Caution: an unaware threat's colour,
@@ -565,7 +614,8 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
         } else {
             Category::Caution
         };
-        put(body.cell(), BODY_GLYPH, fg);
+        // A body faces nowhere: someone taken down has stopped looking (§7.2).
+        put(body.cell(), BODY_GLYPH, fg, None);
     }
     // A **seen** guard (in the FOV, §9.2) draws as the full state-coloured `g`; the
     // `g` glyph is re-categorised every turn from the guard's state (§11.2): yellow →
@@ -581,7 +631,16 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
     // `visible_cone_cells`) is truthful but negative; the mark is the positive half.
     for guard in state.guards() {
         if state.perceive_guard(guard) == Some(GuardPerception::Seen) {
-            put(guard.pos(), GUARD_GLYPH, guard.state().category());
+            // A **seen** guard is turned the way it is looking (§11.1/#461) — the same
+            // facing its cone is drawn from below, said a second way for a renderer
+            // that can show it. A **sensed** guard never reaches this branch, which is
+            // what keeps §9.2's "position only" true in the shape channel too.
+            put(
+                guard.pos(),
+                GUARD_GLYPH,
+                guard.state().category(),
+                Some(guard.facing()),
+            );
         }
     }
     // The player, always Owned — trivially inside their own FOV. Inside a hideout
@@ -589,8 +648,17 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
     // Owned (§10.3/§11.3) — the "you are hidden here" signal — instead of drawing
     // the `@`. Read through the same `hidden` query the loop and vision use, so
     // the picture cannot disagree.
-    let player_glyph = if state.hidden() { '}' } else { PLAYER_GLYPH };
-    put(state.player(), player_glyph, Category::Owned);
+    //
+    // Turned the way you are facing (§5/§11.1/#461) — **except inside a hideout**,
+    // where the glyph is the cupboard and a cupboard faces nowhere. The facing rides
+    // with the `@`, not with the cell: the moment you are drawn as the furniture you
+    // are hiding in, there is no actor on the cell to turn.
+    let (player_glyph, player_facing) = if state.hidden() {
+        ('}', None)
+    } else {
+        (PLAYER_GLYPH, Some(state.facing()))
+    };
+    put(state.player(), player_glyph, Category::Owned, player_facing);
 }
 
 /// The crouch signal (§10.3/§11.3): while the player is crouched, the whole

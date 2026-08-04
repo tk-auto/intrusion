@@ -210,6 +210,140 @@ fn a_decoy_draws_as_an_owned_at_glyph() {
     assert_eq!(g.get(4, 6).vis, Visibility::Live, "in view: drawn live");
 }
 
+/// §11.1/#461: **the facing channel belongs to the actors and to nothing else.**
+/// The player carries the way they are turned and a **seen** guard carries the way
+/// it is looking; every other cell of the board — terrain, floor dots, the ground a
+/// cone is painted on — faces nowhere, so a renderer that turns a sprite can only
+/// ever turn something that has a front.
+#[test]
+fn only_the_actors_carry_a_facing() {
+    let guard = Cell::new(5, 7);
+    let mut s = state(12, 12, Cell::new(5, 5), vec![Guard::stationary(guard)]);
+    s.step(Input::Wait);
+    assert_eq!(
+        s.perceive_guard(&s.guards()[0]),
+        Some(GuardPerception::Seen),
+        "precondition: the guard is in view, so it is drawn at all",
+    );
+
+    let g = render(&s);
+    assert_eq!(
+        g.get(5, 5).facing,
+        Some(s.facing()),
+        "the player is turned the way they face",
+    );
+    assert_eq!(
+        g.get(guard.x, guard.y).facing,
+        Some(s.guards()[0].facing()),
+        "a seen guard is turned the way it looks",
+    );
+    for y in 0..g.height() {
+        for x in 0..g.width() {
+            if (x, y) == (5, 5) || (x, y) == (guard.x, guard.y) {
+                continue;
+            }
+            assert_eq!(
+                g.get(x, y).facing,
+                None,
+                "({x},{y}) draws {:?} and has no business facing anywhere",
+                g.get(x, y).glyph,
+            );
+        }
+    }
+}
+
+/// §11.1/#461: **the player's facing follows the player**, so a turn is visible in
+/// the channel the turned sprite reads — and the four directions all arrive.
+#[test]
+fn the_players_facing_follows_their_turns() {
+    let mut s = state(12, 12, Cell::new(5, 5), Vec::new());
+    for direction in Direction::ALL {
+        s.step(Input::Step(direction));
+        assert_eq!(
+            render(&s).get(s.player().x, s.player().y).facing,
+            Some(direction),
+            "stepping {direction:?} must leave the `@` facing {direction:?}",
+        );
+    }
+}
+
+/// §9.2/§11.5/#461: a **sensed** guard gives position and nothing else — "no facing,
+/// no cone". It has no glyph to turn, and it must have no facing either: the shape
+/// channel is the one §11.5a's masking is easiest to defeat through, and a turned
+/// sprite behind a wall would hand over exactly the fact the sense is defined to
+/// withhold.
+#[test]
+fn a_sensed_guard_has_no_facing() {
+    let guard = Cell::new(10, 14);
+    let s = State::new(
+        open_room(20, 20),
+        Cell::new(10, 10),
+        Direction::North, // the guard is behind: sensed through the fog, never seen
+        vec![Guard::stationary(guard)],
+        Vec::new(),
+        Cell::new(18, 18),
+    );
+    let cell = render(&s).get(guard.x, guard.y);
+    assert_eq!(
+        cell.bg,
+        Some(Category::Sensed),
+        "precondition: the guard is sensed",
+    );
+    assert_ne!(cell.glyph, 'g', "precondition: sensed draws no guard glyph");
+    assert_eq!(
+        cell.facing, None,
+        "a sensed guard faces nowhere on the grid"
+    );
+}
+
+/// §10.3/§11.3/#461: inside a hideout the player draws as **the cupboard** — and a
+/// cupboard faces nowhere. The facing rides with the `@`, not with the cell, so the
+/// turn vanishes for exactly as long as the actor is drawn as furniture.
+#[test]
+fn a_hidden_player_faces_nowhere() {
+    let mut layout = open_room(10, 10);
+    layout.place(Cell::new(5, 6), Terrain::Hideout);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(8, 8),
+    );
+    s.step(Input::Step(Direction::South)); // climb in
+    assert!(s.hidden(), "precondition: the player is in the cupboard");
+
+    let cell = render(&s).get(5, 6);
+    assert_eq!(cell.glyph, '}', "hidden: drawn as the furniture");
+    assert_eq!(cell.facing, None);
+}
+
+/// §8.3/§11.1/#461: **a decoy is turned the way you are.** It has no facing of its
+/// own, but it wears your glyph in your colour, and the two `@`s have to stay one
+/// appearance: a renderer that could tell you from your own fake would be carrying
+/// information the character grid does not.
+#[test]
+fn a_decoy_faces_the_way_you_do() {
+    use crate::AbilityId;
+    let mut s = state_holding(10, 10, Cell::new(4, 4), Vec::new(), AbilityId::Decoy);
+    s.step(Input::Step(Direction::South)); // (4,5), facing south
+    s.step(Input::Activate(AbilityId::Decoy)); // the fake at (4,6)
+    let g = render(&s);
+    assert_eq!(g.get(4, 6).facing, Some(Direction::South));
+    assert_eq!(
+        g.get(4, 6).facing,
+        g.get(4, 5).facing,
+        "the fake and the real thing are drawn identically",
+    );
+
+    // Turn away: the fake turns with you, because what is drawn is *your* facing.
+    s.step(Input::Step(Direction::West));
+    let g = render(&s);
+    assert_eq!(g.get(4, 6).facing, Some(Direction::West));
+    assert_eq!(g.get(4, 6).facing, g.get(s.player().x, s.player().y).facing);
+}
+
 /// §8.3/§11.5 (#338/#341): Camouflage's mark is the half of the ability the §11.4
 /// bar cannot say. The board carries "you are hidden **right now**" — lit on a still
 /// turn, dark on the turn you moved, back on the next still one — while the `@`
