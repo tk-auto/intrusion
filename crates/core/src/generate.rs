@@ -459,7 +459,12 @@ pub fn generate_level(
     // parameter, never consulted from a global, or §12.4's determinism would be a
     // claim nobody could check. It reaches *placement* rather than the carve, so the
     // three settings still carve one building from one seed (see the field's note).
-    let config = &config.with_guard_count(modifiers.guard_count);
+    // The **intel-count knob** (#207) resolves in the same breath and reaches the same
+    // place: how many consoles placement seats, never the carve — so a node's flavour
+    // changes what is *in* the building without changing the building (§14 v3).
+    let config = &config
+        .with_guard_count(modifiers.guard_count)
+        .with_intel_count(modifiers.intel_count);
     for _ in 0..MAX_GEN_ATTEMPTS {
         let mut layout =
             generate_once(config.width, config.height, rng, &Tuning::BIASED, modifiers)?;

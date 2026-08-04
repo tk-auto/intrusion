@@ -1,7 +1,7 @@
 use super::*;
 use crate::ability::AbilityId;
 use crate::alert::{AlertEffect, AlertTrigger, AlertTuning};
-use crate::modifiers::{ActiveModifier, GuardCount, IntelGate};
+use crate::modifiers::{ActiveModifier, GuardCount, IntelCount, IntelGate};
 
 /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
 /// that no row truncates, so a test can read the panel's content whole.
@@ -311,9 +311,9 @@ fn the_level_info_tab_lists_active_modifiers_or_none() {
 fn no_modifier_caption_is_clipped_on_the_board() {
     // Every toggle on, and each knob at one of its non-baseline values, so every
     // caption in `CAPTIONS` is exercised across the two renders.
-    for (gate, guard_count) in [
-        (IntelGate::All, GuardCount::More),
-        (IntelGate::None, GuardCount::Fewer),
+    for (gate, guard_count, intel_count) in [
+        (IntelGate::All, GuardCount::More, IntelCount::More),
+        (IntelGate::None, GuardCount::Fewer, IntelCount::Fewer),
     ] {
         let all_on = LevelModifiers {
             guards_always_search_hideouts: true,
@@ -324,6 +324,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guard_count,
+            intel_count,
             intel_to_exit: gate,
         };
         let g = render_help(

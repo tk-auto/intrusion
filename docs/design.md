@@ -3002,10 +3002,18 @@ deliberately distinct:
 - **Alert** (endogenous) — the campaign alert (#210): a loud raid raises the
   alert, and higher alert switches on harder modifiers for later facilities. This
   is where *"levels adapt to the strategy you lean on"* (§2) lives.
-- **Flavour** (per-node) — a facility's own character (#207).
+- **Flavour** (per-node) — a facility's own character on the campaign map (#207): an
+  *Outpost* is thin and thinly guarded, a *Vault* rich and watched. A flavour **is**
+  the modifier set it contributes and nothing else, which is what stops the map's
+  branches from being three differently-worded labels on the same facility (§2.3).
 
 They compose into the *same* resolved `LevelModifiers` (`ModifierSources::resolve`):
 a toggle is active if **any** source requests it; a knob composes *harder-ward*.
+**A contributing source starts from the neutral set, not from the default one**
+[SETTLED] — the default is the *game's* baseline (an intel gate at `AtLeastOne`), and
+composing harder-ward would let a source that never mentioned the exit tighten it. The
+empty contribution is `LevelModifiers::neutral()`; only `chosen` speaks for the whole
+run and starts from the default.
 Adding a source is a new field and a line in `resolve`, never a new difficulty
 path — #210 owns the alert→modifier *mapping* and its own fairness (decay, floor,
 §2.2); this seam owns only the merge and the application.
@@ -3180,8 +3188,8 @@ it is untouched — a campaign facility is an ordinary level with ordinary modif
 a campaign of **one** facility is exactly the game v1 ships.
 
 - **The sequence is forward-only.** You traverse toward the archive; there is no
-  backtracking and no retry (§2.2). *(Its geography — a graph with real edges, grown
-  lazily, offering a choice at each node — is the facility map, §14 v3.)*
+  backtracking and no retry (§2.2). Its geography is the **facility map** (§14 v3): a
+  graph with real edges, grown lazily, offering a choice at each node.
 - **Each facility's seed is derived from `(run seed, node id)`** — never a fresh
   source (§12.4). A whole run therefore reproduces from `(run seed, [inputs])` exactly
   as one level does, which is what makes bug repro and golden tests possible across a
@@ -3197,11 +3205,15 @@ a campaign of **one** facility is exactly the game v1 ships.
   enforce.
 - **The transitions are the whole layer:** *enter* a facility (the campaign hands out
   its level-seed), *complete* one (the haul is banked, the facility is dropped —
-  geometry, guards and bodies do not persist), *capture* (terminal for the run,
-  anywhere, §2.2), and *reach the end of the sequence* (the run is won).
+  geometry, guards and bodies do not persist, and the run arrives at a **choice
+  point**), *choose* the next facility from what the map offers (§14 v3), *capture*
+  (terminal for the run, anywhere, §2.2), and *leave the archive* (the run is won).
+- **A campaign facility is an ordinary level with one extra source of modifiers**: the
+  node's flavour (§12.6). Nothing below this layer knows the difference — which is why
+  a campaign facility's level-seed token is a level anyone can play on its own.
 
-**[START]** on the campaign's length (six facilities) — the coarsest knob on the 2–3
-hour target, and the map's depth-to-archive takes it over.
+**[START]** on the campaign's length, now stated as the map's **depth to the archive**
+(six, so a run raids seven facilities) — the coarsest knob on the 2–3 hour target.
 
 The alert's *contribution* is deliberately not settled here: a raid's loudness does not
 yet raise the campaign alert, and every facility starts at base alert. What a loud raid
@@ -3332,7 +3344,38 @@ bullet below fills one of its seams.
 
 - The facility map. **A graph with real edges** — the old "map" was a flat list
   with no adjacency and no geography, where every unlocked facility was always
-  selectable. Geography should mean something.
+  selectable. Geography should mean something. The model (#207):
+  - **A lattice of lanes, grown lazily** [SETTLED]. A node is a `(depth, lane)` pair;
+    everything about it — its successors, its flavour, its drawn position — is derived
+    on demand from `(run seed, node id)` and from nothing else (§12.4). Nothing is
+    pre-generated, so there is no world-build and no fog, and the graph is still a
+    function of the seed. Identity is a coordinate rather than a serial number, which
+    is what lets a node *name* its successors before anything has built them.
+  - **An open edge reaches only an adjacent lane** [SETTLED]. That is the whole of
+    "geography means something": where you stand decides what is in front of you, and
+    crossing the country is a sequence of choices rather than a selection from a list.
+    A run against the edge of the map is offered fewer options, and that is the rule
+    biting rather than a shortfall.
+  - **2–3 open successors at each choice point** [START], **five lanes** [START],
+    **depth six to the archive** [START] — the last being the coarsest knob on the 2–3
+    hour target (§12.7).
+  - **Flavours are visible when offered** [SETTLED] — no fog, because the choice *is*
+    the mechanic and a choice made blind is a coin flip. The starting set [START] is
+    *Outpost* (one guard and one console fewer), *Depot* (the §10.2 recipe untouched),
+    *Vault* (one more of each) and the *Archive*. Two axes, risk and reward, so no
+    option is simply the right answer; a flavour reaches the facility through the §12.6
+    flavour source, so what the map said and what the building is are one statement.
+  - **No two open successors ever share a flavour** [SETTLED]. The flavours are a fixed
+    cycle laid across the lanes and rotated per depth, so this is guaranteed by
+    construction rather than by a rejection loop — a branch whose options generate the
+    same facility is the flat list wearing a costume.
+  - **One further successor is intel-locked** [SETTLED] — the alternative-route sink
+    below. It reaches a lane *two* across, which no open edge can, so what intel buys
+    is **ground**: a part of the map that was not on offer, rather than a better
+    facility handed over. What stands on that ground is whatever the seed put there.
+  - **Every route converges on the archive** [SETTLED], the one node with no
+    successors. Reaching it ends traversal; what it holds and what arriving concludes
+    are the ending's (#217).
 - **Salvaged tech accumulating across facilities.** This is the run's power curve
   and it is the reason the campaign exists. It was fully built last time and
   reachable by nobody: no facility was ever generated with an equipment cache, so

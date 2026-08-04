@@ -62,7 +62,7 @@ no token (§6).
 
 A held set — the active modifiers, the tech a run holds — is encoded as a
 **combination index over 256 reserved slots**, not over the entries that exist today
-(six tech and nine modifier slots as of writing).
+(six tech and eleven modifier slots as of writing).
 
 This is the single most important property of the format.
 
@@ -97,7 +97,9 @@ makes that structurally impossible rather than merely detected.
 **A bounded knob spends one slot per end, not a field of its own.** The guard count
 (#232) is the worked example: `More` takes slot 7 and `Fewer` slot 8, and its baseline
 names neither, so a run at the §10.2 count encodes byte-for-byte as it did before the
-knob existed. The alternative — a new radix-3 field in the chain beside the intel
+knob existed. The **intel count** (#207) is the second telling, at slots 9 and 10 — the
+campaign map's reward axis, and the reason a campaign facility's *flavour* rides in its
+own token rather than in a recipe the token cannot carry (design §12.7). The alternative — a new radix-3 field in the chain beside the intel
 gate's — would have moved every field after it and changed what a token *means*: a §8
 version bump, and every link ever shared stops decoding. Two slots out of 256 change no
 radix at all. **So a knob joins the format for free if its ends can be slots**, and only
