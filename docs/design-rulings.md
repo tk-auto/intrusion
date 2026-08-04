@@ -1607,7 +1607,81 @@ registering, the lever is the glyph's weight — `░`, or `▒` with a dim of i
 
 ---
 
-## Appendix 34 — Debug mode ships hidden in every build
+## Appendix 34 — The sense is one channel: what fades, and how short the trail has to be
+
+*(§9.2, §9.4, §9.5, §11.2, §11.5, #192 — settling the [OPEN] note §9.4 carried since
+#188. Decided while unifying the two halves of the sense.)*
+
+**The problem was that one channel had two behaviours.** The door cue (#188) persisted
+and faded: a door change is discrete, so it was latched the turn it happened and decayed
+over `DOOR_CUE_DECAY_TURNS`. The guard sense was a hard on/off dot at the live range —
+present this frame, gone the instant the guard stepped out of the box or the widened
+Wait lapsed. Both painted the same orange in the same `Sensed` category, so the player
+had one colour meaning two different things: *a live dot here, a fading mark there*.
+
+**What fades — a trail, or a ghost?** The ticket offered them as alternatives. They fall
+out of the same rule, so the answer is both, and the rule is the deliverable:
+
+> Every turn, the sense stamps a mark where it felt something. Marks fade.
+
+Stamp each sensed guard's cell every turn and a moving guard leaves a **trail**; let the
+stamps outlive the perception by a turn or two and a guard that leaves the box leaves a
+**ghost** of its last known cell. One `record_*`/`decay_*` pair, the door cue's own
+machinery generalised, and the door cue becomes a third thing the same rule produces.
+Picking one of the two would have meant writing a *second* rule to exclude the other.
+
+**Which half is actually new information.** The trail is not, and this is the whole
+answer to "does this change what the player can exploit?". A guard continuously inside
+the box was already legible frame to frame — the dot was there, now it is here — so the
+trail only spares the player the memory work. The **ghost** is the genuinely new fact:
+today the dot blinks out and the player is told nothing; with the ghost, "I have lost it,
+and it was just there" is on the board. That is worth having, it is bounded by the same
+short fade, and it is *less* information than the live dot it replaces, never more.
+
+**The arrow, and why two turns.** The one thing this feature could break is §9.2's bound
+— position, never intent. A long trail is an **arrow**: hand over four cells in a line
+and the player extrapolates the next four, which is heading, which the design withholds
+on purpose. `GUARD_CUE_DECAY_TURNS` is therefore **2** [START] — the shortest life in the
+channel, and shorter than the door cue's 3, so at most the live cell and the one behind
+it are lit at once. The asymmetry has a reason beyond caution: a door change gets **one**
+chance to be read and never restates itself, where a guard mark is re-stamped every turn
+the guard is still felt, so the guard cue only ever has to carry the tail.
+
+Two properties make the bound self-enforcing rather than a number we hope holds:
+
+- **A standing guard leaves no trail.** It re-stamps the same cell, so the mark never
+  ages. The watcher whose facing you would most like to know is exactly the one the
+  channel says nothing extra about — which is the opposite of what an arrow would do.
+- **A seen guard stamps nothing.** Sight already draws it whole; a trace underneath
+  would be the sense restating sight in the one colour that means *not seen*.
+
+**The ramp is two steps, and they mean age.** `Sensed` had ignored the fill entirely and
+painted its bright background regardless of visibility, on the honest ground that a
+sensed cell is certain knowledge and the fog has nothing to say about it. That is still
+true — everything sensed is outside the FOV by construction — so the two fills every
+palette row already carries were free to mean something else here: **full for a mark made
+this turn, quiet for the fading tail**. No new palette shades, no third `Fill` variant,
+and the core still emits an age and a category and never a colour. A graduated three- or
+four-step ramp was rejected for the reason the trail is short: more steps are only
+readable on a longer trail, and a longer trail is the arrow.
+
+**One precedence question had to be reopened.** The sense channel used to paint *above*
+the watcher line (#465), which is right for the live dot — the line's own endpoint is
+that guard, and the orange position mark should survive the red line running up to it.
+It is wrong for a **fading** mark: a trace of where something was a turn ago must never
+cover a line that says a guard has you *right now*. So the fading marks moved below the
+line and the live dot stayed above it. The danger overlay still paints last (§11.5,
+being seen outranks) and nothing about that changed.
+
+**What would change the answer.** The decay is the knob, and it is the only one that can
+turn the trail into an arrow — which is why it is pinned by a test rather than left to
+drift. If play says the trail is too faint to read, the honest first move is the *ghost*
+half (a guard leaving the box lingering longer) rather than a longer tail behind a live
+dot the player can already see.
+
+---
+
+## Appendix 35 — Debug mode ships hidden in every build
 
 *(§12.6; `crates/web/src/debug.rs`, `crates/core/src/render/help.rs`. Ticket #459.)*
 

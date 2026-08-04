@@ -345,19 +345,61 @@ impl State {
         }
     }
 
-    /// The cells lit by a live door-change cue (§9.4/§10.4): the **whole footprint**
-    /// of every door that opened or shut away from the player recently enough to still
-    /// show. The renderer paints each as a [`Category::Sensed`] background — the same
-    /// "sensed through a wall" channel as a guard, a fading mark that "someone passed
-    /// here", readable around a corner and out of FOV, position only (§10.4). A
-    /// guard-driven or automatic door change within
+    /// Everything the sense channel currently marks (§9/§9.4, #192), as a cell and how
+    /// many turns old the mark is: the **trail** of each guard felt through a wall — the
+    /// cell it stands in this turn and the ones it just left — and the **whole
+    /// footprint** of every door that opened or shut away from the player recently
+    /// enough to still show.
+    ///
+    /// One query, because it is one channel: the renderer paints every mark as a
+    /// [`Category::Sensed`] background and shades it by age (§11.2), so a "sensed, and
+    /// fading" cue reads the same whether the fact behind it was a guard or a door. Both
+    /// are position only — where something was felt, never who or which way (§9.2) — and
+    /// both are painted through walls and out of the FOV.
+    ///
+    /// Door marks come first and guard marks second, so a guard standing on a door that
+    /// just changed reads as the guard: the renderer resolves the overlap by paint
+    /// order, and the guard is the sharper claim.
+    pub fn sense_marks(&self) -> impl Iterator<Item = SenseMark> + '_ {
+        let regions = self.layout.regions();
+        let doors = self
+            .sense_cues
+            .iter()
+            .filter_map(|cue| match cue.source {
+                SenseSource::Door(door) => Some((door, cue.age())),
+                SenseSource::Guard(_) => None,
+            })
+            .flat_map(move |(door, age)| {
+                regions
+                    .door(door)
+                    .cells()
+                    .map(move |cell| SenseMark { cell, age })
+            });
+        let guards = self.sense_cues.iter().filter_map(|cue| match cue.source {
+            SenseSource::Guard(cell) => Some(SenseMark {
+                cell,
+                age: cue.age(),
+            }),
+            SenseSource::Door(_) => None,
+        });
+        doors.chain(guards)
+    }
+
+    /// The cells lit by a live **door-change** cue (§9.4/§10.4): the whole footprint of
+    /// every door that opened or shut away from the player recently enough to still
+    /// show. The door half of [`sense_marks`](Self::sense_marks), for the callers that
+    /// ask about doors specifically. A guard-driven or automatic door change within
     /// [`door_sense_range`](Self::door_sense_range) lights one; a door *you* operate
     /// does not (it keeps its quiet near-line self-narration, §11.7).
     pub fn door_cues(&self) -> impl Iterator<Item = Cell> + '_ {
         let regions = self.layout.regions();
-        self.door_cues
+        self.sense_cues
             .iter()
-            .flat_map(move |cue| regions.door(cue.door).cells())
+            .filter_map(|cue| match cue.source {
+                SenseSource::Door(door) => Some(door),
+                SenseSource::Guard(_) => None,
+            })
+            .flat_map(move |door| regions.door(door).cells())
     }
 
     /// The cells of the **watcher lines** (§11.5/§9.2/§7.6, #222/#465): for every

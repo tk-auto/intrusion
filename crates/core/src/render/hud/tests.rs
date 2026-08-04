@@ -6,6 +6,7 @@ use crate::guard::GuardState;
 use crate::modifiers::LevelModifiers;
 use crate::state::{BoreRefusal, Event, Input, State};
 use crate::test_support::open_room;
+use crate::{Difficulty, EndExit, EndUi, RunMode, RunOptions};
 
 /// A **legal** run loadout (§8.3/#244): innate Run plus a three-tech grant — the
 /// shape quick play resolves, and the shape the bar's width bound is sized for.
@@ -1510,4 +1511,90 @@ fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
         playing,
         "leaving the menu restores the identical frame",
     );
+}
+
+/// #473: **what outlives a run, named one by one.** The theme a player picks on
+/// the title screen has to be the theme the run opens in — it is a fact about
+/// their eyes, not about the facility — and so does the modality and the build's
+/// replay offer; everything else is the last screen's and must go.
+///
+/// The result is destructured field-by-field rather than compared against a
+/// hand-built `ScreenUi`, so adding a field to the struct fails to compile *here*
+/// until someone answers the only question that matters about it: does a fresh
+/// facility keep it? That is the check the theme itself never got (#189).
+#[test]
+fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
+    // Every field off its default, so nothing can pass by accident.
+    let carried = ScreenUi {
+        message_log_open: true,
+        help_open: true,
+        menu: Some(MenuUi::default()),
+        help_tab: HelpTab::Abilities,
+        theme: Theme::default().toggled(),
+        seed_copy: SeedCopy::Copied,
+        offer_replay_copy: true,
+        end: EndUi {
+            options: RunOptions {
+                mode: RunMode::Campaign,
+                difficulty: Difficulty::Harder,
+            },
+            selected: EndExit::NewRun,
+        },
+        modality: InputModality::Touch,
+    };
+
+    let ScreenUi {
+        // Kept — the player's, and the build's.
+        modality,
+        theme,
+        offer_replay_copy,
+        // Dropped — the last screen's.
+        message_log_open,
+        help_open,
+        menu,
+        help_tab,
+        seed_copy,
+        end,
+    } = carried.for_fresh_run();
+
+    assert_eq!(modality, carried.modality, "the player's hands (§11.6)");
+    assert_eq!(theme, carried.theme, "the player's eyes (§11.2)");
+    assert!(offer_replay_copy, "the build's own offer (#411)");
+
+    assert!(
+        !message_log_open,
+        "the last run's messages are not this run's"
+    );
+    assert!(
+        !help_open,
+        "a run opens on the board, not on the help panel"
+    );
+    assert!(menu.is_none(), "the run replaces the title screen");
+    assert_eq!(help_tab, HelpTab::default());
+    assert_eq!(
+        seed_copy,
+        SeedCopy::default(),
+        "a new token, unacknowledged"
+    );
+    assert_eq!(end, EndUi::default(), "no verdict has been reached yet");
+}
+
+/// The carry is **idempotent and total**: a default view state comes back
+/// unchanged, and a run started from the end screen of a run started from the menu
+/// still opens in the theme chosen before any of it (#473). Chaining is the real
+/// path — quick play, end screen, *new run* — and each hop must not shed a little
+/// more.
+#[test]
+fn the_theme_survives_run_after_run() {
+    assert_eq!(ScreenUi::default().for_fresh_run(), ScreenUi::default());
+
+    let chosen = ScreenUi {
+        theme: Theme::default().toggled(),
+        ..ScreenUi::default()
+    };
+    let mut ui = chosen;
+    for _ in 0..3 {
+        ui = ui.for_fresh_run();
+        assert_eq!(ui.theme, chosen.theme);
+    }
 }

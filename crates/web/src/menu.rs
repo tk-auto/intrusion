@@ -291,6 +291,14 @@ impl Game {
     ///
     /// The world underneath is left exactly as it was: the menu draws instead of the
     /// game frame, so there is nothing to reset, and nothing that could show through.
+    ///
+    /// This is the **mirror** of the reset [`Game::reseed`] performs, and deliberately
+    /// the opposite shape (#473): going *into* a run drops everything except the few
+    /// facts that outlive it, while coming *out* of one keeps the whole view state and
+    /// only raises the menu over it. Nothing needs listing by name here — the theme and
+    /// the modality carry because *everything* carries — and no leftover of the finished
+    /// run can show through a modal menu that is drawn instead of the frame, nor survive
+    /// the next run's own reset.
     pub(crate) fn show_menu(&mut self) {
         self.ui = ScreenUi {
             menu: Some(MenuUi::default()),

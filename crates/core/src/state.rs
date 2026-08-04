@@ -40,8 +40,9 @@
 //! This file owns the [`State`] itself, [`step`](State::step), the player phase and
 //! the sight phase. The rest is next door, each in its own module: the public
 //! [`Input`]/[`Event`]/[`Affordance`] vocabulary ([`events`]), the read surface the
-//! renderer and the §13.2 bot ask ([`view`]), phase 3 ([`guards`]), doors and their
-//! §9.4 cues ([`doors`]), the ability effects ([`abilities`]) and the #57 auto-slide
+//! renderer and the §13.2 bot ask ([`view`]), phase 3 ([`guards`]), the doors' own turn
+//! ([`doors`]), the §9 sense channel both halves of which fade on one model
+//! ([`sense`]), the ability effects ([`abilities`]) and the #57 auto-slide
 //! ([`traversal`]). They are all `impl State` blocks over the *same* struct — plain
 //! structs, not an ECS (§12.3), so the coupling stays visible in the types.
 
@@ -84,6 +85,7 @@ mod events;
 mod guards;
 mod lockdown;
 mod reinforcements;
+mod sense;
 mod traversal;
 mod view;
 
@@ -91,9 +93,11 @@ pub use bore::BoreRefusal;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
 pub(crate) use reinforcements::{RUNG_THREE_REINFORCEMENTS, RUNG_TWO_REINFORCEMENTS};
+pub use sense::SenseMark;
 
 use activation::Aimed;
 use effects::EffectMark;
+use sense::{SenseCue, SenseSource};
 
 /// The player and every guard are solid and exclusive — fill 1.0 (§4.3). A cell
 /// already holding one admits no other actor.
@@ -146,13 +150,37 @@ pub const DOOR_SENSE_RANGE: u32 = 15;
 const _: () = assert!(DOOR_SENSE_RANGE > PLAYER_SENSE_RANGE);
 
 /// How many turns a door-change cue stays lit before it fades (§9.4/§10.4
-/// **[START]**): a door open/close is a **discrete** event, not a standing position
-/// like a guard, so its cue is inherently a fading mark. It reads like sensed
-/// evidence — visible while the fact is fresh — rather than a single-frame flash.
-/// Placed at full life the turn the door changes and decremented once per world
-/// turn, so the cue shows for this many renders and is gone on the next. Pinned by a
-/// test.
+/// **[START]**): a door open/close is a **discrete** event that will not restate
+/// itself, so its cue is inherently a fading mark. It reads like sensed evidence —
+/// visible while the fact is fresh — rather than a single-frame flash. Placed at full
+/// life the turn the door changes and decremented once per world turn, so the cue
+/// shows for this many renders and is gone on the next. Pinned by a test.
+///
+/// It is the **longer** of the sense channel's two lives (§9.4/#192): the guard cue
+/// beside it ([`GUARD_CUE_DECAY_TURNS`]) is re-stamped every turn its guard is still
+/// felt, so it needs to carry only the tail behind a live position.
 pub const DOOR_CUE_DECAY_TURNS: u32 = 3;
+
+/// How many turns a **guard** cue stays lit before it fades (§9.2/§9.4 **[START]**,
+/// #192): the sense stamps the cell of every guard it feels through a wall, once per
+/// world turn, and the stamp fades over this many turns. It is the other half of the
+/// one persist-and-fade channel [`DOOR_CUE_DECAY_TURNS`] governs, and the tuning story
+/// is shared: what varies between them is only how long each fact stays worth showing.
+///
+/// **Two**, and deliberately the shortest life in the channel. Its job is a **trail**
+/// short enough to say *was just here* and no longer — a mark that outlived that would
+/// be a readable heading, and §9.2 gives position, never intent. Two turns of tail
+/// behind the live dot is enough to see a guard is on the move (and, when it leaves the
+/// box, to leave a ghost of the last cell it was felt in) without handing the player a
+/// vector to extrapolate. Raising it is the one knob that can turn the trail into an
+/// arrow, so it is pinned by a test.
+pub const GUARD_CUE_DECAY_TURNS: u32 = 2;
+
+/// The guard trail stays **no longer** than the door cue (§9.4/#192) — the tail behind
+/// a position the sense re-states every turn cannot outlive the discrete event that
+/// gets one chance to be read. Pinned at compile time so the pair cannot silently
+/// invert into a heading-length trail.
+const _: () = assert!(GUARD_CUE_DECAY_TURNS <= DOOR_CUE_DECAY_TURNS);
 
 /// The **Confusion** blast radius (§8.3/§9/#240/#325 **[START]**): the ability fires
 /// once, and every guard standing within this Chebyshev box of the player *at that
@@ -420,21 +448,6 @@ pub enum GuardPerception {
     Sensed,
 }
 
-/// A fading door-change cue (§9.4/§10.4): the door that opened or shut away from the
-/// player, and how many more turns the mark shows. A door change is a **discrete**
-/// event — unlike a guard, there is no standing position to re-read each frame — so
-/// the fact is latched here the turn it happens (if within [`DOOR_SENSE_RANGE`]) and
-/// fades over [`DOOR_CUE_DECAY_TURNS`] world turns. The renderer lights the door's
-/// **whole footprint** as a [`Category::Sensed`] background — the same sense channel
-/// as a guard felt through a wall ([`State::door_cues`]).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct DoorCue {
-    /// The door whose whole footprint the cue lights.
-    door: DoorId,
-    /// Turns of life left; decremented once per world turn and dropped at zero.
-    ttl: u32,
-}
-
 /// Whether the run is still going, and if not, how it ended (§4.5).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Outcome {
@@ -632,15 +645,17 @@ pub struct State {
     /// stacks it under the current block; the near line never reads it. Empty on a
     /// fresh [`State`], so a level starts with no memory of the last one (§12.6).
     message_history: MessageHistory,
-    /// The live door-change cues (§9.4/§10.4): doors that opened or shut away from
-    /// the player, each fading over [`DOOR_CUE_DECAY_TURNS`] turns. Placed in
-    /// [`record_door_cues`](Self::record_door_cues) for the door events the player did
-    /// not cause, and decayed each world turn in
-    /// [`decay_door_cues`](Self::decay_door_cues); the renderer reads their whole
-    /// footprint through [`door_cues`](Self::door_cues). A small set — at most a
-    /// handful of doors change in any few-turn window — so a plain `Vec` scan is
+    /// The live cues of the **sense channel** (§9/§9.4, #192): everything the player
+    /// has felt through a wall recently enough to still show — the cell of each guard
+    /// the sense stamped this turn and the turns just before it
+    /// ([`record_guard_cues`](Self::record_guard_cues)), and every door that opened or
+    /// shut away from them ([`record_door_cues`](Self::record_door_cues)). One store,
+    /// because they are one channel: each entry fades on its own life in
+    /// [`decay_sense_cues`](Self::decay_sense_cues), and the renderer reads the union —
+    /// cell plus age — through [`sense_marks`](Self::sense_marks). A small set (a
+    /// handful of doors, a short trail per sensed guard), so a plain `Vec` scan is
     /// cheaper than a map.
-    door_cues: Vec<DoorCue>,
+    sense_cues: Vec<SenseCue>,
     /// The §11.5 **effect layer**: every ability effect currently made visible as a
     /// background mark, one entry per (ability, placement) (#308/#338). Lit from the
     /// turn's events in [`record_effect_marks`](Self::record_effect_marks) with the very
@@ -839,7 +854,7 @@ impl State {
             takedowns: 0,
             last_events: Vec::new(),
             message_history: MessageHistory::default(),
-            door_cues: Vec::new(),
+            sense_cues: Vec::new(),
             effect_marks: Vec::new(),
             autodoors_pending: Vec::new(),
             // A fixed default stream until [`with_rng`](Self::with_rng) threads the
@@ -1926,10 +1941,11 @@ impl State {
     /// notices the silence (§7.3), not a turn late.
     fn run_world_phases(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
-        // Fade the door cues one turn *before* this turn's door events can relight
-        // them (§9.4/§10.4), so a cue placed this turn keeps its full life and a
-        // re-change refreshes rather than double-decrements.
-        self.decay_door_cues();
+        // Fade the sense channel one turn *before* this turn's facts can relight it
+        // (§9/§9.4) — the door cues and the guard trail alike — so a cue placed this
+        // turn keeps its full life and a re-stamp refreshes rather than
+        // double-decrements.
+        self.decay_sense_cues();
         // The effect marks age on the same schedule and for the same reason
         // (§11.5/#308/#338): one turn of life spent before this turn's activation can
         // light a fresh one ([`record_effect_marks`](Self::record_effect_marks)).
@@ -1959,6 +1975,11 @@ impl State {
         // Latch a fading cue on every door the player did not cause (§10.4) — the
         // player's own open is emitted in phase 1 and never reaches here.
         self.record_door_cues(&events);
+        // Stamp the other half of the same channel (§9.2/#192): the cell of every guard
+        // the player still feels through a wall, read *after* the guards have moved and
+        // the reinforcements have landed, so the mark is where the turn actually left
+        // them.
+        self.record_guard_cues();
         events
     }
 

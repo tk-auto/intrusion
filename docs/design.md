@@ -1210,7 +1210,7 @@ between them is the whole design:
 
 | State | When | What the player sees |
 |---|---|---|
-| **Sensed** | In sense range, **not** in the player's field of view | An orange **background** highlight on the guard's **exact cell** (no glyph of its own). No facing, no cone, no danger overlay. You know *where*, not *which way it looks*. |
+| **Sensed** | In sense range, **not** in the player's field of view | An orange **background** highlight on the guard's **exact cell** (no glyph of its own), with a short **fading trail** of the cells it was just felt in (§9.5). No facing, no cone, no danger overlay. You know *where*, not *which way it looks*. |
 | **Seen** | In the player's field of view (§6), line of sight clear | The full guard: glyph in its state colour (§11.2/§11.3), **facing, vision cone, and the danger overlay** (§11.5). |
 
 **Knowing where a guard is is not knowing whether it can see you.** The cone — the
@@ -1281,23 +1281,66 @@ on-grid cue**, exactly like the sensed guard.
 - **It is a fading mark, not a standing dot.** A door change is a **discrete** event,
   not a live position, so the cue decays over a short **`DOOR_CUE_DECAY_TURNS`
   [START]** (currently 3) and is then gone — visible while the fact is fresh, not a
-  single-frame flash and not a permanent stain.
+  single-frame flash and not a permanent stain. Since #192 the *guard* sense fades the
+  same way, on the same machinery: see §9.5.
 - **Open and shut share one cue** — it is the same evidence, and both drive it.
   Where the cue coincides with the danger overlay, being seen outranks it (§11.5).
 - **A door *you* operate** keeps its quiet near-line self-narration (§11.7) and
   lights no cue — you already know; the cue is for the doors you did *not* move.
 
-> **[OPEN] — the sense channel wants to unify around this fading model.** The door
-> cue fades over a few turns because a door change is discrete. The **guard** sense
-> today is instead a hard on/off dot at the live range. The intended direction is
-> for the guard sense to gain the *same* persistence — a sensed guard leaves a
-> **fading trail** as it moves, the mark decaying a few turns behind its live cell —
-> so the two halves of the sense read as one coherent "sensed, and fading" system.
-> The door cue's decaying-marker machinery (`DOOR_CUE_DECAY_TURNS`, the per-turn
-> decay pass) is the seed of that shared model; unifying them is its own ticket.
-
 This shares the `Sensed` category with the guard sense, so the light-mode reskin
 (§11.2) covers both at once.
+
+### 9.5 One channel, one fade [SETTLED]
+
+The sense had two halves that behaved differently: the door cue persisted and faded,
+the guard sense was a hard on/off dot at the live range. They now run on **one rule**
+(#192, appendix 34):
+
+> **Every turn, the sense stamps a mark where it felt something. Marks fade.**
+
+A mark is a **cell and an age**, nothing more. The core states the age; presentation
+owns what age looks like (§11.2). What the one rule produces:
+
+- **A trail.** A sensed guard on the move leaves the cells it just occupied marked
+  behind its live cell — *was just here*, fading to nothing.
+- **A ghost.** A guard that leaves the sense box — walks out of it, or falls out when
+  a Wait's widened box (§9.1) lapses back to the walking one — leaves its last felt
+  cell on the board for a moment instead of blinking out. "I have lost it, and it was
+  just there" is a fact worth acting on, and it is the half of this that is genuinely
+  new information.
+- **A door cue that fades visually**, not just in its own bookkeeping: its first turn
+  is the bright mark, the rest of its life the quiet one.
+
+**The trail is deliberately the shortest thing in the channel.** `GUARD_CUE_DECAY_TURNS`
+**[START]** = **2**, against the door cue's 3, so at most the live cell and the one
+behind it are lit at once. §9.2's restraint is the bound: the sense gives **position,
+never intent**, and a trail long enough to extrapolate is an **arrow** — heading handed
+over for free. Two properties keep it honest, and they are why the trail leaks nothing
+the board did not already show:
+
+- **A guard standing still leaves no trail at all** — it re-stamps one cell. The
+  watcher whose facing you would most like to know is exactly the one that gives you
+  nothing.
+- **A guard on the move was already legible frame to frame** (the dot was there, now
+  it is here). The trail makes what an attentive player could already read *legible*;
+  it does not add a channel.
+
+**A guard you can *see* stamps nothing.** Sight already draws it whole — glyph, facing,
+cone (§9.2) — so a trace under it would be the sense restating sight in the one colour
+that means *not seen*.
+
+**Two strengths, and they mean age, not fog.** `Sensed` paints the full fill on a mark
+made this turn and the quiet one on the fading tail (§11.2/§11.5). Nothing sensed is
+ever inside the FOV, so fog has nothing to say about the channel; freshness is the only
+thing a strength here can honestly mean. Two steps are what a two-turn trail can
+carry — a longer ramp would need a longer trail, which is the arrow.
+
+**Precedence, refined** (§11.5): the **live** sensed dot keeps its place above the
+watcher line (#465) — the line's own endpoint is that guard. The channel's **fading**
+marks sit below it: a trace of where something was a turn ago must never cover a red
+line that says a guard has you *now*. The danger overlay still paints last and still
+wins over all of it — **being seen outranks**.
 
 ---
 
@@ -1921,7 +1964,7 @@ one-table edit.
 | **Caution** | Yellow | A threat that is unaware |
 | **Warning** | Orange | A threat that is hunting |
 | **Danger** | Red | A threat that has you |
-| **Sensed** | Orange (background) | **Sensed through a wall** (§9) — a guard, or a door that just changed away from you (§9.4); an eye-catching highlight, position only |
+| **Sensed** | Orange (background), two strengths | **Sensed through a wall** (§9) — a guard, or a door that just changed away from you (§9.4); an eye-catching highlight, position only. Full strength on a mark made **this turn**, quiet on the fading tail behind it (§9.5) — the strengths mean *age*, never fog |
 | **Interest** | Purple | Goals and rewards |
 | **System** | Tan | Doors, hideouts — neutral furniture |
 | **Effect** | Cyan (background only) | An **ability effect of your own making** (§8.3) — where it acted, and what it holds; advisory, so it yields to Danger, and its wash yields to Sensed too |
@@ -2279,6 +2322,12 @@ visibility is drawn.
 | Watched by a guard the player **cannot see** | The straight sightline from that guard to the player is red — the **watcher line**, standing for as long as it has them. See below |
 | Watched by a guard, outside player's FOV | Dark gray on dark gray — *unreadable* |
 | A guard **sensed but not seen** (§9.2), any FOV | Its cell gets the orange **Sensed** background highlight regardless of line of sight; **no cone, no danger overlay** — position is known, attention is not. Where a *seen* guard's cone also watches the cell, the red danger overlay wins (being seen outranks) |
+| The cells it was **just felt in** (§9.5) | The same orange at the quiet strength, fading out over `GUARD_CUE_DECAY_TURNS` — *was just here*, never a heading. It is the weakest cue on the board bar the effect wash: the watcher line and the danger overlay both paint over it |
+
+The **live** dot and the **fading** trail behind it are the same channel at two
+strengths, not two cues (§9.5): one rule stamps a mark where the sense felt something
+and every mark fades, so a guard's trail, a guard's ghost after it leaves the box, and a
+door's change all read as "sensed, and fading".
 
 Note the sensed highlight and a guard's *own* danger overlay never coincide: a guard
 you can only sense projects no overlay (you cannot see its cone), and the instant you
@@ -3076,7 +3125,7 @@ sees it. The line is worth keeping sharp:
 of it** — anything that bends a rule is a level modifier and belongs in the token with
 the rest of the run's identity.
 
-**Debug mode ships hidden in every build** (#459, *appendix 34*). The switches used to
+**Debug mode ships hidden in every build** (#459, *appendix 35*). The switches used to
 be reachable only by rebuilding, which meant a run that misbehaved on the deployed page
 could not be looked at at all. So there is a **debug session**: the help panel grows a
 fourth **Debug** tab carrying the switches — omni-vision, flippable mid-run — and the

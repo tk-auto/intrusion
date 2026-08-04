@@ -28,6 +28,35 @@ Take one GitHub issue from idea to a pushed, reviewable PR. This skill owns the
    is the contract; `[SETTLED]` rules are non-negotiable, `[START]` numbers may be
    tuned with justification recorded in the PR.
 
+## 1b. Brief the user before you build
+
+**Post a short brief in the conversation before writing any code**, so the user
+sees what you understood and what you decided while it is still cheap to correct.
+Two parts, both required:
+
+- **What the ticket asks for**, in your own words — the change in a couple of
+  sentences, the design section(s) it rests on, and what is explicitly *out* of
+  scope. Not a paste of the issue body: a reading of it.
+- **The open questions and the call you made on each**, one line of reasoning
+  apiece. "Open" is anything the ticket did not settle: an `[OPEN]` marker in a
+  design section it cites, alternatives named without a choice, a number the
+  ticket needs but doesn't give, acceptance criteria that can be read two ways,
+  or an interaction with existing code the ticket is silent about. If the ticket
+  genuinely left nothing open, say so in a line — don't invent decisions to fill
+  the section.
+
+Decide and proceed by default; the brief is a statement of assumptions, not a
+request for permission. **Stop and ask** only where proceeding either way would
+be wasted work if wrong — a decision that bends a `[SETTLED]` rule, moves
+`[START]` numbers materially, changes how the game feels, or picks between
+approaches with very different diffs. Ask in plain text, **one question at a
+time**, per `CLAUDE.md` — not `AskUserQuestion`, and not a batch.
+
+The brief is the source for the PR body (step 7): the same decisions get
+recorded there, so a reviewer sees what was open and why it closed the way it
+did. If a decision cost real argument or measurement, it also earns the next
+numbered appendix in [`docs/design-rulings.md`](../../../docs/design-rulings.md).
+
 ## 2. Branch — always start from fresh `main`
 
 **Fetch before you read, and branch from `origin/main` — never from the local
@@ -158,8 +187,10 @@ ends in a PR, every time; don't wait to be asked and don't stop at a pushed
 branch:
 
 - **Title:** the conventional-commit summary.
-- **Body:** what changed and why, the design section(s) honoured, how it was
-  verified (paste the gate result), any `[START]` numbers tuned, and `Closes #<n>`.
+- **Body:** what changed and why, the design section(s) honoured, **the questions
+  the ticket left open and how each was decided** (the step 1b brief, updated for
+  anything that moved during the work), how it was verified (paste the gate
+  result), any `[START]` numbers tuned, and `Closes #<n>`.
 - **This repo has no PR template** — don't go looking for one; the body sections
   above are the format.
 - Link the PR back on the issue if useful; don't over-comment.
