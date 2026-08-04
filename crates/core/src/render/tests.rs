@@ -2926,3 +2926,79 @@ fn climbing_out_hides_the_tunnel_but_never_the_exit() {
         "the way back is never lost"
     );
 }
+
+/// **Every cell of the screen says which surface it is** (§11.4/#460), and the split
+/// falls exactly where the two constructors put it: the map band is
+/// [`Surface::Board`], the §11.4 status lines and the ability bar are
+/// [`Surface::Chrome`].
+///
+/// This is what a tile renderer needs and what row geometry cannot give it. It is
+/// also a claim the text renderer never exercises — it draws both surfaces the same
+/// way — so without a test the field would be free to drift the day a new row was
+/// added.
+#[test]
+fn the_screen_says_which_cells_are_board_and_which_are_frame() {
+    let mut s = state(
+        12,
+        12,
+        Cell::new(3, 3),
+        vec![Guard::stationary(Cell::new(5, 6))],
+    );
+    s.step(Input::Wait);
+    let screen = render_screen(&s, ScreenUi::default());
+    let map_bottom = screen.height - BOTTOM_ROWS;
+
+    for x in 0..screen.width {
+        for y in 0..TOP_ROWS {
+            assert_eq!(
+                screen.get(x, y).surface,
+                Surface::Chrome,
+                "the status line at ({x}, {y}) is frame, not facility",
+            );
+        }
+        for y in TOP_ROWS..map_bottom {
+            assert_eq!(
+                screen.get(x, y).surface,
+                Surface::Board,
+                "the map cell at ({x}, {y}) is facility",
+            );
+        }
+        for y in map_bottom..screen.height {
+            assert_eq!(
+                screen.get(x, y).surface,
+                Surface::Chrome,
+                "the ability bar at ({x}, {y}) is frame",
+            );
+        }
+    }
+}
+
+/// The two full-screen surfaces are frame **entirely** (§14/#268/#139): before a run
+/// starts, and while the help card is up, there is no facility on screen at all.
+#[test]
+fn a_full_screen_panel_is_frame_end_to_end() {
+    let mut s = state(12, 12, Cell::new(3, 3), Vec::new());
+    s.step(Input::Wait);
+    let screens = [
+        ScreenUi {
+            help_open: true,
+            ..ScreenUi::default()
+        },
+        ScreenUi {
+            menu: Some(MenuUi::default()),
+            ..ScreenUi::default()
+        },
+    ];
+    for ui in screens {
+        let screen = render_screen(&s, ui);
+        for y in 0..screen.height {
+            for x in 0..screen.width {
+                assert_eq!(
+                    screen.get(x, y).surface,
+                    Surface::Chrome,
+                    "({x}, {y}) of a full-screen panel is frame",
+                );
+            }
+        }
+    }
+}

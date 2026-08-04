@@ -1019,4 +1019,53 @@ mod tests {
         assert!(assemble(Vec::new(), &MessageHistory::default()).is_empty());
         assert!(assemble(loud(0)[..1].to_vec(), &MessageHistory::default()).is_empty());
     }
+
+    /// **An overlay is frame wherever it lands** (§11.4/#460) — including on top of
+    /// the map, which is the whole reason [`Surface`] is a property of the cell rather
+    /// than of the row. The deployed log hangs prose down over the board; every cell it
+    /// writes is [`Surface::Chrome`], and the board it did not reach stays
+    /// [`Surface::Board`].
+    ///
+    /// Without this, a tile renderer would find the `g` in "a guard has seen you" and
+    /// draw a guard standing in the middle of the sentence.
+    #[test]
+    fn the_deployed_log_is_frame_even_where_it_covers_the_map() {
+        use crate::render::Surface;
+
+        let s = loud_step();
+        let deployed = render_screen(
+            &s,
+            ScreenUi {
+                message_log_open: true,
+                ..ScreenUi::default()
+            },
+        );
+        let plain = render_screen(&s, ScreenUi::default());
+        let map = TOP_ROWS..deployed.height - BOTTOM_ROWS;
+
+        let mut covered = 0;
+        for y in map {
+            // A row the log rewrote is one whose cells moved; it is frame end to end,
+            // because the block clears the screen's full width before it writes.
+            let rewritten = (0..deployed.width).any(|x| deployed.get(x, y) != plain.get(x, y));
+            let expected = if rewritten {
+                Surface::Chrome
+            } else {
+                Surface::Board
+            };
+            for x in 0..deployed.width {
+                assert_eq!(
+                    deployed.get(x, y).surface,
+                    expected,
+                    "({x}, {y}): a log row is frame end to end, and the board it \
+                     does not reach stays board",
+                );
+            }
+            covered += u32::from(rewritten);
+        }
+        assert!(
+            covered > 0,
+            "the log covered no map rows — nothing was tested"
+        );
+    }
 }
