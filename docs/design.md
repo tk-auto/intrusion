@@ -3376,6 +3376,24 @@ bullet below fills one of its seams.
   - **Every route converges on the archive** [SETTLED], the one node with no
     successors. Reaching it ends traversal; what it holds and what arriving concludes
     are the ending's (#217).
+  - **The map screen is the campaign's surface** (#208) — the title screen's *Story
+    mode* opens it, and it is where every raid is chosen and started. It draws in the
+    same character grid as everything else (§11.1), as **a picture and a list**: the
+    picture says *where* — nodes at their positions, the road walked behind you, the
+    fan of offers, the archive at the head of the screen from the first frame — and the
+    list says *which*, one marked row per facility you may walk into, reachable by key
+    and by finger alike (§11.6). Splitting them is what fits the choice on a 40-column
+    board: a map carrying its own captions has no room for them, and a list on its own
+    is the flat list again.
+  - **The map shows shape, not contents** [SETTLED]. A facility the run has not stood
+    on and is not being offered draws as an outline: no fog on the geography (you can
+    always see how far the archive is), and no flavour handed over a hop early. It is
+    §11.5a's rule one scale up, and it leaves the scouting sinks (#215) something to
+    sell.
+  - **A completed facility does not raise the end screen.** The map comes up instead,
+    with the haul banked — a "you won" card between every raid would be seven endings
+    in a game that has one. The end screen keeps the endings that are endings: capture,
+    and the archive left behind.
 - **Salvaged tech accumulating across facilities.** This is the run's power curve
   and it is the reason the campaign exists. It was fully built last time and
   reachable by nobody: no facility was ever generated with an equipment cache, so

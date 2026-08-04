@@ -277,6 +277,32 @@ impl Campaign {
         self.map.successors(self.node())
     }
 
+    /// **The facilities the run may walk into next** — what the map screen (#208) puts
+    /// in front of the player, in one call, whichever of the two live stages the run is
+    /// in.
+    ///
+    /// At a [`Choosing`](CampaignStage::Choosing) point that is
+    /// [`offers`](Self::offers). On the [`Approach`](CampaignStage::Approach) — a fresh
+    /// run, or a choice just made — there is exactly one, and it is **the facility the
+    /// run is standing on**: the map is the surface a campaign is played from, so
+    /// *"raid this one"* has to be a row on it rather than a second screen with one
+    /// button. Empty once the run is over.
+    ///
+    /// The offer that names the current node is not a move; taking it enters. The two
+    /// read identically to the player and differ only in whether
+    /// [`choose`](Self::choose) runs first, which is the shell's one line of
+    /// bookkeeping rather than a second screen's worth.
+    pub fn ahead(&self) -> Vec<Offer> {
+        match self.stage {
+            CampaignStage::Approach => vec![Offer {
+                node: self.node(),
+                flavour: self.flavour(),
+                locked: false,
+            }],
+            _ => self.offers(),
+        }
+    }
+
     /// **Take an offered edge** (§14 v3): move the run to `node` and stand it there,
     /// ready to enter. `true` if the run moved.
     ///

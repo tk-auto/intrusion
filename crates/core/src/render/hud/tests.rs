@@ -1529,6 +1529,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         message_log_open: true,
         help_open: true,
         menu: Some(MenuUi::default()),
+        map: Some(MapUi { selected: 1 }),
         help_tab: HelpTab::Abilities,
         theme: Theme::default().toggled(),
         seed_copy: SeedCopy::Copied,
@@ -1552,6 +1553,7 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         message_log_open,
         help_open,
         menu,
+        map,
         help_tab,
         seed_copy,
         end,
@@ -1570,6 +1572,10 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         "a run opens on the board, not on the help panel"
     );
     assert!(menu.is_none(), "the run replaces the title screen");
+    assert!(
+        map.is_none(),
+        "and the campaign map closes as the facility opens (§14 v3)",
+    );
     assert_eq!(help_tab, HelpTab::default());
     assert_eq!(
         seed_copy,

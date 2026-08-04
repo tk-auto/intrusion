@@ -42,9 +42,9 @@ use std::rc::Rc;
 use intrusion_core::{
     ability_in_slot, ability_slot_for_code, ability_slot_for_letter, end_nav_for_gesture,
     end_nav_for_key, help_nav_for_gesture, help_nav_for_key, input_for_gesture, input_for_key,
-    key_for_code, menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, Cell, Direction,
-    EndExit, EndNav, Gesture, HelpHit, HelpNav, HelpTab, Input, InputModality, MenuNav, SeedCopy,
-    UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    key_for_code, map_nav_for_gesture, map_nav_for_key, menu_nav_for_gesture, menu_nav_for_key,
+    ui_command_for_key, Cell, Direction, EndExit, EndNav, Gesture, HelpHit, HelpNav, HelpTab,
+    Input, InputModality, MapNav, MenuNav, SeedCopy, UiCommand, BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -86,6 +86,16 @@ impl Game {
         if self.ui.menu.is_some() {
             if let Some(nav) = menu_nav_for_key(key) {
                 self.apply_menu_nav(nav);
+                return true;
+            }
+            return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
+        }
+        // The campaign map next, and **before** the end screen (§14 v3/#208): between
+        // facilities the `State` underneath is a finished raid, so its verdict keys would
+        // otherwise answer presses aimed at the map drawn over it.
+        if self.map_open() {
+            if let Some(nav) = map_nav_for_key(key) {
+                self.apply_map_nav(nav);
                 return true;
             }
             return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
@@ -194,6 +204,7 @@ impl Game {
     fn gesture_command(&self, gesture: Gesture) -> Option<GestureCommand> {
         surface_command(
             self.ui.menu.is_some(),
+            self.map_open(),
             self.run_over(),
             self.ui.help_open,
             gesture,
@@ -233,6 +244,13 @@ impl Game {
             self.ui.message_log_open = false;
         }
         self.draw();
+        // The **campaign** hears the verdict last (§12.7/#208), after the frame the raid
+        // ended on has been painted: an escaped facility banks its haul and the map comes
+        // up over that frame, and a run that ended for good leaves the end screen where
+        // it is. A no-op in quick play, which has no layer above the level.
+        if let Some(verdict) = self.state.verdict() {
+            self.campaign_verdict(&verdict);
+        }
     }
 
     /// Whether a held movement's *repeat* of `input` must be suppressed this tick
@@ -706,6 +724,10 @@ enum GestureCommand {
     /// A title-screen navigation (§14/#268): walk the list. Costs no turn, changes
     /// no [`State`](intrusion_core::State).
     Menu(MenuNav),
+    /// A navigation on the campaign map (§14 v3/#208): walk the facilities on offer.
+    /// Free like every other screen navigation (§4.4) — the campaign moves when a row is
+    /// fired, and a swipe never fires one.
+    Map(MapNav),
     /// A navigation inside the open help panel (§14 v2/#248): walk the tab bar.
     /// Likewise free (§4.4).
     Help(HelpNav),
@@ -718,20 +740,25 @@ enum GestureCommand {
 /// the pure rule behind [`Game::gesture_command`], in the spirit of
 /// [`drag_gesture`], so the *order* the shell owns is pinned natively too.
 ///
-/// The precedence is the keyboard's, deliberately: menu, then the end screen, then
-/// help, then the board.
+/// The precedence is the keyboard's, deliberately: menu, then the campaign map, then the
+/// end screen, then help, then the board. The map sits above the end screen because
+/// between facilities there is a *finished* raid on the state underneath it (#208).
 /// Only the last arm can produce a [`Play`](GestureCommand::Play), which is what
 /// makes the two board-only gates in [`GesturePump::apply`] structurally
 /// unreachable from a modal screen — #223 asks about visible danger and #306's dead
 /// band about the board's edges, and a title screen has neither.
 fn surface_command(
     menu_up: bool,
+    map_open: bool,
     run_over: bool,
     help_open: bool,
     gesture: Gesture,
 ) -> Option<GestureCommand> {
     if menu_up {
         return menu_nav_for_gesture(gesture).map(GestureCommand::Menu);
+    }
+    if map_open {
+        return map_nav_for_gesture(gesture).map(GestureCommand::Map);
     }
     if run_over {
         return end_nav_for_gesture(gesture).map(GestureCommand::End);
@@ -1034,6 +1061,7 @@ impl GesturePump {
             // edges, and a title screen has neither. It owns the whole viewport, so
             // there is nowhere on it a swipe could be a misaimed something else.
             Some(GestureCommand::Menu(nav)) => game.apply_menu_nav(nav),
+            Some(GestureCommand::Map(nav)) => game.apply_map_nav(nav),
             Some(GestureCommand::End(nav)) => game.apply_end_nav(nav),
             Some(GestureCommand::Help(nav)) => {
                 game.apply_help_nav(nav);
@@ -1177,7 +1205,7 @@ pub(crate) fn install_gestures(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use intrusion_core::{AbilityId, MenuEntry, MenuHit};
+    use intrusion_core::{AbilityId, MapNav, MenuEntry, MenuHit};
 
     /// #369, the reported bug, at the seam it lived on: a **top-row** `2` fires the
     /// bar's second slot. The press arrives as `code: "Digit2"`, `key: "2"` — the
@@ -1522,30 +1550,37 @@ mod tests {
         let up = Gesture::Swipe(Direction::North);
         let left = Gesture::Swipe(Direction::West);
         assert_eq!(
-            surface_command(true, false, false, up),
+            surface_command(true, false, false, false, up),
             Some(GestureCommand::Menu(MenuNav::Prev)),
         );
         assert_eq!(
-            surface_command(true, false, true, up),
+            surface_command(true, false, false, true, up),
             Some(GestureCommand::Menu(MenuNav::Prev)),
             "the menu outranks the panel, as it does on the keyboard",
         );
         assert_eq!(
-            surface_command(false, false, true, left),
+            surface_command(false, false, false, true, left),
             Some(GestureCommand::Help(HelpNav::PrevTab)),
         );
         // A finished run outranks the panel underneath it, as it does on the
         // keyboard: there is nothing left to navigate but the way on (#138).
         assert_eq!(
-            surface_command(false, true, true, up),
+            surface_command(false, false, true, true, up),
             Some(GestureCommand::End(EndNav::Prev)),
         );
+        // And the **campaign map** outranks the finished run under *it* (§14 v3/#208):
+        // between facilities there is a raid that ended on the state below, so its end
+        // screen must not answer a swipe aimed at the map drawn over it.
         assert_eq!(
-            surface_command(false, false, false, up),
+            surface_command(false, true, true, true, up),
+            Some(GestureCommand::Map(MapNav::Prev)),
+        );
+        assert_eq!(
+            surface_command(false, false, false, false, up),
             Some(GestureCommand::Play(Input::Step(Direction::North))),
         );
         assert_eq!(
-            surface_command(false, false, false, Gesture::Press),
+            surface_command(false, false, false, false, Gesture::Press),
             Some(GestureCommand::Play(Input::Wait)),
         );
     }
@@ -1566,14 +1601,15 @@ mod tests {
             Gesture::Swipe(Direction::West),
         ];
         for gesture in every {
-            for (menu_up, run_over, help_open) in [
-                (true, false, false),
-                (false, true, false),
-                (false, false, true),
+            for (menu_up, map_open, run_over, help_open) in [
+                (true, false, false, false),
+                (false, true, false, false),
+                (false, false, true, false),
+                (false, false, false, true),
             ] {
                 assert!(
                     !matches!(
-                        surface_command(menu_up, run_over, help_open, gesture),
+                        surface_command(menu_up, map_open, run_over, help_open, gesture),
                         Some(GestureCommand::Play(_))
                     ),
                     "{gesture:?} on a modal must never reach the board's gates",
@@ -1581,7 +1617,7 @@ mod tests {
             }
             assert!(
                 matches!(
-                    surface_command(false, false, false, gesture),
+                    surface_command(false, false, false, false, gesture),
                     Some(GestureCommand::Play(_))
                 ),
                 "{gesture:?} on the board still goes through the gates",
@@ -1596,14 +1632,17 @@ mod tests {
     /// ([`armed_fires`]), which this leaves untouched.
     #[test]
     fn a_tap_on_empty_menu_space_never_activates_an_entry() {
-        assert_eq!(surface_command(true, false, false, Gesture::Press), None);
+        assert_eq!(
+            surface_command(true, false, false, false, Gesture::Press),
+            None
+        );
         // Nor does a swipe across the list's grain: the horizontal pair sets the
         // level-options slider (#298) and fires no control at all, so no gesture on
         // the menu can start a run.
         for direction in [Direction::East, Direction::West] {
             assert!(
                 matches!(
-                    surface_command(true, false, false, Gesture::Swipe(direction)),
+                    surface_command(true, false, false, false, Gesture::Swipe(direction)),
                     Some(GestureCommand::Menu(MenuNav::Easier | MenuNav::Harder)),
                 ),
                 "a horizontal swipe on the menu may only move the slider",
@@ -1630,7 +1669,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(true, false, false, gesture),
+                surface_command(true, false, false, false, gesture),
                 menu_nav_for_key(key).map(GestureCommand::Menu),
                 "{gesture:?} and {key} drive the menu the same way",
             );
@@ -1642,7 +1681,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(false, false, true, gesture),
+                surface_command(false, false, false, true, gesture),
                 help_nav_for_key(key, false).map(GestureCommand::Help),
             );
         }

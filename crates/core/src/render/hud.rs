@@ -125,6 +125,17 @@ pub struct ScreenUi {
     /// [`menu_hit`](crate::menu_hit)). Its own screen lives in
     /// [`menu`](super::menu).
     pub menu: Option<MenuUi>,
+    /// The **campaign map**, while it is up (§14 v3/#208) — `None` in quick play and
+    /// inside a facility. Modal and full-screen exactly like [`menu`](Self::menu):
+    /// [`render_map`](super::render_map) draws it *instead of* the game frame and the
+    /// shell routes input to it ([`map_nav_for_key`](crate::map_nav_for_key) /
+    /// [`map_hit`](crate::map_hit)).
+    ///
+    /// It is **not** drawn by [`render_screen`], and that is deliberate rather than an
+    /// omission: the map is a view of the *campaign*, which sits above the level and is
+    /// not reachable from a [`State`]. A shell holding a campaign asks for the map
+    /// screen directly; one that is not in a campaign has nothing to ask with.
+    pub map: Option<MapUi>,
     /// Which help tab is showing while [`help_open`](Self::help_open) (§14 v2/#248).
     /// Ignored when the panel is closed; the [`Default`] is the leftmost tab, so the
     /// panel opens on Level info. The shell cycles it from

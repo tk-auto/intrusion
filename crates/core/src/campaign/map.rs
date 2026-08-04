@@ -176,8 +176,20 @@ impl Flavour {
     /// what guarantees a differentiated offer — see [`FacilityMap::flavour`].
     pub const OFFERED: [Flavour; 3] = [Flavour::Outpost, Flavour::Depot, Flavour::Vault];
 
-    /// The flavour's name, as the map screen (#208) prints it.
-    pub fn label(self) -> &'static str {
+    /// **Every** flavour, [`OFFERED`](Self::OFFERED) plus the terminus — what an
+    /// exhaustive check walks. The map screen (#208) measures its rows against this at
+    /// **compile time**, so a blurb too long for the board fails the build rather than
+    /// being discovered as a clipped line in a screenshot.
+    pub const ALL: [Flavour; 4] = [
+        Flavour::Outpost,
+        Flavour::Depot,
+        Flavour::Vault,
+        Flavour::Archive,
+    ];
+
+    /// The flavour's name, as the map screen (#208) prints it. `const` so that screen's
+    /// width bound can measure it before the build finishes.
+    pub const fn label(self) -> &'static str {
         match self {
             Flavour::Outpost => "Outpost",
             Flavour::Depot => "Depot",
@@ -191,12 +203,12 @@ impl Flavour {
     /// numbers: "one more console" is the help panel's job once there is a run to
     /// describe (§12.6), and a menu row that printed modifier arithmetic would be asking
     /// the player to do the sum the flavour exists to have already done.
-    pub fn blurb(self) -> &'static str {
+    pub const fn blurb(self) -> &'static str {
         match self {
-            Flavour::Outpost => "thin pickings, thinly guarded",
+            Flavour::Outpost => "thin, and thinly guarded",
             Flavour::Depot => "an ordinary facility",
             Flavour::Vault => "worth robbing, and watched",
-            Flavour::Archive => "the archive — what you came for",
+            Flavour::Archive => "what you came for",
         }
     }
 

@@ -107,8 +107,9 @@ pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN
 pub use guard::{Guard, GuardState};
 pub use input::{
     ability_slot_for_code, end_nav_for_gesture, end_nav_for_key, help_nav_for_gesture,
-    help_nav_for_key, input_for_gesture, input_for_key, key_for_code, menu_nav_for_gesture,
-    menu_nav_for_key, ui_command_for_key, EndNav, Gesture, HelpNav, MenuNav, UiCommand,
+    help_nav_for_key, input_for_gesture, input_for_key, key_for_code, map_nav_for_gesture,
+    map_nav_for_key, menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, EndNav, Gesture,
+    HelpNav, MapNav, MenuNav, UiCommand,
 };
 pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
@@ -120,11 +121,11 @@ pub use region::{
     Door, DoorCell, DoorId, DoorKind, DoorLock, Region, RegionGraph, RegionId, RegionKind,
 };
 pub use render::{
-    ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid, help_hit,
-    is_help_button, is_message_button, menu_hit, message_log_rows, render, render_screen,
-    verdict_hit, EndUi, Fill, GlyphCell, Grid, HelpHit, HelpTab, InputModality, MenuEntry, MenuHit,
-    MenuScreen, MenuUi, OptionsControl, ScreenUi, SeedCopy, Surface, Visibility, BOTTOM_ROWS,
-    TOP_ROWS,
+    ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid,
+    flavour_glyph, help_hit, is_help_button, is_message_button, map_hit, menu_hit,
+    message_log_rows, render, render_map, render_screen, verdict_hit, EndUi, Fill, GlyphCell, Grid,
+    HelpHit, HelpTab, InputModality, MapHit, MapUi, MenuEntry, MenuHit, MenuScreen, MenuUi,
+    OptionsControl, ScreenUi, SeedCopy, Surface, Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{
     ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,
