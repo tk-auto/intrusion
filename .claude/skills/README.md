@@ -18,7 +18,8 @@ slash command (e.g. `/create-tickets`) or by describing the task.
    this from the other direction: it reads the *code* for cleanup opportunities —
    oversized files, muddy naming, drift — and hands the good ones to
    `/create-tickets`.)
-2. `/work-ticket` — pick one, build it, ship a PR. Player-visible PRs get an
+2. `/work-ticket` — pick one, brief what it asks and how you're closing whatever
+   it left open, build it, ship a PR. Player-visible PRs get an
    `/artifact-build` preview before merge; key (feel/balance) changes hold for
    the user's playtest on it.
 3. `/playtest` — let the headless sim (§13.2) flag suspicious seeds for a human to
