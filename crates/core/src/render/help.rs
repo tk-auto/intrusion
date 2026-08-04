@@ -54,7 +54,7 @@ mod abilities;
 
 use super::{
     blank_grid, draw, Grid, ScreenUi, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH,
-    SCHEMATIC_GROUND, SCHEMATIC_WALL,
+    SCHEMATIC_WALL,
 };
 use crate::ability::Loadout;
 use crate::alert::AlertReadout;
@@ -866,12 +866,12 @@ fn glyph_rows() -> Vec<(char, Category, &'static str)> {
         terrain(Terrain::Console, "intel — bump to take"),
         terrain(Terrain::CommsConsole, "comms — bump to kill the radio"),
         terrain(Terrain::Exit, "the exit"),
-        (FLOOR_DOT, Category::Ground, "floor"),
-        // The schematic (§11.5a/#307): what the plans give you before you have been
-        // there. Two rows, because the two marks are the whole vocabulary — walking
-        // in resolves either one into what is really there.
+        (FLOOR_DOT, Category::Ground, "floor you can see"),
+        // The schematic (§11.5a/#307/#470): what the plans give you before you have
+        // been there. One row, because the plan is one mark and one absence — the
+        // floor space between the fabric draws blank, exactly as floor out of your
+        // sight does, and a blank row on a card teaches nothing.
         (SCHEMATIC_WALL, Category::Neutral, "building — not yet seen"),
-        (SCHEMATIC_GROUND, Category::Ground, "floor — not yet seen"),
     ]
 }
 

@@ -1916,7 +1916,7 @@ one-table edit.
 | Category | Colour | Meaning |
 |---|---|---|
 | **Neutral** | White | Inert scenery, spent objectives |
-| **Ground** | Dark gray | Traversable floor — the §11.5 dots, drawn to recede |
+| **Ground** | Dark gray | Traversable floor — the §11.5 dots, drawn to recede; dotted only while in sight |
 | **Owned** | Blue | You, and things you made |
 | **Caution** | Yellow | A threat that is unaware |
 | **Warning** | Orange | A threat that is hunting |
@@ -2274,7 +2274,7 @@ visibility is drawn.
 | Cell state | Rendering |
 |---|---|
 | In player's FOV | Full category colour |
-| Outside player's FOV | Same glyph, dark gray — dim but legible. Two exceptions: Ground dims further (the dots whisper), and the exit keeps a dark Interest tint — it anchors every escape plan (§7.6) and must not sink into wall gray |
+| Outside player's FOV | Same glyph, dark gray — dim but legible. Two exceptions: **floor is not drawn at all** (the dot is the FOV's own ink — see below), and the exit keeps a dark Interest tint, since it anchors every escape plan (§7.6) and must not sink into wall gray |
 | Watched by a guard, in player's FOV | **Red background** — the danger overlay |
 | Watched by a guard the player **cannot see** | The straight sightline from that guard to the player is red — the **watcher line**, standing for as long as it has them. See below |
 | Watched by a guard, outside player's FOV | Dark gray on dark gray — *unreadable* |
@@ -2366,6 +2366,13 @@ Two rules the old version's failures leave behind (appendix 1): **a watched cell
 never render safer than an unwatched one**, and **floor renders as dots** so the FOV
 boundary is visible across open ground at all.
 
+The second is now served by drawing the dots **only inside the FOV** (appendix 33):
+floor beyond your sight draws blank, so the boundary is a hard edge between dotted
+ground and bare page rather than a step between two shades of dot. That is the same
+rule pushed further, not withdrawn — a board with no dots anywhere is what it was
+written against. Backgrounds are unaffected: they paint per cell whatever the glyph,
+so a watched cell out of your sight still paints red, now with nothing on top of it.
+
 > **What each background resolves to, row by row** — which cue means what, and the two
 > guarantees that must not regress (the overlay covers watched cells outside your own
 > FOV; cones of guards you cannot see paint nothing) — is
@@ -2383,17 +2390,24 @@ boundary is visible across open ground at all.
 | **What you placed** — your live decoy (§8.3) | **Always drawn, wherever it is.** In the FOV or out of it, for as long as it exists. |
 | **The exit** — the tunnel you dug and came in by (§4.5) | **Always drawn as itself**, from turn one, never schematic. Yours. |
 
-> **The schematic (#307).** Geometry you have never had eyes on draws as the
-> building's *plans*, not as it has been seen: the **fabric** (`≈`) — wall runs and
-> the recesses and openings cut into them — and the **floor space** (`~`) between
-> it. Walking somewhere resolves it into the real thing, permanently. It is a
+> **The schematic (#307, #470).** Geometry you have never had eyes on draws as the
+> building's *plans*, not as it has been seen: the **fabric** (`□`) — wall runs and
+> the recesses and openings cut into them — with the **floor space** between it left
+> blank. Walking somewhere resolves it into the real thing, permanently. It is a
 > **shape** distinction, not a darker shade, because geometry too dark to read is fog
-> by another name. **The line is load-bearing structure**: `≈` is what holds the
-> building up, `~` is everything that does not — a room's floor, the furniture standing
-> in it, and a **doorway**, which draws as the gap in the wall line a plan would show,
-> so the ways between an unexplored wing's rooms stay plannable. Which mark each thing
-> takes, and the denser alternative that was built and rejected, are
-> [`docs/render-reference.md`](render-reference.md) §2.3–§2.4.
+> by another name. **The line is load-bearing structure**: `□` is what holds the
+> building up, and everything that does not — a room's floor, the furniture standing
+> in it, and a **doorway**, which shows as the gap in the wall line a plan would show —
+> draws nothing, so the ways between an unexplored wing's rooms stay plannable. The
+> plan is one mark and one absence, which is what it can afford to be now that floor
+> out of your sight draws blank too (§11.5). Which mark each thing takes, why `□`
+> replaced the `≈` this shipped with, and the denser alternative that was built and
+> rejected, are [`docs/render-reference.md`](render-reference.md) §2.3–§2.4.
+>
+> **Floor is the one layer that is not drawn from memory.** Explored and unexplored
+> floor are the same blank; the distinction lives entirely in the fabric channel, where
+> explored geometry reads `#`/`×`/`}` and unexplored reads `□`, so a room you have
+> cleared still reads as cleared by its shape (appendix 33).
 >
 > **Duct mouths and furniture are contents, not geometry** — a stated change from
 > §10.7's earlier "visible from turn one like a door", on the grounds that a duct
