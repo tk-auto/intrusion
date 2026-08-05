@@ -408,11 +408,26 @@ impl Event {
             | Event::SearchBegan
             | Event::ReinforcementArrived { .. } => Category::Warning,
             // The search ending is the only *good* news the threat channel carries
-            // (§11.2/#224), and the band says so by stepping **down** the ladder: the
-            // guards that were hunting are unaware again, which is exactly what
-            // Caution's yellow means. The near line going orange → yellow is the
-            // relief, painted.
-            Event::SearchEnded => Category::Caution,
+            // (§11.2/#224), and the band it wears is the one that says **nothing is
+            // hunting you**: the near line goes quiet rather than changing which threat
+            // colour it is wearing. That is what relief looks like on a row whose
+            // colour is its register.
+            //
+            // It is deliberately **not** `Caution`, which is the tempting answer — the
+            // guards really are unaware again, and that is what Caution means on a
+            // guard's own glyph. Two things rule it out on this row. The ambient floor
+            // already paints the §7.3 ladder's colours ([`ambient`]), so a rung-1
+            // facility's standing band **is** Caution gold — and a search is very often
+            // called off on exactly such a run, which would announce the news as the
+            // ambient row briefly brightening in the same hue rather than as a message
+            // at all. And Caution is the *brightest* band the palette produces (§11.2's
+            // ladder descends from it), which would spend the loudest row the near line
+            // can paint on its quietest fact.
+            //
+            // `Neutral` collides with nothing: the ambient floor is only ever Interest
+            // or a rung's colour, so a Neutral band is always a message, and it is the
+            // one band that already means *nothing to report* (a bump, a step).
+            Event::SearchEnded => Category::Neutral,
             // A guard that sees you is hunting *you* — the same Danger band as
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
             // reinforce (§11.2).

@@ -2881,9 +2881,12 @@ system — it is derived from adjacency every frame and carries no state.
   worse — announce that the search was called off while a second guard was still
   combing the ground you are hiding in. Neither line names a place; **where** is the
   investigation area's job (§11.5), and a cell here would name one searcher's focus as
-  though it were the only one. The bands step *down* the §11.2 ladder across the pair —
-  Warning for a hunting threat, Caution for an unaware one — so the near line going
-  orange → yellow is the relief itself, painted.
+  though it were the only one. The **bands differ, and the second one goes quiet** —
+  Warning for the opening, Neutral for the calling-off — so relief reads as the row
+  falling silent rather than as one threat colour swapped for another. Caution is the
+  tempting answer and is wrong on this row: the ambient floor already paints the §7.3
+  ladder's own colours, so a facility at condition 1 is *standing* in a Caution band,
+  and a search is very often called off on exactly such a run.
 
 Priority ladder **[START]**: routine self-narration ≤ 0; a search opening or being
 called off sits on its own quiet rung at 1 — the consequence of something louder that

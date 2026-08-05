@@ -1113,9 +1113,12 @@ fn live_messages_is_empty_when_the_action_is_quiet() {
 /// detection wants; and the pair still has to clear the crouches and door bumps that
 /// would otherwise bury it.
 ///
-/// The **bands differ**, and they differ down the §11.2 ladder: a search opening is a
-/// hunting threat (Warning), a search called off is an unaware one (Caution). The near
-/// line going orange → yellow is the relief itself, painted.
+/// The **bands differ**, and the difference is the relief: a search opening is a
+/// hunting threat (Warning), and a search called off wears the band that means
+/// *nothing to report* (Neutral) — the row goes quiet rather than swapping one threat
+/// colour for another. Caution is the trap here and is asserted against: the ambient
+/// floor already paints the §7.3 ladder, so a rung-1 run's standing band is Caution
+/// gold and this message would read as that row brightening rather than as news.
 #[test]
 fn the_search_boundary_reads_below_the_threat_ladder() {
     let began = message_for(Event::SearchBegan).expect("a search opening speaks");
@@ -1125,7 +1128,12 @@ fn the_search_boundary_reads_below_the_threat_ladder() {
 
     let ended = message_for(Event::SearchEnded).expect("a search ending speaks");
     assert_eq!(ended.text, "the search is called off");
-    assert_eq!(ended.category, Category::Caution);
+    assert_eq!(ended.category, Category::Neutral);
+    assert_ne!(
+        ended.category,
+        crate::alert::rung_category(1),
+        "the calling-off must not wear the band a rung-1 facility already stands in",
+    );
     assert_eq!(ended.priority, 1);
 
     // Under the bottom rung of the threat ladder: a guard that has *found* you
