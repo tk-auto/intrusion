@@ -376,20 +376,24 @@ pub fn message_for(event: Event) -> Option<Message> {
         // `CalledIn` and the radio silence: all three say guards are converging on a
         // named cell, and it makes no difference to the ranking that this one was the
         // player's own doing.
-        Event::FalseCallFired { answered: 0, .. } => {
-            ("the call goes out — nobody free".to_string(), 3)
-        }
-        Event::FalseCallFired { answered: 1, .. } => {
-            ("your call pulls a guard here".to_string(), 3)
-        }
-        Event::FalseCallFired { answered, .. } => {
-            (format!("your call pulls {answered} guards here"), 3)
-        }
-        // The refusals (§8.3/#504): free, changed nothing, and each has to say why for
+        // The forged call, reported — and reported as **what you did**, never as what
+        // it found (§8.3/§11.7/#504). Confusion says how many it caught because its
+        // blast is clamped inside the guard sense and every one of them was already
+        // drawn; this reach is not clamped, so a count would name guards behind the §5
+        // cone and, in a duct, well past the §9 sense — free information about the dark,
+        // out of a tool that is a transmitter and not a detector.
+        //
+        // So the line says the transmission went out and stops. What answered is the
+        // player's to learn the way they learn everything else about guards: by sensing
+        // the dots turn toward them (§9/§9.3, the §7.7 legibility tell). It keeps its
+        // rung at **3** alongside `CalledIn` and the radio silence — all three say guards
+        // are converging on a named cell — and it keeps the word *here*, which is the one
+        // word that makes standing still feel like the mistake it is.
+        Event::FalseCallFired { .. } => ("your call goes out — to here".to_string(), 3),
+        // The one refusal (§8.3/#504): free, changed nothing, and it has to say why for
         // the refused bore's reason — a press that silently did nothing reads as a
-        // dropped key. Each names the rule the player is learning, and they are two
-        // different rules: what the spoofer can reach, and what a dead net leaves of it.
-        Event::FalseCallMissed => ("no one in range to call".to_string(), 0),
+        // dropped key. It gives nothing away, because it reports a switch the player
+        // threw themselves.
         Event::FalseCallDead => ("the radio is dead — nothing to spoof".to_string(), 0),
         // The §7.6 search, made legible in time (§11.7/#224). Both sit at **1** — a
         // new rung, deliberately below the threat ladder's bottom (a fresh detection

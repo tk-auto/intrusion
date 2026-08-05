@@ -34,11 +34,55 @@ fn navigator(player: Cell, consoles: Vec<Cell>) -> State {
     .with_loadout(Loadout::innate().with(AbilityId::Guide))
 }
 
-/// The one cell the compass is painting, or `None` when it is dark.
+/// The one cell the compass is painting **on this frame**, or `None` when it is dark.
 fn needle(s: &State) -> Option<Cell> {
     let lit: Vec<Cell> = s.effect_cell_marks().collect();
     assert!(lit.len() <= 1, "a compass paints one cell or none: {lit:?}");
     lit.first().copied()
+}
+
+/// Wait until the compass is **due**, then read it (§8.3/#505). The bearing pulses, so
+/// every assertion about *where* it points has to stand on a turn it is lit — and these
+/// fixtures hold no guards, so spending turns to get there changes nothing else.
+fn fix(s: &mut State) -> Option<Cell> {
+    for _ in 0..=GUIDE_BLINK_TURNS {
+        if s.turn() > 0 && s.turn().is_multiple_of(GUIDE_BLINK_TURNS) {
+            return needle(s);
+        }
+        s.step(Input::Wait);
+    }
+    unreachable!("the compass comes due at least once every {GUIDE_BLINK_TURNS} turns")
+}
+
+// ---------------------------------------------------------------------------
+// It pulses
+// ---------------------------------------------------------------------------
+
+/// §8.3/#505: the compass is a **pulse**, not a standing line — lit on one turn in
+/// [`GUIDE_BLINK_TURNS`] and dark on the rest, **turn zero included**.
+///
+/// That is the ability's main balance lever, and both halves of it matter. A standing
+/// bearing is a line you simply follow, and §11.5a's fog stops being something you plan
+/// around; a pulse gives you a *fix* you then walk on your own memory of. And the run
+/// opens dark, so the first thing the ability asks is that you spend a few turns before
+/// it answers — a compass already pointing on the frame you arrive would make the
+/// opening move free.
+#[test]
+fn the_compass_pulses_and_the_run_opens_dark() {
+    assert_eq!(GUIDE_BLINK_TURNS, 3, "the [START] period is pinned");
+    let mut s = navigator(Cell::new(20, 20), vec![Cell::new(30, 20)]);
+
+    assert_eq!(s.turn(), 0);
+    assert_eq!(needle(&s), None, "the run opens with no fix");
+    for turn in 1..=(GUIDE_BLINK_TURNS * 3) {
+        s.step(Input::Wait);
+        assert_eq!(s.turn(), turn, "one wait, one turn");
+        assert_eq!(
+            needle(&s).is_some(),
+            turn.is_multiple_of(GUIDE_BLINK_TURNS),
+            "turn {turn}: lit on one turn in {GUIDE_BLINK_TURNS} and dark on the rest",
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -50,9 +94,9 @@ fn needle(s: &State) -> Option<Cell> {
 #[test]
 fn one_neighbouring_cell_is_washed_while_something_is_left_to_take() {
     let player = Cell::new(20, 20);
-    let s = navigator(player, vec![Cell::new(30, 20)]);
+    let mut s = navigator(player, vec![Cell::new(30, 20)]);
 
-    let cell = needle(&s).expect("something is left to take");
+    let cell = fix(&mut s).expect("something is left to take");
     assert_eq!(
         cell,
         Cell::new(21, 20),
@@ -80,14 +124,14 @@ fn it_goes_dark_when_nothing_is_left() {
         Cell::new(38, 38),
     )
     .with_loadout(Loadout::innate().with(AbilityId::Guide));
-    assert!(needle(&s).is_some(), "precondition: one console still out");
+    assert!(fix(&mut s).is_some(), "precondition: one console still out");
 
     s.step(Input::Step(Direction::East));
     assert_eq!(s.objectives_remaining(), 0, "the console is taken");
     assert_eq!(
-        needle(&s),
+        fix(&mut s),
         None,
-        "and the compass goes dark on the very turn the set empties",
+        "and the compass is dark on the next fix it is due — for good",
     );
 }
 
@@ -104,11 +148,15 @@ fn claiming_one_moves_the_bearing_to_the_next() {
         Cell::new(38, 38),
     )
     .with_loadout(Loadout::innate().with(AbilityId::Guide));
-    assert_eq!(needle(&s), Some(Cell::new(21, 20)), "east, to the near one");
+    assert_eq!(
+        fix(&mut s),
+        Some(Cell::new(21, 20)),
+        "east, to the near one"
+    );
 
     s.step(Input::Step(Direction::East)); // bump it
     assert_eq!(
-        needle(&s),
+        fix(&mut s),
         Some(Cell::new(20, 19)),
         "north, to the one that is left",
     );
@@ -118,7 +166,7 @@ fn claiming_one_moves_the_bearing_to_the_next() {
 /// Guide paints nothing, however many consoles are out.
 #[test]
 fn a_run_that_does_not_hold_it_sees_nothing() {
-    let s = State::new(
+    let mut s = State::new(
         open_room(40, 40),
         Cell::new(20, 20),
         Direction::East,
@@ -126,7 +174,7 @@ fn a_run_that_does_not_hold_it_sees_nothing() {
         vec![Cell::new(30, 20)],
         Cell::new(38, 38),
     );
-    assert_eq!(needle(&s), None, "no ability, no compass");
+    assert_eq!(fix(&mut s), None, "no ability, no compass");
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +196,7 @@ fn the_bearing_points_through_a_wall_not_round_it() {
         layout.place(Cell::new(25, y), Terrain::Wall);
     }
     let console = Cell::new(30, 20);
-    let s = State::new(
+    let mut s = State::new(
         layout,
         Cell::new(20, 20),
         Direction::East,
@@ -159,7 +207,7 @@ fn the_bearing_points_through_a_wall_not_round_it() {
     .with_loadout(Loadout::innate().with(AbilityId::Guide));
 
     assert_eq!(
-        needle(&s),
+        fix(&mut s),
         Some(Cell::new(21, 20)),
         "due east, straight into the wall — the line, never the road",
     );
@@ -185,9 +233,9 @@ fn the_needle_uses_all_eight_cells() {
         (10, -10, 1, -1),
     ] {
         let console = Cell::new((player.x as i32 + dx) as u32, (player.y as i32 + dy) as u32);
-        let s = navigator(player, vec![console]);
+        let mut s = navigator(player, vec![console]);
         let want = Cell::new((player.x as i32 + nx) as u32, (player.y as i32 + ny) as u32);
-        assert_eq!(needle(&s), Some(want), "bearing to {console:?}");
+        assert_eq!(fix(&mut s), Some(want), "bearing to {console:?}");
     }
 }
 
@@ -198,7 +246,7 @@ fn the_needle_uses_all_eight_cells() {
 #[test]
 fn the_octant_boundary_is_where_the_geometry_says() {
     let player = Cell::new(20, 20);
-    let bearing = |dy: u32| needle(&navigator(player, vec![Cell::new(32, 20 + dy)]));
+    let bearing = |dy: u32| fix(&mut navigator(player, vec![Cell::new(32, 20 + dy)]));
 
     // 4/12 = 0.333 < 0.414 — inside the eastward sector.
     assert_eq!(bearing(4), Some(Cell::new(21, 20)), "still due east");
@@ -221,8 +269,8 @@ fn the_octant_boundary_is_where_the_geometry_says() {
 fn it_reveals_nothing_but_the_one_cell() {
     let player = Cell::new(20, 20);
     let console = Cell::new(30, 20);
-    let with = navigator(player, vec![console]);
-    let without = State::new(
+    let mut with = navigator(player, vec![console]);
+    let mut without = State::new(
         open_room(40, 40),
         player,
         Direction::East,
@@ -230,6 +278,12 @@ fn it_reveals_nothing_but_the_one_cell() {
         vec![console],
         Cell::new(38, 38),
     );
+    // Both walked to the same turn, so the comparison is frame against frame — and to
+    // one the compass is **due** on, which is the only turn it could reveal anything.
+    let needle = fix(&mut with).expect("a bearing is up");
+    while without.turn() < with.turn() {
+        without.step(Input::Wait);
+    }
 
     assert_eq!(
         with.memory().contains(console),
@@ -237,7 +291,6 @@ fn it_reveals_nothing_but_the_one_cell() {
         "the compass remembers nothing for you (§11.5a)",
     );
 
-    let needle = needle(&with).expect("a bearing is up");
     let (a, b) = (crate::render(&with), crate::render(&without));
     for y in 0..a.height() {
         for x in 0..a.width() {
@@ -270,7 +323,7 @@ fn the_comms_console_is_not_an_objective() {
     let mut layout = open_room(40, 40);
     // Right next to the player, where it would dominate any bearing if it counted.
     layout.place(Cell::new(21, 20), Terrain::CommsConsole);
-    let s = State::new(
+    let mut s = State::new(
         layout,
         Cell::new(20, 20),
         Direction::East,
@@ -286,7 +339,7 @@ fn the_comms_console_is_not_an_objective() {
         "precondition: the comms console is one cell east",
     );
     assert_eq!(
-        needle(&s),
+        fix(&mut s),
         Some(Cell::new(20, 19)),
         "north, to the intel — the radio terminal is not a thing you go and take",
     );
@@ -306,7 +359,7 @@ fn a_threat_cue_paints_over_the_bearing() {
     let bearing = Cell::new(21, 20);
     // A guard the player can see, north of the bearing cell and facing south (§7.1's
     // spawn facing), so its cone covers that cell.
-    let s = State::new(
+    let mut s = State::new(
         open_room(40, 40),
         player,
         Direction::East,
@@ -316,9 +369,12 @@ fn a_threat_cue_paints_over_the_bearing() {
     )
     .with_loadout(Loadout::innate().with(AbilityId::Guide));
 
+    while s.turn() == 0 || !s.turn().is_multiple_of(GUIDE_BLINK_TURNS) {
+        s.step(Input::Wait);
+    }
     assert!(
         s.guide_bearing() == Some(bearing),
-        "precondition: the compass wants that cell",
+        "precondition: the compass is due, and wants that cell",
     );
     assert!(
         s.visible_cone_cells().any(|c| c == bearing),
@@ -349,8 +405,8 @@ fn a_tie_resolves_by_the_level_s_own_ordering() {
         "precondition: the two are the same distance away",
     );
 
-    let s = navigator(player, vec![first, second]);
-    let answer = needle(&s);
+    let mut s = navigator(player, vec![first, second]);
+    let answer = fix(&mut s);
     assert_eq!(answer, Some(Cell::new(20, 19)), "the earlier console wins");
     for _ in 0..8 {
         assert_eq!(needle(&s), answer, "and it wins every time it is asked");
@@ -358,6 +414,6 @@ fn a_tie_resolves_by_the_level_s_own_ordering() {
 
     // Swap the placement order and the tie goes the other way — which is the proof that
     // the ordering *is* the rule, rather than a coincidence of the geometry.
-    let swapped = navigator(player, vec![second, first]);
-    assert_eq!(needle(&swapped), Some(Cell::new(21, 20)));
+    let mut swapped = navigator(player, vec![second, first]);
+    assert_eq!(fix(&mut swapped), Some(Cell::new(21, 20)));
 }

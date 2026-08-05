@@ -242,7 +242,7 @@ fn the_called_cell_is_where_you_fired_not_where_you_are() {
 /// moment it is sent, so there is no window to switch off.
 #[test]
 fn the_false_call_numbers_are_pinned() {
-    assert_eq!(FALSE_CALL_RADIUS, 8, "[START] — a wing, not the building");
+    assert_eq!(FALSE_CALL_RADIUS, 10, "[START] — a wing, not the building");
     let economy = AbilityId::FalseCall
         .def()
         .economy()
@@ -347,22 +347,69 @@ fn a_crawling_player_still_broadcasts_in_full() {
     );
 }
 
-/// §4.4/§8.4: a firing with nobody in reach is a **free no-op** with a near-line
-/// message — no turn, no cooldown, nothing changed. Fair rather than fiddly for
-/// Confusion's reason: the reach is clamped inside the sense, so every guard it could
-/// have called is one the player was already shown.
+/// **A transmitter, not a detector** (§8.4/§9/#504) — the rule that separates this
+/// ladder from Confusion's, and the reason the ability is *always* pressable.
+///
+/// Confusion may refuse an empty blast because its reach is clamped inside the guard
+/// sense: everything it could have caught was already drawn, so refusing tells the
+/// player nothing new. This reach is **not** clamped — it covers guards behind the §5
+/// cone, and in a duct well past the §9 sense — so a refusal would answer *"is anyone
+/// within ten cells of me?"*, and a greyed bar entry would answer it **every frame, for
+/// free, without spending the turn**. That is a detector.
+///
+/// So a firing into an empty facility goes out anyway, costs its turn and its lockout,
+/// and reports nothing about what it did or did not find.
 #[test]
-fn a_call_with_nobody_in_reach_is_free() {
+fn a_call_with_nobody_in_reach_still_fires_and_still_costs() {
     let mut s = spoofer(Vec::new());
     let turn = s.turn();
-
-    let events = s.step(Input::Activate(AbilityId::FalseCall));
-    assert!(events.contains(&Event::FalseCallMissed));
-    assert_eq!(s.turn(), turn, "a refusal costs no turn (§4.4)");
     assert_eq!(
         s.ability_state(AbilityId::FalseCall),
-        AbilityState::Unusable,
-        "and the bar says so before the press, rather than after it (§11.4)",
+        AbilityState::Ready,
+        "the bar never greys it for want of guards — that would be the leak (§11.4)",
+    );
+
+    assert_eq!(fire(&mut s), 0, "nobody answered, and it fired regardless");
+    assert!(s.turn() > turn, "the turn is spent (§4.4)");
+    assert!(
+        matches!(
+            s.ability_state(AbilityId::FalseCall),
+            AbilityState::Cooling { .. }
+        ),
+        "and so is the lockout — a press that tells you nothing still costs (§8.2)",
+    );
+}
+
+/// §11.7/§9: **the near line carries no count.** Confusion says how many it caught
+/// because its blast is clamped inside the sense and every one of them was already on
+/// the player's picture; this reach is not, so a count would name guards the player
+/// cannot perceive. The line reports the transmission, and what answered is learned the
+/// way everything about guards is learned — by watching the §9 dots turn (§9.3).
+#[test]
+fn the_near_line_never_says_how_many_answered() {
+    let mut s = spoofer(vec![
+        Guard::stationary(Cell::new(20, 24)),
+        Guard::stationary(Cell::new(24, 20)),
+        Guard::stationary(Cell::new(16, 20)),
+    ]);
+    assert_eq!(fire(&mut s), 3, "three answered, on the event");
+
+    let line = crate::message_for(
+        *s.last_events()
+            .iter()
+            .find(|e| matches!(e, Event::FalseCallFired { .. }))
+            .expect("the call went out"),
+    )
+    .expect("it speaks");
+    assert!(
+        !line.text.chars().any(|c| c.is_ascii_digit()),
+        "no number reaches the player: {:?}",
+        line.text,
+    );
+    assert_eq!(
+        line.category,
+        Category::Warning,
+        "and it reads as the warning it is, not as a confirmation (§11.2)",
     );
 }
 

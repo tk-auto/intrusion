@@ -452,6 +452,16 @@ impl State {
     /// which is exactly what leaves #215's v3 intel sink — POI reveal, sold for currency
     /// — something to sell. Nothing here touches tile memory or the fog.
     ///
+    /// # It pulses (§8.3/#505)
+    ///
+    /// The bearing shows on one turn in [`GUIDE_BLINK_TURNS`] and is **dark on the
+    /// rest**, turn zero included. A standing needle is a line you follow without
+    /// thinking; a pulsing one gives you a *fix* you then have to walk on your own
+    /// memory of, which is both what a compass feels like to use and what leaves
+    /// §11.5a's exploration intact. The phase is the **turn counter** and nothing else,
+    /// so it is deterministic (§12.4), it is the same for every run, and a player can
+    /// count to it.
+    ///
     /// # Determinism (§12.4)
     ///
     /// Two equidistant objectives are separated by a **fixed** rule and never a draw: the
@@ -459,6 +469,12 @@ impl State {
     /// flickered between two answers on a replay would be a desync.
     pub fn guide_bearing(&self) -> Option<Cell> {
         if !self.abilities.effect_active(Effect::ObjectiveBearing) {
+            return None;
+        }
+        // Dark on turn zero and on the two turns between each fix — see
+        // [`GUIDE_BLINK_TURNS`]. A `0 % n == 0` would light the opening frame, which is
+        // the one frame the ability must not answer on.
+        if self.turn == 0 || !self.turn.is_multiple_of(GUIDE_BLINK_TURNS) {
             return None;
         }
         let candidates = self

@@ -2,10 +2,16 @@
 
 **Salvaged tech (§8.3/#505)** — **passive**. While held, one of the eight cells around
 you is washed `Effect`: the one lying toward the nearest **unclaimed** intel console or
-equipment cache. A **compass, not a route** — the bearing is straight-line and
-wall-blind, the deliberate opposite of §7.3's *"nearest means the shortest walk"* — and
-it reveals nothing else, so the objective's cell stays fogged until seen (§11.5a). No
-activation, no turn, no cooldown: it pays with the loadout slot and nothing else.
+equipment cache — **on one turn in `GUIDE_BLINK_TURNS` (3)**, and never on turn zero. A
+**compass, not a route** — the bearing is straight-line and wall-blind, the deliberate
+opposite of §7.3's *"nearest means the shortest walk"* — and it reveals nothing else, so
+the objective's cell stays fogged until seen (§11.5a). No activation, no turn, no
+cooldown: it pays with the loadout slot and nothing else.
+
+**It pulses rather than stands**, which is the ability's main balance lever: a standing
+needle is a line you follow without thinking, where a pulse gives you a *fix* you then
+walk on your own memory of for two turns. The run opens dark for the same reason — a
+compass already pointing on the frame you arrive would make the opening move free.
 
 ## What the cue says
 
@@ -24,8 +30,9 @@ not a shy cue; it is a passive, twice over.
 
 ## What the sim measured
 
-`8ea5b7c+guide-505`, `--abilities guide` against the innate control, all four
-temperaments, `--runs 100 --seed 0 --cap 1000`.
+`c1f4a2e+guide-505`, `--abilities guide` against the innate control, all four
+temperaments, `--runs 100 --seed 0 --cap 1000`. Re-run after the pulse landed, with the
+same result — as it must be.
 
 | | balanced | cautious | aggressive | careless |
 |---|---|---|---|---|
@@ -60,9 +67,12 @@ farthest-first, so it is a poor model of the player whose exploration this might
 **This is a human playtest question**, and it is the one to put to a player holding it:
 *did you still look around?*
 
-If the answer is no, §8.3 names the lever — a **range cap**, so the compass only wakes
-within N cells and is a local tool rather than a global one — and it is deliberately not
-a nerf to the wash, which is already the weakest cue on the board.
+The **pulse** is the first answer to that risk, applied before anyone played it: a
+bearing you get one turn in three is a fix to hold and walk on, not a line to follow, so
+the route between fixes is still yours to work out. If a playtest says it is still too
+much, `GUIDE_BLINK_TURNS` is the obvious next knob and §8.3 names a second — a **range
+cap**, so the compass only wakes within N cells and is a local tool rather than a global
+one. Neither is a nerf to the wash, which is already the weakest cue on the board.
 
 ### One thing the sim did catch
 
@@ -82,3 +92,6 @@ same footing as the two marks that blink.
 
 - `8ea5b7c+guide-505` (#505) — page created with the ability. Batches identical to the
   control by construction; the exploration question is handed to a human playtest.
+- `c1f4a2e+guide-505` (#505) — the bearing made to **pulse** (one turn in three, dark on
+  turn zero), pre-empting the exploration risk this page could not measure. Batches
+  identical again, for the same structural reason.

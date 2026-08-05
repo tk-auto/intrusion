@@ -427,20 +427,17 @@ pub enum Event {
     /// the board cannot show — and the `reach` itself rather than a recipe for redrawing
     /// one, so the flash paints the very box the call was measured over.
     ///
-    /// `answered` may be **zero**: the reach is a box round the transmitter, but who
-    /// answers is still §7.7's rule, so a guard already chasing the live player is never
-    /// pulled off it. A call nobody was free for is a call that was made and went
-    /// unanswered — a spent turn, unlike [`FalseCallMissed`](Event::FalseCallMissed),
-    /// which is the press never happening at all.
-    FalseCallFired { reach: EffectArea, answered: u32 },
-    /// A False Call was **refused** because no guard is inside the reach (§8.3/#504) —
-    /// free and nothing changed, like a wall bump, spending neither the turn nor the
-    /// cooldown.
+    /// `answered` may be **zero**, and a firing that reaches nobody at all is still a
+    /// firing: the press is never refused for an empty reach (§8.4), because refusing it
+    /// would answer *"is anyone within ten cells of me?"* for free. So this event reports
+    /// a transmission that went out, not a result that came back.
     ///
-    /// Fair rather than fiddly for the reason Confusion's refusal is: the reach is
-    /// clamped inside the guard sense, so every guard it could have called is one the
-    /// player was already shown.
-    FalseCallMissed,
+    /// **`answered` is carried but never shown.** The near line says the call went out
+    /// and stops there (§11.7): the reach is not clamped to the guard sense, so a count
+    /// would report guards the player cannot perceive and turn a transmitter into a
+    /// detector. The field exists for the tests and the §13.2 sim, which are allowed to
+    /// know things the player is not.
+    FalseCallFired { reach: EffectArea, answered: u32 },
     /// A False Call was **refused** because the radio net is dead (§7.3/§7.7/#504) — the
     /// player silenced it at the comms console, and a spoofer is radio like everything
     /// else on it.
@@ -518,7 +515,6 @@ impl Event {
             // A forged call that *did not go out* is the same quiet band as every other
             // refused press: nothing happened, and the line is teaching a rule. What a
             // call that **did** go out reads as is a different question, answered below.
-            | Event::FalseCallMissed
             | Event::FalseCallDead
             | Event::DecoyDied { .. } => Category::Owned,
             // A machine of yours, and who is driving it (§8.1/#273): the same Owned band
