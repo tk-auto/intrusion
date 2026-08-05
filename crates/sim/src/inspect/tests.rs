@@ -102,9 +102,19 @@ fn the_pasted_link_reproduces_the_run_that_was_played() {
 #[test]
 fn the_opening_crawl_reads_as_the_moves_it_is() {
     let level = LevelSeed::sim(7);
-    // West, because this seed's tunnel comes out through the east border — the crawl
-    // runs inward from the way-out cell it opens on.
-    let inputs = parse_script("WWW").expect("a legal script");
+    // **Inward along the tunnel**, whichever border this seed's way out opens on —
+    // read off the layout rather than spelled as a letter, because which border that
+    // is moves with every re-carve (it was `WWW` until #481 turned this seed's tunnel)
+    // and the claim under test is about the crawl, not about the compass.
+    let opening = start_level(&level).expect("the v1 footprint carves");
+    let cells = opening
+        .layout()
+        .exit_duct()
+        .expect("every run begins in its own tunnel")
+        .cells();
+    let inward = Direction::between(cells[cells.len() - 1], cells[cells.len() - 2])
+        .expect("a tunnel is a walk of single steps");
+    let inputs = vec![Input::Step(inward); 3];
     let seen = inspect(&level, &inputs).expect("the v1 footprint carves");
 
     let crawls = seen

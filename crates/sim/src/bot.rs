@@ -316,10 +316,19 @@ impl StealthBot {
         let danger = danger_cells(state);
         let blocked = blocked_cells(state);
         let facility = state.layout().facility();
+        // **Enterable, not merely routable.** Climbing out is a *step*, and the crawl's
+        // confinement (§10.7) gives it no bump: the core lets a crawler off the mouth
+        // only onto a cell it can actually enter, so a closed door panel beside `E` —
+        // which [`routable`] admits, because a walker opens one by bumping it (§10.4) —
+        // is not a way out of the tunnel. Choosing one is a refused, *free* input, and
+        // since nothing about the mouth changes by pressing it again the bot pressed it
+        // until the input cap: a whole run spent on turn fourteen. The freeze predates
+        // #481 (seeds 231 and 288 of the 300-seed sweep hold it on `main`); moving where
+        // the exit lands is what walked it onto a pinned witness seed.
         let out = |avoid_danger: bool| {
             Direction::ALL.into_iter().find(|&dir| {
                 state.player().step(dir).is_some_and(|cell| {
-                    routable(facility, cell)
+                    enterable(facility, cell)
                         && !cells.contains(&cell)
                         // Not into a cupboard, either: it has one mouth (§10.1.6), and
                         // if that mouth is the cell we are standing on the only way out
@@ -1733,6 +1742,20 @@ fn cost_field(
 /// the facility, so nothing routes through it.
 fn routable(facility: &Facility, cell: Cell) -> bool {
     facility.terrain(cell).is_some_and(Terrain::routes_player)
+}
+
+/// Whether the player can **stand on** `cell` — the stricter question [`routable`]
+/// deliberately does not answer, and the core's own rule again
+/// ([`Terrain::blocks_movement`], §4.3/§10.3).
+///
+/// A route may plan straight through a closed door panel because walking into one
+/// *opens* it (§10.4); a step that has no bump behind it may not. That is the case
+/// wherever the game hands the player a move and no interaction — climbing out of a
+/// duct mouth (§10.7) is the one the bot meets.
+fn enterable(facility: &Facility, cell: Cell) -> bool {
+    facility
+        .terrain(cell)
+        .is_some_and(|terrain| !terrain.blocks_movement())
 }
 
 /// Every in-bounds cell of the facility, in row-major order — the deterministic
