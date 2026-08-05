@@ -2301,6 +2301,17 @@ is the case this serves.
   outright which shade it wants — reaching for the map's "explored" knowledge state
   to get the dim one for free would pick the right colour by telling a lie.
 
+  **The band stops at the controls.** It runs edge to edge across every cell the words
+  can use — including the ones they do not fill — but under the `[?]` and the deploy
+  control the row keeps the screen's own background, so the one static tan those two
+  wear is read against the same backdrop as every other control on the screen rather
+  than against a tint of the standing mood, which is not enough separation and left
+  the row's two most important controls its least legible. Held back the control's own
+  three cells each, so the band meets the button edge to edge and stays one continuous
+  run; this is **paint and never layout**, and the row's capacity is untouched. The
+  span is read off the same layout as the drawing and both hit-tests (see
+  [`docs/render-reference.md`](render-reference.md) §5).
+
   > **The row is laid out once, and the message's width comes *from* it.**
   > **[SETTLED]** Both controls, both hit-tests and the words' span are read off a
   > single layout: the message starts clear of the `[?]` and stops a cell short of

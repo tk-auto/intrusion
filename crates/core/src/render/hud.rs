@@ -27,6 +27,8 @@
 //! [`MAX_BAR_WIDTH`] spends it under a `const` assertion: a longer bar name, a
 //! three-digit cooldown or a bigger tech grant breaks the **build**, not the frame.
 
+use std::ops::Range;
+
 use super::*;
 use crate::ability::{max_bar_name, AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::mnemonic;
@@ -284,6 +286,22 @@ pub(super) const HELP_BUTTON_LEN: u32 = 3;
 pub(super) const NEAR_LINE_CONTROL_CELLS: u32 =
     HELP_BUTTON_LEN + 1 + 1 + super::message_log::DEPLOY_LEN;
 
+/// How far past a near-line control the row **holds its band back** (§11.4/#502), in
+/// cells of air on the message's side of it: the control's own cells always carry the
+/// screen background, and this says whether the blank cell beside it does too.
+///
+/// **None — the band meets the button edge to edge.** Both widths were built and
+/// compared side by side (the ticket's variants A and B, one artifact each), and the
+/// control's own cells are enough: what made the `[?]` unreadable was the tan sitting
+/// *on* the tint, and lifting the tan off it is the whole of the fix. Taking the air
+/// cell as well reads as a gap punched in the row, and the band's job is the row.
+///
+/// Setting it to `1` is the whole of variant B, which is how the comparison was run —
+/// and it would cost nothing either way, since the air cells are already outside the
+/// message's budget ([`NEAR_LINE_CONTROL_CELLS`]). The choice is legibility against
+/// the band's continuity, not capacity; see `docs/render-reference.md` §5.
+const HELD_BACK_AIR: u32 = 0;
+
 /// The near line's **controls** (§11.4/§11.7/#267), laid out once — where each one
 /// sits, and the span of row the words are therefore left with.
 ///
@@ -315,6 +333,29 @@ impl NearLineControls {
     /// `text_start .. text_max`.
     pub(super) fn capacity(&self) -> u32 {
         self.text_max.saturating_sub(self.text_start)
+    }
+
+    /// The spans of the row the band is **not** painted across (§11.4/#502) — the `[?]`
+    /// and, when it is up, the deploy control, each with its [`HELD_BACK_AIR`] beside it.
+    /// Those cells keep the screen's own background, so the one static System tan every
+    /// HUD control wears (#420) is read against the same backdrop as every other control
+    /// on the screen instead of against a quiet tint of the facility's standing mood.
+    ///
+    /// **Read off the layout, like everything else about this row.** The holdback is the
+    /// third thing that has to agree with the drawing and the hit-tests, and a `[?]` whose
+    /// held-back span and whose hit-test disagree is the same class of bug as one whose
+    /// band and words disagree (§11.4 **[SETTLED]**). Derived from the control positions
+    /// rather than written down beside them, so moving a control moves its holdback.
+    ///
+    /// This is **paint, not layout**: the spans cover cells the message was never allowed
+    /// ([`capacity`](Self::capacity) is untouched), so holding the band back can never
+    /// cost the row a glyph.
+    pub(super) fn held_back(&self) -> impl Iterator<Item = Range<u32>> {
+        let help = self.help_start..self.help_start + HELP_BUTTON_LEN + HELD_BACK_AIR;
+        let log = self.log.as_ref().map(|(_, start)| {
+            start.saturating_sub(HELD_BACK_AIR)..start + super::message_log::DEPLOY_LEN
+        });
+        std::iter::once(help).chain(log)
     }
 }
 
@@ -475,25 +516,20 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
         &[(top.text, Category::Neutral)],
         Some((top.category, band_fill)),
     );
+    // **The band stops at the controls** (§11.4/#502). It runs edge to edge across every
+    // cell the words can use — including the ones they do not fill — but under the `[?]`
+    // and the deploy control the row keeps the screen's own background, so the static
+    // System tan those two wear is read against the backdrop every other control on the
+    // screen is read against rather than against a tint of the standing mood.
+    for span in controls.held_back() {
+        hold_back_band(&mut near, span);
+    }
     if let Some((label, start)) = &controls.log {
-        super::message_log::draw_message_button(
-            &mut near,
-            width,
-            *start,
-            top.category,
-            band_fill,
-            label,
-        );
+        super::message_log::draw_message_button(&mut near, width, *start, label);
     }
     // The help toggle, in the one static System colour every other HUD control wears
     // (#420). It is drawn last so it owns column 0 whatever the row said.
-    draw_help_button(
-        &mut near,
-        width,
-        controls.help_start,
-        top.category,
-        band_fill,
-    );
+    draw_help_button(&mut near, width, controls.help_start);
 
     // One grid, top to bottom: the two status lines, the map, the ability bar.
     let mut cells = near;
@@ -690,10 +726,27 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
         .map(|(slot, _)| slot)
 }
 
+/// Hold the near line's band back across `span` (§11.4/#502): those cells drop their
+/// background category and carry the screen's own backdrop instead — black in the dark
+/// theme, paper in the light one. The core says *no band here* and the shell paints
+/// whichever of presentation's two columns is live (§11.2/#189); nothing here names a
+/// colour.
+///
+/// The cell's [`Fill`] is left alone deliberately: it is meaningless — and ignored —
+/// when `bg` is `None` ([`GlyphCell::fill`]), so clearing it would only invite the
+/// reader to wonder which of the two shades a cell with no background paints in.
+fn hold_back_band(row: &mut [GlyphCell], span: Range<u32>) {
+    for x in span {
+        if let Some(cell) = row.get_mut(x as usize) {
+            cell.bg = None;
+        }
+    }
+}
+
 /// Draw the help toggle over the already-built near line `row` (§14 v2/#139/#267):
 /// [`HELP_BUTTON`] in [`Category::System`] — the HUD-control colour the deploy button
-/// and the panel's `[x]` wear — over the near line's own `band`, which keeps painting
-/// behind it.
+/// and the panel's `[x]` wear — on the screen's own background, which the row holds its
+/// band back from underneath it ([`hold_back_band`], #502).
 ///
 /// **It used to be tinted by the alert rung** (#375), on the argument that the button is
 /// the ladder's always-visible half: the panel behind it is where the standing alert
@@ -705,15 +758,17 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
 ///
 /// The alert stays readable in the help panel's ALERT section throughout (§7.3/#375), so
 /// what went is a redundant channel and not the only one.
-fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32, band: Category, fill: Fill) {
+///
+/// **It is not handed a band at all** (#502), rather than being handed one and told not
+/// to use it: the button's whole problem was the tan sitting on the row's tint, and a
+/// drawer that cannot be given a background cannot drift back into painting one.
+fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32) {
     for (i, glyph) in HELP_BUTTON.chars().enumerate() {
         let x = start + i as u32;
         if x < width {
             row[x as usize] = GlyphCell {
                 glyph,
                 fg: Category::System,
-                bg: Some(band),
-                fill,
                 ..GlyphCell::blank()
             };
         }

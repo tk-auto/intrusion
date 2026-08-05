@@ -797,6 +797,50 @@ were already looking, which is exactly the corner the flash exists to light — 
 `Effect` paints one strength everywhere. `Sensed` is not fogged either; its two
 strengths are spent on **age** instead (§4.2).
 
+### The near line's band stops at its controls (#502)
+
+The near line is the one HUD row that paints a background (§11.4), and its two
+controls sit on it. Both wear the single static System tan every HUD control wears
+(#420, §4.5), and against a quiet tint of the facility's standing mood that tan does
+not separate — so the `[?]` and the deploy control, the two things on the row that
+must *always* be legible, were the least legible things on it. The `[?]` is the fixed
+landmark a lost player reaches for and the deploy control is the only way to the rest
+of the messages; a row whose words read and whose controls do not has it backwards.
+
+So **the band is not painted under either control**. Those cells carry the screen's own
+background — black in the dark theme, paper in the light one — and the System tan is
+read against exactly the backdrop every other control on the screen is read against.
+The core says *no band here* and the shell paints whichever of its two columns is live
+(§4.4/#189); nothing in `crates/core` names a colour. The band still runs edge to edge
+everywhere else, including the cells the message does not fill, and it still paints
+`Fill::Quiet` when ambient and `Fill::Full` for a message.
+
+**The held-back span is the control's own cells — three each, and the band meets the
+button edge to edge.** Two widths were built and compared side by side, one artifact
+each: the control's three cells, and those three plus the blank cell between the
+control and the words. The wider one gives the button a hairline of background all
+round and reads as a chip lifted off the band; the narrower one keeps the band a
+continuous run and reads as a band the control is set into. **Three won**: what made
+the control unreadable was the tan sitting *on* the tint, and lifting the tan off it is
+the whole of the fix — the extra cell buys a little more separation at the price of a
+notch in a row whose job is to be one unbroken flash of colour across the top of the
+screen. Neither width costs anything: the air cells are already outside the message's
+budget (§11.4's `NEAR_LINE_CONTROL_CELLS`), so this is **paint, not layout** and the
+row's 32-glyph capacity is identical either way. The comparison is a one-constant flip
+(`HELD_BACK_AIR`) if it is ever worth re-running.
+
+The span is derived from the same `NearLineControls` layout the drawing and both
+hit-tests are read off (§11.4 **[SETTLED]**) — a `[?]` whose held-back cells and whose
+hit-test disagree is the same class of bug as one whose band and words disagree.
+
+Two non-fixes, both already tried: **do not dim the band** and **do not re-tint the
+controls per alert rung** (§4.5 — that one was reverted in #420). Each trades one
+legibility problem for another.
+
+No other row has this problem to fix: the usable line, the alert row and the help
+panel's own `[x]` and `copy [c]` draw no band at all, so their controls already sit on
+the page background.
+
 ---
 
 ## 6. Tiles

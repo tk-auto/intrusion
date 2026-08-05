@@ -282,8 +282,11 @@ fn an_ambient_band_is_quiet_and_a_message_band_is_not() {
         [Cell::new(5, 5)],
         Cell::new(8, 8),
     );
+    // Sampled off a **banded** column, not off column 0: the `[?]` lives there and the
+    // row holds its band back underneath it (#502), so column 0 answers `None` whatever
+    // the message is.
     let band = |s: &State| {
-        let cell = render_screen(s, ScreenUi::default()).get(0, NEAR_ROW);
+        let cell = render_screen(s, ScreenUi::default()).get(HELP_BUTTON_LEN + 1, NEAR_ROW);
         (cell.bg, cell.fill)
     };
 
@@ -304,12 +307,59 @@ fn an_ambient_band_is_quiet_and_a_message_band_is_not() {
     assert_eq!(band(&s).1, Fill::Quiet);
 }
 
-/// #420: the band's fill is the row's **whole** width, controls included. The `[?]`
-/// and the deploy toggle draw over the band rather than beside it, so a control
-/// painting the other shade would put a bright notch in a quiet row.
-#[test]
-fn the_near_lines_controls_share_the_bands_fill() {
+/// The near line with a **history behind it**, so the deploy control is up (§11.7),
+/// resting on the ambient floor: a blocked step says "blocked" for free, and the wait
+/// after it files that block and clears the row. The cheapest way to a row carrying
+/// both controls at once.
+fn near_line_with_deploy_control() -> State {
     let mut s = State::new(
+        open_room(40, 14),
+        Cell::new(1, 6),
+        Direction::North,
+        Vec::new(),
+        [Cell::new(5, 5)],
+        Cell::new(8, 8),
+    );
+    // A wall bump must stay a wall bump: with the §10.1 auto-slide on, walking west
+    // into the edge would round the corner instead of saying "blocked".
+    s.set_auto_slide(false);
+    s.step(Input::Step(Direction::West)); // "blocked" — a free bump
+    s.step(Input::Wait); // …which this files, leaving the floor and the control
+    assert!(
+        !s.message_history().is_empty(),
+        "the control has something to deploy"
+    );
+    s
+}
+
+/// Where the near line's band paints, as a row of `#` (band) and `.` (the screen's
+/// own background), for the golden below.
+fn band_mask(s: &State, ui: ScreenUi) -> String {
+    let g = render_screen(s, ui);
+    (0..g.width())
+        .map(|x| {
+            if g.get(x, NEAR_ROW).bg.is_some() {
+                '#'
+            } else {
+                '.'
+            }
+        })
+        .collect()
+}
+
+/// **The band stops at the controls** (§11.4/#502). The `[?]` and the deploy control
+/// wear one static System tan (#420); on a quiet tint of the facility's standing mood
+/// that is not enough separation, and the two things on the row that must always be
+/// legible came out unreadable. So the row holds its band back under each of them —
+/// those cells carry the screen's own background — and runs edge to edge everywhere
+/// else, including the cells the message does not fill.
+///
+/// Four rows pinned: ambient and message, with the deploy control up and down. The
+/// held-back spans are the same in all four, because they are the *controls'* geometry
+/// and nothing about what the row is saying moves them.
+#[test]
+fn the_near_lines_band_stops_at_its_controls() {
+    let mut quiet = State::new(
         open_room(40, 14),
         Cell::new(5, 6),
         Direction::North,
@@ -317,18 +367,146 @@ fn the_near_lines_controls_share_the_bands_fill() {
         [Cell::new(5, 5)],
         Cell::new(8, 8),
     );
-    s.set_auto_slide(false);
+    quiet.set_auto_slide(false);
+    quiet.step(Input::Wait);
+    assert!(near_line(&quiet).is_ambient(), "the floor, not a message");
+    // Nothing filed and one live message at most: no deploy control, so the band runs
+    // to the row's last column.
+    assert_eq!(
+        band_mask(&quiet, ScreenUi::default()),
+        "...#####################################"
+    );
+
+    let mut loud = quiet.clone();
+    loud.step(Input::Step(Direction::North)); // take the intel: a live message
+    assert!(!near_line(&loud).is_ambient(), "a live message");
+    assert_eq!(
+        band_mask(&loud, ScreenUi::default()),
+        "...#####################################"
+    );
+
+    // With the control up the row holds a second span back, at its right end.
+    let carried = near_line_with_deploy_control();
+    assert!(near_line(&carried).is_ambient(), "the floor, control up");
+    assert_eq!(
+        band_mask(&carried, ScreenUi::default()),
+        "...##################################..."
+    );
+    // Deployed, the control is still three cells (§11.7): only its glyph changes, so
+    // the mask cannot.
+    assert_eq!(
+        band_mask(
+            &carried,
+            ScreenUi {
+                message_log_open: true,
+                ..ScreenUi::default()
+            }
+        ),
+        "...##################################..."
+    );
+
+    let mut loud_with_control = carried.clone();
+    loud_with_control.step(Input::Step(Direction::West)); // blocked: a live message
+    assert!(!near_line(&loud_with_control).is_ambient());
+    assert_eq!(
+        band_mask(&loud_with_control, ScreenUi::default()),
+        "...##################################..."
+    );
+}
+
+/// #420, still: **every cell the band does paint shares one fill** — the quiet shade on
+/// an ambient row, the full one on a message. The holdback (#502) took cells out of the
+/// band; it must not have left the band two-toned across what is left of it.
+#[test]
+fn the_near_lines_band_paints_one_fill_across_what_is_left_of_it() {
+    let mut s = near_line_with_deploy_control();
+
     for expected in [Fill::Quiet, Fill::Full] {
         let g = render_screen(&s, ScreenUi::default());
+        let mut banded = 0;
         for x in 0..g.width() {
             let cell = g.get(x, NEAR_ROW);
+            let Some(_) = cell.bg else { continue };
+            banded += 1;
             assert_eq!(
-                (cell.bg.is_some(), cell.fill),
-                (true, expected),
-                "column {x} of the near line breaks the band",
+                cell.fill, expected,
+                "column {x} of the near line breaks the band's fill",
             );
         }
-        s.step(Input::Step(Direction::North)); // take the intel: a live message
+        // Spelled out rather than summed off `held_back`, so a span that silently grew
+        // would be caught here rather than agreeing with itself.
+        assert_eq!(
+            banded,
+            g.width() - HELP_BUTTON_LEN - super::super::message_log::DEPLOY_LEN - 2 * HELD_BACK_AIR,
+            "the band runs across every cell but the controls' own",
+        );
+        s.step(Input::Step(Direction::West)); // blocked: a free bump, and a message
+    }
+}
+
+/// §11.4 **[SETTLED]** — one layout, and the holdback is read off it like everything
+/// else. A `[?]` whose held-back span and whose hit-test disagree is the same class of
+/// bug as one whose band and words disagree: the player would tap a control that is not
+/// where the background says it is.
+#[test]
+fn the_held_back_cells_agree_with_the_controls_hit_tests() {
+    let s = near_line_with_deploy_control();
+    let width = s.layout().facility().width();
+    let g = render_screen(&s, ScreenUi::default());
+
+    for x in 0..width {
+        let hit = is_help_button(x, NEAR_ROW)
+            || super::super::message_log::is_message_button(&s, x, NEAR_ROW);
+        if hit {
+            assert_eq!(
+                g.get(x, NEAR_ROW).bg,
+                None,
+                "column {x} is hittable, so the band must not paint under it",
+            );
+        }
+    }
+
+    // …and the spans the layout names cover every hittable cell, with only whatever air
+    // the row holds back beside each control over and above them.
+    let controls = near_line_controls(&s, width, false);
+    let held: Vec<u32> = controls.held_back().flatten().collect();
+    let hittable: Vec<u32> = (0..width)
+        .filter(|&x| {
+            is_help_button(x, NEAR_ROW)
+                || super::super::message_log::is_message_button(&s, x, NEAR_ROW)
+        })
+        .collect();
+    assert!(
+        hittable.iter().all(|x| held.contains(x)),
+        "held back {held:?} does not cover the hit-tests {hittable:?}",
+    );
+    assert_eq!(
+        held.len(),
+        hittable.len() + 2 * HELD_BACK_AIR as usize,
+        "the controls' own cells and their air, and nothing else: {held:?}",
+    );
+}
+
+/// The holdback is **paint, not layout** (#502): the spans cover cells the message was
+/// never allowed, so the row's capacity is untouched — this cannot quietly cost the
+/// near line the three messages #420 won back.
+#[test]
+fn holding_the_band_back_costs_the_message_nothing() {
+    let s = near_line_with_deploy_control();
+    let width = s.layout().facility().width();
+    let controls = near_line_controls(&s, width, false);
+    assert!(controls.log.is_some(), "both controls are up");
+    assert_eq!(
+        controls.capacity(),
+        width - NEAR_LINE_CONTROL_CELLS,
+        "the message still has the row less exactly the controls' cells",
+    );
+    // Every held-back cell is one the words could not have used anyway.
+    for x in controls.held_back().flatten() {
+        assert!(
+            x < controls.text_start || x >= controls.text_max,
+            "column {x} is held back out of the message's own span",
+        );
     }
 }
 
@@ -509,19 +687,24 @@ fn status_rows_carry_the_band_and_the_categories() {
 
     let (near_y, usable_y) = (NEAR_ROW, USABLE_ROW);
     let controls = near_line_controls(&s, g.width(), false);
+    let held: Vec<u32> = controls.held_back().flatten().collect();
     for x in 0..g.width() {
         let cell = g.get(x, near_y);
-        assert_eq!(cell.bg, Some(Category::Interest), "the band spans the row");
+        if !held.contains(&x) {
+            assert_eq!(cell.bg, Some(Category::Interest), "the band spans the row");
+        }
         assert_eq!(cell.vis, Visibility::Live);
         if cell.glyph != ' ' && x >= controls.text_start && x < controls.text_max {
             assert_eq!(cell.fg, Category::Neutral, "words read Neutral on the band");
         }
         assert_eq!(g.get(x, usable_y).bg, None, "the usable line has no band");
     }
-    // The `[?]` rides the band in the HUD control colour, not the words' Neutral,
-    // and it owns the row's left end (#267).
+    // The `[?]` owns the row's left end (#267), in the HUD control colour rather than
+    // the words' Neutral — and on the screen's own background, which the row holds its
+    // band back from underneath it (#502).
     assert_eq!(g.get(0, near_y).glyph, '[');
     assert_eq!(g.get(0, near_y).fg, Category::System);
+    assert_eq!(g.get(0, near_y).bg, None, "no band under the control");
     // The affordance names its bump direction and speaks its own category:
     // `console: take intel →` is Interest (§11.2 — goals and rewards). The
     // console is east of the player, so the entry is flush right behind a
@@ -546,7 +729,12 @@ fn status_rows_carry_the_band_and_the_categories() {
     );
     s.step(Input::Wait); // the guard steps south into the player: caught
     let g = render_screen(&s, ScreenUi::default());
-    assert_eq!(g.get(0, NEAR_ROW).bg, Some(Category::Danger));
+    // Sampled off the words' own span: column 0 is the `[?]`, which the band stops
+    // short of (#502).
+    assert_eq!(
+        g.get(HELP_BUTTON_LEN + 1, NEAR_ROW).bg,
+        Some(Category::Danger)
+    );
     // The words start clear of the `[?]` at the row's left end (#300).
     assert_eq!(g.get(HELP_BUTTON_LEN + 1, NEAR_ROW).glyph, 'c'); // "caught"
 }
