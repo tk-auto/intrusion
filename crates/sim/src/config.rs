@@ -267,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 11] = [
+const MODIFIERS: [(&str, SetModifier); 12] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -303,6 +303,12 @@ const MODIFIERS: [(&str, SetModifier); 11] = [
     // `--intel-gate all`, where a console is an objective rather than loot.
     ("intel-count-more", |m| m.intel_count = IntelCount::More),
     ("intel-count-fewer", |m| m.intel_count = IntelCount::Fewer),
+    // Purely a **render** modifier (§11.5/#224): it paints the §7.6 search areas and
+    // bends no rule, so a batch that names it plays the baseline run exactly. It is
+    // named here anyway because the bot reads the board through the player's own
+    // channels (§13.2), so what the board shows is a legitimate thing to sweep on the
+    // day the bot learns to route around a search — see `docs/bot-behaviour.md`.
+    ("show-search-areas", |m| m.show_search_areas = true),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -599,6 +605,7 @@ mod tests {
             calm_guards_detect_only_their_cone,
             automatic_doors,
             guards_watch_consoles,
+            show_search_areas,
             guard_count,
             intel_count,
             caches,
@@ -611,6 +618,7 @@ mod tests {
         assert!(full_layout_known);
         assert!(automatic_doors);
         assert!(guards_watch_consoles);
+        assert!(show_search_areas);
         // The knob's two ends are two names over one field, so naming both leaves the
         // one named last rather than accumulating — see [`RunConfig::with_modifier`].
         assert_eq!(guard_count, GuardCount::Fewer);

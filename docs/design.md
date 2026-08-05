@@ -832,6 +832,16 @@ four rules and how they compounded are appendix 10.
 | **Hunted** | You are in a hideout / behind a pillar, holding still. Cones sweep. | **The best part** |
 | **Released** | They give up. Alert decays. Patrol resumes — but *this region gets watched harder*. | Earned |
 
+**The search is legible** (§11.5/§11.7, #224). It used to run silently — a guard's glyph
+turned orange and nothing else said a search was under way, so the Hunted phase above was
+a thing the player could only infer from a cone wandering past. The near line now says
+when a search opens and when it is called off, facility-wide and once each however many
+guards answered the call, which is what makes the timer a bet the player can actually
+place. *Where* it is sweeping is a separate, opt-in layer: the `show_search_areas`
+modifier (§12.6) washes the `SEARCH_RADIUS` box orange — the same box a cupboard inside it
+is flushed from — as an *easier* setting, because knowing which ground is being combed is
+a real advantage.
+
 **Watched harder means covered, not crowded.** Every guard that answered one call
 carries the same `focus` (§7.7), so the raised-coverage territory is the watch disc
 **intersected with the guard's own §7.5 slice**, not substituted for it: sharing a
@@ -2458,9 +2468,36 @@ throughout. Neither substitutes for the other, which is why a mark is keyed by i
 lifetime as well as its place: an ability may hold a momentary and a standing mark at
 the same time, over the same kind of place, without one quietly replacing the other.
 
-**The precedence is fixed: Danger > a mark on a thing > Sensed > the wash.** An advisory
+**The investigation area is the second advisory layer** (§7.6/#224), and it is switched
+on by the `show_search_areas` level modifier (§12.6) rather than drawn every run. With it
+on, the area every guard in a §7.6 search is sweeping washes **orange** (Warning): the
+`SEARCH_RADIUS` box around that guard's `focus` — the literal set a hideout inside the
+sweep is flushed from (§10.3/§15 Q5), so the picture is the rule's own geometry and cannot
+drift from it. Orange means *a guard's attention is on this ground*; **that you are
+detected stays red's word alone**, and where the two overlap red paints last and wins.
+
+Two rules the area is stated with. **Every live search projects one, seen or not** — the
+"never a guess" contract binds the *detection set*, and an advisory area gated on
+perception would go dark exactly in the cupboard where it is worth most, since the whole
+point of §7.6 is that you cannot see the guard combing the room. And it **clears when the
+search does**, with no fade: unlike the §9.5 sense cue it makes no claim about the past,
+and an area outliving its search would say a guard is combing ground it has already left.
+
+Baseline — with the modifier off — a search is legible in **time** rather than in space:
+the near line says when one opens and when it is called off (§11.7). That half is free
+because it is the half a hidden player cannot get any other way; the spatial half is an
+*easier* modifier because knowing which ground is being combed is a real advantage and has
+to be paid for (§12.6).
+
+**The precedence is fixed: Danger > a mark on a thing > Sensed > the investigation area >
+the wash.** An advisory
 layer can never masquerade as the detection set, nor hide it — the wash yields to the
 sense channel, while a mark on a thing merely refines the cue that thing already draws.
+The area sits above the wash and below the sense channel: a threat's attention outranks a
+note about your own gadget, and neither may cover the cell a guard is actually standing
+in. (Warning and Sensed are the same palette row, so that last comparison changes no
+pixel — it is settled the sober way round because the free choice should go to the
+stronger claim.)
 Every mark carries the geometry the mechanic resolved against, by value, so the picture
 cannot disagree with the rule, and it stays where it happened rather than following the
 player, because that is what the effect did. A **refusal** marks nothing: a press that
@@ -2831,9 +2868,31 @@ system — it is derived from adjacency every frame and carries no state.
   announce an exit that would refuse, and no refusal may misstate the requirement.
   **[SETTLED]**
 
-Priority ladder **[START]**: routine self-narration ≤ 0; guard threat escalates
-2 → 4 → 10; objective feedback dominates at 20; ambient status sits below
-everything (it is the floor, not a message).
+- **A §7.6 search says when it opens and when it is called off** (#224), on the
+  facility's behalf rather than each guard's. The whole hiding game is a bet on the
+  search timer (§7.6), and a bet whose clock never visibly starts or stops is one the
+  player cannot place: *has it given up yet?* is the question the bounded search exists
+  to make askable, and watching a cone wander is not an answer — least of all from
+  inside a cupboard, where the guard doing the searching is typically one you cannot
+  see. So *a guard starts searching* fires when the level goes from nobody sweeping to
+  somebody, and *the search is called off* when the last sweeper releases. **One
+  announcement however many guards search**: a §7.7 call-in puts two or three on the
+  same lead, and a per-guard line would both spend the one row three times and — far
+  worse — announce that the search was called off while a second guard was still
+  combing the ground you are hiding in. Neither line names a place; **where** is the
+  investigation area's job (§11.5), and a cell here would name one searcher's focus as
+  though it were the only one. The **bands differ, and the second one goes quiet** —
+  Warning for the opening, Neutral for the calling-off — so relief reads as the row
+  falling silent rather than as one threat colour swapped for another. Caution is the
+  tempting answer and is wrong on this row: the ambient floor already paints the §7.3
+  ladder's own colours, so a facility at condition 1 is *standing* in a Caution band,
+  and a search is very often called off on exactly such a run.
+
+Priority ladder **[START]**: routine self-narration ≤ 0; a search opening or being
+called off sits on its own quiet rung at 1 — the consequence of something louder that
+has usually already spoken, so it never takes the row a fresh detection wants; guard
+threat escalates 2 → 4 → 10; objective feedback dominates at 20; ambient status sits
+below everything (it is the floor, not a message).
 
 ### 11.8 Vocabulary — what the design calls things, what the screen calls them
 
@@ -2992,7 +3051,10 @@ baseline by one either way (#232 — *"guards: one more"* harder, *"one fewer"* 
 the other generation-time modifier, and the one bounded knob whose baseline is a
 neutral middle); *"guards watch consoles"* has a Calm patrol prefer a cell beside a
 console its beat touches and cycle them, so the ground the player must reach is the
-ground that is patrolled (§7.5/#319 — harder; appendix 39); *"calm guards detect only their cone"* drops a **Calm**
+ground that is patrolled (§7.5/#319 — harder; appendix 39); *"search areas shown"* paints
+the area every §7.6 search is sweeping in the Warning orange, so *where* a guard is
+combing is on the board rather than inferred from a wandering cone (§11.5/#224 — easier;
+the *when* is free and unconditional, and only the *where* is priced); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
 wedge while a guard that is hunting still watches its sides (easier — an
 **experiment**, see below). This is the
@@ -3094,11 +3156,13 @@ its pool takes what exists rather than looping.
 > discovered, because "byte-identical at every difficulty" was a stated property.
 
 **Both sides are now deeper than the axis reaches. [START]** The pool holds **five**
-harder entries (the fifth is the watched consoles, #319) and **three** easier ones, so
+harder entries (the fifth is the watched consoles, #319) and **four** easier ones (the
+fourth is the shown search areas, #224), so
 ±2 are both genuine draws that differ by seed. The easier side used to be two deep and therefore exhaustive at −2 — the cost
 appendix 29 stated rather than hid — and what closed it is the guard count's easier end
 (#232), exactly the "knowledge or slack without touching the objective" that appendix
-said would.
+said would; #224 is the third of that kind, and takes −2 from a draw of two-from-three to
+one of two-from-four.
 
 Relaxing the **intel gate** would have been the other candidate, and it is still not
 taken: the gate is a knob `union` composes harder-ward, and quick play already sits at

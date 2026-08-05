@@ -1103,3 +1103,95 @@ fn live_messages_is_empty_when_the_action_is_quiet() {
     assert!(live_messages(&s).is_empty());
     assert_eq!(near_line(&s).priority, i32::MIN, "the ambient floor");
 }
+
+/// §7.6/§11.7/#224: the search's two lines sit on their own quiet rung — **1** —
+/// above routine self-narration and below the threat ladder's bottom rung.
+///
+/// That placement is the whole of their manners. A search opening is the
+/// *consequence* of something louder that has usually already spoken (a lost
+/// sighting, a found body, a call-in), so it must never take the one row a fresh
+/// detection wants; and the pair still has to clear the crouches and door bumps that
+/// would otherwise bury it.
+///
+/// The **bands differ**, and the difference is the relief: a search opening is a
+/// hunting threat (Warning), and a search called off wears the band that means
+/// *nothing to report* (Neutral) — the row goes quiet rather than swapping one threat
+/// colour for another. Caution is the trap here and is asserted against: the ambient
+/// floor already paints the §7.3 ladder, so a rung-1 run's standing band is Caution
+/// gold and this message would read as that row brightening rather than as news.
+#[test]
+fn the_search_boundary_reads_below_the_threat_ladder() {
+    let began = message_for(Event::SearchBegan).expect("a search opening speaks");
+    assert_eq!(began.text, "a guard starts searching");
+    assert_eq!(began.category, Category::Warning);
+    assert_eq!(began.priority, 1);
+
+    let ended = message_for(Event::SearchEnded).expect("a search ending speaks");
+    assert_eq!(ended.text, "the search is called off");
+    assert_eq!(ended.category, Category::Neutral);
+    assert_ne!(
+        ended.category,
+        crate::alert::rung_category(1),
+        "the calling-off must not wear the band a rung-1 facility already stands in",
+    );
+    assert_eq!(ended.priority, 1);
+
+    // Under the bottom rung of the threat ladder: a guard that has *found* you
+    // outranks the news that somebody is looking.
+    let detected = message_for(Event::Detected {
+        by: Cell::new(3, 3),
+    })
+    .expect("a fresh detection speaks");
+    assert!(
+        began.priority < detected.priority && ended.priority < detected.priority,
+        "the search boundary must not bury a detection ({} / {} vs {})",
+        began.priority,
+        ended.priority,
+        detected.priority,
+    );
+    // …and over routine self-narration, which it would otherwise be buried by.
+    let bump = message_for(Event::Bumped {
+        into: Cell::new(1, 1),
+    })
+    .expect("a bump speaks");
+    assert!(
+        began.priority > bump.priority,
+        "a search opening outranks a bump",
+    );
+
+    // The ordering holds through the near line itself, not just in the numbers: a
+    // turn carrying both speaks the detection.
+    assert_eq!(
+        loudest_first(&[
+            Event::SearchBegan,
+            Event::Detected {
+                by: Cell::new(3, 3)
+            }
+        ])[0]
+            .text,
+        "a guard has seen you",
+    );
+}
+
+/// §11.8: both lines name the **world**, never the mechanism. The player is told a
+/// guard is searching and that the search was called off — not that an `Alerted`
+/// mood was entered, nor that a twelve-turn timer is running.
+#[test]
+fn the_search_lines_name_the_world() {
+    for event in [Event::SearchBegan, Event::SearchEnded] {
+        let text = message_for(event).expect("both lines speak").text;
+        for word in [
+            "alerted",
+            "search radius",
+            "timer",
+            "turns",
+            "focus",
+            "state",
+        ] {
+            assert!(
+                !text.contains(word),
+                "{text:?} says {word:?} — the design's word, not the player's (§11.8)",
+            );
+        }
+    }
+}

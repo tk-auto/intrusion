@@ -18,6 +18,7 @@
 //! core and bot can never disagree about what is perceivable.
 
 use super::*;
+use crate::guard::SEARCH_RADIUS;
 
 impl State {
     /// The level geometry (§10.5) — read-only outside the core.
@@ -488,6 +489,43 @@ impl State {
                         && !(in_duct && !self.player_fov.contains(cell))
                 })
             })
+    }
+
+    /// The cells of every live §7.6 **investigation area** (§11.5/#224) — the box of
+    /// [`SEARCH_RADIUS`] around each searching guard's focus, clipped to the facility.
+    /// Empty unless the `show_search_areas` modifier is on (§12.6), which is what makes
+    /// this an *easier* setting rather than a change to the board every run gets.
+    ///
+    /// **The box is the rule's own geometry, not a picture of it.** It is exactly the
+    /// set [`Guard::checks_hideout_at`] measures a cupboard against — the §6.1 sight
+    /// metric, through walls — so the orange the player sees and the ground a hideout is
+    /// flushed inside of are one set, and the picture cannot drift from the rule the way
+    /// a redrawn disc would (the discipline §11.5 holds the red overlay to).
+    ///
+    /// **Every live search projects one, seen or sensed or neither.** The §11.5 "never a
+    /// guess" contract is about the *detection set*; this is a separate advisory layer
+    /// that says only *a guard's attention is on this area*, and gating it on perception
+    /// would blank it exactly when it is worth most — a player in a cupboard watching a
+    /// guard they cannot see decide whether to open it (§7.6). Areas simply overlap
+    /// where several guards answer one call (§7.7): the wash is a set, so two searchers
+    /// on one focus paint one area and no cell is any more orange for it.
+    ///
+    /// The area lives and dies with the search itself ([`Guard::search_focus`]): it
+    /// clears the turn a guard releases to its post-search watch, stands down, or is
+    /// pulled onto a fresher lead. There is no fade — unlike the §9.5 sense cue, this
+    /// makes no claim about the past, and an area that outlived its search would say a
+    /// guard is combing ground it has already left.
+    ///
+    /// [`Guard::checks_hideout_at`]: crate::Guard::checks_hideout_at
+    /// [`Guard::search_focus`]: crate::Guard::search_focus
+    pub fn search_area_cells(&self) -> impl Iterator<Item = Cell> + '_ {
+        let shown = self.modifiers.show_search_areas;
+        let facility = self.layout.facility();
+        let (width, height) = (facility.width(), facility.height());
+        self.guards
+            .iter()
+            .filter_map(move |guard| shown.then(|| guard.search_focus()).flatten())
+            .flat_map(move |focus| search_box(focus, width, height))
     }
 
     /// Whether the player currently sees `cell` painted by the §11.5 danger overlay:
@@ -982,4 +1020,17 @@ impl State {
         }
         self.body_at(self.player).is_some()
     }
+}
+
+/// The in-bounds cells of the §6.1 box of [`SEARCH_RADIUS`] around `focus`, clipped
+/// to a `width` × `height` facility — one guard's investigation area (§11.5/#224).
+///
+/// A free function rather than a method on [`Guard`], because the clip is a fact about
+/// the *facility* and a guard knows nothing about the level's bounds; and it takes the
+/// two dimensions rather than the [`Facility`] itself, so the caller's borrow of the
+/// layout ends before the iterator it returns is consumed.
+fn search_box(focus: Cell, width: u32, height: u32) -> impl Iterator<Item = Cell> {
+    let ys = focus.y.saturating_sub(SEARCH_RADIUS)..=(focus.y + SEARCH_RADIUS).min(height - 1);
+    let xs = focus.x.saturating_sub(SEARCH_RADIUS)..=(focus.x + SEARCH_RADIUS).min(width - 1);
+    ys.flat_map(move |y| xs.clone().map(move |x| Cell::new(x, y)))
 }

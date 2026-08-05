@@ -456,11 +456,18 @@ shipped without anything objecting:
 
 ### 4.2 Two orange categories, and why they never collide
 
-**Warning** and **Sensed** share a hue. They never share a cell role: Sensed only
-ever paints a *background*, never a glyph, and Warning only ever a glyph. A hunting
-guard you can see is an orange `g`; a guard you can only feel through a wall is an
-orange *filled cell* with no glyph at all. The bloom from one to the other, the
-moment you round the corner, is the seen/sensed distinction made visible.
+**Warning** and **Sensed** share a hue. Warning is a glyph — a hunting guard you can
+see is an orange `g` — and Sensed only ever a *background*: a guard you can only feel
+through a wall is an orange filled cell with no glyph at all. The bloom from one to the
+other, the moment you round the corner, is the seen/sensed distinction made visible.
+
+Since #224 Warning also paints one background: the **investigation area** a §7.6 search
+is sweeping, under the `show_search_areas` modifier. That is not the collision the rule
+above was guarding against — it is the *same* claim in two places. The guard hunting is
+orange, and the ground it is hunting over is orange; a searcher standing inside its own
+area reads as one thing rather than two. The two categories being the same palette row
+also means their precedence against each other is invisible on screen, which is why §11.5
+settles the ordering on the comparison that does show: red wins.
 
 Sensed uses **both** of its row's background shades, and they mean something no other
 row's pair means: the bright fill is a mark made **this turn**, the quiet one the
@@ -618,7 +625,7 @@ table is a developer reference, so it says rung.)*
 Backgrounds are the threat channel, and there is a fixed precedence:
 
 **Danger > Effect mark on a thing > Sensed (live dot) > watcher line > Sensed (fading
-mark) > Effect wash.**
+mark) > investigation area > Effect wash.**
 
 | Background | Means |
 |---|---|
@@ -626,7 +633,17 @@ mark) > Effect wash.**
 | **Effect** on a thing (cyan) | The guard here is held by one of your effects; the `@` here is a live decoy rather than you; the `@` here is you, hidden by Camouflage *this turn*; or the `@` here is you **inside a solid with Phase Out running** — the cell the safety eject would throw you out of if the window ended now |
 | **Sensed**, full (orange) | A guard felt through a wall right now — its exact cell, position only |
 | **Sensed**, quiet (orange) | Where the sense felt something a turn or two ago: the trail behind a moving guard, the ghost of one that left the box, a door that changed away from you (§9.5). It fades to nothing over a couple of turns — *was just here*, never a heading |
+| **Warning** (orange) | The area a §7.6 search is sweeping — the `SEARCH_RADIUS` box around a searching guard's focus. Only with the `show_search_areas` modifier on (§12.6); baseline the board draws no investigation area at all |
 | **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
+
+The **investigation area** (#224) is the second advisory layer, and it is advisory in
+exactly the sense the wash is: orange says *a guard's attention is on this ground*, never
+*you are detected*, which stays red's word alone. It is the literal box a hideout inside
+the sweep is flushed from, so the picture and the rule are one set; it clears the turn the
+search does, with no fade, because it makes no claim about the past. It is drawn for
+**every** live search, seen guard or not — the "never a guess" contract binds the
+detection set, and an area gated on perception would go dark exactly in the cupboard where
+it is worth most.
 
 The effect layer appears twice on purpose (#338). Its **wash** is advisory geometry and
 the weakest cue on the board. Its mark on a **thing** is not a competing claim about the

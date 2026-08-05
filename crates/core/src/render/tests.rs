@@ -3136,3 +3136,174 @@ fn a_full_screen_panel_is_frame_end_to_end() {
         }
     }
 }
+
+/// The `show_search_areas` level modifier (§11.5/§12.6/#224), directional in the same
+/// widen-only sense the cone modifier is held to: on the *same* scene and inputs, it
+/// paints the §7.6 investigation area baseline leaves invisible — and it moves no red
+/// cell, because the danger overlay is [SETTLED] and an advisory layer may not touch it.
+///
+/// Three claims, and each is a different way the layer could have gone wrong:
+///
+/// - **It shows something.** Baseline draws no Warning background anywhere; with the
+///   modifier on, the box around the searching guard's focus is washed orange.
+/// - **It is the rule's own geometry.** The painted set is exactly the cells within
+///   `SEARCH_RADIUS` of the focus (§6.1's box metric, clipped to the room) — the same
+///   set a hideout inside the sweep is flushed from, so the picture cannot drift from
+///   the rule the way a redrawn disc would.
+/// - **Red is untouched.** The danger set is byte-identical to baseline's. An orange
+///   that masqueraded as detection, or one that hid it, is the failure §11.5 exists to
+///   prevent — so this is asserted as an equality, not as a superset.
+#[test]
+fn the_show_search_areas_modifier_paints_the_flush_box_and_no_red() {
+    // The wait-out scene (§7.6): a chase that loses its lead over an unwitnessed dive
+    // and settles into a bounded sweep of the cell the player vanished from.
+    let scene = || {
+        let mut layout = open_room(16, 12);
+        layout.place(Cell::new(4, 5), Terrain::Hideout);
+        layout.place(Cell::new(4, 4), Terrain::Wall);
+        State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(5, 1))],
+            Vec::new(),
+            Cell::new(14, 10),
+        )
+    };
+    let background = |g: &Grid, want: Category| -> Vec<(u32, u32)> {
+        let mut cells = Vec::new();
+        for y in 0..g.height() {
+            for x in 0..g.width() {
+                if g.get(x, y).bg == Some(want) {
+                    cells.push((x, y));
+                }
+            }
+        }
+        cells
+    };
+    // Both runs are driven identically: the same dive, then waits until the guard is
+    // actually sweeping. The modifier bends no rule, so the two boards are the same
+    // board — which is what makes the comparison worth anything (§2.3).
+    let sweep = |mut s: State| {
+        s.step(Input::Step(Direction::West));
+        for _ in 0..12 {
+            if s.guards()[0].state() == crate::GuardState::Alerted {
+                return s;
+            }
+            s.step(Input::Wait);
+        }
+        panic!("the guard never settled into its §7.6 search");
+    };
+
+    let baseline = sweep(scene());
+    let modified = sweep(scene().with_modifiers(LevelModifiers {
+        show_search_areas: true,
+        ..LevelModifiers::default()
+    }));
+    let (base_grid, mod_grid) = (render(&baseline), render(&modified));
+
+    assert!(
+        background(&base_grid, Category::Warning).is_empty(),
+        "baseline: a search paints no area at all",
+    );
+    let painted = background(&mod_grid, Category::Warning);
+    assert!(!painted.is_empty(), "modifier: the search area is painted");
+
+    // The literal flush box, clipped to the room — the very set `checks_hideout_at`
+    // measures a cupboard against. Asserted on the query rather than on the paint,
+    // because the two answer different questions: this is the geometry, and what
+    // survives onto the board is then a matter of precedence (below).
+    let focus = Cell::new(5, 5);
+    let facility = modified.layout().facility();
+    let expected: Vec<Cell> = (0..facility.height())
+        .flat_map(|y| (0..facility.width()).map(move |x| Cell::new(x, y)))
+        .filter(|&cell| focus.sight_distance(cell) <= crate::guard::SEARCH_RADIUS)
+        .collect();
+    assert_eq!(
+        modified.search_area_cells().collect::<Vec<_>>(),
+        expected,
+        "the area is the rule's own box, not a picture of one",
+    );
+    assert!(
+        baseline.search_area_cells().next().is_none(),
+        "baseline projects no area to paint",
+    );
+    // What reaches the board is that box **less whatever outranks it** — the searcher
+    // is standing next to the player here, so its own cone and its sensed cell claim a
+    // good part of the area. Orange never appears *outside* the box, which is the
+    // half of the claim the paint owns.
+    for cell in &painted {
+        assert!(
+            expected.contains(&Cell::new(cell.0, cell.1)),
+            "orange outside the rule's box at {cell:?}",
+        );
+    }
+
+    // Red is exactly what it was: the modifier reveals attention, never detection.
+    assert_eq!(
+        background(&base_grid, Category::Danger),
+        background(&mod_grid, Category::Danger),
+        "an advisory layer may not move the detection set (§11.5 [SETTLED])",
+    );
+}
+
+/// §11.5/#224: **red wins where the two overlap.** A guard whose live cone covers
+/// cells inside its own investigation area paints those cells `Danger`, not
+/// `Warning` — being detectable outranks being investigated, and the paint order is
+/// what enforces it.
+///
+/// Asserted on a *seen* searcher, which is the only way the two layers can coincide at
+/// all: the area is drawn for every search, while the red cone needs a guard the player
+/// can see (§11.5).
+#[test]
+fn a_seen_searchers_cone_still_paints_red_inside_its_own_area() {
+    let mut layout = open_room(16, 12);
+    layout.place(Cell::new(4, 5), Terrain::Hideout);
+    layout.place(Cell::new(4, 4), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::patrolling(Cell::new(5, 1))],
+        Vec::new(),
+        Cell::new(14, 10),
+    )
+    .with_modifiers(LevelModifiers {
+        // The player is in a cupboard and cannot see the searcher, so the cone is
+        // revealed the way an easier run reveals it — this test is about which of two
+        // backgrounds wins on a cell, not about who may see what.
+        show_search_areas: true,
+        always_show_vision_cones: true,
+        ..LevelModifiers::default()
+    });
+    s.step(Input::Step(Direction::West));
+    for _ in 0..12 {
+        if s.guards()[0].state() == crate::GuardState::Alerted {
+            break;
+        }
+        s.step(Input::Wait);
+    }
+    assert_eq!(s.guards()[0].state(), crate::GuardState::Alerted);
+
+    let grid = render(&s);
+    let focus = Cell::new(5, 5);
+    let mut overlapped = 0;
+    // The overlay's own set, not the raw cone: a player concealed from the guard is
+    // spared from it (§10.3), so the cupboard cell is legitimately not red and is not
+    // the comparison this test is about.
+    for cell in s.visible_cone_cells().collect::<Vec<_>>() {
+        if focus.sight_distance(cell) > crate::guard::SEARCH_RADIUS {
+            continue; // outside the area — nothing to arbitrate
+        }
+        overlapped += 1;
+        assert_eq!(
+            grid.get(cell.x, cell.y).bg,
+            Some(Category::Danger),
+            "red must win inside the investigation area at {cell:?}",
+        );
+    }
+    assert!(
+        overlapped > 0,
+        "the scene must actually overlap a cone with the area it is sweeping",
+    );
+}

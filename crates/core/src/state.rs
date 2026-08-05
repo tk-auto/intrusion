@@ -2108,6 +2108,13 @@ impl State {
     /// notices the silence (§7.3), not a turn late.
     fn run_world_phases(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+        // Whether the facility was already searching when this turn's world opened
+        // (§7.6/§11.7/#224). Read here rather than inside the guard phase because a
+        // search can end in any of the phases below — the radio can pull the last
+        // searcher onto an errand, a guard can release, a fresher lead can supersede
+        // one — and the near line reports the *boundary*, not the mechanism that
+        // crossed it. Reported at the foot of this function, against the same reading.
+        let was_searching = self.search_under_way();
         // Fade the sense channel one turn *before* this turn's facts can relight it
         // (§9/§9.4) — the door cues and the guard trail alike — so a cue placed this
         // turn keeps its full life and a re-stamp refreshes rather than
@@ -2147,6 +2154,12 @@ impl State {
         // the reinforcements have landed, so the mark is where the turn actually left
         // them.
         self.record_guard_cues();
+        // Last, so the pair reports what the whole world turn settled on rather than
+        // what any one phase did (§11.7/#224). Its rung is below every threat message,
+        // so being the final push costs it nothing: `loudest_first` sorts by priority,
+        // and only a tie with another search boundary — which cannot happen, the two
+        // being a diff of one bool — could turn on the order.
+        self.report_search_boundary(was_searching, &mut events);
         events
     }
 

@@ -312,6 +312,33 @@ pub enum Event {
     /// every guard it could have caught is one the player was already shown, so this
     /// refuses only a press that was going to buy nothing.
     ConfusionMissed,
+    /// A §7.6 **search opened** somewhere in the facility (§11.7/#224): the turn ended
+    /// with somebody sweeping an area that nobody was sweeping when it began. The
+    /// temporal half of what makes a search legible — the whole hiding game is a bet on
+    /// [`SEARCH_DURATION`](crate::guard::SEARCH_DURATION), and a bet whose clock never
+    /// visibly starts is a bet the player cannot place (§2.2).
+    ///
+    /// **Facility-wide, not per guard**, which is why it carries no cell and no index.
+    /// A call-in (§7.7) puts two or three guards on the same lead in the same turn, and
+    /// three lines saying the same thing would spend a one-row surface (§11.7) on one
+    /// fact; so this fires on the transition *nobody searching → somebody searching* and
+    /// stays quiet for every further searcher until the facility is calm again. It names
+    /// no place deliberately: **where** is the [`show_search_areas`] overlay's job
+    /// (§11.5), and a cell here would name one guard's focus as though it were the only
+    /// one.
+    ///
+    /// [`show_search_areas`]: crate::LevelModifiers::show_search_areas
+    SearchBegan,
+    /// The facility's last §7.6 search **ended** (§11.7/#224) — every guard that was
+    /// sweeping has released to its patrol or been pulled onto something else.
+    ///
+    /// The other half of [`SearchBegan`](Event::SearchBegan), and the one the player in
+    /// a cupboard is actually waiting on: *has it given up yet?* is the question §7.6's
+    /// bounded search exists to make askable, and watching a cone wander is not an
+    /// answer. Fires on the transition back to nobody searching, whatever ended it — the
+    /// timer running out, a fresh sighting superseding the sweep, or the searcher being
+    /// taken down.
+    SearchEnded,
 }
 
 impl Event {
@@ -369,13 +396,38 @@ impl Event {
             // even know — but the next two turns are not yours, and that is a bad
             // fact about now rather than self-narration. Not Danger: the Danger band
             // belongs to a threat that is on you (§11.2), and the wall has just let go.
+            // A §7.6 search opening is the same aroused-but-not-on-you band (#224):
+            // somebody is combing an area, and if they had you it would be a
+            // detection instead.
             Event::Ejected { .. }
             | Event::BodyFound { .. }
             | Event::RadioSilence { .. }
             | Event::CalledIn { .. }
             | Event::BodyCalledIn { .. }
             | Event::AlertRaised { .. }
+            | Event::SearchBegan
             | Event::ReinforcementArrived { .. } => Category::Warning,
+            // The search ending is the only *good* news the threat channel carries
+            // (§11.2/#224), and the band it wears is the one that says **nothing is
+            // hunting you**: the near line goes quiet rather than changing which threat
+            // colour it is wearing. That is what relief looks like on a row whose
+            // colour is its register.
+            //
+            // It is deliberately **not** `Caution`, which is the tempting answer — the
+            // guards really are unaware again, and that is what Caution means on a
+            // guard's own glyph. Two things rule it out on this row. The ambient floor
+            // already paints the §7.3 ladder's colours ([`ambient`]), so a rung-1
+            // facility's standing band **is** Caution gold — and a search is very often
+            // called off on exactly such a run, which would announce the news as the
+            // ambient row briefly brightening in the same hue rather than as a message
+            // at all. And Caution is the *brightest* band the palette produces (§11.2's
+            // ladder descends from it), which would spend the loudest row the near line
+            // can paint on its quietest fact.
+            //
+            // `Neutral` collides with nothing: the ambient floor is only ever Interest
+            // or a rung's colour, so a Neutral band is always a message, and it is the
+            // one band that already means *nothing to report* (a bump, a step).
+            Event::SearchEnded => Category::Neutral,
             // A guard that sees you is hunting *you* — the same Danger band as
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
             // reinforce (§11.2).

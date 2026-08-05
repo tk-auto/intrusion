@@ -383,8 +383,17 @@ impl Grid {
 /// and [`State::effect_thing_marks`] is a **recolour of a cue the thing already
 /// draws**, which is why it outranks the `Sensed` channel it refines rather than
 /// competing with it. The precedence is pinned by paint order — `Danger` > a mark on a
-/// thing > `Sensed` > the wash — because an advisory layer must never masquerade as the
-/// detection set, nor hide it (§11.5 **[SETTLED]**).
+/// thing > `Sensed` > the investigation area > the wash — because an advisory layer
+/// must never masquerade as the detection set, nor hide it (§11.5 **[SETTLED]**).
+///
+/// # The investigation area (§7.6/§11.5, #224)
+///
+/// A second advisory layer under that same contract, switched on by the
+/// `show_search_areas` modifier (§12.6): the box every guard in a §7.6 search is
+/// sweeping washes orange (`Category::Warning`), so *where* a search is combing is on
+/// the board. Baseline it is off and a search is legible in **time** only — the near
+/// line says when one opens and when it is called off (§11.7). Orange says a guard's
+/// attention is on this ground; that you are *detected* stays red's word alone.
 ///
 /// # Floor dots (§11.5/#470)
 ///
@@ -410,6 +419,7 @@ pub fn render(state: &State) -> Grid {
     crouch_signal(state, &mut cells);
     stowed_body_memory(state, &mut cells);
     effect_wash(state, &mut cells);
+    search_area_wash(state, &mut cells);
     sense_mark_wash(state, &mut cells);
     watcher_line_pass(state, &mut cells);
     sensed_guard_wash(state, &mut cells);
@@ -769,6 +779,39 @@ fn sense_mark_wash(state: &State, cells: &mut [GlyphCell]) {
             cell.bg = Some(Category::Sensed);
             cell.fill = fill;
         }
+    }
+}
+
+/// The §7.6 **investigation area** (§11.5/#224): the box every searching guard is
+/// sweeping washes `Category::Warning` — orange, the same category its own `g` wears
+/// while it hunts, so the area and the guard read as one state (§11.2).
+///
+/// Painted only with the `show_search_areas` modifier on (§12.6), which
+/// [`State::search_area_cells`] owns along with the geometry: this pass knows nothing
+/// but where to put the colour.
+///
+/// **Its place in the order is the whole of its claim.** It goes on *above* the effect
+/// wash — a threat's attention outranks a note about your own gadget — and *below* the
+/// sense channel, the watcher line and the danger overlay, so it can never hide a cue
+/// that says where a guard actually is or what it can actually see. §11.5's fixed
+/// precedence gains one rung and loses none: `Danger > a mark on a thing > Sensed >
+/// investigation > the wash`.
+///
+/// The ticket asked for the reverse of that one comparison — investigation over Sensed.
+/// It is a distinction with no picture behind it: `Warning` and `Sensed` are the *same*
+/// orange row in the shell's table (§11.2), so ordering them changes no pixel, and given
+/// the free choice the weaker claim (an area a guard's attention is on) should not
+/// overwrite the stronger one (the cell a guard is standing in). The comparison that
+/// does have a picture — red wins where they overlap — holds either way.
+///
+/// Sets no [`Fill`]: the board's own fog rule already gave every cell one
+/// ([`Fill::fogged`]), so an investigation area beyond the player's sight reads at the
+/// quiet strength exactly as a watched cell does — still visibly marked, never
+/// safe-looking (§11.5 fix #1).
+fn search_area_wash(state: &State, cells: &mut [GlyphCell]) {
+    let width = state.layout().facility().width();
+    for cell in state.search_area_cells() {
+        cells[(cell.y * width + cell.x) as usize].bg = Some(Category::Warning);
     }
 }
 
