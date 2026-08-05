@@ -49,7 +49,7 @@ use crate::path;
 use crate::radio::RadioClock;
 use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
-use crate::vision::{field_of_view_with_blind_spot, BlindTier, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
+use crate::vision::{field_of_view_with_blind_spot, BlindTier, GuardSight};
 use std::collections::HashSet;
 
 mod seal;
@@ -634,22 +634,28 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     let guards: Vec<Cell> = guard_pool
         .into_iter()
         .filter(|&cell| {
-            // **Always the shipped [`BlindTier::REAR`] carve, never a modifier's**
-            // (#410). Placement runs before a level's modifiers are resolved
+            // **Always §7.1's own cone and the shipped [`BlindTier::REAR`] carve,
+            // never a modifier's** (#410/#495). Placement runs before a level's
+            // modifiers are resolved
             // ([`start_level_with`](crate::start_level_with)), and pinning it here is
-            // the better answer rather than a workaround for that: a narrower carve
-            // would pass *more* cells, so an experiment that widens a guard's blind
-            // spot would also shift where guards spawn — and a paired A/B whose two
-            // arms generate different geometry cannot attribute what it measures.
-            // The rear rule is the conservative one (a cell safe under it is safe
-            // under any wider blind spot), so pinning it costs nothing but the
-            // very-slightly-closer spawns a narrower cone would have allowed.
+            // the better answer rather than a workaround for that: a smaller cone
+            // would pass *more* cells, so a modifier that shrinks what a guard sees
+            // would also shift where guards spawn — and a paired A/B whose two arms
+            // generate different geometry cannot attribute what it measures. That is
+            // also what keeps the §12.6 narrowed-cones draw off the *byte-identical*
+            // tier of the pool's same-building guarantee: it bends a rule and leaves
+            // the grid alone.
+            //
+            // The baseline is the conservative one in both directions — a cell safe
+            // under §7.1's reach and the rear carve is safe under any shorter cone or
+            // any wider blind spot — so pinning it costs nothing but the
+            // very-slightly-closer spawns a smaller cone would have allowed.
             let cone = field_of_view_with_blind_spot(
                 facility,
                 cell,
                 GUARD_INITIAL_FACING,
-                GUARD_SIGHT_ARC,
-                GUARD_SIGHT_RANGE,
+                GuardSight::BASELINE.arc,
+                GuardSight::BASELINE.range,
                 BlindTier::REAR,
             );
             !cone.contains(exit)
@@ -947,8 +953,8 @@ mod tests {
                         layout.facility(),
                         cell,
                         GUARD_INITIAL_FACING,
-                        GUARD_SIGHT_ARC,
-                        GUARD_SIGHT_RANGE,
+                        GuardSight::BASELINE.arc,
+                        GuardSight::BASELINE.range,
                         BlindTier::REAR,
                     )
                     .cells()

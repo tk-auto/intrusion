@@ -7,7 +7,7 @@
 //! economy itself (duration, cooldown, the lockout) is pinned in
 //! [`crate::ability`]; what is pinned here is the effect on the world.
 
-use crate::guard::{GuardState, CERTAIN_RANGE, GLIMPSE_RANGE};
+use crate::guard::GuardState;
 use crate::state::*;
 use crate::test_support::{captured_at, open_room, solo};
 
@@ -1109,7 +1109,7 @@ fn camouflage_does_not_stop_capture_by_contact() {
 fn runs_gain_is_the_certain_to_glimpse_distance() {
     assert_eq!(
         AbilityId::Run.def().economy().unwrap().duration(),
-        GLIMPSE_RANGE - CERTAIN_RANGE,
+        GuardSight::BASELINE.glimpse_range() - GuardSight::BASELINE.certain_range(),
         "Run's gain and the §7.6 zones are designed as a pair",
     );
 }

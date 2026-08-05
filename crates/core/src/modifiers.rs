@@ -763,6 +763,58 @@ pub struct LevelModifiers {
     /// why the gated doors have to shut themselves, why the lock refuses entry and never
     /// exit, and what the §10.6 guarantee had to grow.
     pub prize_room_locked: bool,
+    /// **Easier.** Every guard's cone is **shorter** (§6.1/§7.1/§7.6/#495):
+    /// [`GuardSight::NARROWED`](crate::GuardSight::NARROWED) — §7.1's own ~90° wedge,
+    /// out to 6 instead of 10. Baseline, every guard sees §7.1's own cone.
+    ///
+    /// **The arc is not part of it**, and that was measured rather than assumed.
+    /// §6.2's tier ladder offers a guard exactly one narrower arc, and appendix 51's
+    /// sweep put that rung at ~25 points of bot win rate against the shortened range's
+    /// ~8 — a step so large it reads as a different guard rather than an easier one. So
+    /// this modifier moves the range and leaves the wedge alone; giving the arc
+    /// settings between its two would be its own piece of work.
+    ///
+    /// **A different kind of easier entry, and that is the whole argument for it.**
+    /// Every other easier field here hands over **information**
+    /// ([`always_show_vision_cones`], [`layout_knowledge`]'s easier end,
+    /// [`show_search_areas`]) or **slack** ([`guard_count`]'s easier end) — *knowledge
+    /// or slack without touching the objective*, the family appendix 29 named, and a
+    /// family with a ceiling: there are only so many things left to reveal, and each
+    /// one reveals a little more of the game the player is supposed to be discovering.
+    /// This bends what a guard can **do**. A facility with four short-sighted guards is
+    /// a different problem from one with three normal ones — more bodies to route
+    /// around, less reach each — rather than another window onto the same run.
+    ///
+    /// **The §7.6 zones come with the cone, and that is what keeps it easier**
+    /// (#495). They are the cone's own halves
+    /// ([`certain_range`](crate::GuardSight::certain_range)), so a narrowed guard has a
+    /// certain zone of 3 and a glimpse ring of 4–6 rather than 5 and 6–10. Holding the
+    /// certain zone at its absolute 5 would have collapsed the ladder to a single
+    /// glimpse ring and made a narrowed guard **more** certain of what it caught than a
+    /// normal one — an *easier* modifier biting harder on contact, which is the shape a
+    /// −N draw must never hand back. The invariant is asserted at compile time over
+    /// every sight configuration, the way §7.3's radio relations are.
+    ///
+    /// **It does not reach generation** (§10.1.9). Placement pins §7.1's own cone for
+    /// its turn-one spawn check — the same pinning the ring carve has had since #410,
+    /// and for the same reason: a smaller cone would pass *more* spawn cells, so a
+    /// modifier that shrank it would also move where the guards stand, and the ±N arms
+    /// of a comparison would stop being the same building. Baseline is the conservative
+    /// bound in both directions, so pinning it costs only the very-slightly-closer
+    /// spawns a shorter cone would have allowed. This entry therefore sits on the
+    /// **byte-identical** tier of the pool's graded guarantee ([`draw_from_pool`]).
+    ///
+    /// **Not the same lever as the retired slot 5**
+    /// ([`calm_guards_detect_only_their_cone`], #410/appendix 28), which changed what
+    /// counted as detection *within* the ring. This changes the cone's reach, and the
+    /// two compose: a short-sighted Calm guard detects exactly its own shortened wedge.
+    ///
+    /// [`always_show_vision_cones`]: LevelModifiers::always_show_vision_cones
+    /// [`layout_knowledge`]: LevelModifiers::layout_knowledge
+    /// [`show_search_areas`]: LevelModifiers::show_search_areas
+    /// [`guard_count`]: LevelModifiers::guard_count
+    /// [`calm_guards_detect_only_their_cone`]: LevelModifiers::calm_guards_detect_only_their_cone
+    pub narrowed_guard_cones: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -830,7 +882,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 19] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 20] = [
     LOCKED_PRIZE_ROOM,
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
@@ -848,6 +900,7 @@ pub(crate) const CAPTIONS: [ActiveModifier; 19] = [
     TWO_CACHES,
     THREE_CACHES,
     SHOWS_SEARCH_AREAS,
+    NARROWED_CONES,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -990,6 +1043,18 @@ const LOCKED_PRIZE_ROOM: ActiveModifier = ActiveModifier {
     detail: Some("guards hold the key"),
 };
 
+/// Named for the **cones**, not for the guards (#495). "Guards: short-sighted" would
+/// collide with the guard-count knob's own `Guards` rows on a card that draws both, and
+/// the cone is the thing a player already reads off the §11.5 overlay — so the caption
+/// names what visibly changed on the board. The detail says *shorter* and only that: it
+/// is the whole of the change, and a player who read "narrower" and then watched a
+/// full-width wedge sweep past them would be right to distrust the card.
+const NARROWED_CONES: ActiveModifier = ActiveModifier {
+    name: "Guard cones",
+    direction: ModifierDirection::Easier,
+    detail: Some("shorter"),
+};
+
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
     name: "Intel to exit",
     direction: ModifierDirection::Harder,
@@ -1103,7 +1168,7 @@ pub(crate) struct PoolEntry {
 /// settings are the same building down to the cell; nothing about it failed either
 /// question. It was out solely because the bot has no cue for buying a key — which, by
 /// the rule above, was never a reason at all.
-pub(crate) const POOL: [PoolEntry; 12] = [
+pub(crate) const POOL: [PoolEntry; 13] = [
     PoolEntry {
         caption: SEARCHES_HIDEOUTS,
         set: |m| m.guards_always_search_hideouts = true,
@@ -1173,6 +1238,14 @@ pub(crate) const POOL: [PoolEntry; 12] = [
     PoolEntry {
         caption: LOCKED_PRIZE_ROOM,
         set: |m| m.prize_room_locked = true,
+    },
+    // Slot 18, appended (#495) — the easier side's **fifth** entry, and the first of
+    // them that bends a rule rather than handing over knowledge or slack. It leaves the
+    // grid byte-identical, so it lands on the strictest tier of the same-building
+    // guarantee below.
+    PoolEntry {
+        caption: NARROWED_CONES,
+        set: |m| m.narrowed_guard_cones = true,
     },
 ];
 
@@ -1288,6 +1361,7 @@ impl LevelModifiers {
             intel_count,
             caches,
             prize_room_locked,
+            narrowed_guard_cones,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -1335,6 +1409,12 @@ impl LevelModifiers {
         // game being broken rather than as the rule it is.
         if prize_room_locked {
             active.push(LOCKED_PRIZE_ROOM);
+        }
+        // Read before turn one as well (#495): with this on the §11.5 overlay opens
+        // visibly smaller than a player who has raided one facility expects, and the
+        // card is what tells them that is the run rather than the renderer.
+        if narrowed_guard_cones {
+            active.push(NARROWED_CONES);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -1433,6 +1513,10 @@ impl LevelModifiers {
             // A plain toggle like the ones above (#236): one source asking for the lock
             // is enough, and no source can talk another out of it.
             prize_room_locked: self.prize_room_locked || other.prize_room_locked,
+            // A plain toggle like every other one here (#495), composed by the same OR.
+            // The rule holds in its easier direction too: a source asking for narrowed
+            // cones is asking for a *rule*, and no source can talk another out of one.
+            narrowed_guard_cones: self.narrowed_guard_cones || other.narrowed_guard_cones,
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
         }
     }
@@ -1704,9 +1788,10 @@ mod tests {
             intel_count: IntelCount::Fewer,
             caches: CacheCount::Three,
             prize_room_locked: true,
+            narrowed_guard_cones: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 13);
+        assert_eq!(stacked.active().len(), 14);
         assert!(
             !stacked
                 .active()
@@ -1739,14 +1824,15 @@ mod tests {
         //
         // **The sides are no longer the same depth, and that is the shape of #518.** The
         // three modifiers admitted there are all `Harder`, so the harder side went from
-        // five to **eight** while the easier side stayed at **four**. Nothing lies about
-        // it — [`Difficulty::blurb`](crate::Difficulty::blurb) counts *picks*, not pool
+        // five to **eight** while the easier side stayed at four — and #495 has since
+        // taken the easier side to **five**, the growth that paragraph called for.
+        // Nothing lies about the gap either way —
+        // [`Difficulty::blurb`](crate::Difficulty::blurb) counts *picks*, not pool
         // depth, so both ±2 stops still promise exactly the two rules they will bend —
-        // but a `+N` run now has meaningfully more variety than a `−N` one, and the
-        // easier side is the one to grow next.
-        assert_eq!(POOL.len(), 12);
+        // but a `+N` run still has more variety than a `−N` one.
+        assert_eq!(POOL.len(), 13);
         assert_eq!(pool_size(ModifierDirection::Harder), 8);
-        assert_eq!(pool_size(ModifierDirection::Easier), 4);
+        assert_eq!(pool_size(ModifierDirection::Easier), 5);
         assert_eq!(
             pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
             POOL.len(),
@@ -1776,6 +1862,7 @@ mod tests {
             intel_count: IntelCount::Baseline,
             caches: CacheCount::Two,
             prize_room_locked: true,
+            narrowed_guard_cones: false,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -1792,6 +1879,7 @@ mod tests {
             intel_count: IntelCount::More,
             caches: CacheCount::None,
             prize_room_locked: false,
+            narrowed_guard_cones: true,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);

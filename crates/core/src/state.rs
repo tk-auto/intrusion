@@ -75,7 +75,7 @@ use crate::status::MessageHistory;
 use crate::targeting::Targeting;
 use crate::verdict::{Ending, RunStats, Verdict};
 use crate::vision::{
-    field_of_view_with_peek, BlindPolicy, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC,
+    field_of_view_with_peek, GuardSight, VisibleSet, ENHANCED_SIGHT_RANGE, FULL_SIGHT_ARC,
     PLAYER_SIGHT_ARC, PLAYER_SIGHT_RANGE,
 };
 use crate::DoorAction;
@@ -2628,23 +2628,37 @@ impl State {
         }
     }
 
-    /// How much of a guard's touching ring is blind (§6.1/§6.2/#410/#442) — the
-    /// **rule**, not a level's choice any more: [`BlindPolicy::FlankWhileCalm`],
-    /// resolved per guard against its own mood. A **Calm** guard detects exactly its
-    /// ~90° cone ([`BlindTier::FLANK`] — its flanks blind along with its back); every
-    /// other mood watches its sides ([`BlindTier::REAR`], §155's three cells).
+    /// **How a guard sees on this level** (§6.1/§7.1/§7.6/§12.6) — the cone's arc and
+    /// range, and how much of its touching ring is blind, as the one value every look
+    /// and every sighting is resolved against.
     ///
-    /// It was the `calm_guards_detect_only_their_cone` experiment (§12.6) until the
-    /// measurement came in clean (appendix 28) and #442 adopted it. The seam survives
-    /// the adoption because the *policy* was never the interesting part: what matters
-    /// is that the tier is resolved from the guard's mood at look time, so a guard's
-    /// sides come back the turn it stops being Calm, with no new state and no timer.
+    /// Two facts, resolved at this one seam so no read site learns either flag exists
+    /// (§12.3):
+    ///
+    /// - **The ring carve is the rule, not a level's choice any more** (#410/#442):
+    ///   [`BlindPolicy::FlankWhileCalm`], resolved per guard against its own mood. A
+    ///   **Calm** guard detects exactly its ~90° cone ([`BlindTier::FLANK`] — its flanks
+    ///   blind along with its back); every other mood watches its sides
+    ///   ([`BlindTier::REAR`], §155's three cells). It was the
+    ///   `calm_guards_detect_only_their_cone` experiment until the measurement came in
+    ///   clean (appendix 28) and #442 adopted it; the seam survives the adoption because
+    ///   the *policy* was never the interesting part — what matters is that the tier is
+    ///   resolved from the guard's mood at look time, so a guard's sides come back the
+    ///   turn it stops being Calm, with no new state and no timer.
+    /// - **The cone's shape is a level modifier** (§12.6/#495): the narrowed-cones draw
+    ///   hands every guard [`GuardSight::NARROWED`] — §7.1's own wedge with a shorter
+    ///   reach — and with it §7.6's zones, which are that cone's own halves.
     ///
     /// Still a function rather than a constant, and still read fresh on every use
     /// (§12.3) exactly like [`patrol_style`](Self::patrol_style) — one truth, so a
-    /// guard's cone and the §11.5 danger overlay drawn from it cannot disagree.
-    pub(crate) fn guard_blind_policy(&self) -> BlindPolicy {
-        BlindPolicy::FlankWhileCalm
+    /// guard's cone, the sighting it resolves and the §11.5 danger overlay drawn from
+    /// them cannot disagree.
+    pub(crate) fn guard_sight(&self) -> GuardSight {
+        if self.modifiers.narrowed_guard_cones {
+            GuardSight::NARROWED
+        } else {
+            GuardSight::BASELINE
+        }
     }
 
     /// Phase 2 (§4.2): recompute every viewer's field of view from its current
@@ -2658,7 +2672,7 @@ impl State {
     /// read still breaks the guard's line (§7.6).
     fn recompute_sight(&mut self) {
         let facility = self.layout.facility();
-        let blind = self.guard_blind_policy();
+        let sight = self.guard_sight();
         // Inside a duct the normal cone is off (§10.7): the player perceives only
         // their memory of the building and the shortened guard sense, with one live
         // window — the mouth peek from an entry cell (§6.1). Mid-duct there is no
@@ -2725,7 +2739,7 @@ impl State {
         self.memory
             .absorb_except(&self.player_fov, crawled_interior);
         for guard in &mut self.guards {
-            guard.look(facility, blind);
+            guard.look(facility, sight);
         }
     }
 

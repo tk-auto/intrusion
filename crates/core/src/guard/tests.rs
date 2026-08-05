@@ -1,7 +1,7 @@
 use super::*;
 use crate::facility::Facility;
 use crate::test_support::open_beat;
-use crate::vision::{field_of_view, FULL_SIGHT_ARC};
+use crate::vision::{field_of_view, FULL_SIGHT_ARC, GUARD_SIGHT_RANGE};
 
 /// §7.5: a guard with **no beat** has no territory and holds. There is no box
 /// fallback any more — a flood around a remembered spawn cell was the half of
@@ -412,7 +412,7 @@ fn a_colleague_in_the_way_does_not_cost_the_guard_its_target() {
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
 
     assert_eq!(step, None, "sealed in this turn, the guard holds");
@@ -532,7 +532,7 @@ fn a_calm_guard_dwells_on_arrival_then_resumes() {
     // target picks one and walks without pausing.)
     let mut guard =
         Guard::patrolling_to(Cell::new(4, 4), Cell::new(4, 4)).with_beat(open_beat(9, 9));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let (start, facing) = (guard.pos(), guard.facing());
     let mut rng = Rng::new(7);
 
@@ -544,7 +544,7 @@ fn a_calm_guard_dwells_on_arrival_then_resumes() {
         &mut rng,
         Dwell::CALM,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert!(
         first.is_none() && guard.is_dwelling(),
@@ -561,7 +561,7 @@ fn a_calm_guard_dwells_on_arrival_then_resumes() {
             &mut rng,
             Dwell::CALM,
             PatrolStyle::Beat,
-            BlindPolicy::Rear,
+            GuardSight::REAR_CARVE,
         );
         if !guard.is_dwelling() {
             // The dwell has ended and the sweep resumes: the guard is active
@@ -580,7 +580,7 @@ fn a_calm_guard_dwells_on_arrival_then_resumes() {
                         &mut rng,
                         Dwell::CALM,
                         PatrolStyle::Beat,
-                        BlindPolicy::Rear,
+                        GuardSight::REAR_CARVE,
                     )
                     .is_some();
             }
@@ -623,7 +623,7 @@ fn every_calm_arrival_pauses_for_the_whole_dwell_window() {
     for seed in 0..64u64 {
         // Standing on its own target: the "just arrived" fixture.
         let mut guard = Guard::patrolling_to(Cell::new(4, 4), Cell::new(4, 4));
-        guard.look(&facility, BlindPolicy::Rear);
+        guard.look(&facility, GuardSight::REAR_CARVE);
         let (start, facing) = (guard.pos(), guard.facing());
         let mut rng = Rng::new(seed);
         let chance = GUARD_DWELL_CHANCE_PERCENT;
@@ -634,7 +634,7 @@ fn every_calm_arrival_pauses_for_the_whole_dwell_window() {
             &mut rng,
             Dwell::with_chance(chance),
             PatrolStyle::Beat,
-            BlindPolicy::Rear,
+            GuardSight::REAR_CARVE,
         );
         assert!(
             first.is_none() && guard.is_dwelling(),
@@ -649,7 +649,7 @@ fn every_calm_arrival_pauses_for_the_whole_dwell_window() {
                 &mut rng,
                 Dwell::with_chance(chance),
                 PatrolStyle::Beat,
-                BlindPolicy::Rear,
+                GuardSight::REAR_CARVE,
             );
             if !guard.is_dwelling() {
                 break; // the window elapsed and the sweep resumed this turn
@@ -676,7 +676,7 @@ fn a_detection_cancels_an_in_progress_dwell() {
     let facility = Facility::walled_box(15, 15);
     // Arrived at its target (faces south, §7.1), so the first decide dwells.
     let mut guard = Guard::patrolling_to(Cell::new(7, 2), Cell::new(7, 2));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let mut rng = Rng::new(3);
 
     guard.decide(
@@ -685,14 +685,14 @@ fn a_detection_cancels_an_in_progress_dwell() {
         &mut rng,
         Dwell::CALM,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert!(guard.is_dwelling(), "precondition: dwelling");
 
     // A player appears down the cone (certain zone): the guard turns reactive.
     let player = Cell::new(7, 5);
     assert!(guard.fov().contains(player), "precondition: in the cone");
-    guard.sense(player, false);
+    guard.sense(player, false, GuardSight::BASELINE);
     assert_eq!(guard.state(), GuardState::Chasing);
 
     // The next decision clears the dwell and steps toward the player.
@@ -702,7 +702,7 @@ fn a_detection_cancels_an_in_progress_dwell() {
         &mut rng,
         Dwell::CALM,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert!(!guard.is_dwelling(), "going reactive cancels the dwell");
     assert!(step.is_some(), "a chasing guard moves, it does not dwell");
@@ -718,7 +718,7 @@ fn a_calm_guard_spends_a_turn_rotating_before_a_quarter_turn() {
     let facility = Facility::walled_box(12, 12);
     // Faces south (§7.1); its patrol target is due east, a 90° turn away.
     let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(8, 5));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     assert!(
         guard.fov().contains(Cell::new(5, 7)) && !guard.fov().contains(Cell::new(7, 5)),
         "precondition: the cone starts facing south",
@@ -732,7 +732,7 @@ fn a_calm_guard_spends_a_turn_rotating_before_a_quarter_turn() {
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert_eq!(first, None, "the quarter-turn spends the whole turn");
     assert_eq!(
@@ -753,7 +753,7 @@ fn a_calm_guard_spends_a_turn_rotating_before_a_quarter_turn() {
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert_eq!(
         second,
@@ -769,7 +769,7 @@ fn a_calm_guard_walking_straight_pays_no_turn_tax() {
     let facility = Facility::walled_box(12, 12);
     // Faces south (§7.1); the target is due south — straight ahead.
     let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 9));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     assert_eq!(
         guard.decide(
             &facility,
@@ -777,7 +777,7 @@ fn a_calm_guard_walking_straight_pays_no_turn_tax() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         Some(Direction::South),
         "a guard already facing its heading steps at once",
@@ -795,7 +795,7 @@ fn a_reactive_guard_turns_without_a_tax() {
 
     // Calm on this line first rotates in place (no step).
     let mut calm = Guard::patrolling_to(Cell::new(5, 5), post);
-    calm.look(&facility, BlindPolicy::Rear);
+    calm.look(&facility, GuardSight::REAR_CARVE);
     assert_eq!(
         calm.decide(
             &facility,
@@ -803,7 +803,7 @@ fn a_reactive_guard_turns_without_a_tax() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         None,
         "the Calm guard spends the turn rotating",
@@ -811,7 +811,7 @@ fn a_reactive_guard_turns_without_a_tax() {
 
     // Reactive on the same line steps at once — the fast turn re-aims with the step.
     let mut reactive = Guard::patrolling(Cell::new(5, 5));
-    reactive.look(&facility, BlindPolicy::Rear);
+    reactive.look(&facility, GuardSight::REAR_CARVE);
     reactive.respond_to(post); // Responding, walking to the post, lead warm
     assert_eq!(
         reactive.decide(
@@ -820,7 +820,7 @@ fn a_reactive_guard_turns_without_a_tax() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         Some(Direction::East),
         "a reactive guard turns fast and steps the same turn",
@@ -836,7 +836,7 @@ fn a_responder_searches_the_cell_it_was_called_to() {
     let facility = Facility::walled_box(12, 12);
     let called_to = Cell::new(5, 9);
     let mut guard = Guard::patrolling(Cell::new(5, 5));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     guard.respond_to(called_to);
 
     // Walk it in — `decide` returns the heading, the loop applies it (§4.2), so
@@ -853,11 +853,11 @@ fn a_responder_searches_the_cell_it_was_called_to() {
                 &mut Rng::new(0),
                 Dwell::NEVER,
                 PatrolStyle::Beat,
-                BlindPolicy::Rear,
+                GuardSight::REAR_CARVE,
             )
             .expect("the responder is still walking");
         let next = guard.pos.step(step).expect("in bounds");
-        guard.advance_to(next, step, &facility, BlindPolicy::Rear);
+        guard.advance_to(next, step, &facility, GuardSight::REAR_CARVE);
     }
     assert_eq!(guard.pos, called_to, "it reached the cell it was called to");
     assert_eq!(
@@ -873,7 +873,7 @@ fn a_responder_searches_the_cell_it_was_called_to() {
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert_eq!(guard.state, GuardState::Alerted, "arrival opens a search");
     assert_eq!(guard.search, SEARCH_DURATION);
@@ -894,18 +894,18 @@ fn a_responder_searches_the_cell_it_was_called_to() {
 /// skips it is measuring nothing.
 fn take_turn(guard: &mut Guard, facility: &Facility, blocked: &[Cell]) -> Option<Direction> {
     // Concealed from everyone, so no sighting can refresh the lead under the test.
-    guard.sense(Cell::new(0, 0), true);
+    guard.sense(Cell::new(0, 0), true, GuardSight::BASELINE);
     let step = guard.decide(
         facility,
         blocked,
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     if let Some(dir) = step {
         if let Some(next) = guard.pos.step(dir) {
-            guard.advance_to(next, dir, facility, BlindPolicy::Rear);
+            guard.advance_to(next, dir, facility, GuardSight::REAR_CARVE);
         }
     }
     step
@@ -915,7 +915,7 @@ fn take_turn(guard: &mut Guard, facility: &Facility, blocked: &[Cell]) -> Option
 /// a patrol's blind spot; it reaches a corner and turns 90°. Baseline that puts
 /// you at its side (§6.2 tier 3), which detects, so tailing a guard is impossible
 /// — the one manoeuvre that should be the reward for reading a patrol. Under
-/// [`BlindPolicy::FlankWhileCalm`] the turn no longer catches you.
+/// [`GuardSight::BASELINE`] the turn no longer catches you.
 ///
 /// Both arms in one test, because the claim is a *difference*: the same scene, the
 /// same turn, one knob.
@@ -924,30 +924,30 @@ fn a_ninety_degree_turn_catches_a_tail_only_in_the_control_arm() {
     let facility = Facility::walled_box(11, 11);
     let tail = Cell::new(4, 5); // directly behind an east-facing guard
 
-    let detected_after_turning = |blind: BlindPolicy| {
+    let detected_after_turning = |sight: GuardSight| {
         let mut guard = Guard::stationary(Cell::new(5, 5));
         guard.facing = Direction::East;
         assert_eq!(guard.state, GuardState::Calm, "a patrol, not a hunt");
-        guard.look(&facility, blind);
-        guard.sense(tail, false);
+        guard.look(&facility, sight);
+        guard.sense(tail, false, sight);
         assert!(
             !guard.detected_player(),
-            "{blind:?}: precondition — directly behind is blind in both arms (§155)",
+            "{sight:?}: precondition — directly behind is blind in both arms (§155)",
         );
 
         // The corner: a quarter turn, position unchanged. The tail is now at the
         // guard's flank.
-        guard.turn_in_place(Direction::North, &facility, blind);
-        guard.sense(tail, false);
+        guard.turn_in_place(Direction::North, &facility, sight);
+        guard.sense(tail, false, sight);
         guard.detected_player()
     };
 
     assert!(
-        detected_after_turning(BlindPolicy::Rear),
+        detected_after_turning(GuardSight::REAR_CARVE),
         "control: the turn brings the tail to tier 3, which detects (§6.1/§7.2)",
     );
     assert!(
-        !detected_after_turning(BlindPolicy::FlankWhileCalm),
+        !detected_after_turning(GuardSight::BASELINE),
         "experiment: a calm guard detects exactly its cone, so the tail survives",
     );
 }
@@ -973,14 +973,14 @@ fn an_alerted_guard_watches_its_flanks_in_both_arms() {
         GuardState::Alerted,
         GuardState::Responding,
     ] {
-        for blind in [BlindPolicy::Rear, BlindPolicy::FlankWhileCalm] {
+        for sight in [GuardSight::REAR_CARVE, GuardSight::BASELINE] {
             let mut guard = Guard::stationary(Cell::new(5, 5)).with_state(state);
             guard.facing = Direction::East;
-            guard.look(&facility, blind);
-            guard.sense(flanker, false);
+            guard.look(&facility, sight);
+            guard.sense(flanker, false, sight);
             assert!(
                 guard.detected_player(),
-                "{state:?} under {blind:?}: a guard that is not calm watches its sides",
+                "{state:?} under {sight:?}: a guard that is not calm watches its sides",
             );
         }
     }
@@ -989,8 +989,8 @@ fn an_alerted_guard_watches_its_flanks_in_both_arms() {
     // nothing else about the scene.
     let mut calm = Guard::stationary(Cell::new(5, 5));
     calm.facing = Direction::East;
-    calm.look(&facility, BlindPolicy::FlankWhileCalm);
-    calm.sense(flanker, false);
+    calm.look(&facility, GuardSight::BASELINE);
+    calm.sense(flanker, false, GuardSight::BASELINE);
     assert!(
         !calm.detected_player(),
         "calm, same cell, same facing, same arm: the flank is blind",
@@ -1005,18 +1005,18 @@ fn an_alerted_guard_watches_its_flanks_in_both_arms() {
 fn an_about_face_still_catches_a_tail_in_both_arms() {
     let facility = Facility::walled_box(11, 11);
     let tail = Cell::new(4, 5);
-    for blind in [BlindPolicy::Rear, BlindPolicy::FlankWhileCalm] {
+    for sight in [GuardSight::REAR_CARVE, GuardSight::BASELINE] {
         let mut guard = Guard::stationary(Cell::new(5, 5));
         guard.facing = Direction::East;
-        guard.look(&facility, blind);
-        guard.sense(tail, false);
-        assert!(!guard.detected_player(), "{blind:?}: behind is blind");
+        guard.look(&facility, sight);
+        guard.sense(tail, false, sight);
+        assert!(!guard.detected_player(), "{sight:?}: behind is blind");
 
-        guard.turn_in_place(Direction::West, &facility, blind);
-        guard.sense(tail, false);
+        guard.turn_in_place(Direction::West, &facility, sight);
+        guard.sense(tail, false, sight);
         assert!(
             guard.detected_player(),
-            "{blind:?}: turning to face the tail detects it — tier 1, dead ahead",
+            "{sight:?}: turning to face the tail detects it — tier 1, dead ahead",
         );
     }
 }
@@ -1031,7 +1031,7 @@ fn a_responder_arrives_however_far_the_call_is() {
     let facility = Facility::walled_box(40, 40);
     let called_to = Cell::new(38, 38);
     let mut guard = Guard::patrolling(Cell::new(1, 1));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     guard.respond_to(called_to);
 
     let journey = guard.pos.manhattan_distance(called_to);
@@ -1077,7 +1077,7 @@ fn a_responder_that_cannot_travel_still_cools_out() {
         facility.set_terrain(6, y, Terrain::Wall);
     }
     let mut stranded = Guard::patrolling(Cell::new(2, 2));
-    stranded.look(&facility, BlindPolicy::Rear);
+    stranded.look(&facility, GuardSight::REAR_CARVE);
     stranded.respond_to(Cell::new(9, 9));
     for _ in 0..ALERT_DURATION {
         assert_eq!(stranded.state, GuardState::Responding, "still trying");
@@ -1098,7 +1098,7 @@ fn a_responder_that_cannot_travel_still_cools_out() {
     facility.set_terrain(2, 6, Terrain::Floor); // the one gap
     let colleague = Cell::new(2, 6);
     let mut held = Guard::patrolling(Cell::new(2, 4));
-    held.look(&facility, BlindPolicy::Rear);
+    held.look(&facility, GuardSight::REAR_CARVE);
     held.respond_to(Cell::new(2, 9));
     for _ in 0..ALERT_DURATION {
         let step = take_turn(&mut held, &facility, &[colleague]);
@@ -1120,7 +1120,7 @@ fn a_responder_that_cannot_travel_still_cools_out() {
 fn a_chase_still_burns_its_lead_while_it_steps() {
     let facility = Facility::walled_box(40, 40);
     let mut guard = Guard::patrolling(Cell::new(1, 1));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     guard.state = GuardState::Chasing;
     guard.destination = Some(Cell::new(38, 38));
     guard.alert = ALERT_DURATION;
@@ -1156,7 +1156,7 @@ fn a_call_drops_the_responders_stale_sighting() {
     let called_to = Cell::new(5, 9);
 
     let mut guard = Guard::patrolling(Cell::new(5, 5));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     guard.last_seen = Some(stale); // it saw the player over there, a while ago
     guard.respond_to(called_to);
     assert_eq!(guard.last_seen, None, "the call clears the old sighting");
@@ -1172,11 +1172,11 @@ fn a_call_drops_the_responders_stale_sighting() {
                 &mut Rng::new(0),
                 Dwell::NEVER,
                 PatrolStyle::Beat,
-                BlindPolicy::Rear,
+                GuardSight::REAR_CARVE,
             )
             .expect("walking");
         let next = guard.pos.step(step).expect("in bounds");
-        guard.advance_to(next, step, &facility, BlindPolicy::Rear);
+        guard.advance_to(next, step, &facility, GuardSight::REAR_CARVE);
     }
     guard.decide(
         &facility,
@@ -1184,7 +1184,7 @@ fn a_call_drops_the_responders_stale_sighting() {
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     ); // arrive → search
     assert_eq!(
         guard.focus,
@@ -1205,7 +1205,7 @@ fn no_guard_flips_180_in_one_move() {
     // North on the first move; it rotates a clockwise quarter (west), then — now
     // 90° off — turns fast and steps north. Two turns, through the quarter.
     let mut reactive = Guard::patrolling(Cell::new(5, 5));
-    reactive.look(&facility, BlindPolicy::Rear);
+    reactive.look(&facility, GuardSight::REAR_CARVE);
     reactive.respond_to(Cell::new(5, 1)); // due north — a 180° reversal
     assert_eq!(
         reactive.decide(
@@ -1214,7 +1214,7 @@ fn no_guard_flips_180_in_one_move() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         None,
         "a reactive guard cannot half-turn in one move",
@@ -1231,7 +1231,7 @@ fn no_guard_flips_180_in_one_move() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         Some(Direction::North),
         "now a quarter off, the fast turn steps north",
@@ -1241,7 +1241,7 @@ fn no_guard_flips_180_in_one_move() {
     // quarter (west), another to north, then the step. It faces north only on the
     // second rotation, never in one move.
     let mut calm = Guard::patrolling_to(Cell::new(5, 5), Cell::new(5, 1));
-    calm.look(&facility, BlindPolicy::Rear);
+    calm.look(&facility, GuardSight::REAR_CARVE);
     assert_eq!(
         calm.decide(
             &facility,
@@ -1249,7 +1249,7 @@ fn no_guard_flips_180_in_one_move() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         None
     );
@@ -1265,7 +1265,7 @@ fn no_guard_flips_180_in_one_move() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         None
     );
@@ -1277,7 +1277,7 @@ fn no_guard_flips_180_in_one_move() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         Some(Direction::North),
         "aligned at last, it steps",
@@ -1294,7 +1294,7 @@ fn going_reactive_drops_a_pending_slow_turn() {
     let facility = Facility::walled_box(12, 12);
     // Rotate in place once: south spawn facing, target due east — the Calm quarter.
     let mut guard = Guard::patrolling_to(Cell::new(5, 5), Cell::new(8, 5));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     assert_eq!(
         guard.decide(
             &facility,
@@ -1302,7 +1302,7 @@ fn going_reactive_drops_a_pending_slow_turn() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         None
     );
@@ -1318,7 +1318,7 @@ fn going_reactive_drops_a_pending_slow_turn() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear
+            GuardSight::REAR_CARVE
         ),
         Some(Direction::North),
         "the reactive dispatch steps at once — no pending rotation to wait out",
@@ -1333,7 +1333,7 @@ fn the_slow_turn_delays_a_corner_it_does_not_freeze_it() {
     let facility = Facility::walled_box(12, 12);
     let target = Cell::new(9, 2);
     let mut guard = Guard::patrolling_to(Cell::new(2, 2), target); // due east, a turn
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
 
     let mut rotations = 0;
     let mut steps = 0;
@@ -1347,11 +1347,11 @@ fn the_slow_turn_delays_a_corner_it_does_not_freeze_it() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear,
+            GuardSight::REAR_CARVE,
         ) {
             Some(dir) => {
                 let dest = guard.pos().step(dir).expect("interior step");
-                guard.advance_to(dest, dir, &facility, BlindPolicy::Rear);
+                guard.advance_to(dest, dir, &facility, GuardSight::REAR_CARVE);
                 steps += 1;
             }
             None => rotations += 1,
@@ -1375,22 +1375,22 @@ fn the_slow_turn_delays_a_corner_it_does_not_freeze_it() {
 fn a_lost_lead_searches_then_releases_to_patrol() {
     let facility = Facility::walled_box(15, 15);
     let mut guard = Guard::patrolling(Cell::new(7, 2)); // faces south (§7.1)
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let glimpse = Cell::new(7, 9); // down the cone: the glimpse zone
     assert!(guard.fov().contains(glimpse), "precondition: in the cone");
 
-    guard.sense(glimpse, false);
+    guard.sense(glimpse, false, GuardSight::BASELINE);
     assert_eq!(guard.state(), GuardState::Investigating);
 
     // Arrive at the lead with nothing more seen: the search begins, not patrol.
-    guard.advance_to(glimpse, Direction::South, &facility, BlindPolicy::Rear);
+    guard.advance_to(glimpse, Direction::South, &facility, GuardSight::REAR_CARVE);
     guard.decide(
         &facility,
         &[],
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert_eq!(
         guard.state(),
@@ -1402,7 +1402,7 @@ fn a_lost_lead_searches_then_releases_to_patrol() {
     // Alerted for SEARCH_DURATION turns, then releases to Calm.
     let mut alerted_turns = 0u32;
     for _ in 0..SEARCH_DURATION + 2 {
-        guard.sense(glimpse, true);
+        guard.sense(glimpse, true, GuardSight::BASELINE);
         if guard.state() == GuardState::Alerted {
             alerted_turns += 1;
         }
@@ -1412,7 +1412,7 @@ fn a_lost_lead_searches_then_releases_to_patrol() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::Rear,
+            GuardSight::REAR_CARVE,
         );
     }
     assert_eq!(
@@ -1467,49 +1467,55 @@ fn only_calm_guards_close_doors() {
 /// cone's own range — past it there is no cone to be seen in.
 #[test]
 fn the_detection_zones_and_alert_are_pinned() {
-    assert_eq!(CERTAIN_RANGE, 5, "the [START] certain zone");
-    assert_eq!(GLIMPSE_RANGE, 10, "the [START] glimpse-zone edge");
+    let baseline = GuardSight::BASELINE;
+    assert_eq!(baseline.certain_range(), 5, "the [START] certain zone");
+    assert_eq!(
+        baseline.glimpse_range(),
+        10,
+        "the [START] glimpse-zone edge"
+    );
     assert_eq!(ALERT_DURATION, 30, "the [START] alert duration");
     assert_eq!(
-        GLIMPSE_RANGE, GUARD_SIGHT_RANGE,
+        baseline.glimpse_range(),
+        GUARD_SIGHT_RANGE,
         "the glimpse edge is the cone's own range",
     );
 }
 
-/// §7.6 certain zone: a player seen within [`CERTAIN_RANGE`] flips the guard to
+/// §7.6 certain zone: a player seen inside it flips the guard to
 /// Chasing its **live** cell and refreshes the alert timer. The last-known-precise
 /// cell is recorded for a later glimpse to fall back on.
 #[test]
 fn a_player_in_the_certain_zone_is_chased_at_its_live_cell() {
     let facility = Facility::walled_box(11, 11);
     let mut guard = Guard::stationary(Cell::new(5, 3)); // faces south (§7.1)
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let player = Cell::new(5, 7); // 4 cells down the cone: certain
     assert!(guard.fov.contains(player), "precondition: in the cone");
 
-    guard.see(player, false);
+    guard.see(player, false, GuardSight::BASELINE);
     assert_eq!(guard.state(), GuardState::Chasing);
     assert_eq!(guard.destination, Some(player), "tracks the live cell");
     assert_eq!(guard.last_seen, Some(player), "records the certain cell");
     assert_eq!(guard.alert, ALERT_DURATION);
 }
 
-/// §7.6 glimpse zone: past [`CERTAIN_RANGE`] but within [`GLIMPSE_RANGE`] the guard
+/// §7.6 glimpse zone: past the certain zone but within the cone's range the guard
 /// only catches imprecise movement, so it Investigates toward where it *last knew*
 /// the player — the certain cell — not the imprecise glimpse itself.
 #[test]
 fn a_glimpse_investigates_toward_the_last_certain_cell() {
     let facility = Facility::walled_box(11, 13);
     let mut guard = Guard::stationary(Cell::new(5, 2)); // faces south
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let certain = Cell::new(5, 6); // 4 down: certain — sets the precise memory
     let glimpse = Cell::new(5, 10); // 8 down: glimpse
     assert!(guard.fov.contains(glimpse), "precondition: in the cone");
 
-    guard.see(certain, false);
+    guard.see(certain, false, GuardSight::BASELINE);
     assert_eq!(guard.last_seen, Some(certain));
 
-    guard.see(glimpse, false);
+    guard.see(glimpse, false, GuardSight::BASELINE);
     assert_eq!(guard.state(), GuardState::Investigating);
     assert_eq!(
         guard.destination,
@@ -1526,11 +1532,11 @@ fn a_glimpse_investigates_toward_the_last_certain_cell() {
 fn a_concealed_player_in_the_cone_is_not_seen() {
     let facility = Facility::walled_box(11, 11);
     let mut guard = Guard::stationary(Cell::new(5, 3));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let player = Cell::new(5, 7);
     assert!(guard.fov.contains(player), "precondition: in the cone");
 
-    guard.see(player, true); // concealed from this guard
+    guard.see(player, true, GuardSight::BASELINE); // concealed from this guard
     assert_eq!(
         guard.state(),
         GuardState::Calm,
@@ -1540,19 +1546,131 @@ fn a_concealed_player_in_the_cone_is_not_seen() {
     assert_eq!(guard.alert, 0);
 }
 
-/// §7.6 "gone" zone: beyond [`GLIMPSE_RANGE`] there is no cone to be seen in, so a
+/// §7.6 "gone" zone: beyond the cone's range there is no cone to be seen in, so a
 /// player past the guard's range is simply not in its FOV and detection does
 /// nothing this turn.
 #[test]
 fn a_player_beyond_the_glimpse_range_is_not_seen() {
     let facility = Facility::walled_box(11, 20);
     let mut guard = Guard::stationary(Cell::new(5, 2));
-    guard.look(&facility, BlindPolicy::Rear);
-    let far = Cell::new(5, 2 + GLIMPSE_RANGE + 1); // one past the cone's range
+    guard.look(&facility, GuardSight::REAR_CARVE);
+    let far = Cell::new(5, 2 + GuardSight::BASELINE.glimpse_range() + 1); // one past the cone
     assert!(!guard.fov.contains(far), "precondition: out of the cone");
 
-    guard.see(far, false);
+    guard.see(far, false, GuardSight::BASELINE);
     assert_eq!(guard.state(), GuardState::Calm, "> 10 detects nothing");
+}
+
+/// §7.6/§12.6/#495: **the two zones survive a shortened cone**, which is the whole of
+/// the zone decision the modifier had to make. The zones are the cone's own halves, so
+/// a shorter cone keeps a certain zone, a glimpse ring outside it and a gone zone
+/// beyond — all three rungs, on a cone barely over half the length.
+///
+/// The failure it guards against is the one a fixed `CERTAIN_RANGE` of 5 would have
+/// produced against a range of 6: a single glimpse ring, and every other sighting
+/// certain. That would leave an **easier** modifier biting harder on contact than the
+/// baseline, which is the one thing a −N draw must never hand back.
+#[test]
+fn a_narrowed_cone_keeps_both_detection_zones() {
+    let sight = GuardSight::NARROWED;
+    assert!(sight.range < GuardSight::BASELINE.range, "shorter");
+    assert_eq!(
+        sight.arc,
+        GuardSight::BASELINE.arc,
+        "…and the wedge is §7.1's own: this modifier moves the reach, not the arc",
+    );
+
+    let facility = Facility::walled_box(11, 20);
+    // Straight down the cone's axis, so nothing but the range and the zones can be
+    // what excludes a cell.
+    let at = |depth: u32| Cell::new(5, 2 + depth);
+    let look = || {
+        let mut guard = Guard::stationary(Cell::new(5, 2)); // faces south (§7.1)
+        guard.look(&facility, sight);
+        guard
+    };
+
+    let mut certain = look();
+    certain.see(at(sight.certain_range()), false, sight);
+    assert_eq!(
+        certain.state(),
+        GuardState::Chasing,
+        "the inner half is still a certain track",
+    );
+
+    let mut glimpse = look();
+    let edge = at(sight.glimpse_range());
+    assert!(glimpse.fov.contains(edge), "precondition: in the cone");
+    glimpse.see(edge, false, sight);
+    assert_eq!(
+        glimpse.state(),
+        GuardState::Investigating,
+        "…and the outer half is still only a glimpse",
+    );
+
+    let mut gone = look();
+    let far = at(sight.glimpse_range() + 1);
+    assert!(!gone.fov.contains(far), "precondition: out of the cone");
+    gone.see(far, false, sight);
+    assert_eq!(gone.state(), GuardState::Calm, "past the cone, nothing");
+
+    // And the baseline is untouched by the derivation: §7.6's own [START] numbers.
+    assert_eq!(
+        (
+            GuardSight::BASELINE.certain_range(),
+            GuardSight::BASELINE.glimpse_range(),
+        ),
+        (5, 10),
+        "deriving the zones from the cone must not move the baseline's",
+    );
+}
+
+/// §6.1/§12.6/#495: a shortened cone is a **subset** of the baseline's from the same
+/// cell and facing — shorter, never merely different — and it keeps both §6.1's
+/// touching ring and §7.1's own ~90° silhouette, neither of which is the modifier's to
+/// bend.
+///
+/// Stated on open floor so the claim is about the range rather than about which wall
+/// happened to be in the way.
+#[test]
+fn a_narrowed_cone_is_a_strict_subset_of_the_baseline_cone() {
+    let facility = Facility::walled_box(31, 31);
+    let cone = |sight| {
+        let mut guard = Guard::stationary(Cell::new(15, 15));
+        guard.look(&facility, sight);
+        guard.fov.cells().collect::<HashSet<Cell>>()
+    };
+    let baseline = cone(GuardSight::BASELINE);
+    let narrowed = cone(GuardSight::NARROWED);
+
+    assert!(
+        narrowed.is_subset(&baseline),
+        "a narrowed guard must see less, not elsewhere",
+    );
+    assert!(
+        narrowed.len() < baseline.len(),
+        "…and strictly less: {} cells against {}",
+        narrowed.len(),
+        baseline.len(),
+    );
+    // Shorter: the far half of the axis is gone…
+    assert!(
+        baseline.contains(&Cell::new(15, 23)) && !narrowed.contains(&Cell::new(15, 23)),
+        "shorter — 8 down the axis is inside the baseline cone alone",
+    );
+    // …and no thinner: the ~90° wedge's own 45° diagonal is still covered at every
+    // depth the shortened cone reaches. This is the assertion that would fail if the
+    // arc were ever quietly folded back into this modifier.
+    assert!(
+        narrowed.contains(&Cell::new(19, 19)),
+        "the wedge is §7.1's own — the 45° diagonal at depth 4 is still seen",
+    );
+    for ring in [Cell::new(15, 16), Cell::new(14, 16), Cell::new(16, 16)] {
+        assert!(
+            narrowed.contains(&ring),
+            "§6.1's touching ring is not the modifier's to bend: {ring:?}",
+        );
+    }
 }
 
 /// §7.2's takedown gate is **per-turn fact, not mood**: a guard whose latest
@@ -1563,15 +1681,15 @@ fn a_player_beyond_the_glimpse_range_is_not_seen() {
 fn detection_is_per_turn_not_state() {
     let facility = Facility::walled_box(11, 11);
     let mut guard = Guard::stationary(Cell::new(5, 3)); // faces south (§7.1)
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let player = Cell::new(5, 5);
     assert!(!guard.detected_player(), "nothing sensed yet");
 
-    guard.sense(player, false);
+    guard.sense(player, false, GuardSight::BASELINE);
     assert!(guard.detected_player());
     assert_eq!(guard.state(), GuardState::Chasing);
 
-    guard.sense(player, true); // concealed: this turn's look misses
+    guard.sense(player, true, GuardSight::BASELINE); // concealed: this turn's look misses
     assert!(!guard.detected_player(), "awareness is per-turn");
     assert_eq!(guard.state(), GuardState::Chasing, "the mood lingers");
 }
@@ -1586,7 +1704,7 @@ fn finding_a_body_out_alerts_a_sighting_and_begins_the_search() {
 
     let facility = Facility::walled_box(15, 15);
     let mut guard = Guard::patrolling(Cell::new(7, 2));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let body = Cell::new(7, 5);
     guard.find_body(body);
     assert_eq!(guard.state(), GuardState::Alerted);
@@ -1602,9 +1720,9 @@ fn finding_a_body_out_alerts_a_sighting_and_begins_the_search() {
 fn a_detecting_guard_keeps_its_chase_over_a_found_body() {
     let facility = Facility::walled_box(15, 15);
     let mut guard = Guard::patrolling(Cell::new(7, 2));
-    guard.look(&facility, BlindPolicy::Rear);
+    guard.look(&facility, GuardSight::REAR_CARVE);
     let player = Cell::new(7, 5);
-    guard.sense(player, false);
+    guard.sense(player, false, GuardSight::BASELINE);
     assert!(guard.detected_player());
 
     guard.find_body(Cell::new(8, 5));
@@ -1622,14 +1740,14 @@ fn a_detecting_guard_keeps_its_chase_over_a_found_body() {
 fn a_cold_lead_stands_the_guard_down() {
     let facility = Facility::walled_box(11, 11);
     let mut guard = Guard::patrolling(Cell::new(5, 3));
-    guard.look(&facility, BlindPolicy::Rear);
-    guard.see(Cell::new(5, 7), false);
+    guard.look(&facility, GuardSight::REAR_CARVE);
+    guard.see(Cell::new(5, 7), false, GuardSight::BASELINE);
     assert_eq!(guard.state(), GuardState::Chasing);
     assert_eq!(guard.alert, ALERT_DURATION);
 
     // The player vanishes (concealed each turn): the lead cools turn by turn.
     for remaining in (0..ALERT_DURATION).rev() {
-        guard.sense(Cell::new(5, 7), true);
+        guard.sense(Cell::new(5, 7), true, GuardSight::BASELINE);
         assert_eq!(guard.alert, remaining, "the lead cools by one a turn");
     }
 
@@ -1640,7 +1758,7 @@ fn a_cold_lead_stands_the_guard_down() {
         &mut Rng::new(0),
         Dwell::NEVER,
         PatrolStyle::Beat,
-        BlindPolicy::Rear,
+        GuardSight::REAR_CARVE,
     );
     assert_eq!(guard.state(), GuardState::Calm, "a cold lead is given up");
 }
@@ -1757,7 +1875,7 @@ fn the_always_search_hideouts_modifier_flushes_a_lost_chase() {
 /// deferred spends the turn it had planned — and if that turn is §7.5's slow
 /// quarter-turn, the rotation re-aims its cone. The mood that cone is cast
 /// against must be the guard's **live** one, not the Calm it was executing:
-/// [`BlindPolicy::FlankWhileCalm`] gives blind flanks to a *patrol*, and a guard
+/// [`GuardSight::BASELINE`] gives blind flanks to a *patrol*, and a guard
 /// that has just spotted you is not patrolling. Otherwise the deferred turn would
 /// hand a hunting guard a patrol's blind spot — the "somewhere to hide from a
 /// guard that is hunting you" the experiment is conditioned to prevent — and
@@ -1786,12 +1904,12 @@ fn a_deferred_first_spot_rotation_still_watches_its_flanks() {
             &mut Rng::new(0),
             Dwell::NEVER,
             PatrolStyle::Beat,
-            BlindPolicy::FlankWhileCalm,
+            GuardSight::BASELINE,
         );
         assert_eq!(step, None, "the planned turn is spent rotating");
         assert_eq!(guard.facing, Direction::North, "…and it rotated");
         assert_eq!(guard.state, state, "the live mood survives the swap");
-        guard.sense(flanker, false);
+        guard.sense(flanker, false, GuardSight::BASELINE);
         guard.detected_player()
     };
 
@@ -1980,7 +2098,7 @@ mod watched_consoles {
                 &mut Rng::new(0),
                 Dwell::NEVER,
                 PatrolStyle::WatchedConsoles,
-                BlindPolicy::FlankWhileCalm,
+                GuardSight::BASELINE,
             );
             assert_eq!(
                 guard.destination,

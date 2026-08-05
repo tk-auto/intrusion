@@ -66,6 +66,20 @@ pub const ENHANCED_SIGHT_RANGE: u32 = 20;
 pub const GUARD_SIGHT_RANGE: u32 = 10;
 /// A guard's sight arc (§7.1/§6.2): width 2, the ~90° forward wedge. **[START]**
 pub const GUARD_SIGHT_ARC: u8 = 2;
+/// A **short-sighted** guard's sight range (§7.1/§12.6/#495) — a 13×13 box, down from
+/// §7.1's 21×21. **[START]**
+///
+/// The shortest reduction that leaves the §7.6 two-zone structure intact: the zones
+/// are the cone's own halves ([`GuardSight::certain_range`]), so 6 keeps a certain
+/// zone of 3 and a glimpse ring of 4–6, and anything shorter leaves a ladder too
+/// short to have two rungs worth naming.
+///
+/// **The arc is deliberately not touched with it.** §6.2's ladder gives a guard only
+/// two settings — its own ~90° wedge and the ~53° one a rung down — and the sweep
+/// behind appendix 51 measured that rung as worth ~25 points of bot win rate against
+/// the range's ~8. That is not a difficulty step, it is a different guard; the range
+/// alone is the step this modifier wanted, and a finer arc is its own piece of work.
+pub const NARROWED_GUARD_SIGHT_RANGE: u32 = 6;
 
 /// How much of a guard's **touching ring** (§6.1) is blind — the lowest §6.2 ring
 /// tier dropped from its detection set, and everything above it with it.
@@ -163,6 +177,83 @@ impl BlindPolicy {
             BlindPolicy::FlankWhileCalm if state == crate::GuardState::Calm => BlindTier::FLANK,
             BlindPolicy::FlankWhileCalm => BlindTier::REAR,
         }
+    }
+}
+
+/// **How a guard sees on this level** (§6.1/§7.1/§12.6) — the cone's shape and what
+/// its ring detects, as one value resolved from the level's modifiers and handed down
+/// to every guard that looks.
+///
+/// It exists because the arc and the range stopped being constants (#495). They are
+/// read by the cast, by §7.6's two-zone detection and by the danger overlay drawn from
+/// both, and a level modifier now moves them — so the choice was one value threaded
+/// where [`BlindPolicy`] already was, or a second parameter beside it at every call.
+/// **One value**, because a second sight-affecting modifier should then be a change to
+/// this struct's contents and not another thread through the same six signatures.
+///
+/// [`BlindPolicy`] is a **field** rather than a neighbour for the same reason: it is
+/// already the answer to *"how does a guard look this level?"*, asked about the ring
+/// instead of the wedge. Nothing may carry a copy on the guard — the value is derived
+/// from [`State`](crate::State) and passed per call, so a guard's cone and the §11.5
+/// overlay drawn from it read one truth (§12.3, the #199/#200 shape).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GuardSight {
+    /// The §6.2 arc width the cone is carved with.
+    pub arc: u8,
+    /// How far the cone reaches — a square box (§6.1), range *R* being `(2R+1)²`.
+    pub range: u32,
+    /// How much of the touching ring is dropped from detection (§6.1/#442).
+    pub blind: BlindPolicy,
+}
+
+impl GuardSight {
+    /// **§7.1's guard, unmodified** — the ~90° wedge out to 10, with the shipped
+    /// [`BlindPolicy::FlankWhileCalm`] carve. Every run that does not draw the §12.6
+    /// narrowed-cones modifier, and every hand-built guard in a test.
+    pub const BASELINE: Self = Self {
+        arc: GUARD_SIGHT_ARC,
+        range: GUARD_SIGHT_RANGE,
+        blind: BlindPolicy::FlankWhileCalm,
+    };
+
+    /// **What the short-sighted-guards modifier hands the player** (§12.6/#495): the
+    /// same guards, with the same ~90° wedge, seeing a **shorter** piece of the same
+    /// building. The arc and the ring carve are both untouched — the modifier bends
+    /// how far a guard can *reach*, never how wide it looks or what it notices beside
+    /// it.
+    pub const NARROWED: Self = Self {
+        arc: GUARD_SIGHT_ARC,
+        range: NARROWED_GUARD_SIGHT_RANGE,
+        blind: BlindPolicy::FlankWhileCalm,
+    };
+
+    /// **The §155 control arm** ([`BlindPolicy::Rear`]) over §7.1's own cone: every
+    /// guard blind at its back alone, whatever its mood. Not reachable in a shipped
+    /// run — it is the contrast the flank rule's tests are stated against, which is why
+    /// it is a test-only constant rather than a fourth thing a level could ask for.
+    #[cfg(test)]
+    pub(crate) const REAR_CARVE: Self = Self {
+        arc: GUARD_SIGHT_ARC,
+        range: GUARD_SIGHT_RANGE,
+        blind: BlindPolicy::Rear,
+    };
+
+    /// Every sight configuration a shipped run can be dealt — what the §7.6 zone
+    /// invariant is asserted over at compile time, so a future cone that collapsed the
+    /// two zones would fail the build rather than be discovered in a playtest.
+    pub(crate) const ALL: [Self; 2] = [Self::BASELINE, Self::NARROWED];
+
+    /// The tier this level's policy carves for a guard in `state` — see
+    /// [`BlindPolicy::tier`]. Resolved against the guard's own mood, which is why the
+    /// whole value comes down rather than a bare [`BlindTier`].
+    pub(crate) fn tier(self, state: crate::GuardState) -> BlindTier {
+        self.blind.tier(state)
+    }
+}
+
+impl Default for GuardSight {
+    fn default() -> Self {
+        Self::BASELINE
     }
 }
 

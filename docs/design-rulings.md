@@ -3561,3 +3561,174 @@ The debounce numbers are **[START]** and unmeasured against real play: 2 s and a
 cap were chosen against the 120 ms key repeat, not against a session. The right evidence
 is how many turns players actually lose to a killed tab, which needs the feature in
 players' hands first.
+
+---
+
+## Appendix 51 — Short-sighted guards: the zones follow the cone, and the arc stays out of it
+
+*(§6.1 the cone and the blind spot, §7.6 two-zone detection, §12.6 the directed pool
+and the same-building guarantee, §10.1.9 placement. The ticket is #495.)*
+
+The §12.6 easier side had four entries and a shape problem. Every one of them handed
+over **information** (*all vision cones shown*, *full layout known*, *search areas
+shown*) or **slack** (*guards: one fewer*) — the family appendix 29 called *"knowledge
+or slack without touching the objective"*, and a family with a ceiling: there are only
+so many things left to reveal, and each one reveals a little more of the game the player
+is there to discover. This is the first easier entry that bends what a guard can **do**.
+Four short-sighted guards is a different problem from three ordinary ones — more bodies
+to route around, less reach each — rather than another window onto the same run.
+
+The ticket asked for a cone that was **shorter and thinner**. What shipped is shorter
+only, and the arc is the interesting half of this ruling.
+
+### 1. The zones are the cone's halves, not two absolutes
+
+§7.6's certain zone was `5` and its glimpse edge was `GUARD_SIGHT_RANGE`, which is `10`.
+Shorten the range and the glimpse edge follows for free — but a certain zone pinned at
+`5` against a range of `6` leaves a **one-ring glimpse zone**, and past that it vanishes
+entirely and every sighting becomes certain. That is an *easier* modifier biting
+**harder** on contact than the baseline, which is the one thing a `−N` draw must never
+hand back.
+
+So the zones are stated as a proportion of the cone: **certain is its inner half,
+glimpse the rest**. At §7.1's range 10 that is exactly `5` and `6–10` — the baseline is
+untouched, which is what made this the cheap answer rather than a retune. A
+short-sighted guard gets `3` and `4–6`: both zones shorter, the modifier easier in both.
+The invariant — every cone has a certain zone at least a cell deep and a glimpse ring
+outside it — is asserted at **compile time** over every sight configuration the game can
+deal, the way §7.3's radio relations are, so a future cone that collapsed the ladder
+fails the build rather than a playtest.
+
+One relation moves and it moves the right way. §7.6 designed Run's gain to be *exactly*
+the certain→glimpse distance; against a shortened cone the gain overshoots — 5 cells
+against a 3-cell gap — so breaking contact is easier than designed. On the easier side,
+that is the correct direction for a break.
+
+### 2. Placement keeps §7.1's own cone
+
+The §10.1.9 turn-one check refuses a guard spawn whose opening cone covers the player's
+exit. A **smaller** cone passes *more* spawn cells, so reading the modifier there would
+move where the guards stand — and the ±N arms of a comparison would stop being the same
+building, which is most of what makes comparing them worth anything.
+
+This was already settled once, for the flank experiment (#410): placement pins
+`BlindTier::REAR` for the same reason, on the grounds that *"a paired A/B whose two arms
+generate different geometry cannot attribute what it measures"*. The baseline is the
+conservative bound in both directions — a cell safe under §7.1's reach and the rear
+carve is safe under any shorter cone or any wider blind spot — so pinning costs only the
+very-slightly-closer spawns a smaller cone would have allowed. The entry therefore sits
+on the **byte-identical** tier of the pool's graded guarantee: same carve, same
+placement, same board down to each guard's radio clock.
+
+The ticket asked whether that guarantee had already been bent, since a promise nobody
+keeps is worse than either answer. It had — `automatic_doors` reaches the carve — but
+#518 had already restated it in three graded tiers, pinned by
+`a_difficulty_draw_moves_the_building_only_where_it_is_meant_to`. Nothing needed
+correcting; this entry simply joins the strictest tier.
+
+### 3. The arc is not a difficulty knob, because it has no small settings
+
+The obvious reading of *"shorter and thinner"* is that both halves are dials. They are
+not. The **range** is an integer with as many settings as you like; the **arc** is a
+rung on §6.2's five-tier ring ladder, and a guard has exactly one rung below its own —
+`arc 1`, a ~53° wedge where §7.1's is ~90°. There is nothing in between.
+
+The 2×2 that separates them, four temperaments, 100 seeds each, against the stored
+baseline:
+
+| arm | balanced | cautious | aggressive | careless | mean lift |
+|---|---|---|---|---|---|
+| baseline — arc 2, range 10 | 0.35 | 0.53 | 0.40 | 0.43 | — |
+| **shorter** — arc 2, range 6 | 0.42 | 0.71 | 0.42 | 0.47 | **+8** |
+| thinner — arc 1, range 10 | 0.57 | 0.77 | 0.67 | 0.70 | +25 |
+| both — arc 1, range 6 | 0.63 | 0.89 | 0.72 | 0.68 | +30 |
+
+*(win rate; lift in points, meaned over the four profiles)*
+
+**The one available arc rung is worth 25 points, and §10.2 puts a guard at 8–10.** A
+single `−1` pick that hands back three guards' worth of pressure is not a difficulty
+step — it is a different guard, dealt to a player who asked for *slightly easier*. The
+range alone lands at +8, which is one guard: the step the axis actually promises. So the
+modifier ships as **range 6, arc untouched**, and a test asserts the 45° diagonal is
+still seen so the arc cannot be quietly folded back in later.
+
+**The two halves are not even the same kind of change**, which the win rate hides.
+Thinner cuts detections on every profile. Shorter *raises* them for the striking
+temperaments (aggressive 728 → **890**, careless 1211 → 1154) — a shorter cone lets a
+player get closer before being seen, so a profile that wants to be close takes the
+invitation and is caught at close range more often. A thinner cone gives ground back at
+every distance; a shorter one **trades distance for proximity**, which is a more
+interesting rule and the one that reads as *short-sighted* rather than *inattentive*.
+
+**A finer arc is the real missing knob, and it is its own work.** The cast is already
+rational-slope arithmetic (`min_col`/`max_col`/`is_symmetric` are integer rationals) and
+the tier trick is a special case of it — arc 2 is the forward quadrant at slope `1`, arc
+1 is the same sector clamped to `1/2`. An optional sub-tier slope clamp would give arcs
+of `3/4` or `2/3` and make the arc a dial rather than a cliff. Two things constrain it:
+the **[SETTLED]** touching ring is currently free *because* the out-of-arc ring cells are
+artificial walls and walls are marked seen, so a slope-carved arc has to reinstate the
+ring explicitly; and the tier ladder cannot be replaced wholesale, since the player's
+~180° and 360° arcs are not slope-bounded forward sectors. So the shape is *keep the
+tier, add a clamp inside it* — additive, and `BlindTier` (which carves detection after
+the cast) is untouched either way.
+
+### 4. The variant that was tried and dropped: narrow only while moving
+
+*"You cannot scan properly while walking"* — give a guard the thin arc while it steps
+and §7.1's full wedge back whenever it stands (dwelling, rotating, held). It reads well
+and it is cheap: one bit on the guard, cleared at the head of each decision and set by
+the step that follows.
+
+It does not recover what it needs to. Against the both-halves arm it gives back about
+**5 of the 30 points** (balanced 0.63 → 0.58, cautious 0.89 → 0.85, aggressive 0.72 →
+0.65) and *raises* careless slightly. Guards spend **31.6%** of their turns standing —
+measured over 16 seeds × 200 turns — so two thirds of the time the rule is simply the
+thin arc, and the wide-arc third is spent on guards that are stationary and therefore
+the easiest kind to read and route around anyway.
+
+It also costs more than it looks. The §11.5 overlay **is** the detection set, so the red
+would change shape whenever a guard started or stopped walking — a cell flipping between
+safe and watched with the guard neither moving nor turning. And it points the wrong way
+against §7.5's dwell, which exists as *"a stationary window a Takedown can be lined up
+against"* (§153): the standing guard is precisely the one the design wants approachable,
+and this hands it back its widest arc.
+
+Dropped. The finer arc in §3 is the better answer to the same question, and it costs no
+new rule at all.
+
+### What the batch says, and what it does not
+
+`--modifier narrowed-guard-cones`, four temperaments, 100 seeds each, against the stored
+baseline:
+
+| profile | win rate | detections | alert_peak_mean | takedowns | bodies found |
+|---|---|---|---|---|---|
+| balanced | 0.35 → 0.42 | 848 → 553 | 0.76 → 0.52 | 0 → 0 | 0 → 0 |
+| cautious | 0.53 → 0.71 | 722 → 341 | 0.67 → 0.28 | 0 → 0 | 0 → 0 |
+| aggressive | 0.40 → 0.42 | 728 → **890** | 1.07 → 0.64 | 22 → 12 | 3 → 2 |
+| careless | 0.43 → 0.47 | 1211 → 1154 | 1.18 → 0.76 | 21 → 8 | 17 → 5 |
+
+**The run gets quieter on every profile** — `alert_peak_mean` falls across the board, and
+that is the clearest single reading of the modifier: the same raid, less of it noticed.
+The win-rate lift is real but modest and very unevenly spread: the **avoidant**
+temperaments take nearly all of it (+7 balanced, +18 cautious) and the **striking** ones
+barely move (+2, +4). That is the shape §3 predicts — a shorter cone rewards keeping
+your distance, and a profile that closes anyway simply meets the cone later and nearer.
+
+Which is also why aggressive is **detected more** while winning slightly more often, and
+why both striking profiles land **fewer takedowns** (22 → 12, 21 → 8) and leave far fewer
+bodies (17 → 5 for careless). A shorter cone is not a longer approach window: the guard
+still watches its full ~90° wedge, it just watches it late, so the run that walks up to
+one has less warning rather than more room. The verb gets *harder* to set up, not easier
+— the opposite of what the thinner arc did, and worth knowing before anyone reads the two
+arms as interchangeable.
+
+**The bot plays this one honestly**, which is worth saying because most of the easier
+side it joins is bot-blind (§12.6/#518: three of the four existing easier entries are
+no-ops to the policy). The bot builds its danger set from the cones of the guards it can
+see, and those cones shrink with the modifier, so the ground it judges safe is the ground
+that *is* safe. No cue was needed; what changed is the board the existing cues read.
+
+None of which is a verdict. §13.4's rule stands — the sim is a smoke detector, not a
+judge — and *how much easier a −1 draw should feel* is exactly the kind of question
+§13.1 reserves for playing it.
