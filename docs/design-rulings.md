@@ -3335,3 +3335,138 @@ sitting beside it. Every `Outlay` message already names the balance ("spent 1 in
 left", "needs 1 intel — you have 0"), so the readout is not a fact the player loses; two
 lines saying the balance twice would be the screen repeating itself. It clears the moment
 the marker moves: a message about the row you have just left is a message about nothing.
+
+---
+
+## Appendix 49 — Pool membership is about the level, not about what the bot can score
+
+*(§12.6 level modifiers and the difficulty draw, §13.1/§13.3/§13.4 the experiment loop,
+§11.5a the fogged layout, §10.4 doors. The ticket is #518; the three modifiers it admits
+are #452, #233 and #236.)*
+
+The §12.6 **directed pool** is what a difficulty draws from: nine entries, five harder
+and four easier, filtered on each field's own documented direction. Three harder
+modifiers shipped outside it — *all doors automatic*, *layout unknown*, *locked room* —
+each held back for its own stated reason. This is the ruling that admitted all three,
+and the more useful half of it is not the three: it is **the criterion that had quietly
+replaced the real one**.
+
+### The criterion that crept in
+
+Read the three exclusions together and a pattern appears that nobody chose:
+
+- *locked room* was out **only** because the §13.2 bot has no cue for buying a key. It
+  is a plain harder toggle; the two settings are the same building down to the cell.
+  Nothing about it failed any test a pool entry is supposed to pass.
+- *layout unknown* was out for two reasons, and the doc gave both: it is arguably not a
+  difficulty step, **and** the bot routes through walls it has never seen.
+- *all doors automatic* was out for two reasons as well: it reaches the carve, **and**
+  the sim measured it as feel rather than difficulty — a win rate that did not move over
+  four hundred runs.
+
+In each case at least part of the reason was **"the harness cannot score it."** Stated
+once, per modifier, that reads like diligence. Stated three times it is a rule, and the
+rule is backwards. §13.4 is explicit: *"treat bot output as a smoke detector, not a
+judge."* §13.1 is more explicit still: *"you play and rule. Fun is a human judgement."*
+The sim exists to stop us shipping inert systems (§2.3) and to flag suspicious seeds for
+a human — not to hold a veto over what the game contains.
+
+A modifier's job is to **modify the level**. That is the whole of what §12.6 says one
+is. Some will be light and sweep cleanly; others will only ever be judged by playing
+them, and the second kind is not a lesser kind of modifier — it is most of the
+interesting ones. Withholding those from players because the harness cannot put a number
+on them is the §13.3 failure pointed the other way: instead of the bot's metrics quietly
+becoming a description of the bot, the bot's *limitations* quietly become a description
+of the game.
+
+So membership asks two questions and only two:
+
+1. Is it a **difficulty** change rather than a change of subject? The ±N axis promises
+   the same game under more or less pressure.
+2. Does it bend in a **documented direction**? That is what makes §2.3's directional
+   assertion true by construction rather than by review.
+
+Bot-blindness stays real and stays a **reporting** concern: a batch that draws a
+modifier the policy cannot use is measuring the bot, and its numbers do not belong in a
+balance argument. That is an argument for teaching the bot (#498, #517) and for labelling
+the batch — never for a thinner game.
+
+### It was never a small problem, which is the argument's strongest form
+
+The objection would carry more weight if the pool were otherwise clean. It is not, and
+counting was what settled the question. Of the four **easier** entries already in the
+pool, **three are bot-blind**:
+
+| Entry | Why the bot cannot use it |
+|---|---|
+| *All vision cones shown* | The policy builds its danger set from `perceive_guard == Seen` only; the widened overlay is never read |
+| *Full layout known* | The bot is granted geometry unconditionally (`bot-behaviour.md` §2), so it already routes as if this were on |
+| *Search areas shown* | Nothing in the policy reads a search area |
+| *Guards: one fewer* | — it plays this one |
+
+A `−1` bot batch has a three-in-four chance of drawing a no-op, and `−2` is guaranteed at
+least one. Bot-blindness in this pool is the **standing state**, not something the three
+admissions introduce.
+
+There is a reason it clusters on that side, and it is worth stating because it will keep
+being true: **a harder modifier lands on the bot whether it understands it or not; an
+easier one has to be used.** Guards that search hideouts flush a bot that hid in one
+without the bot knowing the rule exists. An overlay that reveals more cones does nothing
+at all unless something reads it. So the easier side is where comprehension is required,
+and comprehension is what the bot is short of.
+
+### What each admission actually cost
+
+**The locked room cost nothing.** It was the clean case, and the one that exposed the bad
+criterion by having no other reason attached to it.
+
+**Layout unknown cost the [SETTLED] override becoming reachable unnamed.** §11.5a is
+**[SETTLED]** — geometry is never fogged — and this is the one modifier that overrides
+it. Before, a player only met it by asking for it: a chosen set, a shared token, a node
+flavour. Now a `+1` can deal it to them, and the Level info card's *"Layout unknown"* is
+the whole of the warning. The objection that it is *not a difficulty step* has not been
+answered; it has been accepted. Whether the card is enough, or whether that end wants a
+louder cue on turn one, is the open question this leaves behind.
+
+**Automatic doors cost the flat same-building guarantee**, and that one needed real work
+rather than a shrug. `difficulty.rs` promised — and §12.6 repeated — that *a seed's
+facility is byte-identical at every difficulty, and only the rules bending it differ;
+that is what makes the ±N arms of a comparison worth anything.* The draw takes a salted
+sub-stream precisely to buy it. But the salt governs the **stream**, not what a drawn
+modifier then does, and this one is read by the carve.
+
+Measuring it is what turned that from a worry into a specification. Diffing the generated
+grid at every difficulty over a seed sweep gives **three tiers**, not two:
+
+1. **The doors move the building.** Not merely doorway roles — on seed 42 a **duct
+   mouth** relocates. A ±N comparison that draws this entry is comparing two facilities.
+2. **The locked room re-roles cells the carve already cut.** It folds a doorway's two
+   hinges into its panel span (§10.4) and touches nothing else; every differing cell
+   belongs to a door the lock is on.
+3. **Everything else leaves the grid byte-identical** — the property the arms are worth
+   comparing on.
+
+That is pinned by `a_difficulty_draw_moves_the_building_only_where_it_is_meant_to` rather
+than by a sentence, because it is exactly the claim that stops being true silently. A new
+generation-reaching entry fails that test, which is what makes admitting one a deliberate
+act rather than a discovery.
+
+### The asymmetry left behind
+
+All three admissions are `Harder`, so the pool went to **twelve: eight harder, four
+easier.** Nothing lies about it — the slider's blurb counts *picks*, not pool depth, so
+both ±2 stops still promise exactly the two rules they will bend — but a `+N` run now has
+meaningfully more variety than a `−N` one. The easier side is the one to grow next, and
+the honest way to grow it is not to relabel a harder rule but to find rules that are
+genuinely bent the player's way. That, and #258's difficulty/feeling split, are what this
+appendix leaves open.
+
+### The one thing that did **not** change
+
+`automatic_doors` is still, on the sim's own evidence, a **feel** modifier rather than a
+difficulty one: win rate flat over four hundred runs, with the run's *character* moving
+instead. Admitting it to a pool labelled by difficulty does not settle that — it defers
+it. `Harder` remains the safer of the two labels because the structural change (wider
+throats, no hand-close) is the harder-direction one and is what §2.3's assertion can
+actually hold. #258 is where that question gets answered properly.
+
