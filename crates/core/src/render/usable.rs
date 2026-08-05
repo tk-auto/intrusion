@@ -63,6 +63,25 @@ const SEGMENT_GAP: u32 = 2;
 /// the help panel's Help card is where the full set is read.
 const TOUCH_HINT: [&str; 2] = ["swipe: move", "tap: wait"];
 
+/// What the usable line says while an **exchange** is open, on keys (§8.3/§11.6/#266):
+/// the two presses that answer it.
+///
+/// The row's whole job is *what the next press does* (§11.4), and while a crate is
+/// offering there are exactly two things a press can do — drop one of the four on the
+/// bar, or decline — so for those turns it says that instead of the affordances. It has
+/// to: the bar has changed meaning under the player's fingers, and a row still offering
+/// `cache: swap tech` would be naming the bump that got them here.
+///
+/// `1-4` rather than the mnemonic letters, because the digits are the slots (#359) and
+/// the row has no width to teach a per-run letter set; the marks on the bar itself are
+/// where those are read (§11.6/#360).
+const EXCHANGE_KEYS: [&str; 2] = ["1-4: drop one", "esc: decline"];
+
+/// The same two answers by finger (§11.6/#336/#266). There is no `Escape` to name, so
+/// the decline is spelled as what it actually is — dropping the crate's own entry, the
+/// one the bar marks `(+)` — which is the same press on both surfaces.
+const EXCHANGE_TOUCH: [&str; 2] = ["tap: drop one", "tap (+): decline"];
+
 /// The usable line's floor, on keys (§11.4/§11.6/#323): the same two verbs off
 /// §11.6's own table — the arrows the row already draws, and `w` to wait.
 ///
@@ -131,7 +150,9 @@ const _: () = {
 /// the v1 width (§10.2) fails the *build*, not the frame.
 const _: () = assert!(
     hint_width(TOUCH_HINT) <= LevelConfig::V1.width
-        && hint_width(KEYS_HINT) <= LevelConfig::V1.width,
+        && hint_width(KEYS_HINT) <= LevelConfig::V1.width
+        && hint_width(EXCHANGE_TOUCH) <= LevelConfig::V1.width
+        && hint_width(EXCHANGE_KEYS) <= LevelConfig::V1.width,
     "the usable line's move/wait hint must fit the v1 board (§10.2): shorten a segment",
 );
 
@@ -168,6 +189,27 @@ fn usable_hint(modality: InputModality) -> Vec<(String, Category)> {
     hint.iter()
         .map(|text| ((*text).to_string(), Category::Owned))
         .collect()
+}
+
+/// The usable line **while an exchange is open** (§8.3/#266): how to answer it, in the
+/// vocabulary the player's hands are using.
+///
+/// Drawn *instead of* the affordances, not beside them, for the same reason the row
+/// exists at all: it must never promise what the next press will not deliver, and while
+/// an offer is up no press does anything but answer it (`State::step`). The words take
+/// the floor's own [`Owned`](Category::Owned) — they are keys of yours, like the innate
+/// verbs — and the row stays unaimed, because the presses are the bar's slots and not a
+/// direction to walk in.
+pub(super) fn exchange_row(width: u32, modality: InputModality) -> Vec<GlyphCell> {
+    let hint = match modality {
+        InputModality::Keys => EXCHANGE_KEYS,
+        InputModality::Touch => EXCHANGE_TOUCH,
+    };
+    let entries: Vec<(String, Category)> = hint
+        .iter()
+        .map(|text| ((*text).to_string(), Category::Owned))
+        .collect();
+    status_row(width, 1, width, &entries, None)
 }
 
 /// The usable line's direction glyph (§11.4): which way to bump for the

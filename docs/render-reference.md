@@ -75,7 +75,7 @@ first that is a machine rather than a copy of you — hence a glyph of its own r
 than the decoy's borrowed `@`. Its **background** is what says who is driving: while
 your input moves it, the cell carries the §11.5 effect mark, and the moment you hand
 the controls back the mark goes dark while the `*` stays. That is the one thing the
-§11.4 bar cannot say — the entry reads `Drone[17]` either way — and it is the one
+§11.4 bar cannot say — the entry reads `Drone[23]` either way — and it is the one
 thing a player can get wrong about the ability. It draws **under** a guard's `g` and
 a body's `z` on purpose (a thing of yours never hides a threat), and its mark yields
 to the danger overlay for the same reason, which is why the cue is a background and
@@ -128,10 +128,21 @@ uses nowhere else. It is deliberately **not** a letter: the board's letters are 
 
 A facility may show **several** (§14 v3: a Vault hides three), all drawn the same. What
 a particular crate holds is never on the board — the usable line (§11.4) is the only
-thing that speaks about it, and only from the cell beside it: `cache: take tech`, or
-`cache: hands full` / `cache: already yours` for the two refusals. That is the same
-bargain the exit strikes with its own refusal — you learn what a bump *would* do by
-standing next to it, never by looking across the room.
+thing that speaks about it, and only from the cell beside it: `cache: take tech`,
+`cache: swap tech` for a run with no room for it (#266), `cache: recharge` for a duplicate
+that refills a spent use budget (§8.2), or `cache: already yours` for the one refusal
+left. That is the same bargain the exit strikes with its own refusal — you
+learn what a bump *would* do by standing next to it, never by looking across the room.
+
+While a **swap** is being decided the ability bar stops being the held set and becomes the
+four candidates (§11.4/#266): your three pieces of tech, then the crate's — drawn in
+Interest rather than Owned, the colour of the `¤` it is still sitting in, which is the
+whole of how the row says which entry is the new one. It is the one row that draws its
+**slot numbers** (`1 Camo`, the digit in the key colour the mnemonic mark wears): this row
+is picked *from* rather than glanced at, and a candidate carries no clock, which is where
+the width comes from. Pressing an entry drops it; the usable line carries the two answers
+(`1-4: drop one`, `esc: decline`) and the near line keeps asking for as long as the offer
+stands.
 
 The **contents** rows — `}`, `=`, `$`, `Ψ`, `¤` — take the memory slate rather than the
 dim shade once they are out of view, which is the §3 knowledge state and not a

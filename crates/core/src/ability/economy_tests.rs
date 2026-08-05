@@ -134,11 +134,11 @@ fn the_catalog_matches_the_design_drone() {
         TargetingMode::Itself,
         "you launch it from your own cell"
     );
-    assert_eq!(economy.duration(), 30, "[START] — flying *and* hovering");
+    assert_eq!(economy.duration(), 40, "[START] — flying *and* hovering");
     assert_eq!(economy.cooldown(), 40, "[START]");
     assert_eq!(
         economy.duration() + economy.cooldown(),
-        70,
+        80,
         "the longest lockout in the catalogue (§8.2), for the strongest information tool",
     );
     assert_eq!(

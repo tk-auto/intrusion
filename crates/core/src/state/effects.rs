@@ -229,7 +229,7 @@ pub(super) enum MarkPlace {
     /// While a control transfer is in force there are two things of yours on the board
     /// and only one of them answers the arrow keys. That is the single thing a player
     /// can get wrong about this ability, and it is a fact the §11.4 bar cannot carry: it
-    /// reads `Drone[17]` whether you are at the controls or standing in a room three
+    /// reads `Drone[23]` whether you are at the controls or standing in a room three
     /// corridors away watching a camera. So the mark rides the machine exactly while it
     /// is *yours to drive*, goes dark the moment you hand the keys back, and comes back
     /// on if you take them again — the disagreement with the bar entry that is the price

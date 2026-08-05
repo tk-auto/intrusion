@@ -772,9 +772,14 @@ impl State {
             // The ladder never decays (§7.3), so the rung standing now is the run's
             // peak — no separate high-water mark to keep, and none to let drift.
             alert_peak: self.alert(),
-            // The crates that were opened (#209) — the one line that carries §8.3
-            // abilities out of a facility and into the run (§2.2).
+            // The crates that were opened (#209) — what this facility was worth.
             salvaged: self.salvaged(),
+            // …and what the run is actually **holding** as it leaves (#266), which is
+            // the line that carries §8.3 abilities out of a facility and into the run
+            // (§2.2). The two differ the moment a crate is traded at rather than taken
+            // from: the facility gave the new tech, and the run gave up an old one for
+            // it, and only this side knows which.
+            held: self.loadout(),
         }
     }
 
@@ -876,6 +881,20 @@ impl State {
     /// draws `Run[3]` while active and `Run` while ready
     /// ([`AbilityStatus::bar_entry`]).
     pub fn ability_input(&self, id: AbilityId) -> Input {
+        // **While a crate is offering, the bar is the exchange** (§8.3/#266): the four
+        // slots are the four candidates and a press discards the one under it, so the
+        // very same digit, letter and tap that fire an ability answer the offer instead.
+        // Deciding it here — at the one seam both input paths already meet at — is what
+        // keeps the shells from each needing to know the exchange exists.
+        //
+        // It is asked **before** the control transfer below, and the order is free rather
+        // than load-bearing: an offer opens by bumping a crate (§4.3), which is a thing
+        // hands do, so it can never be open while the player's hands are on a remote's
+        // controls (#273). Asking the modal one first is what the order would have to be
+        // if the two ever did meet — a prompt that must be answered outranks a toggle.
+        if self.exchange.is_some() {
+            return Input::Discard(id);
+        }
         // **A control-transfer ability's key is a three-state toggle** (§8.1/#273), which
         // is the one place this rule needs an arm of its own. Its window outlives the
         // flying: while the remote hovers unattended the ability is still `Active`, and
@@ -893,8 +912,62 @@ impl State {
             | AbilityState::Limited { .. }
             | AbilityState::Exhausted
             | AbilityState::Passive
-            | AbilityState::Unusable => Input::Activate(id),
+            | AbilityState::Unusable
+            // Unreachable in practice — `Offered` is a state the *exchange row* gives an
+            // entry, and the branch above has already answered every press made while
+            // one is open — so it takes the same free-refusal path as the rest rather
+            // than a special case that could only fire if that branch were removed.
+            | AbilityState::Offered => Input::Activate(id),
         }
+    }
+
+    /// **The exchange a crate is offering right now** (§8.3/#266), or `None` — which is
+    /// almost always: it takes a run with full hands bumping a crate to open one.
+    ///
+    /// While it is `Some` the game is *waiting*: the turn loop answers nothing but
+    /// [`Input::Discard`] ([`step`](State::step)), the ability bar draws the four
+    /// candidates instead of the held set ([`bar_statuses`](Self::bar_statuses)), and
+    /// the usable line says how to answer. Three surfaces, one fact.
+    pub fn exchange(&self) -> Option<Exchange> {
+        self.exchange
+    }
+
+    /// **What the ability bar draws, and what its keys fire** (§11.4/§11.6/#266) — the
+    /// held set ([`ability_statuses`](Self::ability_statuses)) in the ordinary case, and
+    /// the **exchange's four candidates** while a crate is offering.
+    ///
+    /// The one seam for both, because the bar's digits, mnemonic letters and tap
+    /// hit-test all resolve through it ([`ability_in_slot`](crate::ability_in_slot)):
+    /// the row cannot draw one set while the keys fire another, whichever of the two it
+    /// is showing.
+    ///
+    /// # Why the candidates carry no clocks
+    ///
+    /// A candidate is drawn [`Ready`](AbilityState::Ready) — a bare name — whatever its
+    /// real slot is doing, and the crate's own draws [`Offered`](AbilityState::Offered).
+    /// The row has stopped being a readout of the economy for as long as the offer is
+    /// up: nothing can be activated while the loop answers only the discard, so a
+    /// cooldown drawn on it would be a number about a press that is not on offer. Worse,
+    /// the two states §11.4 draws as *plainly not an option now* would grey out entries
+    /// that are perfectly droppable — a spent `Bore` is as tradeable as anything else.
+    /// What the row means here is *these are your four, press the one to lose*, and that
+    /// is what it says.
+    pub fn bar_statuses(&self) -> Vec<AbilityStatus> {
+        let Some(offer) = self.exchange else {
+            return self.ability_statuses();
+        };
+        offer
+            .candidates(self.loadout())
+            .into_iter()
+            .map(|id| AbilityStatus {
+                id,
+                state: if id == offer.offered() {
+                    AbilityState::Offered
+                } else {
+                    AbilityState::Ready
+                },
+            })
+            .collect()
     }
 
     /// The run's ability line/panel (§11.4): one [`AbilityStatus`] per economy

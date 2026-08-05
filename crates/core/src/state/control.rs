@@ -183,10 +183,12 @@ impl State {
     /// - **The remote's own key** hands the controls back — free (§4.4), and the window
     ///   runs on.
     /// - **Everything else** is the free no-op of a key that does nothing: another
-    ///   ability's activation, another ability's toggle-off. Your hands are on the
-    ///   controls. It is silent, because the reason is already on the board (§11.7's
-    ///   rule for a refusal the player can see): the drone is drawn under its own mark
-    ///   and the §11.4 bar has greyed every other entry.
+    ///   ability's activation, another ability's toggle-off, a discard answering an
+    ///   exchange that cannot be open (#266 — an offer arrives by bumping a crate, and
+    ///   bumping is something hands do). Your hands are on the controls. It is silent,
+    ///   because the reason is already on the board (§11.7's rule for a refusal the
+    ///   player can see): the drone is drawn under its own mark and the §11.4 bar has
+    ///   greyed every other entry.
     pub(super) fn piloted_phase(&mut self, input: Input, events: &mut Vec<Event>) -> bool {
         match input {
             Input::Step(dir) => self.pilot_step(dir, events),
@@ -198,7 +200,7 @@ impl State {
                 self.release_control(events);
                 false
             }
-            Input::Activate(_) | Input::Deactivate(_) => false,
+            Input::Activate(_) | Input::Deactivate(_) | Input::Discard(_) => false,
         }
     }
 

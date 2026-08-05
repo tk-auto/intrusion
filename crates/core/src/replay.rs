@@ -75,6 +75,10 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
 /// - `Step` → `N`/`E`/`S`/`W`; `Wait` → `.`.
 /// - `Activate(id)` → `+` then the ability's [script letter](ability_script_letter);
 ///   `Deactivate(id)` → `-`.
+/// - `Discard(id)` → `!` then the letter — the exchange's answer (§8.3/#266), which
+///   names the ability **dropped**. A third sign rather than a reuse of `-`: a
+///   toggle-off and a trade are different actions on the same ability, and a script
+///   that spelled them alike would replay one as the other.
 pub fn input_token(input: Input) -> String {
     match input {
         Input::Step(Direction::North) => "N".to_string(),
@@ -84,6 +88,7 @@ pub fn input_token(input: Input) -> String {
         Input::Wait => ".".to_string(),
         Input::Activate(id) => format!("+{}", id.script_letter()),
         Input::Deactivate(id) => format!("-{}", id.script_letter()),
+        Input::Discard(id) => format!("!{}", id.script_letter()),
     }
 }
 
@@ -105,9 +110,10 @@ fn ability_for_script_letter(ch: char) -> Option<AbilityId> {
 /// Parse the script notation to an [`Input`] stream (the inverse of [`to_script`]).
 ///
 /// One input per token: `N`/`E`/`S`/`W` step (case folded), `.` waits, `+<letter>`
-/// activates and `-<letter>` deactivates the ability with that script letter.
+/// activates, `-<letter>` deactivates and `!<letter>` discards (#266) the ability with
+/// that script letter.
 /// Whitespace between tokens is ignored, so a long stream can be wrapped for
-/// reading. An unknown character, or a `+`/`-` not followed by a known letter, is
+/// reading. An unknown character, or a `+`/`-`/`!` not followed by a known letter, is
 /// a hard error — a malformed replay must not silently drop an input (§12.4).
 pub fn parse_script(text: &str) -> Result<Vec<Input>, String> {
     let mut inputs = Vec::new();
@@ -119,23 +125,23 @@ pub fn parse_script(text: &str) -> Result<Vec<Input>, String> {
             'S' => Input::Step(Direction::South),
             'W' => Input::Step(Direction::West),
             '.' => Input::Wait,
-            '+' | '-' => {
+            '+' | '-' | '!' => {
                 let key = chars
                     .next()
                     .ok_or_else(|| format!("replay: `{c}` needs an ability letter after it"))?;
                 let id = ability_for_script_letter(key.to_ascii_lowercase()).ok_or_else(|| {
-                    format!("replay: `{c}{key}` is not an ability (want +/- r/c/d/x)")
+                    format!("replay: `{c}{key}` is not an ability (want +/-/! r/c/d/x)")
                 })?;
-                if c == '+' {
-                    Input::Activate(id)
-                } else {
-                    Input::Deactivate(id)
+                match c {
+                    '+' => Input::Activate(id),
+                    '!' => Input::Discard(id),
+                    _ => Input::Deactivate(id),
                 }
             }
             w if w.is_whitespace() => continue,
             other => {
                 return Err(format!(
-                    "replay: unknown move {other:?} (want N/E/S/W/. or +/- an ability key)"
+                    "replay: unknown move {other:?} (want N/E/S/W/. or +/-/! an ability key)"
                 ))
             }
         };
@@ -229,6 +235,7 @@ mod tests {
         for id in AbilityId::ALL {
             all.push(Input::Activate(id));
             all.push(Input::Deactivate(id));
+            all.push(Input::Discard(id));
         }
         for input in all {
             let token = input_token(input);
@@ -256,6 +263,30 @@ mod tests {
         assert_eq!(script, "N+rE.-rS");
         assert_eq!(parse_script(&script), Ok(stream.clone()));
         assert_eq!(parse_script("N +r\nE . -r S"), Ok(stream));
+    }
+
+    /// **The three signs are three actions** (#266): `+`, `-` and `!` on the same letter
+    /// parse to activate, deactivate and discard, and never to each other. A script that
+    /// spelled a trade like a toggle-off would replay the run as a different one — the
+    /// ability would still be held, and every later token would be fed to a loadout the
+    /// original never had.
+    #[test]
+    fn the_three_ability_signs_stay_apart() {
+        let id = AbilityId::Camouflage;
+        let letter = id.script_letter();
+        for (sign, expected) in [
+            ('+', Input::Activate(id)),
+            ('-', Input::Deactivate(id)),
+            ('!', Input::Discard(id)),
+        ] {
+            let token = format!("{sign}{letter}");
+            assert_eq!(
+                parse_script(&token).as_deref(),
+                Ok(&[expected][..]),
+                "{token}"
+            );
+            assert_eq!(input_token(expected), token);
+        }
     }
 
     /// Case folding: a lowercase move letter and an uppercase ability key both

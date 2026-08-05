@@ -1015,7 +1015,7 @@ the literal one — it transfers the player's *input* to another entity, which n
 arrangement of effect primitives expresses. That seam is deliberately a **remote
 unit** rather than a drone (`control::remote_kind`), so taking over a guard later is
 a row in one table plus a spawn rule rather than a second control system
-(appendix 44). **Start data-driven; promote
+(appendix 45). **Start data-driven; promote
 to code only when the vocabulary genuinely can't express it.** Resist the urge to
 grow the vocabulary to cover a one-off; that's how DSLs become bad programming
 languages.
@@ -1063,8 +1063,14 @@ to spend, refill or manage**: the number only goes down, and no decision in a ru
 about *getting more of it*. The fence that keeps it out of the charge economy
 (appendix 23):
 
-- **Set at level start from the ability's own row. No recharge** — no regeneration, no
-  pickup or console that tops it up, no way to earn one back.
+- **Set at level start from the ability's own row. No recharge, with one named
+  exception** — no regeneration, no tick, no console that tops it up, and nothing you can
+  earn one back with. The exception is **finding another copy of the tool itself** in an
+  equipment cache (§8.3/#266): a crate holding tech you already carry refills that
+  ability's budget to the level's grant and is spent doing it. It is not a way to *manage*
+  the number — there is still nothing to spend, refill on demand or plan around — and it
+  is bounded by how many crates the building hides (§14 v3, at most three). What it does
+  is give a duplicate crate, otherwise pure bad luck, one thing to be worth. Appendix 44.
 - **Single digits**, enforced at compile time. Ten uses is an inventory.
 - **It composes with the time economy, it does not replace it.** An ability may carry a
   cooldown *and* a use budget; §4.4 stands unchanged, and an activation refused for want
@@ -1119,11 +1125,29 @@ whole reason the architecture looks the way it does.
 > you the walk.
 >
 > **You carry three, and the cap is kept at the crate.** `MAX_TECH_HELD` (§8.3) is
-> enforced where the pickup happens: a bump on a crate you have no room for — or on one
-> holding tech you already have — is **refused for free** (§4.4) and says which, and the
-> crate is left standing for a run that comes back with a free hand. Trading one piece of
-> tech for another is the exchange screen (#266); until it exists, a full run's answer is
-> the refusal.
+> enforced where the pickup happens, and what a full run meets there is **the exchange**
+> (#266), not a refusal: the crate offers what is in it, and you choose which of the four
+> — your three, and its one — to **drop**. Dropping one of yours is the trade: the new
+> tech is on the deck that turn and the old one is gone for the rest of the run. Dropping
+> the crate's own is the decline, and the crate is left standing for a run that comes back
+> having traded that piece away. The bump that opens the offer is **free** (§4.4) and the
+> trade spends the one turn a plain salvage would have — so a swap costs a walk and a
+> turn, and a decline costs nothing.
+>
+> **The exchange is the ability bar, not a screen** (§8.4). While it is open the bar draws
+> the four candidates in its own four slots — **numbered** `1`–`4`, since this row is
+> picked from rather than glanced at, and the crate's drawn in the reward colour, which is
+> the whole of how it says it is the new one. The keys, the mnemonics and the taps that
+> fire an ability answer the offer instead; `Esc` is a second spelling of dropping the
+> crate's own. **Nothing else happens while it is open**: the turn loop takes only the
+> choice, so no guard moves while a run is deciding, the near line keeps stating the
+> question for as long as it stands, and the decline is always one press away (§11.6 —
+> never a trap).
+> A crate holding tech you **already carry** is the one refusal left — there is no decision
+> in a second copy, so it is refused for free and says so — **unless that tech has a
+> per-level use budget you have spent from** (§8.2), in which case the second copy is worth
+> a real detour: the crate refills it to the level's grant, says so (`Bore recharged`), and
+> is spent. That is the only thing anywhere that moves a budget upward. Appendix 44.
 
 | Ability | Cost | Duration | Cooldown | Effect |
 |---|---|---|---|---|
@@ -1136,7 +1160,7 @@ whole reason the architecture looks the way it does.
 | **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot get it open, so its route goes the long way round (§7.6/§10.4). (It used to say *"cannot work the handle"*; on an all-automatic level there is no handle to work — §10.4/#452 — and the seal holds the door shut whatever kind it is.) A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it. **You** are never refused — a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in; that costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4). Appendix 24. |
 | **Saver** | — | **passive** | — | **[START]/experiment (#243).** The **first guard to reach you in a facility takes you down — and instead goes down itself**: §4.5's capturing step is turned into a §7.2 takedown of that guard, which drops **where it stood** (a lunge turned over never arrives, and your own cell may be a cupboard where a body means something else), leaves a body and starts the §7.3 clock. Then it is **spent for the rest of the level** — `1/level` (§8.2), no recharge — so a second guard reaching you the same turn captures you exactly as the settled rule says. There is **no activation**: held is on, which is the whole reason it is a passive rather than the toggle first proposed — a defensive window you have to predict is one you mistime, and §8.2's timing trap needs an activation turn to be a trap at all. **Surviving is not free**: you are left standing beside a body you did not choose the place of, in a cell a guard was walking to, with the radio already counting; and the slot it holds is a flight tool you do not have for every *other* crisis of the run. **This is the one declared exception to a [SETTLED] rule (§4.5)** — it is on trial, and the sim says it is strong: a fearless bot handed it wins nearly twice as often (appendix 43). |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
-| **Drone** | 1 turn | 30 | 40 | **[START]/experiment (#273).** Launch a drone from the cell you stand on and **fly it yourself**: your input moves the machine and your body stands still, so every drone move is a full turn the guards get (§4.2) while nobody is watching where you left yourself. Press again and the controls come back — **free** (§4.4), and the window does **not** end: the drone holds the cell you left it in and keeps feeding you its camera for the rest of the duration, and you can take the controls back later for the price of a turn. **One clock covers both halves**, which is the design: how much of the 30 you spend flying rather than watching is the decision the ability sells, and the bar's `[N]` means *turns of machine* throughout (appendix 44). Its camera is the full **360°** at `DRONE_SIGHT_RANGE` (**8** **[START]**) and is unioned into your own sight — your eyes keep working — and what it sees is remembered (§11.5a). The **guard sense (§9) is not widened with it**: that is your body's channel, and your body is what this costs. It **respects the building at its own scale**: everywhere a person could squeeze, plus **over a table** and **through a shut door's ventilation holes** — it is hand-sized and airborne — but never a wall, a **door frame**, a duct entry or a solid usable (`Terrain::admits_drone`). It crosses a shut door **without opening it**, which is the difference between reading a wing and unlocking one; the consequence worth stating is that a closed-door wing is scoutable and a Lockdown seals nothing against a camera. It is **not an actor** (nothing blocks it, it blocks nothing, no door shuts on it), has **no interaction verb at all** — it opens nothing, takes nothing, wins nothing — and **guards cannot perceive it** in any way. While flying, every other ability is greyed and refused: your hands are on the controls. **Launching, and taking the controls back, needs you on your feet** — a crawlspace refuses both (§10.7), because a body nothing can reach pays nothing, and the exposed body is the whole cost (§2.3). |
+| **Drone** | 1 turn | 40 | 40 | **[START]/experiment (#273).** Launch a drone from the cell you stand on and **fly it yourself**: your input moves the machine and your body stands still, so every drone move is a full turn the guards get (§4.2) while nobody is watching where you left yourself. Press again and the controls come back — **free** (§4.4), and the window does **not** end: the drone holds the cell you left it in and keeps feeding you its camera for the rest of the duration, and you can take the controls back later for the price of a turn. **One clock covers both halves**, which is the design: how much of the 40 you spend flying rather than watching is the decision the ability sells, and the bar's `[N]` means *turns of machine* throughout (appendix 45). Its camera is the full **360°** at `DRONE_SIGHT_RANGE` (**8** **[START]**) and is unioned into your own sight — your eyes keep working — and what it sees is remembered (§11.5a). The **guard sense (§9) is not widened with it**: that is your body's channel, and your body is what this costs. It **respects the building at its own scale**: everywhere a person could squeeze, plus **over a table** and **through a shut door's ventilation holes** — it is hand-sized and airborne — but never a wall, a **door frame**, a duct entry or a solid usable (`Terrain::admits_drone`). It crosses a shut door **without opening it**, which is the difference between reading a wing and unlocking one; the consequence worth stating is that a closed-door wing is scoutable and a Lockdown seals nothing against a camera. It is **not an actor** (nothing blocks it, it blocks nothing, no door shuts on it), has **no interaction verb at all** — it opens nothing, takes nothing, wins nothing — and **guards cannot perceive it** in any way. While flying, every other ability is greyed and refused: your hands are on the controls. **Launching, and taking the controls back, needs you on your feet** — a crawlspace refuses both (§10.7), because a body nothing can reach pays nothing, and the exposed body is the whole cost (§2.3). |
 
 Notes carried forward, because they are good and non-obvious:
 
@@ -3643,10 +3667,14 @@ bullet below fills one of its seams.
     stock is drawn from the facility's own seed, so a building is stocked before anyone
     breaks into it, and meeting tech you already carry is **bad luck** rather than
     something the world rearranges itself to prevent. Appendix 40.
-  - **The §8.3 held cap is enforced at the crate.** A run carries three pieces of tech;
-    a bump with no room for a fourth — or on a duplicate — is **refused for free** and
-    says which, leaving the crate standing for a run that comes back with a free hand.
-    The exchange that makes a full run's choice interesting is #266's.
+  - **The §8.3 held cap is kept at the crate, and it is a choice rather than a wall**
+    (#266). A run carries three pieces of tech; a bump with no room for a fourth opens
+    the **exchange** — drop one of your three for the crate's, or decline and leave it
+    standing. The trade spends the turn a salvage would have and the decline is free; a
+    bump on a **duplicate** is still the one refusal, because there is no decision in a
+    second copy — except where that tech has a spent per-level budget (§8.2), which the
+    duplicate refills. This is what makes the tech axis a shape rather than a queue: the fourth
+    crate of a run is where you start saying what this run *is*. Appendix 44.
   - **Found tech is usable the turn it is found**, in the facility it was found in.
     A reward that only switched on after extraction would make the detour a deposit
     toward a later raid rather than a tool for this one.

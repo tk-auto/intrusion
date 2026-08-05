@@ -107,6 +107,21 @@ pub enum AbilityState {
     /// Not usable right now for a reason other than cooldown — no adjacent target
     /// for a takedown, no body to drag (§8.3). Discoverable, but greyed.
     Unusable,
+    /// **The tech an open crate is offering** (§8.3/#266) — not held, not a clock, and
+    /// the one entry on an exchange's bar row that is not already yours.
+    ///
+    /// It exists because the exchange is drawn on the ability bar rather than in a
+    /// modal of its own ([`State::exchange`](crate::State::exchange)): the row lists the
+    /// four candidates and the player presses the one to drop, so exactly one of them
+    /// has to read as *the new one*.
+    ///
+    /// It says so in **colour alone** — Interest, the reward channel of the `¤` it came
+    /// out of, against the three Owned entries beside it (§11.2) — and carries no
+    /// notation of its own. It wore a `(+)` first, and the mark was redundant the moment
+    /// the row started drawing its slot numbers: three cells spent restating what the
+    /// colour already says, on the one row where the width is worth spending on the
+    /// **keys** instead.
+    Offered,
 }
 
 impl AbilityState {
@@ -126,6 +141,9 @@ impl AbilityState {
             AbilityState::Cooling { remaining } => format!("/{remaining}/"),
             AbilityState::Limited { uses } => format!("({uses})"),
             AbilityState::Passive => PASSIVE_MARKER.to_string(),
+            // An exchange candidate draws its bare name (#266): the row is a choice, not
+            // a readout, and which entry is the crate's is said in colour.
+            AbilityState::Offered => String::new(),
             // Spent is unusable, and says so in the one word the bar has for it.
             AbilityState::Exhausted | AbilityState::Unusable => "—".to_string(),
         }
@@ -250,7 +268,7 @@ const fn max_state_notation() -> usize {
 
 /// The longest [`AbilityId::bar_name`], in cells. Byte length **is** cell width
 /// because the names are ASCII, which [`bar_names_are_ascii`] pins right below.
-const fn max_bar_name() -> usize {
+pub(crate) const fn max_bar_name() -> usize {
     let mut widest = 0;
     let mut i = 0;
     while i < AbilityId::ALL.len() {
@@ -682,6 +700,20 @@ impl Loadout {
     #[must_use]
     pub fn with(mut self, id: AbilityId) -> Self {
         self.present[id.index()] = true;
+        self
+    }
+
+    /// The same loadout with `id` **gone** — the exchange's half of [`with`](Self::with)
+    /// (§8.3/#266): what a run gives up to make room for what a crate is offering.
+    ///
+    /// The one way a loadout shrinks, and it is deliberately as blunt as `with`: it
+    /// removes what it is told to and asks nothing about caps or innateness, because
+    /// *which* ability may be traded away is the exchange's question
+    /// ([`Exchange`](crate::Exchange)) and not the set's. A no-op for an ability the
+    /// loadout does not hold.
+    #[must_use]
+    pub fn without(mut self, id: AbilityId) -> Self {
+        self.present[id.index()] = false;
         self
     }
 
@@ -1141,10 +1173,15 @@ const SAVER: Ability = Ability {
 // **One duration for both halves, and that is the design** (#273). Activating launches
 // the drone and hands it the controls; pressing again hands them back, **free** (§4.4)
 // — and the drone stays out there, hovering, feeding you its camera for whatever is
-// left of the window. So the 30 turns are not "30 turns of flying": they are 30 turns
+// left of the window. So the 40 turns are not "40 turns of flying": they are 40 turns
 // of *machine*, and how much of that you spend flying versus watching is the whole
 // decision. Two clocks would have made that a pair of numbers the player has to add up,
 // and the bar can honestly show only one of them (§8.2's timing rule).
+//
+// **40 rather than the 30 it opened at**, retuned on the first play-through: 30 buys
+// enough machine to fly somewhere *or* to leave a camera behind, and not enough to do
+// both — which collapses the decision the single clock exists to create. The lockout
+// absorbs the extra turns whole.
 //
 // **What it costs** (§2.3). Every turn you fly is a turn your body stands still in a
 // patrolled building while you look somewhere else: the guard phase runs (§4.2), capture
@@ -1155,12 +1192,12 @@ const SAVER: Ability = Ability {
 // therefore answered by geometry: you fly from somewhere nobody walks, and if you have
 // nowhere like that, you do not fly.
 //
-// The lockout is 30 + 40 = **70**, the longest in the catalogue, because information is
-// the thing §11.5a most deliberately withholds and a run that could re-scout every
-// twenty turns would never have to plan under fog at all.
+// The lockout is 40 + 40 = **80**, comfortably the longest in the catalogue, because
+// information is the thing §11.5a most deliberately withholds and a run that could
+// re-scout every twenty turns would never have to plan under fog at all.
 const DRONE: Ability = Ability {
     id: AbilityId::Drone,
-    mode: activated(1, TargetingMode::Itself, 30, 40),
+    mode: activated(1, TargetingMode::Itself, 40, 40),
     uses: None,
     behaviour: Behaviour::Coded,
 };
@@ -1378,6 +1415,38 @@ impl Deck {
         self.uses[id.index()]
     }
 
+    /// Whether `id`'s **per-level budget is short** of what the level granted
+    /// (§8.2/#302) — the question a duplicate crate asks (#266): is there anything here
+    /// worth taking, for a run that already holds this tech?
+    ///
+    /// `false` for an ability with no budget, and for one that has spent none of it:
+    /// in both cases a second copy would restore nothing, and a bump that changes
+    /// nothing must cost nothing (§4.4).
+    pub(crate) fn uses_spent(&self, id: AbilityId) -> bool {
+        matches!(
+            (self.uses[id.index()], id.def().uses_per_level()),
+            (Some(left), Some(granted)) if left < granted
+        )
+    }
+
+    /// **Refill `id`'s per-level budget** from its own §8.3 row (§8.2/#302/#266) — what
+    /// a crate holding tech the run already carries pays out.
+    ///
+    /// This is the one and only way a budget ever goes back up, and §8.2's fence is
+    /// otherwise unmoved: nothing regenerates, nothing ticks it up, no console tops it
+    /// up, and it is still a bound on the facility rather than a resource to manage.
+    /// What it takes is **another copy of the tool itself**, found in a crate that is
+    /// then spent — bounded by how many crates the building hides, which is the same
+    /// scarcity the §14 v3 flavour already sets.
+    ///
+    /// Back to **full**, not up by one: the level's grant is the number the row states,
+    /// and a partial refill would put a second number on the same axis for no gain.
+    pub(crate) fn recharge(&mut self, id: AbilityId) {
+        if let Some(granted) = id.def().uses_per_level() {
+            self.uses[id.index()] = Some(granted);
+        }
+    }
+
     /// The run's loadout — the abilities it holds (#244), for the UI line to list
     /// and a test to assert what was resolved.
     pub(crate) fn loadout(&self) -> Loadout {
@@ -1397,11 +1466,36 @@ impl Deck {
     /// budget (§8.2/#302), and rebuilding the deck to achieve that would instead reset
     /// the clocks and budgets of everything the run was already carrying.
     ///
-    /// Idempotent. Nothing here enforces the §8.3 held cap: the cap and its discard
-    /// prompt are #266's, and silently dropping a pickup the player was never told about
-    /// is the failure that ticket exists to avoid.
+    /// Idempotent. Nothing here enforces the §8.3 held cap, and that is deliberate: the
+    /// cap is kept at the **crate**, where a full run is offered the exchange instead
+    /// (#266, [`Exchange`](crate::Exchange)) — that is the one moment the player can be
+    /// told. A silent cap in here would drop a find nobody was warned about, which is
+    /// the failure the exchange exists to avoid.
     pub(crate) fn grant(&mut self, id: AbilityId) {
         self.loadout = self.loadout.with(id);
+    }
+
+    /// **Trade `id` away** (§8.3/#266): drop it from the loadout, so the run stops
+    /// holding it from this turn on — the exchange's half of [`grant`](Deck::grant).
+    ///
+    /// It **switches the ability off first**, and that is the whole subtlety here: an
+    /// activated ability is *in effect* by its slot alone ([`in_effect`](Deck::in_effect)),
+    /// not by loadout membership, so an ability dropped mid-window would keep running
+    /// with nothing on the bar to say so. Ending it first is the same free toggle-off
+    /// §8.2 already defines, and it refunds nothing — the cooldown it leaves behind
+    /// simply belongs to an ability the run no longer has.
+    ///
+    /// The slot and the per-level budget are otherwise **left where they are**. Dropping
+    /// an ability is not a way to launder its clocks: a run that trades tech away and
+    /// finds the same tech again later picks it up exactly as cool — or as spent — as it
+    /// put it down, which is what stops drop-and-refind being a free recharge.
+    ///
+    /// The state a *world* has to unwind with it — a decoy standing on the board, a
+    /// lockdown's seals — is the turn loop's, not the deck's, and rides the same path
+    /// an early toggle-off takes ([`State::step`](crate::State::step)).
+    pub(crate) fn revoke(&mut self, id: AbilityId) {
+        self.deactivate(id);
+        self.loadout = self.loadout.without(id);
     }
 
     /// Activate `id` if the run holds it and it is [`Ready`](Slot::Ready). Returns

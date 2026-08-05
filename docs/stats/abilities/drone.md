@@ -1,6 +1,6 @@
 # Drone
 
-**Salvaged tech (§8.3/#273)** — 1 turn to press, duration **30**, cooldown **40**,
+**Salvaged tech (§8.3/#273)** — 1 turn to press, duration **40**, cooldown **40**,
 `Behaviour::Coded` (§8.1's escape hatch, and the case the design names by hand).
 Activating launches a drone from the cell you are standing on and **hands it your
 input**: `Step` flies the machine and your body stands still. Pressing again hands the
