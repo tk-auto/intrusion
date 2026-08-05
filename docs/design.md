@@ -286,6 +286,11 @@ If you are adding an ability and about to make it free, re-read §2.3.
   > records why it is shaped this way and what the sim measured, which is that a bot
   > handed a free first capture wins nearly twice as often. Promote to a §12.6
   > modifier, retune, or reject — but do not read it as softening the rule above.
+  > **If it proves too strong the budget is already at its floor**, so the two levers
+  > are changes to the effect: leave the player **stunned for N turns** after the save
+  > (§8.3's eject stun, so being caught still costs the position it was caught in), or
+  > **stun the guard instead of taking it down** — one capture *deferred* rather than
+  > refunded, which loses the free body along with it. Appendix 43 weighs both.
 - **Being seen is not losing.** It is the beginning of a problem.
 - **Win: grab the intel, then return to your entry point.** You leave the
   way you came in — and the way you came in is a **place**, not a tile (§10.7/#466).

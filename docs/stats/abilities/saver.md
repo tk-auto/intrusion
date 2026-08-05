@@ -64,8 +64,9 @@ and will take a 5% capture risk forever, so it walks into the moment this abilit
 out far more often than a frightened human does. The honest statement is the one the
 numbers support — the ability is nowhere near inert, and it is strong for a player who
 gets caught. Whether it flattens a *human* run's stakes is a question for the playtest,
-not for this page. If it is retuned, the knob is `SAVER_USES` and the direction is not
-up.
+not for this page. `SAVER_USES` is already at its floor, so a retune is a change to the
+effect: appendix 43 records the two candidates — stunning the player for N turns after
+the save, or stunning the guard rather than taking it down.
 
 ## History
 

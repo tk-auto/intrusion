@@ -2516,6 +2516,36 @@ this appendix reports a measurement and not a balance decision. What the numbers
 establish is that the ability is nowhere near inert, and that if it is retuned the knob is
 `SAVER_USES` and the direction is not up.
 
+### If it needs nerfing, two levers before the budget
+
+`SAVER_USES` is the obvious knob and it is already at its floor — one — so a version
+that is too strong cannot simply be turned down. Two changes to the *effect* are on the
+table instead, and they are recorded here so that a later playtest verdict has somewhere
+to start rather than reopening the whole design:
+
+- **Stun the player for N turns after the save.** The escape stops being clean: you
+  survive, but you spend the next few turns unable to act while the guards keep moving
+  — §8.3's safety-eject stun applied to a different rescue, and the machinery for it
+  already exists (`Ejected`'s "every key is swallowed, the turn is spent"). It attacks
+  exactly the thing the sim measured: the bot's saved runs mostly continue as if nothing
+  happened, and a stun means being caught still costs you the position you were caught
+  in. The number would be a fresh **[START]**, and the honest starting guess is small —
+  two or three — because a long stun in a room with a second guard is just a slower
+  capture, which is the §2.2 death this ability exists to avoid.
+- **Stun the guard instead of taking it down.** The gentler and more interesting of the
+  two: the guard that grabbed you is put down for a while (§8.3's Confusion daze is the
+  existing vocabulary) and then **gets up**. You lose the free takedown and the body,
+  which is a real loss — a takedown is permanent and a daze is not — and you gain a
+  guard who knows exactly where you were. It also changes what the ability *is*: from
+  "one capture refunded" to "one capture deferred", which is a much smaller promise and
+  may be the right size for an exception to a **[SETTLED]** rule. The cost is that the
+  §7.2/§7.3 body economy stops paying, so the save no longer prices itself; whatever
+  replaces it would have to.
+
+They are not exclusive, and the first is the smaller change. Neither should be tried
+before a human has played the ability — the sim cannot tell a strong ability from a
+frightening one.
+
 ### What is not open
 
 That it is an **exception**, and stays declared as one. It is written into §4.5 beside the

@@ -1105,6 +1105,13 @@ const LOCKDOWN: Ability = Ability {
 // than only in the ones that ask for it by name. That is the experiment (§14) — trial,
 // measure, promote or reject — and the sim is what watches whether a run whose worst
 // moment is survivable once has stopped taking capture seriously (§13.2/§13.4).
+//
+// **If it proves too strong, [`SAVER_USES`] is already at its floor.** The two levers
+// are on the effect rather than the budget, and appendix 43 weighs them: leave the
+// player **stunned for N turns** after the save (§8.3's eject stun — so being caught
+// still costs the position it was caught in), or **stun the guard rather than take it
+// down**, which turns one capture refunded into one capture deferred and gives up the
+// free body with it.
 const SAVER: Ability = Ability {
     id: AbilityId::Saver,
     mode: AbilityMode::Passive,
