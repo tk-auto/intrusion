@@ -406,6 +406,45 @@ mod tests {
         }
     }
 
+    /// §12.6/#495: **an easier quick-play draw really can deal the short-sighted
+    /// guards.** Membership in [`POOL`] is what makes an entry reachable, but what a
+    /// *player* meets is `LevelSeed::quick_play_at`, which composes the draw onto the
+    /// quick-play base with [`LevelModifiers::union`] — so this walks that whole path
+    /// and insists the modifier actually arrives at the far end of it.
+    ///
+    /// Stated over a sweep rather than on one seed: the draw is a shuffle over the
+    /// easier half, so no single `(level, seed)` is guaranteed to pick any one entry.
+    /// Both easier stops are checked, because `−1` drawing one modifier from five and
+    /// `−2` drawing two are different questions, and an entry that only ever landed at
+    /// the deeper stop would be half in the pool.
+    #[test]
+    fn an_easier_quick_play_draw_deals_the_short_sighted_guards() {
+        use crate::level_seed::LevelSeed;
+
+        for position in [Difficulty::Easier, Difficulty::MuchEasier] {
+            let dealt = crate::test_support::seed_sweep(64)
+                .into_iter()
+                .filter(|&seed| {
+                    LevelSeed::quick_play_at(seed, position)
+                        .modifiers
+                        .narrowed_guard_cones
+                })
+                .count();
+            assert!(
+                dealt > 0,
+                "{position:?} never deals the short-sighted guards over 64 seeds — the \
+                 entry is in the pool but not reaching quick play",
+            );
+            // …and it is one pick among several, not the only thing the stop ever
+            // deals. A stop that dealt it *every* seed would mean the easier half had
+            // collapsed to one entry.
+            assert!(
+                dealt < 64,
+                "{position:?} deals it on every seed — the easier half has collapsed",
+            );
+        }
+    }
+
     /// **What a difficulty draw may do to the building** (#518) — three tiers, and the
     /// point of pinning them is that a modifier can only move between tiers deliberately.
     ///

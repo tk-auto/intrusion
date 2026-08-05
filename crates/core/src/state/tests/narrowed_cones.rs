@@ -1,7 +1,8 @@
 //! The `narrowed_guard_cones` modifier through a generated level (§6.1/§7.6/§12.6/#495).
 //!
-//! An **easier** level modifier: every guard's cone is shorter and thinner
-//! ([`GuardSight::NARROWED`]) — the same building, the same guards, less reach each.
+//! An **easier** level modifier: every guard's cone is shorter
+//! ([`GuardSight::NARROWED`]) — the same building, the same guards, §7.1's own ~90°
+//! wedge, less reach each.
 //!
 //! The **cone** itself and the §7.6 zones it carries are pinned next door, in
 //! `guard::tests` — the subset, the touching ring, the three detection rungs on a
@@ -52,16 +53,31 @@ fn the_modifier_resolves_into_the_guard_sight_and_nothing_else() {
 /// §12.6/§2.3/#495 — **the directional assertion**, in the strongest frame there is:
 /// the same seed, the same building, the same guards standing in the same cells facing
 /// the same way, so on turn one every guard's detection set is a **subset** of what it
-/// watched at baseline, and the level's watched ground is strictly smaller.
+/// watched at baseline.
 ///
-/// Turn one is where the claim can be exact rather than distributional, and that is not
+/// Turn one is where the subset can be exact rather than distributional, and that is not
 /// a weaker statement than it looks: a cone is also what a §7.5 patrol *inspects*, so
 /// from turn two the two arms send their guards down different legs and the comparison
-/// stops being cell-for-cell. The run-long version of the same claim is the sweep
-/// below.
+/// stops being cell-for-cell. The run-long version of the same claim is the sweep below.
+///
+/// **The "it really bites" half is stated over the sweep, not per seed**, and the reason
+/// is the modifier's own character rather than a weakened claim. This one shortens the
+/// **reach** and leaves §7.1's wedge alone (appendix 50), so on a seed where every guard
+/// happens to open facing into a room shallower than 6 cells the walls were already
+/// doing the work and turn one is legitimately identical — which is the same §10.1a fact
+/// that makes a shortened cone a one-guard step rather than a three-guard one. So: never
+/// more ground than baseline on any seed, strictly less in total, and less on a clear
+/// majority of seeds.
 #[test]
 fn every_guard_watches_a_subset_of_what_it_watched_at_baseline() {
-    for seed in seed_sweep(32) {
+    /// How many of the swept seeds must open with visibly less ground watched. The
+    /// measured share is well above this; the margin is for the seeds whose guards all
+    /// face short rooms, where walls already bound the baseline's cone.
+    const SHRINKS_ON: f64 = 0.5;
+
+    let seeds = seed_sweep(32);
+    let (mut shrank, mut narrowed_total, mut baseline_total) = (0usize, 0usize, 0usize);
+    for &seed in &seeds {
         let baseline = level(seed, false);
         let narrowed = level(seed, true);
         for (i, (dim, full)) in narrowed.guards().iter().zip(baseline.guards()).enumerate() {
@@ -77,11 +93,26 @@ fn every_guard_watches_a_subset_of_what_it_watched_at_baseline() {
                 "seed {seed}: guard {i} watches ground the baseline's does not",
             );
         }
+        let (dim, full) = (watched(&narrowed).len(), watched(&baseline).len());
         assert!(
-            watched(&narrowed).len() < watched(&baseline).len(),
-            "seed {seed}: the modifier is a facade — the same ground is watched (§2.3)",
+            dim <= full,
+            "seed {seed}: more ground watched than baseline"
         );
+        shrank += usize::from(dim < full);
+        narrowed_total += dim;
+        baseline_total += full;
     }
+    assert!(
+        narrowed_total < baseline_total,
+        "the modifier is a facade — the same ground is watched (§2.3): \
+         {narrowed_total} against {baseline_total}",
+    );
+    assert!(
+        shrank as f64 >= seeds.len() as f64 * SHRINKS_ON,
+        "only {shrank} of {} seeds open with less ground watched — the shortened cone \
+         is not reaching past the walls often enough to be a rule",
+        seeds.len(),
+    );
 }
 
 /// §12.6/§2.3/#495: the run-long half of the claim. Over a long idle sweep — the guards

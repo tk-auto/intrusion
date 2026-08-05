@@ -1561,7 +1561,7 @@ fn a_player_beyond_the_glimpse_range_is_not_seen() {
     assert_eq!(guard.state(), GuardState::Calm, "> 10 detects nothing");
 }
 
-/// §7.6/§12.6/#495: **the two zones survive a narrowed cone**, which is the whole of
+/// §7.6/§12.6/#495: **the two zones survive a shortened cone**, which is the whole of
 /// the zone decision the modifier had to make. The zones are the cone's own halves, so
 /// a shorter cone keeps a certain zone, a glimpse ring outside it and a gone zone
 /// beyond — all three rungs, on a cone barely over half the length.
@@ -1574,11 +1574,15 @@ fn a_player_beyond_the_glimpse_range_is_not_seen() {
 fn a_narrowed_cone_keeps_both_detection_zones() {
     let sight = GuardSight::NARROWED;
     assert!(sight.range < GuardSight::BASELINE.range, "shorter");
-    assert!(sight.arc < GuardSight::BASELINE.arc, "and thinner");
+    assert_eq!(
+        sight.arc,
+        GuardSight::BASELINE.arc,
+        "…and the wedge is §7.1's own: this modifier moves the reach, not the arc",
+    );
 
     let facility = Facility::walled_box(11, 20);
-    // Straight down the cone's axis, so the thinner arc cannot be what excludes a
-    // cell: only the range and the zones are under test here.
+    // Straight down the cone's axis, so nothing but the range and the zones can be
+    // what excludes a cell.
     let at = |depth: u32| Cell::new(5, 2 + depth);
     let look = || {
         let mut guard = Guard::stationary(Cell::new(5, 2)); // faces south (§7.1)
@@ -1621,12 +1625,13 @@ fn a_narrowed_cone_keeps_both_detection_zones() {
     );
 }
 
-/// §6.1/§12.6/#495: a narrowed cone is a **subset** of the baseline's from the same
-/// cell and facing — shorter *and* thinner, never merely different — and both keep
-/// §6.1's touching ring, which is not the modifier's to bend.
+/// §6.1/§12.6/#495: a shortened cone is a **subset** of the baseline's from the same
+/// cell and facing — shorter, never merely different — and it keeps both §6.1's
+/// touching ring and §7.1's own ~90° silhouette, neither of which is the modifier's to
+/// bend.
 ///
-/// Stated on open floor so the claim is about the arc and the range rather than about
-/// which wall happened to be in the way.
+/// Stated on open floor so the claim is about the range rather than about which wall
+/// happened to be in the way.
 #[test]
 fn a_narrowed_cone_is_a_strict_subset_of_the_baseline_cone() {
     let facility = Facility::walled_box(31, 31);
@@ -1648,15 +1653,17 @@ fn a_narrowed_cone_is_a_strict_subset_of_the_baseline_cone() {
         narrowed.len(),
         baseline.len(),
     );
-    // Shorter: the far half of the axis is gone. Thinner: a cell the ~90° wedge
-    // covers at width is not in the ~53° one, at a depth both cones still reach.
+    // Shorter: the far half of the axis is gone…
     assert!(
         baseline.contains(&Cell::new(15, 23)) && !narrowed.contains(&Cell::new(15, 23)),
         "shorter — 8 down the axis is inside the baseline cone alone",
     );
+    // …and no thinner: the ~90° wedge's own 45° diagonal is still covered at every
+    // depth the shortened cone reaches. This is the assertion that would fail if the
+    // arc were ever quietly folded back into this modifier.
     assert!(
-        baseline.contains(&Cell::new(19, 19)) && !narrowed.contains(&Cell::new(19, 19)),
-        "thinner — the 45° diagonal at depth 4 is inside the baseline cone alone",
+        narrowed.contains(&Cell::new(19, 19)),
+        "the wedge is §7.1's own — the 45° diagonal at depth 4 is still seen",
     );
     for ring in [Cell::new(15, 16), Cell::new(14, 16), Cell::new(16, 16)] {
         assert!(

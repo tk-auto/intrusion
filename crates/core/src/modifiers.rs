@@ -761,9 +761,16 @@ pub struct LevelModifiers {
     /// why the gated doors have to shut themselves, why the lock refuses entry and never
     /// exit, and what the §10.6 guarantee had to grow.
     pub prize_room_locked: bool,
-    /// **Easier.** Every guard's cone is **shorter and thinner** (§6.1/§7.1/§7.6/#495):
-    /// [`GuardSight::NARROWED`](crate::GuardSight::NARROWED) — a ~53° wedge out to 6,
-    /// where §7.1's is ~90° out to 10. Baseline, every guard sees §7.1's own cone.
+    /// **Easier.** Every guard's cone is **shorter** (§6.1/§7.1/§7.6/#495):
+    /// [`GuardSight::NARROWED`](crate::GuardSight::NARROWED) — §7.1's own ~90° wedge,
+    /// out to 6 instead of 10. Baseline, every guard sees §7.1's own cone.
+    ///
+    /// **The arc is not part of it**, and that was measured rather than assumed.
+    /// §6.2's tier ladder offers a guard exactly one narrower arc, and appendix 50's
+    /// sweep put that rung at ~25 points of bot win rate against the shortened range's
+    /// ~8 — a step so large it reads as a different guard rather than an easier one. So
+    /// this modifier moves the range and leaves the wedge alone; giving the arc
+    /// settings between its two would be its own piece of work.
     ///
     /// **A different kind of easier entry, and that is the whole argument for it.**
     /// Every other easier field here hands over **information**
@@ -797,8 +804,8 @@ pub struct LevelModifiers {
     ///
     /// **Not the same lever as the retired slot 5**
     /// ([`calm_guards_detect_only_their_cone`], #410/appendix 28), which changed what
-    /// counted as detection *within* the ring. This changes the cone itself, and the two
-    /// compose: a narrowed Calm guard detects exactly its narrowed wedge.
+    /// counted as detection *within* the ring. This changes the cone's reach, and the
+    /// two compose: a short-sighted Calm guard detects exactly its own shortened wedge.
     ///
     /// [`always_show_vision_cones`]: LevelModifiers::always_show_vision_cones
     /// [`layout_knowledge`]: LevelModifiers::layout_knowledge
@@ -1037,12 +1044,13 @@ const LOCKED_PRIZE_ROOM: ActiveModifier = ActiveModifier {
 /// Named for the **cones**, not for the guards (#495). "Guards: short-sighted" would
 /// collide with the guard-count knob's own `Guards` rows on a card that draws both, and
 /// the cone is the thing a player already reads off the §11.5 overlay — so the caption
-/// names what visibly changed on the board. The detail carries both halves, because a
-/// cone that were only shorter and a cone that were only thinner are different runs.
+/// names what visibly changed on the board. The detail says *shorter* and only that: it
+/// is the whole of the change, and a player who read "narrower" and then watched a
+/// full-width wedge sweep past them would be right to distrust the card.
 const NARROWED_CONES: ActiveModifier = ActiveModifier {
     name: "Guard cones",
     direction: ModifierDirection::Easier,
-    detail: Some("shorter and thinner"),
+    detail: Some("shorter"),
 };
 
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {

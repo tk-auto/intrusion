@@ -64,25 +64,20 @@ pub const ENHANCED_SIGHT_RANGE: u32 = 20;
 pub const GUARD_SIGHT_RANGE: u32 = 10;
 /// A guard's sight arc (§7.1/§6.2): width 2, the ~90° forward wedge. **[START]**
 pub const GUARD_SIGHT_ARC: u8 = 2;
-/// A **narrowed** guard's sight range (§7.1/§12.6/#495) — a 13×13 box, down from
+/// A **short-sighted** guard's sight range (§7.1/§12.6/#495) — a 13×13 box, down from
 /// §7.1's 21×21. **[START]**
 ///
 /// The shortest reduction that leaves the §7.6 two-zone structure intact: the zones
 /// are the cone's own halves ([`GuardSight::certain_range`]), so 6 keeps a certain
 /// zone of 3 and a glimpse ring of 4–6, and anything shorter leaves a ladder too
 /// short to have two rungs worth naming.
-pub const NARROWED_GUARD_SIGHT_RANGE: u32 = 6;
-/// A **narrowed** guard's sight arc (§7.1/§6.2/§12.6/#495): width 1, so only the
-/// cell directly ahead of the guard is a transparent ring neighbour and the two
-/// forward diagonals join the artificial walls that carve the cone — a ~53° wedge
-/// where §7.1's is ~90°. **[START]**
 ///
-/// The only value below the guard's own on §6.2's tier ladder, which is what makes
-/// *"thinner"* mean exactly one thing here. It carves the silhouette and nothing
-/// else: what a guard **detects** at its own ring is [`BlindTier`]'s business, so a
-/// narrowed guard still notices whatever its mood leaves live there, and a player
-/// still cannot stand in front of one for free.
-pub const NARROWED_GUARD_SIGHT_ARC: u8 = 1;
+/// **The arc is deliberately not touched with it.** §6.2's ladder gives a guard only
+/// two settings — its own ~90° wedge and the ~53° one a rung down — and the sweep
+/// behind appendix 50 measured that rung as worth ~25 points of bot win rate against
+/// the range's ~8. That is not a difficulty step, it is a different guard; the range
+/// alone is the step this modifier wanted, and a finer arc is its own piece of work.
+pub const NARROWED_GUARD_SIGHT_RANGE: u32 = 6;
 
 /// How much of a guard's **touching ring** (§6.1) is blind — the lowest §6.2 ring
 /// tier dropped from its detection set, and everything above it with it.
@@ -219,12 +214,13 @@ impl GuardSight {
         blind: BlindPolicy::FlankWhileCalm,
     };
 
-    /// **What the narrowed-cones modifier hands the player** (§12.6/#495): the same
-    /// guards, seeing a shorter and thinner piece of the same building. The ring carve
-    /// is untouched — the modifier bends what a guard can *reach*, never what it
-    /// notices beside it.
+    /// **What the short-sighted-guards modifier hands the player** (§12.6/#495): the
+    /// same guards, with the same ~90° wedge, seeing a **shorter** piece of the same
+    /// building. The arc and the ring carve are both untouched — the modifier bends
+    /// how far a guard can *reach*, never how wide it looks or what it notices beside
+    /// it.
     pub const NARROWED: Self = Self {
-        arc: NARROWED_GUARD_SIGHT_ARC,
+        arc: GUARD_SIGHT_ARC,
         range: NARROWED_GUARD_SIGHT_RANGE,
         blind: BlindPolicy::FlankWhileCalm,
     };

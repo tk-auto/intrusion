@@ -381,16 +381,18 @@ it trivialises the hiding game.
   cheap and was never noticed. Worth trying.
 - **A guard's arc and range are a level's, not a constant's** (§12.6/#495). §7.1's
   guard is the ~90° wedge out to 10 and every run plays it unless the difficulty draw
-  says otherwise; the *narrowed cones* modifier hands every guard a ~53° wedge out to
-  6 instead — the arc one rung down §6.2's tier ladder, so only the cell directly ahead
-  is a transparent ring neighbour. The **player's** sight is not on this seam and no
-  modifier moves it. Placement is not either: the §10.1.9 turn-one spawn check always
-  uses §7.1's own cone, so a shorter one cannot pass spawn cells the baseline refuses
-  and the ±N arms of a comparison stay the same building (§12.6). **This is a different
-  knob from the blind spot above**, on the same subsystem: the blind spot decides what a
-  guard's touching ring *detects*, this decides the shape of the cone itself, and
-  neither supersedes the other — a narrowed Calm guard detects exactly its narrowed
-  wedge.
+  says otherwise; the *short-sighted guards* modifier shortens the **reach** to 6 and
+  leaves the wedge alone. **The arc is deliberately not a difficulty knob**: §6.2's
+  ladder gives a guard exactly one narrower rung (~53°) and no settings in between, and
+  that rung measures at roughly three guards' worth of pressure (appendix 50) — a step
+  too large for an axis that promises *slightly easier*. Making the arc finer-grained is
+  its own piece of work. The **player's** sight is not on this seam and no modifier moves
+  it. Placement is not either: the §10.1.9 turn-one spawn check always uses §7.1's own
+  cone, so a shorter one cannot pass spawn cells the baseline refuses and the ±N arms of
+  a comparison stay the same building (§12.6). **This is a different knob from the blind
+  spot above**, on the same subsystem: the blind spot decides what a guard's touching
+  ring *detects*, this decides how far the cone reaches, and neither supersedes the
+  other — a short-sighted Calm guard detects exactly its own shortened wedge.
 - **The 8 cells immediately around a viewer are always seen** — with one
   exception, the guard rear blind spot below. For the **player** this is
   unqualified and **[SETTLED]**: you can never stand adjacent to the player
@@ -916,8 +918,8 @@ rule biting harder on contact. Every cone the game can deal keeps both zones, as
 at compile time. The Run relation follows the same proportion, and against a narrowed
 cone it overshoots — 5 cells of gain against a 3-cell gap — which is a break in the
 player's favour on the side of the axis where it belongs. Appendix 50 has the argument,
-and the measurement that separates the two halves of *"shorter and thinner"*: the arc
-carries five sixths of the modifier's effect, and the range is worth about one guard.
+and the measurement that kept the **arc** out of the modifier: the one narrower rung
+§6.2 offers is worth roughly three guards, where the shortened range is worth one.
 
 **2. Losing sight must lead to a search, not an instant give-up.**
 
@@ -3244,10 +3246,10 @@ the *when* is free and unconditional, and only the *where* is priced); *"locked 
 key-gates every doorway of the one room holding the facility's prize and puts a key on
 every guard (§10.4/#236 — harder, the **fifth** modifier read by generation, and the one
 that reaches *past* placement rather than into it: it draws nothing, so both settings are
-the same board and only one room's doorways differ); *"guard cones: shorter and thinner"*
-gives every guard a ~53° wedge out to 6 where §7.1's is ~90° out to 10, and §7.6's two
-zones shorten with it (§6.1/#495 — easier, and the first entry on that side that bends a
-rule rather than handing over knowledge or slack: see below); *"calm guards detect only their cone"* drops a **Calm**
+the same board and only one room's doorways differ); *"guard cones: shorter"*
+shortens every guard's reach from 10 to 6 — the same ~90° wedge, watched late — and
+§7.6's two zones shorten with it (§6.1/#495 — easier, and the first entry on that side
+that bends a rule rather than handing over knowledge or slack: see below); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
 wedge while a guard that is hunting still watches its sides (easier — an
 **experiment**, see below). This is the
@@ -3375,17 +3377,17 @@ been drawing no-ops.
 
 So the pool now holds **thirteen** entries, **eight harder and five easier**. The three
 admitted by #518 are all harder, which is why the sides stopped being the same depth;
-the narrowed cones (#495) are the first step back the other way. Nothing lies about the
+the short-sighted guards (#495) are the first step back the other way. Nothing lies about the
 gap (the slider's blurb counts *picks*, not pool depth), but a `+N` run still has more
 variety than a `−N` one, and the easier side is still the one to grow.
 
 **What kind of easier entry, not how many** (#495). Growing the easier side is not only
-arithmetic: every entry on it before the narrowed cones handed over **information**
+arithmetic: every entry on it before the short-sighted guards handed over **information**
 (*"all vision cones shown"*, *"full layout known"*, *"search areas shown"*) or **slack**
 (the guard count's easier end) — *knowledge or slack without touching the objective*,
 the family appendix 29 named, and one with a ceiling. There are only so many things left
 to reveal, and each one reveals a little more of the game the player is there to
-discover. The narrowed cones bend what a guard can **do** instead, so the easier side
+discover. The short-sighted guards bend what a guard can **do** instead, so the easier side
 now holds a rule-bending entry alongside its knowledge-and-slack ones — a facility with
 four short-sighted guards is a different problem from one with three ordinary ones,
 rather than another window onto the same run. That is the axis the easier side has left
@@ -3405,8 +3407,8 @@ five easier ones, ±2 are both genuine draws that differ by seed. The easier sid
 be two deep and therefore exhaustive at −2 — the cost appendix 29 stated rather than hid
 — and what closed it is the guard count's easier end (#232), exactly the "knowledge or
 slack without touching the objective" that appendix said would; the shown search areas
-(#224) are the third of that kind, and the narrowed cones (#495) take −2 to a draw of
-two-from-five.
+(#224) are the third of that kind, and the short-sighted guards (#495) take −2 to a draw
+of two-from-five.
 
 Relaxing the **intel gate** would have been the other candidate, and it is still not
 taken: the gate is a knob `union` composes harder-ward, and quick play already sits at

@@ -3473,7 +3473,7 @@ actually hold. #258 is where that question gets answered properly.
 
 ---
 
-## Appendix 50 — Blind guards: the zones follow the cone, and the arc is where the pressure is
+## Appendix 50 — Short-sighted guards: the zones follow the cone, and the arc stays out of it
 
 *(§6.1 the cone and the blind spot, §7.6 two-zone detection, §12.6 the directed pool
 and the same-building guarantee, §10.1.9 placement. The ticket is #495.)*
@@ -3487,7 +3487,8 @@ is there to discover. This is the first easier entry that bends what a guard can
 Four short-sighted guards is a different problem from three ordinary ones — more bodies
 to route around, less reach each — rather than another window onto the same run.
 
-Three things had to be decided to ship it, and two of them cost the measurement below.
+The ticket asked for a cone that was **shorter and thinner**. What shipped is shorter
+only, and the arc is the interesting half of this ruling.
 
 ### 1. The zones are the cone's halves, not two absolutes
 
@@ -3500,15 +3501,15 @@ hand back.
 
 So the zones are stated as a proportion of the cone: **certain is its inner half,
 glimpse the rest**. At §7.1's range 10 that is exactly `5` and `6–10` — the baseline is
-untouched, which is what made this the cheap answer rather than a retune. A narrowed
-guard gets `3` and `4–6`: both zones shorter, the modifier easier in both. The
-invariant — every cone has a certain zone at least a cell deep and a glimpse ring
+untouched, which is what made this the cheap answer rather than a retune. A
+short-sighted guard gets `3` and `4–6`: both zones shorter, the modifier easier in both.
+The invariant — every cone has a certain zone at least a cell deep and a glimpse ring
 outside it — is asserted at **compile time** over every sight configuration the game can
 deal, the way §7.3's radio relations are, so a future cone that collapsed the ladder
 fails the build rather than a playtest.
 
 One relation moves and it moves the right way. §7.6 designed Run's gain to be *exactly*
-the certain→glimpse distance; against a narrowed cone the gain overshoots — 5 cells
+the certain→glimpse distance; against a shortened cone the gain overshoots — 5 cells
 against a 3-cell gap — so breaking contact is easier than designed. On the easier side,
 that is the correct direction for a break.
 
@@ -3534,61 +3535,102 @@ keeps is worse than either answer. It had — `automatic_doors` reaches the carv
 `a_difficulty_draw_moves_the_building_only_where_it_is_meant_to`. Nothing needed
 correcting; this entry simply joins the strictest tier.
 
-### 3. The arc is the lever, the range is worth about one guard
+### 3. The arc is not a difficulty knob, because it has no small settings
 
-The numbers picked themselves only after a sweep. Four temperaments, 100 seeds each,
-`--modifier narrowed-guard-cones` against the stored baseline, over the 2×2 that
-separates the two halves of *"shorter and thinner"*:
+The obvious reading of *"shorter and thinner"* is that both halves are dials. They are
+not. The **range** is an integer with as many settings as you like; the **arc** is a
+rung on §6.2's five-tier ring ladder, and a guard has exactly one rung below its own —
+`arc 1`, a ~53° wedge where §7.1's is ~90°. There is nothing in between.
+
+The 2×2 that separates them, four temperaments, 100 seeds each, against the stored
+baseline:
 
 | arm | balanced | cautious | aggressive | careless | mean lift |
 |---|---|---|---|---|---|
 | baseline — arc 2, range 10 | 0.35 | 0.53 | 0.40 | 0.43 | — |
-| **shorter only** — arc 2, range 6 | 0.42 | 0.71 | 0.42 | 0.47 | +8 |
-| **thinner only** — arc 1, range 10 | 0.57 | 0.77 | 0.67 | 0.70 | +25 |
-| **shipped** — arc 1, range 6 | 0.63 | 0.89 | 0.72 | 0.68 | +30 |
+| **shorter** — arc 2, range 6 | 0.42 | 0.71 | 0.42 | 0.47 | **+8** |
+| thinner — arc 1, range 10 | 0.57 | 0.77 | 0.67 | 0.70 | +25 |
+| both — arc 1, range 6 | 0.63 | 0.89 | 0.72 | 0.68 | +30 |
 
-*(win rate; the lift is in points, meaned over the four profiles)*
+*(win rate; lift in points, meaned over the four profiles)*
 
-**The arc carries five sixths of it.** One rung down §6.2's tier ladder turns a ~90°
-wedge into a ~53° one, which halves the angular width at *every* depth — wall or no
-wall. The range is worth about **one guard** on its own (§10.2 puts a guard at 8–10
-points) and only ~5 more once the arc is already thin, because indoors the walls bound
-a guard's sight long before its range box does — the same fact §10.1a's corridor cap is
-stated against. Holding the arc at 1 and sweeping the range 8 → 7 → 6 moves nothing
-outside the noise, which is what first pointed at the arc.
+**The one available arc rung is worth 25 points, and §10.2 puts a guard at 8–10.** A
+single `−1` pick that hands back three guards' worth of pressure is not a difficulty
+step — it is a different guard, dealt to a player who asked for *slightly easier*. The
+range alone lands at +8, which is one guard: the step the axis actually promises. So the
+modifier ships as **range 6, arc untouched**, and a test asserts the 45° diagonal is
+still seen so the arc cannot be quietly folded back in later.
 
-**The two halves are not the same kind of change**, which the win rate alone hides.
-Thinner cuts detections on every profile (balanced 848 → 575, aggressive 728 → 591).
-Shorter *raises* them for the striking temperaments (aggressive 728 → **890**, careless
-1211 → 1154 — flat), because a shorter cone lets a player get closer before being seen,
-so a profile that wants to be close takes the invitation and is caught at close range
-more often. A thinner cone gives ground back at every distance; a shorter one trades
-distance for proximity. Both are easier on the win rate; only one of them is quieter.
+**The two halves are not even the same kind of change**, which the win rate hides.
+Thinner cuts detections on every profile. Shorter *raises* them for the striking
+temperaments (aggressive 728 → **890**, careless 1211 → 1154) — a shorter cone lets a
+player get closer before being seen, so a profile that wants to be close takes the
+invitation and is caught at close range more often. A thinner cone gives ground back at
+every distance; a shorter one **trades distance for proximity**, which is a more
+interesting rule and the one that reads as *short-sighted* rather than *inattentive*.
 
-Six is kept for what the sweep cannot measure: it is the half a player can **see**. A
-13×13 box against 21×21 reads plainly shorter on the §11.5 overlay, where 17×17 would
-be a caption more than a change — and it is the shortest reduction that leaves the
-ladder in §1 with two rungs worth naming.
+**A finer arc is the real missing knob, and it is its own work.** The cast is already
+rational-slope arithmetic (`min_col`/`max_col`/`is_symmetric` are integer rationals) and
+the tier trick is a special case of it — arc 2 is the forward quadrant at slope `1`, arc
+1 is the same sector clamped to `1/2`. An optional sub-tier slope clamp would give arcs
+of `3/4` or `2/3` and make the arc a dial rather than a cliff. Two things constrain it:
+the **[SETTLED]** touching ring is currently free *because* the out-of-arc ring cells are
+artificial walls and walls are marked seen, so a slope-carved arc has to reinstate the
+ring explicitly; and the tier ladder cannot be replaced wholesale, since the player's
+~180° and 360° arcs are not slope-bounded forward sectors. So the shape is *keep the
+tier, add a clamp inside it* — additive, and `BlindTier` (which carves detection after
+the cast) is untouched either way.
 
-**And it is the note for whoever retunes this.** If the `−N` step turns out too generous
-in play, the knob is the **arc**: widening it back to 2 gives roughly 25 of the 30 points
-back while keeping the cone visibly shorter. Shortening the range further buys almost
-nothing, and lengthening it back buys only about a guard.
+### 4. The variant that was tried and dropped: narrow only while moving
+
+*"You cannot scan properly while walking"* — give a guard the thin arc while it steps
+and §7.1's full wedge back whenever it stands (dwelling, rotating, held). It reads well
+and it is cheap: one bit on the guard, cleared at the head of each decision and set by
+the step that follows.
+
+It does not recover what it needs to. Against the both-halves arm it gives back about
+**5 of the 30 points** (balanced 0.63 → 0.58, cautious 0.89 → 0.85, aggressive 0.72 →
+0.65) and *raises* careless slightly. Guards spend **31.6%** of their turns standing —
+measured over 16 seeds × 200 turns — so two thirds of the time the rule is simply the
+thin arc, and the wide-arc third is spent on guards that are stationary and therefore
+the easiest kind to read and route around anyway.
+
+It also costs more than it looks. The §11.5 overlay **is** the detection set, so the red
+would change shape whenever a guard started or stopped walking — a cell flipping between
+safe and watched with the guard neither moving nor turning. And it points the wrong way
+against §7.5's dwell, which exists as *"a stationary window a Takedown can be lined up
+against"* (§153): the standing guard is precisely the one the design wants approachable,
+and this hands it back its widest arc.
+
+Dropped. The finer arc in §3 is the better answer to the same question, and it costs no
+new rule at all.
 
 ### What the batch says, and what it does not
 
-The lift is large — 25 to 36 points of win rate across the four temperaments, where
-§10.2 puts one guard at 8–10. Detections fall on every profile and `alert_peak_mean`
-falls on every profile: the pressure genuinely comes off. Diversity rises on three of
-four, so it is not buying safety by collapsing the run onto one line.
+`--modifier narrowed-guard-cones`, four temperaments, 100 seeds each, against the stored
+baseline:
 
-Two things move the *other* way and both are coherent. The striking profiles land **more
-takedowns** (aggressive 22→33, careless 21→34) and leave **more bodies found** (3→11,
-17→25), and `careless` reaches rung 3 on 22 seeds against 14. A shorter, thinner cone
-makes walking up behind a guard easier, so a temperament that wants the verb gets it
-more often — the same invitation the shorter-only arm above accepts — and a body left on the floor is still the loudest event in the game (§7.3).
-The noise does not go away; it moves from *"you were seen"* to *"you left something"*,
-which is the trade §7.2 prices and not a hole in the modifier.
+| profile | win rate | detections | alert_peak_mean | takedowns | bodies found |
+|---|---|---|---|---|---|
+| balanced | 0.35 → 0.42 | 848 → 553 | 0.76 → 0.52 | 0 → 0 | 0 → 0 |
+| cautious | 0.53 → 0.71 | 722 → 341 | 0.67 → 0.28 | 0 → 0 | 0 → 0 |
+| aggressive | 0.40 → 0.42 | 728 → **890** | 1.07 → 0.64 | 22 → 12 | 3 → 2 |
+| careless | 0.43 → 0.47 | 1211 → 1154 | 1.18 → 0.76 | 21 → 8 | 17 → 5 |
+
+**The run gets quieter on every profile** — `alert_peak_mean` falls across the board, and
+that is the clearest single reading of the modifier: the same raid, less of it noticed.
+The win-rate lift is real but modest and very unevenly spread: the **avoidant**
+temperaments take nearly all of it (+7 balanced, +18 cautious) and the **striking** ones
+barely move (+2, +4). That is the shape §3 predicts — a shorter cone rewards keeping
+your distance, and a profile that closes anyway simply meets the cone later and nearer.
+
+Which is also why aggressive is **detected more** while winning slightly more often, and
+why both striking profiles land **fewer takedowns** (22 → 12, 21 → 8) and leave far fewer
+bodies (17 → 5 for careless). A shorter cone is not a longer approach window: the guard
+still watches its full ~90° wedge, it just watches it late, so the run that walks up to
+one has less warning rather than more room. The verb gets *harder* to set up, not easier
+— the opposite of what the thinner arc did, and worth knowing before anyone reads the two
+arms as interchangeable.
 
 **The bot plays this one honestly**, which is worth saying because most of the easier
 side it joins is bot-blind (§12.6/#518: three of the four existing easier entries are

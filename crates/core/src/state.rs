@@ -2568,8 +2568,8 @@ impl State {
     ///   resolved from the guard's mood at look time, so a guard's sides come back the
     ///   turn it stops being Calm, with no new state and no timer.
     /// - **The cone's shape is a level modifier** (§12.6/#495): the narrowed-cones draw
-    ///   hands every guard [`GuardSight::NARROWED`] — a shorter, thinner wedge — and
-    ///   with it §7.6's zones, which are that cone's own halves.
+    ///   hands every guard [`GuardSight::NARROWED`] — §7.1's own wedge with a shorter
+    ///   reach — and with it §7.6's zones, which are that cone's own halves.
     ///
     /// Still a function rather than a constant, and still read fresh on every use
     /// (§12.3) exactly like [`patrol_style`](Self::patrol_style) — one truth, so a
