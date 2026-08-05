@@ -58,6 +58,10 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
         // `s` for *seal*, not for the initial: `d` was already Decoy's, and the
         // letters have to stay unique for [`parse_script`] to be unambiguous.
         "Lockdown" => 's',
+        // `e` for *escape*: the seal took `s` first, and a passive's letter is never
+        // written into a script anyway (it has no activation to spell) — it exists so
+        // the map stays exhaustive over the catalogue, as Vision's does.
+        "Saver" => 'e',
         _ => return None,
     })
 }

@@ -140,6 +140,18 @@ pub enum Event {
     /// The player took an unaware adjacent guard down (§7.2): the guard is
     /// permanently out, and a body now lies at `at`.
     TakenDown { at: Cell },
+    /// A guard's capturing step was **turned over** by the Saver (§4.5/§8.3/#243):
+    /// the run's one exception to the only loss condition fired, at the cell `at`
+    /// where the player stood. The guard that reached them is taken down where it
+    /// stood, so this event always travels with an [`Event::TakenDown`] for the body
+    /// — the fact that a guard is permanently out is the same fact whichever verb put
+    /// it there, and every surface that counts takedowns (§7.2/§7.3, the end screen)
+    /// therefore needs no arm of its own for this one.
+    ///
+    /// It is a separate event and not a flag on `TakenDown` because what it says is
+    /// not "a guard fell": it is that the run **did not end**, which nothing else in
+    /// the vocabulary can say and which the near line has to lead with.
+    CaptureSaved { at: Cell },
     /// A guard at `by` **freshly** detected the player this turn (§7.6): its
     /// look found them after a turn (or a lifetime) of not seeing them. Fired on
     /// the transition only — a chase that holds the player in sight turn after
@@ -495,6 +507,12 @@ impl Event {
             | Event::ExchangeDeclined { .. } => Category::Interest,
             // A threat that has you, literally (§4.5) — or the wall does (§8.3).
             Event::Captured { .. } | Event::Entombed { .. } => Category::Danger,
+            // A hand *did* land on you (§4.5): the Saver is why the run continues, but
+            // what the player has to read is that they were caught — the same Danger
+            // band as the capture it replaced, because it is that moment. Reporting
+            // the rescue in the tools' own Owned band would file the worst moment of a
+            // run under "something you did", one row from the ability bar.
+            Event::CaptureSaved { .. } => Category::Danger,
         }
     }
 }

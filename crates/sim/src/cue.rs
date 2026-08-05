@@ -231,7 +231,17 @@ impl Moment<'_> {
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"
             // reads as a decision and not an omission.
-            AbilityId::Vision => None,
+            //
+            // The Saver (#243) is the same answer for a slightly different reason, and
+            // it is worth naming: it *does* have something to spend, so the temptation
+            // is to cue "play riskier while it is unspent". That would be the bot
+            // deciding the ability is good and then proving itself right (§13.3) — the
+            // measurement wanted here is what the **unchanged** policy's outcomes do
+            // when one capture is survivable, and a bot that plays differently for
+            // holding it cannot answer that. If the with/without pair shows the
+            // temperaments barely moving, a boldness cue is the next experiment, and it
+            // belongs to `Profile` where the other temperament knobs live.
+            AbilityId::Vision | AbilityId::Saver => None,
         }
     }
 

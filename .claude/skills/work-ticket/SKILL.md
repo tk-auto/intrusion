@@ -226,6 +226,21 @@ A finished ticket ends **merged**, not just in an open PR. **Do NOT use GitHub
 auto-merge** (`enable_pr_auto_merge`) — merge deliberately, after *watching* CI
 go green:
 
+- **Check mergeability *before* you read anything about CI.** A PR that conflicts
+  with its base never gets its workflows queued, so the symptom is not a red
+  check — it's *no check at all*, or checks stuck "expected"/"pending" forever.
+  Don't diagnose that as a slow runner and don't sit in a monitor loop waiting
+  for a run that will never start. On every poll, read the PR's `mergeable` /
+  `mergeable_state` (`pull_request_read` with `get`) alongside the checks:
+  - `mergeable: null` just means GitHub hasn't finished computing it yet — poll
+    again rather than concluding anything.
+  - `mergeable: false` / `mergeable_state: "dirty"` → resolve the conflict
+    first: merge `main` into the branch locally, fix the conflicts, run the
+    step 6 gate again, and push. (`update_pull_request_branch` works only when
+    the merge is clean.) CI starts once the PR is mergeable again — only then is
+    a missing or pending check worth waiting on.
+  - `mergeable_state: "behind"` or `"blocked"` is not a conflict; it's a stale
+    base or a required-check/review gate, and CI still runs.
 - **Watch for CI completion yourself, with basic monitors only.** Do NOT use the
   Claude Code Remote tools (`subscribe_pr_activity`, `send_later`, triggers) —
   see `CLAUDE.md`. Pace the wait with a background timer (Monitor, or a Bash

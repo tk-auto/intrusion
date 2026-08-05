@@ -58,7 +58,8 @@ skill rather than improvising its workflow. The intended loop:
   Proposals happen in conversation for approval, then become issues with
   v1/v2/v3 milestone and area/type/size labels.
 - **`/survey`** — read the *code* for cleanup opportunities (oversized files,
-  muddy naming, convention drift) and feed the good ones to `/create-tickets`.
+  muddy naming, convention drift) and the always-loaded docs for bloat, then
+  feed the good ones to `/create-tickets`.
 - **`/work-ticket`** — pick an open issue and build it end-to-end: branch per
   ticket, unit tests, the fmt/clippy/test gate, commit conventions, and a PR
   that closes it.
