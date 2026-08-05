@@ -164,8 +164,14 @@ pub(crate) fn encode(save: &Save) -> Option<String> {
 pub(crate) trait Slot {
     /// What is in the slot, if anything.
     fn read(&self) -> Option<String>;
-    /// Put `value` in the slot, replacing whatever was there.
-    fn write(&self, value: &str);
+    /// Put `value` in the slot, replacing whatever was there — answering **whether it
+    /// landed**.
+    ///
+    /// A refusal is not exotic: a browser can be out of storage quota, or be one that
+    /// hands out a `localStorage` which throws on every write. The answer is what the
+    /// policy reacts to, so a write that did not happen is not mistaken for one that
+    /// did ([`Autosave::store`]).
+    fn write(&self, value: &str) -> bool;
     /// Empty the slot.
     fn clear(&self);
 }
@@ -255,9 +261,19 @@ impl Autosave {
     }
 
     /// Store a record, encoding it on the way out.
-    pub(crate) fn store(&self, save: &Save) {
-        if let Some(text) = encode(save) {
-            self.slot.write(&text);
+    ///
+    /// **A write that did not land stays outstanding.** The storage itself cannot
+    /// half-replace a record — `localStorage` stores a string atomically, so a refused
+    /// write leaves the previous *complete* save exactly where it was, which is the
+    /// safe direction — but a refusal must not be mistaken for a save. Left as
+    /// pending, the next moment writes again, and, more to the point, the page-hide
+    /// flush still has something to flush: without this a quota refusal would answer
+    /// "nothing outstanding" a moment later and the run would be silently frozen at
+    /// whatever older record the slot still held.
+    pub(crate) fn store(&mut self, save: &Save) {
+        let stored = encode(save).is_some_and(|text| self.slot.write(&text));
+        if !stored {
+            self.pending = self.pending.max(1);
         }
     }
 
@@ -407,18 +423,30 @@ impl Slot for LocalSlot {
         self.store.as_ref()?.get_item(KEY).ok().flatten()
     }
 
-    fn write(&self, value: &str) {
-        // A quota refusal is the one failure worth swallowing rather than reporting:
-        // the run carries on either way, and there is nothing the player could do.
-        if let Some(store) = self.store.as_ref() {
-            let _ = store.set_item(KEY, value);
-        }
+    fn write(&self, value: &str) -> bool {
+        // `setItem` is **atomic**: it stores the whole string or throws, so the slot
+        // never holds half a record and a refusal leaves the previous complete one
+        // untouched (measured against Chromium at quota, not assumed). What the caller
+        // needs back is only which of the two happened.
+        self.store
+            .as_ref()
+            .is_some_and(|store| store.set_item(KEY, value).is_ok())
     }
 
     fn clear(&self) {
-        if let Some(store) = self.store.as_ref() {
-            let _ = store.remove_item(KEY);
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let _ = store.remove_item(KEY);
+        if store.get_item(KEY).ok().flatten().is_none() {
+            return;
         }
+        // The removal did not take — the one storage failure that would be a **rule**
+        // broken rather than a save lost, since a slot still holding the run would let
+        // a capture be reloaded away (§2.2). Poison it instead: an empty value is not a
+        // record, so it decodes to nothing and the menu offers no continue row. Belt
+        // and braces — `removeItem` has no quota to exceed and should never need this.
+        let _ = store.set_item(KEY, "");
     }
 }
 
@@ -540,6 +568,8 @@ mod tests {
         value: RefCell<Option<String>>,
         writes: Cell<u32>,
         clears: Cell<u32>,
+        /// Whether the slot refuses writes — a browser at its storage quota.
+        refuse: Cell<bool>,
     }
 
     impl Slot for Rc<MemorySlot> {
@@ -547,9 +577,13 @@ mod tests {
             self.value.borrow().clone()
         }
 
-        fn write(&self, value: &str) {
+        fn write(&self, value: &str) -> bool {
+            if self.refuse.get() {
+                return false;
+            }
             *self.value.borrow_mut() = Some(value.to_string());
             self.writes.set(self.writes.get() + 1);
+            true
         }
 
         fn clear(&self) {
@@ -690,6 +724,42 @@ mod tests {
             "the pending write is cancelled, not left to fire over the empty slot",
         );
         assert_eq!(auto.flush(), Write::Later, "and nothing is outstanding");
+    }
+
+    /// **A refused write stays outstanding.** A browser at its storage quota throws
+    /// rather than storing half a record, so the *previous* complete save survives —
+    /// but the shell must not take the refusal for a save. The run stays pending, so
+    /// the next moment tries again and, crucially, the page-hide flush still has
+    /// something to flush instead of answering "nothing to do" over a stale slot.
+    #[test]
+    fn a_refused_write_stays_outstanding_and_is_retried() {
+        let (mut auto, slot, _timer) = rig();
+        let save = record(run().0, run().1, &[]);
+
+        slot.refuse.set(true);
+        auto.moment(false);
+        assert_eq!(auto.flush(), Write::Now);
+        auto.store(&save);
+        assert_eq!(slot.writes.get(), 0, "the slot refused it");
+        assert!(slot.read().is_none(), "and holds nothing it did not accept");
+        assert_eq!(
+            auto.flush(),
+            Write::Now,
+            "the refused write is still outstanding, so the page-hide flush retries it",
+        );
+
+        slot.refuse.set(false);
+        auto.store(&save);
+        assert_eq!(
+            slot.writes.get(),
+            1,
+            "the retry lands once the slot accepts"
+        );
+        assert_eq!(
+            auto.flush(),
+            Write::Later,
+            "and nothing is left outstanding"
+        );
     }
 
     /// **Snapshot → restore → the same state**, and the same run from there on: the
