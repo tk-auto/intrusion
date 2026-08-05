@@ -66,6 +66,18 @@ fn the_catalog_matches_the_design_activated() {
             40,
             Effect::SealDoors,
         ),
+        // Instant, on Confusion's terms and for its reason (#504): a message is over
+        // the moment it is sent, so there is no window to switch off — what it bought
+        // runs on the responders' legs. 30 rather than the blast's 45 because it buys
+        // less: the guards keep walking, keep looking, and arrive.
+        (
+            AbilityId::FalseCall,
+            1,
+            TargetingMode::Itself,
+            0,
+            30,
+            Effect::FakeCall,
+        ),
     ] {
         let def = id.def();
         let economy = def
@@ -174,7 +186,7 @@ fn every_activated_ability_is_pinned_by_a_catalog_test() {
 
 /// The data-driven rows [`the_catalog_matches_the_design_activated`] walks — kept
 /// beside it so the completeness check above reads off the same list.
-const PINNED_ACTIVATED: [AbilityId; 7] = [
+const PINNED_ACTIVATED: [AbilityId; 8] = [
     AbilityId::Run,
     AbilityId::Camouflage,
     AbilityId::Decoy,
@@ -182,6 +194,7 @@ const PINNED_ACTIVATED: [AbilityId; 7] = [
     AbilityId::Autodoors,
     AbilityId::Confusion,
     AbilityId::Lockdown,
+    AbilityId::FalseCall,
 ];
 
 /// The **passive** catalog (#264/#265), pinned: Vision is the one passive, it

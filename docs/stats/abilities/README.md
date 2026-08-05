@@ -103,5 +103,7 @@ to make.
 | Confusion | cued | [`confusion.md`](confusion.md) |
 | Pierce Wall | cued | [`pierce-wall.md`](pierce-wall.md) |
 | Lockdown | cued | [`lockdown.md`](lockdown.md) |
+| False Call | cued, narrowly | [`false-call.md`](false-call.md) |
 | Vision | **none** — passive, nothing to activate | [`vision.md`](vision.md) |
 | Saver | **none** — passive, and deliberately uncued | [`saver.md`](saver.md) |
+| Drone | **none** — a control mode the bot does not have | [`drone.md`](drone.md) |

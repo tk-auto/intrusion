@@ -63,6 +63,9 @@ pub(super) enum Aimed {
     /// The blast Confusion would fire (§8.3/#325) — already known to catch at least
     /// one guard.
     Blast(EffectArea),
+    /// The reach a False Call would broadcast over (§7.7/§8.3/#504) — already known to
+    /// have a live net to travel down and at least one guard inside it.
+    Call(EffectArea),
     /// The cell a control-transfer ability would launch its remote from (§8.1/#273):
     /// the player's own, because you let it go from your hands.
     ///
@@ -90,6 +93,10 @@ pub(super) enum Refused {
     NoDoorsInReach,
     /// The blast would catch no guard (§8.3/#325).
     BlastCatchesNobody,
+    /// The forged call would reach no guard (§8.3/#504).
+    CallReachesNobody,
+    /// The radio net is dead (§7.3/§7.7/#504), so there is nothing to forge a call on.
+    NetIsDead,
     /// There is no room to launch a remote, or to take one's controls, from where the
     /// player is standing (§10.7/#273) — a crawlspace.
     NoRoomToPilot,
@@ -121,6 +128,8 @@ impl Refused {
             Refused::Bore(reason) => Some(Event::BoreRefused { reason }),
             Refused::NoDoorsInReach => Some(Event::LockdownRefused),
             Refused::BlastCatchesNobody => Some(Event::ConfusionMissed),
+            Refused::CallReachesNobody => Some(Event::FalseCallMissed),
+            Refused::NetIsDead => Some(Event::FalseCallDead),
         }
     }
 }
@@ -177,6 +186,24 @@ impl State {
                 Err(Refused::NoDoorsInReach)
             } else {
                 Ok(Aimed::Seal(doors))
+            };
+        }
+        // The forged call asks two things the economy cannot (§7.7/§8.3/#504), and the
+        // order is the order the player should learn them in. **The net first**: a
+        // silenced facility has nothing listening, so the spoofer dies with the radio it
+        // spoofs — the console's trade, stated where the press is refused rather than
+        // discovered as a turn that bought nothing. Then the reach, on Confusion's terms
+        // exactly: a call nobody is inside is a call worth nothing, and the clamp means
+        // everybody it could have reached was already on the player's picture.
+        if declares(id, Effect::FakeCall) {
+            if self.radio_silenced() {
+                return Err(Refused::NetIsDead);
+            }
+            let reach = self.false_call_area();
+            return if self.guards.iter().any(|g| reach.contains(g.pos())) {
+                Ok(Aimed::Call(reach))
+            } else {
+                Err(Refused::CallReachesNobody)
             };
         }
         if declares(id, Effect::Confuse) {

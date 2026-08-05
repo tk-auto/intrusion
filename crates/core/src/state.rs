@@ -221,6 +221,52 @@ pub const LOCKDOWN_RADIUS: u32 = 4;
 /// wall they had no way to read. Pinned at compile time.
 const _: () = assert!(LOCKDOWN_RADIUS <= PLAYER_SENSE_RANGE);
 
+/// The **False Call** reach (§7.7/§8.3/#504 **[START]**): the spoofer's broadcast, as a
+/// Chebyshev box around the player — the same §6.1 box metric the guard sense,
+/// Confusion's blast and Lockdown's seal are measured in, and like them reaching
+/// **through walls**.
+///
+/// **The widest of the three, and that is the ability.** Confusion and Lockdown act on
+/// the ground around you, so a wide one would play the map for you; this one moves
+/// guards *off* ground you are about to leave, and a reach that only emptied the room
+/// you stand in would empty nothing worth emptying. Eight is a wing's worth of corridor
+/// on a 40×40 board (§10.2) without being the building. It is also close to the ceiling
+/// of what the board can take: a box of radius 8 is 17×17, and the reach above that
+/// stops being *a wing* and becomes *the facility*, which is a different and much worse
+/// ability (§13.2 measured a 14 that summoned most of the level onto the player).
+///
+/// **Unclamped by the guard sense**, unlike Confusion's blast — it is a radio, and
+/// eyesight is not what a transmitter is measured in
+/// ([`false_call_area`](State::false_call_area) has the argument). So it reaches a
+/// little past what the player can perceive on open floor, and a **crawling player
+/// broadcasts in full**: a duct degrades perception (§10.7) and a transmitter does not
+/// perceive.
+///
+/// The radius is the **transmitter's**, never control's own net: §7.7's "no radio
+/// range" stays true of every call the facility makes
+/// ([`send_call`](State::send_call) gains no reach).
+///
+/// It is one of the two levers this ability is tuned on — the other is its lockout —
+/// so it is pinned by a test and expected to move in playtest (§13.2). It is also where
+/// the ticket's second risk lives: pulling a wing off its patrol on a 30-turn cooldown
+/// could delete the §7.7 pressure the design says the difficulty comes from, and this
+/// pair is what the sim sweeps first.
+pub const FALSE_CALL_RADIUS: u32 = 8;
+
+/// The broadcast is deliberately **wider than the guard sense** (§9/§8.3/#504) — the
+/// opposite of what Confusion's and Lockdown's assertions hold, and pinned here so that
+/// a later tune which quietly brought it back inside eyesight would have to say so.
+///
+/// Reaching past what the player can perceive is the whole of what makes it a radio
+/// rather than a shout; a value at or under [`PLAYER_SENSE_RANGE`] would leave the
+/// ability indistinguishable from a wider Confusion and would make the *duct* case —
+/// where a crawler still broadcasts in full — silently disappear.
+/// The broadcast must stay **inside the board** (§10.2): a reach wider than the
+/// facility is a number that no longer describes anything, since every firing would
+/// call every guard alive and the radius would stop being a lever at all. Pinned at
+/// compile time against the v1 footprint's shorter side.
+const _: () = assert!(FALSE_CALL_RADIUS * 2 < crate::LevelConfig::V1.height);
+
 /// How long a guard caught by a Confusion blast stays **dazed** (§8.3/#325
 /// **[START]**): blinded and frozen for this many turns, counted down on the guard's
 /// own clock ([`Guard::shake_off_daze`](crate::Guard)) rather than on the player's.
@@ -1517,6 +1563,7 @@ impl State {
                         Aimed::Bore(wall) => self.bore_wall(wall, events),
                         Aimed::Seal(doors) => self.seal_doors(&doors, events),
                         Aimed::Blast(blast) => self.fire_confusion(blast, events),
+                        Aimed::Call(reach) => self.fire_false_call(reach, events),
                         Aimed::Launch(from) => self.deploy_remote(id, from, events),
                         Aimed::Nothing | Aimed::Decoy(_) => {}
                     }

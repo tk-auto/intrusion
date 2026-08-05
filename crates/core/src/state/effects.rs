@@ -162,6 +162,7 @@ pub(super) fn area_radius(effect: Effect) -> Option<u32> {
     match effect {
         Effect::Confuse => Some(CONFUSION_RADIUS),
         Effect::SealDoors => Some(LOCKDOWN_RADIUS),
+        Effect::FakeCall => Some(FALSE_CALL_RADIUS),
         // Everything else acts on the player themselves, not on a region around them.
         // Reversal (#243) acts on the one cell the player is standing in — the guard
         // has to reach *them* — so it has no footprint to draw either.
@@ -324,6 +325,51 @@ impl State {
         }
     }
 
+    /// The reach **a False Call fired from where the player stands would broadcast
+    /// over** (§7.7/§8.3/#504): the §6.1 box of [`FALSE_CALL_RADIUS`], read from the one
+    /// [`area_radius`] table so the ability's reach and the table cannot drift apart.
+    ///
+    /// The firing seam, in [`confusion_blast`](Self::confusion_blast)'s and
+    /// [`lockdown_area`](Self::lockdown_area)'s shape and for the same reason: one
+    /// object carries the geometry to the rule that picks the guards
+    /// ([`fire_false_call`](Self::fire_false_call)), to the event, and to the mark the
+    /// player reads — so what is painted is what was measured.
+    ///
+    /// **Unclamped**, which is [`lockdown_area`](Self::lockdown_area)'s answer rather
+    /// than [`confusion_blast`](Self::confusion_blast)'s, and the difference between the
+    /// two is what decides it. Confusion is narrowed to what the player can *perceive*
+    /// because a guard frozen out of sense range is an effect with no readout at all.
+    /// Neither of the two facts that makes true is true here. A called guard is not held
+    /// out of view: it **walks to you**, arriving inside the §9 sense long before it
+    /// arrives anywhere else, so the effect delivers its own readout. And the near line
+    /// says **how many answered** at the moment of firing (§11.7), so what was summoned
+    /// is stated even where it cannot yet be sensed.
+    ///
+    /// It is a **radio**, and clamping a transmitter to eyesight is not a rule about
+    /// radios — it is the rule for a blast, borrowed. The guard sense is the player's
+    /// body; the reach here is the device in their hand, and the two are not the same
+    /// channel (§9's "the sense is a separate, innate channel" cuts both ways). The
+    /// consequence worth stating is the one that follows for a **duct** (§10.7): a
+    /// crawling player broadcasts exactly as far as a standing one, because a
+    /// crawlspace degrades *perception* and a transmitter does not perceive.
+    ///
+    /// It is pure, so the ability bar may ask it every frame to decide whether the press
+    /// would reach anybody (§11.4/#345) and get the answer the press itself would — and
+    /// unlike Confusion there is no read-moment question at all, since §9.1's widened
+    /// Wait is not something this ability is measured in.
+    ///
+    /// The centre is where the player is standing, and the call names that cell **by
+    /// value** ([`fire_false_call`](Self::fire_false_call)): the responders keep walking
+    /// to where you *were*. That staleness is the ability, not a limitation of it —
+    /// §7.7 already says as much about genuine calls ("the searched cell is stale by
+    /// construction… the tail is not the threat, the net is").
+    pub fn false_call_area(&self) -> EffectArea {
+        EffectArea {
+            centre: self.player,
+            radius: area_radius(Effect::FakeCall).expect("False Call is an area effect"),
+        }
+    }
+
     /// The area **a Lockdown fired from where the player stands would seal** (§8.3/#242):
     /// the §6.1 box of [`LOCKDOWN_RADIUS`], read from the one [`area_radius`] table so
     /// the ability's reach and the table cannot drift apart.
@@ -482,6 +528,36 @@ impl State {
         });
     }
 
+    /// Fire the False Call over `reach` (§7.7/§8.3/#504): call every guard standing
+    /// inside it **right now** to the cell it was fired from, and report how many
+    /// answered.
+    ///
+    /// The world change is [`send_call`](Self::send_call) and nothing else — the same
+    /// call control makes when a post goes silent and the same one a guard makes on a
+    /// lost sighting, with the *who* narrowed to the transmitter's box instead of to a
+    /// count. So the responders **search** (§7.6) rather than chase, a guard that has
+    /// the live player is never pulled off it, a guard already on an errand is
+    /// redirected like any other respondable one, and a killed net answers with nobody
+    /// — none of which this function decides, because none of it is this ability's to
+    /// decide.
+    ///
+    /// The set is taken here and nowhere else. A guard that wanders into the reach next
+    /// turn was not in the call and is untouched; the cell named is a snapshot passed by
+    /// value, so walking away narrows nothing, widens nothing, and moves nothing.
+    ///
+    /// Nothing steps the alert ladder (§7.3). Nothing was seen and no ping was missed —
+    /// a forged transmission is, to the facility, an ordinary call — so escalating here
+    /// would be the ability climbing the ladder by a side door.
+    pub(super) fn fire_false_call(&mut self, reach: EffectArea, events: &mut Vec<Event>) {
+        let answered = self.send_call(reach.centre(), self.guards.len(), |guard, _| {
+            reach.contains(guard.pos())
+        });
+        events.push(Event::FalseCallFired {
+            reach,
+            answered: answered as u32,
+        });
+    }
+
     /// Count one turn off every dazed guard (§8.3/#325). Run once per **spent** turn,
     /// at end of turn beside the ability clocks, on §8.2's convention: a guard dazed
     /// for N is frozen for N turns *including* the one the blast went off in, every
@@ -565,6 +641,24 @@ impl State {
                         MarkLife::Standing,
                     );
                 }
+                // The False Call wears the **wash alone** (§7.7/§8.3/#504), which is
+                // Confusion's pair with the standing half deliberately absent. The box
+                // is a moment — *this far the message carried* — and it is the one
+                // thing neither the board nor the near line can otherwise say, since
+                // most of what it reached is behind a wall.
+                //
+                // What it caught needs no mark of its own, and that is the difference
+                // from a blast: a called guard is not *held*, it is walking, and the
+                // §7.7 legibility tell for a call is already the responder's own sensed
+                // dot peeling off toward the cell (§9/§9.3). Recolouring those dots
+                // would restate the thing they are doing while the player watches them
+                // do it — and would go on claiming an effect over a guard that had long
+                // since finished its search and gone back to its beat.
+                Event::FalseCallFired { reach, .. } => self.light_mark(
+                    AbilityId::FalseCall,
+                    MarkPlace::Cells(reach.cells(self.layout.facility())),
+                    MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                ),
                 Event::WallBored { at } => self.light_mark(
                     AbilityId::PierceWall,
                     MarkPlace::Cells(vec![at]),

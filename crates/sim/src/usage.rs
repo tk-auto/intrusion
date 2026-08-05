@@ -117,13 +117,23 @@ pub enum Verb {
     /// exactly why it has a row at all, since a verb with no slot could not report the
     /// day the policy lands.
     Drone,
+    /// Forged a control call with False Call (§7.7/§8.3/#504) —
+    /// [`Event::AbilityActivated`](intrusion_core::Event::AbilityActivated), like every
+    /// other activation.
+    ///
+    /// The row to read against the alert and detection numbers rather than on its own:
+    /// what the verb buys is not measured where it is pressed but in the turns after,
+    /// and what it *risks* is that the bot called a search onto its own feet. A count
+    /// that climbs while `detections` climbs with it is the ticket's own suicide-button
+    /// worry showing up as data.
+    FalseCall,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 15] = [
+    pub const ALL: [Verb; 16] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -139,6 +149,7 @@ impl Verb {
         Verb::Stow,
         Verb::SilenceRadio,
         Verb::Drone,
+        Verb::FalseCall,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -165,6 +176,7 @@ impl Verb {
             AbilityId::PierceWall => Verb::PierceWall,
             AbilityId::Lockdown => Verb::Lockdown,
             AbilityId::Drone => Verb::Drone,
+            AbilityId::FalseCall => Verb::FalseCall,
             AbilityId::Vision | AbilityId::Saver => return None,
         })
     }
@@ -223,6 +235,7 @@ impl Verb {
             Verb::Stow => "stow",
             Verb::SilenceRadio => "silence_radio",
             Verb::Drone => "drone",
+            Verb::FalseCall => "false_call",
         }
     }
 
@@ -347,7 +360,8 @@ mod tests {
                 "crouch",
                 "stow",
                 "silence_radio",
-                "drone"
+                "drone",
+                "false_call"
             ]
         );
         // Each ability activation lands in its own slot.

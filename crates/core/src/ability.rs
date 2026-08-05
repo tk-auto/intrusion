@@ -369,6 +369,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#273): launch a drone and **fly it yourself** — then let go
     /// and leave it watching for the rest of the window.
     Drone,
+    /// Salvaged tech (§8.3/#504): forge control's own call — every guard in reach is
+    /// sent to search **the cell you fired from**.
+    FalseCall,
 }
 
 impl AbilityId {
@@ -377,7 +380,7 @@ impl AbilityId {
     /// which bar slot a held ability lands in and therefore which digit fires it
     /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
     /// must not drift.
-    pub const ALL: [AbilityId; 11] = [
+    pub const ALL: [AbilityId; 12] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -389,6 +392,7 @@ impl AbilityId {
         AbilityId::Lockdown,
         AbilityId::Saver,
         AbilityId::Drone,
+        AbilityId::FalseCall,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
@@ -402,7 +406,7 @@ impl AbilityId {
     /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
     /// from here like any other tech — it competes for the same slot, which is exactly
     /// what it pays with.
-    pub const TECH: [AbilityId; 10] = [
+    pub const TECH: [AbilityId; 11] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -413,6 +417,7 @@ impl AbilityId {
         AbilityId::Lockdown,
         AbilityId::Saver,
         AbilityId::Drone,
+        AbilityId::FalseCall,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -476,6 +481,11 @@ impl AbilityId {
             AbilityId::Lockdown => "Lockdown",
             AbilityId::Saver => "Saver",
             AbilityId::Drone => "Drone",
+            // Two words, on Phase Out's precedent, and the pairing is the design
+            // (§8.3/#504): the full name says the transmission is **forged**, the bar
+            // name says what it *does*. A name suggesting bait would be wrong — bait is
+            // the Decoy's job, and the two are complements rather than variants.
+            AbilityId::FalseCall => "False Call",
         }
     }
 
@@ -503,6 +513,7 @@ impl AbilityId {
             AbilityId::Lockdown => "Lock",
             AbilityId::Saver => "Saver",
             AbilityId::Drone => "Drone",
+            AbilityId::FalseCall => "Call",
         }
     }
 
@@ -566,6 +577,10 @@ impl AbilityId {
                 "Fly a drone while your body stands still. Press again to let go: it \
                  hovers on, watching, till the window ends. Guards never see it."
             }
+            AbilityId::FalseCall => {
+                "Forges a call naming your cell: every guard in reach goes there and \
+                 searches. Be elsewhere by then; a dead radio spoofs nothing."
+            }
         }
     }
 
@@ -600,6 +615,7 @@ impl AbilityId {
             AbilityId::Lockdown => &LOCKDOWN,
             AbilityId::Saver => &SAVER,
             AbilityId::Drone => &DRONE,
+            AbilityId::FalseCall => &FALSE_CALL,
         }
     }
 
@@ -617,6 +633,7 @@ impl AbilityId {
             AbilityId::Lockdown => 8,
             AbilityId::Saver => 9,
             AbilityId::Drone => 10,
+            AbilityId::FalseCall => 11,
         }
     }
 }
@@ -826,6 +843,25 @@ pub enum Effect {
     /// one: surviving still costs a body, an aware guard's noise, and a radio silence
     /// coming due.
     ReverseCapture,
+    /// False Call (§8.3/§7.7, #504): **fired once**, from the cell it is pressed in.
+    /// A forged control transmission naming that cell — every guard within
+    /// [`FALSE_CALL_RADIUS`](crate::FALSE_CALL_RADIUS) of it, reaching **through
+    /// walls** like the guard sense (§9) and clamped down to what the player can
+    /// actually sense, is **called to it and searches** (§7.6) exactly as a real call's
+    /// responder does.
+    ///
+    /// It adds **no second verb** to §7.7. Cooperation has exactly one — *a call sends
+    /// guards to search a cell* — and this hands the player that one rather than
+    /// inventing another; the world change runs through the very seam control's own
+    /// dispatch and both call-ins run through
+    /// ([`send_call`](crate::State::send_call)). The radius belongs to the **player's
+    /// transmitter**, not to control's net: §7.7's "no radio range" is a standing rule
+    /// about the facility's own calls, and nothing here weakens it.
+    ///
+    /// Like [`Confuse`](Effect::Confuse) the set is decided at the firing and the cell
+    /// named is a **snapshot** — walking away does not move the destination, which is
+    /// the whole play: you call them here, and then you are not here.
+    FakeCall,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -1200,6 +1236,36 @@ const DRONE: Ability = Ability {
     mode: activated(1, TargetingMode::Itself, 40, 40),
     uses: None,
     behaviour: Behaviour::Coded,
+};
+
+// False Call [START] (§7.7/§8.3, #504): the player's half of the radio. **Instant**
+// (`duration: 0`), Confusion's and Pierce Wall's shape — it fires once from the cell it
+// is pressed in and goes straight to its lockout, because what it does is send a
+// message and a message is over the moment it is sent. There is no window to switch
+// off and nothing to carry: what it bought runs on the responders' own legs.
+//
+// **What it costs, and when a good player declines it** (§2.3). The turn, the 30-turn
+// lockout — and the cell. The call names where you *are*, so its whole value is in the
+// turns after it: fire it and stand still and you have summoned a search onto your own
+// feet, and a search flushes a hideout (§10.3/§7.6), so the cupboard in the corner is
+// not the answer either. A good player declines it whenever they have nowhere to be
+// next — pulling four guards into the room you are still crossing is strictly worse
+// than the patrol you had. That the value is *elsewhere* is the design, and it is why
+// the near line words it as a warning rather than as a confirmation.
+//
+// **30, against Confusion's 45.** It buys less than a daze does — the guards keep
+// walking, keep looking, and arrive — so it is not priced like the panic-buy. It is
+// still long enough that emptying a wing stays a plan rather than a habit, which is the
+// §7.7 pressure the design says the difficulty lives in.
+//
+// Data-driven rather than [`Behaviour::Coded`], for Lockdown's reason: calling an
+// area's guards is the same shape as freezing an area's guards and sealing an area's
+// doors, so it is one more row in the vocabulary (§8.1) and not an escape hatch.
+const FALSE_CALL: Ability = Ability {
+    id: AbilityId::FalseCall,
+    mode: activated(1, TargetingMode::Itself, 0, 30),
+    uses: None,
+    behaviour: Behaviour::Effects(&[Effect::FakeCall]),
 };
 
 /// How many captures one facility lets you walk away from — **[START]** (§4.5/§8.3/#243).

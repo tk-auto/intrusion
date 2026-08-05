@@ -65,6 +65,8 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
         // `o` for the middle of *drone*: `d` is the Decoy's and the letters have to
         // stay unique for [`parse_script`] to be unambiguous.
         "Drone" => 'o',
+        // `f` for *forged* — and for the initial, which for once is free.
+        "False Call" => 'f',
         _ => return None,
     })
 }

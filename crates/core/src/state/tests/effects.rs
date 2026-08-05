@@ -110,10 +110,14 @@ fn only_the_area_effects_declare_a_radius() {
         Effect::Phase,
         Effect::AutoDoors,
         Effect::EnhancedSight,
+        Effect::FakeCall,
     ] {
         assert_eq!(
             area_radius(effect).is_some(),
-            matches!(effect, Effect::Confuse | Effect::SealDoors),
+            matches!(
+                effect,
+                Effect::Confuse | Effect::SealDoors | Effect::FakeCall
+            ),
             "{effect:?}: only an effect that acts on a region has a radius",
         );
     }
