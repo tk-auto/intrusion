@@ -1,7 +1,9 @@
 use super::*;
 use crate::ability::AbilityId;
 use crate::alert::{AlertEffect, AlertTrigger, AlertTuning};
-use crate::modifiers::{ActiveModifier, CacheCount, GuardCount, IntelCount, IntelGate};
+use crate::modifiers::{
+    ActiveModifier, CacheCount, GuardCount, IntelCount, IntelGate, LayoutKnowledge,
+};
 
 /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
 /// that no row truncates, so a test can read the panel's content whole.
@@ -336,7 +338,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             sighting_lost_calls_a_guard: true,
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
-            full_layout_known: true,
+            layout_knowledge: LayoutKnowledge::Full,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guards_watch_consoles: true,

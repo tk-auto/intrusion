@@ -452,7 +452,9 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use intrusion_core::{AbilityId, AlertTuning, IntelGate, LevelModifiers, Loadout};
+    use intrusion_core::{
+        AbilityId, AlertTuning, IntelGate, LayoutKnowledge, LevelModifiers, Loadout,
+    };
 
     fn command(argv: &[&str]) -> Result<Command, String> {
         parse_args(&argv.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
@@ -538,7 +540,7 @@ mod tests {
             "--intel-gate",
             "all",
             "--modifier",
-            "full-layout-known,always-show-vision-cones",
+            "layout-knowledge-full,always-show-vision-cones",
             "--abilities",
             "camouflage,decoy",
             "--without",
@@ -548,7 +550,10 @@ mod tests {
         ])
         .expect("known values");
         assert_eq!(parsed.config.modifiers.intel_to_exit, IntelGate::All);
-        assert!(parsed.config.modifiers.full_layout_known);
+        assert_eq!(
+            parsed.config.modifiers.layout_knowledge,
+            LayoutKnowledge::Full
+        );
         assert!(parsed.config.modifiers.always_show_vision_cones);
         assert!(parsed.config.abilities.contains(AbilityId::Camouflage));
         assert!(!parsed.config.abilities.contains(AbilityId::Decoy));
@@ -675,7 +680,7 @@ mod tests {
         assert!(error.contains("none, one, all"), "{error}");
         let error = args(&["--modifier", "deafen-the-guards"]).expect_err("no such modifier");
         assert!(error.contains("--modifier"), "{error}");
-        assert!(error.contains("full-layout-known"), "{error}");
+        assert!(error.contains("layout-knowledge-full"), "{error}");
         let error = args(&["--abilities", "smoke-grenade"]).expect_err("no such ability");
         assert!(error.contains("--abilities"), "{error}");
         assert!(error.contains("camouflage"), "{error}");

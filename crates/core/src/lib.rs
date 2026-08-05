@@ -114,8 +114,8 @@ pub use input::{
 };
 pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
-    ActiveModifier, CacheCount, DebugModifiers, GuardCount, IntelCount, IntelGate, LevelModifiers,
-    ModifierDirection, ModifierSources,
+    ActiveModifier, CacheCount, DebugModifiers, GuardCount, IntelCount, IntelGate, LayoutKnowledge,
+    LevelModifiers, ModifierDirection, ModifierSources,
 };
 pub use place::{LevelConfig, Placement};
 pub use region::{

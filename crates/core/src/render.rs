@@ -38,6 +38,7 @@
 use crate::category::{Category, Theme};
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
+use crate::modifiers::LayoutKnowledge;
 use crate::state::{GuardPerception, State};
 
 /// The entity glyphs (§11.3), named once so the world render and the help legend
@@ -102,7 +103,11 @@ pub enum Visibility {
     /// paints this in the same dim shade as [`Explored`](Self::Explored), because
     /// the schematic separates itself by **shape**. That keeps the distinction on
     /// the seam for anything that needs to reason about coverage rather than draw
-    /// it (the §12.6 full-layout modifier, a future fog-the-geometry rule).
+    /// it, and it is what lets the §12.6 layout knob
+    /// ([`LayoutKnowledge`](crate::LayoutKnowledge)) move what such a cell *shows* —
+    /// the real building at one end, nothing at all at the other — without moving what
+    /// it honestly *is*. An unexplored cell reports itself unexplored under all three
+    /// settings.
     Unexplored,
     /// Outside the FOV, drawn from tile memory: a content seen earlier this run
     /// (§11.5a) — its own visual state, distinct from both live and explored.
@@ -435,15 +440,16 @@ pub fn render(state: &State) -> Grid {
 
 /// The terrain layer, through the fog: what the player knows of each cell.
 ///
-/// The §12.6 `full_layout_known` modifier draws the architecture of cells the
-/// player has never had eyes on, instead of the schematic. Contents stay hidden —
-/// it buys the building, not the objectives.
+/// The §12.6 layout knob moves what a never-seen cell is worth in both directions:
+/// [`LayoutKnowledge::Full`] draws the architecture of cells the player has never had
+/// eyes on instead of the schematic (contents stay hidden — it buys the building, not
+/// the objectives), and [`LayoutKnowledge::None`] draws nothing there at all.
 fn terrain_pass(state: &State) -> Vec<GlyphCell> {
     let facility = state.layout().facility();
     let (width, height) = (facility.width(), facility.height());
     let fov = state.player_fov();
     let memory = state.memory();
-    let layout_known = state.modifiers().full_layout_known;
+    let knowledge = state.modifiers().layout_knowledge;
 
     (0..height)
         .flat_map(|y| (0..width).map(move |x| (x, y)))
@@ -463,7 +469,7 @@ fn terrain_pass(state: &State) -> Vec<GlyphCell> {
                     schematic: false,
                 }
             } else {
-                fogged_view(terrain, memory.contains(cell), layout_known)
+                fogged_view(terrain, memory.contains(cell), knowledge)
             };
             // Floor dots (§11.5/#470): give open ground a foreground so the FOV edge
             // reads across it — and **only** inside the FOV, so the edge is dots
@@ -889,9 +895,9 @@ fn danger_overlay(state: &State, cells: &mut [GlyphCell]) {
 /// What [`fogged_view`] decided about one out-of-FOV cell.
 ///
 /// `schematic` is carried rather than re-derived from `vis` because the two can
-/// legitimately disagree: with the §12.6 `full_layout_known` modifier on, a cell is
-/// still honestly `Unexplored` — the player has not been there — but draws as the
-/// real building. Keeping the decision in one place is what stops the glyph choice
+/// legitimately disagree: with the §12.6 layout knob at [`LayoutKnowledge::Full`], a
+/// cell is still honestly `Unexplored` — the player has not been there — but draws as
+/// the real building. Keeping the decision in one place is what stops the glyph choice
 /// and the masking choice from drifting into two different answers.
 struct Fogged {
     /// The terrain to draw, after any masking.
@@ -915,6 +921,12 @@ struct Fogged {
 /// **Unexplored** draws the **schematic** ([`SCHEMATIC_WALL`]) instead: the
 /// player has the building's plans, so they read the fabric, and the floor space
 /// between it as blank.
+///
+/// **What an unexplored cell is worth is a knob** ([`LayoutKnowledge`], §12.6), and
+/// the schematic is only its middle rung. [`Full`](LayoutKnowledge::Full) draws the
+/// real building there instead; [`None`](LayoutKnowledge::None) draws nothing at all,
+/// so the whole section below on *which mark the plans give a thing* applies to the
+/// baseline and to nothing else — there are no plans to read (#233).
 ///
 /// The line the schematic draws is architectural rather than mechanical: `□` is
 /// the building's **load-bearing fabric** — a wall run, and the recesses cut back
@@ -964,7 +976,7 @@ struct Fogged {
 /// drawing that is not a memory. And doors are everywhere: slating all of them would
 /// bury the two or three marks that change a plan under a building's worth of
 /// doorways. A colour that marks everything marks nothing.
-fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
+fn fogged_view(terrain: Terrain, explored: bool, knowledge: LayoutKnowledge) -> Fogged {
     let vis = if explored {
         Visibility::Explored
     } else {
@@ -975,11 +987,36 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         vis,
         schematic: false,
     };
-    // The exit first: known from turn one whatever else is (§4.5/§7.6).
+    // The exit first: known from turn one whatever else is (§4.5/§7.6). Under
+    // `LayoutKnowledge::None` it is the *only* thing turn one draws, and that is what
+    // keeps the run playable: with the building gone, the player's own tunnel is the
+    // one fixed point an escape plan can be hung on.
     if terrain == Terrain::Exit {
         return real(terrain);
     }
-    if !explored && !layout_known {
+    if !explored && knowledge == LayoutKnowledge::None {
+        // **No plans at all** (§11.5a/#233), the layout knob's harder end. Ground the
+        // player has never had eyes on is blank — not a dimmer schematic, which would
+        // be the fog §11.5a already argues against, and not a second mark to read.
+        //
+        // The mask is *total*, and by the schematic's own rule taken one step further:
+        // everything unexplored has to collapse to a single appearance in a single
+        // colour or the fog leaks what it hides. Here that single appearance is bare
+        // floor — no glyph, and so no ink for the §11.2 category channel to give
+        // anything away through either. Nothing distinguishes an unwalked wall from
+        // the room behind it, which is the whole modifier: the building has to be
+        // walked to be known.
+        return Fogged {
+            shown: Terrain::Floor,
+            vis: Visibility::Unexplored,
+            // Moot rather than meaningful: the schematic arm draws only for a `Wall`,
+            // and the mask above leaves no unexplored cell showing one. Carried as
+            // `true` so the flag keeps saying what it says everywhere else — *this is
+            // not the real building* — rather than claiming a drawn cell is.
+            schematic: true,
+        };
+    }
+    if !explored && knowledge == LayoutKnowledge::Plans {
         // The schematic (§11.5a/#307). Fabric — what holds the building up: a wall
         // run, a door's *frame*, and the recesses cut back into a run (a hideout
         // alcove, a duct mouth), which are backed by structure and read as part of
@@ -1005,9 +1042,10 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
             schematic: true,
         };
     }
-    // Either the cell is explored, or the §12.6 `full_layout_known` modifier is
-    // handing the architecture over. Both draw the real building; they differ only
-    // in what they do with a **content**, which the modifier never reveals.
+    // Either the cell is explored, or the §12.6 layout knob is at
+    // [`LayoutKnowledge::Full`] and handing the architecture over. Both draw the real
+    // building; they differ only in what they do with a **content**, which the
+    // modifier never reveals.
     match terrain {
         // Geometry the player has walked (or been given): drawn as itself, dim but
         // legible (§11.5).
@@ -1052,7 +1090,7 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         Terrain::Hideout => real(Terrain::Wall),
         // The one content the modifier **does** hand over, and deliberately left that
         // way by #450: a mouth is cut into the fabric and reads off a plan the way a
-        // doorway does, which is why `full_layout_known` has always drawn it (§12.6,
+        // doorway does, which is why `LayoutKnowledge::Full` has always drawn it (§12.6,
         // and the modifier's own row in §11.5a). Being remembered once scouted is a
         // change to what *finding* one is worth; it is not an argument for taking it
         // off the plans, and quietly narrowing an *easier*-direction modifier is a

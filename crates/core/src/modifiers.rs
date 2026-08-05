@@ -223,6 +223,104 @@ impl IntelCount {
     }
 }
 
+/// How much of the building the player is given **before setting foot in it**
+/// (§11.5a/§12.6, #307/#233) — the third bounded knob of [`GuardCount`]'s shape, and
+/// the one whose axis is *knowledge* rather than a count.
+///
+/// §11.5a's baseline hands over the **plans**: the load-bearing fabric of ground you
+/// have never had eyes on draws as the schematic `□`, the floor space between it
+/// blank, and walking somewhere resolves it into the real building permanently. The
+/// knob's two ends move that line in opposite directions — [`Full`](Self::Full) draws
+/// the real building where the schematic would stand, [`None`](Self::None) draws
+/// nothing at all — so both are departures from one middle, which is why they are one
+/// knob rather than two toggles that could contradict each other.
+///
+/// **The [`None`] end deliberately overrides a [SETTLED] rule**, and that is stated
+/// rather than smuggled: §11.5a settles that geometry is *"always visible, from turn
+/// one. Never fogged."* precisely so a player can **plan an escape route before being
+/// spotted** (§7.6) — *"a player who is chased and improvising in unknown geometry is
+/// not playing a stealth game, they're rolling dice."* This end removes that pillar's
+/// support on purpose. It is why the rule may only ever be bent by a **modifier**,
+/// never by the base game, and why the end sits outside the difficulty draw (see
+/// [`POOL`]): it does not add a step of pressure, it hands back a different game.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayoutKnowledge {
+    /// **Easier.** The **full layout** (§11.5a): geometry the player has never had
+    /// eyes on draws as the real building rather than as the schematic `□`, so
+    /// doorways, duct mouths and furniture are all on the map from turn one. Exactly
+    /// the picture the game gave everyone before the schematic landed (#307), which is
+    /// what makes this end easy to state and easy to price.
+    ///
+    /// It reveals the **layout and nothing else**: a console and a cupboard are
+    /// contents, still hidden until seen (§11.5a), so this never shortcuts the
+    /// scouting that finds the objectives — it removes the *architectural* unknown
+    /// only. The knowledge state on the seam stays truthful either way: an unexplored
+    /// cell still reports itself unexplored, it is simply drawn in full.
+    ///
+    /// **The duct mouth is the one content on the plans**, and stays one (#450). It is
+    /// a recess cut into the fabric and reads off a drawing the way a doorway does,
+    /// which is why this end has always handed it over. #450 made a mouth *remembered*
+    /// once scouted — a change to what finding one is worth — and left that alone
+    /// deliberately: quietly narrowing an easier-direction modifier is a difficulty
+    /// change wearing a render fix's clothes.
+    ///
+    /// **It has to be paid for.** Route-planning through unscouted wings is a real
+    /// advantage, so this end sits on the *easier* side of the §12.6 directed pool:
+    /// under the difficulty draw it spends budget that must be found by taking a
+    /// harder rule elsewhere. A modifier that only ever gave would not be a modifier.
+    Full,
+    /// The §11.5a **[SETTLED]** baseline: the building's **plans**, drawn as the
+    /// schematic until explored. [`Default`], so a hand-built state, quick play and
+    /// the sim all play the unchanged §11.5a game.
+    #[default]
+    Plans,
+    /// **Harder.** No layout at all (#233): a cell the player has never had eyes on
+    /// draws as **blank**, and only what has actually been seen is on the board.
+    /// Route-planning stops being a first-class activity from turn one and becomes
+    /// something exploration has to earn — the schematic's *"you are never lost, never
+    /// mapping"* traded away.
+    ///
+    /// **The fog is total, and it has to be.** §11.5a's masking rule — *everything
+    /// unexplored collapses to exactly the same appearance, glyph channel and colour
+    /// channel both* — is what stops the fog leaking what it hides, so this end masks
+    /// every unexplored cell to bare floor rather than dimming the schematic further.
+    /// One appearance, no ink, nothing to read.
+    ///
+    /// **The exit is the one exception**, on the same footing it keeps everywhere else
+    /// (§4.5/§11.5a): the tunnel the player dug and came in by is theirs, drawn as
+    /// itself from turn one. It is also the whole reason the run stays playable — with
+    /// the building gone, `E` is the one fixed point every escape plan can still be
+    /// hung on (§7.6).
+    ///
+    /// **The §9 guard sense is untouched, and reads oddly on purpose.** A sensed guard
+    /// is still a bare position through walls — the sense was never line of sight — so
+    /// with this on the player gets a dot floating in blank space and does not know
+    /// what stands between them and it. That is the honest picture rather than an
+    /// oversight: special-casing the sense here would invent a second knowledge rule
+    /// for one channel to paper over the first one's consequences.
+    None,
+}
+
+impl LayoutKnowledge {
+    /// Compose two contributions **harder-ward**, the [`LevelModifiers::union`] rule
+    /// for this knob — [`GuardCount::harder_of`]'s rule over a knob whose baseline is
+    /// likewise a neutral middle.
+    ///
+    /// The invariant is §12.6's: **no contribution can relieve pressure another one
+    /// asked for.** A source resting at [`Plans`](Self::Plans) stayed quiet and yields
+    /// to whichever end its partner names; when two sources genuinely disagree,
+    /// [`None`](Self::None) wins, because a source that asked for the layout to be
+    /// hidden cannot be talked out of it by one that offered to hand it over.
+    #[must_use]
+    pub fn harder_of(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Plans, end) | (end, Self::Plans) => end,
+            (Self::None, _) | (_, Self::None) => Self::None,
+            (Self::Full, Self::Full) => Self::Full,
+        }
+    }
+}
+
 /// How many **equipment caches** a facility hides (§2.2/§14 v3/#209) — the campaign's
 /// *second* reward axis, and the one the run's power curve is made of.
 ///
@@ -360,30 +458,23 @@ pub struct LevelModifiers {
     /// [SETTLED] contract ("if your cell isn't red, no guard detects you") is
     /// kept and, if anything, strengthened.
     pub always_show_vision_cones: bool,
-    /// **Easier.** Hand over the **full layout** (§11.5a): geometry the player has
-    /// never had eyes on draws as the real building rather than as the schematic
-    /// `□`, so doorways, duct mouths and furniture are all on the map from turn
-    /// one. Exactly the picture the game gave everyone before the schematic landed
-    /// (#307), which is what makes the modifier easy to state and easy to price.
+    /// How much of the building the player is given before setting foot in it
+    /// (§11.5a/#307/#233) — [`Full`](LayoutKnowledge::Full) hands the real
+    /// architecture over (easier), [`None`](LayoutKnowledge::None) hides it
+    /// altogether (harder). Baseline [`LayoutKnowledge::Plans`]: §11.5a's schematic,
+    /// untouched.
     ///
-    /// It reveals the **layout and nothing else**: a console and a cupboard are
-    /// contents, still hidden until seen (§11.5a), so this never shortcuts the
-    /// scouting that finds the objectives — it removes the *architectural* unknown
-    /// only. The knowledge state on the seam stays truthful either way: an
-    /// unexplored cell still reports itself unexplored, it is simply drawn in full.
+    /// **One knob rather than two toggles**, because the two ends are two answers to
+    /// one question and a pair of bools could be asked both at once with nothing to
+    /// say which won. The knob has the same shape as [`GuardCount`] — a neutral middle
+    /// with a departure either side — and composes by the same rule
+    /// ([`LayoutKnowledge::harder_of`]).
     ///
-    /// **The duct mouth is the one content on the plans**, and stays one (#450). It
-    /// is a recess cut into the fabric and reads off a drawing the way a doorway
-    /// does, which is why this modifier has always handed it over. #450 made a mouth
-    /// *remembered* once scouted — a change to what finding one is worth — and left
-    /// that alone deliberately: quietly narrowing an easier-direction modifier is a
-    /// difficulty change wearing a render fix's clothes.
-    ///
-    /// **It has to be paid for.** Route-planning through unscouted wings is a real
-    /// advantage, so this sits on the *easier* side of the §12.6 directed pool: under
-    /// the difficulty draw it spends budget that must be found by taking a harder
-    /// rule elsewhere. A modifier that only ever gave would not be a modifier.
-    pub full_layout_known: bool,
+    /// **Its hard end is the one modifier that overrides a [SETTLED] rule** (§11.5a,
+    /// geometry is never fogged). That is why the bending lives here and only here:
+    /// the base game keeps the visible layout, and a run that gives it up says so on
+    /// its card. See [`LayoutKnowledge`] for what each end costs.
+    pub layout_knowledge: LayoutKnowledge,
     /// **Retired — slot 5, frozen (#442).** This was the `calm_guards_detect_only_
     /// their_cone` experiment (#410): a **Calm** guard detecting exactly its ~90° cone,
     /// its flank cells (§6.2 tier 3) dropping out of detection along with the three at
@@ -652,12 +743,13 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 17] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 18] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
     SHOWS_ALL_CONES,
     KNOWS_FULL_LAYOUT,
+    LAYOUT_UNKNOWN,
     ALL_DOORS_AUTOMATIC,
     WATCHES_CONSOLES,
     GUARDS_MORE,
@@ -699,6 +791,20 @@ const SHOWS_ALL_CONES: ActiveModifier = ActiveModifier {
 const KNOWS_FULL_LAYOUT: ActiveModifier = ActiveModifier {
     name: "Full layout known",
     direction: ModifierDirection::Easier,
+    detail: None,
+};
+
+/// The same knob's hard end (#233), and the caption a player most needs to read
+/// **before** turn one: with this on the board opens nearly empty, and a card that did
+/// not say so would leave them wondering whether the render had broken.
+///
+/// Not styled as `Layout: fully known` / `Layout: unknown` even though the two are now
+/// one knob's ends. The easier end shipped first and *"Full layout known"* is the
+/// caption players have already read; restyling a caption nothing else needs changed
+/// would be churn on the card for tidiness in the source.
+const LAYOUT_UNKNOWN: ActiveModifier = ActiveModifier {
+    name: "Layout unknown",
+    direction: ModifierDirection::Harder,
     detail: None,
 };
 
@@ -840,6 +946,23 @@ pub(crate) struct PoolEntry {
 /// accident, and the one thing §2.2 forbids outright. It is driven by node flavour
 /// ([`Flavour`](crate::Flavour)) and by nothing else.
 ///
+/// **A symmetric knob does not have to put both ends in, and the layout knob does
+/// not** (#233). [`LayoutKnowledge::Full`] takes the row below;
+/// [`LayoutKnowledge::None`] has none, and the reason is neither of the two above. It
+/// is a renderer-only rule read on the same board, so the mechanical objection that
+/// keeps `automatic_doors` out does not arise — it is simply **not a difficulty step**.
+/// The −2…+2 axis promises a run of the same game under more or less pressure, and this
+/// end hands back a *different* game: §11.5a's escape-route planning (§7.6) stops
+/// existing, so a player who asked for "+1" would be handed an unfamiliar mode rather
+/// than a harder facility. It stays reachable by every other route into the seam — a
+/// chosen set, a shared token, a node flavour — where it is asked for by name.
+///
+/// It is also the one modifier the sim cannot yet weigh: the bot is granted geometry
+/// unconditionally ([`docs/bot-behaviour.md`](../../docs/bot-behaviour.md) §2, on
+/// §11.5a's authority), so with this end on it routes through walls it has never seen.
+/// Keeping it out of the pool means no difficulty draw can quietly put a sim batch in
+/// that position while the bot still believes the layout is free.
+///
 /// **A symmetric knob is a different case, and both its ends are in** (#232,
 /// appendix 30). [`GuardCount`]'s baseline is a neutral middle rather than one end of
 /// an axis quick play has already walked to, so
@@ -867,7 +990,7 @@ pub(crate) const POOL: [PoolEntry; 9] = [
     },
     PoolEntry {
         caption: KNOWS_FULL_LAYOUT,
-        set: |m| m.full_layout_known = true,
+        set: |m| m.layout_knowledge = LayoutKnowledge::Full,
     },
     // The knob's two ends, one on each side of the pool's filter (#232). They are
     // listed in slot order like everything else, so the two rows sit together even
@@ -937,7 +1060,7 @@ impl LevelModifiers {
             sighting_lost_calls_a_guard,
             body_found_calls_two_guards,
             always_show_vision_cones,
-            full_layout_known,
+            layout_knowledge,
             calm_guards_detect_only_their_cone,
             automatic_doors,
             guards_watch_consoles,
@@ -962,8 +1085,13 @@ impl LevelModifiers {
         if always_show_vision_cones {
             active.push(SHOWS_ALL_CONES);
         }
-        if full_layout_known {
-            active.push(KNOWS_FULL_LAYOUT);
+        // The layout knob surfaces one caption per end, like the count knobs below
+        // (§11.5a/#307/#233) — its baseline is the schematic every other run plays, so
+        // there is nothing there to announce.
+        match layout_knowledge {
+            LayoutKnowledge::Plans => {} // §11.5a's own picture — nothing to surface
+            LayoutKnowledge::Full => active.push(KNOWS_FULL_LAYOUT),
+            LayoutKnowledge::None => active.push(LAYOUT_UNKNOWN),
         }
         if automatic_doors {
             active.push(ALL_DOORS_AUTOMATIC);
@@ -1050,7 +1178,11 @@ impl LevelModifiers {
                 || other.body_found_calls_two_guards,
             always_show_vision_cones: self.always_show_vision_cones
                 || other.always_show_vision_cones,
-            full_layout_known: self.full_layout_known || other.full_layout_known,
+            // A knob whose baseline is a neutral middle, composed like the guard count
+            // (#233): a source resting on §11.5a's schematic stayed quiet and yields,
+            // and when two sources disagree the *hidden* end wins — an easier source
+            // cannot hand back a layout a harder one asked to take away.
+            layout_knowledge: self.layout_knowledge.harder_of(other.layout_knowledge),
             // Retired (#442): composed like any other toggle so the slot keeps
             // round-tripping, but nothing reads the result.
             calm_guards_detect_only_their_cone: self.calm_guards_detect_only_their_cone
@@ -1334,7 +1466,7 @@ mod tests {
             sighting_lost_calls_a_guard: true,
             body_found_calls_two_guards: true,
             always_show_vision_cones: true,
-            full_layout_known: true,
+            layout_knowledge: LayoutKnowledge::Full,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guards_watch_consoles: true,
@@ -1400,7 +1532,7 @@ mod tests {
             sighting_lost_calls_a_guard: true,
             body_found_calls_two_guards: true,
             always_show_vision_cones: false,
-            full_layout_known: false,
+            layout_knowledge: LayoutKnowledge::Plans,
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
             guards_watch_consoles: false,
@@ -1415,7 +1547,7 @@ mod tests {
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: true,
-            full_layout_known: true,
+            layout_knowledge: LayoutKnowledge::Full,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guards_watch_consoles: true,
@@ -1486,5 +1618,102 @@ mod tests {
         }
         .resolve();
         assert_eq!(resolved.guard_count, More);
+    }
+
+    /// The layout knob's composition (#233), the guard knob's rule over the knowledge
+    /// axis: a source resting on §11.5a's plans yields to either end, and when two
+    /// sources genuinely disagree the **hidden** end wins — an easier source may not
+    /// hand back a building a harder one asked to take away.
+    #[test]
+    fn the_layout_knob_hides_when_two_sources_disagree() {
+        use LayoutKnowledge::{Full, None, Plans};
+        assert_eq!(Plans.harder_of(Full), Full);
+        assert_eq!(Full.harder_of(Plans), Full);
+        assert_eq!(Plans.harder_of(None), None);
+        assert_eq!(None.harder_of(Plans), None);
+        // The disagreement, which is the case the knob exists to make answerable at
+        // all: two bools could be asked for both at once with nothing to say which won.
+        assert_eq!(Full.harder_of(None), None);
+        assert_eq!(None.harder_of(Full), None);
+        // Agreement composes to itself, the baseline is the identity, and the whole
+        // knob is commutative — sources compose in any order.
+        assert_eq!(Full.harder_of(Full), Full);
+        assert_eq!(None.harder_of(None), None);
+        assert_eq!(Plans.harder_of(Plans), Plans);
+        for a in [Full, Plans, None] {
+            for b in [Full, Plans, None] {
+                assert_eq!(a.harder_of(b), b.harder_of(a), "{a:?} / {b:?}");
+            }
+        }
+        // Through the seam the renderer actually reads: a campaign alert that hid the
+        // layout survives a choice that asked for it.
+        let resolved = ModifierSources {
+            chosen: LevelModifiers {
+                layout_knowledge: Full,
+                ..LevelModifiers::default()
+            },
+            flavour: Option::None,
+            alert: Some(LevelModifiers {
+                layout_knowledge: None,
+                ..LevelModifiers::neutral()
+            }),
+        }
+        .resolve();
+        assert_eq!(resolved.layout_knowledge, None);
+    }
+
+    /// Each end of the layout knob surfaces its own caption with its own direction
+    /// (#248/#233), and the baseline announces nothing — §11.5a's schematic is the
+    /// picture every other run plays, so there is no departure to state.
+    ///
+    /// The harder end is also the one caption a player most needs *before* turn one:
+    /// the board opens nearly empty, and a card that did not say so would read as a
+    /// broken render.
+    #[test]
+    fn each_end_of_the_layout_knob_announces_itself() {
+        assert!(LevelModifiers::default().active().is_empty());
+        let with = |knowledge| {
+            LevelModifiers {
+                layout_knowledge: knowledge,
+                ..LevelModifiers::default()
+            }
+            .active()
+        };
+        assert_eq!(with(LayoutKnowledge::Plans), vec![]);
+        assert_eq!(with(LayoutKnowledge::Full), vec![KNOWS_FULL_LAYOUT]);
+        assert_eq!(with(LayoutKnowledge::None), vec![LAYOUT_UNKNOWN]);
+        assert_eq!(KNOWS_FULL_LAYOUT.direction, ModifierDirection::Easier);
+        assert_eq!(LAYOUT_UNKNOWN.direction, ModifierDirection::Harder);
+        // Both captions are in the table the help card's width bound measures, or the
+        // card could clip a caption nothing checks.
+        assert!(CAPTIONS.contains(&KNOWS_FULL_LAYOUT));
+        assert!(CAPTIONS.contains(&LAYOUT_UNKNOWN));
+    }
+
+    /// The knob's harder end is deliberately **not** a pool entry (#233): the −2…+2
+    /// axis promises the same game under more or less pressure, and hiding the layout
+    /// hands back a different one (§11.5a/§7.6). It is reachable by every other route
+    /// into the seam — a chosen set, a token, a node flavour — where it is asked for
+    /// by name.
+    #[test]
+    fn hiding_the_layout_is_not_a_difficulty_step_the_draw_can_take() {
+        assert!(
+            !POOL.iter().any(|e| e.caption.name == LAYOUT_UNKNOWN.name),
+            "the difficulty draw must not be able to hide the layout",
+        );
+        // Its easier end stays in, so the knob is in the pool at exactly one end.
+        assert!(POOL
+            .iter()
+            .any(|e| e.caption.name == KNOWS_FULL_LAYOUT.name));
+        for difficulty in crate::Difficulty::ALL {
+            for seed in [0, 7, 4242, u64::MAX] {
+                assert_ne!(
+                    difficulty.draw(seed).layout_knowledge,
+                    LayoutKnowledge::None,
+                    "a {:?} draw on seed {seed} hid the layout",
+                    difficulty.label(),
+                );
+            }
+        }
     }
 }

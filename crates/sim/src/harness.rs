@@ -335,14 +335,17 @@ mod tests {
             .with_tech("camouflage,decoy")
             .expect("known abilities")
             .with_intel_gate(IntelGate::All)
-            .with_modifier("full-layout-known")
+            .with_modifier("layout-knowledge-full")
             .expect("a known modifier");
         let state = intrusion_core::start_level_with(&config.facility, &config.level(7))
             .expect("generates");
         assert!(state.loadout().contains(AbilityId::Camouflage));
         assert!(state.loadout().contains(AbilityId::Decoy));
         assert_eq!(state.modifiers().intel_to_exit, IntelGate::All);
-        assert!(state.modifiers().full_layout_known);
+        assert_eq!(
+            state.modifiers().layout_knowledge,
+            intrusion_core::LayoutKnowledge::Full
+        );
         // The facility a seed carves is independent of the config it is played under
         // — the property a paired A/B (#257) rests on.
         let sim = RunConfig::sim();
