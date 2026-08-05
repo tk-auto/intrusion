@@ -157,6 +157,8 @@ fn every_near_line_message_fits() {
         Event::Entombed { at },
         Event::RematerializeRefused,
         Event::WallBored { at },
+        Event::SearchBegan,
+        Event::SearchEnded,
     ];
     // Every bore refusal is a near-line message of its own (§8.4/#303), so each
     // wording is measured rather than just one representative.

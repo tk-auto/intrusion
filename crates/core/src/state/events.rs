@@ -312,6 +312,33 @@ pub enum Event {
     /// every guard it could have caught is one the player was already shown, so this
     /// refuses only a press that was going to buy nothing.
     ConfusionMissed,
+    /// A §7.6 **search opened** somewhere in the facility (§11.7/#224): the turn ended
+    /// with somebody sweeping an area that nobody was sweeping when it began. The
+    /// temporal half of what makes a search legible — the whole hiding game is a bet on
+    /// [`SEARCH_DURATION`](crate::guard::SEARCH_DURATION), and a bet whose clock never
+    /// visibly starts is a bet the player cannot place (§2.2).
+    ///
+    /// **Facility-wide, not per guard**, which is why it carries no cell and no index.
+    /// A call-in (§7.7) puts two or three guards on the same lead in the same turn, and
+    /// three lines saying the same thing would spend a one-row surface (§11.7) on one
+    /// fact; so this fires on the transition *nobody searching → somebody searching* and
+    /// stays quiet for every further searcher until the facility is calm again. It names
+    /// no place deliberately: **where** is the [`show_search_areas`] overlay's job
+    /// (§11.5), and a cell here would name one guard's focus as though it were the only
+    /// one.
+    ///
+    /// [`show_search_areas`]: crate::LevelModifiers::show_search_areas
+    SearchBegan,
+    /// The facility's last §7.6 search **ended** (§11.7/#224) — every guard that was
+    /// sweeping has released to its patrol or been pulled onto something else.
+    ///
+    /// The other half of [`SearchBegan`](Event::SearchBegan), and the one the player in
+    /// a cupboard is actually waiting on: *has it given up yet?* is the question §7.6's
+    /// bounded search exists to make askable, and watching a cone wander is not an
+    /// answer. Fires on the transition back to nobody searching, whatever ended it — the
+    /// timer running out, a fresh sighting superseding the sweep, or the searcher being
+    /// taken down.
+    SearchEnded,
 }
 
 impl Event {
@@ -369,13 +396,23 @@ impl Event {
             // even know — but the next two turns are not yours, and that is a bad
             // fact about now rather than self-narration. Not Danger: the Danger band
             // belongs to a threat that is on you (§11.2), and the wall has just let go.
+            // A §7.6 search opening is the same aroused-but-not-on-you band (#224):
+            // somebody is combing an area, and if they had you it would be a
+            // detection instead.
             Event::Ejected { .. }
             | Event::BodyFound { .. }
             | Event::RadioSilence { .. }
             | Event::CalledIn { .. }
             | Event::BodyCalledIn { .. }
             | Event::AlertRaised { .. }
+            | Event::SearchBegan
             | Event::ReinforcementArrived { .. } => Category::Warning,
+            // The search ending is the only *good* news the threat channel carries
+            // (§11.2/#224), and the band says so by stepping **down** the ladder: the
+            // guards that were hunting are unaware again, which is exactly what
+            // Caution's yellow means. The near line going orange → yellow is the
+            // relief, painted.
+            Event::SearchEnded => Category::Caution,
             // A guard that sees you is hunting *you* — the same Danger band as
             // its Chasing/Investigating glyph (§7.4), so the message and the `g`
             // reinforce (§11.2).

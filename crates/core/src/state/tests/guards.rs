@@ -3238,3 +3238,157 @@ fn a_deferred_spotter_paints_the_cone_of_the_mood_it_is_in() {
         );
     }
 }
+
+/// §7.6/§11.7/#224: the near line says when a search **opens** and when it is
+/// **called off**, and says each exactly once.
+///
+/// The scene is [`a_hidden_player_waits_out_a_search_and_watches_the_guard_leave`]'s:
+/// a chase that loses its lead, a bounded sweep, then a release to patrol. Baseline —
+/// no modifier — because the messages are the free half of #224; the area overlay is
+/// the part that has to be paid for.
+///
+/// The two properties are the ones the hiding game turns on. The opening lands on the
+/// turn the guard actually drops into its sweep, so *the clock has started* is
+/// information the player has rather than something inferred from a wandering cone;
+/// and the ending lands on the turn the last searcher releases, which is the answer to
+/// **has it given up yet?** — the one question §7.6's bounded search exists to make
+/// askable, and the one a hidden player cannot see for themselves.
+#[test]
+fn a_search_says_when_it_opens_and_when_it_is_called_off() {
+    let mut layout = open_room(16, 12);
+    layout.place(Cell::new(4, 5), Terrain::Hideout);
+    layout.place(Cell::new(4, 4), Terrain::Wall); // the dive is unwitnessed (§15 Q5)
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![Guard::patrolling(Cell::new(5, 1))],
+        Vec::new(),
+        Cell::new(14, 10),
+    );
+    assert_eq!(s.guards()[0].state(), GuardState::Chasing);
+
+    // The chase is on and nobody is searching yet — so nothing has been said.
+    let dive = s.step(Input::Step(Direction::West));
+    assert!(s.hidden());
+    assert!(
+        !dive.contains(&Event::SearchBegan),
+        "a chase is not a search",
+    );
+
+    let (mut began, mut ended) = (0, 0);
+    for _ in 0..60 {
+        let searching_before = s.guards()[0].state() == GuardState::Alerted;
+        let events = s.step(Input::Wait);
+        let searching_after = s.guards()[0].state() == GuardState::Alerted;
+        for event in &events {
+            match event {
+                Event::SearchBegan => {
+                    began += 1;
+                    assert!(
+                        !searching_before && searching_after,
+                        "the opening lands on the turn the sweep actually starts",
+                    );
+                }
+                Event::SearchEnded => {
+                    ended += 1;
+                    assert!(
+                        searching_before && !searching_after,
+                        "the ending lands on the turn the sweep actually stops",
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(began, 1, "the search opened once and said so once");
+    assert_eq!(ended, 1, "…and was called off once");
+    assert!(s.hidden(), "the player rode it out from cover");
+}
+
+/// §7.7/§11.7/#224: the boundary is **facility-wide**, not per guard. A §7.7 call-in
+/// puts a second guard on the same lead, so the level runs **two** searches — and the
+/// near line still says *one* opening and *one* calling-off.
+///
+/// The scene produces the hardest version of that: a clean **handoff**. The caller
+/// releases on the very turn the responder arrives and starts sweeping, so the level
+/// never stops searching even though no single guard searched throughout. Per-guard
+/// messages would say "the search is called off" into a cupboard the second guard was
+/// at that moment walking towards — the one answer the line must never get wrong —
+/// and then say "a guard starts searching" again a breath later. Neither fires, because
+/// the fact being reported is *the facility's*, and it never changed.
+#[test]
+fn several_overlapping_searches_are_one_announcement() {
+    // `call_in_scene`'s own responder is deliberately far away, which is the wrong
+    // scene here: it would arrive long after the caller's twelve turns were up. So the
+    // second guard stands just south of the first search, behind a wall that keeps the
+    // player out of its sight until the call sends it.
+    let mut layout = open_room(30, 12);
+    layout.place(Cell::new(4, 5), Terrain::Hideout); // the dive
+    layout.place(Cell::new(4, 4), Terrain::Wall); // …unwitnessed (§15 Q5)
+    for x in 3..=7 {
+        layout.place(Cell::new(x, 7), Terrain::Wall); // the near guard's sight-block
+    }
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        vec![
+            Guard::patrolling(Cell::new(5, 1)), // 4 away — the certain zone
+            Guard::patrolling(Cell::new(5, 9)), // walled off, and a short walk once sent
+        ],
+        Vec::new(),
+        Cell::new(28, 10),
+    )
+    .with_modifiers(LevelModifiers {
+        sighting_lost_calls_a_guard: true,
+        ..LevelModifiers::default()
+    });
+    s.step(Input::Step(Direction::West)); // dive into the cupboard, breaking sight
+
+    let searching = |s: &State| {
+        s.guards()
+            .iter()
+            .map(|g| g.state() == GuardState::Alerted)
+            .collect::<Vec<_>>()
+    };
+    let (mut began, mut ended) = (0, 0);
+    let mut swept = vec![false; 2];
+    let mut open = false;
+    for _ in 0..80 {
+        let events = s.step(Input::Wait);
+        let now = searching(&s);
+        for (guard, sweeping) in now.iter().enumerate() {
+            swept[guard] |= *sweeping;
+        }
+        let anyone = now.iter().any(|sweeping| *sweeping);
+        for event in &events {
+            match event {
+                Event::SearchBegan => {
+                    began += 1;
+                    open = true;
+                }
+                Event::SearchEnded => {
+                    ended += 1;
+                    open = false;
+                    assert!(
+                        !anyone,
+                        "\"called off\" must not fire while somebody is still sweeping",
+                    );
+                }
+                _ => {}
+            }
+        }
+        // The whole claim, checked every turn: what the near line last said about the
+        // facility is what the facility is doing. A handoff between two guards is not
+        // an ending followed by a beginning, and a level with nobody sweeping is not a
+        // search still standing.
+        assert_eq!(open, anyone, "the announced state must match the real one");
+    }
+    assert!(
+        swept.iter().all(|guard| *guard),
+        "the scene must actually run two searches, one per guard (saw {swept:?})",
+    );
+    assert_eq!(began, 1, "two searches, one opening");
+    assert_eq!(ended, 1, "two searches, one calling-off");
+}

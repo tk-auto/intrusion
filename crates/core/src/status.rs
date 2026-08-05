@@ -37,9 +37,9 @@ pub struct Message {
     pub text: String,
     /// What the message *means* (§11.2) — the shell colours the band from this.
     pub category: Category,
-    /// The §11.7 ladder: routine self-narration ≤ 0, threat 2 → 4 → 10,
-    /// objective feedback 20. Ambient status sits below everything at
-    /// `i32::MIN` — it is the floor, not a message.
+    /// The §11.7 ladder: routine self-narration ≤ 0, the §7.6 search's own quiet
+    /// rung at 1, threat 2 → 4 → 10, objective feedback 20. Ambient status sits
+    /// below everything at `i32::MIN` — it is the floor, not a message.
     ///
     /// A **subordinate** message ([`subordinate_for`]) wears its headline's priority
     /// and is never sorted by it: [`loudest_first`] orders headlines and splices the
@@ -301,6 +301,20 @@ pub fn message_for(event: Event) -> Option<Message> {
         // as a dropped key. It names the rule the player is learning: the blast only
         // reaches what you can already sense.
         Event::ConfusionMissed => ("nothing near enough to daze".to_string(), 0),
+        // The §7.6 search, made legible in time (§11.7/#224). Both sit at **1** — a
+        // new rung, deliberately below the threat ladder's bottom (a fresh detection
+        // at 2) and above routine self-narration: a search opening is the
+        // *consequence* of something that has usually already spoken this turn or a
+        // few turns back (a lost sighting, a found body, a call-in), so it must never
+        // push the louder fact off the one row it has.
+        //
+        // Neither line names a place, because neither knows one: the events are
+        // facility-wide (§11.7 — one call-in puts three guards on one lead), and
+        // **where** is what the `show_search_areas` overlay answers (§11.5). The
+        // wording follows §11.8 and names the world: guards search, control calls a
+        // search off — nothing here mentions a timer or a radius.
+        Event::SearchBegan => ("a guard starts searching".to_string(), 1),
+        Event::SearchEnded => ("the search is called off".to_string(), 1),
     };
     Some(Message {
         text,

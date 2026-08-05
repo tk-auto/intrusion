@@ -133,6 +133,52 @@ impl State {
         self.move_guards(&senses, events);
     }
 
+    /// Whether **anybody** in the facility is running a §7.6 search right now
+    /// (§11.7/#224) — the one fact the near line's start/end pair is a diff of.
+    ///
+    /// Facility-wide on purpose. A §7.7 call-in puts two or three guards on one lead in
+    /// one turn, and a per-guard message would say the same thing three times into a
+    /// one-row surface; worse, "the search is called off" would fire the moment the
+    /// *first* of them released while the rest kept combing — which is the one question
+    /// the message exists to answer, answered wrongly. So the answer is a count reduced
+    /// to a bool: a search is under way while any guard is sweeping, and over when the
+    /// last one stops.
+    ///
+    /// A **dazed** searcher (§8.3/#325) still counts. Its sweep is paused, not
+    /// abandoned — state, lead and focus all survive the freeze — so a "called off" on
+    /// the turn a blast lands would be a lie the guard disproves as soon as it shakes it
+    /// off.
+    pub(crate) fn search_under_way(&self) -> bool {
+        self.guards.iter().any(Guard::searching)
+    }
+
+    /// Report the facility's §7.6 search **starting** or **ending** (§11.7/#224), given
+    /// what was true before the world phases ran.
+    ///
+    /// It is a diff across the whole of phases 2–3 rather than a hook inside the guard
+    /// phase, because a search does not only begin and end there: the radio dispatch
+    /// (§7.3) can pull the last searcher onto an errand in `radio_phase`, one turn's
+    /// takedown can remove it, and the search itself opens in three different passes.
+    /// One reading either side of the world's turn catches all of them and cannot be
+    /// forgotten by a later pass that learns to start a search.
+    ///
+    /// **A search that opens and closes inside one turn says nothing**, which is right:
+    /// a guard that arrives at a cell with nothing left to poke at releases in the same
+    /// `decide`, and there was never a wait for the player to be told about.
+    ///
+    /// Silent once the run is over. A capture or a win ends the turn mid-phase (§4.5),
+    /// and the last thing the near line should say is what happened to the player.
+    pub(super) fn report_search_boundary(&self, was_under_way: bool, events: &mut Vec<Event>) {
+        if self.outcome != Outcome::Playing {
+            return;
+        }
+        match (was_under_way, self.search_under_way()) {
+            (false, true) => events.push(Event::SearchBegan),
+            (true, false) => events.push(Event::SearchEnded),
+            _ => {}
+        }
+    }
+
     /// Pass 1 — every guard takes in this turn's information ([`Guard::sense`], §7.6):
     /// it sees the player from the cone phase 2 just recomputed, and a player in its
     /// cone flips it to Chasing (certain zone) or Investigating (glimpse zone).
