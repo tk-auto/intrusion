@@ -5,8 +5,9 @@ bot's **cue** says it is for (`crates/sim/src/cue.rs`), and what a batch measure
 when the bot was actually given it. The set is exhaustive over `AbilityId` on
 purpose — the same move the cue seam makes in code (#366), so a missing file means
 "not an ability", never "nobody got round to it". A verb with no cue still gets a
-file; it says so, and says why — today that is the two passives (Vision and the Saver)
-and the Drone, whose press exists but whose *control mode* the bot does not have (#273).
+file; it says so, and says why — today that is the three passives (Vision, the Saver and
+the Guide) and the Drone, whose press exists but whose *control mode* the bot does not
+have (#273).
 
 ## These are numbers, not verdicts (§13.4)
 
@@ -104,6 +105,7 @@ to make.
 | Pierce Wall | cued | [`pierce-wall.md`](pierce-wall.md) |
 | Lockdown | cued | [`lockdown.md`](lockdown.md) |
 | False Call | cued, narrowly | [`false-call.md`](false-call.md) |
+| Guide | **none** — passive, and a cue would have to cheat | [`guide.md`](guide.md) |
 | Vision | **none** — passive, nothing to activate | [`vision.md`](vision.md) |
 | Saver | **none** — passive, and deliberately uncued | [`saver.md`](saver.md) |
 | Drone | **none** — a control mode the bot does not have | [`drone.md`](drone.md) |

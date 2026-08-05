@@ -332,6 +332,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **False Call** | emptying the ground you are walking away from | the route step, the guards inside core's reach, and whether that step opens the gap on **every** one of them |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
+| **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |
 | **Saver** | — **passive**, and deliberately uncued even though it has a budget (#243) | — |
 
 Three of these are worth reading twice, because they are the seam's own rules biting:
@@ -364,6 +365,17 @@ Three of these are worth reading twice, because they are the seam's own rules bi
   the crossing offer is withdrawn outright while the sprint is up (a two-cell step
   overshoots the far side). Both guard the same thing: a duration that expires inside
   a solid costs the safety eject plus a stun as long as the throw (§8.3).
+
+**The Guide's zero is a third kind, and it is the interesting one.** Vision and the
+Saver have no cue because there is no key; the Guide has no key *either*, but unlike
+them it hands the policy something it could act on — a bearing to an objective. Acting
+on it is exactly what the bot may not do. §11.5a's no-cheat gate is that the bot routes
+only to intel it has **seen** (`known_intel`), and a policy that walked a compass needle
+would be routing to a console it has never laid eyes on. So the ability cannot be cued
+without punching a hole in the one rule that keeps the sim's exploration numbers honest,
+and the measurement it wants is the with/without pair a human reads —
+`docs/stats/abilities/guide.md` — watching whether the *player* holding it stops
+exploring.
 
 ### 4.5 Arbitration
 

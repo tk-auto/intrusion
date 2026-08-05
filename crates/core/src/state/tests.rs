@@ -33,6 +33,7 @@ mod effects;
 mod exchange;
 mod false_call;
 mod guards;
+mod guide;
 mod keys;
 mod lockdown;
 mod reinforcements;

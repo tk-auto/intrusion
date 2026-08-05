@@ -372,6 +372,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#504): forge control's own call — every guard in reach is
     /// sent to search **the cell you fired from**.
     FalseCall,
+    /// Salvaged tech (§8.3/#505), **passive**: a compass to the nearest unclaimed
+    /// objective, painted as one of the eight cells around you.
+    Guide,
 }
 
 impl AbilityId {
@@ -380,7 +383,7 @@ impl AbilityId {
     /// which bar slot a held ability lands in and therefore which digit fires it
     /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
     /// must not drift.
-    pub const ALL: [AbilityId; 12] = [
+    pub const ALL: [AbilityId; 13] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -393,6 +396,7 @@ impl AbilityId {
         AbilityId::Saver,
         AbilityId::Drone,
         AbilityId::FalseCall,
+        AbilityId::Guide,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
@@ -406,7 +410,7 @@ impl AbilityId {
     /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
     /// from here like any other tech — it competes for the same slot, which is exactly
     /// what it pays with.
-    pub const TECH: [AbilityId; 11] = [
+    pub const TECH: [AbilityId; 12] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -418,6 +422,7 @@ impl AbilityId {
         AbilityId::Saver,
         AbilityId::Drone,
         AbilityId::FalseCall,
+        AbilityId::Guide,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -486,6 +491,7 @@ impl AbilityId {
             // name says what it *does*. A name suggesting bait would be wrong — bait is
             // the Decoy's job, and the two are complements rather than variants.
             AbilityId::FalseCall => "False Call",
+            AbilityId::Guide => "Guide",
         }
     }
 
@@ -514,6 +520,7 @@ impl AbilityId {
             AbilityId::Saver => "Saver",
             AbilityId::Drone => "Drone",
             AbilityId::FalseCall => "Call",
+            AbilityId::Guide => "Guide",
         }
     }
 
@@ -581,6 +588,10 @@ impl AbilityId {
                 "Forges a call naming your cell: every guard in reach goes there and \
                  searches. Be elsewhere by then; a dead radio spoofs nothing."
             }
+            AbilityId::Guide => {
+                "Washes the neighbouring cell lying toward the nearest thing left to \
+                 take. A bearing as the crow flies — it will point through walls."
+            }
         }
     }
 
@@ -616,6 +627,7 @@ impl AbilityId {
             AbilityId::Saver => &SAVER,
             AbilityId::Drone => &DRONE,
             AbilityId::FalseCall => &FALSE_CALL,
+            AbilityId::Guide => &GUIDE,
         }
     }
 
@@ -634,6 +646,7 @@ impl AbilityId {
             AbilityId::Saver => 9,
             AbilityId::Drone => 10,
             AbilityId::FalseCall => 11,
+            AbilityId::Guide => 12,
         }
     }
 }
@@ -862,6 +875,21 @@ pub enum Effect {
     /// named is a **snapshot** — walking away does not move the destination, which is
     /// the whole play: you call them here, and then you are not here.
     FakeCall,
+    /// Guide (§8.3/§11.5a, #505): while held, one of the eight cells around the player
+    /// is washed [`Effect`](crate::Category::Effect) — the one lying in the direction of
+    /// the nearest **unclaimed objective** (an intel console or an equipment cache).
+    ///
+    /// **A compass, not a route.** The bearing is taken as the crow flies, with no
+    /// regard for walls, doors or reachability, and that restraint is the whole design:
+    /// a guide that pathed would answer §10's exploration outright and turn a facility
+    /// into a corridor to follow. It tells you *which way* and nothing else — expect it
+    /// to point straight through a wall, often; that is the tool working.
+    ///
+    /// **It reveals nothing.** The objective's cell, glyph and distance stay fogged
+    /// until seen (§11.5a **[SETTLED]**); what the player gains is an eighth of a
+    /// circle. Anything that reveals more belongs to §12.6's `full_layout_known` or to
+    /// #215's v3 intel sink, which sells exactly that.
+    ObjectiveBearing,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -1266,6 +1294,35 @@ const FALSE_CALL: Ability = Ability {
     mode: activated(1, TargetingMode::Itself, 0, 30),
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::FakeCall]),
+};
+
+// Guide [START] (§8.3/§11.5a, #505): the **second passive** after Vision — no
+// activation, no turn, no cooldown, in effect for as long as it is held. Its whole price
+// is the loadout slot (§8.2/#264), and unlike Vision it is not obviously worth one,
+// which is the interesting part: it changes what you *know* rather than what you can
+// *do*, and a run that always knows which way to walk still has to get there.
+//
+// **What it costs, and when a good player declines it** (§2.3). The slot, against a
+// flight tool for the moment it all goes wrong — and a compass is worth least exactly
+// when a run is going badly, because knowing the bearing to a console does not help a
+// player being chased away from it. The other cost is subtler and is the one to watch:
+// a bearing plus §11.5a's always-visible geometry may be enough to walk more or less
+// straight to every console, which would delete the exploration the fog exists to
+// create. If it does, the answer is a **range cap** — a compass that only wakes within N
+// cells is a local tool rather than a global one — and not a nerf to the wash.
+//
+// **Deliberately not a pathfinder**, and the first bug report will say it points into a
+// wall. That is the specification: §7.3's "nearest means the shortest walk" is control
+// routing a guard, and this is a needle pointing. Nobody should "fix" it into a
+// pathfind later ([`State::guide_bearing`] states it again at the seam).
+//
+// Data-driven rather than [`Behaviour::Coded`]: a standing wash over a derived cell is
+// an effect like any other, and the layer already knows how to draw one.
+const GUIDE: Ability = Ability {
+    id: AbilityId::Guide,
+    mode: AbilityMode::Passive,
+    uses: None,
+    behaviour: Behaviour::Effects(&[Effect::ObjectiveBearing]),
 };
 
 /// How many captures one facility lets you walk away from — **[START]** (§4.5/§8.3/#243).

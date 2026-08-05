@@ -210,9 +210,30 @@ fn the_catalog_matches_the_design_passive() {
         .collect();
     assert_eq!(
         passives,
-        vec![AbilityId::Vision, AbilityId::Saver],
+        vec![AbilityId::Vision, AbilityId::Saver, AbilityId::Guide],
         "the shipped passive set",
     );
+
+    // The Guide (#505) is the third, and the one that is a passive *by shape* rather
+    // than by concession: it has nothing to activate at all — no window, no target, no
+    // moment — because what it does is simply true while it is held.
+    let guide = AbilityId::Guide.def();
+    assert!(guide.is_passive());
+    assert_eq!(guide.economy(), None, "no clock to run (§8.2/#264)");
+    assert_eq!(
+        guide.uses_per_level(),
+        None,
+        "the slot is its whole price — unlike the Saver, it is not also budgeted",
+    );
+    match guide.behaviour() {
+        Behaviour::Effects(effects) => {
+            assert_eq!(effects, &[Effect::ObjectiveBearing][..]);
+        }
+        Behaviour::Coded => panic!("the Guide should be data-driven (§8.1)"),
+    }
+    assert_eq!(AbilityId::Guide.name(), "Guide");
+    assert_eq!(AbilityId::Guide.bar_name(), "Guide", "§11.4 fits 5 cells");
+    assert_eq!(AbilityId::Guide.script_letter(), 'u');
 
     let def = AbilityId::Vision.def();
     assert!(def.is_passive());

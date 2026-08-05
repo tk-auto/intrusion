@@ -177,7 +177,7 @@ impl Verb {
             AbilityId::Lockdown => Verb::Lockdown,
             AbilityId::Drone => Verb::Drone,
             AbilityId::FalseCall => Verb::FalseCall,
-            AbilityId::Vision | AbilityId::Saver => return None,
+            AbilityId::Vision | AbilityId::Saver | AbilityId::Guide => return None,
         })
     }
 

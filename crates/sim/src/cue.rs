@@ -283,7 +283,16 @@ impl Moment<'_> {
             // usage histogram (`Verb::Drone`) with this comment and
             // `docs/stats/abilities/drone.md` saying which kind of zero it is (§13.3).
             AbilityId::Drone => None,
-            AbilityId::Vision | AbilityId::Saver => None,
+            // The **Guide** (§8.3/#505) is the Vision answer again, and for exactly the
+            // Vision reason: a passive has no activation to cue. It is worth naming the
+            // temptation it does raise, since unlike Vision it hands over something the
+            // policy could act on — a bearing. Acting on it would be the bot routing to
+            // an objective it has never *seen*, which is the one thing §11.5a forbids the
+            // policy to do (`known_intel` is the no-cheat gate), so a cue here could not
+            // be written without punching a hole in that gate. The honest measurement is
+            // the with/without pair on `docs/stats/abilities/guide.md`, and what it
+            // watches is whether the *human* holding it stops exploring.
+            AbilityId::Vision | AbilityId::Saver | AbilityId::Guide => None,
         }
     }
 

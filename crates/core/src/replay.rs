@@ -67,6 +67,10 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
         "Drone" => 'o',
         // `f` for *forged* — and for the initial, which for once is free.
         "False Call" => 'f',
+        // `u` for the middle of *Guide*: `g` is the Drag's. Like Vision's and the
+        // Saver's it is never written into a script — a passive has no activation to
+        // spell — and exists so the map stays exhaustive over the catalogue.
+        "Guide" => 'u',
         _ => return None,
     })
 }
