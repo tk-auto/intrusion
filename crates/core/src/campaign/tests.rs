@@ -13,7 +13,7 @@ use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::guard::GuardState;
 use crate::level_seed::start_level;
-use crate::modifiers::{LevelModifiers, ModifierSources};
+use crate::modifiers::{LevelModifiers, ModifierDirection, ModifierSources};
 use crate::path::first_step_toward;
 use crate::place::LevelConfig;
 use crate::render::render;
@@ -161,8 +161,13 @@ fn captured() -> Verdict {
 /// The choice is deliberately the dullest possible one — these tests are about the
 /// transitions and what carries across them, and *which* successor is taken is the
 /// map's own business, tested in [`map`](super::map).
+///
+/// The raid ends at **condition 1** for the same reason: a raid that was noticed and
+/// nothing more is the one loudness the campaign alert carries nothing out of (#210), so
+/// these tests keep measuring the transitions rather than the alert's mapping — which
+/// has tests of its own, here and in [`loudness`](super::loudness).
 fn walk_on(run: &mut Campaign, intel: usize) {
-    run.complete(&extracted(intel, 0));
+    run.complete(&extracted(intel, 1));
     if run.stage() == CampaignStage::Choosing {
         let next = run.offers()[0].node;
         assert!(run.choose(next), "an offered node is takeable");
@@ -420,28 +425,204 @@ fn the_run_moves_only_along_an_offer() {
     assert_eq!(run.stage(), CampaignStage::Choosing);
 }
 
-/// **A loud raid does not follow the run out of the facility — yet** (#210). The
-/// §7.3 ladder is per-facility and dies with it; the run-level alert is a seam with
-/// no rule behind it, so every facility starts at base alert and this pins that the
-/// campaign is not quietly inventing a difficulty curve of its own.
+/// A run that has raided one facility of `seed`'s country and left it at `condition`,
+/// standing at the choice point with the noise of that raid on the ground ahead.
+fn after_a_raid_at(seed: u64, condition: u32) -> Campaign {
+    let mut run = Campaign::to_depth(seed, 3);
+    run.enter().expect("the first facility");
+    run.complete(&extracted(1, condition));
+    assert_eq!(run.stage(), CampaignStage::Choosing);
+    run
+}
+
+/// How many of a resolved set's modifiers bend each way — the §2.3 directional
+/// assertion is stated in these two counts, exactly as the difficulty axis states its
+/// own.
+fn by_direction(modifiers: LevelModifiers) -> (usize, usize) {
+    let active = modifiers.active();
+    let count = |want| active.iter().filter(|m| m.direction == want).count();
+    (
+        count(ModifierDirection::Harder),
+        count(ModifierDirection::Easier),
+    )
+}
+
+/// **The campaign alert is the last raid's condition, replaced and never added to**
+/// (§14 v3/#210) — the relief valve §2.2 asks for, held by the shape of the field
+/// rather than by a decay rate.
 #[test]
-fn a_raids_loudness_does_not_scale_the_next_facility_yet() {
+fn the_alert_is_the_last_raids_condition_and_nothing_older() {
     let mut run = Campaign::to_depth(66, 3);
+    assert_eq!(run.alert(), 0);
+    assert_eq!(
+        run.loudness(),
+        None,
+        "a run that has raided nothing is not a run that slipped through unnoticed",
+    );
+
     run.enter();
     run.complete(&extracted(1, TOP_RUNG));
-    assert_eq!(run.alert(), 0, "the alert contribution is #210's to define");
+    assert_eq!(run.alert(), TOP_RUNG);
+    assert_eq!(run.loudness(), Some(Loudness::Hunted));
 
-    // Against a run of the same country that was **quiet** in the same facility and
-    // walked the same way: the facility it arrives at must be identical.
-    let mut quiet = Campaign::to_depth(66, 3);
-    quiet.enter();
-    quiet.complete(&extracted(1, 0));
+    // Walk on and leave the next facility quietly: the alert comes all the way back
+    // down, because what carries is the last raid's noise and nothing older. A campaign
+    // that added instead would have no way back from the top rung (§2.2).
     let node = run.offers()[0].node;
-    assert!(run.choose(node) && quiet.choose(node));
+    assert!(run.choose(node));
+    run.enter();
+    run.complete(&extracted(1, 0));
+    assert_eq!(run.alert(), 0);
+    assert_eq!(run.loudness(), Some(Loudness::Unnoticed));
+
+    // A capture banks nothing, the alert included — there is no later facility for it
+    // to reach.
+    let mut lost = Campaign::to_depth(66, 3);
+    lost.enter();
+    lost.complete(&captured());
+    assert_eq!(lost.alert(), 0);
+}
+
+/// **How far a raid's noise carries** (§14 v3/#210): one open road ahead at condition
+/// 2, every one of them at condition 3, one the *other* way after a raid nobody
+/// noticed, and none at condition 1.
+///
+/// It is stated over a spread of countries because the shape of a choice point is the
+/// seed's to decide — two open edges against the side of the map, three in the middle,
+/// and the intel-locked one either way.
+#[test]
+fn a_loud_raid_alerts_the_roads_ahead_and_a_ghost_raid_eases_one() {
+    for seed in [1, 66, 8371, 123_456] {
+        for (condition, wanted) in [
+            (0, Some(ModifierDirection::Easier)),
+            (1, None),
+            (ALERTS_ONE, Some(ModifierDirection::Harder)),
+            (ALERTS_ALL, Some(ModifierDirection::Harder)),
+        ] {
+            let run = after_a_raid_at(seed, condition);
+            let offers = run.offers();
+            let open: Vec<&Offer> = offers.iter().filter(|offer| !offer.locked).collect();
+            let reached: Vec<&&Offer> = open
+                .iter()
+                .filter(|offer| run.alert_reaches(offer.node).is_some())
+                .collect();
+            let expected = match (wanted, condition) {
+                (None, _) => 0,
+                (Some(_), c) if c >= ALERTS_ALL => open.len(),
+                (Some(_), _) => 1,
+            };
+            assert_eq!(
+                reached.len(),
+                expected,
+                "seed {seed} at condition {condition}",
+            );
+            for offer in &reached {
+                assert_eq!(run.alert_reaches(offer.node), wanted);
+            }
+            // The intel-locked road is never the one the noise settled on: it is
+            // ground the run cannot walk onto (#212), so an alert on it would be an
+            // alert with nothing behind it (§2.3).
+            for offer in offers.iter().filter(|offer| offer.locked) {
+                assert_eq!(run.alert_reaches(offer.node), None, "seed {seed}");
+            }
+        }
+    }
+}
+
+/// **The §2.3 bite check, and the loop §14 v3 exists for**: a louder raid on facility
+/// *k* yields a harder facility *k+1* than a quiet raid does, from the same run seed
+/// and the same choice path.
+///
+/// Two runs of one country, differing in **nothing** but how loudly the first raid
+/// ended, walking to the same node. The facility the loud run walks into carries a rule
+/// the quiet one's does not, and that rule is one the pool documents *harder* — so the
+/// alert is not a number on a screen, it is the building.
+#[test]
+fn a_louder_raid_makes_the_next_facility_harder() {
+    let mut bit_somewhere = false;
+    for seed in [1, 66, 8371, 123_456] {
+        let loud = after_a_raid_at(seed, ALERTS_ALL);
+        let quiet = after_a_raid_at(seed, 1);
+        for offer in quiet.offers().into_iter().filter(|offer| !offer.locked) {
+            let (mut loud, mut quiet) = (loud.clone(), quiet.clone());
+            assert!(loud.choose(offer.node) && quiet.choose(offer.node));
+            let loud = loud.enter().expect("the facility ahead");
+            let quiet = quiet.enter().expect("the facility ahead");
+
+            // Same country, same node: the *building* is the same one either way, and
+            // only the rules bending it differ (§12.4 — the alert draws from its own
+            // stream and cannot move a facility's seed).
+            assert_eq!(loud.seed, quiet.seed, "seed {seed}");
+
+            let (harder_loud, easier_loud) = by_direction(loud.modifiers);
+            let (harder_quiet, easier_quiet) = by_direction(quiet.modifiers);
+            assert!(
+                harder_loud >= harder_quiet,
+                "seed {seed}: a loud raid made the next facility easier",
+            );
+            assert_eq!(
+                easier_loud, easier_quiet,
+                "seed {seed}: a loud raid bent a rule the player's way",
+            );
+            bit_somewhere |= harder_loud > harder_quiet;
+
+            // The witness: whatever the alert drew is *active* in the facility the run
+            // walked into, whether or not the flavour had already asked for something
+            // like it. This is the half that can never be true by luck.
+            let country = quiet_map(seed);
+            let drawn = Loudness::Hunted
+                .contribution(country, country.start(), offer.node)
+                .expect("condition 3 reaches every open road");
+            for rule in drawn.active() {
+                assert!(
+                    loud.modifiers.active().contains(&rule),
+                    "seed {seed}: the alert drew {} and the facility does not play it",
+                    rule.name,
+                );
+            }
+        }
+    }
+    assert!(
+        bit_somewhere,
+        "the alert never once added a rule the flavour had not already asked for",
+    );
+}
+
+/// The country a [`after_a_raid_at`] run raids — its map, for a test that wants to ask
+/// the mapping directly.
+fn quiet_map(seed: u64) -> FacilityMap {
+    FacilityMap::to_depth(seed, 3)
+}
+
+/// **The noise reaches one hop and no further** (§14 v3/#210): being loud in facility 2
+/// makes facility 3 harder, and it says nothing whatever about facility 4.
+///
+/// The counterweight to the spiral §2.2 warns against, stated as the property that
+/// makes it impossible: after a quiet raid the facilities ahead are byte for byte the
+/// ones a run that had never been loud would walk into.
+#[test]
+fn the_noise_does_not_outlive_the_hop_it_was_made_on() {
+    let mut loud = after_a_raid_at(8371, ALERTS_ALL);
+    let mut quiet = after_a_raid_at(8371, 1);
+    let first = quiet.offers()[0].node;
+    assert!(loud.choose(first) && quiet.choose(first));
+
+    // The second facility differs — that is the loop closing.
+    assert_ne!(loud.next_level(), quiet.next_level());
+
+    // Both now raid it and leave at the same condition. From here on the two runs are
+    // the same run: the noise of the *first* raid is gone, and nothing about it can
+    // still be reaching the third facility.
+    loud.enter();
+    quiet.enter();
+    loud.complete(&extracted(1, 1));
+    quiet.complete(&extracted(1, 1));
+    let second = quiet.offers()[0].node;
+    assert!(loud.choose(second) && quiet.choose(second));
     assert_eq!(
-        run.enter(),
-        quiet.enter(),
-        "so the facility after a loud raid is the facility after a quiet one",
+        loud.next_level(),
+        quiet.next_level(),
+        "a raid two facilities back is still bending the run",
     );
 }
 

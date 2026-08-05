@@ -39,12 +39,15 @@
 //! **Ground** for the road behind you, the facilities you have spent, and the locked
 //! edge you cannot take yet.
 
+use super::alert::condition_line;
 use super::help::{theme_control, theme_control_len, theme_control_start, FOOTER_INDENT};
 use super::menu::{centre, ENTRY_SPACING, MARKER, NO_MARKER};
 use super::{blank_grid, draw, Grid};
+use crate::alert::TOP_RUNG;
 use crate::campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
-use crate::campaign::{Campaign, Flavour, MapPos, NodeId, Offer};
+use crate::campaign::{Campaign, Flavour, Loudness, MapPos, NodeId, Offer};
 use crate::category::Category;
+use crate::modifiers::ModifierDirection;
 use crate::place::LevelConfig;
 
 #[cfg(test)]
@@ -94,8 +97,17 @@ const EDGE_GLYPH: char = '·';
 /// geometry always, contents once you are close enough to see.
 const UNKNOWN_GLYPH: char = '▫';
 
-/// The screen row the heading sits on, and the first row of the map band beneath it.
+/// The screen row the heading sits on, the row the campaign alert reports on, and the
+/// first row of the map band beneath them.
+///
+/// The alert takes the blank that used to separate the heading from the picture, so the
+/// band keeps every row it had: the line is a **subtitle** — what the country ahead
+/// currently is — rather than a panel the map has to make room for. It is drawn only
+/// when there is a raid behind the run to report on ([`alert_text`]), and the layout does
+/// not move when it is not: a map band that changed height between two looks at the same
+/// screen would be a picture that jumped.
 const HEADING_ROW: u32 = 0;
+const ALERT_ROW: u32 = 1;
 const MAP_TOP: u32 = 2;
 
 /// Rows the list of rows-you-may-take needs beneath the map: one per offer at
@@ -140,6 +152,97 @@ const fn row_width(label: usize, blurb: usize) -> usize {
 /// What stands between a facility's name and what it is worth. Its own constant because
 /// [`row_width`] has to measure exactly what [`row_text`] prints.
 const SEPARATOR: &str = " — ";
+
+/// How the alert line names a run that nobody ever noticed (§7.3 condition 0/#210).
+///
+/// It does **not** reuse the Level info tab's rung-0 wording (`no alert — you are
+/// unnoticed`): that line is about the facility you are standing in, in the present
+/// tense, and this one is about the raid you have walked out of. Same fact, two tenses,
+/// and the map is the one that has to be in the past.
+const LEFT_UNNOTICED: &str = "Left unnoticed";
+
+/// What the alert line says when the last raid's noise carried nothing onward (§7.3
+/// condition 1) — the one loudness with no consequence, said plainly rather than left as
+/// a blank row the player would read as a bug.
+const NOTHING_FOLLOWS: &str = "nothing follows";
+
+/// What it says when the noise *did* carry, but not onto anything the list is showing:
+/// at a choice point, the road it settled on is one of the others; on the approach, the
+/// facility under your feet is not the one it settled on.
+const NOTHING_AHEAD: &str = "nothing ahead";
+
+/// What it says at the top of the ladder, when there is no unwatched road left to steer
+/// toward — the whole of the step from condition 2 to condition 3.
+const ALL_ALERTED: &str = "all ahead alerted";
+
+/// How the line names what the noise did to the one facility it settled on. The two
+/// directions of the §12.6 seam, in the world's own words: a facility that is *expecting
+/// you*, or one that is not looking.
+const ALERTED: &str = "alerted";
+/// See [`ALERTED`].
+const OFF_GUARD: &str = "off guard";
+
+/// The width of the panel's condition line (`Condition 2 of 3`) — what the alert line
+/// leads with for every loudness but [`LEFT_UNNOTICED`], and the one part of the line
+/// whose text is built at runtime.
+///
+/// Measured off a literal of the same shape rather than off the function, because a
+/// `const` cannot call [`condition_line`]. Both numbers are single digits and the assert
+/// below is what keeps that true: a ladder that grew a tenth rung would fail the build
+/// here rather than clip a line on a player's screen.
+const CONDITION_LEN: usize = "Condition 0 of 0".len();
+const _: () = assert!(TOP_RUNG < 10, "a two-digit rung would widen the alert line");
+
+/// The widest the alert line can ever be, in cells — the widest lead against the widest
+/// tail, with the widest flavour label standing in the tail that names one.
+///
+/// Byte lengths, like [`row_width`]: `len()` is what a `const` can see, and it can only
+/// **over**-count against a multi-byte glyph, so the bound fails early rather than late.
+const ALERT_LINE_MAX: usize = {
+    let lead = if CONDITION_LEN > LEFT_UNNOTICED.len() {
+        CONDITION_LEN
+    } else {
+        LEFT_UNNOTICED.len()
+    };
+    let named = widest_label()
+        + 1
+        + if ALERTED.len() > OFF_GUARD.len() {
+            ALERTED.len()
+        } else {
+            OFF_GUARD.len()
+        };
+    let mut tail = named;
+    if NOTHING_FOLLOWS.len() > tail {
+        tail = NOTHING_FOLLOWS.len();
+    }
+    if NOTHING_AHEAD.len() > tail {
+        tail = NOTHING_AHEAD.len();
+    }
+    if ALL_ALERTED.len() > tail {
+        tail = ALL_ALERTED.len();
+    }
+    lead + SEPARATOR.len() + tail
+};
+
+/// The longest flavour label there is — the widest thing the alert line can name.
+const fn widest_label() -> usize {
+    let mut widest = 0;
+    let mut i = 0;
+    while i < Flavour::ALL.len() {
+        let label = Flavour::ALL[i].label().len();
+        if label > widest {
+            widest = label;
+        }
+        i += 1;
+    }
+    widest
+}
+
+/// The alert line fits the board too (§10.2/§11.4), on the same terms its rows do.
+const _: () = assert!(
+    ALERT_LINE_MAX <= LevelConfig::V1.width as usize,
+    "the campaign alert line must fit the v1 board (§10.2): shorten its wording",
+);
 
 /// **A row must fit the board it is drawn on** (§10.2/§11.4), and this is where that
 /// stops being a hope. Every input is derived from the flavours themselves, so a longer
@@ -302,6 +405,72 @@ fn row_text(offer: Offer, selected: bool) -> String {
     )
 }
 
+/// **What the last raid left on the ground ahead** (§14 v3/#210), as the line under the
+/// heading says it — the text and the §11.2 meaning it is drawn in, or `None` before the
+/// run has finished a raid to report on.
+///
+/// This is the readout that keeps the campaign alert from being the decoration §14 v3
+/// complains about. The rule it reports is legible twice over: *inside* the facility the
+/// help panel's Level info tab lists it with every other active modifier, derived from
+/// the same resolved set (§12.6/#248); *here* is the half that has to arrive **before**
+/// the choice, because routing around an alerted facility is the play at condition 2 and
+/// a player who learns which road was watched after walking down it has been told
+/// nothing.
+///
+/// **It names the facility by its flavour**, and that is unambiguous by construction: no
+/// two open successors ever share one (§14 v3 **[SETTLED]**), so *the Vault is alerted*
+/// picks out exactly one row of the list. Naming it is what a 40-column row cannot do —
+/// the widest offer already spends 38 of the board's 40 cells — so the mark lives on a
+/// line of its own rather than as a second glyph nothing has room for.
+///
+/// The tail is decided by **what the list is showing**, not by re-deriving the mapping:
+/// one reached offer is named, several are *all ahead*, none is *nothing ahead*. That is
+/// what makes the line true in both live stages — a choice point showing a fan, and an
+/// approach showing the single facility the run has already picked.
+fn alert_text(run: &Campaign, ahead: &[Offer]) -> Option<(String, Category)> {
+    let loudness = run.loudness()?;
+    let lead = match loudness {
+        Loudness::Unnoticed => LEFT_UNNOTICED.to_string(),
+        _ => condition_line(run.alert()),
+    };
+    let reached: Vec<Flavour> = ahead
+        .iter()
+        .filter(|offer| run.alert_reaches(offer.node).is_some())
+        .map(|offer| offer.flavour)
+        .collect();
+    let (tail, category) = match (loudness.direction(), reached.as_slice()) {
+        // Condition 1: the raid was noticed and the facility kept it to itself.
+        (None, _) => (NOTHING_FOLLOWS.to_string(), Category::Ground),
+        // It carried, but not onto anything on this list — a fact about the run, not a
+        // threat, so it is Ground like the road behind you.
+        (Some(_), []) => (NOTHING_AHEAD.to_string(), Category::Ground),
+        (Some(direction), [flavour]) => (
+            format!("{} {}", flavour.label(), suffix(direction)),
+            direction_category(direction),
+        ),
+        (Some(direction), _) => (ALL_ALERTED.to_string(), direction_category(direction)),
+    };
+    Some((format!("{lead}{SEPARATOR}{tail}"), category))
+}
+
+/// What the line says the noise did to the facility it names.
+fn suffix(direction: ModifierDirection) -> &'static str {
+    match direction {
+        ModifierDirection::Harder => ALERTED,
+        ModifierDirection::Easier => OFF_GUARD,
+    }
+}
+
+/// The §11.2 meaning a bent rule carries — the **same** cue the help card gives the same
+/// modifier (§12.6/#248), so the colour a player learns on one screen reads the same on
+/// the other: Warning for a threat that is hunting, Owned for a rule bent your way.
+fn direction_category(direction: ModifierDirection) -> Category {
+    match direction {
+        ModifierDirection::Harder => Category::Warning,
+        ModifierDirection::Easier => Category::Owned,
+    }
+}
+
 /// The column the list starts at: the widest row centred, every row left-aligned inside
 /// it. A ragged-right list reads as a list; centring each row on its own would make the
 /// labels jitter as the marker moves (the title screen's rule, #268).
@@ -381,6 +550,13 @@ pub fn render_map(width: u32, height: u32, run: &Campaign, ui: MapUi) -> Grid {
         HEADING,
         Category::System,
     );
+
+    // What the last raid left on the ground ahead (§14 v3/#210) — the subtitle, drawn
+    // only once there is a raid behind the run to report on.
+    if let Some((line, category)) = alert_text(run, &ahead) {
+        let len = line.chars().count() as u32;
+        draw(&mut grid, centre(width, len), ALERT_ROW, &line, category);
+    }
 
     let at = |node: NodeId| plot(map.position(node), map.depth(), width, map_h);
 

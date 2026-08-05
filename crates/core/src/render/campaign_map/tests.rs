@@ -4,7 +4,7 @@
 //! spent (§4.4/§12.1).
 
 use super::*;
-use crate::campaign::CampaignStage;
+use crate::campaign::{CampaignStage, ALERTS_ALL, ALERTS_ONE};
 use crate::render::GlyphCell;
 use crate::verdict::{Ending, RunStats, Verdict};
 
@@ -12,19 +12,29 @@ use crate::verdict::{Ending, RunStats, Verdict};
 const W: u32 = 40;
 const H: u32 = 43;
 
-fn escaped() -> Verdict {
+/// A raid walked out of at §7.3 `condition` — what the campaign alert reads (#210), and
+/// so what the map's subtitle has to report.
+fn escaped_at(condition: u32) -> Verdict {
     Verdict {
         ending: Ending::Escaped,
-        stats: RunStats::default(),
+        stats: RunStats {
+            alert_peak: condition,
+            ..RunStats::default()
+        },
     }
 }
 
 /// A run standing at its **first choice point**: the opening facility raided and left, so
 /// the map is showing a fan of successors rather than the single row a fresh run gets.
 fn at_a_choice_point(seed: u64) -> Campaign {
+    at_a_choice_point_after(seed, 0)
+}
+
+/// The same, having left the opening facility at §7.3 `condition`.
+fn at_a_choice_point_after(seed: u64, condition: u32) -> Campaign {
     let mut run = Campaign::new(seed);
     run.enter();
-    run.complete(&escaped());
+    run.complete(&escaped_at(condition));
     assert_eq!(run.stage(), CampaignStage::Choosing);
     run
 }
@@ -56,7 +66,7 @@ fn the_map_draws_the_country_the_run_is_in() {
         text(&run, MapUi::default()),
         vec![
             "            THE FACILITY MAP            ",
-            "                                        ",
+            "    Left unnoticed — Depot off guard    ",
             "   ▫      ▫          ★       ▫       ▫  ",
             "                                        ",
             "                                        ",
@@ -122,6 +132,115 @@ fn a_fresh_run_is_offered_the_facility_it_stands_on() {
         rows.iter().any(|r| r.contains('★')),
         "with the archive in view from the first frame — the map is not fogged (§14 v3)",
     );
+}
+
+/// **The map says what the last raid left on the ground ahead** (§14 v3/#210) — the
+/// readout that keeps the campaign alert from being decoration.
+///
+/// The line has to arrive *before* the choice, because routing around an alerted
+/// facility is the whole play at condition 2: it names the facility by its flavour (no
+/// two open successors share one, §14 v3 **[SETTLED]**), and it names the same facility
+/// the mapping actually bent.
+#[test]
+fn the_map_says_which_facility_ahead_the_last_raid_alerted() {
+    for seed in 0..12 {
+        let run = at_a_choice_point_after(seed, ALERTS_ONE);
+        let line = alert_row(&run);
+        assert!(
+            line.starts_with(&condition_line(ALERTS_ONE)),
+            "seed {seed}: {line}",
+        );
+
+        // Exactly one road ahead is alerted, and the line names that one — not another
+        // row of the list, and not the locked edge.
+        let alerted: Vec<Offer> = run
+            .ahead()
+            .into_iter()
+            .filter(|offer| run.alert_reaches(offer.node).is_some())
+            .collect();
+        assert_eq!(alerted.len(), 1, "seed {seed}");
+        assert!(
+            line.contains(&format!("{} {ALERTED}", alerted[0].flavour.label())),
+            "seed {seed}: {line}",
+        );
+        assert!(!alerted[0].locked, "seed {seed}: the lock is never alerted");
+    }
+}
+
+/// **The top of the ladder reads as the one thing it is** (§7.3/#210): there is no
+/// unwatched road left to name, so the line stops naming one.
+#[test]
+fn the_loudest_raid_says_every_road_ahead_is_alerted() {
+    let run = at_a_choice_point_after(8371, ALERTS_ALL);
+    let line = alert_row(&run);
+    assert_eq!(
+        line,
+        format!("{}{SEPARATOR}{ALL_ALERTED}", condition_line(ALERTS_ALL)),
+    );
+
+    // Condition 1 is the loudness that carries nothing, and it says so rather than
+    // leaving a blank row a player would read as a bug.
+    let ordinary = at_a_choice_point_after(8371, 1);
+    assert_eq!(
+        alert_row(&ordinary),
+        format!("{}{SEPARATOR}{NOTHING_FOLLOWS}", condition_line(1)),
+    );
+}
+
+/// **A run with no raid behind it reports nothing** — the line is a statement about the
+/// last raid, and a fresh run has not made one. The layout does not move for it either:
+/// the map band starts at the same row with the line and without it.
+#[test]
+fn a_run_that_has_raided_nothing_has_no_alert_to_report() {
+    let fresh = Campaign::new(8371);
+    assert_eq!(alert_text(&fresh, &fresh.ahead()), None);
+    assert_eq!(
+        text(&fresh, MapUi::default())[ALERT_ROW as usize].trim(),
+        ""
+    );
+}
+
+/// **Colour is named, never chosen** (§11.2), and it is the *same* cue the help card
+/// gives the same modifier (#248): a rule bent against you reads Warning, one bent your
+/// way reads Owned, and a raid whose noise reached nothing is a fact rather than a
+/// threat.
+#[test]
+fn the_alert_line_carries_the_direction_it_reports() {
+    let alerted = at_a_choice_point_after(8371, ALERTS_ALL);
+    assert_eq!(
+        alert_text(&alerted, &alerted.ahead()).map(|(_, category)| category),
+        Some(Category::Warning),
+    );
+    let ghost = at_a_choice_point_after(8371, 0);
+    assert_eq!(
+        alert_text(&ghost, &ghost.ahead()).map(|(_, category)| category),
+        Some(Category::Owned),
+    );
+    let ordinary = at_a_choice_point_after(8371, 1);
+    assert_eq!(
+        alert_text(&ordinary, &ordinary.ahead()).map(|(_, category)| category),
+        Some(Category::Ground),
+    );
+
+    // And on the approach to a facility the noise did not settle on, the line says so —
+    // the tail is decided by what the list is showing, not by re-deriving the mapping.
+    let mut past_it = at_a_choice_point_after(8371, ALERTS_ONE);
+    let clear = past_it
+        .offers()
+        .into_iter()
+        .find(|offer| !offer.locked && past_it.alert_reaches(offer.node).is_none())
+        .expect("condition 2 leaves a road to route around it");
+    assert!(past_it.choose(clear.node));
+    let (line, category) = alert_text(&past_it, &past_it.ahead()).expect("a raid behind it");
+    assert!(line.ends_with(NOTHING_AHEAD), "{line}");
+    assert_eq!(category, Category::Ground);
+}
+
+/// The alert line as drawn, trimmed — the row under the heading.
+fn alert_row(run: &Campaign) -> String {
+    text(run, MapUi::default())[ALERT_ROW as usize]
+        .trim()
+        .to_string()
 }
 
 /// **The picture is true to the graph** (§14 v3): every facility the map offers is drawn

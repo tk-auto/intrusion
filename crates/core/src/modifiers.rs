@@ -17,9 +17,11 @@
 //! - **Choice** (exogenous) — the player's chosen or seeded baseline. The only
 //!   source this crate ships; it is what a mode preset (#244) and a shared token
 //!   (#245) set.
-//! - **Alert** (endogenous) — the campaign alert (#210): a loud raid raises the
-//!   alert, and a higher alert switches on harder modifiers for later facilities.
-//!   [`ModifierSources`] exposes the hook it plugs into; it is `None` here.
+//! - **Alert** (endogenous) — the campaign alert (#210): a loud raid alerts the ground
+//!   ahead of it, and an alerted facility is drawn a harder rule from the same pool the
+//!   difficulty axis draws from ([`draw_from_pool`]). It lands in
+//!   [`ModifierSources::alert`]; outside a campaign there is no such layer and it is
+//!   `None`.
 //! - **Flavour** (per-node) — a facility's own character on the campaign map (#207):
 //!   an [`Outpost`](crate::Flavour::Outpost) is thin and thinly guarded, a
 //!   [`Vault`](crate::Flavour::Vault) rich and watched. It is what makes a branch on
@@ -38,6 +40,8 @@
 //! playtest-only view switch that no rule and no generation seam may read, and that
 //! never travels in a level-seed token. See its own documentation for why the two
 //! are deliberately kept apart.
+
+use crate::rng::Rng;
 
 /// The exit's **intel gate** (§4.5/§10.2/#244): how much intel a run must hold
 /// before the exit will let the player leave.
@@ -1018,6 +1022,52 @@ pub(crate) const POOL: [PoolEntry; 9] = [
         set: |m| m.show_search_areas = true,
     },
 ];
+
+/// **Draw `picks` modifiers from the directed pool** and switch them on over `base` —
+/// the one draw over [`POOL`], shared by everything that asks the pool for a rule
+/// (§12.6).
+///
+/// Two callers today, and they are the two *sources* that pick rather than state:
+/// the quick-play difficulty axis ([`Difficulty::draw`](crate::Difficulty::draw), #297)
+/// and the campaign alert (#210). Sharing the draw is what keeps §2.3's directional
+/// guarantee true **by construction** for both — the pool is filtered on
+/// [`ModifierDirection`] itself, so a `direction`-ward draw cannot hand back a rule that
+/// bends the other way, whichever source asked for it.
+///
+/// A pure function of `(base, direction, picks, seed)` (§12.4). The caller salts its own
+/// seed: the difficulty axis and the alert must not share a stream position, and which
+/// salt separates them is the caller's business rather than the pool's.
+///
+/// **`base` is a parameter because the two callers need different ones.** Quick play
+/// draws over [`LevelModifiers::default`], the game's baseline; a *contributing* source
+/// like the alert must draw over [`LevelModifiers::neutral`], or the contribution would
+/// silently ask for an intel gate one rung tighter than the campaign's and lock an exit
+/// it never mentioned (see [`neutral`](LevelModifiers::neutral)).
+///
+/// Takes what exists when `picks` outruns the directed pool, rather than looping to fill
+/// the quota — the rule [`Difficulty::picks`](crate::Difficulty::picks) states, held here
+/// too so no caller can ask for more than the pool holds and panic for it.
+pub(crate) fn draw_from_pool(
+    base: LevelModifiers,
+    direction: ModifierDirection,
+    picks: usize,
+    seed: u64,
+) -> LevelModifiers {
+    let mut drawn = base;
+    let mut pool: Vec<&PoolEntry> = POOL
+        .iter()
+        .filter(|entry| entry.caption.direction == direction)
+        .collect();
+    // A partial Fisher–Yates over the directed pool, the same idiom the quick-play tech
+    // grant draws its subset with.
+    let mut rng = Rng::new(seed);
+    for i in 0..picks.min(pool.len()) {
+        let j = i + rng.below((pool.len() - i) as u32) as usize;
+        pool.swap(i, j);
+        (pool[i].set)(&mut drawn);
+    }
+    drawn
+}
 
 /// How many pool entries bend a run `direction`-wards — the size the draw
 /// takes what it can from when it is asked for more picks than exist.
