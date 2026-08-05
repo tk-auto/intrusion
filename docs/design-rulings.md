@@ -2214,3 +2214,135 @@ is the campaign's power curve silently deleted from that facility — the failur
 records the axis having already suffered once, arrived at from a different direction. It
 is the same argument that puts the comms console in the flood (§7.7: unreachable
 counterplay is no counterplay), and it costs a redraw on the rare seed that trips it.
+
+---
+
+## Appendix 41 — The alert reaches the offers, not the run: breadth is the escalation
+
+*(§2.2/§7.3/§12.6/§12.7/§14 v3; #210, closing the loop #107, #206 and #225 left open.
+`crates/core/src/campaign/loudness.rs`, `crates/core/src/campaign.rs`,
+`crates/core/src/render/campaign_map.rs`.)*
+
+§14 v3 states the failure in one sentence — *"the whole point of the alert system is
+that being loud in facility 2 makes facility 3 harder; until that loop closes, alert is
+decoration"* — and the ticket that closes it proposed the obvious shape: a **persistent
+campaign alert level** that rises with a raid's loudness, carries across facilities,
+scales the next one, and is relieved by a slow decay and an intel sink, floored so it
+cannot spiral.
+
+What shipped is a different shape, and the difference is worth the appendix: the alert
+does not accumulate at all, and what a loud raid buys is **breadth across the map**
+rather than depth on one facility.
+
+### Why not a rising level
+
+The accumulating design has three moving parts — a contribution per raid, a decay per
+hop, and a floor — and every one of them is a number nobody has played yet. Worse, they
+only make sense *together*: a contribution without the right decay is a spiral, a decay
+without the right contribution is a number that never leaves zero, and the floor is there
+to catch the case where the first two were wrong. §2.2's fairness promise is that a
+capture traces to a decision the player made, and a run losing at hour 2.5 to a facility
+made hard by three raids' worth of accumulated arithmetic traces to nothing the player
+can point at.
+
+The version that shipped has **one** moving part: the condition the last raid ended at.
+It is assigned, not added, so a quiet raid returns the campaign to calm however loud the
+raid before it was — which means the spiral is not merely unlikely, it is
+**unrepresentable**, and there is nothing to floor because the floor is zero and every
+raid can reach it. The relief valve §2.2 asks for is the next raid itself. Spending intel
+to clear a mark before choosing (#213) then becomes a real sink rather than a way to pay
+down a debt the player did not choose to take on.
+
+It also makes the loop *legible*, which is the half §14 v3 actually complains about. A
+player can be told exactly what a loud raid cost, because it cost one thing on one road
+that is on the screen in front of them. A campaign alert of `4`, decaying by one per hop
+and switching on modifiers at thresholds, is a number you can display and not a
+consequence you can read.
+
+### Why breadth rather than depth
+
+Given "condition 2 does something and condition 3 does something worse", the natural
+reading is *more*: one harder rule at 2, two at 3. That was rejected for what it does to
+the choice point. A second rule stacked on the same facility is a difference the player
+meets **after** committing to it — inside the building, on the help panel — and cannot
+act on.
+
+Breadth puts the escalation on the map, where the player is making a decision. At
+condition 2 exactly one of the roads ahead is alerted and the other is not, so the
+consequence is *route around it*, which is a real play with a real cost (the unwatched
+road is whatever flavour the seed put there — it may be the Outpost with nothing in it).
+At condition 3 every open road is alerted and there is no steering left. The step from
+2 to 3 is therefore the loss of an option rather than an increment of a number, and the
+player feels it at the moment they are choosing.
+
+Two consequences fall out of it that are worth stating:
+
+- **Each alerted facility draws its own rule.** *Every road is watched* is not *every
+  road is watched the same way*, so a condition-3 choice point is still a choice between
+  differently-shaped raids rather than three copies of one penalty.
+- **A ghost raid is the mirror image.** Condition 0 leaves one road ahead *off guard*,
+  drawn one easier rule. It costs the same to state and it is the reason the alert is an
+  axis rather than a tax: a campaign that only ever punished noise would make stealth
+  the absence of a penalty rather than a thing you are paid for. It is deliberately the
+  same size as the punishment — one rule, one road — because the point is symmetry, not
+  a reward curve.
+
+### The two edges
+
+**The intel-locked road is never marked.** The mark lands only on the open successors —
+the ones `Campaign::choose` will actually take. Marking uniformly across all successors
+would put roughly one choice point in four's worth of consequence on ground the run
+cannot walk onto: an alert with nothing behind it, which is §2.3's decoration failure
+reappearing inside the ticket that exists to end it. The fiction agrees — the locked edge
+reaches a lane two across that no open edge from here can, so it is the one road the noise
+did not travel — and it gives #212's sink something real to sell at condition 3.
+
+**The last hop still carries.** A node one short of the archive has exactly one
+successor, so a loud raid there alerts the archive itself. That is the geography biting
+rather than a special case: there is nowhere else for the noise to go, and the run's last
+raid being the one it made hard for itself is the loop working.
+
+### What the readout had to do, and what it could not
+
+The line has to arrive **before** the choice or the mechanic does not exist — routing
+around an alerted facility is the whole play at condition 2, and a player who learns
+which road was watched after walking down it has been told nothing.
+
+The obvious surface was a mark on the offer's own row, and it does not fit: the widest
+row (`Workshop — salvage, at intel's cost`, with its marker) already spends 38 of the
+board's 40 cells. So the readout is a **subtitle** under the heading, and it names the
+facility by its **flavour** — which is exact, because no two open successors ever share
+one (§14 v3 **[SETTLED]**). The line has to carry the loudness itself in any case (which
+condition, and whether it reached one road or all of them), which no per-row mark could,
+so the constraint and the better design pointed the same way.
+
+### Where the numbers are, and what would move them
+
+Everything above is **[START]**. Condition 2 as the first rung that carries is the one
+worth naming: rung 1 is a fact of almost every honest run — first contact, and the ladder
+never comes down within a facility — so a campaign that taxed it would be taxing playing
+the game at all, and rung 2 is the first rung whose meaning is *this raid went wrong*
+(§7.3: it is where the facility stops reacting and starts adding guards to itself).
+
+**"Unnoticed" is condition 0, and it is not the same as never being seen.** The two are
+different questions and the end screen already prints both, side by side, in its noise
+row: `seen 2 · no alert — you are unnoticed` is a legal and unremarkable line. `seen` is
+every fresh detection, glimpses included; the condition only leaves rung 0 on a
+**confirmed** sighting — three turns of certain-zone contact inside a ten-turn window,
+tallied facility-wide — or a missed radio ping, and a glimpse contributes nothing to that
+tally ever. So the cherry goes to a raid the *building* never worked out, not to a raid
+nobody ever laid eyes on.
+
+That is deliberate, and it is where the ceiling is left rather than the floor: the
+obvious follow-up is a **higher** reward for a true ghost — condition 0 *and* zero
+detections — sitting above this one, rather than this one being tightened to mean it.
+Tightening would leave the ordinary clean raid paying nothing, which is the wrong end to
+adjust; adding a rung above keeps what is here and gives the hardest way to play
+something of its own. `RunStats` already carries the detection count, so the mapping has
+what it would need on the day someone decides what the better prize is.
+
+What is **not** open is the seam. The alert reaches the facility through
+`ModifierSources::alert` and the §12.6 directed pool, so it can only ever switch on a rule
+the pool already documents with a direction — which is what makes the §2.3 assertion true
+by construction rather than by review, and what keeps the campaign from growing the
+private difficulty knob set the ticket was written to forbid.

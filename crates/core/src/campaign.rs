@@ -23,16 +23,17 @@
 //! and it is these three fields, carried from the day the layer exists rather than
 //! retrofitted. The loadout is now filled by the thing it was declared for — an
 //! equipment cache opened in a facility rides out on the verdict and is added here
-//! (#209) — and the intel epic spends the wallet (#211).
+//! (#209) — the intel epic spends the wallet (#211), and the alert now closes §14 v3's
+//! loop (#210).
 //!
-//! **The alert is the exception, deliberately.** Its field is here — later tickets
-//! need a place to put a run-level alert, and retrofitting one would touch every
-//! transition — but **nothing writes it yet, and every facility starts at base
-//! alert**. What a raid's loudness is worth, how it decays, and what a raised alert
-//! does to the next facility are one decision, and it is #210's: half of it landed
-//! here would be a number carried for no reason, and a campaign that got harder by an
-//! accident of this ticket's arithmetic. The §7.3 ladder stays what it is — per
-//! facility, and it dies with the facility.
+//! **The alert carries exactly one hop**, which is the whole of what §14 v3 asks for:
+//! *being loud in facility 2 makes facility 3 harder*. It is the §7.3 condition the last
+//! completed raid ended at, it is **replaced** at every hop rather than accumulated, and
+//! it reaches the facilities the map is about to offer through the §12.6 modifier seam —
+//! one of them at condition 2, all of them at condition 3, and one of them the *other*
+//! way after a raid nobody ever noticed. The mapping and the reasoning behind it are
+//! [`loudness`]; the §7.3 ladder inside a facility stays exactly what it was, per
+//! facility and dying with it.
 //!
 //! # The geography
 //!
@@ -56,15 +57,17 @@
 use crate::ability::{AbilityId, Loadout};
 use crate::difficulty::Difficulty;
 use crate::level_seed::LevelSeed;
-use crate::modifiers::{IntelGate, LevelModifiers, ModifierSources};
+use crate::modifiers::{IntelGate, LevelModifiers, ModifierDirection, ModifierSources};
 use crate::rng::Rng;
 use crate::state::Outcome;
 use crate::verdict::{Ending, RunMode, RunOptions, RunStats, Verdict};
 
+pub mod loudness;
 pub mod map;
 #[cfg(test)]
 mod tests;
 
+pub use loudness::{Loudness, ALERTS_ALL, ALERTS_ONE};
 pub use map::{FacilityMap, Flavour, MapPos, Offer, DEPTH_TO_ARCHIVE};
 
 use map::LANES;
@@ -363,17 +366,73 @@ impl Campaign {
         self.intel
     }
 
-    /// The campaign alert (§7.3/§14 v3) — the run-level layer above the *in-facility*
-    /// ladder, which climbs within a raid and dies with it.
+    /// The campaign alert (§7.3/§14 v3/#210) — the run-level layer above the
+    /// *in-facility* ladder, which climbs within a raid and dies with it.
     ///
-    /// **Zero, for now.** #210 owns the whole of it: what a loud raid contributes, the
-    /// decay and floor that keep §2.2's fairness promise, and the mapping onto level
-    /// modifiers that makes being loud in facility 2 a fact about facility 3. Until
-    /// then every facility starts at base alert, which is v1's behaviour and is the
-    /// honest state of the game rather than a placeholder rule the balance would
-    /// quietly inherit.
+    /// **The condition the last completed raid ended at**, on the same 0…[`TOP_RUNG`]
+    /// scale the facility ladder uses, and zero before a run has finished one. It is
+    /// replaced at each hop rather than added to: what carries is the last raid's noise
+    /// and nothing older, which is what makes the loud → harder → louder spiral §2.2
+    /// warns against unrepresentable rather than merely unlikely.
+    ///
+    /// What it *does* is [`Loudness`] — see [`loudness`] for the mapping and
+    /// [`alert_reaches`](Self::alert_reaches) for which facility ahead it landed on.
+    ///
+    /// [`TOP_RUNG`]: crate::alert::TOP_RUNG
     pub fn alert(&self) -> u32 {
         self.alert
+    }
+
+    /// **How loud the last completed raid was**, as the campaign reads it — or `None`
+    /// before the run has finished one.
+    ///
+    /// The distinction is load-bearing and is why this is an `Option` rather than
+    /// `Loudness::of(self.alert())`: a run that has raided nothing is not a run that
+    /// slipped through unnoticed, and the cherry for a ghost raid (§7.3 condition 0)
+    /// must not be handed to the first facility of every campaign for free.
+    pub fn loudness(&self) -> Option<Loudness> {
+        self.noise_made_at().map(|_| Loudness::of(self.alert))
+    }
+
+    /// **Whether the last raid's noise reached `node`**, and which way it bends it
+    /// (§12.6) — what the map screen (#208) reads to say *which* facility ahead is
+    /// expecting you.
+    ///
+    /// `None` for every facility the noise did not reach, for the locked edge (which it
+    /// never reaches, #212), and before the run's first raid. It answers about any node,
+    /// but only the ones the map has just offered can ever be `Some`: the alert reaches
+    /// one hop and no further.
+    pub fn alert_reaches(&self, node: NodeId) -> Option<ModifierDirection> {
+        let loudness = self.loudness()?;
+        let from = self.noise_made_at()?;
+        loudness
+            .reaches(self.map, from, node)
+            .then(|| loudness.direction())
+            .flatten()
+    }
+
+    /// **The facility the noise on the ground ahead was made in** — the raid the
+    /// campaign alert is currently reporting, or `None` before the run has finished one.
+    ///
+    /// It is a different node in the two live stages, and that is the geography rather
+    /// than a special case. At a [`Choosing`](CampaignStage::Choosing) point the run is
+    /// still standing on the facility it has just emptied, so the noise was made *here*
+    /// and the offers it reaches are this node's successors. Once the run has
+    /// [`choose`](Self::choose)n and walked on, the facility it stands on is one of those
+    /// successors, and the noise was made one node back.
+    fn noise_made_at(&self) -> Option<NodeId> {
+        match self.stage {
+            // Only a completed raid puts a run here, so there is always one behind it.
+            CampaignStage::Choosing => Some(self.node()),
+            _ => self.previous(),
+        }
+    }
+
+    /// The facility the run stood on **before** the one it stands on now. `None` on the
+    /// first facility of a run, which is the whole of the "no raid behind us yet" case.
+    fn previous(&self) -> Option<NodeId> {
+        let before = self.path.len().checked_sub(2)?;
+        self.path.get(before).copied()
     }
 
     /// The run's framing (§2.2/appendix 31): a campaign, so the end screen offers no
@@ -414,15 +473,30 @@ impl Campaign {
                     intel_to_exit: IntelGate::None,
                     ..LevelModifiers::default()
                 },
-                // The campaign alert's modifier contribution is #210's mapping; the
-                // hook is here so it lands in the shared seam (§12.6) rather than in
-                // a difficulty path of the campaign's own.
-                alert: None,
+                // The campaign alert (#210), through the shared seam (§12.6) rather
+                // than a difficulty path of the campaign's own: if the last raid's
+                // noise reached this facility, it is drawn a rule — harder for a loud
+                // raid, easier for one nobody noticed — and composed like any other
+                // source.
+                alert: self.alert_contribution(),
                 flavour: Some(self.flavour().modifiers()),
             }
             .resolve(),
             abilities: self.loadout,
         }
+    }
+
+    /// The modifier contribution the campaign alert makes to the facility the run is
+    /// standing on (§12.6/#210) — `None` on the first facility of a run, and for a
+    /// facility the last raid's noise did not reach.
+    ///
+    /// Kept beside [`next_level`](Self::next_level) rather than inlined into it so the
+    /// source is a named thing a test can hold: the §2.3 assertion this ticket owes is
+    /// *the rule the alert drew is active in the facility the run walks into*, and that
+    /// is stated against the resolved seed, with this as its witness.
+    fn alert_contribution(&self) -> Option<LevelModifiers> {
+        let loudness = self.loudness()?;
+        loudness.contribution(self.map, self.previous()?, self.node())
     }
 
     /// **Enter the current facility**: the raid begins, and the caller boots
@@ -482,7 +556,7 @@ impl Campaign {
     }
 
     /// Add a raid's haul to what the run carries: the consoles it took, the **tech it
-    /// salvaged** (#209), and — once #210 says what a loud raid is worth — its loudness.
+    /// salvaged** (#209), and **how loud it was** (#210).
     ///
     /// The salvage is folded here rather than at the moment the crate was opened, and
     /// the two are not in tension: within the facility the ability is already on the
@@ -490,13 +564,18 @@ impl Campaign {
     /// *keeping* it — which only a raid the player walked out of has earned. A capture
     /// banks nothing, tech included, because there is no later facility to carry it to.
     ///
-    /// The raid's [`alert_peak`](RunStats::alert_peak) is deliberately *not* read here.
-    /// It is the obvious thing to fold in and the wrong thing to fold in blind: a rule
-    /// invented in this ticket would be a difficulty curve nobody designed, arriving
-    /// before the relief valves §2.2 requires of one.
+    /// The raid's [`alert_peak`](RunStats::alert_peak) is **assigned, not added**
+    /// (§14 v3/#210). What carries is the noise of the raid just finished and nothing
+    /// older: a quiet raid puts the campaign alert back to zero however loud the one
+    /// before it was, which is what makes §2.2's "escalation must stay recoverable"
+    /// a property of the type rather than a decay rate tuned to hope so. The ladder
+    /// never falls *within* a facility (§7.3) and is wiped by the walk out of it, which
+    /// is the same statement one layer up: an alert is a fact about a raid, and the raid
+    /// is over.
     fn bank(&mut self, stats: RunStats) {
         let taken = u32::try_from(stats.intel).unwrap_or(u32::MAX);
         self.intel = self.intel.saturating_add(taken);
+        self.alert = stats.alert_peak;
         for id in stats.salvaged.iter() {
             self.salvage(id);
         }
