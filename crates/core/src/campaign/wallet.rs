@@ -29,6 +29,8 @@
 //! facilities, which is what [`Outlay::Closed`] refuses everywhere else — the check is
 //! [`Campaign::spend`](super::Campaign::spend)'s, so a sink cannot forget to make it.
 
+use serde::{Deserialize, Serialize};
+
 #[cfg(test)]
 mod tests;
 
@@ -42,7 +44,7 @@ mod tests;
 ///
 /// Nothing persists it, which is §2.2's across-runs half needing no code: a wallet is a
 /// plain value inside a [`Campaign`](super::Campaign), and a finished run drops both.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
 pub struct Wallet {
     balance: u32,
 }

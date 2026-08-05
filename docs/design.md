@@ -2710,9 +2710,18 @@ so a watched cell out of your sight still paints red, now with nothing on top of
 > geometry is not playing a stealth game, they're rolling dice"* — and then read it as
 > a description of what this modifier turns on. That is the modifier's whole content:
 > route-planning stops being free and becomes what exploring buys, and a chase through
-> ground you have not scouted is exactly the dice-roll the doc warns of. It is therefore
-> **not a difficulty step** and stays out of §12.6's directed pool: a player who asked
-> for *+1 harder* would be handed a different game, not a harder facility.
+> ground you have not scouted is exactly the dice-roll the doc warns of. It is therefore arguably
+> **not a difficulty step** at all: a player who asked for *+1 harder* is handed a
+> different game rather than a harder facility.
+>
+> **It is in the directed pool anyway since #518, and that reading is what it cost.** A
+> modifier's job is to modify the level, and whether the ±N axis is the *tidiest* way to
+> reach one is a weaker claim than the objection reads as — so this end was admitted with
+> the consequence stated rather than argued away: a `+1` quick-play run can now be dealt
+> a fogged-geometry facility the player never named, and the Level info card's *"Layout
+> unknown"* is the only warning they get. It is the largest player-facing cost in that
+> change (appendix 49), and the thing to watch is whether the card is enough or whether
+> this end wants a louder cue on turn one.
 >
 > **The exit is the exception that keeps the run playable.** It draws as itself from
 > turn one like always (row five), and with the building gone it is the one fixed point
@@ -3188,10 +3197,32 @@ What this single property buys:
 
 ### 12.5 Saves
 
-Serialise the run state (seed, level, progress) to browser local storage.
-**[START]** — with true determinism, `(seed, inputs)` is also a valid save, and a
-much smaller one. Snapshotting is simpler and survives design changes; a replay
-save doesn't. Probably: snapshot for saves, replay for tests and bug reports.
+The run is **snapshotted** to browser local storage — the whole [`State`], plus the
+campaign layer above it (§12.7), the level-seed token, the run's framing and its input
+recording — and read back to resume it. **[SETTLED]**: snapshot for saves, replay for
+tests and bug reports (#514, appendix 50). `(seed, inputs)` is the smaller save and the
+determinism (§12.4) is real, but a replay reproduces the run *the current build* would
+play, so a save written before a tuning change resumes a different game without saying
+so; a snapshot either restores exactly what was stored or fails to decode.
+
+- **Autosave only. There is no save verb** — no key, no menu entry, no button. The run
+  is written as it plays, and the title screen (§14) grows a **Continue run** row only
+  when a valid save is there to resume.
+- **Debounced, not per turn.** A turn arms a trailing write a few seconds out and each
+  further turn re-arms it, so a held-key burst is one write; **[START]** 2 s, with a
+  20-turn cap so the window is bounded in turns as well as seconds. Two things bypass
+  the debounce: the page **hiding** (`visibilitychange`/`pagehide` — the reliable
+  subset of the unload signals, and the moment a phone player is actually leaving), and
+  a **terminal** event.
+- **Permadeath shapes it** (§2.2). One slot, overwritten forward, emptied as part of
+  resolving the turn that ends the run — so the slot never holds a pre-death state, and
+  a save is *interruption resume*, never an undo and never a retry. Save-scumming is
+  designed out rather than policed: the player cannot choose what is in the slot.
+- **A save this build cannot read is simply no save** — discarded silently, and the
+  menu shows the entries it always had. §12.6's "never a bricked page", applied to
+  storage.
+- The codec and the debounce clock live in the **shell** (§12.1); the core carries
+  `serde` derives and nothing else.
 
 ### 12.6 Level modifiers
 
@@ -3207,9 +3238,9 @@ otherwise stand, so doorways, duct mouths and furniture are all on the map from 
 (easier — the duct mouth is the one *content* it hands over, because a mouth reads off a
 plan the way a doorway does; a scouted mouth is still the one that gets the memory slate,
 #450), and *"layout unknown"* draws nothing there at all, so the geometry is fogged like
-the contents and route-planning becomes what exploring buys (#233 — harder, the **one
-modifier that overrides a [SETTLED] rule**, and for that reason kept out of the directed
-pool below: see §11.5a); the two
+the contents and route-planning becomes what exploring buys (#233 — harder, and the **one
+modifier that overrides a [SETTLED] rule**; it was kept out of the directed pool below
+for that reason until #518 admitted it: see §11.5a); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
 summon anyone (harder); *"all doors automatic"* generates every doorway frameless
 instead of hinged (§10.4/#452 — harder, and one of the modifiers **read by
@@ -3277,6 +3308,15 @@ so a flag that changes nothing observable cannot pass for shipped.
 > what lets its §2.3 assertion be stated per seed and in the simplest possible form: a
 > prize a keyless flood reaches at baseline, it does not reach behind the lock.
 >
+> **Two of these are now in the difficulty pool** (#518), and that is what turns the
+> paragraph above from a note about generation into a promise about comparisons. A ±N
+> comparison used to be two rulesets over one building, flatly. It is graded now, in
+> three tiers, and the tiers are pinned by a test rather than by this sentence: the
+> **doors** may move the building (measured, a duct mouth relocates on seed 42), the
+> **locked room** may only re-role cells inside doorways the carve already cut, and every
+> other entry leaves the grid byte-identical. A new generation-reaching entry fails that
+> test, which is what makes admitting one a deliberate act rather than a discovery.
+>
 > It is also why adding to this set is not free: a modifier that reaches the **carve**
 > breaks **seed stability**. Dropping the old per-doorway draw shifted the RNG stream,
 > so every `#seed=N` link shared before #452 now names a different facility. The break
@@ -3325,11 +3365,27 @@ seed's **carve** is byte-identical at every difficulty — which is what makes t
 arms of a comparison the same building. The pool
 is filtered on the fields' own documented **direction**, which makes §2.3's
 directional assertion true by construction rather than by review; a level deeper than
-its pool takes what exists rather than looping. The **locked room** (#236) is out of the
-pool on the hidden layout's ground rather than its own: the §13.2 bot has no notion of a
-key, so a `+N` draw that picked it could stand a whole sweep in front of a door the bot
-will not buy its way through, and the numbers would then measure the bot (§13.3). It is
-in every other route into the seam, where it is asked for by name.
+its pool takes what exists rather than looping.
+
+**What decides membership, and what does not** (#518). Two questions, and only two: is
+the entry a **difficulty** change rather than a change of subject, and does it bend in a
+**documented direction**? Whether the §13.2 bot can weigh it is deliberately *not* a
+third. That criterion had crept in — three modifiers were being withheld from players
+partly or wholly because the harness could not score them — and it inverts §13.4's
+*"treat bot output as a smoke detector, not a judge"* and §13.1's *"you play and rule;
+fun is a human judgement"*. A modifier's job is to modify the level; some are light and
+sweep cleanly, others will only ever be judged by playing them, and the second kind is
+not a lesser kind. Bot-blindness stays a **reporting** concern — a batch that draws a
+modifier the policy cannot use measures the bot, and its numbers do not belong in a
+balance argument — which is an argument for teaching the bot (#498, #517) and for
+labelling the batch, never for a thinner game. It was never a small problem either:
+three of the four *easier* entries are already bot-blind, so a `−N` bot batch has long
+been drawing no-ops.
+
+So the pool now holds **twelve** entries, **eight harder and four easier** — the three
+admitted by #518 are all harder, which is why the sides are no longer the same depth.
+Nothing lies about it (the slider's blurb counts *picks*, not pool depth), but a `+N` run
+has more variety than a `−N` one, and the easier side is the one to grow next.
 
 > **What "the same building" now means, precisely** (#232). Every pool entry used to be
 > read at runtime, so the ±N arms of a comparison were the same *level* down to the last
@@ -3515,9 +3571,11 @@ a campaign of **one** facility is exactly the game v1 ships.
   (§4.5), extraction is voluntary, and the balance is banked at every completed raid and
   spent only at the map between facilities (§14 v3, appendix 47) — and the
   **campaign alert**, the run-level layer
-  above the per-facility §7.3 ladder. Nothing persists a campaign anywhere, so
-  "nothing carries across runs" is a property of the type rather than a rule to
-  enforce.
+  above the per-facility §7.3 ladder. A campaign is persisted in exactly one place and
+  for exactly one purpose — the run's autosave slot (§12.5/#514), so an interrupted
+  campaign can be resumed where it stopped — and that slot is emptied when the run
+  ends, so "nothing carries across runs" is a property of the save's lifetime and still
+  never a rule anything has to enforce.
 - **The transitions are the whole layer:** *enter* a facility (the campaign hands out
   its level-seed), *complete* one (the haul is banked, the facility is dropped —
   geometry, guards and bodies do not persist, and the run arrives at a **choice

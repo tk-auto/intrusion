@@ -55,6 +55,8 @@
 //!   formats exactly the value it is handed and advertises nothing else, so it
 //!   cannot re-introduce the old advertised-vs-real discrepancy.
 
+use serde::{Deserialize, Serialize};
+
 use crate::replay::ability_script_letter;
 
 /// The runtime state of one ability, as the player reads it (§11.4): the cases the
@@ -341,7 +343,7 @@ const _: () = assert!(
 /// no duration or cooldown to govern — they resolve in their own tickets (#102,
 /// #103) and stay out of this deck. What is left is exactly the activated set:
 /// innate Run plus the salvaged tech.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub enum AbilityId {
     /// Innate escape (§8.3): 2 cells/turn while active.
     Run,
@@ -661,7 +663,7 @@ impl AbilityId {
 /// the shareable level-seed token ([`LevelSeed`](crate::LevelSeed)), so a handed-
 /// around run reproduces the exact loadout, not just the geometry. Held as a
 /// membership mask over [`AbilityId::ALL`] so it stays `Copy` and small.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct Loadout {
     /// `Default` is the **empty** set, matching [`empty`](Loadout::empty) — a loadout is
     /// built up, never carved down, so the neutral value is *nothing held* rather than
@@ -1352,7 +1354,7 @@ pub const PIERCE_WALL_USES: u32 = 3;
 /// below take only the economy *numbers*, never an [`Ability`] or its
 /// [`Behaviour`] — that is what makes the economy provably blind to behaviour, so
 /// a `Coded` ability rides the identical interface.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 enum Slot {
     /// Inactive and off cooldown — usable this turn.
     #[default]
@@ -1447,7 +1449,7 @@ impl Slot {
 /// [`activate`]: Deck::activate
 /// [`deactivate`]: Deck::deactivate
 /// [`tick`]: Deck::tick
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub(crate) struct Deck {
     slots: [Slot; AbilityId::ALL.len()],
     /// Which abilities the run actually holds (§8.3/#244) — the resolved

@@ -16,13 +16,27 @@
 //! same seed + same modifiers + same inputs → identical run). A player who is handed
 //! a token gets the run, not a recipe for re-rolling one.
 //!
-//! # Its own sub-stream
+//! # Its own sub-stream, and the one thing that escapes it
 //!
 //! The draw takes from a sub-stream salted away from the generation stream
 //! ([`DIFFICULTY_STREAM_SALT`]), the same discipline the quick-play loadout draw
-//! keeps: a seed's facility is byte-identical at every difficulty, and only the rules
-//! bending it differ. That is what makes the ±N arms of a comparison worth anything —
-//! they are the same building.
+//! keeps, so the *draw itself* never shifts what a seed carves: what the axis returns
+//! is a set of rules, and reading it costs the generator nothing.
+//!
+//! That used to make a flat promise — a seed's facility is byte-identical at every
+//! difficulty, and only the rules bending it differ, which is what made the ±N arms of a
+//! comparison worth anything. **Since #518 it holds for every pool entry but one.** The
+//! salt governs the *stream*; it cannot govern what a drawn modifier then does, and
+//! `automatic doors` is read by the **carve** (§12.6), so a draw that picks it produces a
+//! different building from the same seed. Every other entry is read at runtime, by the
+//! renderer, or by placement, and leaves the carve alone.
+//!
+//! So the guarantee is graded now, in three tiers: the doors may move the building, the
+//! locked room may only re-role cells inside doorways the carve already cut (§10.4), and
+//! every other entry leaves the grid byte-identical. That is pinned by
+//! `a_difficulty_draw_moves_the_building_only_where_it_is_meant_to` rather than left as
+//! a sentence here, because a new generation-reaching entry would falsify it silently —
+//! the test is what makes admitting one a deliberate act.
 //!
 //! # The direction cannot be cancelled
 //!
@@ -35,12 +49,18 @@
 //! lives in [`draw_from_pool`], so the campaign alert (#210), which draws from the same
 //! pool, inherits the same guarantee rather than restating it.
 
+use serde::{Deserialize, Serialize};
+
 use crate::modifiers::{draw_from_pool, pool_size, LevelModifiers, ModifierDirection};
 
 /// A fixed transform applied to the run seed before the difficulty draw, so it takes
 /// from a sub-stream **independent** of generation and of the loadout draw (§12.4).
-/// This is what keeps a difficulty from shifting the facility the seed carves — the
+/// This is what keeps the *draw* from shifting the facility the seed carves — the
 /// streams never share a position — while the whole run still derives from one seed.
+///
+/// It says nothing about what a **drawn** modifier does afterwards: a generation-depth
+/// entry still reaches the generator as a parameter, and `automatic doors` is one
+/// (§12.6/#518). See the module note above.
 const DIFFICULTY_STREAM_SALT: u64 = 0x_D1FF_0000_D1FF_0000;
 
 /// How far the level runs either side of the baseline. The axis is −[`SPAN`]…+[`SPAN`]
@@ -60,7 +80,7 @@ pub const SPAN: i8 = 2;
 /// way the run is bent rather than dressing it as a fiction about the building. They
 /// are the same two words [`ModifierDirection`] uses, which is the point: the label a
 /// player reads and the direction the draw filters on cannot come apart.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum Difficulty {
     /// −2: two rules bent the player's way.
     MuchEasier,
@@ -215,7 +235,8 @@ impl Difficulty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modifiers::ActiveModifier;
+    use crate::modifiers::{ActiveModifier, POOL};
+    use crate::Cell;
 
     /// A spread of seeds wide enough that a draw which ignored its seed, or one that
     /// only ever landed on the first pool entry, shows up.
@@ -357,6 +378,125 @@ mod tests {
                 assert_eq!(position.draw(seed).active().len(), position.picks());
             }
         }
+    }
+
+    /// **The pool is exactly the two questions §12.6 asks of an entry** (#518): is it a
+    /// difficulty change, and does it bend in a documented direction? Whether the §13.2
+    /// bot can weigh it is deliberately *not* a third — the sim is a smoke detector, not
+    /// a judge (§13.4), and a modifier only a human can rule on is still a modifier.
+    ///
+    /// So this pins the shape rather than a membership list that would churn: every
+    /// entry carries a direction, the directed halves partition the pool, and the axis
+    /// can actually fill the picks it advertises at every stop.
+    #[test]
+    fn the_pool_is_directed_and_deep_enough_for_every_stop() {
+        assert_eq!(
+            pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
+            POOL.len(),
+            "every entry bends one way or the other — there is no neutral row",
+        );
+        for position in Difficulty::ALL {
+            let Some(direction) = position.direction() else {
+                assert_eq!(position.picks(), 0, "the baseline draws nothing");
+                continue;
+            };
+            assert_eq!(
+                position.picks(),
+                (position.level().unsigned_abs() as usize).min(pool_size(direction)),
+                "{position:?} must not advertise a pick the pool cannot fill",
+            );
+        }
+    }
+
+    /// **What a difficulty draw may do to the building** (#518) — three tiers, and the
+    /// point of pinning them is that a modifier can only move between tiers deliberately.
+    ///
+    /// The draw takes a salted sub-stream so that *reading* it costs the generator
+    /// nothing. That used to make a flat promise — one seed, one facility, whatever the
+    /// difficulty — and admitting two generation-reaching entries turned it into a
+    /// graded one:
+    ///
+    /// 1. **The doors move the building.** `automatic doors` is consumed by the carve
+    ///    (§12.6), and the divergence is not confined to doorways: measured over the
+    ///    sweep, whole features relocate — on seed 42 a **duct mouth** lands somewhere
+    ///    else entirely. A ±N comparison that draws it is comparing two facilities, not
+    ///    two rulesets.
+    /// 2. **The locked room re-roles cells the carve already cut.** `prize room locked`
+    ///    folds a doorway's two hinges into its panel span (§10.4/#236) and touches
+    ///    nothing else — the building is the same building, and every differing cell
+    ///    belongs to a door the lock is on.
+    /// 3. **Everything else leaves the grid byte-identical**, which is the property the
+    ///    ±N arms are worth comparing on.
+    ///
+    /// A failure here is not a test to relax. Tier 3 breaking means a new entry reaches
+    /// generation and the guarantee needs restating; tier 2 breaking means the lock has
+    /// started moving geometry, which §10.6's own assertions are stated against.
+    #[test]
+    fn a_difficulty_draw_moves_the_building_only_where_it_is_meant_to() {
+        use crate::generate::generate_level;
+        use crate::place::LevelConfig;
+        use crate::render::ascii_grid;
+        use crate::Rng;
+
+        let build = |modifiers: &LevelModifiers, seed: u64| {
+            let (layout, _) = generate_level(&LevelConfig::V1, modifiers, &mut Rng::new(seed))
+                .unwrap_or_else(|e| panic!("seed {seed}: {e:?}"));
+            let keyed: std::collections::HashSet<Cell> = layout
+                .regions()
+                .doors()
+                .filter(|(_, d)| d.is_keyed())
+                .flat_map(|(_, d)| d.cells().collect::<Vec<_>>())
+                .collect();
+            (ascii_grid(layout.facility()), keyed)
+        };
+        let differing = |a: &[String], b: &[String]| -> Vec<Cell> {
+            a.iter()
+                .enumerate()
+                .flat_map(|(y, row)| {
+                    row.chars()
+                        .zip(b[y].chars())
+                        .enumerate()
+                        .filter(|(_, (p, q))| p != q)
+                        .map(move |(x, _)| Cell::new(x as u32, y as u32))
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+
+        let (mut saw_doors, mut saw_lock, mut saw_quiet) = (false, false, false);
+        for seed in crate::test_support::seed_sweep(24) {
+            let (baseline, _) = build(&LevelModifiers::default(), seed);
+            for position in Difficulty::ALL {
+                let drawn = position.draw(seed);
+                let (grid, keyed) = build(&drawn, seed);
+                let diff = differing(&baseline, &grid);
+                if drawn.automatic_doors {
+                    saw_doors = true; // tier 1: the building itself may move
+                    continue;
+                }
+                if drawn.prize_room_locked {
+                    saw_lock = true;
+                    assert!(
+                        !keyed.is_empty() && diff.iter().all(|c| keyed.contains(c)),
+                        "seed {seed}, {position:?}: the lock moved {} cells that are not \
+                         its own doorways — it must re-role a doorway, never carve one",
+                        diff.iter().filter(|c| !keyed.contains(c)).count(),
+                    );
+                    continue;
+                }
+                saw_quiet = true; // tier 3
+                assert!(
+                    diff.is_empty(),
+                    "seed {seed}, {position:?}: {} cells moved, so the ±N arms are no \
+                     longer one building — a pool entry has started reaching generation",
+                    diff.len(),
+                );
+            }
+        }
+        assert!(
+            saw_doors && saw_lock && saw_quiet,
+            "the sweep missed a tier (doors {saw_doors}, lock {saw_lock}, quiet {saw_quiet})",
+        );
     }
 
     /// The blurb counts the rules the position will **actually** bend, so a level

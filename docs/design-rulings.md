@@ -3335,3 +3335,229 @@ sitting beside it. Every `Outlay` message already names the balance ("spent 1 in
 left", "needs 1 intel — you have 0"), so the readout is not a fact the player loses; two
 lines saying the balance twice would be the screen repeating itself. It clears the moment
 the marker moves: a message about the row you have just left is a message about nothing.
+
+---
+
+## Appendix 49 — Pool membership is about the level, not about what the bot can score
+
+*(§12.6 level modifiers and the difficulty draw, §13.1/§13.3/§13.4 the experiment loop,
+§11.5a the fogged layout, §10.4 doors. The ticket is #518; the three modifiers it admits
+are #452, #233 and #236.)*
+
+The §12.6 **directed pool** is what a difficulty draws from: nine entries, five harder
+and four easier, filtered on each field's own documented direction. Three harder
+modifiers shipped outside it — *all doors automatic*, *layout unknown*, *locked room* —
+each held back for its own stated reason. This is the ruling that admitted all three,
+and the more useful half of it is not the three: it is **the criterion that had quietly
+replaced the real one**.
+
+### The criterion that crept in
+
+Read the three exclusions together and a pattern appears that nobody chose:
+
+- *locked room* was out **only** because the §13.2 bot has no cue for buying a key. It
+  is a plain harder toggle; the two settings are the same building down to the cell.
+  Nothing about it failed any test a pool entry is supposed to pass.
+- *layout unknown* was out for two reasons, and the doc gave both: it is arguably not a
+  difficulty step, **and** the bot routes through walls it has never seen.
+- *all doors automatic* was out for two reasons as well: it reaches the carve, **and**
+  the sim measured it as feel rather than difficulty — a win rate that did not move over
+  four hundred runs.
+
+In each case at least part of the reason was **"the harness cannot score it."** Stated
+once, per modifier, that reads like diligence. Stated three times it is a rule, and the
+rule is backwards. §13.4 is explicit: *"treat bot output as a smoke detector, not a
+judge."* §13.1 is more explicit still: *"you play and rule. Fun is a human judgement."*
+The sim exists to stop us shipping inert systems (§2.3) and to flag suspicious seeds for
+a human — not to hold a veto over what the game contains.
+
+A modifier's job is to **modify the level**. That is the whole of what §12.6 says one
+is. Some will be light and sweep cleanly; others will only ever be judged by playing
+them, and the second kind is not a lesser kind of modifier — it is most of the
+interesting ones. Withholding those from players because the harness cannot put a number
+on them is the §13.3 failure pointed the other way: instead of the bot's metrics quietly
+becoming a description of the bot, the bot's *limitations* quietly become a description
+of the game.
+
+So membership asks two questions and only two:
+
+1. Is it a **difficulty** change rather than a change of subject? The ±N axis promises
+   the same game under more or less pressure.
+2. Does it bend in a **documented direction**? That is what makes §2.3's directional
+   assertion true by construction rather than by review.
+
+Bot-blindness stays real and stays a **reporting** concern: a batch that draws a
+modifier the policy cannot use is measuring the bot, and its numbers do not belong in a
+balance argument. That is an argument for teaching the bot (#498, #517) and for labelling
+the batch — never for a thinner game.
+
+### It was never a small problem, which is the argument's strongest form
+
+The objection would carry more weight if the pool were otherwise clean. It is not, and
+counting was what settled the question. Of the four **easier** entries already in the
+pool, **three are bot-blind**:
+
+| Entry | Why the bot cannot use it |
+|---|---|
+| *All vision cones shown* | The policy builds its danger set from `perceive_guard == Seen` only; the widened overlay is never read |
+| *Full layout known* | The bot is granted geometry unconditionally (`bot-behaviour.md` §2), so it already routes as if this were on |
+| *Search areas shown* | Nothing in the policy reads a search area |
+| *Guards: one fewer* | — it plays this one |
+
+A `−1` bot batch has a three-in-four chance of drawing a no-op, and `−2` is guaranteed at
+least one. Bot-blindness in this pool is the **standing state**, not something the three
+admissions introduce.
+
+There is a reason it clusters on that side, and it is worth stating because it will keep
+being true: **a harder modifier lands on the bot whether it understands it or not; an
+easier one has to be used.** Guards that search hideouts flush a bot that hid in one
+without the bot knowing the rule exists. An overlay that reveals more cones does nothing
+at all unless something reads it. So the easier side is where comprehension is required,
+and comprehension is what the bot is short of.
+
+### What each admission actually cost
+
+**The locked room cost nothing.** It was the clean case, and the one that exposed the bad
+criterion by having no other reason attached to it.
+
+**Layout unknown cost the [SETTLED] override becoming reachable unnamed.** §11.5a is
+**[SETTLED]** — geometry is never fogged — and this is the one modifier that overrides
+it. Before, a player only met it by asking for it: a chosen set, a shared token, a node
+flavour. Now a `+1` can deal it to them, and the Level info card's *"Layout unknown"* is
+the whole of the warning. The objection that it is *not a difficulty step* has not been
+answered; it has been accepted. Whether the card is enough, or whether that end wants a
+louder cue on turn one, is the open question this leaves behind.
+
+**Automatic doors cost the flat same-building guarantee**, and that one needed real work
+rather than a shrug. `difficulty.rs` promised — and §12.6 repeated — that *a seed's
+facility is byte-identical at every difficulty, and only the rules bending it differ;
+that is what makes the ±N arms of a comparison worth anything.* The draw takes a salted
+sub-stream precisely to buy it. But the salt governs the **stream**, not what a drawn
+modifier then does, and this one is read by the carve.
+
+Measuring it is what turned that from a worry into a specification. Diffing the generated
+grid at every difficulty over a seed sweep gives **three tiers**, not two:
+
+1. **The doors move the building.** Not merely doorway roles — on seed 42 a **duct
+   mouth** relocates. A ±N comparison that draws this entry is comparing two facilities.
+2. **The locked room re-roles cells the carve already cut.** It folds a doorway's two
+   hinges into its panel span (§10.4) and touches nothing else; every differing cell
+   belongs to a door the lock is on.
+3. **Everything else leaves the grid byte-identical** — the property the arms are worth
+   comparing on.
+
+That is pinned by `a_difficulty_draw_moves_the_building_only_where_it_is_meant_to` rather
+than by a sentence, because it is exactly the claim that stops being true silently. A new
+generation-reaching entry fails that test, which is what makes admitting one a deliberate
+act rather than a discovery.
+
+### The asymmetry left behind
+
+All three admissions are `Harder`, so the pool went to **twelve: eight harder, four
+easier.** Nothing lies about it — the slider's blurb counts *picks*, not pool depth, so
+both ±2 stops still promise exactly the two rules they will bend — but a `+N` run now has
+meaningfully more variety than a `−N` one. The easier side is the one to grow next, and
+the honest way to grow it is not to relabel a harder rule but to find rules that are
+genuinely bent the player's way. That, and #258's difficulty/feeling split, are what this
+appendix leaves open.
+
+### The one thing that did **not** change
+
+`automatic_doors` is still, on the sim's own evidence, a **feel** modifier rather than a
+difficulty one: win rate flat over four hundred runs, with the run's *character* moving
+instead. Admitting it to a pool labelled by difficulty does not settle that — it defers
+it. `Harder` remains the safer of the two labels because the structural change (wider
+throats, no hand-close) is the harder-direction one and is what §2.3's assertion can
+actually hold. #258 is where that question gets answered properly.
+
+
+## Appendix 50 — The save is a snapshot, because a replay resumes a different game
+
+*(§12.5 saves, §12.4 determinism, §2.2 permadeath, §12.7 the campaign layer, §14 v2's
+saves deliverable. The ticket is #514; the menu it grows a row on is #268.)*
+
+§12.5 shipped as an open choice: snapshot the run, or store `(seed, inputs)` and re-feed
+them. Determinism (§12.4) is [SETTLED] and the replay machinery already existed — the
+shell records every input, the copy-replay control hands the pair around, the sim replays
+it — so the replay save was the one that cost nothing to build and a fifth of a kilobyte
+to store. It is still the wrong save, and the reason is worth writing down, because it is
+not the reason the design doc guessed.
+
+### The measurement that was *not* decisive
+
+The obvious objection to a replay save is restore cost: it re-runs the run. Measured on
+the release build, a turn costs about **174 µs** — 3000 turns is **0.52 s** natively, and
+a wasm build is slower again, so a long run would resume with a second or more of frozen
+page, growing with exactly the runs the feature exists to protect. That is a real cost
+and it is not the decisive one: a "restoring…" frame would have covered it.
+
+### The reason that is decisive
+
+**A replay reproduces the run *this build* would play, not the run that was saved.**
+
+The page updates whenever `main` merges. A player who leaves a run on Tuesday comes back
+to Wednesday's build, and if a single §12.6 [START] number moved in between — a dwell
+chance, a sighting window, a search radius — re-feeding their inputs produces a different
+run: the same first move, a guard a cell to the left, an alert rung that never rose. It
+does not error. Nothing about the page can tell the player that the run they are looking
+at is not the run they left, because from the code's point of view nothing went wrong.
+
+A snapshot has the opposite failure mode, and it is the safe one. It stores the state
+rather than a recipe for it, so a build with a different rule restores the *stored* world
+and plays on under the new rules; and a build whose state has a different **shape** fails
+to decode, which is caught, which is discarded, which is a menu without a continue row.
+The version stamp beside it covers the third case — same shape, different meaning —
+where the format cannot notice on its own.
+
+That asymmetry is the whole ruling. A save is a promise about the past; a replay is a
+computation in the present, and the present moves.
+
+### What it cost
+
+`serde` derives across the state graph — about seventy types, one line each, plus the
+`serde` feature on the pinned PRNG so the run's random position rides along. That is a
+real dependency in a crate that had two, and it is the price of the snapshot branch. The
+codec (`serde_json`) stays in the shell: §12.1's core is still pure, still clockless, and
+gains no I/O.
+
+The stored record is ~150 KB for a 300-turn quick-play run against a multi-megabyte
+`localStorage` quota — two orders of magnitude of headroom, pinned by a test rather than
+by this paragraph.
+
+### Two things the ticket did not ask for, and why they are in anyway
+
+**The input recording rides in the save.** A snapshot does not need it. The shell's
+recorder does (§12.4/#411): a resumed run whose recording restarted at the resume would
+hand the copy-replay control a script that reproduces a *different* run — the exact
+failure this appendix is about, re-entering through the back door. A few bytes a turn
+closes it.
+
+**A reload of the run in progress resumes it.** The shell reflects a live run's token
+into the address bar (§13.1/#110), so a refresh mid-run arrives carrying that token and
+is indistinguishable from a shared link — and #268's rule for a link is *boot straight
+in*, which would roll the level fresh and throw away the run. When the named level is the
+saved run's own level, the load is read as a reload and the save wins. A token naming a
+different level is a genuine link and starts fresh, overwriting the slot forward like any
+new run.
+
+### The campaign came along
+
+§12.7 said "nothing persists a campaign anywhere", and #514 scoped campaign saves out to
+v3. It turned out to be a handful of lines: the record carries `Option<Campaign>` and the
+map screen's marker row, and the only genuinely new idea is that **the run being over is
+not the same question as the facility being over** — a campaign facility's verdict is the
+middle of the run (§12.7), so only `CampaignStage::is_over` may empty the slot. Two
+moments outside the turn loop had to arm a write as well, because between raids no turn
+is taken: the map coming up, and a road bought at the hub (#212) — intel spent and then
+reloaded away would be a road bought twice.
+
+§12.7's sentence is now about the *slot's lifetime* rather than about nothing existing:
+the campaign is persisted in one place for one purpose, and that place is emptied when
+the run ends. §2.2 is unmoved.
+
+### What is left open
+
+The debounce numbers are **[START]** and unmeasured against real play: 2 s and a 20-turn
+cap were chosen against the 120 ms key repeat, not against a session. The right evidence
+is how many turns players actually lose to a killed tab, which needs the feature in
+players' hands first.

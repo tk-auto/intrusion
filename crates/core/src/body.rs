@@ -23,12 +23,14 @@
 //! responder searches a spot it is no longer at. The radio is what keeps the
 //! takedown's permanence costly; this type is the seam it reads.
 
+use serde::{Deserialize, Serialize};
+
 use crate::cell::Cell;
 use crate::radio::{RadioClock, MAX_MISSED_PINGS};
 
 /// A downed guard (§7.2): where the body now lies, and what the world will want
 /// to know about it later.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Body {
     /// Where the body lies. Moves only by being dragged (§8.3, #103).
     cell: Cell,

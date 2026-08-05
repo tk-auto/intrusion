@@ -10,6 +10,8 @@
 //! message drawn from an event or an affordance colours through the same table as
 //! everything else — the loop reports facts, the presentation reads them.
 
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
 /// What the player asks to do on their phase. Input mapping (which key is which,
@@ -50,7 +52,7 @@ pub enum Input {
 /// its information [`Category`] ([`Event::category`]) so a message drawn from it
 /// colours through the same §11.2 table as everything else; display priority and
 /// the bar itself (§11.7) are the message ticket's job — the loop reports facts.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Event {
     /// The player stepped to `to`.
     Moved { to: Cell },

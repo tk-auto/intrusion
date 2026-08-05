@@ -32,6 +32,8 @@
 //! camera is 360° and short, that guards cannot perceive it at all — live on the kind,
 //! not on the seam.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ability::AbilityId;
 use crate::cell::Cell;
 use crate::vision::FULL_SIGHT_ARC;
@@ -62,7 +64,7 @@ const _: () = assert!(DRONE_SIGHT_RANGE < crate::vision::PLAYER_SIGHT_RANGE);
 /// stops it, how it sees, whether the facility can perceive it — and a second kind
 /// should arrive by adding a variant and answering those questions, not by threading a
 /// boolean through the turn loop.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum RemoteKind {
     /// A **drone** (§8.3/#273): a flying camera you launch from your own cell.
     ///
@@ -109,7 +111,7 @@ impl RemoteKind {
 /// that ability's duration ends (§8.2), whether the player was still flying it or had
 /// handed the keys back twenty turns earlier. There is no linger counter, because the
 /// linger *is* the rest of the duration.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Remote {
     /// The cell it occupies. It shares cells freely — it is not an actor (§4.3).
     pub(crate) cell: Cell,

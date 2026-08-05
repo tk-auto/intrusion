@@ -54,10 +54,16 @@ core's own answer, and there are tests whose only job is to keep them that way.
 > the modifier exists to charge.
 >
 > So: **a batch under that modifier measures the bot, not the game** (§13.3), and no
-> number from one belongs in a balance argument. The modifier is kept out of the §12.6
-> directed pool partly for this reason, so no difficulty draw can put a batch there by
-> accident; naming it explicitly is still allowed, because `--inspect` and a captured
-> replay show what the *player* would be shown and that is worth looking at.
+> number from one belongs in a balance argument.
+>
+> **It used to be kept out of the §12.6 directed pool partly for this reason. It is not
+> any more** (#518). Pool membership asks whether a modifier is a difficulty change that
+> bends in a documented direction, and not whether this policy can score it — the sim is
+> *"a smoke detector, not a judge"* (§13.4), and withholding a rule from players because
+> the harness cannot weigh it lets the detector decide what the game contains. So a `+N`
+> draw **can** now put a batch here, and the obligation moved with it: check the resolved
+> set before quoting a number, and read `--inspect` or a captured replay for what the
+> *player* would have been shown, which is worth looking at either way.
 >
 > Closing the hole means giving the bot an **optimistic explorer**: route over known
 > geometry, treat the unseen as passable until a bump says otherwise, and re-plan on
@@ -570,8 +576,10 @@ Stated so they read as decisions rather than oversights:
   24% win rate, detections 848 → 1,086, diversity 0.60 → 0.54), because the locked room
   is a room it must route around rather than one it cannot enter. Under `--intel-gate
   all`, where the locked console is required, the win rate goes to **zero** — and that is
-  the bot, not the game (§13.3). It is why the modifier is kept out of the §12.6 directed
-  pool: a difficulty draw must not be able to put a batch in that position by accident.
+  the bot, not the game (§13.3). The modifier used to be kept out of the §12.6 directed
+  pool for this reason; since #518 it is in, because pool membership is not decided by
+  what this policy can score (§13.4). A `+N` batch can now draw it, so **check the
+  resolved set before quoting a number** from one.
 - **Loadout.** A batch holds the innate set unless `--abilities` grants otherwise, so
   every tech verb reads a structural zero in the committed baseline. That zero is the
   loadout, not the cue — see `docs/stats/abilities/`.

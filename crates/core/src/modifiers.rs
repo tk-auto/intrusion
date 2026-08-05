@@ -41,6 +41,8 @@
 //! never travels in a level-seed token. See its own documentation for why the two
 //! are deliberately kept apart.
 
+use serde::{Deserialize, Serialize};
+
 use crate::rng::Rng;
 
 /// The exit's **intel gate** (§4.5/§10.2/#244): how much intel a run must hold
@@ -52,7 +54,7 @@ use crate::rng::Rng;
 /// §4.5-vs-`place.rs` discrepancy). Ordered by the pressure it puts on a run:
 /// [`All`](IntelGate::All) is the hardest (the longest exposure), [`None`] the
 /// easiest, so the sources compose it *harder-ward* ([`IntelGate::harder_of`]).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IntelGate {
     /// **Easier.** The exit opens immediately — no intel required. Reserved for
     /// campaign (§14 v3), where intel is currency (§2.2), not an exit key.
@@ -123,7 +125,7 @@ impl Ord for IntelGate {
 /// with a departure on each side, which is what lets both ends live in the §12.6
 /// directed pool — see [`harder_of`](GuardCount::harder_of) for the composition rule
 /// that follows from it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GuardCount {
     /// **Easier.** One guard fewer than the recipe asks for — never below
     /// [`LevelConfig::GUARDS_MIN`](crate::LevelConfig::GUARDS_MIN), the floor that
@@ -191,7 +193,7 @@ impl GuardCount {
 /// (`crate::LevelConfig`), and lives there with the recipe for the same reason the
 /// guard envelope does: how many consoles a carve can *seat* is a fact about
 /// generation (§10.6), not about this seam.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IntelCount {
     /// **Harder.** One console fewer than the recipe asks for — never below
     /// [`LevelConfig::INTEL_MIN`](crate::LevelConfig::INTEL_MIN), the floor that keeps
@@ -247,7 +249,7 @@ impl IntelCount {
 /// support on purpose. It is why the rule may only ever be bent by a **modifier**,
 /// never by the base game, and why the end sits outside the difficulty draw (see
 /// [`POOL`]): it does not add a step of pressure, it hands back a different game.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LayoutKnowledge {
     /// **Easier.** The **full layout** (§11.5a): geometry the player has never had
     /// eyes on draws as the real building rather than as the schematic `□`, so
@@ -340,7 +342,7 @@ impl LayoutKnowledge {
 /// either side; a facility with no crate in it is not a middle, it is *none*. That
 /// makes the §12.6 pressure rule read differently here — see
 /// [`most_of`](Self::most_of).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CacheCount {
     /// No crate at all — every quick-play level and every hand-built state.
     /// [`Default`], because a single facility has no *rest of the run* to accumulate
@@ -428,7 +430,7 @@ impl CacheCount {
 /// shareable level-seed token ([`LevelSeed`](crate::LevelSeed), #245).
 ///
 /// [`intel_to_exit`]: LevelModifiers::intel_to_exit
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LevelModifiers {
     /// **Harder.** Force the §7.6 search to flush an occupied hideout within its
     /// disc unconditionally — not only a *body* search (§10.3/#219). Baseline, a
@@ -478,6 +480,15 @@ pub struct LevelModifiers {
     /// geometry is never fogged). That is why the bending lives here and only here:
     /// the base game keeps the visible layout, and a run that gives it up says so on
     /// its card. See [`LayoutKnowledge`] for what each end costs.
+    ///
+    /// **Both ends are in the directed pool since #518.** The hard end used to be kept
+    /// out on the grounds that it is not a *difficulty step* — the ±N axis promises the
+    /// same game under more or less pressure, and this end arguably hands back a
+    /// different one. That reading is unchanged and the entry is admitted anyway, with
+    /// the cost stated: a `+N` quick-play run can be dealt a fogged-geometry facility the
+    /// player never named, and the Level info card's *"Layout unknown"* is their only
+    /// warning. It is the largest player-facing cost in that change, and appendix 49 is
+    /// where it is argued.
     pub layout_knowledge: LayoutKnowledge,
     /// **Retired — slot 5, frozen (#442).** This was the `calm_guards_detect_only_
     /// their_cone` experiment (#410): a **Calm** guard detecting exactly its ~90° cone,
@@ -533,11 +544,17 @@ pub struct LevelModifiers {
     /// of four, and pacing splits by temperament — the avoidant profiles get slower,
     /// the striking ones faster.
     ///
-    /// So on the evidence this is a **feel** modifier, not a difficulty one, and it is
-    /// a candidate for the difficulty/feeling split (#258) rather than for the directed
-    /// pool. `Harder` is the safer of the two labels until that split exists: the
-    /// structural change is the harder-direction one, and it is the direction the
-    /// anti-facade assertion can actually hold.
+    /// So on the evidence this is a **feel** modifier, not a difficulty one, and what it
+    /// really wants is the difficulty/feeling split (#258). `Harder` is the safer of the
+    /// two labels until that split exists: the structural change is the
+    /// harder-direction one, and it is the direction the anti-facade assertion can
+    /// actually hold.
+    ///
+    /// **It is in the directed pool since #518**, feel/difficulty question and all — and
+    /// it is the one entry there that reaches the **carve**, so it is the exception the
+    /// pool's same-building guarantee is now stated with rather than without
+    /// ([`draw_from_pool`]). A `+N` draw that picks it hands back a different facility
+    /// from the same seed, which no other entry does.
     ///
     /// **The one modifier that reaches generation.** Every other field here is read
     /// at runtime or by the renderer; this one is consumed by
@@ -726,18 +743,21 @@ pub struct LevelModifiers {
     /// in here: on one seed, the prize is reachable at baseline and not reachable behind
     /// the locks (`the_lock_puts_the_prize_out_of_reach`).
     ///
-    /// **Deliberately out of the directed pool** (§12.6/[`POOL`]), on
-    /// [`LayoutKnowledge::None`]'s reasoning rather than the intel count's: the §13.2
-    /// bot knows a locked door is not a way through and opens the room the moment a
-    /// takedown hands it the key, but no plan of its says *the thing I need is behind
-    /// that door, so go and buy the key*. Under the sim preset's `--intel-gate one` that
-    /// costs it a little and the modifier reads harder in the documented direction (over
-    /// 100 balanced seeds: win rate 35% → 24%, detections 848 → 1,086, diversity 0.60 →
-    /// 0.54); under `--intel-gate all`, where the locked console is required, the win
-    /// rate goes to **zero**, which is a fact about the bot rather than about the game
-    /// (§13.3). A difficulty draw must not be able to put a batch in that position by
-    /// accident. It stays reachable by name, by token and by node flavour, where it is
-    /// asked for deliberately.
+    /// **In the directed pool since #518** (§12.6/[`POOL`]), and it was held out of it
+    /// until then because the §13.2 bot has no cue for buying a key: it knows a locked
+    /// door is not a way through and opens the room the moment a takedown hands it the
+    /// key, but no plan of its says *the thing I need is behind that door, so go and buy
+    /// the key*. Under the sim preset's `--intel-gate one` that costs it a little and the
+    /// modifier reads harder in the documented direction (over 100 balanced seeds: win
+    /// rate 35% → 24%, detections 848 → 1,086, diversity 0.60 → 0.54); under
+    /// `--intel-gate all`, where the locked console is required, the win rate goes to
+    /// **zero**, which is a fact about the bot rather than about the game (§13.3).
+    ///
+    /// That was never a reason to withhold the modifier from **players**, which is what
+    /// keeping it out of the pool did (§13.1/§13.4: the sim is a smoke detector, not a
+    /// judge — see [`POOL`]). It stays a reason not to cite a bot batch that draws it:
+    /// until #517 teaches the policy to buy a key, those numbers measure the bot (§13.3)
+    /// and do not belong in a balance argument.
     ///
     /// Appendix 46 has the argument: why the key is on every guard rather than on one,
     /// why the gated doors have to shut themselves, why the lock refuses entry and never
@@ -1002,20 +1022,20 @@ pub(crate) struct PoolEntry {
 /// A new modifier joins the pool by taking a row here beside the caption that
 /// declares its direction.
 ///
-/// Two things are deliberately *not* in it. The **retired** slot 5 (#442) is not a
-/// modifier any more — it asks for the rule the level already plays, so drawing it
-/// would spend a pick on nothing. And the **intel gate** is a knob the pool cannot
-/// reach: quick play already sets it to [`IntelGate::All`], and
-/// [`LevelModifiers::union`] composes it *harder-ward*, so an easier draw could not
-/// relax it without the draw learning to replace a knob rather than compose with it.
-/// Relaxing the gate is therefore a decision the pool does not quietly make.
+/// **What is still out, and why.** The **retired** slot 5 (#442) is not a modifier any
+/// more — it asks for the rule the level already plays, so drawing it would spend a
+/// pick on nothing. The **intel gate** is a knob the pool cannot reach: quick play
+/// already sets it to [`IntelGate::All`], and [`LevelModifiers::union`] composes it
+/// *harder-ward*, so an easier draw could not relax it without the draw learning to
+/// replace a knob rather than compose with it. Relaxing the gate is therefore a
+/// decision the pool does not quietly make.
 ///
-/// **The intel count is out too, and for a sharper reason** (#207). It is symmetric
-/// like [`GuardCount`], so the mechanical objection above does not apply — but under
-/// quick play's [`IntelGate::All`] it moves the **win condition**, not the pressure on
-/// it, and a difficulty draw that quietly decided how many consoles a run must clear
-/// would be tuning quick play from inside a campaign ticket. It is driven by node
-/// flavour ([`Flavour`](crate::Flavour)) and by nothing else until someone measures it.
+/// **The intel count is out for a sharper reason** (#207). It is symmetric like
+/// [`GuardCount`], so the mechanical objection above does not apply — but under quick
+/// play's [`IntelGate::All`] it moves the **win condition**, not the pressure on it, and
+/// a difficulty draw that quietly decided how many consoles a run must clear would be
+/// tuning quick play from inside a campaign ticket. It is driven by node flavour
+/// ([`Flavour`](crate::Flavour)) and by nothing else until someone measures it.
 ///
 /// **The cache count is out**, on the intel count's reasoning taken one step further
 /// (#209). It is not a difficulty knob at all: what it hands over is a §8.3 ability the
@@ -1024,40 +1044,66 @@ pub(crate) struct PoolEntry {
 /// accident, and the one thing §2.2 forbids outright. It is driven by node flavour
 /// ([`Flavour`](crate::Flavour)) and by nothing else.
 ///
-/// **A symmetric knob does not have to put both ends in, and the layout knob does
-/// not** (#233). [`LayoutKnowledge::Full`] takes the row below;
-/// [`LayoutKnowledge::None`] has none, and the reason is neither of the two above. It
-/// is a renderer-only rule read on the same board, so the mechanical objection that
-/// keeps `automatic_doors` out does not arise — it is simply **not a difficulty step**.
-/// The −2…+2 axis promises a run of the same game under more or less pressure, and this
-/// end hands back a *different* game: §11.5a's escape-route planning (§7.6) stops
-/// existing, so a player who asked for "+1" would be handed an unfamiliar mode rather
-/// than a harder facility. It stays reachable by every other route into the seam — a
-/// chosen set, a shared token, a node flavour — where it is asked for by name.
-///
-/// It is also the one modifier the sim cannot yet weigh: the bot is granted geometry
-/// unconditionally ([`docs/bot-behaviour.md`](../../docs/bot-behaviour.md) §2, on
-/// §11.5a's authority), so with this end on it routes through walls it has never seen.
-/// Keeping it out of the pool means no difficulty draw can quietly put a sim batch in
-/// that position while the bot still believes the layout is free.
-///
-/// **The locked prize room is out on that same last ground** (#236). Mechanically it
-/// would sit here happily — a plain harder toggle whose two settings are the same
-/// building down to the cell — but the §13.2 bot has no notion of a key, so a `+N` draw
-/// that picked it could stand a whole sweep in front of a door the bot bumps forever,
-/// and the batch would then be measuring the bot rather than the game (§13.3). It is
-/// out until the bot can play it, exactly as the hidden layout is, and reachable by
-/// every other route into the seam meanwhile.
-///
 /// **A symmetric knob is a different case, and both its ends are in** (#232,
 /// appendix 30). [`GuardCount`]'s baseline is a neutral middle rather than one end of
 /// an axis quick play has already walked to, so
 /// [`harder_of`](GuardCount::harder_of) leaves an easier pick standing instead of
 /// overruling it with a base that asked for nothing — the exact mechanical objection
-/// that keeps the gate out does not arise. It is the third easier candidate appendix
-/// 29 said would close its own question, and it closes it: −2 is a genuine draw of
-/// two from three rather than the one exhaustive pair every seed used to get.
-pub(crate) const POOL: [PoolEntry; 9] = [
+/// that keeps the gate out does not arise.
+///
+/// # What decides membership, and what does not (#518)
+///
+/// A modifier's job is to **modify the level** — that is the whole of what §12.6 says
+/// one is. So two questions decide whether it belongs here, and only two:
+///
+/// 1. Is it a **difficulty** change rather than a change of subject? The ±N axis
+///    promises the same game under more or less pressure.
+/// 2. Does it bend in a **documented direction** ([`ModifierDirection`])? That is what
+///    makes §2.3's directional assertion true by construction rather than by review.
+///
+/// **Whether the §13.2 bot can weigh it is not one of them.** That reading crept in and
+/// this is where it stops: the sim is *"a smoke detector, not a judge"* (§13.4), and
+/// **"you play and rule — fun is a human judgement"** (§13.1). Some modifiers are light
+/// and sweep cleanly; others will only ever be judged by playing them. Withholding the
+/// second kind from players because the harness cannot score it is letting the smoke
+/// detector decide what the game contains, which is the §13.3 failure the sim exists to
+/// avoid, pointed the other way.
+///
+/// Bot-blindness is a real fact and it stays a **reporting** concern: a batch that draws
+/// a modifier the policy cannot use measures the bot, and its numbers do not belong in a
+/// balance argument. It has never been a small problem here either — three of the four
+/// *easier* entries above are already bot-blind (the policy builds its danger set from
+/// seen guards only, is granted geometry unconditionally, and reads no search area), so
+/// a `−N` bot batch has long been drawing no-ops. That is an argument for teaching the
+/// bot (#498, #517) and for labelling the batch, never for a thinner game.
+///
+/// # The three admitted by #518, and what each one costs
+///
+/// **`automatic_doors`** (#452) is the entry this table had never explained. Its
+/// exclusion was referred to here — *"the mechanical objection that keeps
+/// `automatic_doors` out"* — and stated only on the field, which is exactly the drift a
+/// "why is this missing?" reader falls into. The objection is real and unchanged: **it
+/// reaches the carve**, so a draw that picks it and a draw that does not are two
+/// *different facilities* from one seed, and the ±N arms stop being the same building.
+/// That guarantee is now stated with this one exception rather than flatly
+/// ([`draw_from_pool`]) and pinned by
+/// `a_difficulty_draw_moves_the_building_only_where_it_is_meant_to`. Its other objection —
+/// that the sim measured **feel** rather than difficulty — is question 1 above, and it
+/// is genuinely open; `Harder` stays the safer label until #258's split can answer it.
+///
+/// **[`LayoutKnowledge::None`]** (#233) is the only entry that overrides a **[SETTLED]**
+/// rule (§11.5a: geometry is never fogged), and it is the one whose question 1 is
+/// closest to *no*: §11.5a's escape-route planning stops existing, which is arguably a
+/// different game rather than a harder one. It is admitted with that stated: a `+N` run
+/// can be dealt a fogged-geometry facility the player never named, and the Level info
+/// card's *"Layout unknown"* is their only warning.
+///
+/// **[`prize_room_locked`](LevelModifiers::prize_room_locked)** (#236) is the clean case,
+/// and the one that exposed the bad criterion. It is a plain harder toggle whose two
+/// settings are the same building down to the cell; nothing about it failed either
+/// question. It was out solely because the bot has no cue for buying a key — which, by
+/// the rule above, was never a reason at all.
+pub(crate) const POOL: [PoolEntry; 12] = [
     PoolEntry {
         caption: SEARCHES_HIDEOUTS,
         set: |m| m.guards_always_search_hideouts = true,
@@ -1103,6 +1149,31 @@ pub(crate) const POOL: [PoolEntry; 9] = [
         caption: SHOWS_SEARCH_AREAS,
         set: |m| m.show_search_areas = true,
     },
+    // The three admitted together by #518, listed in the slot order the rest of the
+    // table keeps. Each was held back for its own reason and each of those reasons is
+    // now either superseded or deliberately accepted — appendix 49 has the trade.
+    //
+    // Slot 6 (#452). **The one entry that reaches the carve**, and the reason the
+    // `same_building` guarantee below is now stated with an exception rather than
+    // flatly (see [`draw_from_pool`]).
+    PoolEntry {
+        caption: ALL_DOORS_AUTOMATIC,
+        set: |m| m.automatic_doors = true,
+    },
+    // Slot 16 (#233) — the layout knob's harder end, and the only pool entry that
+    // overrides a **[SETTLED]** rule (§11.5a: geometry is never fogged). A `+N` draw
+    // can therefore hand a player a fogged-geometry run they did not name, which is the
+    // largest player-facing cost in this change and is said plainly in §11.5a rather
+    // than left as a contradiction between the doc and the table.
+    PoolEntry {
+        caption: LAYOUT_UNKNOWN,
+        set: |m| m.layout_knowledge = LayoutKnowledge::None,
+    },
+    // Slot 17 (#236).
+    PoolEntry {
+        caption: LOCKED_PRIZE_ROOM,
+        set: |m| m.prize_room_locked = true,
+    },
 ];
 
 /// **Draw `picks` modifiers from the directed pool** and switch them on over `base` —
@@ -1119,6 +1190,22 @@ pub(crate) const POOL: [PoolEntry; 9] = [
 /// A pure function of `(base, direction, picks, seed)` (§12.4). The caller salts its own
 /// seed: the difficulty axis and the alert must not share a stream position, and which
 /// salt separates them is the caller's business rather than the pool's.
+///
+/// **The same-building guarantee, and its one exception** (#518). The salted sub-stream
+/// buys a strong property: a seed's *facility* is byte-identical whatever this draw
+/// returns, so the ±N arms of a comparison differ in their **rules** and in nothing else
+/// — which is what makes comparing them worth anything. That held flatly while every
+/// entry was read at runtime or by placement. It now holds for every entry **but
+/// [`ALL_DOORS_AUTOMATIC`]**, which is consumed by the carve (§12.6): a draw that picks
+/// it produces a different building from the same seed, and a comparison that lands on
+/// it is comparing two facilities rather than two rulesets.
+///
+/// It is graded rather than binary, and **pinned by a test**
+/// (`a_difficulty_draw_moves_the_building_only_where_it_is_meant_to`) rather than left
+/// as a sentence here: the doors may move the building (a duct mouth relocates on seed
+/// 42), [`LOCKED_PRIZE_ROOM`] may only re-role cells inside doorways the carve already
+/// cut, and every other entry must leave the grid byte-identical. If a new entry ever
+/// reaches generation, that test fails and this paragraph is what has to be rewritten.
 ///
 /// **`base` is a parameter because the two callers need different ones.** Quick play
 /// draws over [`LevelModifiers::default`], the game's baseline; a *contributing* source
@@ -1423,7 +1510,7 @@ impl ModifierSources {
 /// compile-time enumeration of modifier read sites (§12.2) would start listing a
 /// switch that no rule may ever consult. Two types, two rules: **a level modifier
 /// changes the game, a debug modifier changes only what you get to see of it.**
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DebugModifiers {
     /// See the **whole level**: the player's field of view (§6) becomes every cell of
     /// the facility, so a playtest build can be watched instead of played blind.
@@ -1648,12 +1735,17 @@ mod tests {
         }
         // The pool covers every live toggle — the fields, less the retired slot 5,
         // which asks for the rule the level plays regardless (#442) — plus the guard
-        // knob's two ends, one on each side (#232). The easier side is **four** deep
-        // with the shown search areas (#224), so −2 is a draw of two from four rather
-        // than the one exhaustive pair appendix 29 flagged; the harder side is five
-        // with the watched consoles (#319).
-        assert_eq!(POOL.len(), 9);
-        assert_eq!(pool_size(ModifierDirection::Harder), 5);
+        // knob's two ends, one on each side (#232) and the layout knob's two (#233/#518).
+        //
+        // **The sides are no longer the same depth, and that is the shape of #518.** The
+        // three modifiers admitted there are all `Harder`, so the harder side went from
+        // five to **eight** while the easier side stayed at **four**. Nothing lies about
+        // it — [`Difficulty::blurb`](crate::Difficulty::blurb) counts *picks*, not pool
+        // depth, so both ±2 stops still promise exactly the two rules they will bend —
+        // but a `+N` run now has meaningfully more variety than a `−N` one, and the
+        // easier side is the one to grow next.
+        assert_eq!(POOL.len(), 12);
+        assert_eq!(pool_size(ModifierDirection::Harder), 8);
         assert_eq!(pool_size(ModifierDirection::Easier), 4);
         assert_eq!(
             pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
@@ -1835,29 +1927,79 @@ mod tests {
         assert!(CAPTIONS.contains(&LAYOUT_UNKNOWN));
     }
 
-    /// The knob's harder end is deliberately **not** a pool entry (#233): the −2…+2
-    /// axis promises the same game under more or less pressure, and hiding the layout
-    /// hands back a different one (§11.5a/§7.6). It is reachable by every other route
-    /// into the seam — a chosen set, a token, a node flavour — where it is asked for
-    /// by name.
+    /// **Every modifier that is not in the pool is out for a stated reason** (#518), and
+    /// this pins the list so that "why is this missing?" always has an answer in
+    /// [`POOL`]'s own doc rather than only on a field somewhere.
+    ///
+    /// The list shrank when the three held-back entries were admitted, and the criterion
+    /// is what shrank it: membership asks whether an entry is a *difficulty* change that
+    /// bends in a documented direction, and **not** whether the §13.2 bot can weigh it
+    /// (§13.4 — the sim is a smoke detector, not a judge). What is left out is left out
+    /// on mechanics, not on measurability.
     #[test]
-    fn hiding_the_layout_is_not_a_difficulty_step_the_draw_can_take() {
-        assert!(
-            !POOL.iter().any(|e| e.caption.name == LAYOUT_UNKNOWN.name),
-            "the difficulty draw must not be able to hide the layout",
-        );
-        // Its easier end stays in, so the knob is in the pool at exactly one end.
-        assert!(POOL
-            .iter()
-            .any(|e| e.caption.name == KNOWS_FULL_LAYOUT.name));
-        for difficulty in crate::Difficulty::ALL {
+    fn what_is_out_of_the_pool_is_out_on_mechanics_and_not_on_measurability() {
+        let drawable = |c: ActiveModifier| POOL.iter().any(|e| e.caption.name == c.name);
+
+        // The intel gate: quick play already sets `All` and union composes harder-ward,
+        // so an easier draw could not relax it — the pool cannot reach a knob it can
+        // only ever tighten.
+        assert!(!drawable(INTEL_GATE_ALL) && !drawable(INTEL_GATE_NONE));
+        // The reward knobs: both move what a run *wins*, not the pressure on it, and the
+        // cache count would hand a campaign a permanent ability from inside one facility.
+        assert!(!drawable(CONSOLES_MORE) && !drawable(CONSOLES_FEWER));
+        assert!(!drawable(ONE_CACHE) && !drawable(TWO_CACHES) && !drawable(THREE_CACHES));
+
+        // …and the three admitted by #518 really are reachable now, at every stop that
+        // draws in their direction. All three are `Harder`, so a `−N` must never find one.
+        for caption in [ALL_DOORS_AUTOMATIC, LAYOUT_UNKNOWN, LOCKED_PRIZE_ROOM] {
+            assert!(drawable(caption), "{} is not in the pool", caption.name);
+            assert_eq!(caption.direction, ModifierDirection::Harder);
+        }
+        let harder_can_draw = |pick: fn(&LevelModifiers) -> bool| {
+            (0..400u64).any(|seed| pick(&crate::Difficulty::MuchHarder.draw(seed)))
+        };
+        assert!(harder_can_draw(|m| m.automatic_doors));
+        assert!(harder_can_draw(
+            |m| m.layout_knowledge == LayoutKnowledge::None
+        ));
+        assert!(harder_can_draw(|m| m.prize_room_locked));
+        for difficulty in [crate::Difficulty::Easier, crate::Difficulty::MuchEasier] {
             for seed in [0, 7, 4242, u64::MAX] {
-                assert_ne!(
-                    difficulty.draw(seed).layout_knowledge,
-                    LayoutKnowledge::None,
-                    "a {:?} draw on seed {seed} hid the layout",
+                let drawn = difficulty.draw(seed);
+                assert!(
+                    !drawn.automatic_doors
+                        && drawn.layout_knowledge != LayoutKnowledge::None
+                        && !drawn.prize_room_locked,
+                    "a {:?} draw on seed {seed} bent a harder rule",
                     difficulty.label(),
                 );
+            }
+        }
+    }
+
+    /// The layout knob is in the pool at **both** ends now (#233/#518), one caption each,
+    /// and they are on opposite sides of the direction filter — so no single draw can
+    /// ever name both, and the codec's "a knob holds one value" rejection is never asked
+    /// to arbitrate a set the draw produced.
+    #[test]
+    fn the_layout_knob_is_in_the_pool_at_both_ends_and_never_at_once() {
+        assert_eq!(KNOWS_FULL_LAYOUT.direction, ModifierDirection::Easier);
+        assert_eq!(LAYOUT_UNKNOWN.direction, ModifierDirection::Harder);
+        for difficulty in crate::Difficulty::ALL {
+            for seed in [0, 7, 4242, u64::MAX] {
+                // A draw resolves the knob to exactly one value by construction; this is
+                // the assertion that the two rows cannot conspire to ask for both.
+                let drawn = difficulty.draw(seed).layout_knowledge;
+                assert!(matches!(
+                    drawn,
+                    LayoutKnowledge::Plans | LayoutKnowledge::Full | LayoutKnowledge::None
+                ));
+                if difficulty.direction() == Some(ModifierDirection::Easier) {
+                    assert_ne!(drawn, LayoutKnowledge::None);
+                }
+                if difficulty.direction() == Some(ModifierDirection::Harder) {
+                    assert_ne!(drawn, LayoutKnowledge::Full);
+                }
             }
         }
     }

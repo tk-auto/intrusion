@@ -13,6 +13,8 @@
 //! a concrete colour is a platform concern. The renderer (§11.1) tags every grid
 //! cell with a category; the shell maps category → pixels and nothing else.
 
+use serde::{Deserialize, Serialize};
+
 /// What a cell's foreground *means* (§11.2). Presentation maps each to a colour; the
 /// core never names one.
 ///
@@ -20,7 +22,7 @@
 /// as a foreground and as a darkened background variant — but that is the shell's
 /// table (§11.2), and the full palette lands with the colour-category ticket. Here
 /// we only fix the vocabulary the renderer speaks.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub enum Category {
     /// White. Inert scenery, spent objectives.
     Neutral,

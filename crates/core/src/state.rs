@@ -46,6 +46,8 @@
 //! ([`traversal`]). They are all `impl State` blocks over the *same* struct — plain
 //! structs, not an ECS (§12.3), so the coupling stays visible in the types.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ability::{
     AbilityId, AbilityState, AbilityStatus, Behaviour, Deck, Effect, Loadout, TargetingMode,
 };
@@ -539,7 +541,7 @@ pub enum GuardPerception {
 }
 
 /// Whether the run is still going, and if not, how it ended (§4.5).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Outcome {
     /// The run is live; the player may act.
     Playing,
@@ -552,7 +554,7 @@ pub enum Outcome {
 /// One objective: an intel console and whether it has been taken. How many of them
 /// the exit demands is the run's gate ([`exit_ready`](State::exit_ready), §4.5/§12.6),
 /// not a fixed rule — all of them in quick play, one in the sim, none in campaign.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Objective {
     cell: Cell,
     taken: bool,
@@ -567,7 +569,7 @@ struct Objective {
 /// tech is simply out of luck (#209). Once taken the crate stays on the state as spent
 /// scenery: the renderer recolours it Neutral like a used console (§11.2), and what it
 /// gave is on the loadout, not here.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Cache {
     cell: Cell,
     holds: AbilityId,
@@ -578,7 +580,7 @@ struct Cache {
 ///
 /// Plain structs, not an ECS (§12.3). The level owns its layout, its player, and its
 /// guards directly, so the coupling between them is visible in the types.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State {
     layout: Layout,
     player: Cell,

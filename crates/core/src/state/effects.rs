@@ -101,6 +101,8 @@
 //! rides each guard it froze, reading off that guard's own counter and so staying
 //! truthful for one that has since walked out of the box.
 
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
 /// The footprint one area effect **fired** with (§8.3/#325): the §6.1 **box** of its
@@ -111,7 +113,7 @@ use super::*;
 /// Decided once, at the firing seam ([`State::confusion_blast`]), and then fixed: the
 /// player walking away narrows nothing and widens nothing, because the set of guards
 /// it caught was settled the moment it went off.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct EffectArea {
     pub(super) centre: Cell,
     pub(super) radius: u32,
@@ -181,7 +183,7 @@ pub(super) fn area_radius(effect: Effect) -> Option<u32> {
 }
 
 /// Where an effect mark lands (§11.5/#338) — one of the two shapes the layer speaks.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub(super) enum MarkPlace {
     /// An explicit set of cells, fixed when the mark was lit: a blast's footprint, the
     /// cell a bore opened, the pair an eject threw you between. Nothing about it is a
@@ -250,7 +252,7 @@ pub(super) enum MarkPlace {
 
 /// How long an effect mark lives (§11.5/#338). Both arms run on the one decay schedule
 /// ([`State::decay_effect_marks`]); neither carries a clock of its own.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub(super) enum MarkLife {
     /// A **moment**: this many more spent turns, then gone. The effect *is* an event —
     /// a blast's reach, a bore — and the mark is the frame that reports it.
@@ -274,7 +276,7 @@ pub(super) enum MarkLife {
 
 /// A live **effect mark** (§8.3/§11.5, #308/#324/#338): one ability effect, made
 /// visible as a background over a place, for a stated lifetime.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub(super) struct EffectMark {
     /// The ability the mark came from — an [`AbilityId`] rather than an [`Effect`], so
     /// the key reaches a `Behaviour::Coded` ability (Pierce Wall, §8.1) as easily as a

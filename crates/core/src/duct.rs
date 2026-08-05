@@ -30,11 +30,13 @@
 //! explicitly on the [`State`](crate::State), set by climbing in and cleared by climbing
 //! out.
 
+use serde::{Deserialize, Serialize};
+
 use crate::cell::Cell;
 
 /// What a duct **is for** (§10.7/§4.5) — the one thing that differs between the two,
 /// which is what its far end opens onto.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DuctKind {
     /// A crawlspace shortcut found in the facility (§10.7): a mouth-bearing entry at
     /// each end, joining two far-apart regions.
@@ -52,7 +54,7 @@ pub enum DuctKind {
 /// an **interior** cell, which keeps whatever terrain it already had. Consecutive cells
 /// are orthogonally adjacent by construction — the generator lays the path one cardinal
 /// step at a time (§10.7 generation).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Duct {
     cells: Vec<Cell>,
     kind: DuctKind,

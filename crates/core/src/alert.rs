@@ -48,6 +48,8 @@
 //! part of the [`LevelSeed`](crate::LevelSeed): no shared token can carry it, so a
 //! swept batch is a measuring instrument rather than a game anyone is handed.
 
+use serde::{Deserialize, Serialize};
+
 use crate::category::Category;
 
 /// How many turns of certain-zone contact make one **confirmed sighting** (§7.6,
@@ -104,7 +106,7 @@ pub const TOP_RUNG: u32 = 3;
 /// everybody else gets. Every field is a number the design marks **[START]**; none of
 /// them is a rule, and the rules that *are* settled are held by
 /// [`validate`](Self::validate) rather than by the field types.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct AlertTuning {
     /// Turns of certain-zone contact that make one confirmed sighting
     /// ([`SIGHTING_CONTACT_TURNS`]).
@@ -228,7 +230,7 @@ pub struct AlertReadout {
 ///
 /// Each variant names the rung it reaches ([`rung`](Self::rung)); the ladder takes
 /// the **highest** rung any trigger has reached and never comes back down.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum AlertTrigger {
     /// A **confirmed sighting** (rung 1): [`SIGHTING_CONTACT_TURNS`] turns of
     /// certain-zone contact inside [`SIGHTING_WINDOW_TURNS`]. Somebody is definitely
@@ -326,7 +328,7 @@ pub fn rung_category(rung: u32) -> Category {
 ///
 /// It is deliberately a **count of escalations, not a mood**: guard states (§7.4) are
 /// per-guard and are never folded into this number.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct Alert {
     /// The rung, 0..=[`TOP_RUNG`]. Only [`raise`](Self::raise) writes it, and only
     /// upward — that *is* the no-decay rule (§7.3).
