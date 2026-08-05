@@ -1141,6 +1141,7 @@ fn glyph_rows() -> Vec<(char, Category, &'static str)> {
         terrain(Terrain::DuctEntry, "duct — bump to crawl in"),
         terrain(Terrain::Console, "intel — bump to take"),
         terrain(Terrain::CommsConsole, "comms — bump to kill the radio"),
+        terrain(Terrain::EquipmentCache, "cache — bump to salvage tech"),
         terrain(Terrain::Exit, "the exit"),
         (FLOOR_DOT, Category::Ground, "floor you can see"),
         // The schematic (§11.5a/#307/#470): what the plans give you before you have

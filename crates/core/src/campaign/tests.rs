@@ -530,6 +530,108 @@ fn salvaged_tech_rides_into_the_next_facility() {
     assert_eq!(Campaign::new(21).loadout(), Loadout::innate());
 }
 
+/// **A raid's find rides out on its verdict** (§2.2/#209) — the whole seam, end to
+/// end: the campaign banks the salvage the same way it banks the intel, and the next
+/// facility boots holding it.
+///
+/// This is the acceptance criterion "usable for the rest of the run" said at the layer
+/// that owns the rest of the run. [`salvaged_tech_rides_into_the_next_facility`] pins
+/// the same accumulation driven by hand; what this adds is that a *finished raid* is
+/// what drives it, with nothing in between.
+#[test]
+fn a_completed_raid_banks_the_tech_it_salvaged() {
+    let mut run = Campaign::to_depth(21, 3);
+    run.enter().expect("a facility to raid");
+    let mut verdict = extracted(2, 0);
+    verdict.stats.salvaged = Loadout::empty()
+        .with(AbilityId::Confusion)
+        .with(AbilityId::Decoy);
+    run.complete(&verdict);
+
+    assert!(run.loadout().contains(AbilityId::Confusion), "the find");
+    assert!(
+        run.loadout().contains(AbilityId::Decoy),
+        "and the second crate's — a facility may hide three (§14 v3)",
+    );
+    assert_eq!(run.intel(), 2, "and the haul, from the same value");
+    let next = run.offers()[0].node;
+    run.choose(next);
+    assert!(
+        run.enter()
+            .expect("the next facility")
+            .abilities
+            .contains(AbilityId::Confusion),
+        "the facility after boots holding what the one before handed over",
+    );
+}
+
+/// **A captured run banks nothing, tech included** (§2.2). There is no later facility
+/// to carry a find to, and a run that kept its salvage past a capture would be keeping
+/// something past the run — the "start over stronger" §2.2 rules out.
+#[test]
+fn a_capture_carries_no_salvage_out_of_the_facility() {
+    let mut run = Campaign::to_depth(21, 3);
+    run.enter().expect("a facility to raid");
+    let mut verdict = captured();
+    verdict.stats.salvaged = Loadout::empty().with(AbilityId::Confusion);
+    assert_eq!(run.complete(&verdict), CampaignStage::Lost);
+    assert_eq!(run.loadout(), Loadout::innate(), "the run is over");
+}
+
+/// **A Workshop is the facility its offer said it was** (§2.3/§14 v3/#209): the flavour
+/// the map names resolves into the level-seed the run walks into, crate and all — and
+/// it *pays* for it, one console fewer, so the offer is a trade rather than a bonus.
+#[test]
+fn each_flavour_hides_the_crates_its_row_promises() {
+    use crate::modifiers::{CacheCount, IntelCount};
+
+    // The ladder the map is a choice over (§14 v3/#209): richer flavours hide more, and
+    // each pays for its crates in a different currency.
+    for (flavour, caches) in [
+        (Flavour::Outpost, CacheCount::None),
+        (Flavour::Depot, CacheCount::One),
+        (Flavour::Workshop, CacheCount::Two),
+        (Flavour::Vault, CacheCount::Three),
+        (Flavour::Archive, CacheCount::None),
+    ] {
+        assert_eq!(flavour.modifiers().caches, caches, "{flavour:?}");
+    }
+    // …and the Workshop's price is a console, where the Vault's is a guard: the two
+    // rich flavours differ in what they charge, which is what makes the choice between
+    // them a decision rather than a ranking (§2.3).
+    assert_eq!(
+        Flavour::Workshop.modifiers().intel_count,
+        IntelCount::Fewer,
+        "the console a Workshop's crates cost",
+    );
+    assert_eq!(
+        Flavour::Vault.modifiers().guard_count,
+        crate::modifiers::GuardCount::More,
+        "the guard a Vault's crates cost",
+    );
+    // And it reaches the facility through the one seam (§12.6): walk a run until it
+    // stands on a Workshop, and the level-seed it would boot carries the crate — which
+    // is what makes the campaign facility's *token* the facility as it was played
+    // (§12.7), rather than a label the map printed.
+    let mut run = Campaign::new(PLAYED_SEED);
+    let mut stood_on_one = false;
+    while !run.stage().is_over() {
+        let flavour = run.flavour();
+        assert_eq!(
+            run.next_level().modifiers.caches,
+            flavour.modifiers().caches,
+            "the config disagrees with the row that offered it",
+        );
+        stood_on_one |= flavour == Flavour::Workshop;
+        run.enter();
+        walk_on(&mut run, 1);
+    }
+    assert!(
+        stood_on_one,
+        "a run that never meets a Workshop cannot test one — pick another seed",
+    );
+}
+
 /// **The campaign offers no way to play the run again** (§2.2/appendix 31). The gate
 /// has been in the code since the end screen shipped; this is the first thing that
 /// actually stands behind it.

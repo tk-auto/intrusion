@@ -580,8 +580,12 @@ impl AbilityId {
 /// the shareable level-seed token ([`LevelSeed`](crate::LevelSeed)), so a handed-
 /// around run reproduces the exact loadout, not just the geometry. Held as a
 /// membership mask over [`AbilityId::ALL`] so it stays `Copy` and small.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Loadout {
+    /// `Default` is the **empty** set, matching [`empty`](Loadout::empty) — a loadout is
+    /// built up, never carved down, so the neutral value is *nothing held* rather than
+    /// the innate set. It is what makes [`RunStats`](crate::RunStats) derive `Default`
+    /// with an empty salvage haul (#209).
     present: [bool; AbilityId::ALL.len()],
 }
 
@@ -646,6 +650,15 @@ impl Loadout {
     pub fn with(mut self, id: AbilityId) -> Self {
         self.present[id.index()] = true;
         self
+    }
+
+    /// How many pieces of **salvaged tech** the loadout holds (§8.3) — the innate set
+    /// does not count, because it is never found, never drawn and never traded.
+    ///
+    /// This is the number [`AbilityId::MAX_TECH_HELD`] caps, and the one an equipment
+    /// cache's bump checks before handing anything over (#209/#266).
+    pub fn tech_held(self) -> usize {
+        self.iter().filter(|id| !id.is_innate()).count()
     }
 
     /// Whether `id` is in the loadout — the run holds this ability.
@@ -1231,6 +1244,26 @@ impl Deck {
     /// and a test to assert what was resolved.
     pub(crate) fn loadout(&self) -> Loadout {
         self.loadout
+    }
+
+    /// **Salvage `id` into the run** (§2.2/§8.3/#209): add it to the loadout mid-level,
+    /// so an ability found in a crate is usable from the turn the crate was opened.
+    ///
+    /// The one thing that grows a loadout after boot, and it grows it only. A deck's
+    /// slots and use budgets were seeded for the whole catalog in
+    /// [`new`](Deck::new) — every ability starts [`Ready`](Slot::Ready) with its budget
+    /// full, held or not — so what was missing was never state, it was **permission**:
+    /// [`state`](Deck::state) and [`activate`](Deck::activate) both refuse an ability the
+    /// loadout does not contain. Granting it lifts exactly that, which is why this
+    /// touches nothing else: a salvaged ability arrives ready, with its full per-level
+    /// budget (§8.2/#302), and rebuilding the deck to achieve that would instead reset
+    /// the clocks and budgets of everything the run was already carrying.
+    ///
+    /// Idempotent. Nothing here enforces the §8.3 held cap: the cap and its discard
+    /// prompt are #266's, and silently dropping a pickup the player was never told about
+    /// is the failure that ticket exists to avoid.
+    pub(crate) fn grant(&mut self, id: AbilityId) {
+        self.loadout = self.loadout.with(id);
     }
 
     /// Activate `id` if the run holds it and it is [`Ready`](Slot::Ready). Returns

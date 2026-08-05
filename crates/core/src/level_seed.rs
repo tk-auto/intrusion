@@ -84,7 +84,7 @@ use crate::ability::{AbilityId, Loadout};
 use crate::cell::Direction;
 use crate::difficulty::Difficulty;
 use crate::generate::{generate_level, GenError};
-use crate::modifiers::{GuardCount, IntelCount, IntelGate, LevelModifiers};
+use crate::modifiers::{CacheCount, GuardCount, IntelCount, IntelGate, LevelModifiers};
 use crate::place::LevelConfig;
 use crate::rng::Rng;
 use crate::state::State;
@@ -668,6 +668,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         guards_watch_consoles,
         guard_count,
         intel_count,
+        caches,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -704,6 +705,21 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         // the two knobs' ends exactly as the rule says: appending is free, and the
         // position is permanent from here on.
         guards_watch_consoles,
+        // Slots 12, 13 and 14, appended (#209): the cache knob's three rungs, one slot
+        // each, on the terms the two count knobs' ends were appended under — no radix
+        // moves, and a facility with no crate in it names none of them, so every token
+        // minted before caches existed still encodes byte for byte.
+        //
+        // Three slots rather than a packed field because that is what the format is
+        // *for* (§3 of the token spec): 256 permanent positions, spent one at a time. A
+        // count squeezed into two bits would be a new field, and a new field is a
+        // format bump.
+        //
+        // This is the last piece of "the level you are handed is the level the map
+        // offered" (§12.7) — a Vault's token carries its three crates.
+        matches!(caches, CacheCount::One),
+        matches!(caches, CacheCount::Two),
+        matches!(caches, CacheCount::Three),
     ]
     .into_iter()
     .enumerate()
@@ -730,7 +746,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches] =
         active;
     let guard_count = match (more_guards, fewer_guards) {
         (false, false) => GuardCount::Baseline,
@@ -746,6 +762,16 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         (false, true) => IntelCount::Fewer,
         (true, true) => return None,
     };
+    // And over the cache knob's three rungs (#209), for the reason a knob's two ends are
+    // rejected together: a facility hides one number of crates, so a set naming two of
+    // these describes a config no run can be in.
+    let caches = match (one_cache, two_caches, three_caches) {
+        (false, false, false) => CacheCount::None,
+        (true, false, false) => CacheCount::One,
+        (false, true, false) => CacheCount::Two,
+        (false, false, true) => CacheCount::Three,
+        _ => return None,
+    };
     Some(LevelModifiers {
         guards_always_search_hideouts,
         sighting_lost_calls_a_guard,
@@ -757,6 +783,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         guards_watch_consoles,
         guard_count,
         intel_count,
+        caches,
         intel_to_exit: gate,
     })
 }
@@ -764,8 +791,9 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// How many modifier slots this build actually uses — the live count, against which
 /// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
 /// the format. Not the same as the number of *fields*: the guard-count knob (#232) and
-/// the intel-count knob (#207) spend one slot per end.
-const MODIFIER_FIELDS: usize = 12;
+/// the intel-count knob (#207) spend one slot per end, and the cache knob (#209) one
+/// slot per rung.
+const MODIFIER_FIELDS: usize = 15;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -919,10 +947,26 @@ pub fn start_level(level: &LevelSeed) -> Result<State, GenError> {
 /// loadout; only the recipe the facility carves from differs.
 pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State, GenError> {
     let mut rng = Rng::new(level.seed);
+    // **The facility is stocked before it is carved** (§2.2/§14 v3/#209): what the crates
+    // hold is drawn from the level seed alone ([`cache_contents`](crate::cache_contents)),
+    // never from what the run is carrying, so a building holds what it holds and meeting
+    // tech you already have is luck rather than design.
+    //
+    // Resolved *here*, ahead of generation, so the count placement seats is the count the
+    // draw could actually fill: the knob is a ceiling rather than a promise, and the grid
+    // and the prizes are decided together and can never disagree. (With three crates
+    // against a catalogue of eight, nothing narrows today — the guard is here so a later
+    // flavour asking for more than the world holds fails by planting fewer crates rather
+    // than by standing empty boxes on the floor.)
+    let stock = crate::salvage::cache_contents(level.seed, level.modifiers.caches.crates());
+    let modifiers = LevelModifiers {
+        caches: CacheCount::for_crates(stock.len()),
+        ..level.modifiers
+    };
     // **Modifiers are resolved before the carve** (§12.6/#452). Most of them are read
     // at runtime, but `automatic_doors` decides what a doorway *is*, so it has to
     // reach the generator — threaded as a parameter, never consulted from a global.
-    let (layout, placement) = generate_level(config, &level.modifiers, &mut rng)?;
+    let (layout, placement) = generate_level(config, &modifiers, &mut rng)?;
     let guards = placement.guards(&layout);
     Ok(State::new(
         layout,
@@ -933,7 +977,8 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
         placement.exit(),
     )
     .with_rng(rng)
-    .with_level(*level))
+    .with_level(*level)
+    .with_caches(stock))
 }
 
 #[cfg(test)]
@@ -1138,13 +1183,14 @@ mod tests {
             let on = |field: u32| bits & (1 << field) != 0;
             let (search, sighting, body, cones, layout, cone_only, doors, consoles) =
                 (on(0), on(1), on(2), on(3), on(4), on(5), on(6), on(7));
-            for (guard_count, intel_count) in [
-                (GuardCount::Baseline, IntelCount::Baseline),
-                (GuardCount::More, IntelCount::More),
-                (GuardCount::Fewer, IntelCount::Fewer),
-                // The two knobs crossed the other way, so the sweep covers a set
-                // holding one end of each rather than only matched pairs (#207).
-                (GuardCount::More, IntelCount::Fewer),
+            for (guard_count, intel_count, caches) in [
+                (GuardCount::Baseline, IntelCount::Baseline, CacheCount::None),
+                (GuardCount::More, IntelCount::More, CacheCount::Three),
+                (GuardCount::Fewer, IntelCount::Fewer, CacheCount::Two),
+                // The knobs crossed the other way, so the sweep covers a set holding one
+                // end of each rather than only matched pairs (#207), and every rung of
+                // the cache knob (#209).
+                (GuardCount::More, IntelCount::Fewer, CacheCount::One),
             ] {
                 for gate in gates {
                     for abilities in loadouts {
@@ -1159,6 +1205,7 @@ mod tests {
                             guards_watch_consoles: consoles,
                             guard_count,
                             intel_count,
+                            caches,
                             intel_to_exit: gate,
                         };
                         let level = LevelSeed {
@@ -1179,7 +1226,8 @@ mod tests {
                         .filter(|&flag| flag)
                         .count()
                             + usize::from(guard_count != GuardCount::Baseline)
-                            + usize::from(intel_count != IntelCount::Baseline);
+                            + usize::from(intel_count != IntelCount::Baseline)
+                            + usize::from(caches != CacheCount::None);
                         if active > MODIFIER_CAP {
                             assert_eq!(
                                 level.encode(),
@@ -1299,6 +1347,10 @@ mod tests {
                 // intel knob decodes at its baseline, so the token still names the run
                 // it named the day it was minted.
                 intel_count: IntelCount::Baseline,
+                // And slots 11–13 (#209) are the fourth telling: a token minted before
+                // caches existed decodes as the facility it always named — one with no
+                // crate in it.
+                caches: CacheCount::None,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1421,22 +1473,23 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 11, the watched consoles (#319). Each
-        // knob's two ends cannot both be held, so the highest five are that toggle, one
-        // end of each knob (8 and 10) and the two highest toggles below them (5 and 6).
-        // Holding more than five at once is over the cap and refused outright, asserted
-        // in `every_config_round_trips`.
+        // actually hold, which now reaches slot 14, the cache knob's third rung (#209).
+        // A knob holds one value, so the highest five are the top cache rung (14), the
+        // watched consoles (11), one end of each count knob (10 and 8), and the highest
+        // toggle below them (6). Holding more than five at once is over the cap and
+        // refused outright, asserted in `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
             guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: false,
             full_layout_known: false,
-            calm_guards_detect_only_their_cone: true,
+            calm_guards_detect_only_their_cone: false,
             automatic_doors: true,
             guards_watch_consoles: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::Fewer,
+            caches: CacheCount::Three,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {

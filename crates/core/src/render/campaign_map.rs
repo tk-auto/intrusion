@@ -228,10 +228,12 @@ pub enum MapHit {
 
 /// The glyph a facility of this flavour is drawn with on the map.
 ///
-/// Two of them are borrowed from the board's own vocabulary on purpose (§11.3): `$` is
+/// Three of them are borrowed from the board's own vocabulary on purpose (§11.3): `$` is
 /// the intel console, so a **Vault** reads as *the place with the loot in it* without a
-/// legend, and `★` is the one glyph on this screen the game does not use elsewhere,
-/// which is right for the one place a run is trying to reach.
+/// legend; `¤` is the equipment cache (#209), so a **Workshop** is *the place with the
+/// crate in it* on exactly the same terms; and `★` is the one glyph on this screen the
+/// game does not use elsewhere, which is right for the one place a run is trying to
+/// reach.
 ///
 /// **The Depot is `▪` and not `■`** — small, not large. A full block is the heaviest ink
 /// the grid can put down, and in light mode it made an *unmarked* option pull the eye
@@ -245,6 +247,7 @@ pub fn flavour_glyph(flavour: Flavour) -> char {
         Flavour::Outpost => 'o',
         Flavour::Depot => '▪',
         Flavour::Vault => '$',
+        Flavour::Workshop => '¤',
         Flavour::Archive => '★',
     }
 }

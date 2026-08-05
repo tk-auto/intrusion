@@ -36,6 +36,7 @@
 11    glyph:@      You, and a decoy you placed
 12    glyph:g      A guard you can see
 13    glyph:z      A body
+14    glyph:¤      Equipment cache — salvaged tech (§2.2/§14 v3)
 16    wall:0       Wall autotile — wall neighbours none
 17    wall:1       Wall autotile — wall neighbours N
 18    rotation:2   Wall autotile — wall neighbours E: slot 17 turned 1 quarter clockwise

@@ -169,6 +169,27 @@ pub enum Event {
     /// [`RadioSilence`](Event::RadioSilence), which is a single *guard* gone quiet and
     /// is bad news; this is the net itself, and it is the player's doing.
     CommsSilenced { at: Cell },
+    /// The player bumped an **equipment cache** and salvaged the tech in it
+    /// (§2.2/§8.3/§14 v3/#209): `id` is now theirs — usable this turn, in this facility,
+    /// and in every facility the run reaches after it.
+    ///
+    /// It carries the ability rather than a cell, because the ability is the whole
+    /// event: where the crate stood stops mattering the instant it is opened, and *what
+    /// you now have* is the only thing the near line, the campaign layer and the run's
+    /// ledger each want from it. One-way, like the silenced net — nothing takes a
+    /// salvaged ability back within a run, and nothing carries it out of one (§2.2).
+    TechSalvaged { id: AbilityId },
+    /// The player bumped a crate the run **cannot take from** (§8.3/§14 v3/#209) — a
+    /// free refusal, like the exit's (§4.4). `id` is what the crate holds, because both
+    /// refusals are about a specific thing you are walking away from: the tech you have
+    /// no room for, or the one you already have.
+    ///
+    /// The crate is left unopened, so a run that comes back with a free hand — or, once
+    /// #266 ships the exchange, with something to trade — finds it exactly as it was.
+    SalvageRefused {
+        id: AbilityId,
+        refusal: SalvageRefusal,
+    },
     /// The facility alert climbed to `rung`, because of `trigger` (§7.3): the
     /// concrete, explainable escalation the alert system was always meant to provide
     /// (§2.3). Fired **once per escalation** — a trigger at or below the rung the
@@ -367,14 +388,38 @@ impl Event {
             // the reward for routing to the comms console, and it reads in that band
             // rather than the Owned one your abilities use: it is a fact about the
             // *facility* now, not a tool you are holding.
+            // Salvaging tech (§8.3/#209) reads in the same band, and the same argument
+            // decides it: the *find* is the reward the facility was hiding, which is
+            // Interest. That the thing found is a tool you now hold is the ability bar's
+            // to say in Owned, one row down.
             Event::IntelTaken { .. }
             | Event::ExitRefused { .. }
             | Event::Won
-            | Event::CommsSilenced { .. } => Category::Interest,
+            | Event::CommsSilenced { .. }
+            | Event::TechSalvaged { .. }
+            // A refused crate is still the reward channel talking — it is the same find
+            // reported as *not yours*, not a threat and not furniture.
+            | Event::SalvageRefused { .. } => Category::Interest,
             // A threat that has you, literally (§4.5) — or the wall does (§8.3).
             Event::Captured { .. } | Event::Entombed { .. } => Category::Danger,
         }
     }
+}
+
+/// **Why a crate cannot be taken from** (§8.3/§14 v3/#209) — the two ways a bump on a
+/// live cache is refused, kept apart because they are different problems with different
+/// answers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SalvageRefusal {
+    /// The run already carries [`AbilityId::MAX_TECH_HELD`] pieces of tech (§8.3), and
+    /// there is no room for another. A *decision* waiting to be made — which is exactly
+    /// what #266's exchange screen is for; until it exists the crate is simply left where
+    /// it stands, and coming back with a free hand finds it unopened.
+    HandsFull,
+    /// The crate holds tech the run already carries. A facility is stocked from its own
+    /// seed and knows nothing of who is coming (#209), so this is luck rather than
+    /// design — the world is not rearranged to spare you the walk.
+    AlreadyCarried,
 }
 
 /// One thing a bump would do right now — the **usable line**'s vocabulary
@@ -419,6 +464,23 @@ pub enum Affordance {
     /// the level (§7.3/§7.7). Never offered on a console already used — a silenced net
     /// has nothing left to switch off.
     SilenceRadio,
+    /// An **equipment cache** still holding its tech: bump to salvage it (§4.3/#209).
+    /// Never offered on a crate already opened — an empty one is scenery, exactly as a
+    /// spent console is.
+    SalvageTech,
+    /// A live crate the run has **no room for** (§8.3/#209): the bump will refuse, free.
+    /// Offered rather than left silent because the refusal is a fact worth having before
+    /// you spend the walk — the refused exit's precedent, one usable over.
+    SalvageFull,
+    /// A live crate holding tech the run **already carries** (#209): the bump will
+    /// refuse, free.
+    ///
+    /// It tells the player the crate is a dud without their having to press, which is
+    /// the point: the alternative is a line that says *take tech* and then does not, and
+    /// §2.3 forbids exactly that. It gives away that the contents are a duplicate and
+    /// nothing more — which is the same shape of hint the exit's refusal gives about the
+    /// gate.
+    SalvageCarried,
     /// An empty cupboard: bump to climb in and be concealed (§10.3).
     Hide,
     /// A duct entry: bump to climb into the crawlspace shortcut (§10.7).
@@ -446,7 +508,7 @@ impl Affordance {
     /// a variant missing from here is a label nothing checks, which is exactly the
     /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
     /// against it so a new variant cannot quietly skip the list.
-    pub(crate) const ALL: [Affordance; 14] = [
+    pub(crate) const ALL: [Affordance; 17] = [
         Affordance::Takedown,
         Affordance::ReleaseBody,
         Affordance::TakeBody,
@@ -455,6 +517,9 @@ impl Affordance {
         Affordance::CloseDoor,
         Affordance::TakeIntel,
         Affordance::SilenceRadio,
+        Affordance::SalvageTech,
+        Affordance::SalvageFull,
+        Affordance::SalvageCarried,
         Affordance::Hide,
         Affordance::EnterDuct,
         Affordance::EnterExit,
@@ -478,6 +543,9 @@ impl Affordance {
             Affordance::CloseDoor => "door: close",
             Affordance::TakeIntel => "console: take intel",
             Affordance::SilenceRadio => "comms: silence radio",
+            Affordance::SalvageTech => "cache: take tech",
+            Affordance::SalvageFull => "cache: hands full",
+            Affordance::SalvageCarried => "cache: already yours",
             Affordance::Hide => "cupboard: hide",
             Affordance::EnterDuct => "duct: enter",
             Affordance::EnterExit => "exit: enter",
@@ -490,7 +558,8 @@ impl Affordance {
     /// What acting on this affordance is *about* (§11.2): doors, cupboards and
     /// tables are System furniture; both consoles and the exit are the goal,
     /// Interest — the comms console is a place worth routing to (§7.7), which is what
-    /// puts it there rather than with the furniture; a takedown is about the unaware
+    /// puts it there rather than with the furniture, and an equipment cache (#209) is
+    /// there on the same reading; a takedown is about the unaware
     /// threat it targets — Caution,
     /// matching the yellow `g` it points at; the body in your hands is Owned,
     /// like its recoloured glyph (§11.3). Stowing a body is a cupboard
@@ -514,6 +583,9 @@ impl Affordance {
             // (§4.5/#466): what it is *for* is leaving.
             Affordance::TakeIntel
             | Affordance::SilenceRadio
+            | Affordance::SalvageTech
+            | Affordance::SalvageFull
+            | Affordance::SalvageCarried
             | Affordance::EnterExit
             | Affordance::Leave
             | Affordance::ExitRefused => Category::Interest,
@@ -544,6 +616,9 @@ mod affordance_tests {
                 | Affordance::CloseDoor
                 | Affordance::TakeIntel
                 | Affordance::SilenceRadio
+                | Affordance::SalvageTech
+                | Affordance::SalvageFull
+                | Affordance::SalvageCarried
                 | Affordance::Hide
                 | Affordance::EnterDuct
                 | Affordance::EnterExit

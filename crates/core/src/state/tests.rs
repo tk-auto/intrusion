@@ -18,6 +18,7 @@ mod abilities;
 mod activation;
 mod alert;
 mod bore;
+mod cache;
 mod comms;
 mod doors;
 mod ducts;

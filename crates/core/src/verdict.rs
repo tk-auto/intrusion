@@ -23,6 +23,7 @@
 //! reusing this screen. §14 v3 does not exist yet; the gate does, in shape, which is
 //! the whole point of writing it down now (see design appendix 31).
 
+use crate::ability::Loadout;
 use crate::cell::Cell;
 use crate::difficulty::Difficulty;
 use crate::guard::GuardState;
@@ -87,6 +88,19 @@ pub struct RunStats {
     /// The facility alert's peak rung (§7.3). The ladder never decays, so the rung
     /// standing at the end *is* the peak.
     pub alert_peak: u32,
+    /// The **tech salvaged** from this facility's equipment caches (§2.2/§8.3/§14
+    /// v3/#209) — empty if it hid none, or if every crate was left unopened, which is a
+    /// legal and sometimes correct choice.
+    ///
+    /// **This is the seam the run's power curve travels along.** A raid's haul crosses
+    /// into the campaign through the verdict and nothing else (`Campaign::complete`), so
+    /// the abilities found in crates ride beside the intel taken rather than through a
+    /// second channel of its own — one place where "what a facility was worth" is said,
+    /// and the layer above folds it into the loadout every later facility boots with.
+    ///
+    /// A [`Loadout`] because a haul of abilities *is* a set of abilities, and because it
+    /// keeps [`RunStats`] `Copy` where a list would not — the end screen relies on that.
+    pub salvaged: Loadout,
 }
 
 /// A finished run, as the end screen reads it: why it ended, and what it cost.

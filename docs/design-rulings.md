@@ -2094,3 +2094,123 @@ errands a run cannot skip (§4.5 take the intel, §7.3 silence the net). That is
 from 3403 to 5603 over 64 seeds, with no seed inverting — rather than on detections per
 run, which measures a different thing and would have this modifier reading easier.
 
+---
+
+---
+
+## Appendix 40 — Crates scale with the flavour, and what is in them is the building's business
+
+*(§2.2/§8.3/§10.6/§14 v3; #209, on the seams #206 and #207 left. `crates/core/src/salvage.rs`,
+`crates/core/src/campaign/map.rs`, `crates/core/src/place.rs`.)*
+
+§14 v3's complaint about the old campaign is unusually specific: salvaged tech was
+"fully built and reachable by nobody — no facility was ever generated with an equipment
+cache, so no ability could ever be unlocked." Building the crate is not the interesting
+part of fixing that. Four decisions around it were.
+
+### How many, and who hides them
+
+The ticket says "a facility whose flavour calls for one", and when it was written no
+flavour did: #207 shipped *Outpost / Depot / Vault / Archive*, a ladder on two axes
+(guards for risk, consoles for reward) with nothing about tech in it.
+
+The first answer built was a **toggle** on a single new flavour — a Workshop hid one
+crate, everything else hid none. It was rejected in review for making the tech axis a
+coin flip on the map rather than a curve: a run that was never offered a Workshop never
+salvaged anything, and one that was offered three got everything.
+
+What shipped is a **count that rises with the facility's richness**: Outpost 0, Depot 1,
+Workshop 2, Vault 3 **[START]**. Two consequences worth stating:
+
+- **The ordinary road is not flat.** A Depot — the §10.2 recipe untouched in guards and
+  consoles — still hides a crate, so a run that takes the plain route the whole way still
+  has a power curve. What the rich flavours sell is *more* of it, not the only access to
+  it.
+- **The two rich flavours differ in what they charge, not in how much they give.** A
+  Vault pays out in crates *and* intel and charges a guard; a Workshop pays out in crates
+  alone and charges a console. So the choice between them is *which currency you are
+  short of* — tech the run keeps against intel the run spends — rather than a ranking
+  with one right answer. The Workshop still earns its place; it earns it as a different
+  trade rather than as the only source.
+
+The flavour cycle grew from three to four, and the §14 v3 "no two open successors ever
+share a flavour" guarantee survived untouched: it rests on three consecutive lanes being
+distinct modulo the cycle length, which holds for any cycle of three or more. What a
+longer cycle costs is coverage — with four flavours in a three-wide window, one is
+missing from any given choice point. That is the map having somewhere left to send you,
+not a shortfall.
+
+### What a crate holds: the building's business, not the intruder's
+
+The ticket named two ways to handle a crate holding tech you already carry: avoid the
+collision in the draw, or pay a consolation prize. **Neither.** The draw does not look at
+the loadout at all.
+
+A crate's contents come from the **facility seed alone**, so a building is stocked before
+anybody breaks into it. Stocking it out of the intruder's pockets is the sort of thing
+that is invisible in the code and loud in play: the same facility, shared as a level-seed
+token, would hold different things for two people, and the world would be quietly
+rearranging itself around whoever walked in.
+
+So **a run can meet the same tech twice, and that is bad luck rather than a bug.** There
+are eight pieces of tech and a run carries three; walking a long detour to a crate you
+have no use for is a real loss, and the answer to it is that there are others. The bump
+refuses for free and says *another Decoy — you have one*, so nothing is spent but the
+walk.
+
+The first build did avoid the collision by drawing over the unheld set. It reads well in
+isolation and was rejected for what it implied: a reward economy that can never
+disappoint is one where the detour is never a gamble, and the §2.3 question — *when would
+a good player not take this?* — loses one of its two honest answers.
+
+**Within one facility the crates are still all different**, because there the rule costs
+nothing to keep and its absence would be absurd: the stock is a prefix of one seeded
+shuffle of the catalogue, so a Vault's three crates hold three different things by
+construction, with no rejection loop and no draw that can fail. It also makes the counts
+**nest** — a Vault's three crates are the Workshop's two with one more behind them — so a
+flavour's count reads as *how much of this building's stock you get at* rather than as a
+different building.
+
+### The held cap is kept at the crate
+
+§8.3 settles `MAX_TECH_HELD` at three, and with a Vault hiding three crates a run meets
+the cap early and often. It is enforced **at the pickup**: a bump on a crate the run has
+no room for is refused, for free, and the near line names the tech being left behind.
+
+Two rejected alternatives, both quieter and both worse. Enforcing it inside the loadout
+would drop a find the player was never warned about — a rule you discover by noticing an
+ability missing. Not enforcing it at all would make the §8.3 cap a comment: the ability
+bar's one-row width bound (§11.4) is sized against it, and a passive's whole price is a
+slot.
+
+Refusing is deliberately the *unsatisfying* answer, and it is the honest one for now: the
+interesting version is a **swap**, and swapping needs a screen to choose on. That is
+#266. Until it exists, the crate is left standing rather than opened-and-discarded, so a
+run that comes back with a free hand — or with the exchange, once it ships — finds it
+exactly as it was.
+
+The two refusals are kept apart in the vocabulary (`SalvageRefusal`) and on the usable
+line (`cache: hands full`, `cache: already yours`) because they are different problems:
+one is a decision waiting on #266, the other is luck. And *already carried* is asked
+first, because it is the more specific answer — that crate is no use to you whether or
+not your hands are full.
+
+### Where they stand, and why they are still reachable
+
+Every crate is planted at least `PLAYER_CACHE_MIN_DISTANCE` (16 **[START]**, the comms
+console's own number) from the mouth the run climbs out of, and the crates of one
+facility **prefer distinct rooms**. They are also solid usables, so appendix 38's rule
+applies to them unchanged: a cell whose stamping would seal walkable ground off is out of
+the pool, judged **per crate** rather than once for the set — the second crate has to be
+weighed against a building the first is already standing in. §2.3 is the whole reason for both: a reward sat near
+the way in is a free grab, and three crates in one room would be a single detour paying
+out three times over — which is the price collapsing in a different direction.
+
+And they are held to the §10.6 reachability flood, which reads at first like a
+contradiction: the ticket calls a cache an *optional* reward, so why must every seed
+guarantee you can reach it? Because **choosing to skip it and being unable to reach it
+are not the same thing, and only the first is a decision.** A crate sealed behind geometry
+is the campaign's power curve silently deleted from that facility — the failure §14 v3
+records the axis having already suffered once, arrived at from a different direction. It
+is the same argument that puts the comms console in the flood (§7.7: unreachable
+counterplay is no counterplay), and it costs a redraw on the rare seed that trips it.

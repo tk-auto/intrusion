@@ -51,7 +51,7 @@
 //! handed over, a part of the map that was not on offer. What stands on that ground is
 //! whatever the seed put there, exactly as everywhere else.
 
-use crate::modifiers::{GuardCount, IntelCount, LevelModifiers};
+use crate::modifiers::{CacheCount, GuardCount, IntelCount, LevelModifiers};
 use crate::rng::Rng;
 
 use super::NodeId;
@@ -149,14 +149,38 @@ pub enum Flavour {
     /// route, taken when the run needs a facility it can walk out of rather than a
     /// facility worth robbing.
     Outpost,
-    /// **The plain facility** — the §10.2 recipe untouched, and the flavour that proves
-    /// the others are doing something: it is the game as v1 ships it, standing in a
-    /// campaign.
+    /// **The plain facility**, with one crate in it — the §10.2 recipe untouched in
+    /// guards and consoles, so it is still the flavour that proves the others are doing
+    /// something: the game as v1 ships it, standing in a campaign.
+    ///
+    /// It hides **one** equipment cache all the same (#209), and that is deliberate
+    /// rather than an exception to its plainness: salvaged tech is the run's power curve
+    /// (§14 v3), and a curve that only rose on the two rich flavours would leave the
+    /// ordinary road flat. What the richer flavours sell is *more* of it.
     Depot,
-    /// **Rich, and watched.** One console more and one guard more — the trade the whole
-    /// map exists to offer, and the reason an [`Outpost`](Self::Outpost) is not simply
-    /// the correct answer every time.
+    /// **Rich, and watched.** One console more, **three** crates, and one guard more —
+    /// the trade the whole map exists to offer, and the reason an
+    /// [`Outpost`](Self::Outpost) is not simply the correct answer every time.
+    ///
+    /// The richest facility on the map is richest in **both** currencies at once
+    /// (§14 v3/#209), and pays for the pair with the one thing that can actually stop
+    /// you carrying them out: another patrol between you and the way home.
     Vault,
+    /// **Somebody else's kit, badly locked up** (§14 v3/#209): **two** equipment caches,
+    /// and one console fewer to pay for them.
+    ///
+    /// It is a position on a different axis rather than a rung on the same ladder, and
+    /// that is the whole reason it exists beside the [`Vault`](Self::Vault). Both are
+    /// richer than a [`Depot`](Self::Depot); they differ in **what they are rich in and
+    /// what they charge**. A Vault pays out in crates *and* in intel and charges a
+    /// guard; this pays out in crates alone and charges a console. So the choice
+    /// between them is *which currency you are short of* — tech the run keeps (§2.2)
+    /// against intel the run spends — rather than which one is better.
+    ///
+    /// Guards stay at the recipe's count deliberately: a facility both poorer in intel
+    /// **and** better watched would be one nobody picks, which fails the same way as
+    /// one everybody does (§2.3).
+    Workshop,
     /// **The archive** (§14 v3): the run's terminus at [`DEPTH_TO_ARCHIVE`], and the one
     /// node nobody chooses between. More guards, and a search that flushes hideouts —
     /// the last raid should be the hard one.
@@ -174,16 +198,22 @@ impl Flavour {
     ///
     /// The order is the risk/reward ladder, quiet end first, and the cycle's *step* is
     /// what guarantees a differentiated offer — see [`FacilityMap::flavour`].
-    pub const OFFERED: [Flavour; 3] = [Flavour::Outpost, Flavour::Depot, Flavour::Vault];
+    pub const OFFERED: [Flavour; 4] = [
+        Flavour::Outpost,
+        Flavour::Depot,
+        Flavour::Vault,
+        Flavour::Workshop,
+    ];
 
     /// **Every** flavour, [`OFFERED`](Self::OFFERED) plus the terminus — what an
     /// exhaustive check walks. The map screen (#208) measures its rows against this at
     /// **compile time**, so a blurb too long for the board fails the build rather than
     /// being discovered as a clipped line in a screenshot.
-    pub const ALL: [Flavour; 4] = [
+    pub const ALL: [Flavour; 5] = [
         Flavour::Outpost,
         Flavour::Depot,
         Flavour::Vault,
+        Flavour::Workshop,
         Flavour::Archive,
     ];
 
@@ -194,6 +224,7 @@ impl Flavour {
             Flavour::Outpost => "Outpost",
             Flavour::Depot => "Depot",
             Flavour::Vault => "Vault",
+            Flavour::Workshop => "Workshop",
             Flavour::Archive => "Archive",
         }
     }
@@ -208,6 +239,7 @@ impl Flavour {
             Flavour::Outpost => "thin, and thinly guarded",
             Flavour::Depot => "an ordinary facility",
             Flavour::Vault => "worth robbing, and watched",
+            Flavour::Workshop => "salvage, at intel's cost",
             Flavour::Archive => "what you came for",
         }
     }
@@ -220,9 +252,13 @@ impl Flavour {
     /// the campaign alert (#210) under one rule instead of three.
     pub fn modifiers(self) -> LevelModifiers {
         match self {
+            // The thin facility is thin in **every** currency: it is the route you take
+            // when what you need is a raid you can walk out of, and a run that could
+            // salvage from one would be taking the quiet road for free (§2.3).
             Flavour::Outpost => LevelModifiers {
                 guard_count: GuardCount::Fewer,
                 intel_count: IntelCount::Fewer,
+                caches: CacheCount::None,
                 ..LevelModifiers::neutral()
             },
             // The recipe untouched, said as the empty contribution rather than as a
@@ -236,19 +272,37 @@ impl Flavour {
             //
             // [`neutral`]: LevelModifiers::neutral
             // [`default`]: LevelModifiers::default
-            Flavour::Depot => LevelModifiers::neutral(),
+            Flavour::Depot => LevelModifiers {
+                caches: CacheCount::One,
+                ..LevelModifiers::neutral()
+            },
             Flavour::Vault => LevelModifiers {
                 guard_count: GuardCount::More,
                 intel_count: IntelCount::More,
+                caches: CacheCount::Three,
+                ..LevelModifiers::neutral()
+            },
+            // The cache, and the console it costs (#209). Both halves are here rather
+            // than the reward alone, because a flavour is a *position* on the axes and
+            // not a bonus: what the run buys with the console it gives up is an ability
+            // it keeps for the rest of the campaign (§2.2).
+            Flavour::Workshop => LevelModifiers {
+                caches: CacheCount::Two,
+                intel_count: IntelCount::Fewer,
                 ..LevelModifiers::neutral()
             },
             // The terminus is the hard raid, and it is hard through **pressure** rather
             // than through scarcity: the consoles stay at the recipe's count because what
             // the archive holds is #217's to say, and a number invented here would be a
             // reward curve nobody designed sitting on the run's last facility.
+            // No crates on the terminus, and that is the same reasoning as its console
+            // count: what the archive *holds* is #217's to say, and salvage handed out
+            // on the run's last facility would be a power curve rising after the last
+            // thing it could be spent on.
             Flavour::Archive => LevelModifiers {
                 guard_count: GuardCount::More,
                 guards_always_search_hideouts: true,
+                caches: CacheCount::None,
                 ..LevelModifiers::neutral()
             },
         }
@@ -354,11 +408,16 @@ impl FacilityMap {
     /// per depth from the run seed.
     ///
     /// That buys the guarantee outright: the open successors of a node are distinct lanes
-    /// inside a window three wide ([`open_lanes`]), and any two distinct values in three
-    /// consecutive integers differ modulo three — so **every open offer is a choice
-    /// between different things**, on every seed, at every node, with no rejection loop
-    /// and no draw that could fail. The rotation is what stops that being a fixed stripe
-    /// down the country.
+    /// inside a window three wide ([`open_lanes`]), and any two distinct values inside a
+    /// window of three consecutive integers differ modulo any cycle length of three or
+    /// more — so **every open offer is a choice between different things**, on every
+    /// seed, at every node, with no rejection loop and no draw that could fail. The
+    /// rotation is what stops that being a fixed stripe down the country.
+    ///
+    /// It therefore survived the cycle growing from three flavours to four (#209), and
+    /// would survive a fifth. What a longer cycle costs is *coverage*: with four
+    /// flavours over a three-wide window, one of them is missing from any given choice
+    /// point — which is the map having somewhere to send you rather than a shortfall.
     ///
     /// And it is still a property of the *node*: two runs standing on the same facility
     /// see the same flavour, whichever way they came.

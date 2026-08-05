@@ -453,6 +453,26 @@ def comms():
     return t
 
 
+def cache():
+    """`¤` — an equipment cache: a crate, strapped shut.
+
+    Read as a box seen face-on, with a lid line across it and two straps down it —
+    deliberately nothing like the two consoles' screen-on-a-stand, since what a bump
+    gets you is the whole distinction between them (#209).
+    """
+    t = Tile(DRAW_W, DRAW_H)
+    left, right, top, bottom = 3, DRAW_W - 4, 7, DRAW_H - 7
+    t.frame(left, top, right, bottom)
+    t.rect(left + 1, top + 1, right - 1, bottom - 1, grey=110)
+    # The lid: a band across the top third, brighter than the body it sits on.
+    t.rect(left + 1, top + 6, right - 1, top + 7, grey=240)
+    # Two straps down the front, and the catch between them.
+    for x in (left + 6, right - 7):
+        t.rect(x, top + 1, x + 1, bottom - 1, grey=200)
+    t.rect(DRAW_W // 2 - 2, top + 12, DRAW_W // 2 + 1, top + 15, grey=255)
+    return t
+
+
 def figure(body_r, head_r, brim, grey=255):
     """The shared body plan for the two actors, **seen from above and facing south**.
 
@@ -555,6 +575,7 @@ GLYPHS = [
     ("@", "You, and a decoy you placed", player),
     ("g", "A guard you can see", guard),
     ("z", "A body", body),
+    ("\u00a4", "Equipment cache \u2014 salvaged tech (\u00a72.2/\u00a714 v3)", cache),
 ]
 
 # The **wall autotile band** (slots 16-31): a wall drawn for each combination of

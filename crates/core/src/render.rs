@@ -979,7 +979,9 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         // Contents: hidden until seen, then remembered (§11.5a). The comms console
         // (§7.3/§7.7) is contents like the intel console: the counterplay it offers
         // has to be *found*, so the map never advertises it before the player has
-        // scouted the room.
+        // scouted the room. An **equipment cache** (#209) is contents on the same
+        // terms and for a sharper reason — it is an optional detour, and a detour the
+        // plans hand over for free is not one the player chose to take.
         //
         // A **duct mouth** is contents too (#450), and for the reason the layer table
         // gives it: it is a route you plan with. §10.7 makes a duct an escape a
@@ -987,7 +989,11 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         // the cupboard beside it — and drawn as geometry it took the shared dim gray
         // and read as one more wall the moment you looked away. The memory slate is
         // what says *you found this*.
-        Terrain::Console | Terrain::CommsConsole | Terrain::Hideout | Terrain::DuctEntry
+        Terrain::Console
+        | Terrain::CommsConsole
+        | Terrain::EquipmentCache
+        | Terrain::Hideout
+        | Terrain::DuctEntry
             if explored =>
         {
             Fogged {
@@ -999,7 +1005,7 @@ fn fogged_view(terrain: Terrain, explored: bool, layout_known: bool) -> Fogged {
         // Layout handed over but the cell never seen: the content is still hidden,
         // masked by the geometry naturally in its place. The modifier buys the
         // architecture, never the objectives.
-        Terrain::Console | Terrain::CommsConsole => real(Terrain::Floor),
+        Terrain::Console | Terrain::CommsConsole | Terrain::EquipmentCache => real(Terrain::Floor),
         Terrain::Hideout => real(Terrain::Wall),
         // The one content the modifier **does** hand over, and deliberately left that
         // way by #450: a mouth is cut into the fabric and reads off a plan the way a

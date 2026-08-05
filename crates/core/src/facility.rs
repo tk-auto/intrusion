@@ -80,6 +80,14 @@ pub enum Terrain {
     /// carries state for; its spent/live distinction is state on
     /// [`State`](crate::State), not terrain.
     CommsConsole,
+    /// An **equipment cache** (§2.2/§14 v3/#209): the crate of forbidden hardware a
+    /// campaign facility hides, and the one way salvaged tech enters a run. Bumping it
+    /// unlocks a §8.3 tech ability for the rest of the run — the console's pattern with
+    /// a different prize, so it is the intel console's twin physically: solid,
+    /// transparent to sight and pathing, bumped from an adjacent cell. Its glyph is its
+    /// own (`¤`, a crate) because *what a bump gets you* is the whole distinction
+    /// between it and the `$` beside it (§11.3). Renders `¤` (§10.3, §11.3).
+    EquipmentCache,
     /// The exit: where a laden player leaves to win (§4.5). Solid but otherwise
     /// transparent, like a console. Renders `E` (§10.3, §11.3).
     Exit,
@@ -89,7 +97,7 @@ impl Terrain {
     /// Every terrain kind, for exhaustive sweeps — the counterpart to
     /// [`Direction::ALL`](crate::Direction::ALL). Its length is pinned by a test, so
     /// a new variant cannot slip in without being listed here too.
-    pub const ALL: [Terrain; 11] = [
+    pub const ALL: [Terrain; 12] = [
         Terrain::Floor,
         Terrain::Wall,
         Terrain::DoorHinge,
@@ -100,6 +108,7 @@ impl Terrain {
         Terrain::DuctEntry,
         Terrain::Console,
         Terrain::CommsConsole,
+        Terrain::EquipmentCache,
         Terrain::Exit,
     ];
 
@@ -116,6 +125,7 @@ impl Terrain {
             Terrain::DuctEntry => '=',
             Terrain::Console => '$',
             Terrain::CommsConsole => 'Ψ',
+            Terrain::EquipmentCache => '¤',
             Terrain::Exit => 'E',
         }
     }
@@ -132,7 +142,8 @@ impl Terrain {
     /// exposure the detour takes, which is exactly the "goal" reading. Its glyph, not
     /// its colour, is what tells it apart from the intel console (§11.3) — and, like a
     /// spent objective, once used it recolours to Neutral (§11.2, the renderer's
-    /// spent-console pass).
+    /// spent-console pass). An **equipment cache** (#209) is a goal on the same terms —
+    /// a place worth routing to, spent once taken.
     pub fn category(self) -> Category {
         match self {
             Terrain::Wall => Category::Neutral,
@@ -142,7 +153,9 @@ impl Terrain {
             | Terrain::Hideout
             | Terrain::PartialCover
             | Terrain::DuctEntry => Category::System,
-            Terrain::Console | Terrain::CommsConsole | Terrain::Exit => Category::Interest,
+            Terrain::Console | Terrain::CommsConsole | Terrain::EquipmentCache | Terrain::Exit => {
+                Category::Interest
+            }
         }
     }
 
@@ -159,6 +172,7 @@ impl Terrain {
             | Terrain::DuctEntry
             | Terrain::Console
             | Terrain::CommsConsole
+            | Terrain::EquipmentCache
             | Terrain::Exit => 1.0,
         }
     }
@@ -181,6 +195,7 @@ impl Terrain {
             | Terrain::PartialCover
             | Terrain::Console
             | Terrain::CommsConsole
+            | Terrain::EquipmentCache
             | Terrain::Exit => false,
             // A duct entry is wall-like to every viewer: a guard never sees
             // *through* it or into the crawlspace behind it (§10.7).
@@ -228,6 +243,7 @@ impl Terrain {
             | Terrain::DoorPanelOpen
             | Terrain::Console
             | Terrain::CommsConsole
+            | Terrain::EquipmentCache
             | Terrain::Exit => false,
         }
     }
@@ -265,9 +281,12 @@ impl Terrain {
             // Solid to the player: no route crosses these (§10.3).
             Terrain::Wall | Terrain::DoorHinge | Terrain::PartialCover => false,
             // Goals, not through-cells: each is reached by a *bump* from an adjacent
-            // cell (take the intel, silence the radio, leave by the exit, §4.3/§4.5),
+            // cell (take the intel, silence the radio, take the tech, leave by the
+            // exit, §4.3/§4.5),
             // never crossed — so a route ends beside one rather than running over it.
-            Terrain::Console | Terrain::CommsConsole | Terrain::Exit => false,
+            Terrain::Console | Terrain::CommsConsole | Terrain::EquipmentCache | Terrain::Exit => {
+                false
+            }
             // A duct entry **is** enterable by the player and by them alone (§10.7),
             // so this `false` is a decision, not an oversight: bumping a mouth is a
             // *mode change* into the crawlspace, where movement is confined to the
@@ -359,6 +378,18 @@ impl Facility {
             .map(|i| Cell::new(i as u32 % self.width, i as u32 / self.width))
     }
 
+    /// **Every** cell holding `terrain`, in row-major scan order — [`find`](Self::find)
+    /// for the kinds a facility carries more than one of (the equipment caches, §14
+    /// v3/#209). Scan order makes the answer deterministic (§12.4).
+    pub fn find_all(&self, terrain: Terrain) -> Vec<Cell> {
+        self.cells
+            .iter()
+            .enumerate()
+            .filter(|(_, &t)| t == terrain)
+            .map(|(i, _)| Cell::new(i as u32 % self.width, i as u32 / self.width))
+            .collect()
+    }
+
     /// Whether `cell` names a square on this grid.
     pub fn in_bounds(&self, cell: Cell) -> bool {
         cell.x < self.width && cell.y < self.height
@@ -422,7 +453,7 @@ mod tests {
     /// count is the deliberate step a new terrain has to pass through.
     #[test]
     fn all_lists_every_terrain_kind() {
-        assert_eq!(Terrain::ALL.len(), 11, "a new Terrain must be added to ALL");
+        assert_eq!(Terrain::ALL.len(), 12, "a new Terrain must be added to ALL");
         for (i, &a) in Terrain::ALL.iter().enumerate() {
             for &b in &Terrain::ALL[i + 1..] {
                 assert_ne!(a, b, "ALL holds each kind once");
@@ -577,7 +608,8 @@ mod tests {
         assert!(Terrain::Wall.blocks_pathing());
     }
 
-    /// The rest of the static §10.3 table: hideout, the two consoles, exit.
+    /// The rest of the static §10.3 table: hideout, the two consoles, the equipment
+    /// cache, the exit.
     #[test]
     fn hideout_console_and_exit_match_10_3() {
         // Hideout, empty: walk-through (fill 0.0), sight transparent, yet it
@@ -596,6 +628,7 @@ mod tests {
         for (t, glyph) in [
             (Terrain::Console, '$'),
             (Terrain::CommsConsole, 'Ψ'),
+            (Terrain::EquipmentCache, '¤'),
             (Terrain::Exit, 'E'),
         ] {
             assert_eq!(t.fill(), 1.0);
@@ -607,13 +640,23 @@ mod tests {
             assert_eq!(t.category(), Category::Interest);
         }
 
-        // The two consoles are told apart by **glyph**, not colour (§11.3) — the
-        // player must never have to read a colour to know which terminal is which.
-        assert_ne!(
-            Terrain::Console.glyph(),
-            Terrain::CommsConsole.glyph(),
-            "the comms console needs its own glyph (§11.3)",
-        );
+        // The three bump-to-use goals are told apart by **glyph**, not colour (§11.3)
+        // — the player must never have to read a colour to know which terminal is
+        // which, or which of them is the crate holding tech (#209).
+        let interest = [
+            Terrain::Console,
+            Terrain::CommsConsole,
+            Terrain::EquipmentCache,
+        ];
+        for (i, one) in interest.iter().enumerate() {
+            for other in &interest[i + 1..] {
+                assert_ne!(
+                    one.glyph(),
+                    other.glyph(),
+                    "{one:?} and {other:?} need distinct glyphs (§11.3)",
+                );
+            }
+        }
     }
 
     /// The §10.3 partial-cover row: a table is solid to movement and pathing like
