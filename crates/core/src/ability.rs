@@ -113,8 +113,14 @@ pub enum AbilityState {
     /// It exists because the exchange is drawn on the ability bar rather than in a
     /// modal of its own ([`State::exchange`](crate::State::exchange)): the row lists the
     /// four candidates and the player presses the one to drop, so exactly one of them
-    /// has to read as *the new one*. It reads [`OFFERED_MARKER`] — a bare `(+)`,
-    /// parenthetical like the other two states that are not countdowns.
+    /// has to read as *the new one*.
+    ///
+    /// It says so in **colour alone** — Interest, the reward channel of the `¤` it came
+    /// out of, against the three Owned entries beside it (§11.2) — and carries no
+    /// notation of its own. It wore a `(+)` first, and the mark was redundant the moment
+    /// the row started drawing its slot numbers: three cells spent restating what the
+    /// colour already says, on the one row where the width is worth spending on the
+    /// **keys** instead.
     Offered,
 }
 
@@ -135,9 +141,9 @@ impl AbilityState {
             AbilityState::Cooling { remaining } => format!("/{remaining}/"),
             AbilityState::Limited { uses } => format!("({uses})"),
             AbilityState::Passive => PASSIVE_MARKER.to_string(),
-            // The crate's own tech during an exchange (#266) — the one entry on that
-            // row you do not already hold, marked as the thing on offer.
-            AbilityState::Offered => OFFERED_MARKER.to_string(),
+            // An exchange candidate draws its bare name (#266): the row is a choice, not
+            // a readout, and which entry is the crate's is said in colour.
+            AbilityState::Offered => String::new(),
             // Spent is unusable, and says so in the one word the bar has for it.
             AbilityState::Exhausted | AbilityState::Unusable => "—".to_string(),
         }
@@ -151,15 +157,6 @@ impl AbilityState {
 /// the bar's whole budget is per-entry width, so an always-on marker that cost more
 /// than a countdown would have made passives the reason names had to shrink.
 pub(crate) const PASSIVE_MARKER: &str = "(on)";
-
-/// What the crate's own tech shows on an **exchange** row (§8.3/#266): `(+)` — the
-/// entry you do not hold yet, beside the three you do.
-///
-/// Parenthetical like [`PASSIVE_MARKER`] and the use budget, because it is the same
-/// kind of thing as those and not the other kind: a fact about the entry, never a
-/// number counting anywhere. The `+` is the replay notation's own sign for *gaining*
-/// an ability, so the mark reads the same way in the two places it appears.
-pub(crate) const OFFERED_MARKER: &str = "(+)";
 
 /// One entry on the always-on ability bar (§11.4): a held ability's identity and
 /// the state it is in. Assembled from live runtime by
@@ -236,12 +233,6 @@ const fn decimal_width(n: u32) -> usize {
 /// marker's own width. `const` so [`MAX_STATE_NOTATION`] is a compile-time fact.
 const fn max_state_notation() -> usize {
     let mut widest = PASSIVE_MARKER.len();
-    // The exchange's mark (#266) is measured beside it: it is the third notation that
-    // is not a clock, and a wider one would push the swap row past the board exactly
-    // as a three-digit cooldown would push the ordinary bar past it.
-    if OFFERED_MARKER.len() > widest {
-        widest = OFFERED_MARKER.len();
-    }
     let mut i = 0;
     while i < AbilityId::ALL.len() {
         let def = AbilityId::ALL[i].def();
@@ -277,7 +268,7 @@ const fn max_state_notation() -> usize {
 
 /// The longest [`AbilityId::bar_name`], in cells. Byte length **is** cell width
 /// because the names are ASCII, which [`bar_names_are_ascii`] pins right below.
-const fn max_bar_name() -> usize {
+pub(crate) const fn max_bar_name() -> usize {
     let mut widest = 0;
     let mut i = 0;
     while i < AbilityId::ALL.len() {

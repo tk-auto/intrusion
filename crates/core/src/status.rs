@@ -562,7 +562,26 @@ fn objective_and_security(taken: usize, total: usize, alert: u32) -> String {
 /// what it used to do, dropping the objective the moment the ladder stepped and never
 /// mentioning the facility before it did.
 fn ambient(state: &State) -> Message {
-    let (text, category) = if state.stunned() > 0 {
+    let (text, category) = if let Some(offer) = state.exchange() {
+        // **A crate is waiting on an answer** (§8.3/#266), and it outranks every other
+        // ambient fact for the reason the stun below it does: there is no other decision
+        // to weigh until it is made — the loop takes nothing else (`State::step`). It
+        // belongs on the *floor* rather than only in the offer's own message, because it
+        // is a standing state and not news: it has to keep saying itself for as long as
+        // the question is up, however many keys are pressed at it.
+        //
+        // It cannot co-occur with the stun underneath: a stun comes only from the phase
+        // eject, and a phased run cannot bump at all (§8.3), so it can never open an
+        // offer. Placed first anyway, because if the two ever did meet, the question is
+        // the one the player has to answer to get moving again.
+        //
+        // Interest, like the find it is about (§11.2) — and like the offer's own message,
+        // so the row does not change colour under the player when the live line ages out.
+        (
+            format!("{} — drop one for it", offer.offered().name()),
+            Category::Interest,
+        )
+    } else if state.stunned() > 0 {
         // Stunned (§8.3/#329) outranks every other ambient fact, because it is the
         // only one that removes the decision entirely: there is nothing to weigh
         // until the count reaches zero. Derived straight off the counter, so the line

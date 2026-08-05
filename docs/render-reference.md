@@ -122,10 +122,14 @@ one refusal left. That is the same bargain the exit strikes with its own refusal
 learn what a bump *would* do by standing next to it, never by looking across the room.
 
 While a **swap** is being decided the ability bar stops being the held set and becomes the
-four candidates (§11.4/#266): your three pieces of tech, then the crate's marked `(+)` and
-drawn in Interest rather than Owned — the colour of the `¤` it is still sitting in, so the
-one entry you do not hold yet says so twice. Pressing an entry drops it; the usable line
-carries the two answers (`1-4: drop one`, `esc: decline`) for as long as the offer is up.
+four candidates (§11.4/#266): your three pieces of tech, then the crate's — drawn in
+Interest rather than Owned, the colour of the `¤` it is still sitting in, which is the
+whole of how the row says which entry is the new one. It is the one row that draws its
+**slot numbers** (`1 Camo`, the digit in the key colour the mnemonic mark wears): this row
+is picked *from* rather than glanced at, and a candidate carries no clock, which is where
+the width comes from. Pressing an entry drops it; the usable line carries the two answers
+(`1-4: drop one`, `esc: decline`) and the near line keeps asking for as long as the offer
+stands.
 
 The **contents** rows — `}`, `=`, `$`, `Ψ`, `¤` — take the memory slate rather than the
 dim shade once they are out of view, which is the §3 knowledge state and not a

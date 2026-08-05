@@ -2611,9 +2611,8 @@ edits.
 
 It fits by arithmetic, not by luck: `MAX_BAR_WIDTH` is sized for `MAX_HELD` entries, the
 innate set plus the cap, and an exchange row is the cap plus one — the same four. The
-crate's entry is marked `(+)` (three cells, inside the existing `MAX_STATE_NOTATION`
-budget) and drawn in **Interest**, the reward colour of the `¤` it is still sitting in, so
-the one entry that is not yours yet says so in two channels.
+crate's entry is drawn in **Interest**, the reward colour of the `¤` it is still sitting
+in, against the three Owned ones beside it.
 
 **The candidates carry no clocks**, and that was a deliberate reversal of the first
 attempt. Drawing each candidate's real state looked more honest and read worse: a cooling
@@ -2623,11 +2622,39 @@ droppable. A spent `Bore` is as tradeable as anything else. While the offer is o
 row is not a readout of the economy at all; it is the choice, and a number on it would be
 about a press that is not on offer.
 
+**What that width bought instead: the slot numbers.** The ordinary bar has never drawn
+them — position is muscle memory (#287/#359) and the cells belong to the clocks — but the
+exchange row is *picked from* rather than glanced at, and counting slots to find the digit
+is exactly the friction a decision screen must not have. So the numbered form is the
+exchange's alone (`1 Camo`, the digit in the same key colour the mnemonic mark wears), and
+it is spent **inside** the existing slot rather than widening it, so the hit-test, the
+layout and the width bound are all untouched. A candidate's bare name is 5 cells against a
+9-cell entry, which is where the two cells come from.
+
+The crate's entry wore a `(+)` for exactly one iteration, and the numbers are what
+retired it: with a digit in front of every entry, the marker was three cells restating
+what the colour already said, on the one row whose width was worth spending on keys.
+Two channels for one fact is a channel too many when the other one is *which key do I
+press*.
+
 ### The world stops, and the rule lives in the core
 
 While an offer is open, `State::step` answers nothing but the discard. Every other input
-— a step, a wait, an activation — is a free no-op, so no guard moves while a run is
+— a step, a wait, an activation — stops at the door, so no guard moves while a run is
 deciding.
+
+It stops **before the message bookkeeping**, and that is not a detail: the first version
+swallowed the input *inside* the player phase, which meant the turn loop still filed the
+outgoing messages and replaced them with an empty set — so pressing an arrow at a crate
+wiped the very near line telling the player what they were being asked. A swallowed input
+is not a free action that happened and reported nothing; it is an input that never
+arrived, and it must un-say nothing.
+
+The belt to that brace is the **ambient floor** (§11.4): while an offer stands, the near
+line's quiet floor *is* the question, above the stun and everything else on the ladder.
+That is where a standing state belongs — the same argument the phase-eject countdown
+already made — and it means the row keeps asking however long the player takes and
+whatever they press, rather than relying on one message staying live.
 
 Putting that in the **core** rather than in the shell that draws the row is the load-
 bearing half. A shell can only make its own input path obey it, and there are three: the

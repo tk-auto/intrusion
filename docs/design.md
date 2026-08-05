@@ -1123,11 +1123,14 @@ whole reason the architecture looks the way it does.
 > turn, and a decline costs nothing.
 >
 > **The exchange is the ability bar, not a screen** (§8.4). While it is open the bar draws
-> the four candidates in its own four slots — the crate's marked `(+)` and drawn in the
-> reward colour — and the keys, the mnemonics and the taps that fire an ability answer the
-> offer instead; `Esc` is a second spelling of dropping the crate's own. **Nothing else
-> happens while it is open**: the turn loop takes only the choice, so no guard moves while
-> a run is deciding, and the decline is always one press away (§11.6 — never a trap).
+> the four candidates in its own four slots — **numbered** `1`–`4`, since this row is
+> picked from rather than glanced at, and the crate's drawn in the reward colour, which is
+> the whole of how it says it is the new one. The keys, the mnemonics and the taps that
+> fire an ability answer the offer instead; `Esc` is a second spelling of dropping the
+> crate's own. **Nothing else happens while it is open**: the turn loop takes only the
+> choice, so no guard moves while a run is deciding, the near line keeps stating the
+> question for as long as it stands, and the decline is always one press away (§11.6 —
+> never a trap).
 > A crate holding tech you **already carry** is the one refusal left: there is no decision
 > in a second copy, so it is refused for free and says so. Appendix 44.
 

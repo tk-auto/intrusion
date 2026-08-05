@@ -1635,10 +1635,13 @@ fn offering_bar_on(height: u32) -> State {
 
 /// **The bar becomes the exchange** (§8.3/§11.4/#266): while a crate is offering, the
 /// row drops the innate entry and draws the four candidates — the three pieces of tech
-/// the run holds, then the crate's own marked `(+)`.
+/// the run holds, then the crate's own.
 ///
-/// No clocks on it: the row has stopped being a readout of the economy and become the
-/// choice, because nothing can be activated while the offer is open.
+/// **Numbered**, because this row is picked *from* rather than glanced at, and nobody
+/// choosing what to give up should have to count slots to find the digit. And no clocks:
+/// the row has stopped being a readout of the economy and become the choice, since
+/// nothing can be activated while the offer is open — which is exactly the width the
+/// numbers are spent out of.
 #[test]
 fn the_bar_draws_the_exchange_row() {
     let s = offering_bar();
@@ -1646,7 +1649,7 @@ fn the_bar_draws_the_exchange_row() {
     let row: String = (0..g.width())
         .map(|x| g.get(x, ability_row(10)).glyph)
         .collect();
-    assert_eq!(row, "Camo      Decoy     Phase     Lock(+)   ", "{row:?}",);
+    assert_eq!(row, "1 Camo    2 Decoy   3 Phase   4 Lock    ", "{row:?}");
     assert!(
         !row.contains("Run"),
         "an innate ability is not on the table (§8.3), so it leaves the row",
@@ -1655,7 +1658,8 @@ fn the_bar_draws_the_exchange_row() {
 
 /// **The crate's entry reads in the reward channel** (§11.2/#266): the three you hold
 /// are Owned, the one you are being offered is Interest — the colour of the `¤` it is
-/// still sitting in. One glance says which of the four is the new thing.
+/// still sitting in. One glance says which of the four is the new thing, which is why it
+/// needs no marker of its own beside the name.
 #[test]
 fn the_offered_entry_wears_the_reward_colour() {
     let s = offering_bar();

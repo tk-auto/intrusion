@@ -179,6 +179,41 @@ fn an_open_offer_takes_nothing_but_its_answer() {
     }
 }
 
+/// **The question survives the keys pressed at it** (§11.7/#266) — the bug this closes:
+/// pressing an arrow at a crate used to wipe the very line saying what was being asked.
+///
+/// Two things keep it up. A swallowed input returns before the message bookkeeping, so
+/// it files nothing and un-says nothing — it never reached the loop. And the **ambient
+/// floor** carries the offer, so even once the live message has aged out the row is still
+/// stating the standing question, which is where a standing state belongs (§11.4).
+#[test]
+fn the_near_line_keeps_asking_while_the_offer_is_open() {
+    let mut s = offering();
+    let asked = crate::near_line(&s).text;
+    assert!(
+        asked.contains(OFFERED.name()),
+        "the offer speaks: {asked:?}"
+    );
+
+    for input in [
+        Input::Step(Direction::North),
+        Input::Step(Direction::West),
+        Input::Wait,
+    ] {
+        s.step(input);
+        assert_eq!(
+            crate::near_line(&s).text,
+            asked,
+            "{input:?} changed what the near line is asking",
+        );
+    }
+
+    // …and it stops the moment the offer is answered, rather than lingering as a
+    // question about a crate that is no longer asking.
+    s.step(Input::Discard(OFFERED));
+    assert_ne!(crate::near_line(&s).text, asked);
+}
+
 /// **A discard naming something that is not a candidate is a free mis-input** (§4.4):
 /// an ability the run does not hold, an innate one, or any discard at all with no offer
 /// open. Silent and free, exactly like activating a cooling ability.

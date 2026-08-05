@@ -1173,6 +1173,27 @@ impl State {
         if self.outcome != Outcome::Playing {
             return Vec::new();
         }
+        // **An open exchange takes nothing but its answer** (§8.3/#266). While a crate is
+        // offering, the only input the loop resolves is the discard: a step, a wait, an
+        // activation each stop here, so the world cannot move on around a decision it is
+        // waiting for.
+        //
+        // It returns **before** the phases *and before the message bookkeeping below*,
+        // which is the part worth stating. A swallowed input is not a free action that
+        // happened and reported nothing — it is an input that never reached the loop at
+        // all, so it must not file the standing question into the log and replace it with
+        // silence. Pressing an arrow at a crate used to wipe the very line telling the
+        // player what they were being asked (§11.7).
+        //
+        // The rule lives **here**, in the core, and not in the shell that draws the row.
+        // A shell can only make its own input path obey it; this makes every path obey
+        // it — the browser, a replayed script and the §13.2 sim alike — so a run cannot
+        // walk away from a half-answered crate in one of them and not the others (§12.4).
+        // Non-trapping either way (§11.6): the decline is one of the four presses, so
+        // there is always a way out of the offer.
+        if self.exchange.is_some() && !matches!(input, Input::Discard(_)) {
+            return Vec::new();
+        }
 
         let mut events = Vec::new();
         // A fresh turn: no hideout has been climbed into yet. The §15 Q5 witness check
@@ -1320,20 +1341,6 @@ impl State {
         if self.stunned > 0 {
             self.waited = false;
             return true;
-        }
-        // **An open exchange takes nothing but its answer** (§8.3/#266). While a crate is
-        // offering, the only input the loop resolves is the discard: a step, a wait, an
-        // activation are all free no-ops, so the world cannot move on around a decision
-        // it is waiting for.
-        //
-        // The rule lives **here**, in the core, and not in the shell that draws the row.
-        // A shell can only make its own input path obey it; this makes every path obey
-        // it — the browser, a replayed script and the §13.2 sim alike — so a run cannot
-        // walk away from a half-answered crate in one of them and not the others (§12.4).
-        // Non-trapping either way (§11.6): the decline is one of the four presses, so
-        // there is always a way out of the offer.
-        if self.exchange.is_some() && !matches!(input, Input::Discard(_)) {
-            return false;
         }
         match input {
             // Waiting is a real action: it spends the turn where you stand (§5) —
