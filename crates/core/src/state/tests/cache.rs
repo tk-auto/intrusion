@@ -144,10 +144,7 @@ fn salvaged_tech_arrives_with_its_whole_level_budget() {
     s.step(Input::Step(Direction::South));
     assert_eq!(
         s.abilities.uses_left(AbilityId::PierceWall),
-        AbilityId::PierceWall
-            .def()
-            .economy()
-            .and_then(|e| e.uses_per_level()),
+        AbilityId::PierceWall.def().uses_per_level(),
         "found tech arrives with the whole level's supply, not a spent one",
     );
     assert!(

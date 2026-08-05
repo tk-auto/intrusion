@@ -102,7 +102,7 @@ fn the_catalog_matches_the_design_coded() {
         0,
         "no clock: the budget is the scarcity"
     );
-    assert_eq!(economy.uses_per_level(), Some(PIERCE_WALL_USES));
+    assert_eq!(def.uses_per_level(), Some(PIERCE_WALL_USES));
     assert_eq!(PIERCE_WALL_USES, 3, "[START]");
     assert!(
         matches!(def.behaviour(), Behaviour::Coded),
@@ -157,12 +157,21 @@ fn the_catalog_matches_the_design_passive() {
         .into_iter()
         .filter(|id| id.is_passive())
         .collect();
-    assert_eq!(passives, vec![AbilityId::Vision], "the shipped passive set");
+    assert_eq!(
+        passives,
+        vec![AbilityId::Vision, AbilityId::Saver],
+        "the shipped passive set",
+    );
 
     let def = AbilityId::Vision.def();
     assert!(def.is_passive());
     assert_eq!(def.mode(), AbilityMode::Passive);
     assert_eq!(def.economy(), None, "a passive spends no time (§8.2/#264)");
+    assert_eq!(
+        def.uses_per_level(),
+        None,
+        "the slot is Vision's whole price (§8.2/#264)",
+    );
     match def.behaviour() {
         Behaviour::Effects(effects) => {
             assert_eq!(effects, &[Effect::EnhancedSight][..]);
@@ -235,10 +244,13 @@ fn a_fresh_deck_is_all_ready() {
     for id in AbilityId::ALL {
         let expected = match id.def().mode() {
             AbilityMode::Passive => AbilityState::Passive,
-            AbilityMode::Activated(economy) => match economy.uses_per_level() {
-                Some(uses) => AbilityState::Limited { uses },
-                None => AbilityState::Ready,
-            },
+            AbilityMode::Activated(_) => AbilityState::Ready,
+        };
+        // A budget shows through either mode (#243): what a fresh deck offers is the
+        // full supply, not the mode's own resting state.
+        let expected = match (expected, id.def().uses_per_level()) {
+            (state, None) => state,
+            (_, Some(uses)) => AbilityState::Limited { uses },
         };
         assert_eq!(deck.state(id), expected, "{}", id.name());
     }
@@ -371,6 +383,7 @@ fn the_economy_is_blind_to_behaviour() {
     const CODED: Ability = Ability {
         id: AbilityId::Run, // id is irrelevant to the economy; reuse one
         mode: activated(1, TargetingMode::Itself, 2, 3),
+        uses: None,
         behaviour: Behaviour::Coded,
     };
     // A data ability with the *same* numbers steps identically.
@@ -516,7 +529,7 @@ fn a_passive_in_the_deck_changes_no_activated_ability_timing() {
         assert_eq!(cooling, cooldown, "{} cooling turns", id.name());
         // Available again — for a budgeted ability that means one use lighter
         // (§8.2/#302), which is the budget doing its job, not the clock failing.
-        let expected = match economy.uses_per_level() {
+        let expected = match id.def().uses_per_level() {
             Some(uses) => AbilityState::Limited { uses: uses - 1 },
             None => AbilityState::Ready,
         };
@@ -539,7 +552,7 @@ fn an_instant_ability_skips_straight_to_cooldown() {
 // -----------------------------------------------------------------------
 
 /// A deck in which `id` carries a per-level budget of `uses` — byte for byte the
-/// runtime a catalog row declaring [`Economy::uses_per_level`] produces, seeded
+/// runtime a catalog row declaring [`Ability::uses_per_level`] produces, seeded
 /// here by hand because **no shipping row declares one yet**: #302 lands the axis
 /// and #303 is the ability that spends it. Everything else is exactly
 /// [`Deck::new`]'s deck, so these tests exercise the real activate/tick/state
@@ -569,7 +582,7 @@ fn a_fresh_deck_seeds_every_use_budget_from_the_catalog() {
     for id in AbilityId::ALL {
         assert_eq!(
             deck.uses_left(id),
-            id.def().economy().and_then(|e| e.uses_per_level()),
+            id.def().uses_per_level(),
             "{}",
             id.name(),
         );
@@ -717,11 +730,9 @@ fn a_fresh_level_restores_the_budget() {
 /// activations ever exhausts anything.
 #[test]
 fn an_unbudgeted_ability_is_untouched_by_the_axis() {
-    let unbudgeted = AbilityId::ALL.into_iter().filter(|id| {
-        id.def()
-            .economy()
-            .is_some_and(|e| e.uses_per_level().is_none())
-    });
+    let unbudgeted = AbilityId::ALL
+        .into_iter()
+        .filter(|id| id.def().economy().is_some() && id.def().uses_per_level().is_none());
     for id in unbudgeted {
         let mut deck = Deck::new(Loadout::full());
         assert_eq!(deck.uses_left(id), None, "{}", id.name());
@@ -738,4 +749,121 @@ fn an_unbudgeted_ability_is_untouched_by_the_axis() {
             assert_eq!(deck.uses_left(id), None, "{}", id.name());
         }
     }
+}
+
+// -----------------------------------------------------------------------
+// A budgeted **passive** (§8.2/#302 × #264, the pair #243 needed)
+// -----------------------------------------------------------------------
+
+/// The catalog row: the Saver is a passive that also carries a per-level budget, and
+/// the two axes are declared in different places on purpose — the mode says there is
+/// no clock, [`Ability::uses_per_level`] says how much of the level there is. Neither
+/// is inside the other, which is what makes this combination expressible at all.
+#[test]
+fn the_saver_is_a_passive_with_a_budget() {
+    let def = AbilityId::Saver.def();
+    assert!(def.is_passive(), "held is on (§8.2/#264)");
+    assert_eq!(
+        def.economy(),
+        None,
+        "no turn cost, no duration, no cooldown"
+    );
+    assert_eq!(def.uses_per_level(), Some(SAVER_USES));
+    assert_eq!(SAVER_USES, 1, "[START] — one capture a facility (§4.5)");
+    match def.behaviour() {
+        Behaviour::Effects(effects) => {
+            assert_eq!(effects, &[Effect::ReverseCapture][..]);
+        }
+        Behaviour::Coded => panic!("turning a capture over is a vocabulary row (§8.1)"),
+    }
+    assert_eq!(AbilityId::Saver.bar_name(), "Saver", "§11.4 fits 5 cells");
+}
+
+/// **A budgeted passive reads its budget, not its passivity.** `(on)` is the right
+/// answer only for a passive nothing can use up; this one can be, so the bar shows
+/// what is left and then that there is none — and `Exhausted` is where it stops,
+/// never `Ready` and never a cooldown (§8.2's fence).
+#[test]
+fn a_budgeted_passive_reads_limited_then_exhausted() {
+    let mut deck = Deck::new(Loadout::full());
+    assert_eq!(
+        deck.state(AbilityId::Saver),
+        AbilityState::Limited { uses: SAVER_USES },
+    );
+    assert_eq!(
+        deck.state(AbilityId::Vision),
+        AbilityState::Passive,
+        "an unbudgeted passive is unchanged — nothing counts it down",
+    );
+
+    assert!(
+        deck.spend_effect(Effect::ReverseCapture),
+        "it was in effect"
+    );
+    assert_eq!(deck.state(AbilityId::Saver), AbilityState::Exhausted);
+    assert_eq!(deck.uses_left(AbilityId::Saver), Some(0));
+}
+
+/// **Spent is off.** The one property a budgeted passive must have that an activated
+/// budgeted ability does not: it has no window to be inside, so an empty budget stops
+/// the effect itself. The bar's `Exhausted` and the world's behaviour are the same
+/// fact, so no caller can read one without the other.
+#[test]
+fn a_spent_passive_is_no_longer_in_effect() {
+    let mut deck = Deck::new(Loadout::full());
+    assert!(deck.effect_active(Effect::ReverseCapture));
+
+    assert!(deck.spend_effect(Effect::ReverseCapture));
+    assert!(
+        !deck.effect_active(Effect::ReverseCapture),
+        "a spent save is not quietly still working",
+    );
+    assert!(
+        !deck.spend_effect(Effect::ReverseCapture),
+        "and there is nothing left to spend",
+    );
+}
+
+/// The budget follows the **loadout**, like every other permission (#244): an ability
+/// the run does not hold is not in effect, so its supply is never reachable — and
+/// holding it is what makes it spendable, mid-level pickup included (#209).
+#[test]
+fn a_saver_the_run_does_not_hold_can_never_fire() {
+    let mut deck = Deck::new(Loadout::innate());
+    assert_eq!(deck.state(AbilityId::Saver), AbilityState::Unusable);
+    assert!(
+        !deck.spend_effect(Effect::ReverseCapture),
+        "not yours to spend"
+    );
+    assert_eq!(
+        deck.uses_left(AbilityId::Saver),
+        Some(SAVER_USES),
+        "and the untouched supply is still sitting in the deck",
+    );
+
+    deck.grant(AbilityId::Saver);
+    assert_eq!(
+        deck.state(AbilityId::Saver),
+        AbilityState::Limited { uses: SAVER_USES },
+        "salvaged tech arrives with the whole level's supply (§8.3/#209)",
+    );
+    assert!(deck.spend_effect(Effect::ReverseCapture));
+}
+
+/// A passive is still un-pressable and un-toggleable with a budget on it (#264): the
+/// two verbs the deck offers are for abilities that have an activation moment, and a
+/// budget does not give one. A press must not burn the save.
+#[test]
+fn a_budgeted_passive_still_answers_to_no_key() {
+    let mut deck = Deck::new(Loadout::full());
+    assert!(
+        !deck.activate(AbilityId::Saver),
+        "there is nothing to switch on"
+    );
+    assert!(!deck.deactivate(AbilityId::Saver), "or off");
+    assert_eq!(
+        deck.uses_left(AbilityId::Saver),
+        Some(SAVER_USES),
+        "a mis-input is free (§4.4) — it must not cost the level's save",
+    );
 }

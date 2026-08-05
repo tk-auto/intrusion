@@ -274,6 +274,23 @@ If you are adding an ability and about to make it free, re-read §2.3.
 - **Lose: a guard touches you.** A guard that attempts to move into your cell
   captures you. That is the only loss condition. There is no health, no combat,
   no damage. **[SETTLED]**
+
+  > **The one declared exception, and it is an experiment** (#243). The **Saver**
+  > (§8.3) is a passive that turns the *first* capture of a facility into a takedown
+  > of the guard that made it: that guard goes down where it stood, a body is left
+  > (§7.2/§7.3), and the run continues. It is bounded by the level rather than by a
+  > clock — **one use per facility, and no recharge** (§8.2) — so the settled rule is
+  > suspended once and then holds for the rest of the building, second guard of the
+  > same turn included. It is held like any other tech and it costs a slot like any
+  > other passive; nothing about it is free. **[START]**, and on trial: appendix 43
+  > records why it is shaped this way and what the sim measured, which is that a bot
+  > handed a free first capture wins nearly twice as often. Promote to a §12.6
+  > modifier, retune, or reject — but do not read it as softening the rule above.
+  > **If it proves too strong the budget is already at its floor**, so the two levers
+  > are changes to the effect: leave the player **stunned for N turns** after the save
+  > (§8.3's eject stun, so being caught still costs the position it was caught in), or
+  > **stun the guard instead of taking it down** — one capture *deferred* rather than
+  > refunded, which loses the free body along with it. Appendix 43 weighs both.
 - **Being seen is not losing.** It is the beginning of a problem.
 - **Win: grab the intel, then return to your entry point.** You leave the
   way you came in — and the way you came in is a **place**, not a tile (§10.7/#466).
@@ -1049,6 +1066,14 @@ about *getting more of it*. The fence that keeps it out of the charge economy
 - **The player is told both numbers.** The bar shows what is *left* (`Bore(2)`); the
   help panel's **Abilities** tab shows what a level *grants* (`3/level`, #343). Spent
   reads as unusable, never as ready and never as `/0/`.
+- **It composes with the *slot* price too, not just with the clocks** (#243). A
+  **passive may carry a budget**: held is still on, there is still nothing to press —
+  and the level still only allows it so many times. What spends it is the world rather
+  than a keypress (the Saver's is a guard reaching you, §4.5), and a passive whose
+  budget is empty is **off**, not merely un-pressable, so the bar's spent-and-greyed
+  and the game's behaviour are one fact. Such an entry reads `(1)` and then `—`, never
+  `(on)`: the parenthetical is the same shape either way because both mean *not a
+  timer*, but a standing `(on)` would advertise a rescue the run has already spent.
 
 If something later wants uses that refresh, or uses shared between abilities, that is a
 different design conversation — not a quiet extension of this field.
@@ -1103,6 +1128,7 @@ whole reason the architecture looks the way it does.
 | **Confusion** | 1 turn | — (instant) | 45 | **Fired once**, from the cell you press it in (#325). Every guard standing within the blast at that moment — `CONFUSION_RADIUS`, through walls like the guard sense (§9) — is **blinded and frozen** for `CONFUSION_DAZE_TURNS` (**6** **[START]**), a countdown each guard carries itself. A costed panic-buy of time, not a kill: a dazed chaser **pauses** (keeps its lead), it does not reset. **After the flash, distance stops mattering** — a guard you run away from stays dazed, and one that walks into the cells the blast covered was never in it and is untouched, which is what keeps it from being a no-guard-may-act field you carry. Capture-is-contact still holds (§4.5): a dazed adjacent guard cannot step into you, but the daze is no shield to walk into a guard the blast never caught, and a frozen guard's cell stays solid. **The clamp [SETTLED]:** the reach fired is `min(CONFUSION_RADIUS, sense_range())`, so the blast can never freeze what you cannot sense — inert on open floor (`min(6, 10)`), and shrunk to **5** inside a duct (§10.7). It can only ever shrink the blast, never widen it. A firing with nothing in reach is a **free no-op** with a near-line message (§4.4/§8.4); a real firing says how many it caught (§11.7). The long cooldown is what keeps it rare (#240). Appendix 24. |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket**, which is a use of the tool rather than a waste of it. It conceals nothing (it is not a cupboard, §10.3), so **three walls around you means you can dig a hole to hide in, never a tunnel**. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. Appendix 24. |
 | **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot get it open, so its route goes the long way round (§7.6/§10.4). (It used to say *"cannot work the handle"*; on an all-automatic level there is no handle to work — §10.4/#452 — and the seal holds the door shut whatever kind it is.) A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it. **You** are never refused — a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in; that costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4). Appendix 24. |
+| **Saver** | — | **passive** | — | **[START]/experiment (#243).** The **first guard to reach you in a facility takes you down — and instead goes down itself**: §4.5's capturing step is turned into a §7.2 takedown of that guard, which drops **where it stood** (a lunge turned over never arrives, and your own cell may be a cupboard where a body means something else), leaves a body and starts the §7.3 clock. Then it is **spent for the rest of the level** — `1/level` (§8.2), no recharge — so a second guard reaching you the same turn captures you exactly as the settled rule says. There is **no activation**: held is on, which is the whole reason it is a passive rather than the toggle first proposed — a defensive window you have to predict is one you mistime, and §8.2's timing trap needs an activation turn to be a trap at all. **Surviving is not free**: you are left standing beside a body you did not choose the place of, in a cell a guard was walking to, with the radio already counting; and the slot it holds is a flight tool you do not have for every *other* crisis of the run. **This is the one declared exception to a [SETTLED] rule (§4.5)** — it is on trial, and the sim says it is strong: a fearless bot handed it wins nearly twice as often (appendix 43). |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 
 Notes carried forward, because they are good and non-obvious:
@@ -1137,9 +1163,9 @@ Notes carried forward, because they are good and non-obvious:
   you.
 - **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
   not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
-  tech from a pool that defaults to the shipped, non-experimental set (eight tech now
-  ship, so "three random" is a genuine draw of three of the seven — the pool has
-  outgrown the grant and it finally bites, #241); a campaign accumulates its set
+  tech from a pool that defaults to the whole shipped set (nine tech now ship, so
+  "three random" is a genuine draw of three of the nine — the pool has outgrown the
+  grant and it finally bites, #241); a campaign accumulates its set
   instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
   tech — it competes for the same slot, which is exactly what it pays with. The
   resolved loadout is one of the three pieces of the shareable level-seed token

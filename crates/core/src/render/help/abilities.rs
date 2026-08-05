@@ -32,7 +32,7 @@
 //! belongs with the salvaged-tech caches (#209).
 
 use super::{ability_keys_column_start, CONTENT_INDENT};
-use crate::ability::{AbilityId, Loadout};
+use crate::ability::{AbilityId, Economy, Loadout};
 use crate::category::Category;
 use crate::mnemonic;
 use crate::place::LevelConfig;
@@ -137,11 +137,30 @@ fn draw_entry(
 /// A **passive** (#264) states no clock, because it has none: its whole price is the
 /// loadout slot it occupies, permanently (§8.2), and printing `0 active · 0 cooling`
 /// would be a fiction of exactly the kind §8.2's timing trap forbids.
+///
+/// A **budgeted** passive (#243) says a shorter version of the same thing — `on until
+/// it fires`, and then the bound — because the slot is no longer the whole price and
+/// the full sentence plus a budget clause would outrun [`DETAIL_WIDTH`]. What it gives
+/// up is a phrase the tab restates two rows down anyway; what it keeps is the number
+/// the bar can never show.
 fn economy_line(id: AbilityId) -> String {
-    let Some(economy) = id.def().economy() else {
-        return "always on — the slot is the price".to_string();
+    let mut parts = match id.def().economy() {
+        None if id.def().uses_per_level().is_some() => vec!["on until it fires".to_string()],
+        None => vec!["always on — the slot is the price".to_string()],
+        Some(economy) => activated_economy_parts(economy),
     };
+    // What a level *grants*, which is the number the bar can never show — the bar
+    // shows what is left (§8.2/#302). Read off the row rather than off the economy
+    // inside it, so a passive's budget is stated on the same footing (#243).
+    if let Some(uses) = id.def().uses_per_level() {
+        parts.push(format!("{uses} a level"));
+    }
+    parts.join(" · ")
+}
 
+/// The clock half of an activated ability's [`economy_line`] (§8.2): what the turn
+/// costs, and the two numbers it buys.
+fn activated_economy_parts(economy: Economy) -> Vec<String> {
     let mut parts = vec![turns(economy.cost())];
     // Duration 0 is not "no time active", it is **instant** (§8.3: Confusion, Pierce
     // Wall) — fired from the cell you press it in, with no window to switch off. A
@@ -155,12 +174,7 @@ fn economy_line(id: AbilityId) -> String {
     if economy.cooldown() > 0 {
         parts.push(format!("{} cooling", economy.cooldown()));
     }
-    // What a level *grants*, which is the number the bar can never show — the bar
-    // shows what is left (§8.2/#302).
-    if let Some(uses) = economy.uses_per_level() {
-        parts.push(format!("{uses} a level"));
-    }
-    parts.join(" · ")
+    parts
 }
 
 /// The turn cost, pluralised — the one segment of the economy line that needs its
@@ -189,15 +203,23 @@ fn turns(n: u32) -> String {
 /// panel says what a level ever grants. The two numbers differ the moment the first
 /// use is spent and that is not a contradiction — one is the supply, the other the
 /// remainder.
+///
+/// A **budgeted passive** (#243) is both at once, and shows both: `Throw (1/level)`.
+/// It has no key, like any passive — but it is also the one entry whose bar notation
+/// is a *countdown of sorts*, and a row that showed it as `(on)` would be advertising
+/// a rescue the run may already have spent.
 pub(super) fn ability_row_keys(slot: usize, id: AbilityId, mnemonic: Option<char>) -> String {
     if id.is_passive() {
-        return format!("{} {}", id.bar_name(), crate::ability::PASSIVE_MARKER);
+        return match id.def().uses_per_level() {
+            Some(uses) => format!("{} ({uses}/level)", id.bar_name()),
+            None => format!("{} {}", id.bar_name(), crate::ability::PASSIVE_MARKER),
+        };
     }
     activated_row_keys(
         slot_key(slot),
         mnemonic,
         id.bar_name(),
-        id.def().economy().and_then(|e| e.uses_per_level()),
+        id.def().uses_per_level(),
     )
 }
 
@@ -407,7 +429,7 @@ mod tests {
             );
             assert_eq!(
                 line.contains("a level"),
-                economy.uses_per_level().is_some(),
+                id.def().uses_per_level().is_some(),
                 "{line:?} states a use budget exactly when there is one",
             );
         }
@@ -431,6 +453,48 @@ mod tests {
         assert!(line.contains("always on") && line.contains("slot"));
         for clock in ["turn", "active", "cooling", "a level"] {
             assert!(!line.contains(clock), "a passive claims no {clock:?}");
+        }
+    }
+
+    /// A **budgeted** passive says both halves of what it is (§8.2/#243): still no
+    /// key, because there is still nothing to press — and the bound, because a run
+    /// that has spent its one save is holding something different from a run that has
+    /// not, and only this panel can say what a level ever grants.
+    #[test]
+    fn a_budgeted_passive_states_its_bound_and_still_no_key() {
+        for slot in 0..AbilityId::MAX_HELD {
+            assert_eq!(
+                ability_row_keys(slot, AbilityId::Saver, Some('s')),
+                "Saver (1/level)",
+                "no key, whatever slot it sits in — but the bound is named",
+            );
+        }
+        let line = economy_line(AbilityId::Saver);
+        assert!(line.contains("on until it fires"), "{line:?} says it is on");
+        assert!(line.contains("1 a level"), "{line:?} states the budget");
+        for clock in ["turn", "active", "cooling"] {
+            assert!(!line.contains(clock), "a passive claims no {clock:?}");
+        }
+        assert!(
+            line.chars().count() <= DETAIL_WIDTH,
+            "{line:?} must fit the board rather than be clamped (§11.4)",
+        );
+    }
+
+    /// Every economy line fits the column it is drawn in. [`draw`] clamps rather than
+    /// asserts, so an over-long line loses its last words in silence — the same
+    /// failure the blurbs are bounded against, and now reachable from two directions
+    /// at once, since a row may state a mode *and* a budget (#243).
+    #[test]
+    fn every_economy_line_fits_the_board() {
+        for id in AbilityId::ALL {
+            let line = economy_line(id);
+            assert!(
+                line.chars().count() <= DETAIL_WIDTH,
+                "{}'s economy line is {} cells, over the {DETAIL_WIDTH} it is drawn in: {line:?}",
+                id.name(),
+                line.chars().count(),
+            );
         }
     }
 
@@ -526,12 +590,8 @@ mod tests {
             activated_row_keys('4', Some('b'), "Bore", None),
             "4\u{b7}b / Bore"
         );
-        for id in AbilityId::ALL.into_iter().filter(|id| !id.is_passive()) {
-            let declared = id
-                .def()
-                .economy()
-                .and_then(|e| e.uses_per_level())
-                .is_some();
+        for id in AbilityId::ALL {
+            let declared = id.def().uses_per_level().is_some();
             assert_eq!(
                 ability_row_keys(0, id, alone(id)).contains("/level"),
                 declared,

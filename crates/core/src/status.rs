@@ -191,6 +191,19 @@ pub fn message_for(event: Event) -> Option<Message> {
         // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
         // the loud half is what happens if the body is ever seen.
         Event::TakenDown { .. } => ("the guard drops — a body is left".to_string(), 0),
+        // The Saver firing (§4.5/§8.3/#243) — a hand on you, and the run not ending.
+        // Ranked at 9: below the endings alone, because for one turn the player has to
+        // know that the thing which ends runs just happened *and did not*, and no
+        // guard event on the same turn may bury it.
+        //
+        // It names the **outcome**, not the ability: a player who has just survived the
+        // one thing that ends runs needs to read what happened to them, and the bar is
+        // already saying which of their things did it (`Saver` → `—`, §11.4). The body
+        // is on this line as well as on the takedown travelling beside it, because at
+        // priority 9 against that one's 0 this is the only half the near line is
+        // guaranteed to speak — and a body you were not told about is the §7.2 cost
+        // arriving as a surprise later.
+        Event::CaptureSaved { .. } => ("capture evaded — body left".to_string(), 9),
         // The bottom rung of the §11.7 threat ladder: a guard's look freshly
         // found you (§7.6). Quieter than a found body, far below being caught —
         // but a threat message, never self-narration.

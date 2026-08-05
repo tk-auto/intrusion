@@ -187,11 +187,13 @@ mod tests {
 
     /// The golden facility's stock and crate cells — written out so the two assertions
     /// above read as one statement about one building.
-    const GOLDEN_STOCK: [AbilityId; 3] = [
-        AbilityId::Confusion,
-        AbilityId::Dephase,
-        AbilityId::PierceWall,
-    ];
+    /// Refreshed when the Saver joined the pool (#243): a shuffle over nine entries
+    /// deals this seed a different three than a shuffle over eight did. Every tech ever
+    /// added moves this, and that is the point of pinning it — the stock is derived
+    /// from the seed and the roster, never carried in the level-seed token, so a change
+    /// to *either* has to be a visible decision rather than a quietly different game.
+    const GOLDEN_STOCK: [AbilityId; 3] =
+        [AbilityId::Vision, AbilityId::Autodoors, AbilityId::Dephase];
     fn golden_crates() -> [crate::Cell; 3] {
         [
             crate::Cell::new(19, 20),
