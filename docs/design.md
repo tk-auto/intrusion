@@ -3678,9 +3678,10 @@ bullet below fills one of its seams.
     construction rather than by a rejection loop — a branch whose options generate the
     same facility is the flat list wearing a costume.
   - **One further successor is intel-locked** [SETTLED] — the alternative-route sink
-    below. It reaches a lane *two* across, which no open edge can, so what intel buys
-    is **ground**: a part of the map that was not on offer, rather than a better
-    facility handed over. What stands on that ground is whatever the seed put there.
+    below, now priced and spendable (#212). It reaches a lane *two* across, which no open
+    edge can, so what intel buys is **ground**: a part of the map that was not on offer,
+    rather than a better facility handed over. What stands on that ground is whatever the
+    seed put there.
   - **Every route converges on the archive** [SETTLED], the one node with no
     successors. Reaching it ends traversal; what it holds and what arriving concludes
     are the ending's (#217).
@@ -3747,6 +3748,29 @@ bullet below fills one of its seams.
     and is told what happened — paid, not enough intel, or not at the hub — and a
     refusal changes *nothing*: no partial payment, no half-applied sink. The wording of
     the refusal belongs to the wallet, so every sink refuses in one voice (§11.7).
+  - **The first sink: the alternative route** (#212). Spending **one intel** [START] at a
+    choice point flips the map's intel-locked successor to takeable. What it buys is
+    **ground** — a lane two across, which no open edge from there can reach — and *not* a
+    better facility: what stands on it is whatever the seed put there.
+    - **The price is what you know, not what you earn** [START]. Unbought ground draws as
+      `?`, so the road is bought *unseen*, and a price has to be proportionate to that: a
+      facility's whole haul is three consoles, and a blind road is not worth a raid. It
+      still asks for something real — nothing is banked until a raid is walked out of, so
+      the first choice point of a run cannot afford one. The bite is **opportunity cost**
+      against the other sinks rather than scarcity; if a played run buys one reflexively
+      at every junction, the first lever is not the price but that the player cannot see
+      what they are buying, which is what the scouting sinks (#215/#216) are for.
+      Appendix 48, which also records the price this one replaced.
+    - **Buying does not commit the run** [SETTLED]. A bought edge becomes an ordinary
+      offer with its flavour showing, and the run may still take an open road instead. So
+      the purchase buys ground *and* the knowledge of what is on it, which is what keeps
+      "flavours are visible when offered" true and stops the sink being a coin flip you
+      paid for.
+    - **A bought road is alerted at condition 3 like any other** [SETTLED]. The top of the
+      ladder takes away *the route around it*; intel that bought immunity from the alert
+      would be a second, unwritten rule about what the alert is. At condition 2 the
+      locked edge is never the marked road — finding the unwatched one is the play there,
+      and it must not cost intel.
   - **Walking out empty-handed is not punished** [OPEN on the tuning]. Nothing is taken
     away for a wasted raid; the run is simply poorer at a facility the alert may have
     made harder (#210), and caches are one-shot. An explicit nudge (a small alert bump)
@@ -3761,7 +3785,8 @@ bullet below fills one of its seams.
     open road ahead *off guard*, drawn one **easier** rule: the cherry on a ghost
     raid. Condition 1 carries nothing. Condition 2 leaves **one** open road
     *alerted*, drawn one **harder** rule. Condition 3 leaves **all** of them
-    alerted, each drawn its own.
+    alerted, each drawn its own — the **alternative route included** (#212, appendix 48),
+    so intel buys ground rather than a way out of the top rung.
   - **The step from 2 to 3 is breadth, not depth** [SETTLED]. Both switch on one
     rule; what the top of the ladder takes away is the *route around it*. At
     condition 2 there is still an unwatched road and finding it is the play; at

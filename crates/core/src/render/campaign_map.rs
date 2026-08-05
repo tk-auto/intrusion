@@ -52,7 +52,9 @@ use super::menu::{centre, ENTRY_SPACING, MARKER, NO_MARKER};
 use super::{blank_grid, draw, Grid};
 use crate::alert::TOP_RUNG;
 use crate::campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
-use crate::campaign::{Campaign, Flavour, Loudness, MapPos, NodeId, Offer};
+use crate::campaign::{
+    Campaign, Flavour, Loudness, MapPos, NodeId, Offer, Outlay, ROUTE_UNLOCK_COST,
+};
 use crate::category::Category;
 use crate::modifiers::ModifierDirection;
 use crate::place::LevelConfig;
@@ -68,11 +70,23 @@ const HEADING: &str = "THE FACILITY MAP";
 /// cannot see a keyboard still reads that tapping a row raids it.
 const FOOTER: &str = "↑↓ choose · Enter/tap raids";
 
-/// What an intel-locked row says (§14 v3's alternative-route sink, #212). It names the
-/// **currency** rather than a price: the price is #212's to set, and a number invented
-/// here would be a cost nobody designed printed on a screen the player believes.
+/// What an intel-locked row says (§14 v3's alternative-route sink, #212) — the label, and
+/// its **price** in the currency's own word.
+///
+/// The number comes from [`ROUTE_UNLOCK_COST`] rather than from a literal here, so the
+/// screen cannot come to advertise a price the campaign does not charge. The blurb is
+/// built at runtime ([`locked_blurb`]) for the same reason the wallet line is: a `const`
+/// cannot format one.
 const LOCKED_LABEL: &str = "Alternative route";
-const LOCKED_BLURB: &str = "costs intel";
+
+/// How many digits a price may take before the row-width bound stops being true. Four is
+/// far past anything a 2–3 hour run can bank, and it is asserted rather than assumed.
+const PRICE_DIGITS: usize = 4;
+
+/// See [`LOCKED_LABEL`] — the price as the row prints it.
+fn locked_blurb() -> String {
+    format!("{ROUTE_UNLOCK_COST} intel")
+}
 
 /// The glyph an intel-locked node is drawn with. Not the flavour's own: what stands on
 /// unbought ground is a thing the player has not been told, and drawing the flavour would
@@ -139,7 +153,8 @@ const LIST_ROWS: u32 = (MAX_ROWS - 1) * ENTRY_SPACING + 3;
 /// widest blurb, plus the marker and the dash between them, and the locked row measured
 /// the same way.
 const MAX_ROW_WIDTH: usize = {
-    let mut widest = row_width(LOCKED_LABEL.len(), LOCKED_BLURB.len());
+    // The priced row, measured at the widest price the bound admits (`{n} intel`).
+    let mut widest = row_width(LOCKED_LABEL.len(), PRICE_DIGITS + " intel".len());
     let mut i = 0;
     while i < Flavour::ALL.len() {
         let row = row_width(Flavour::ALL[i].label().len(), Flavour::ALL[i].blurb().len());
@@ -311,8 +326,8 @@ const _: () = assert!(
 /// The map screen's **view state**, owned by the shell exactly like
 /// [`MenuUi`](super::MenuUi) — it changes no world and costs no turn (§12.1).
 ///
-/// One field, and deliberately so: which facility the marker rests on is the only thing
-/// about this screen the player can change without the campaign moving.
+/// Two fields, and both are things the player can change without the campaign moving:
+/// which facility the marker rests on, and what the hub last said back to them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct MapUi {
     /// Which row the marker rests on, as an index into [`Campaign::ahead`]. Clamped at
@@ -320,6 +335,15 @@ pub struct MapUi {
     /// under it every time the run moves, and a marker resting past the end of a shorter
     /// list would draw nothing and activate nothing.
     pub selected: usize,
+    /// **What the last spend at the hub did** (#211/#212), or `None` when nothing has been
+    /// bought or refused since the marker last moved.
+    ///
+    /// It rides on the view state rather than on the campaign because it is a *message*,
+    /// not a fact about the run: the run's own record of a purchase is the road it can now
+    /// take. Cleared by any move of the marker ([`seek`](Self::seek)) — a refusal still
+    /// sitting there while the player walks the list would be the screen answering a
+    /// question nobody had just asked.
+    pub outlay: Option<Outlay>,
 }
 
 impl MapUi {
@@ -327,44 +351,54 @@ impl MapUi {
     /// caller shares, so the drawing, the hit-test and the activation cannot disagree
     /// about which row is selected.
     ///
-    /// **Locked rows are skipped**, exactly as the menu steps over its *later* entries:
-    /// the marker only ever rests somewhere pressing Enter does something (#268). A list
-    /// of nothing but locked rows cannot happen — every choice point offers at least
-    /// [`MIN_OPEN`](crate::campaign::map::MIN_OPEN) open edges — but if it did, the
-    /// marker would sit on row zero and activate nothing, which is the safe direction.
+    /// **Every row is restable**, the locked one included (#212). It used to step over
+    /// the lock, on the menu's rule that the marker only rests where Enter does something
+    /// (#268) — and the rule has not changed, the row has: an intel-locked row is now a
+    /// **price**, and pressing Enter on it buys the road or says why it cannot. A row that
+    /// answers is a row the marker belongs on.
     pub fn selected(self, ahead: &[Offer]) -> usize {
-        if ahead.get(self.selected).is_some_and(|o| !o.locked) {
+        if self.selected < ahead.len() {
             return self.selected;
         }
-        ahead.iter().position(|o| !o.locked).unwrap_or(0)
+        0
     }
 
-    /// The marker moved one row `step`-wards, wrapping, landing only on takeable rows.
-    /// Gives up and stays put after a full lap, so a list with nothing takeable freezes
-    /// rather than spins — [`MenuEntry::seek`](super::MenuEntry)'s rule, one screen over.
+    /// The marker moved one row `step`-wards, wrapping, and the hub's last word dropped —
+    /// a message about the row you have just left is a message about nothing.
     fn seek(self, ahead: &[Offer], step: usize) -> Self {
         let n = ahead.len();
         if n == 0 {
-            return self;
+            return Self {
+                outlay: None,
+                ..self
+            };
         }
-        let start = self.selected(ahead);
-        let selected = (1..=n)
-            .map(|i| (start + step * i) % n)
-            .find(|&i| !ahead[i].locked)
-            .unwrap_or(start);
-        Self { selected }
+        Self {
+            selected: (self.selected(ahead) + step) % n,
+            outlay: None,
+        }
     }
 
-    /// The next takeable row down, wrapping.
+    /// The next row down, wrapping.
     #[must_use]
     pub fn next(self, ahead: &[Offer]) -> Self {
         self.seek(ahead, 1)
     }
 
-    /// The previous takeable row up, wrapping.
+    /// The previous row up, wrapping.
     #[must_use]
     pub fn prev(self, ahead: &[Offer]) -> Self {
         self.seek(ahead, ahead.len().saturating_sub(1))
+    }
+
+    /// The same screen with the hub's answer to a spend on it (#212) — what the shell sets
+    /// after [`Campaign::unlock`](crate::Campaign::unlock), paid or refused alike.
+    #[must_use]
+    pub fn saying(self, outlay: Outlay) -> Self {
+        Self {
+            outlay: Some(outlay),
+            ..self
+        }
     }
 }
 
@@ -377,6 +411,13 @@ pub enum MapHit {
     /// the shell acts on a facility, and an index would have to be re-resolved against a
     /// list that may have changed since the frame was drawn.
     Facility(NodeId),
+    /// The **intel-locked** row — buy the road rather than walk down it (§14 v3/#212).
+    ///
+    /// Its own variant rather than a [`Facility`](Self::Facility) the shell has to
+    /// re-classify: the two rows look alike and do opposite things, and a shell that
+    /// worked out which by asking the campaign again would be answering from a list that
+    /// may have moved since the frame was drawn.
+    Unlock(NodeId),
     /// The footer's `theme [n]` control (§11.2/#189), in the same corner it keeps on
     /// every other screen.
     ToggleTheme,
@@ -449,7 +490,7 @@ fn map_height(height: u32) -> u32 {
 fn row_text(offer: Offer, selected: bool) -> String {
     let marker = if selected { MARKER } else { NO_MARKER };
     if offer.locked {
-        return format!("{marker}{LOCKED_LABEL}{SEPARATOR}{LOCKED_BLURB}");
+        return format!("{marker}{LOCKED_LABEL}{SEPARATOR}{}", locked_blurb());
     }
     format!(
         "{marker}{}{SEPARATOR}{}",
@@ -518,11 +559,29 @@ fn alert_text(run: &Campaign, ahead: &[Offer]) -> Option<(String, Category)> {
 /// sense the `@` on the picture is. Interest is what is worth reaching for, and it is
 /// spoken for on this screen by the archive and by the marked row — a third claim on it
 /// would blunt both.
-fn wallet_text(run: &Campaign) -> String {
-    match run.intel() {
+/// **The hub's last word replaces the balance**, and that is not a compromise for want of
+/// a row (#212). Every [`Outlay::message`] already names the balance — *spent 1 intel — 3
+/// left*, *needs 1 intel — you have 0* — so the line still answers the question the
+/// readout answers, and it answers the one the player just asked as well. Two lines saying
+/// the balance twice would be the screen repeating itself.
+///
+/// A refusal is **Warning** and a purchase **Owned**: the same two meanings the map already
+/// gives a rule bent against you and a thing that is yours (§11.2), so there is no third
+/// colour to learn.
+fn wallet_text(run: &Campaign, ui: MapUi) -> (String, Category) {
+    if let Some(outlay) = ui.outlay {
+        let category = if outlay.paid() {
+            Category::Owned
+        } else {
+            Category::Warning
+        };
+        return (outlay.message(), category);
+    }
+    let line = match run.intel() {
         0 => format!("{WALLET_LABEL}{SEPARATOR}{WALLET_EMPTY}"),
         banked => format!("{WALLET_LABEL} {banked}"),
-    }
+    };
+    (line, Category::Owned)
 }
 
 /// What the line says the noise did to the facility it names.
@@ -541,6 +600,28 @@ fn direction_category(direction: ModifierDirection) -> Category {
         ModifierDirection::Harder => Category::Warning,
         ModifierDirection::Easier => Category::Owned,
     }
+}
+
+/// The §11.2 meaning a row carries, and the glyph of the facility it names — one function
+/// so the picture and the list cannot come to disagree about what an option currently is.
+///
+/// **Interest for the marked row** wherever the marker rests, because that is what the
+/// marker means on every screen. Off the marker, an open road is **Neutral** — a live
+/// option — and the priced one is Neutral too **when the run can afford it**: it is as
+/// live as the others, and the row's own text says what it costs.
+///
+/// **Ground when it cannot** (#212). Ground is what this screen already gave the locked
+/// edge and what it gives the road behind you: *on the map, not available to you*. So a
+/// price the wallet cannot meet reads as unaffordable at a glance rather than only when
+/// pressed — the §2.3 courtesy of showing a cost before charging for the discovery.
+fn row_category(run: &Campaign, offer: Offer, marked: bool) -> Category {
+    if marked {
+        return Category::Interest;
+    }
+    if offer.locked && !run.affords(ROUTE_UNLOCK_COST) {
+        return Category::Ground;
+    }
+    Category::Neutral
 }
 
 /// The column the list starts at: the widest row centred, every row left-aligned inside
@@ -576,6 +657,10 @@ fn standing_here(run: &Campaign, ahead: &[Offer]) -> bool {
 /// prose. A press on the **picture** hits nothing on purpose: a node is one cell and one
 /// cell is not a target a finger can hit (§11.6), and the row that names it is right
 /// underneath.
+///
+/// The locked row is a target now (#212), and it buys rather than raids — the two are told
+/// apart here, once, so a tap and a keypress on the same row cannot come to mean different
+/// things.
 #[must_use]
 pub fn map_hit(width: u32, height: u32, run: &Campaign, x: u32, y: u32) -> Option<MapHit> {
     if height > 0 && y == height - 1 {
@@ -586,8 +671,20 @@ pub fn map_hit(width: u32, height: u32, run: &Campaign, x: u32, y: u32) -> Optio
     ahead
         .iter()
         .enumerate()
-        .find(|&(i, offer)| !offer.locked && row_of(height, i) == y)
-        .map(|(_, offer)| MapHit::Facility(offer.node))
+        .find(|&(i, _)| row_of(height, i) == y)
+        .map(|(_, offer)| hit_of(*offer))
+}
+
+/// What activating `offer` does — raid it, or buy the road to it (§14 v3/#212). Shared by
+/// the tap path and the key path, which is what keeps the two saying the same thing about
+/// one row.
+#[must_use]
+pub fn hit_of(offer: Offer) -> MapHit {
+    if offer.locked {
+        MapHit::Unlock(offer.node)
+    } else {
+        MapHit::Facility(offer.node)
+    }
 }
 
 /// Render the campaign map (§11.1/§14 v3) — the whole `width × height` screen, not an
@@ -632,14 +729,14 @@ pub fn render_map(width: u32, height: u32, run: &Campaign, ui: MapUi) -> Grid {
 
     // What the run has to spend (§2.2/#211) — always, so the hub's balance is never a
     // thing the player has to remember.
-    let wallet = wallet_text(run);
+    let (wallet, wallet_category) = wallet_text(run, ui);
     let len = wallet.chars().count() as u32;
     draw(
         &mut grid,
         centre(width, len),
         WALLET_ROW,
         &wallet,
-        Category::Owned,
+        wallet_category,
     );
 
     let at = |node: NodeId| plot(map.position(node), map.depth(), width, map_h);
@@ -686,11 +783,12 @@ pub fn render_map(width: u32, height: u32, run: &Campaign, ui: MapUi) -> Grid {
     // reaching for — Neutral for the other live options, Ground for the locked edge.
     if !here {
         for (i, offer) in ahead.iter().enumerate() {
-            let (glyph, category) = match (offer.locked, i == selected) {
-                (true, _) => (LOCKED_GLYPH, Category::Ground),
-                (false, true) => (flavour_glyph(offer.flavour), Category::Interest),
-                (false, false) => (flavour_glyph(offer.flavour), Category::Neutral),
+            let glyph = if offer.locked {
+                LOCKED_GLYPH
+            } else {
+                flavour_glyph(offer.flavour)
             };
+            let category = row_category(run, *offer, i == selected);
             plot_node(&mut grid, at(offer.node), glyph, category);
         }
     }
@@ -700,11 +798,7 @@ pub fn render_map(width: u32, height: u32, run: &Campaign, ui: MapUi) -> Grid {
 
     let column = list_column(width, &ahead);
     for (i, &offer) in ahead.iter().enumerate() {
-        let category = match (offer.locked, i == selected) {
-            (true, _) => Category::Ground,
-            (false, true) => Category::Interest,
-            (false, false) => Category::Neutral,
-        };
+        let category = row_category(run, offer, i == selected);
         draw(
             &mut grid,
             column,

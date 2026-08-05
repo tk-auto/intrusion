@@ -2299,6 +2299,12 @@ reappearing inside the ticket that exists to end it. The fiction agrees — the 
 reaches a lane two across that no open edge from here can, so it is the one road the noise
 did not travel — and it gives #212's sink something real to sell at condition 3.
 
+> **Revisited by #212 (appendix 48).** This held while the edge was inert. Once intel can
+> open it, a bought road that the condition-3 sweep skipped would make intel a way out of
+> the top rung — undoing the one thing that rung says. The rule now splits: never the
+> marked road at condition 2 (the argument above, intact), reached like everything else at
+> condition 3.
+
 **The last hop still carries.** A node one short of the archive has exactly one
 successor, so a loud raid there alerts the archive itself. That is the geography biting
 rather than a special case: there is nowhere else for the noise to go, and the run's last
@@ -3216,3 +3222,116 @@ A refusal changes nothing at all. There is no partial payment, so a sink that br
 `Outlay::paid` cannot end up with the money gone and the effect unapplied — which is the
 one bug class a currency with several buyers reliably grows.
 
+---
+
+## Appendix 48 — The alternative route: intel buys ground, and the top of the ladder still sweeps it
+
+*(§2.3/§14 v3; #212, revisiting appendix 41. `crates/core/src/campaign.rs`,
+`crates/core/src/campaign/loudness.rs`, `crates/core/src/render/campaign_map.rs`.)*
+
+#207 shipped the map's intel-locked successor inert: an edge drawn, named and refused. This
+is the ticket that gives it a price, and two of its three decisions were only decidable
+once the edge could actually be taken.
+
+### One intel — the price is what you know, not what you earn
+
+The ticket landed at **four**, reasoned from income: a facility hides three consoles at the
+§10.2 recipe, so four puts one unlock slightly above a whole facility's haul, a run cannot
+buy a route at every junction, and *which* junction is worth it becomes the decision.
+
+That reasoning was rejected on review, and the objection is the better one: **four intel is
+too much for a route we know nothing about.** It priced the road as though the buyer could
+see it. They cannot — the map draws unbought ground as `?` (§14 v3's "shape, not
+contents"), so what four intel bought was an entire raid's income spent on a lane that
+might hold an Outpost. A price has to be proportionate to what the buyer knows, and this
+buyer knows one fact: where the road goes, not what is on it.
+
+So **one**. It still asks for something real, and the shape of the ask is the interesting
+part: nothing is banked until a raid has been walked out of, so the **first** choice point
+of every run cannot afford one — the sink switches on when the run has actually done
+something, which is a better gate than a number that scales with greed.
+
+**Where the bite comes from instead.** The rejected argument put it in *scarcity*: make it
+dear enough and choosing becomes hard. The real source is **opportunity cost** — the sinks
+behind it (#213–#216) spend the same wallet, so a route bought here is an alert not lowered
+or a facility not scouted there. That is the right axis for a purchase this cheap, and it
+is the axis §14 v3 was describing all along when it listed four sinks over one currency.
+
+**And if it turns out to be reflexive?** If a played run buys the route at every junction,
+the temptation will be to raise the price back. That is treating the symptom. The reason
+buying is reflexive is that the alternative — *not* buying — has no information behind it:
+you cannot compare a road you cannot see to roads you can. The fix is to let the player
+see, which is exactly what the scouting sinks (#215/#216) sell. Raise the price only if
+buying stays reflexive *after* the player can tell what they are buying.
+
+### Buying does not commit the run, and that is what stops it being a coin flip
+
+The obvious shape is *pay, and you are on that road*. It is wrong, and the argument against
+it is a rule the map already settled: **flavours are visible when offered** (§14 v3
+[SETTLED]), because a choice made blind is a coin flip. An unbought edge draws as `?`, so a
+purchase that also committed the run would be selling exactly the coin flip that rule
+exists to forbid — and selling it for more than a facility's income.
+
+So the purchase turns the edge into an **ordinary offer**: flavour showing, sitting in the
+list beside the open roads, and the run may still take one of those instead. What four
+intel buys is ground *and* the knowledge of what stands on it. The bet is real — the seed
+may have put an Outpost on the lane you paid to reach — but it is a bet you get to decline
+after seeing it, which is a different and much better decision than a bet you are locked
+into before.
+
+This is also where the sink's §2.3 answer comes from. *When would a good player choose not
+to buy?* When the open roads already hold the flavour the run needs; when the intel is
+wanted for a sink that has not landed yet; when four intel is most of a wallet that took
+two raids to fill. All three are live at the same junction.
+
+### The condition-3 sweep now reaches it — appendix 41 revisited
+
+Appendix 41 reasoned that the alert should never mark the locked edge: marking ground the
+run cannot walk onto is "an alert with nothing behind it", §2.3's decoration failure inside
+the ticket meant to end it. That was right **while the edge was inert**, and it stops being
+right the moment intel can open it.
+
+Left alone, the old rule had a consequence nobody chose: at condition 3 — where §14 v3
+[SETTLED] says *every* road ahead is watched and what the escalation takes away is the
+route around it — a run with a single intel banked could buy an unwatched one. Intel would be a way
+out of the alert's top rung, which is a second, unwritten rule about what the alert is, and
+it would hollow out the one thing condition 3 says.
+
+So the two rungs now treat the edge differently, on purpose:
+
+- **Condition 2 — never the marked road.** The play at that rung is finding the road
+  nobody is watching, and having that option must not cost intel. Appendix 41's argument
+  survives here intact.
+- **Condition 3 — reached like everything else**, bought or not. A road you paid for is
+  still a road ahead.
+
+The sink loses nothing by it. What it sells at condition 3 was never *safety*: it is a lane
+the map was not offering, on a rung where the open roads are all alerted anyway — so the
+choice becomes *which* alerted facility, from a wider set, which is exactly the kind of
+option the map exists to sell.
+
+The answer is a fact about the **edge**, not about the purchase: the map's alert line says
+the same thing before and after the money changes hands, so a player cannot be surprised by
+a road that changed its mind once they had paid for it.
+
+### The priced row is a row like any other
+
+The marker used to step over the locked row, on #268's rule that it only rests where Enter
+does something. The rule has not changed — the row has. An intel-locked row is now a
+**price**, and pressing Enter on it buys the road or says why it cannot; a row that answers
+is a row the marker belongs on.
+
+Two smaller consequences, both of them the §2.3 courtesy of showing a cost before charging
+for the discovery:
+
+- The row prints the campaign's own `ROUTE_UNLOCK_COST`, so a change to the price moves
+  what the player is charged and what they are told in one edit.
+- A price the wallet cannot meet draws in **Ground** — the meaning this screen already
+  gives the road behind you — so it reads as out of reach at a glance rather than only
+  when pressed.
+
+And the hub's answer lands on the **wallet line**, replacing the balance rather than
+sitting beside it. Every `Outlay` message already names the balance ("spent 1 intel — 3
+left", "needs 1 intel — you have 0"), so the readout is not a fact the player loses; two
+lines saying the balance twice would be the screen repeating itself. It clears the moment
+the marker moves: a message about the row you have just left is a message about nothing.
