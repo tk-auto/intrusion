@@ -2324,6 +2324,23 @@ never comes down within a facility — so a campaign that taxed it would be taxi
 the game at all, and rung 2 is the first rung whose meaning is *this raid went wrong*
 (§7.3: it is where the facility stops reacting and starts adding guards to itself).
 
+**"Unnoticed" is condition 0, and it is not the same as never being seen.** The two are
+different questions and the end screen already prints both, side by side, in its noise
+row: `seen 2 · no alert — you are unnoticed` is a legal and unremarkable line. `seen` is
+every fresh detection, glimpses included; the condition only leaves rung 0 on a
+**confirmed** sighting — three turns of certain-zone contact inside a ten-turn window,
+tallied facility-wide — or a missed radio ping, and a glimpse contributes nothing to that
+tally ever. So the cherry goes to a raid the *building* never worked out, not to a raid
+nobody ever laid eyes on.
+
+That is deliberate, and it is where the ceiling is left rather than the floor: the
+obvious follow-up is a **higher** reward for a true ghost — condition 0 *and* zero
+detections — sitting above this one, rather than this one being tightened to mean it.
+Tightening would leave the ordinary clean raid paying nothing, which is the wrong end to
+adjust; adding a rung above keeps what is here and gives the hardest way to play
+something of its own. `RunStats` already carries the detection count, so the mapping has
+what it would need on the day someone decides what the better prize is.
+
 What is **not** open is the seam. The alert reaches the facility through
 `ModifierSources::alert` and the §12.6 directed pool, so it can only ever switch on a rule
 the pool already documents with a direction — which is what makes the §2.3 assertion true
