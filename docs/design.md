@@ -916,8 +916,8 @@ rule biting harder on contact. Every cone the game can deal keeps both zones, as
 at compile time. The Run relation follows the same proportion, and against a narrowed
 cone it overshoots — 5 cells of gain against a 3-cell gap — which is a break in the
 player's favour on the side of the axis where it belongs. Appendix 50 has the argument,
-and the measurement that says the *arc* is where a narrowed cone's pressure actually
-sits.
+and the measurement that separates the two halves of *"shorter and thinner"*: the arc
+carries five sixths of the modifier's effect, and the range is worth about one guard.
 
 **2. Losing sight must lead to a search, not an instant give-up.**
 

@@ -3534,37 +3534,46 @@ keeps is worse than either answer. It had — `automatic_doors` reaches the carv
 `a_difficulty_draw_moves_the_building_only_where_it_is_meant_to`. Nothing needed
 correcting; this entry simply joins the strictest tier.
 
-### 3. The arc is the lever, and the range is what makes it legible
+### 3. The arc is the lever, the range is worth about one guard
 
 The numbers picked themselves only after a sweep. Four temperaments, 100 seeds each,
-`--modifier narrowed-guard-cones` against the stored baseline, holding the arc at 1 and
-moving the range:
+`--modifier narrowed-guard-cones` against the stored baseline, over the 2×2 that
+separates the two halves of *"shorter and thinner"*:
 
-| profile | baseline (arc 2, range 10) | range 8 | range 7 | range 6 |
-|---|---|---|---|---|
-| balanced | 0.35 | 0.65 | 0.59 | 0.63 |
-| cautious | 0.53 | 0.82 | 0.86 | 0.89 |
-| aggressive | 0.40 | 0.68 | 0.76 | 0.72 |
-| careless | 0.43 | 0.77 | 0.71 | 0.68 |
+| arm | balanced | cautious | aggressive | careless | mean lift |
+|---|---|---|---|---|---|
+| baseline — arc 2, range 10 | 0.35 | 0.53 | 0.40 | 0.43 | — |
+| **shorter only** — arc 2, range 6 | 0.42 | 0.71 | 0.42 | 0.47 | +8 |
+| **thinner only** — arc 1, range 10 | 0.57 | 0.77 | 0.67 | 0.70 | +25 |
+| **shipped** — arc 1, range 6 | 0.63 | 0.89 | 0.72 | 0.68 | +30 |
 
-*(win rate; detections fall 40–70% across the same batches)*
+*(win rate; the lift is in points, meaned over the four profiles)*
 
-**The range barely matters.** Almost the whole lift is already there at 8, and 6 adds
-nothing outside the noise — because indoors the walls bound a guard's sight long before
-its range box does, which is the same fact §10.1a's corridor cap is stated against. What
-is actually doing the work is the **arc**: one rung down §6.2's tier ladder turns a ~90°
-wedge into a ~53° one, and that halves the angular width at every depth, wall or no
-wall.
+**The arc carries five sixths of it.** One rung down §6.2's tier ladder turns a ~90°
+wedge into a ~53° one, which halves the angular width at *every* depth — wall or no
+wall. The range is worth about **one guard** on its own (§10.2 puts a guard at 8–10
+points) and only ~5 more once the arc is already thin, because indoors the walls bound
+a guard's sight long before its range box does — the same fact §10.1a's corridor cap is
+stated against. Holding the arc at 1 and sweeping the range 8 → 7 → 6 moves nothing
+outside the noise, which is what first pointed at the arc.
 
-So the range is chosen on design grounds rather than on the sweep. Six is kept because
-it is the one that a player can **see**: a 13×13 box against 21×21 reads plainly shorter
-on the §11.5 overlay, where 17×17 would be a caption more than a change. It is also the
-shortest reduction that leaves the ladder in §1 with two rungs worth naming.
+**The two halves are not the same kind of change**, which the win rate alone hides.
+Thinner cuts detections on every profile (balanced 848 → 575, aggressive 728 → 591).
+Shorter *raises* them for the striking temperaments (aggressive 728 → **890**, careless
+1211 → 1154 — flat), because a shorter cone lets a player get closer before being seen,
+so a profile that wants to be close takes the invitation and is caught at close range
+more often. A thinner cone gives ground back at every distance; a shorter one trades
+distance for proximity. Both are easier on the win rate; only one of them is quieter.
+
+Six is kept for what the sweep cannot measure: it is the half a player can **see**. A
+13×13 box against 21×21 reads plainly shorter on the §11.5 overlay, where 17×17 would
+be a caption more than a change — and it is the shortest reduction that leaves the
+ladder in §1 with two rungs worth naming.
 
 **And it is the note for whoever retunes this.** If the `−N` step turns out too generous
-in play, the knob is the **arc**, not the range: shortening further buys almost nothing,
-and widening back to 2 gives most of the step back while keeping the cone visibly
-shorter.
+in play, the knob is the **arc**: widening it back to 2 gives roughly 25 of the 30 points
+back while keeping the cone visibly shorter. Shortening the range further buys almost
+nothing, and lengthening it back buys only about a guard.
 
 ### What the batch says, and what it does not
 
@@ -3577,7 +3586,7 @@ Two things move the *other* way and both are coherent. The striking profiles lan
 takedowns** (aggressive 22→33, careless 21→34) and leave **more bodies found** (3→11,
 17→25), and `careless` reaches rung 3 on 22 seeds against 14. A shorter, thinner cone
 makes walking up behind a guard easier, so a temperament that wants the verb gets it
-more often — and a body left on the floor is still the loudest event in the game (§7.3).
+more often — the same invitation the shorter-only arm above accepts — and a body left on the floor is still the loudest event in the game (§7.3).
 The noise does not go away; it moves from *"you were seen"* to *"you left something"*,
 which is the trade §7.2 prices and not a hole in the modifier.
 
