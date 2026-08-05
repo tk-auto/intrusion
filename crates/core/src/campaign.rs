@@ -64,6 +64,8 @@
 //! whole run reproduces from its run seed and its inputs exactly as one level does
 //! (§12.4) — for tests, for bug repro, and for nothing the player is ever handed.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ability::{AbilityId, Loadout};
 use crate::difficulty::Difficulty;
 use crate::level_seed::LevelSeed;
@@ -100,7 +102,7 @@ use map::LANES;
 /// an id is a coordinate rather than a serial number, so no two nodes can collide on
 /// one, nothing has to allocate ids as it goes, and the identity of a facility is a
 /// fact about where it stands rather than about the order some walk discovered it in.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct NodeId(u32);
 
 impl NodeId {
@@ -187,7 +189,7 @@ pub fn facility_seed(run_seed: u64, node: NodeId) -> u64 {
 /// A stage rather than a pair of flags because the illegal combinations should not be
 /// representable: "choosing where to go while inside a building" is the one this
 /// spelling makes impossible to write.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum CampaignStage {
     /// Standing on a facility not yet raided, with nothing between the run and it —
     /// where a run starts, and where [`choose`](Campaign::choose) leaves it.
@@ -230,7 +232,7 @@ impl CampaignStage {
 /// | [`choose`](Self::choose) | take one of the offered edges and move (§14 v3) |
 /// | [`salvage`](Self::salvage) | add found tech to what the run carries (#209's seam) |
 /// | *drop* | the run is over and nothing survives it (§2.2) |
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Campaign {
     map: FacilityMap,
     /// Every facility the run has stood on, in the order it stood on them — the

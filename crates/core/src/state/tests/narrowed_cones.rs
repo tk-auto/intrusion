@@ -62,7 +62,7 @@ fn the_modifier_resolves_into_the_guard_sight_and_nothing_else() {
 ///
 /// **The "it really bites" half is stated over the sweep, not per seed**, and the reason
 /// is the modifier's own character rather than a weakened claim. This one shortens the
-/// **reach** and leaves §7.1's wedge alone (appendix 50), so on a seed where every guard
+/// **reach** and leaves §7.1's wedge alone (appendix 51), so on a seed where every guard
 /// happens to open facing into a room shallower than 6 cells the walls were already
 /// doing the work and turn one is legitimately identical — which is the same §10.1a fact
 /// that makes a shortened cone a one-guard step rather than a three-guard one. So: never

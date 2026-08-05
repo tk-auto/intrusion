@@ -6,9 +6,10 @@
 //! scaffolding around an unanswered question. Don't do that again."* So the menu
 //! offers the things that actually start a run — **Quick play** (a fresh seeded
 //! facility off the clock), **Seed play** (the level-seed token re-entry that used to be
-//! the always-on seed bar, §13.1/#110/#245) and, since #208, **Story mode**, which opens
-//! the campaign map (§14 v3) — and lists **Options** (§14 v2) as a visibly *later*,
-//! inert entry. It is there so the menu has room to grow, and it does nothing at all:
+//! the always-on seed bar, §13.1/#110/#245), since #208 **Story mode**, which opens
+//! the campaign map (§14 v3), and since #514 **Continue run**, which resumes the
+//! autosaved run and is listed only when there is one (§12.5) — and lists **Options**
+//! (§14 v2) as a visibly *later*, inert entry. It is there so the menu has room to grow, and it does nothing at all:
 //! the moment it acts, it is v2 work, not this screen.
 //!
 //! Story mode was one of those inert entries until the map it needed existed, which is
@@ -31,11 +32,21 @@ use super::{blank_grid, draw, Grid};
 use crate::category::Category;
 use crate::difficulty::Difficulty;
 
-/// The entries on the main menu, top to bottom. Three start a run today — quick play,
-/// a shared level, and the campaign; [`Options`](Self::Options) is the one §14 v2
-/// surface still listed as *later* and inert ([`enabled`]).
+/// The entries on the main menu, top to bottom. Four start a run today — the
+/// interrupted one, quick play, a shared level, and the campaign;
+/// [`Options`](Self::Options) is the one §14 v2 surface still listed as *later* and
+/// inert ([`enabled`]).
+///
+/// [`ContinueRun`](Self::ContinueRun) is the one entry that is not always *listed*:
+/// it appears only when the shell found a save to resume ([`MenuUi::continue_run`]),
+/// and the rows below it move up when it does not — see [`MenuUi::entries`], which is
+/// the one place that decides what this screen shows.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MenuEntry {
+    /// **Resume the autosaved run** (§12.5/#514) — listed only when a valid save
+    /// exists, and first when it does: an interrupted run is what a player who has
+    /// one came back for, so it is the row the marker opens on.
+    ContinueRun,
     /// A fresh seeded facility, straight in — the §14 v1 loop and the default
     /// selection, so the common case is one keypress (or one tap) from a load.
     #[default]
@@ -53,7 +64,12 @@ pub enum MenuEntry {
 impl MenuEntry {
     /// Every entry in menu order — the drawing order, the hit-test order, and the
     /// cycle order. A new entry is one line here.
-    pub const ALL: [MenuEntry; 4] = [
+    ///
+    /// It is the **full** list, not the drawn one: [`MenuUi::entries`] filters it to
+    /// what this screen is currently showing, and every row measurement, hit test and
+    /// selection walk goes through that rather than through this.
+    pub const ALL: [MenuEntry; 5] = [
+        MenuEntry::ContinueRun,
         MenuEntry::QuickPlay,
         MenuEntry::SeedPlay,
         MenuEntry::Options,
@@ -63,6 +79,7 @@ impl MenuEntry {
     /// The entry's label as drawn.
     pub fn label(self) -> &'static str {
         match self {
+            MenuEntry::ContinueRun => "Continue run",
             MenuEntry::QuickPlay => "Quick play",
             MenuEntry::SeedPlay => "Seed play",
             MenuEntry::Options => "Options",
@@ -72,40 +89,17 @@ impl MenuEntry {
 
     /// Whether choosing the entry does anything. The §14 v2/v3 entries answer
     /// `false`: they are drawn dim and tagged *later*, selection steps over them
-    /// ([`next`](Self::next)/[`prev`](Self::prev)), and activating one — by key or
+    /// ([`MenuUi::next_entry`]/[`MenuUi::prev_entry`]), and activating one — by key or
     /// by tap — is a no-op. **This is the whole of their behaviour** (#268): a menu
     /// with room to grow, with nothing yet growing in it.
     pub fn enabled(self) -> bool {
         matches!(
             self,
-            MenuEntry::QuickPlay | MenuEntry::SeedPlay | MenuEntry::StoryMode
+            MenuEntry::ContinueRun
+                | MenuEntry::QuickPlay
+                | MenuEntry::SeedPlay
+                | MenuEntry::StoryMode
         )
-    }
-
-    /// The next **enabled** entry below this one, wrapping past the last. Disabled
-    /// entries are stepped over rather than landed on: the selection marker only
-    /// ever rests somewhere that pressing Enter does something.
-    #[must_use]
-    pub fn next(self) -> Self {
-        self.seek(1)
-    }
-
-    /// The previous **enabled** entry above this one, wrapping past the first.
-    #[must_use]
-    pub fn prev(self) -> Self {
-        self.seek(Self::ALL.len() - 1) // one step backwards, modulo the ring
-    }
-
-    /// Walk `step` positions round the entry ring at a time until an enabled entry
-    /// comes up, giving up (and staying put) after a full lap — so a menu whose
-    /// entries were *all* disabled would freeze rather than spin.
-    fn seek(self, step: usize) -> Self {
-        let n = Self::ALL.len();
-        let start = Self::ALL.iter().position(|&e| e == self).unwrap_or(0);
-        (1..=n)
-            .map(|i| Self::ALL[(start + step * i) % n])
-            .find(|e| e.enabled())
-            .unwrap_or(self)
     }
 }
 
@@ -118,7 +112,8 @@ impl MenuEntry {
 /// the shell's one [`MenuNav`](crate::MenuNav) handler.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MenuScreen {
-    /// The **entry list** — the title block and [`MenuEntry::ALL`]. The root: there
+    /// The **entry list** — the title block and the listed entries
+    /// ([`MenuUi::entries`]). The root: there
     /// is nowhere further back from it.
     #[default]
     Entries,
@@ -190,9 +185,82 @@ pub struct MenuUi {
     pub difficulty: Difficulty,
     /// Which level-options control the marker rests on. Ignored on the other screens.
     pub options_control: OptionsControl,
+    /// Whether the shell found a **resumable save** (§12.5/#514), and so whether
+    /// [`MenuEntry::ContinueRun`] is listed at all. The [`Default`] is `false`: a
+    /// screen that knows nothing about storage — a test, a fixture, the sim — lists
+    /// the entries it always had.
+    ///
+    /// It is view state like everything else here, and it is the shell's to set: only
+    /// the shell can read a browser's storage, and whether the save *decodes* is part
+    /// of the question (#514 — an unreadable slot is no slot at all).
+    pub continue_run: bool,
 }
 
 impl MenuUi {
+    /// The entries this screen actually lists, top to bottom — [`MenuEntry::ALL`]
+    /// minus the ones this menu is not showing.
+    ///
+    /// **The one place that decides what is on the screen.** The drawing, the row
+    /// measurements, the hit test and the selection walk all read it, so a row can
+    /// never be drawn where a tap does not land, and the block cannot be centred for a
+    /// list of a different length than the one printed.
+    ///
+    /// Today exactly one entry is conditional: [`ContinueRun`](MenuEntry::ContinueRun)
+    /// is listed only when a save was found, and the rows below it move up when it was
+    /// not. A disabled entry is a different thing and stays listed — *later* is a
+    /// promise the menu keeps visible (#268), where an absent save is nothing to say.
+    pub fn entries(self) -> Vec<MenuEntry> {
+        MenuEntry::ALL
+            .into_iter()
+            .filter(|&entry| entry != MenuEntry::ContinueRun || self.continue_run)
+            .collect()
+    }
+
+    /// The entry the marker actually rests on — [`selected`](Self::selected), or the
+    /// default when that entry is not on this screen.
+    ///
+    /// The fallback matters because the two fields can disagree: a shell that opened
+    /// the menu on *Continue run* and then started a run has a stale selection the
+    /// moment the save is gone. Resolving it here means the marker is never drawn on a
+    /// row that is not there, and Enter can never fire an entry nobody could see.
+    pub fn selection(self) -> MenuEntry {
+        let entries = self.entries();
+        if entries.contains(&self.selected) {
+            self.selected
+        } else {
+            MenuEntry::default()
+        }
+    }
+
+    /// The next **enabled** entry below the selection, wrapping past the last.
+    /// Disabled entries are stepped over rather than landed on: the marker only ever
+    /// rests somewhere that pressing Enter does something.
+    #[must_use]
+    pub fn next_entry(self) -> MenuEntry {
+        self.seek(1)
+    }
+
+    /// The previous **enabled** entry above the selection, wrapping past the first.
+    #[must_use]
+    pub fn prev_entry(self) -> MenuEntry {
+        let entries = self.entries();
+        self.seek(entries.len() - 1) // one step backwards, modulo the ring
+    }
+
+    /// Walk `step` positions round the listed ring at a time until an enabled entry
+    /// comes up, giving up (and staying put) after a full lap — so a menu whose
+    /// entries were *all* disabled would freeze rather than spin.
+    fn seek(self, step: usize) -> MenuEntry {
+        let entries = self.entries();
+        let here = self.selection();
+        let n = entries.len();
+        let start = entries.iter().position(|&e| e == here).unwrap_or(0);
+        (1..=n)
+            .map(|i| entries[(start + step * i) % n])
+            .find(|e| e.enabled())
+            .unwrap_or(here)
+    }
+
     /// Whether the seed prompt is the surface showing — the one question most of this
     /// module asks of [`screen`](Self::screen), kept as a name rather than a
     /// comparison repeated at a dozen sites.
@@ -289,16 +357,20 @@ pub(super) const NO_MARKER: &str = "  ";
 /// blank between entries and does nothing, never on the neighbour (§11.6).
 pub(super) const ENTRY_SPACING: u32 = 2;
 
-/// Rows from the title to the last entry: title, blank, tagline, three blanks, then
-/// the four entries at [`ENTRY_SPACING`] apart. Used to centre the block vertically,
-/// so the screen looks composed at any board height.
-const BLOCK_ROWS: u32 = 6 + (MenuEntry::ALL.len() as u32 - 1) * ENTRY_SPACING + 1;
+/// Rows from the title to the last of `entries` entries: title, blank, tagline,
+/// three blanks, then the entries at [`ENTRY_SPACING`] apart. Used to centre the
+/// block vertically, so the screen looks composed at any board height — and it takes
+/// the *listed* count, so a menu showing one entry fewer (no save to continue, #514)
+/// sits centred rather than hanging low by a row.
+fn block_rows(entries: usize) -> u32 {
+    6 + (entries as u32).saturating_sub(1) * ENTRY_SPACING + 1
+}
 
 /// Where the title, the tagline, and the first entry sit on a screen `height` tall:
 /// the whole block centred vertically, never above row 1. Shared by the drawing and
 /// [`menu_hit`], so a tap lands on exactly the row that was drawn.
-fn rows(height: u32) -> (u32, u32, u32) {
-    let top = height.saturating_sub(BLOCK_ROWS) / 2;
+fn rows(ui: MenuUi, height: u32) -> (u32, u32, u32) {
+    let top = height.saturating_sub(block_rows(ui.entries().len())) / 2;
     let title = top.max(1);
     (title, title + 2, title + 6)
 }
@@ -377,10 +449,12 @@ fn seed_rows(height: u32) -> (u32, u32, u32) {
     (title, title + 2, title + 5)
 }
 
-/// The screen row entry `index` is drawn on — the counterpart of [`rows`] for the
-/// list itself.
-fn entry_row(height: u32, index: usize) -> u32 {
-    rows(height).2 + index as u32 * ENTRY_SPACING
+/// The screen row the listed entry at `index` is drawn on — the counterpart of
+/// [`rows`] for the list itself. The index is into
+/// [`MenuUi::entries`](MenuUi::entries), never into [`MenuEntry::ALL`]: an entry the
+/// screen is not listing occupies no row.
+fn entry_row(ui: MenuUi, height: u32, index: usize) -> u32 {
+    rows(ui, height).2 + index as u32 * ENTRY_SPACING
 }
 
 /// The entry text as drawn, marker and all: `> Quick play`, or `  Options — later`
@@ -395,8 +469,9 @@ fn entry_text(entry: MenuEntry, selected: bool) -> String {
 /// The column the entry block starts at: the widest entry line centred, with every
 /// row left-aligned inside it — a ragged-right list reads as a list, where centring
 /// each row individually would make the labels jitter as the selection moves.
-fn entry_column(width: u32) -> u32 {
-    let widest = MenuEntry::ALL
+fn entry_column(ui: MenuUi, width: u32) -> u32 {
+    let widest = ui
+        .entries()
         .iter()
         .map(|&e| entry_text(e, true).chars().count() as u32)
         .max()
@@ -481,10 +556,10 @@ pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<M
         let theme = theme_control_start(width);
         return (x >= theme && x < theme + theme_control_len()).then_some(MenuHit::ToggleTheme);
     }
-    MenuEntry::ALL
+    ui.entries()
         .iter()
         .enumerate()
-        .find(|&(i, _)| entry_row(height, i) == y)
+        .find(|&(i, _)| entry_row(ui, height, i) == y)
         .map(|(_, &entry)| MenuHit::Entry(entry))
 }
 
@@ -516,7 +591,7 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
             let title = options_title_row(height);
             (title, title + OPTIONS_TAGLINE, title + OPTIONS_HEADING_ROW)
         }
-        MenuScreen::Entries => rows(height),
+        MenuScreen::Entries => rows(ui, height),
     };
 
     draw_centred(&mut grid, title_row, TITLE, Category::Interest);
@@ -527,9 +602,9 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     } else if ui.level_options() {
         draw_level_options(&mut grid, height, ui);
     } else {
-        let column = entry_column(width);
-        for (i, &entry) in MenuEntry::ALL.iter().enumerate() {
-            let selected = entry == ui.selected;
+        let column = entry_column(ui, width);
+        for (i, &entry) in ui.entries().iter().enumerate() {
+            let selected = entry == ui.selection();
             let category = match (entry.enabled(), selected) {
                 // The selection reads in Interest — the goal colour, the thing worth
                 // reaching for — against Neutral for the rest of the live entries and
@@ -541,7 +616,7 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
             draw(
                 &mut grid,
                 column,
-                entry_row(height, i),
+                entry_row(ui, height, i),
                 &entry_text(entry, selected),
                 category,
             );
@@ -722,6 +797,16 @@ mod tests {
         }
     }
 
+    /// The title screen as it opens when the shell found a save to resume (#514):
+    /// *Continue run* listed and marked, which is how the shell raises it.
+    fn resumable() -> MenuUi {
+        MenuUi {
+            continue_run: true,
+            selected: MenuEntry::ContinueRun,
+            ..MenuUi::default()
+        }
+    }
+
     /// The seed prompt, at the default selection.
     fn seed_prompt() -> MenuUi {
         MenuUi {
@@ -739,19 +824,82 @@ mod tests {
         }
     }
 
-    /// The screen names the game and offers **every** entry — the two that play and
-    /// the two that are only listed (#268).
+    /// The screen names the game and offers **every listed** entry — the ones that
+    /// play and the one that is only listed (#268).
     #[test]
     fn the_title_screen_names_the_game_and_lists_every_entry() {
-        let text = text_of(&render_menu(W, H, MenuUi::default()));
+        let ui = MenuUi::default();
+        let text = text_of(&render_menu(W, H, ui));
         assert!(text.contains(TITLE), "the title is drawn:\n{text}");
         assert!(text.contains(TAGLINE));
-        for entry in MenuEntry::ALL {
+        for entry in ui.entries() {
             assert!(
                 text.contains(entry.label()),
                 "{entry:?} is missing:\n{text}"
             );
         }
+    }
+
+    /// **The continue entry is listed only when there is a run to continue**
+    /// (§12.5/#514) — the one conditional row on the screen. Without a save the menu
+    /// is the one it always was; with one, *Continue run* joins it at the top and
+    /// every other row keeps its label.
+    #[test]
+    fn the_continue_entry_is_listed_only_when_a_save_was_found() {
+        let without = text_of(&render_menu(W, H, MenuUi::default()));
+        assert!(
+            !without.contains(MenuEntry::ContinueRun.label()),
+            "no save, no continue row:\n{without}",
+        );
+        assert_eq!(MenuUi::default().entries().len(), MenuEntry::ALL.len() - 1);
+
+        let with = text_of(&render_menu(W, H, resumable()));
+        assert!(
+            with.contains(MenuEntry::ContinueRun.label()),
+            "a save puts the row on the screen:\n{with}",
+        );
+        assert_eq!(resumable().entries(), MenuEntry::ALL.to_vec());
+        for entry in MenuEntry::ALL {
+            assert!(
+                with.contains(entry.label()),
+                "{entry:?} is missing:\n{with}"
+            );
+        }
+    }
+
+    /// The continue row is **first**, and it is the row the marker opens on: someone
+    /// who has an interrupted run came back for it, so resuming is one keypress from
+    /// the load and starting a fresh run stays a deliberate move down the list.
+    #[test]
+    fn the_continue_entry_leads_the_list_and_opens_marked() {
+        let ui = resumable();
+        assert_eq!(ui.entries().first(), Some(&MenuEntry::ContinueRun));
+        assert_eq!(ui.selection(), MenuEntry::ContinueRun);
+        let rows = render_menu(W, H, ui).to_text();
+        let row = &rows[entry_row(ui, H, 0) as usize];
+        assert!(
+            row.contains(MARKER.trim_end()) && row.contains(MenuEntry::ContinueRun.label()),
+            "the first row is the marked continue row: {row}",
+        );
+    }
+
+    /// A selection left on a row the screen is no longer listing falls back to the
+    /// default rather than marking nothing — the state the shell holds the moment a
+    /// resumed run makes its own save the current one, and a marker drawn on an
+    /// absent row would be a screen that cannot be read.
+    #[test]
+    fn a_selection_that_is_not_listed_falls_back() {
+        let stale = MenuUi {
+            selected: MenuEntry::ContinueRun,
+            ..MenuUi::default()
+        };
+        assert_eq!(stale.selection(), MenuEntry::default());
+        let rows = render_menu(W, H, stale).to_text();
+        let marked = rows
+            .iter()
+            .filter(|r| r.contains(MARKER.trim_end()))
+            .count();
+        assert_eq!(marked, 1, "exactly one row is marked:\n{}", rows.join("\n"));
     }
 
     /// The selection marker rests on exactly one row — the selected entry's — and
@@ -768,16 +916,14 @@ mod tests {
                 .filter(|(_, r)| r.contains(MARKER.trim_end()))
                 .map(|(i, _)| i)
                 .collect();
+            let ui = menu(selected);
+            let index = ui.entries().iter().position(|&e| e == selected).unwrap();
             assert_eq!(
                 marked,
-                vec![entry_row(
-                    H,
-                    MenuEntry::ALL.iter().position(|&e| e == selected).unwrap()
-                ) as usize],
+                vec![entry_row(ui, H, index) as usize],
                 "exactly the {selected:?} row is marked",
             );
-            let index = MenuEntry::ALL.iter().position(|&e| e == selected).unwrap();
-            assert!(rows[entry_row(H, index) as usize].contains(selected.label()));
+            assert!(rows[entry_row(ui, H, index) as usize].contains(selected.label()));
         }
     }
 
@@ -811,9 +957,12 @@ mod tests {
         assert!(MenuEntry::StoryMode.enabled());
         assert!(!MenuEntry::Options.enabled());
 
-        let rows = render_menu(W, H, MenuUi::default()).to_text();
-        for (i, entry) in MenuEntry::ALL.iter().enumerate() {
-            let row = &rows[entry_row(H, i) as usize];
+        assert!(MenuEntry::ContinueRun.enabled());
+
+        let ui = resumable();
+        let rows = render_menu(W, H, ui).to_text();
+        for (i, entry) in ui.entries().iter().enumerate() {
+            let row = &rows[entry_row(ui, H, i) as usize];
             assert_eq!(
                 row.contains(LATER_TAG.trim()),
                 !entry.enabled(),
@@ -826,28 +975,82 @@ mod tests {
     /// so the marker can only ever rest where Enter starts something.
     #[test]
     fn selection_skips_the_disabled_entries_and_wraps() {
-        assert_eq!(MenuEntry::QuickPlay.next(), MenuEntry::SeedPlay);
+        let at = |selected| menu(selected);
+        assert_eq!(at(MenuEntry::QuickPlay).next_entry(), MenuEntry::SeedPlay);
         assert_eq!(
-            MenuEntry::SeedPlay.next(),
+            at(MenuEntry::SeedPlay).next_entry(),
             MenuEntry::StoryMode,
             "next steps over the inert Options entry between them",
         );
         assert_eq!(
-            MenuEntry::StoryMode.next(),
+            at(MenuEntry::StoryMode).next_entry(),
             MenuEntry::QuickPlay,
             "next past the last enabled entry wraps to the first",
         );
-        assert_eq!(MenuEntry::SeedPlay.prev(), MenuEntry::QuickPlay);
+        assert_eq!(at(MenuEntry::SeedPlay).prev_entry(), MenuEntry::QuickPlay);
         assert_eq!(
-            MenuEntry::QuickPlay.prev(),
+            at(MenuEntry::QuickPlay).prev_entry(),
             MenuEntry::StoryMode,
             "prev past the first wraps to the last enabled entry",
         );
         // A disabled entry can never be reached from either direction.
-        for entry in MenuEntry::ALL {
-            assert!(entry.next().enabled(), "next from {entry:?} lands live");
-            assert!(entry.prev().enabled(), "prev from {entry:?} lands live");
+        for entry in MenuUi::default().entries() {
+            let ui = at(entry);
+            assert!(ui.next_entry().enabled(), "next from {entry:?} lands live");
+            assert!(ui.prev_entry().enabled(), "prev from {entry:?} lands live");
         }
+    }
+
+    /// **The walk only ever visits listed entries** (#514): with no save, the ring is
+    /// the four rows the screen draws and the continue entry is unreachable from
+    /// either direction; with one, it joins the ring at the top — so wrapping up from
+    /// quick play lands on the campaign either way, and never on a row that is not
+    /// there.
+    #[test]
+    fn the_selection_walk_only_visits_listed_entries() {
+        let mut here = MenuEntry::default();
+        for _ in 0..MenuEntry::ALL.len() * 2 {
+            here = menu(here).next_entry();
+            assert_ne!(
+                here,
+                MenuEntry::ContinueRun,
+                "an unlisted entry is never walked onto",
+            );
+        }
+
+        let ring = |ui: MenuUi| {
+            let mut seen = vec![ui.selection()];
+            let mut here = ui.selection();
+            loop {
+                here = MenuUi {
+                    selected: here,
+                    ..ui
+                }
+                .next_entry();
+                if here == seen[0] {
+                    return seen;
+                }
+                seen.push(here);
+            }
+        };
+        assert_eq!(
+            ring(resumable()),
+            vec![
+                MenuEntry::ContinueRun,
+                MenuEntry::QuickPlay,
+                MenuEntry::SeedPlay,
+                MenuEntry::StoryMode,
+            ],
+        );
+        assert_eq!(
+            MenuUi {
+                selected: MenuEntry::QuickPlay,
+                ..resumable()
+            }
+            .prev_entry(),
+            MenuEntry::ContinueRun,
+            "prev from the top of the old list reaches the continue row",
+        );
     }
 
     /// A tap resolves to exactly the entry drawn on that row, at **any** column —
@@ -855,9 +1058,9 @@ mod tests {
     /// entries resolves to nothing, so a low tap never activates the neighbour.
     #[test]
     fn a_tap_lands_on_the_entry_drawn_on_that_row() {
-        let ui = MenuUi::default();
-        for (i, &entry) in MenuEntry::ALL.iter().enumerate() {
-            let row = entry_row(H, i);
+        let ui = resumable();
+        for (i, &entry) in ui.entries().iter().enumerate() {
+            let row = entry_row(ui, H, i);
             for x in [0, W / 2, W - 1] {
                 assert_eq!(
                     menu_hit(W, H, ui, x, row),
@@ -994,7 +1197,7 @@ mod tests {
     /// the game actually ships (§10.2's 40×40 board).
     #[test]
     fn the_list_screen_draws_each_row_whole() {
-        let (title, tagline, first) = rows(H);
+        let (title, tagline, first) = rows(MenuUi::default(), H);
         let drawn = render_menu(W, H, MenuUi::default()).to_text();
         assert_eq!(drawn[title as usize].trim(), TITLE);
         assert_eq!(drawn[tagline as usize].trim(), TAGLINE);

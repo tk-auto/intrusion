@@ -384,7 +384,7 @@ it trivialises the hiding game.
   says otherwise; the *short-sighted guards* modifier shortens the **reach** to 6 and
   leaves the wedge alone. **The arc is deliberately not a difficulty knob**: §6.2's
   ladder gives a guard exactly one narrower rung (~53°) and no settings in between, and
-  that rung measures at roughly three guards' worth of pressure (appendix 50) — a step
+  that rung measures at roughly three guards' worth of pressure (appendix 51) — a step
   too large for an axis that promises *slightly easier*. Making the arc finer-grained is
   its own piece of work. The **player's** sight is not on this seam and no modifier moves
   it. Placement is not either: the §10.1.9 turn-one spawn check always uses §7.1's own
@@ -917,7 +917,7 @@ a short-sighted guard *more* certain of what it caught than an ordinary one — 
 rule biting harder on contact. Every cone the game can deal keeps both zones, asserted
 at compile time. The Run relation follows the same proportion, and against a narrowed
 cone it overshoots — 5 cells of gain against a 3-cell gap — which is a break in the
-player's favour on the side of the axis where it belongs. Appendix 50 has the argument,
+player's favour on the side of the axis where it belongs. Appendix 51 has the argument,
 and the measurement that kept the **arc** out of the modifier: the one narrower rung
 §6.2 offers is worth roughly three guards, where the shortened range is worth one.
 
@@ -3209,10 +3209,32 @@ What this single property buys:
 
 ### 12.5 Saves
 
-Serialise the run state (seed, level, progress) to browser local storage.
-**[START]** — with true determinism, `(seed, inputs)` is also a valid save, and a
-much smaller one. Snapshotting is simpler and survives design changes; a replay
-save doesn't. Probably: snapshot for saves, replay for tests and bug reports.
+The run is **snapshotted** to browser local storage — the whole [`State`], plus the
+campaign layer above it (§12.7), the level-seed token, the run's framing and its input
+recording — and read back to resume it. **[SETTLED]**: snapshot for saves, replay for
+tests and bug reports (#514, appendix 50). `(seed, inputs)` is the smaller save and the
+determinism (§12.4) is real, but a replay reproduces the run *the current build* would
+play, so a save written before a tuning change resumes a different game without saying
+so; a snapshot either restores exactly what was stored or fails to decode.
+
+- **Autosave only. There is no save verb** — no key, no menu entry, no button. The run
+  is written as it plays, and the title screen (§14) grows a **Continue run** row only
+  when a valid save is there to resume.
+- **Debounced, not per turn.** A turn arms a trailing write a few seconds out and each
+  further turn re-arms it, so a held-key burst is one write; **[START]** 2 s, with a
+  20-turn cap so the window is bounded in turns as well as seconds. Two things bypass
+  the debounce: the page **hiding** (`visibilitychange`/`pagehide` — the reliable
+  subset of the unload signals, and the moment a phone player is actually leaving), and
+  a **terminal** event.
+- **Permadeath shapes it** (§2.2). One slot, overwritten forward, emptied as part of
+  resolving the turn that ends the run — so the slot never holds a pre-death state, and
+  a save is *interruption resume*, never an undo and never a retry. Save-scumming is
+  designed out rather than policed: the player cannot choose what is in the slot.
+- **A save this build cannot read is simply no save** — discarded silently, and the
+  menu shows the entries it always had. §12.6's "never a bricked page", applied to
+  storage.
+- The codec and the debounce clock live in the **shell** (§12.1); the core carries
+  `serde` derives and nothing else.
 
 ### 12.6 Level modifiers
 
@@ -3391,7 +3413,7 @@ discover. The short-sighted guards bend what a guard can **do** instead, so the 
 now holds a rule-bending entry alongside its knowledge-and-slack ones — a facility with
 four short-sighted guards is a different problem from one with three ordinary ones,
 rather than another window onto the same run. That is the axis the easier side has left
-to grow along (appendix 50).
+to grow along (appendix 51).
 
 > **What "the same building" now means, precisely** (#232). Every pool entry used to be
 > read at runtime, so the ±N arms of a comparison were the same *level* down to the last
@@ -3576,9 +3598,11 @@ a campaign of **one** facility is exactly the game v1 ships.
   (§4.5), extraction is voluntary, and the balance is banked at every completed raid and
   spent only at the map between facilities (§14 v3, appendix 47) — and the
   **campaign alert**, the run-level layer
-  above the per-facility §7.3 ladder. Nothing persists a campaign anywhere, so
-  "nothing carries across runs" is a property of the type rather than a rule to
-  enforce.
+  above the per-facility §7.3 ladder. A campaign is persisted in exactly one place and
+  for exactly one purpose — the run's autosave slot (§12.5/#514), so an interrupted
+  campaign can be resumed where it stopped — and that slot is emptied when the run
+  ends, so "nothing carries across runs" is a property of the save's lifetime and still
+  never a rule anything has to enforce.
 - **The transitions are the whole layer:** *enter* a facility (the campaign hands out
   its level-seed), *complete* one (the haul is banked, the facility is dropped —
   geometry, guards and bodies do not persist, and the run arrives at a **choice

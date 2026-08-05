@@ -49,6 +49,8 @@
 //! lives in [`draw_from_pool`], so the campaign alert (#210), which draws from the same
 //! pool, inherits the same guarantee rather than restating it.
 
+use serde::{Deserialize, Serialize};
+
 use crate::modifiers::{draw_from_pool, pool_size, LevelModifiers, ModifierDirection};
 
 /// A fixed transform applied to the run seed before the difficulty draw, so it takes
@@ -78,7 +80,7 @@ pub const SPAN: i8 = 2;
 /// way the run is bent rather than dressing it as a fiction about the building. They
 /// are the same two words [`ModifierDirection`] uses, which is the point: the label a
 /// player reads and the direction the draw filters on cannot come apart.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum Difficulty {
     /// −2: two rules bent the player's way.
     MuchEasier,

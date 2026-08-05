@@ -13,6 +13,8 @@
 //! whose lead ([`ALERT_DURATION`]) runs out stands back down to patrol on its own.
 //! Movement rides on the deterministic primitives in [`crate::path`].
 
+use serde::{Deserialize, Serialize};
+
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::facility::{Facility, Terrain};
@@ -35,7 +37,7 @@ pub(crate) use patrol::{Dwell, PatrolStyle};
 /// information [`Category`] it presents as ([`GuardState::category`]), and the
 /// renderer re-categorises the `g` glyph from it every turn (§11.2) — yellow →
 /// orange → red *is* the guard's mind, made visible.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum GuardState {
     /// The default: nothing seen, nothing suspected. Patrols (§7.5).
     Calm,
@@ -72,7 +74,7 @@ impl GuardState {
 /// Keeping both in one field is what stops the ladder ever re-deriving "was that
 /// certain?" from the guard's state, where a hideout flush or a body search could
 /// have moved it on since (#199/#200 — one reading, not two that merely agree).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub(crate) enum Contact {
     /// The player was inside the cone's [`certain`](GuardSight::certain_range) zone:
     /// the guard knows where they are.
@@ -117,7 +119,7 @@ pub(crate) struct Plan {
 /// is why they add transitions rather than machinery. A reactive guard whose lead
 /// runs out (§7.1's alert duration) searches its area and then stands back down to
 /// patrol on its own.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Guard {
     pos: Cell,
     facing: Direction,

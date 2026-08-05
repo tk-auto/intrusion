@@ -27,6 +27,8 @@
 //! It is a **pure function of the run's events**, so it costs determinism nothing
 //! (§12.4): the same seed and inputs write the same history.
 
+use serde::{Deserialize, Serialize};
+
 use super::{loudest_first, Message};
 use crate::state::Event;
 use std::collections::VecDeque;
@@ -55,7 +57,7 @@ pub const HISTORY_ACTIONS: usize = 5;
 /// message contributes no entry, which is what keeps a run of quiet steps from
 /// flushing the record and what makes "no empty bands, no doubled rules" true by
 /// construction rather than by filtering at draw time.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageHistory {
     /// Newest first, at most [`HISTORY_ACTIONS`] long.
     blocks: VecDeque<Vec<Message>>,

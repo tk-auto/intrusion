@@ -12,3 +12,4 @@ name = "intrusion_core"
 [dependencies]
 rand_core.workspace = true
 rand_pcg.workspace = true
+serde = { version = "=1.0.229", features = ["derive"] }

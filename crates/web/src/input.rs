@@ -264,6 +264,12 @@ impl Game {
         if let Some(verdict) = self.state.verdict() {
             self.campaign_verdict(&verdict);
         }
+        // The autosave hears it last of all (§12.5/#514), after the campaign has folded
+        // the verdict in: a facility escaped mid-campaign is banked and the map is up by
+        // now, so what a write here stores is the run as the player would come back to
+        // it — and a run that ended for good empties the slot on this same line, before
+        // control returns to the pump.
+        self.autosave_moment();
     }
 
     /// Whether a held movement's *repeat* of `input` must be suppressed this tick

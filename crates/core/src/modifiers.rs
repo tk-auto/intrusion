@@ -41,6 +41,8 @@
 //! never travels in a level-seed token. See its own documentation for why the two
 //! are deliberately kept apart.
 
+use serde::{Deserialize, Serialize};
+
 use crate::rng::Rng;
 
 /// The exit's **intel gate** (§4.5/§10.2/#244): how much intel a run must hold
@@ -52,7 +54,7 @@ use crate::rng::Rng;
 /// §4.5-vs-`place.rs` discrepancy). Ordered by the pressure it puts on a run:
 /// [`All`](IntelGate::All) is the hardest (the longest exposure), [`None`] the
 /// easiest, so the sources compose it *harder-ward* ([`IntelGate::harder_of`]).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IntelGate {
     /// **Easier.** The exit opens immediately — no intel required. Reserved for
     /// campaign (§14 v3), where intel is currency (§2.2), not an exit key.
@@ -123,7 +125,7 @@ impl Ord for IntelGate {
 /// with a departure on each side, which is what lets both ends live in the §12.6
 /// directed pool — see [`harder_of`](GuardCount::harder_of) for the composition rule
 /// that follows from it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GuardCount {
     /// **Easier.** One guard fewer than the recipe asks for — never below
     /// [`LevelConfig::GUARDS_MIN`](crate::LevelConfig::GUARDS_MIN), the floor that
@@ -191,7 +193,7 @@ impl GuardCount {
 /// (`crate::LevelConfig`), and lives there with the recipe for the same reason the
 /// guard envelope does: how many consoles a carve can *seat* is a fact about
 /// generation (§10.6), not about this seam.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IntelCount {
     /// **Harder.** One console fewer than the recipe asks for — never below
     /// [`LevelConfig::INTEL_MIN`](crate::LevelConfig::INTEL_MIN), the floor that keeps
@@ -247,7 +249,7 @@ impl IntelCount {
 /// support on purpose. It is why the rule may only ever be bent by a **modifier**,
 /// never by the base game, and why the end sits outside the difficulty draw (see
 /// [`POOL`]): it does not add a step of pressure, it hands back a different game.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LayoutKnowledge {
     /// **Easier.** The **full layout** (§11.5a): geometry the player has never had
     /// eyes on draws as the real building rather than as the schematic `□`, so
@@ -340,7 +342,7 @@ impl LayoutKnowledge {
 /// either side; a facility with no crate in it is not a middle, it is *none*. That
 /// makes the §12.6 pressure rule read differently here — see
 /// [`most_of`](Self::most_of).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CacheCount {
     /// No crate at all — every quick-play level and every hand-built state.
     /// [`Default`], because a single facility has no *rest of the run* to accumulate
@@ -428,7 +430,7 @@ impl CacheCount {
 /// shareable level-seed token ([`LevelSeed`](crate::LevelSeed), #245).
 ///
 /// [`intel_to_exit`]: LevelModifiers::intel_to_exit
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LevelModifiers {
     /// **Harder.** Force the §7.6 search to flush an occupied hideout within its
     /// disc unconditionally — not only a *body* search (§10.3/#219). Baseline, a
@@ -766,7 +768,7 @@ pub struct LevelModifiers {
     /// out to 6 instead of 10. Baseline, every guard sees §7.1's own cone.
     ///
     /// **The arc is not part of it**, and that was measured rather than assumed.
-    /// §6.2's tier ladder offers a guard exactly one narrower arc, and appendix 50's
+    /// §6.2's tier ladder offers a guard exactly one narrower arc, and appendix 51's
     /// sweep put that rung at ~25 points of bot win rate against the shortened range's
     /// ~8 — a step so large it reads as a different guard rather than an easier one. So
     /// this modifier moves the range and leaves the wedge alone; giving the arc
@@ -1592,7 +1594,7 @@ impl ModifierSources {
 /// compile-time enumeration of modifier read sites (§12.2) would start listing a
 /// switch that no rule may ever consult. Two types, two rules: **a level modifier
 /// changes the game, a debug modifier changes only what you get to see of it.**
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DebugModifiers {
     /// See the **whole level**: the player's field of view (§6) becomes every cell of
     /// the facility, so a playtest build can be watched instead of played blind.

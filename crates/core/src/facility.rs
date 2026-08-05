@@ -22,12 +22,14 @@
 //! when an occupant's fill sits in it — an occupancy overlay the turn tickets read,
 //! not a second terrain kind.
 
+use serde::{Deserialize, Serialize};
+
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
 
 /// A kind of cell. The vocabulary the facility grid stores; the §10.3 terrain
 /// table lives on it as [`Terrain`]'s property methods.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Terrain {
     /// Walkable empty ground. Renders blank (§10.3).
     Floor,
@@ -346,7 +348,7 @@ impl Terrain {
 /// the north-west corner. Movement, distance and the rest of the model are
 /// 4-directional (§4.1), but this type is pure storage plus lookups — it holds
 /// no turn logic.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Facility {
     width: u32,
     height: u32,

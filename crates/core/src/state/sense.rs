@@ -35,13 +35,15 @@
 //!   is here). The trail makes what an attentive player could already read *legible*,
 //!   rather than adding a channel.
 
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
 /// A fading mark in the sense channel (§9/§9.4): what was felt through a wall, and how
 /// many more turns the mark shows. Stamped at full life the turn the fact holds and
 /// decremented once per world turn, so a cue shows for [`life`](SenseSource::life)
 /// renders and is gone on the next.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub(super) struct SenseCue {
     /// What was sensed — and, with it, which cells the mark lights and how long it
     /// lives.
@@ -62,7 +64,7 @@ impl SenseCue {
 /// What a [`SenseCue`] was felt from (§9). The two halves of the one channel: a guard's
 /// position (§9.1/§9.2) and a door change (§9.4). They differ in what they light and in
 /// how long they live, and in nothing else.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub(super) enum SenseSource {
     /// A door that changed state away from the player — the mark lights its **whole
     /// footprint** (§9.4), so the eye reads "that doorway" rather than one panel.

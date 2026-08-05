@@ -36,6 +36,8 @@
 //! they leaned one step forward. The union steps outside the symmetry property on
 //! purpose; see the function for the rule and the rationale.
 
+use serde::{Deserialize, Serialize};
+
 use crate::cell::{Cell, Direction};
 use crate::facility::Facility;
 
@@ -74,7 +76,7 @@ pub const GUARD_SIGHT_ARC: u8 = 2;
 ///
 /// **The arc is deliberately not touched with it.** §6.2's ladder gives a guard only
 /// two settings — its own ~90° wedge and the ~53° one a rung down — and the sweep
-/// behind appendix 50 measured that rung as worth ~25 points of bot win rate against
+/// behind appendix 51 measured that rung as worth ~25 points of bot win rate against
 /// the range's ~8. That is not a difficulty step, it is a different guard; the range
 /// alone is the step this modifier wanted, and a finer arc is its own piece of work.
 pub const NARROWED_GUARD_SIGHT_RANGE: u32 = 6;
@@ -261,7 +263,7 @@ impl Default for GuardSight {
 /// A default-constructed set is empty and contains nothing; it is the placeholder a
 /// viewer carries before its first sight phase runs (§4.2 runs one full turn at
 /// level start, so no live [`State`](crate::State) ever exposes one).
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct VisibleSet {
     width: u32,
     height: u32,

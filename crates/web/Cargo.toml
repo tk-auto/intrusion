@@ -24,6 +24,14 @@ crate-type = ["cdylib", "rlib"]
 intrusion-core = { path = "../core" }
 wasm-bindgen = "=0.2.100"
 
+# The autosave's codec (§12.5/#514). The *derives* live in the core, which stays pure
+# — this is the one crate that turns a run into bytes and hands them to a browser, so
+# the format lives here with the storage boundary rather than in the game logic. JSON
+# because the slot is a string either way, and a save you can read in the devtools is
+# a save you can diagnose.
+serde = "=1.0.229"
+serde_json = "=1.0.151"
+
 # web-sys/js-sys are the raw DOM + canvas2d bindings the thin shell draws
 # through. Pinned to the versions that pair with wasm-bindgen 0.2.100 so the
 # glue never drifts (§12.4 determinism applies to the build, not just the game).
@@ -71,4 +79,8 @@ features = [
     # an unmounted canvas — so the tile layer needs no binding the text renderer did
     # not already have beyond the image itself.
     "HtmlImageElement",
+    # The run's autosave (§12.5/#514): the slot is `localStorage`, and the write that
+    # matters most rides the page going away — `visibilitychange` reads the document's
+    # own `hidden` flag, which needs no binding of its own.
+    "Storage",
 ]

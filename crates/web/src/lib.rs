@@ -52,6 +52,7 @@ mod input;
 mod menu;
 mod palette;
 mod replay;
+mod save;
 mod seed;
 mod tap;
 mod tiles;
@@ -140,6 +141,12 @@ pub fn start() -> Result<(), JsValue> {
     // a `?debug=intruded` activation, so the address bar is already clean by the time
     // the run reflects its own token into it below.
     let debug = debug::boot_debug();
+    // The autosaved run, if this build can read one (§12.5/#514). Asked once, here,
+    // because two decisions below hang on it: whether the title screen carries a
+    // *Continue run* row, and whether a load that names a level is a reload of the run
+    // in progress rather than a fresh roll of it.
+    let resume = save::stored();
+    let resume_level = resume.as_ref().map(|save| save.level);
     let chosen = seed::explicit_level();
     let level = chosen.unwrap_or_else(seed::random_level);
     let replay = replay::initial_replay(level);
@@ -163,7 +170,7 @@ pub fn start() -> Result<(), JsValue> {
     // the first key or finger then corrects.
     let modality = input::boot_modality();
     let ui = if chosen.is_none() && replay.is_none() {
-        menu::opening_ui()
+        menu::opening_ui(resume.is_some())
     } else {
         ScreenUi::default()
     };
@@ -195,6 +202,8 @@ pub fn start() -> Result<(), JsValue> {
             recorded: Vec::new(),
             tiles: tiles::Tiles::boot(),
             campaign: None,
+            autosave: save::browser(handle.clone()),
+            resume,
             handle: handle.clone(),
         })
     });
@@ -211,15 +220,40 @@ pub fn start() -> Result<(), JsValue> {
         input::install_input(&document, &game)?;
         input::install_gestures(&document, &game)?;
         menu::install(&document, &game)?;
+        // The page-hide flush (§12.5/#514) — live play only: a replay has no run of its
+        // own to write.
+        save::install(&document, &game)?;
         // A run the load already named is live from the first frame, so its token
         // belongs in the address bar straight away (§13.1/#110). A run chosen from
         // the menu reflects itself when it starts, not before.
         if game.borrow().ui.menu.is_none() {
             seed::reflect_level(&level);
         }
+        // …and if that named run is the one already in progress, the load is a
+        // **reload**, not a fresh start: resume it over the frame just built (§12.5).
+        if resume_level.is_some_and(|saved| resumes_in_place(chosen, saved)) {
+            game.borrow_mut().continue_run();
+        }
     }
     install_resize(&game)?;
     Ok(())
+}
+
+/// Whether a load that was **told** to play `chosen` should resume the saved run
+/// instead of rolling it fresh (§12.5/#514 × §13.1/#110).
+///
+/// The shell reflects a live run's token into the address bar the moment the run
+/// starts, so a **refresh mid-run** arrives back here carrying that token and looks
+/// exactly like a shared link. Booting it fresh would throw away the run the player is
+/// in the middle of — the one thing the autosave exists to prevent — so the token
+/// matching the save's own level is read as *this is that run*, and the save wins.
+///
+/// A token naming a **different** level is a genuine link to somebody else's run and
+/// starts fresh, overwriting the slot forward as any new run does. A load that names
+/// nothing does not come here at all: it opens on the title screen, where *Continue
+/// run* is a row the player chooses.
+fn resumes_in_place(chosen: Option<LevelSeed>, saved: LevelSeed) -> bool {
+    chosen == Some(saved)
 }
 
 /// On-screen cell geometry in **backing-store (device) pixels** — the scale that fits
@@ -298,6 +332,18 @@ struct Game {
     /// run, and it survives every facility the run walks through. `MapUi` on the view
     /// state says whether the map is *showing*; this says whether there is a map at all.
     campaign: Option<Campaign>,
+    /// The run's **autosave** (§12.5/#514): the storage slot and the write policy that
+    /// decides when the run crosses it. Held here rather than in the view state for the
+    /// same reason the campaign is — it is a fact about the page's run, not about what
+    /// is drawn — and it is the page's, not the run's: a fresh facility keeps the same
+    /// slot and simply overwrites it.
+    autosave: save::Autosave,
+    /// The saved run this load found and has **not yet resumed**, or `None`.
+    ///
+    /// Read once at boot and taken by [`Game::continue_run`], so a run can be resumed
+    /// exactly once and the menu can offer *Continue run* knowing the record already
+    /// decoded — an entry that could fail when chosen would be worse than no entry.
+    resume: Option<save::Save>,
     /// A weak handle back to the shell's own cell, closed at construction
     /// (`Rc::new_cyclic`). Every other input the shell takes is answered inside the
     /// call that raised it, so nothing else needs this; the clipboard write (§13.1/
@@ -377,6 +423,12 @@ impl Game {
         // fed to a run that no longer exists, and a replay stitched across two
         // worlds would reproduce neither.
         self.recorded.clear();
+        // And a fresh world means the *old* world's outstanding write is moot
+        // (§12.5/#514). The slot itself is left holding whatever it holds: it is
+        // overwritten **forward**, by this run's own first write a couple of seconds
+        // from now, so starting a run never empties the slot before there is anything
+        // to put in it.
+        self.autosave.reset();
         // A clean view state, except for what the *player* is — the modality the
         // hint speaks (§11.6/#323) is a fact about their hands and the colour theme
         // (§11.2/#189) a fact about their eyes, neither of them about the run, so a
@@ -567,4 +619,26 @@ fn draw_char(ctx: &CanvasRenderingContext2d, x: f64, y: f64, glyph: char, m: &Me
     let py = y * m.cell_h + m.cell_h / 2.0;
     // fill_text only errors on an invalid surface; ignore the unit Ok.
     let _ = ctx.fill_text(&glyph.to_string(), px, py);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A reload of the run in progress resumes it** (§12.5/#514). The shell writes a
+    /// live run's token into the address bar (§13.1/#110), so a refresh comes back
+    /// naming the level it was already playing — and booting that fresh would throw
+    /// away the very run the autosave exists to keep. A token naming a *different*
+    /// level is a real link and starts fresh; a load naming nothing never asks.
+    #[test]
+    fn a_reload_of_the_saved_level_resumes_it_and_another_link_does_not() {
+        let saved = LevelSeed::quick_play(4);
+        let other = LevelSeed::quick_play(5);
+        assert!(resumes_in_place(Some(saved), saved), "the same run reloads");
+        assert!(
+            !resumes_in_place(Some(other), saved),
+            "another link is a run"
+        );
+        assert!(!resumes_in_place(None, saved), "a bare load opens the menu");
+    }
 }

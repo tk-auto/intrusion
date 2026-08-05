@@ -41,6 +41,8 @@
 //! every other — and rejects the carve and redraws if one fails, up to a hard cap.
 //! Downstream code only ever sees a layout that passed.
 
+use serde::{Deserialize, Serialize};
+
 use crate::cell::{Cell, Direction};
 use crate::duct::{Duct, DuctKind};
 use crate::facility::{Facility, Terrain};
@@ -263,7 +265,7 @@ pub enum GenError {
 /// A generated facility: its terrain grid and the spatial region graph that names
 /// every room and corridor in it (§10.5). The two are kept in lockstep — every
 /// interior floor cell belongs to exactly one region, every wall to none.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Layout {
     facility: Facility,
     regions: RegionGraph,
