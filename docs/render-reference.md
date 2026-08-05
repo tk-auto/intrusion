@@ -209,6 +209,22 @@ mouths is a private fourth layer (§10.7): it is never absorbed into tile memory
 after crawling it the cells still read as whatever the building around them reads
 as. Only the two mouths are ever drawn — and, being fabric, they must be found.
 
+**The whole of this section is the layout knob's middle rung** (§12.6
+`layout_knowledge`, #307/#233). The plans are what the baseline gives, and both ends
+of the knob replace the table above rather than shading it:
+
+| Setting | What a never-seen cell draws |
+|---|---|
+| `Full` (easier) | The **real building** — `#`, `+`, `=`, `π` and the rest, as if walked. Contents it is not entitled to (a console, a cupboard) stay masked by the geometry in their place |
+| `Plans` (baseline) | The **schematic** — `□` for fabric, blank for floor space, as sorted above |
+| `None` (harder) | **Nothing.** Blank, in Ground, for fabric and floor space alike |
+
+The hard end (#233) is the *"everything unexplored collapses to exactly two
+appearances"* rule with the count taken down to one: no mark and no ink, so neither
+channel has anything to leak. It is a **[SETTLED]**-rule override and belongs to the
+modifier alone (§11.5a); the exit keeps its `E` under it like it does under everything
+else, which is the only reason the board is still readable at turn one.
+
 **The player's own tunnel is drawn by that same rule, and turn one is when you see it**
 (§4.5/#466). Every run begins *inside* it, on the level border, so the occupied run —
 border cell to `E`, one connected `=` — is the opening frame: a bright line pointing from

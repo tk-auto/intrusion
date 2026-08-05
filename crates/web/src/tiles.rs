@@ -746,7 +746,8 @@ fn base64(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use intrusion_core::{
-        render, start_level, Category, Fill, Input, LevelSeed, Terrain, Visibility,
+        render, start_level, Category, Fill, Input, LayoutKnowledge, LevelModifiers, LevelSeed,
+        Terrain, Visibility,
     };
 
     /// A tile layer in a known mode, with nothing decoded — every test here is about
@@ -1076,6 +1077,73 @@ mod tests {
             against_the_fog > 0,
             "the opening frame puts some wall against unexplored fabric — \
              without one this test proves nothing",
+        );
+    }
+
+    /// The same fog rule with the layout **hidden** (§11.5a/#233): the harder end of
+    /// the layout knob leaves an unexplored cell drawing a blank rather than the
+    /// schematic's `□`, so a wall the player *has* seen now stands against nothing at
+    /// all — and must join to nothing at all.
+    ///
+    /// It is the leak that would be invisible in a screenshot, and worse here than at
+    /// the baseline: with the schematic gone, a join reaching into the blank would draw
+    /// the *outline of the building* the modifier exists to withhold, in the one channel
+    /// that carries no glyph and no colour to check it against.
+    #[test]
+    fn a_wall_never_joins_into_a_hidden_layout() {
+        let mut state = start_level(&LevelSeed {
+            modifiers: LevelModifiers {
+                layout_knowledge: LayoutKnowledge::None,
+                ..LevelSeed::quick_play(4242).modifiers
+            },
+            ..LevelSeed::quick_play(4242)
+        })
+        .expect("the v1 footprint always carves");
+        for _ in 0..10 {
+            state.step(Input::Step(Direction::West));
+        }
+        let grid = render(&state);
+
+        let mut walls = 0;
+        let mut against_the_blank = 0;
+        for y in 0..grid.height() {
+            for x in 0..grid.width() {
+                if grid.get(x, y).glyph != '#' || grid.get(x, y).surface != Surface::Board {
+                    continue;
+                }
+                walls += 1;
+                let mask = neighbour_mask(&grid, x, y, '#');
+                for (bit, dx, dy) in [(NORTH, 0, -1), (EAST, 1, 0), (SOUTH, 0, 1), (WEST, -1, 0)] {
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    let inside = (0..grid.width() as i64).contains(&nx)
+                        && (0..grid.height() as i64).contains(&ny)
+                        && grid.get(nx as u32, ny as u32).surface == Surface::Board;
+                    let drawn = inside.then(|| grid.get(nx as u32, ny as u32).glyph);
+                    assert_eq!(
+                        mask & bit != 0,
+                        drawn == Some('#'),
+                        "({x},{y}) joins by bit {bit} but its neighbour draws {drawn:?}",
+                    );
+                    if drawn == Some(' ') {
+                        against_the_blank += 1;
+                    }
+                }
+            }
+        }
+        assert!(walls > 0, "the player has seen some wall by turn ten");
+        assert!(
+            against_the_blank > 0,
+            "a seen wall must border the hidden layout somewhere — \
+             without one this test proves nothing",
+        );
+        assert!(
+            !(0..grid.height())
+                .flat_map(|y| (0..grid.width()).map(move |x| (x, y)))
+                .any(|(x, y)| {
+                    let cell = grid.get(x, y);
+                    cell.surface == Surface::Board && cell.glyph == '□'
+                }),
+            "nothing draws the schematic with the layout hidden",
         );
     }
 

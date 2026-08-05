@@ -2346,3 +2346,77 @@ What is **not** open is the seam. The alert reaches the facility through
 the pool already documents with a direction — which is what makes the §2.3 assertion true
 by construction rather than by review, and what keeps the campaign from growing the
 private difficulty knob set the ticket was written to forbid.
+
+---
+
+## Appendix 42 — Fogging the layout is a knob's end, not a toggle, and not a difficulty step
+
+*(§7.6/§11.5a/§12.6/§13.2; #233, on the seam #225 left. `crates/core/src/modifiers.rs`,
+`crates/core/src/render.rs`, `crates/core/src/level_seed.rs`.)*
+
+#233 asks for a hard modifier that fogs the **geometry** — the layer §11.5a settles as
+*"always visible, from turn one. Never fogged."* The ticket knows what it is asking:
+the doc keeps the layout visible so the player can plan an escape before being spotted
+(§7.6), and it says of the alternative that *"a player who is chased and improvising in
+unknown geometry is not playing a stealth game, they're rolling dice."* Building the
+fog is a dozen lines. Three decisions around it were not.
+
+### It is one knob with three rungs, not a second toggle
+
+`full_layout_known` already shipped (#307): the *easier* rule that draws the real
+building where the schematic stands. The obvious implementation of #233 was a second
+`bool` beside it, and it is wrong for a reason that shows up the moment two sources
+compose. A modifier set is a **union** (§12.6) — the alert may add pressure the player's
+choice did not ask for — so two independent bools can arrive both set, and *"the full
+layout is known and also unknown"* has no answer. Every resolution is a precedence rule
+invented at the read site, which is precisely the coupling §12.3 wants visible.
+
+They are two answers to one question, so they are one field:
+`LayoutKnowledge { Full, Plans, None }`, baseline in the middle, composed by
+`GuardCount`'s rule — a quiet source yields, and a genuine disagreement resolves
+harder-ward. There is now exactly one place the question is answered, and the compiler
+enumerates the three rungs at every read site.
+
+The knob costs nothing in the token, which is what made the shape affordable. Slot 4 was
+`full_layout_known`'s and keeps its meaning as the knob's easier end, so every token ever
+minted decodes to exactly the run it named; the harder end is **appended at slot 16**,
+and the ends being twelve slots apart is fine because a slot number is a position, never
+a reading order. The both-ends-at-once rejection the guard knob introduced (#232) covers
+it unchanged.
+
+### It overrides a [SETTLED] rule, so the doc says so where the rule is
+
+A modifier that bends a settled rule from inside §12.6 leaves §11.5a asserting something
+false with nothing to notice it by. Every other modifier flips a rule its own section
+already describes as a knob; this one contradicts a table. So the override is written
+into §11.5a itself, next to the row it falsifies, with what it costs — the §7.6 pillar,
+by name — and the base game keeps the visible layout. The rule is still settled; what is
+settled now includes the one modifier allowed to bend it.
+
+### The pool asks a third question of a candidate
+
+The §12.6 directed pool (#297) had two filters for a candidate modifier: *can it be
+composed* (the intel gate cannot, appendix 29) and *where is its baseline* (a neutral
+middle can be drawn from both ends, appendix 31). By both, this end qualifies — it is a
+renderer-only rule read on the same board, and its knob's baseline is a middle. It is
+still out.
+
+The reason is a third question neither of the first two asks: **is this pressure, or is
+it a different game?** The −2…+2 axis promises the same game under more or less of the
+former. Hiding the layout removes route-planning from turn one and hands back a run
+where a chase is improvised through unknown ground — the dice-roll §11.5a warns of, on
+purpose. A player who moved the slider to *+1* and got that would not have been given a
+harder facility; they would have been given an unfamiliar mode without asking. So the
+modifier stays reachable by name — a chosen set, a shared token, a node flavour — and
+unreachable by the draw.
+
+The second reason is measurement, and it is the honest half. The §13.2 bot is granted
+geometry unconditionally, on §11.5a's authority — the very rule this end overrides — so
+it routes confidently through walls it has never seen and pays none of the price. A
+batch under this modifier measures the bot, not the game (§13.3). Keeping the end out of
+the pool means no difficulty draw can quietly put a batch in that position. Closing the
+hole properly means teaching the bot to route over *known* geometry and re-plan on what
+it discovers — an optimistic explorer, which is a change to the core of the policy
+rather than a flag, and so its own piece of work. Until it exists, this modifier is
+judged by playing it, and `docs/bot-behaviour.md` §2 says so beside the row that is
+lying.

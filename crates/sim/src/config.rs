@@ -25,8 +25,8 @@
 //! a paired A/B (#257) rests on.
 
 use intrusion_core::{
-    AbilityId, AlertTuning, GuardCount, IntelCount, IntelGate, LevelConfig, LevelModifiers,
-    LevelSeed, Loadout,
+    AbilityId, AlertTuning, GuardCount, IntelCount, IntelGate, LayoutKnowledge, LevelConfig,
+    LevelModifiers, LevelSeed, Loadout,
 };
 
 /// What every run in a batch boots from (§13.2): the facility recipe, the modifiers
@@ -131,8 +131,8 @@ impl RunConfig {
 
     /// The same config with the named modifier switched **on**, or the vocabulary as
     /// an error. Names are the [`LevelModifiers`] field names in kebab case, matched
-    /// loosely ([`normalise`]) so `full-layout-known`, `full_layout_known` and
-    /// `Full Layout Known` all name the same field.
+    /// loosely ([`normalise`]) so `layout-knowledge-full`, `layout_knowledge_full` and
+    /// `Layout Knowledge Full` all name the same field.
     ///
     /// Modifiers only ever go on: the baseline is every one of them off, so "off" is
     /// what not naming it already means. A **knob**'s ends are two names over one
@@ -267,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 12] = [
+const MODIFIERS: [(&str, SetModifier); 13] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -280,7 +280,23 @@ const MODIFIERS: [(&str, SetModifier); 12] = [
     ("always-show-vision-cones", |m| {
         m.always_show_vision_cones = true
     }),
-    ("full-layout-known", |m| m.full_layout_known = true),
+    // The **layout knob**'s two ends (§11.5a/#307/#233), one name each, spelled off the
+    // field as the guard knob's are — `full-layout-known` named a field that no longer
+    // exists, and a name that cannot be searched for is the one thing this table's
+    // convention forbids.
+    ("layout-knowledge-full", |m| {
+        m.layout_knowledge = LayoutKnowledge::Full
+    }),
+    // **The bot cannot honestly play this end** (`docs/bot-behaviour.md` §2): it is
+    // granted geometry unconditionally, on the authority of the §11.5a rule this
+    // modifier overrides, so with the layout hidden it still routes through walls it
+    // has never seen. The name is here because a modifier the harness cannot even name
+    // is one nobody can look at — `--inspect` and a replay still show what the *player*
+    // would be shown — but a batch that names it measures the bot, not the game (§13.3).
+    // Teaching the bot to explore unknown geometry is its own ticket.
+    ("layout-knowledge-none", |m| {
+        m.layout_knowledge = LayoutKnowledge::None
+    }),
     // The one modifier that is read by **generation** rather than at runtime
     // (§12.6/#452): it decides what a doorway is, so a batch that names it carves a
     // different facility from the same seed. That is the point of measuring it.
@@ -601,7 +617,7 @@ mod tests {
             sighting_lost_calls_a_guard,
             body_found_calls_two_guards,
             always_show_vision_cones,
-            full_layout_known,
+            layout_knowledge,
             calm_guards_detect_only_their_cone,
             automatic_doors,
             guards_watch_consoles,
@@ -615,7 +631,6 @@ mod tests {
         assert!(sighting_lost_calls_a_guard);
         assert!(body_found_calls_two_guards);
         assert!(always_show_vision_cones);
-        assert!(full_layout_known);
         assert!(automatic_doors);
         assert!(guards_watch_consoles);
         assert!(show_search_areas);
@@ -623,6 +638,7 @@ mod tests {
         // one named last rather than accumulating — see [`RunConfig::with_modifier`].
         assert_eq!(guard_count, GuardCount::Fewer);
         assert_eq!(intel_count, IntelCount::Fewer);
+        assert_eq!(layout_knowledge, LayoutKnowledge::None);
         assert!(
             !calm_guards_detect_only_their_cone,
             "the retired slot has no name, so naming every modifier must not set it",
@@ -649,7 +665,7 @@ mod tests {
             .with_modifier("deafen-the-guards")
             .expect_err("no such modifier");
         assert!(error.contains("deafen-the-guards"), "{error}");
-        assert!(error.contains("full-layout-known"), "{error}");
+        assert!(error.contains("layout-knowledge-full"), "{error}");
 
         let error = RunConfig::sim()
             .with_tech("smoke-grenade")
@@ -680,16 +696,17 @@ mod tests {
             );
         }
         for spelling in [
-            "full-layout-known",
-            "full_layout_known",
-            "Full Layout Known",
+            "layout-knowledge-full",
+            "layout_knowledge_full",
+            "Layout Knowledge Full",
         ] {
-            assert!(
+            assert_eq!(
                 RunConfig::sim()
                     .with_modifier(spelling)
                     .expect("a known modifier")
                     .modifiers
-                    .full_layout_known,
+                    .layout_knowledge,
+                LayoutKnowledge::Full,
                 "{spelling}",
             );
         }
