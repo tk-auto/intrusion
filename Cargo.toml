@@ -16,7 +16,10 @@ repository = "https://github.com/tk-auto/intrusion"
 # pin it exactly so the algorithm can never shift under us between releases.
 [workspace.dependencies]
 rand_core = "=0.9.3"
-rand_pcg = "=0.9.0"
+# `serde` so the run's random source rides a save (§12.5/#514): the snapshot has to
+# carry the PRNG's live position, and the generator's internal state is reachable
+# only through its own derives.
+rand_pcg = { version = "=0.9.0", features = ["serde"] }
 
 # Tests are dominated by CPU-bound facility generation (§10.6 seed sweeps), which
 # runs ~20x slower unoptimized. Light optimization keeps the whole suite in

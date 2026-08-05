@@ -19,6 +19,8 @@
 //! near-line message and the responder is the player's own sensed dot peeling off
 //! toward the takedown site — no ping the player has to hear.
 
+use serde::{Deserialize, Serialize};
+
 use crate::category::Category;
 use crate::cell::Cell;
 use crate::facility::Facility;
@@ -81,7 +83,7 @@ const _: () = assert!(BODY_CALL_GUARDS > SIGHTING_CALL_GUARDS);
 /// by the guard and handed to the [`Body`](crate::body::Body) it becomes at a
 /// takedown, where the clock finally has an effect — a live guard always answers,
 /// so its cadence is unobservable until it is down.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct RadioClock {
     period: u32,
 }

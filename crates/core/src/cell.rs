@@ -7,12 +7,14 @@
 //! grid/occupancy model (a separate ticket); everything that only needs to name
 //! a square can lean on this without pulling that weight in.
 
+use serde::{Deserialize, Serialize};
+
 /// The address of one grid square, `(x, y)` from the top-left origin (§4.1).
 ///
 /// A plain value type — copy it freely. It carries no notion of grid bounds, so
 /// a `Cell` can name a coordinate that no particular facility contains; whoever
 /// holds the grid is responsible for bounds.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct Cell {
     /// Column, growing east from the west wall.
     pub x: u32,
@@ -102,7 +104,7 @@ impl Cell {
 /// path anywhere" structural — nothing built on [`Cell::step`] or
 /// [`Facility::neighbours`](crate::Facility::neighbours) can travel diagonally,
 /// because there is no diagonal to travel.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Direction {
     /// Decreasing `y` — toward the north wall.
     North,

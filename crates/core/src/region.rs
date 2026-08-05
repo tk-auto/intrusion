@@ -19,23 +19,25 @@
 //! and [`RegionGraph::add_door`]. It is fully usable standalone from a hand-built
 //! fixture, which is how it is tested here.
 
+use serde::{Deserialize, Serialize};
+
 use crate::cell::Cell;
 
 /// A handle to a region in a [`RegionGraph`]. Opaque and stable for the life of
 /// the graph; compare handles, don't compute with them.
 /// Ordered by creation index, which is the graph's own scan order — the
 /// deterministic tie-break the §7.5 partition breaks ties with (§12.4).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct RegionId(u32);
 
 /// A handle to a door edge in a [`RegionGraph`].
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct DoorId(u32);
 
 /// What a region *is*. Rooms and corridors are both first-class regions — the old
 /// model could not address corridors at all, and that was the point of failure
 /// (§10.5). More kinds may join later; this is the vocabulary generation needs now.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum RegionKind {
     /// A leftover of the partition — always ≥ 6×6, the space rooms live in (§10.1).
     Room,
@@ -47,7 +49,7 @@ pub enum RegionKind {
 /// One region: its kind and the exact set of cells it occupies (any shape), plus
 /// the doors on its boundary. The cell set is the payoff over a bounding rectangle
 /// — a room with a pillar carved out records its true footprint here (§10.5).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Region {
     kind: RegionKind,
     cells: Vec<Cell>,
@@ -87,6 +89,7 @@ pub enum DoorCell {
 /// the whole facility, so a level speaks one door vocabulary and which one is a stated
 /// property of the run. A mixture was the old behaviour and its cost was legibility —
 /// which kind a door was, you found out by walking up to it.
+#[derive(Serialize, Deserialize)]
 pub enum DoorKind {
     /// A hinged door: a solid frame end at each side and movable panels between them.
     /// Opened by bumping a panel, closed by bumping a hinge (§10.4) or by a Calm guard
@@ -122,7 +125,7 @@ pub enum DoorKind {
 /// window would then unlock the prize room for the rest of the run — a lock quietly
 /// destroyed by an unrelated ability. Two flags cannot do that: each source sets and
 /// clears only its own.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct DoorLock {
     /// **Sealed** by the player's Lockdown (§8.3/#242): a guard cannot work the
     /// handle while the window lasts, and the player's own bump is untouched. It
@@ -204,7 +207,7 @@ impl DoorLock {
 /// and close as one unit. Bump a panel to open, bump a hinge to close; the actual
 /// operation, which also restamps the facility terrain, lives on
 /// [`Layout`](crate::Layout) since it touches both the graph and the grid.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Door {
     between: [RegionId; 2],
     /// The two frame ends, in scan order. Always solid and opaque.
@@ -371,7 +374,7 @@ impl Door {
 /// edge between two of them. The graph enforces its invariants as it is built — a
 /// cell belongs to at most one region, a door joins exactly two distinct regions —
 /// panicking on violation, because those are generator bugs, not runtime states.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RegionGraph {
     width: u32,
     height: u32,

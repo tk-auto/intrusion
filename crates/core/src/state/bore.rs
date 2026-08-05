@@ -67,6 +67,8 @@
 //! doing. §10.6 is untouched in the other direction: boring only ever *adds*
 //! connectivity, so every reachability guarantee that held before a bore holds after.
 
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
 /// Why a bore is refused right now (§8.4/#303) — the [`Err`] half of
@@ -76,7 +78,7 @@ use super::*;
 /// "unusable": walk to a wall, step away from the corner, find an interior wall,
 /// find a thinner one. The near line speaks them (§11.7) so a player learns the rule
 /// by being told it once rather than by being refused repeatedly in silence.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum BoreRefusal {
     /// No wall touches the player at all — standing in the open, there is nothing to
     /// bore.
