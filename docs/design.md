@@ -121,6 +121,7 @@ stronger *inside* a run. That arc is the campaign. It just doesn't survive you.
 |---|---|---|
 | Salvaged tech abilities | **Accumulate** | **Nothing carries** |
 | Intel | **Accumulates and is spent** | **Nothing carries** |
+| Alert | **Carries one hop** — the last raid's condition, replaced not accumulated (§14 v3/#210) | **Nothing carries** |
 | Facility access | **Opens up** | **Resets** |
 | Player skill and knowledge | — | **Everything** |
 
@@ -3111,9 +3112,10 @@ deliberately distinct:
 
 - **Choice** (exogenous) — the player's chosen or seeded baseline. A **mode** is a
   named preset = a bundle of modifiers over the base rules (#244).
-- **Alert** (endogenous) — the campaign alert (#210): a loud raid raises the
-  alert, and higher alert switches on harder modifiers for later facilities. This
-  is where *"levels adapt to the strategy you lean on"* (§2) lives.
+- **Alert** (endogenous) — the campaign alert (#210): a loud raid alerts the ground
+  ahead of it, and an alerted facility is dealt a harder rule from the same directed
+  pool the difficulty axis draws from (§14 v3 has the mapping). This is where
+  *"levels adapt to the strategy you lean on"* (§2) lives.
 - **Flavour** (per-node) — a facility's own character on the campaign map (#207): an
   *Outpost* is thin and thinly guarded, a *Vault* rich and watched, a *Workshop* full of
   crates and thin on intel (#209). A flavour **is**
@@ -3330,10 +3332,26 @@ a campaign of **one** facility is exactly the game v1 ships.
 **[START]** on the campaign's length, now stated as the map's **depth to the archive**
 (six, so a run raids seven facilities) — the coarsest knob on the 2–3 hour target.
 
-The alert's *contribution* is deliberately not settled here: a raid's loudness does not
-yet raise the campaign alert, and every facility starts at base alert. What a loud raid
-is worth, how it decays, and which modifiers a raised alert switches on are one
-decision (§14 v3), and until it is taken the seam carries no number nobody designed.
+**The campaign alert is the condition the last completed raid ended at** (#210), and it
+reaches exactly one hop: the facilities the map is about to offer, through the §12.6
+modifier seam and nothing else. The rule it switches on is drawn from the **directed
+pool** per node, so its direction is guaranteed by construction. See §14 v3 for the
+mapping; three properties are the layer's own:
+
+- **It is replaced, never added to.** A quiet raid returns it to zero however loud the
+  one before it was, so §2.2's "escalation must stay recoverable" is a property of the
+  type rather than a decay rate tuned to hope so — and there is no floor to state,
+  because the floor is zero and every raid can reach it.
+- **Determinism holds across the whole trajectory** (§12.4). Both draws — which facility
+  the noise settles on, and which rule that facility is dealt — hang off the run seed
+  and the node identity on their own salted sub-streams, so a run reproduces from
+  `(run seed, [inputs])` with the same alert trajectory and the same scaled facilities.
+  A facility's own seed is untouched by it: the loud and the quiet arms of a run walk
+  into the *same building*, playing different rules.
+- **A campaign facility stays a sayable level.** The contribution resolves into the
+  facility's `LevelSeed` before it boots, so an alerted facility's token is the facility
+  as it was actually played — like every other source (§12.7's opening rule holds:
+  nothing below this layer knows there is a campaign).
 
 ---
 
@@ -3539,7 +3557,36 @@ bullet below fills one of its seams.
 - Difficulty that scales with the alert level, driven through the level-modifier
   seam (§12.6) rather than a private knob set. **The whole point of the alert
   system is that being loud in facility 2 makes facility 3 harder.** Until that
-  loop closes, alert is decoration.
+  loop closes, alert is decoration. The loop is closed (#210, appendix 41): the
+  campaign alert is the **condition the last raid ended at**, and it lands on the
+  facilities the map is about to offer.
+  - **The mapping** [START]. Condition 0 — nobody ever noticed you — leaves **one**
+    open road ahead *off guard*, drawn one **easier** rule: the cherry on a ghost
+    raid. Condition 1 carries nothing. Condition 2 leaves **one** open road
+    *alerted*, drawn one **harder** rule. Condition 3 leaves **all** of them
+    alerted, each drawn its own.
+  - **The step from 2 to 3 is breadth, not depth** [SETTLED]. Both switch on one
+    rule; what the top of the ladder takes away is the *route around it*. At
+    condition 2 there is still an unwatched road and finding it is the play; at
+    condition 3 there is not. That is an escalation the player can read off the map
+    and act on, which a second modifier stacked on one facility would not be.
+  - **It reaches one hop and does not accumulate** [SETTLED]. Being loud in facility
+    2 makes facility 3 harder — that is the sentence, and the sentence is the whole
+    promise. A raid whose noise still bent facility 6 would be a difficulty curve
+    nobody designed, and the player would have no way to tell which raid they were
+    still paying for. It is also the answer to §2.2's death-spiral risk: a level that
+    cannot add to itself cannot spiral, which is why there is no decay rate and no
+    floor to tune. Lowering it deliberately, with intel, is #213's sink.
+  - **The intel-locked edge is never alerted** [SETTLED]. The mark lands only on
+    ground the run can walk onto; on the locked edge it would be an alert with
+    nothing behind it, which is the §2.3 failure this closes. The road intel buys is
+    the one the noise did not travel.
+  - **It is legible before the choice, not after** [SETTLED]. The map screen names
+    the loudness and the facility it settled on — a facility's flavour identifies it
+    exactly, since no two open successors share one — because routing around an
+    alerted facility is the play at condition 2, and a player told afterwards has been
+    told nothing. Inside the facility the drawn rule is on the help panel's Level info
+    tab with every other active modifier.
 - An ending. The old campaign had no reachable conclusion.
 
 ### Later — the idea backlog

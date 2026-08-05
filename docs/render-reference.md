@@ -319,6 +319,27 @@ light theme for §2.4's reason, one screen over: it is the heaviest ink the grid
 down, and it made an *unmarked* option pull the eye harder than the marked one, which
 is the selection marker's job.
 
+**The campaign alert is a line, not a glyph** (§14 v3/#210). What the last raid left on
+the ground ahead is reported by a subtitle under the heading — `Condition 2 of 3 — Vault
+alerted`, `Left unnoticed — Depot off guard` — rather than by a mark beside the row it
+concerns. Two reasons, and the second is the load-bearing one:
+
+- **There is no room.** The widest offer row (`Workshop — salvage, at intel's cost`,
+  with its marker) already spends 38 of the board's 40 cells, so a second glyph on the
+  row would have to be one cell wide with nothing either side of it.
+- **A name is more legible than a mark.** No two open successors ever share a flavour
+  (§14 v3 **[SETTLED]**), so *the Vault* picks out exactly one row — and the line has to
+  carry the loudness itself (which condition, and whether it reached one road or all of
+  them) regardless, which no per-row mark could.
+
+Its colour is the **direction** it reports, and it is the same cue the help card gives
+the same modifier (§12.6/#248): **Warning** for a rule bent against you, **Owned** for
+one bent your way, **Ground** for a raid whose noise reached nothing on the list. That
+is the one place on this screen where colour means *what a facility will play like*
+rather than *where you stand in the list*, which is why it is on a line of its own and
+never on a node: a node tinted by two unrelated meanings would be a colour you cannot
+read.
+
 ---
 
 ## 3. Knowledge states
