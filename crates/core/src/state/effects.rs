@@ -163,12 +163,15 @@ pub(super) fn area_radius(effect: Effect) -> Option<u32> {
         Effect::Confuse => Some(CONFUSION_RADIUS),
         Effect::SealDoors => Some(LOCKDOWN_RADIUS),
         // Everything else acts on the player themselves, not on a region around them.
+        // Reversal (#243) acts on the one cell the player is standing in — the guard
+        // has to reach *them* — so it has no footprint to draw either.
         Effect::ExtraStep
         | Effect::ConcealWhileStill
         | Effect::SpawnDecoy
         | Effect::Phase
         | Effect::AutoDoors
-        | Effect::EnhancedSight => None,
+        | Effect::EnhancedSight
+        | Effect::ReverseCapture => None,
     }
 }
 

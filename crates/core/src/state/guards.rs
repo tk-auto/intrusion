@@ -477,6 +477,30 @@ impl State {
         !sent.is_empty()
     }
 
+    /// **The Saver firing** (§4.5/§7.2/§8.3/#243): the guard indexed `guard` lunged
+    /// into the player at `at` and is taken down for it, leaving the §7.2 body.
+    ///
+    /// The body falls in the guard's **own** cell, not in the player's. Two reasons,
+    /// and the second is the load-bearing one: a lunge that is turned over never
+    /// arrives, so the guard was standing where it started when it dropped — and the
+    /// player's cell may be a **cupboard** (§10.3: a witnessed hideout is captured
+    /// into, which is the one way this fires while hidden), where a body means
+    /// something else entirely (§7.2's stowing locks the cupboard). Dropping it at the
+    /// player's feet would put a body into the one cell in the game where a body is a
+    /// different noun.
+    ///
+    /// Everything after that is an ordinary takedown, deliberately: the body inherits
+    /// the guard's radio cadence and starts its §7.3 clock, and the tally the end
+    /// screen reads counts it like any other. Surviving a capture costs you a body you
+    /// did not choose where to leave, in a spot a guard was walking to.
+    fn save_from_capture(&mut self, guard: usize, at: Cell, events: &mut Vec<Event>) {
+        let fell = self.guards[guard].pos();
+        let clock = self.guards[guard].radio_clock();
+        self.bodies.push(Body::new(fell, clock, self.turn));
+        events.push(Event::CaptureSaved { at });
+        events.push(Event::TakenDown { at: fell });
+    }
+
     /// Pass 6 — each guard `decide`s a step (§7.5) and takes it. A guard moving into
     /// the player's cell is a capture and ends the run (§4.5). Otherwise it moves onto
     /// any cell that admits it and holds no other actor; a guard with nowhere to go, or
@@ -502,11 +526,21 @@ impl State {
         // divide the building, so every Calm guard wanders the whole of it.
         let style = self.patrol_style();
         let blind = self.guard_blind_policy();
+        // Guards the Saver put down **this pass** (§4.5/§8.3/#243), by index. They are
+        // out of the game from the instant they lunge — their body is already on the
+        // floor — but they are not *removed* until the pass ends, because the phase's
+        // one reading is indexed by position in `self.guards` and the module's opening
+        // note makes that stability a rule: no guard is added or removed between the
+        // passes. So a downed guard is skipped where it would act and ignored where it
+        // would obstruct, and the vector is edited once, after every guard has moved.
+        //
+        // Nearly always empty, and never longer than one entry with the budget at one.
+        let mut downed: Vec<usize> = Vec::new();
         for i in 0..self.guards.len() {
             if self.outcome != Outcome::Playing {
-                return;
+                break;
             }
-            if !senses.acts(i) {
+            if !senses.acts(i) || downed.contains(&i) {
                 continue;
             }
             let facility = self.layout.facility();
@@ -521,7 +555,7 @@ impl State {
                 .guards
                 .iter()
                 .enumerate()
-                .filter(|(j, _)| *j != i)
+                .filter(|(j, _)| *j != i && !downed.contains(j))
                 .map(|(_, g)| g.pos())
                 .collect();
             blocked.extend_from_slice(&sealed);
@@ -584,6 +618,23 @@ impl State {
                     if self.hidden() && self.guards[i].witnessed_hideout() != Some(target) {
                         continue;
                     }
+                    // **The one declared exception to §4.5** (§8.3/#243): with the Saver
+                    // in effect the grab is turned over — the guard that reached you is
+                    // taken down where it stood and the run goes on. Asked here, at the
+                    // last instant before the capture lands, because that is the only
+                    // moment the ability is *for*; every refusal above (the duct, the
+                    // cupboard) is a capture that never happened and must not spend the
+                    // level's one save on nothing.
+                    //
+                    // Keyed on the effect, not the ability (§8.1), and the same call
+                    // both asks and pays: an ability whose budget is spent is no longer
+                    // in effect, so the second guard to reach you this turn — or the
+                    // next one, ten turns later — captures you exactly as §4.5 says.
+                    if self.abilities.spend_effect(Effect::ReverseCapture) {
+                        self.save_from_capture(i, target, events);
+                        downed.push(i);
+                        continue;
+                    }
                     // The mood is read **before** the guard is moved onto the player
                     // (§7.4/#138): what the end screen has to name is the state the
                     // guard made contact in, and a capture is the last thing that
@@ -597,7 +648,7 @@ impl State {
                         state,
                         at: target,
                     });
-                    return;
+                    break;
                 }
             }
             // A closed door does not stop a guard: its route runs straight through
@@ -631,9 +682,11 @@ impl State {
             // cell — the body just lies underneath it (#182). `advance_to` refreshes
             // the moved guard's cone at once, so the sight a frame shows never lags
             // the position it shows (§11.5); the next phase 2 recomputes everything.
-            if self.layout.facility().can_enter(target, ACTOR_FILL)
-                && self.guard_at(target).is_none()
-            {
+            // A guard the Saver put down is not in anybody's way (#243): it is out of
+            // the game and only still in the vector because the pass has not ended, so
+            // it is read past here exactly as it was read past in `blocked` above.
+            let held_by_a_guard = self.guard_at(target).is_some_and(|j| !downed.contains(&j));
+            if self.layout.facility().can_enter(target, ACTOR_FILL) && !held_by_a_guard {
                 let from = self.guards[i].pos();
                 let facility = self.layout.facility();
                 self.guards[i].advance_to(target, dir, facility, blind);
@@ -655,6 +708,13 @@ impl State {
                     }
                 }
             }
+        }
+        // The one edit to the guard list, made **after** every pass has read it: the
+        // guards the Saver put down leave the board here (§8.3/#243). Descending, so
+        // each removal cannot shift an index still to be removed. Empty on every turn
+        // but the one, which is nearly all of them.
+        for i in downed.into_iter().rev() {
+            self.guards.remove(i);
         }
     }
 }

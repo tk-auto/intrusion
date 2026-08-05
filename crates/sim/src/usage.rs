@@ -135,6 +135,11 @@ impl Verb {
     /// shows up in the outcome metrics instead, which is the honest place for it —
     /// a slot in this histogram would sit at zero for a run the ability shaped
     /// throughout.
+    ///
+    /// That holds for the Saver (#243) even though it has a per-level budget: a
+    /// budget is not a press either. What spends it is a guard reaching the player,
+    /// and the metric that shows it is the pair of counters that move together when it
+    /// fires — a capture that did not happen, and a takedown the player never made.
     pub fn of_ability(id: AbilityId) -> Option<Verb> {
         Some(match id {
             AbilityId::Run => Verb::Run,
@@ -145,7 +150,7 @@ impl Verb {
             AbilityId::Confusion => Verb::Confusion,
             AbilityId::PierceWall => Verb::PierceWall,
             AbilityId::Lockdown => Verb::Lockdown,
-            AbilityId::Vision => return None,
+            AbilityId::Vision | AbilityId::Saver => return None,
         })
     }
 

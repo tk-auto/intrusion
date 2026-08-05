@@ -30,8 +30,11 @@
 //! duration/cooldown tick, with the `duration + cooldown` lockout *emergent* from
 //! the rules rather than stored. Alongside the two clocks sits the one non-time
 //! axis (§8.2/#302): an optional **per-level use budget**
-//! ([`Economy::uses_per_level`]), set at level start, counted down by use, and never
+//! ([`Ability::uses_per_level`]), set at level start, counted down by use, and never
 //! given back — scarcity for an effect too strong to hand out on a cooldown alone.
+//! It sits on the ability rather than inside the time economy, so a **passive** can
+//! declare one too (#243) and be spent by the world rather than by a press
+//! ([`Deck::spend_effect`]).
 //! The deck reads each ability's state as one of the
 //! display [`AbilityState`]s ([`Deck::state`]) — the number the player actually
 //! gets (§8.2 timing) — which is how the two halves meet.
@@ -214,7 +217,8 @@ const fn max_state_notation() -> usize {
     let mut widest = PASSIVE_MARKER.len();
     let mut i = 0;
     while i < AbilityId::ALL.len() {
-        match AbilityId::ALL[i].def().mode {
+        let def = AbilityId::ALL[i].def();
+        match def.mode {
             // A passive has no clock at all — its marker is the starting value above.
             AbilityMode::Passive => {}
             AbilityMode::Activated(economy) => {
@@ -226,15 +230,17 @@ const fn max_state_notation() -> usize {
                 if cooldown > widest {
                     widest = cooldown;
                 }
-                // A use budget is a third number the bar can show — `(N)` (#302) —
-                // so it is measured here like the two clocks, and a budget wide
-                // enough to push the row over fails the build rather than the frame.
-                if let Some(uses) = economy.uses {
-                    let notation = decimal_width(uses) + 2;
-                    if notation > widest {
-                        widest = notation;
-                    }
-                }
+            }
+        }
+        // A use budget is a third number the bar can show — `(N)` (#302) — so it is
+        // measured here like the two clocks, and a budget wide enough to push the row
+        // over fails the build rather than the frame. Measured off the row itself
+        // rather than off the economy inside it, because **either** mode may carry one
+        // (#243): a budgeted passive shows `(1)` where an unbudgeted one shows `(on)`.
+        if let Some(uses) = def.uses {
+            let notation = decimal_width(uses) + 2;
+            if notation > widest {
+                widest = notation;
             }
         }
         i += 1;
@@ -288,11 +294,9 @@ const _: () = assert!(
 const fn use_budgets_are_single_digit() -> bool {
     let mut i = 0;
     while i < AbilityId::ALL.len() {
-        if let AbilityMode::Activated(economy) = AbilityId::ALL[i].def().mode {
-            if let Some(uses) = economy.uses {
-                if uses == 0 || uses > 9 {
-                    return false;
-                }
+        if let Some(uses) = AbilityId::ALL[i].def().uses {
+            if uses == 0 || uses > 9 {
+                return false;
             }
         }
         i += 1;
@@ -341,6 +345,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#242): seal the doors around you for a window — guards
     /// cannot work them, you still can.
     Lockdown,
+    /// Salvaged tech (§8.3/#243), **passive and budgeted**: the one guard that lays
+    /// hands on you this facility goes down instead of taking you.
+    Saver,
 }
 
 impl AbilityId {
@@ -349,7 +356,7 @@ impl AbilityId {
     /// which bar slot a held ability lands in and therefore which digit fires it
     /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
     /// must not drift.
-    pub const ALL: [AbilityId; 9] = [
+    pub const ALL: [AbilityId; 10] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -359,17 +366,21 @@ impl AbilityId {
         AbilityId::Vision,
         AbilityId::PierceWall,
         AbilityId::Lockdown,
+        AbilityId::Saver,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
-    /// opposed to innate [`Run`](AbilityId::Run). This is the default eligible pool
-    /// a `starting_abilities` grant (#244) draws from: the shipped, non-experimental
-    /// tech (the gated experiments #239/#243 are not economy abilities yet, so the
-    /// pool is exactly the rows listed here). Quick play grants the whole pool while its size
-    /// meets the grant count; the draw only bites once the pool outgrows the grant.
-    /// A passive (#264) is drawn from here like any other tech — it competes for the
-    /// same slot, which is exactly what it pays with.
-    pub const TECH: [AbilityId; 8] = [
+    /// opposed to innate [`Run`](AbilityId::Run), in their **permanent slot order**:
+    /// the order the level-seed token encodes a held set against (#333), so entries are
+    /// appended and never moved or removed.
+    ///
+    /// This is also the eligible pool a `starting_abilities` grant (#244) draws from
+    /// and an equipment cache is stocked out of (#209) — the roster and the pool are
+    /// one list. Quick play grants the whole pool while its size meets the grant count;
+    /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
+    /// from here like any other tech — it competes for the same slot, which is exactly
+    /// what it pays with.
+    pub const TECH: [AbilityId; 9] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -378,6 +389,7 @@ impl AbilityId {
         AbilityId::Vision,
         AbilityId::PierceWall,
         AbilityId::Lockdown,
+        AbilityId::Saver,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -439,6 +451,7 @@ impl AbilityId {
             AbilityId::Vision => "Vision",
             AbilityId::PierceWall => "Pierce Wall",
             AbilityId::Lockdown => "Lockdown",
+            AbilityId::Saver => "Saver",
         }
     }
 
@@ -464,6 +477,7 @@ impl AbilityId {
             AbilityId::Vision => "Sight",
             AbilityId::PierceWall => "Bore",
             AbilityId::Lockdown => "Lock",
+            AbilityId::Saver => "Saver",
         }
     }
 
@@ -519,6 +533,10 @@ impl AbilityId {
                 "Seals the doors near you for a while. Guards cannot work a sealed \
                  door and route the long way round; you still open yours."
             }
+            AbilityId::Saver => {
+                "The next guard to lay hands on you goes down instead of taking you, \
+                 leaving a body. Once a facility, and then never again."
+            }
         }
     }
 
@@ -551,6 +569,7 @@ impl AbilityId {
             AbilityId::Vision => &VISION,
             AbilityId::PierceWall => &PIERCE_WALL,
             AbilityId::Lockdown => &LOCKDOWN,
+            AbilityId::Saver => &SAVER,
         }
     }
 
@@ -566,6 +585,7 @@ impl AbilityId {
             AbilityId::Vision => 6,
             AbilityId::PierceWall => 7,
             AbilityId::Lockdown => 8,
+            AbilityId::Saver => 9,
         }
     }
 }
@@ -749,6 +769,18 @@ pub enum Effect {
     /// ability fired: a door does not unseal because you walked away from it, or the
     /// wall you raised behind you would dissolve exactly as you fled down it.
     SealDoors,
+    /// Saver (§8.3, §4.5, #243): while in effect, a guard's **capturing step**
+    /// (§4.5 — contact, the only loss condition) is turned into a **takedown of that
+    /// guard** (§7.2) and the run goes on. The attacker alone: a second guard reaching
+    /// the player the same turn captures them as it always did.
+    ///
+    /// The one declared exception to a **[SETTLED]** rule, so what bounds it is not a
+    /// clock but the level itself — the ability is passive with a per-level use budget
+    /// (§8.2/#302), and the moment it fires is the moment it is spent. It leaves the
+    /// §7.2 body and starts the §7.3 clock like any other takedown, because it *is*
+    /// one: surviving still costs a body, an aware guard's noise, and a radio silence
+    /// coming due.
+    ReverseCapture,
 }
 
 /// A data-driven ability's behaviour, or the code escape hatch (§8.1).
@@ -783,7 +815,6 @@ pub struct Economy {
     targeting: TargetingMode,
     duration: u32,
     cooldown: u32,
-    uses: Option<u32>,
 }
 
 impl Economy {
@@ -810,20 +841,6 @@ impl Economy {
     /// true lockout is `duration + cooldown`.
     pub fn cooldown(&self) -> u32 {
         self.cooldown
-    }
-
-    /// How many times this **whole facility** lets the ability be used, or `None`
-    /// for the abilities the time economy alone governs (§8.2/#302).
-    ///
-    /// It is not a resource: there is nothing to spend it on, nothing that refills
-    /// it, and no way to earn one back. It composes *with* the clocks rather than
-    /// replacing them — an ability may carry a cooldown and a budget both, and the
-    /// turn cost is untouched either way (§4.4) — and it exists so an effect too
-    /// strong to hand out on a cooldown alone can still ship (#303). Set at level
-    /// start from this row and counted down by the [`Deck`]; the level is the only
-    /// thing that ever gives one back, by being a new level.
-    pub fn uses_per_level(&self) -> Option<u32> {
-        self.uses
     }
 }
 
@@ -856,6 +873,7 @@ pub enum AbilityMode {
 pub struct Ability {
     id: AbilityId,
     mode: AbilityMode,
+    uses: Option<u32>,
     behaviour: Behaviour,
 }
 
@@ -873,6 +891,26 @@ impl Ability {
     /// How the ability is paid for (§8.2/#264) — a time economy, or the slot.
     pub fn mode(&self) -> AbilityMode {
         self.mode
+    }
+
+    /// How many times this **whole facility** lets the ability be used, or `None`
+    /// for the abilities their [`mode`](Ability::mode) alone governs (§8.2/#302).
+    ///
+    /// It is not a resource: there is nothing to spend it on, nothing that refills
+    /// it, and no way to earn one back. It exists so an effect too strong to hand out
+    /// on a cooldown alone can still ship (#303). Set at level start from this row and
+    /// counted down by the [`Deck`]; the level is the only thing that ever gives one
+    /// back, by being a new level.
+    ///
+    /// **It sits beside the mode rather than inside it** (#243). §8.2 says the budget
+    /// "composes with the time economy, it does not replace it" — it is the one
+    /// *non-time* axis, and an axis that composes with the clocks is not a field of
+    /// them. Kept inside [`Economy`] it was structurally an activated ability's
+    /// privilege, which made a budgeted **passive** unrepresentable rather than merely
+    /// unbuilt. Out here either mode may declare one, and neither has to know the
+    /// other can.
+    pub fn uses_per_level(&self) -> Option<u32> {
+        self.uses
     }
 
     /// The ability's time economy (§8.2), or `None` for a **passive** — which has
@@ -901,9 +939,13 @@ impl Ability {
 // ability's own ticket; the economy is blind to them.
 
 /// An activated ability's §8.2 economy, as one `const` expression — the shape every
-/// [`AbilityMode::Activated`] row below is built from. The time economy alone
-/// governs it: no per-level use budget ([`Economy::uses_per_level`] is `None`), which
-/// is every ability shipping today.
+/// [`AbilityMode::Activated`] row below is built from.
+///
+/// It states the **time** economy and only that. Whether the row also carries a
+/// per-level use budget is [`Ability::uses`]'s to say (§8.2/#302/#243), and every
+/// row states that field explicitly — a budget is never inherited from a
+/// constructor's default, so declaring one stays a different keystroke from
+/// forgetting one.
 const fn activated(
     cost: u32,
     targeting: TargetingMode,
@@ -915,44 +957,25 @@ const fn activated(
         targeting,
         duration,
         cooldown,
-        uses: None,
-    })
-}
-
-/// An activated ability whose real scarcity is the **per-level use budget**
-/// (§8.2/#302) rather than the clock — the shape a row with `uses_per_level` is built
-/// from. Held apart from [`activated`] so that declaring a budget is a different
-/// keystroke from forgetting one: a row either says a number here or does not have
-/// the field at all.
-const fn budgeted(
-    cost: u32,
-    targeting: TargetingMode,
-    duration: u32,
-    cooldown: u32,
-    uses: u32,
-) -> AbilityMode {
-    AbilityMode::Activated(Economy {
-        cost,
-        targeting,
-        duration,
-        cooldown,
-        uses: Some(uses),
     })
 }
 
 const RUN: Ability = Ability {
     id: AbilityId::Run,
     mode: activated(1, TargetingMode::Itself, 5, 12),
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::ExtraStep]),
 };
 const CAMOUFLAGE: Ability = Ability {
     id: AbilityId::Camouflage,
     mode: activated(1, TargetingMode::Itself, 10, 20),
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::ConcealWhileStill]),
 };
 const DECOY: Ability = Ability {
     id: AbilityId::Decoy,
     mode: activated(1, TargetingMode::Direction, 20, 30),
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::SpawnDecoy]),
 };
 // Dephase [START] (§8.3, #449): the window is **4**, counting the activation that
@@ -966,6 +989,7 @@ const DECOY: Ability = Ability {
 const DEPHASE: Ability = Ability {
     id: AbilityId::Dephase,
     mode: activated(1, TargetingMode::Itself, 4, 30),
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::Phase]),
 };
 // Autodoors [START] (§8.3): a long active window — enough to walk a whole stretch
@@ -974,6 +998,7 @@ const DEPHASE: Ability = Ability {
 const AUTODOORS: Ability = Ability {
     id: AbilityId::Autodoors,
     mode: activated(1, TargetingMode::Itself, 16, 40),
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::AutoDoors]),
 };
 // Confusion [START] (§8.3, §9, #240/#325): a blind-and-freeze blast around the
@@ -991,6 +1016,7 @@ const AUTODOORS: Ability = Ability {
 const CONFUSION: Ability = Ability {
     id: AbilityId::Confusion,
     mode: activated(1, TargetingMode::Itself, 0, 45),
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::Confuse]),
 };
 // Vision [START] (§5/§6.1, §8.3, #265): the first **passive** — no activation, no
@@ -1002,6 +1028,7 @@ const CONFUSION: Ability = Ability {
 const VISION: Ability = Ability {
     id: AbilityId::Vision,
     mode: AbilityMode::Passive,
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::EnhancedSight]),
 };
 // Pierce Wall [START] (§8.3/§8.4, #303): **instant** — `duration: 0`, so it resolves
@@ -1020,7 +1047,8 @@ const VISION: Ability = Ability {
 // activation and its budget exactly as a data ability does.
 const PIERCE_WALL: Ability = Ability {
     id: AbilityId::PierceWall,
-    mode: budgeted(1, TargetingMode::Itself, 0, 0, PIERCE_WALL_USES),
+    mode: activated(1, TargetingMode::Itself, 0, 0),
+    uses: Some(PIERCE_WALL_USES),
     behaviour: Behaviour::Coded,
 };
 
@@ -1044,8 +1072,55 @@ const PIERCE_WALL: Ability = Ability {
 const LOCKDOWN: Ability = Ability {
     id: AbilityId::Lockdown,
     mode: activated(1, TargetingMode::Itself, 8, 40),
+    uses: None,
     behaviour: Behaviour::Effects(&[Effect::SealDoors]),
 };
+
+// Saver [START] (§4.5/§8.2/§8.3, #243): the **experiment** — a costed exception to
+// §4.5's [SETTLED] "a guard touches you … that is the only loss condition". The guard
+// that lays hands on you is taken down instead, once, and the run continues.
+//
+// **Passive with a budget, and the pair is the whole design.** The ticket proposed a
+// toggle on a short duration against a very long cooldown; both halves of that shape
+// fight the ability. A defensive toggle has to be *predicted* — you spend a turn
+// standing still, in the moment a guard is closing, on a guess about the next three
+// turns — and §8.2's timing trap says the activation turn must be protected, which is
+// a trap you can only fall into if there is an activation turn at all. There is none
+// here: held is on (§8.2/#264), so the protection is never mistimed and there is no
+// turn spent buying it. What replaces the cooldown is the scarcer bound the same
+// section already offers — **one use per facility** (§8.2/#302) — which is stricter
+// than any cooldown can be: a lockout ends, and this does not (appendix 42).
+//
+// **What it costs.** The loadout slot, permanently (§8.2's answer for every passive)
+// — this is one of three, held instead of a flight tool for every other crisis of the
+// run — and then the body. A save leaves a guard on the floor where you were standing,
+// in a cell a guard was walking to, with the §7.3 clock started and its colleagues
+// nearby; §7.2's economy is that a takedown you cannot hide is a takedown that finds
+// you later. So the good player's "when would I not use this" is answered for them —
+// they never choose to spend it — and the real decision moved one level up, to whether
+// a slot is worth an insurance policy that fires once.
+//
+// It is **drawn like any other tech** (§8.3): quick play can deal it and a crate can
+// hold it, so the §4.5 exception is measured in the runs players actually get rather
+// than only in the ones that ask for it by name. That is the experiment (§14) — trial,
+// measure, promote or reject — and the sim is what watches whether a run whose worst
+// moment is survivable once has stopped taking capture seriously (§13.2/§13.4).
+const SAVER: Ability = Ability {
+    id: AbilityId::Saver,
+    mode: AbilityMode::Passive,
+    uses: Some(SAVER_USES),
+    behaviour: Behaviour::Effects(&[Effect::ReverseCapture]),
+};
+
+/// How many captures one facility lets you walk away from — **[START]** (§4.5/§8.3/#243).
+///
+/// **One**, and the number is the design rather than a dial that happens to be low. Two
+/// would make being caught a thing that *happens* on the way to somewhere, which is the
+/// §2.3 failure ("being seen was free") transposed onto capture; one keeps a run's
+/// single worst moment survivable exactly once and leaves the next one lethal. §8.2's
+/// fence would allow up to nine, and every value above one should be argued for against
+/// the sim before it is tried.
+pub const SAVER_USES: u32 = 1;
 
 /// How many walls one facility lets you bore through — **[START]** (§8.3/#303).
 ///
@@ -1185,7 +1260,7 @@ impl Deck {
     pub(crate) fn new(loadout: Loadout) -> Self {
         let mut uses = [None; AbilityId::ALL.len()];
         for id in AbilityId::ALL {
-            uses[id.index()] = id.def().economy().and_then(|e| e.uses_per_level());
+            uses[id.index()] = id.def().uses_per_level();
         }
         Deck {
             slots: [Slot::Ready; AbilityId::ALL.len()],
@@ -1221,10 +1296,20 @@ impl Deck {
         if !self.loadout.contains(id) {
             return AbilityState::Unusable;
         }
-        if id.is_passive() {
-            return AbilityState::Passive;
-        }
         let uses = self.uses[id.index()];
+        if id.is_passive() {
+            // A passive with a **budget** (#243) is still a passive — held is on — but
+            // holding it is no longer the whole of its state: what it has left is the
+            // fact the player is playing off, so it reads `(N)` and then `—`, never a
+            // standing `(on)` that would promise a rescue already spent. The
+            // parenthetical is the same shape either way, which is the point: both
+            // numbers mean *not a timer*.
+            return match uses {
+                None => AbilityState::Passive,
+                Some(0) => AbilityState::Exhausted,
+                Some(uses) => AbilityState::Limited { uses },
+            };
+        }
         match (self.slots[id.index()].display(), uses) {
             (active @ AbilityState::Active { .. }, _) => active,
             (_, Some(0)) => AbilityState::Exhausted,
@@ -1335,11 +1420,51 @@ impl Deck {
 
     /// Whether `id`'s behaviour applies right now: a held passive always, an
     /// activated ability only while its duration runs (§8.2).
+    ///
+    /// "Always" for a passive means *while the level still allows it* (#243): a
+    /// budgeted passive whose supply is spent is [`Exhausted`](AbilityState::Exhausted)
+    /// on the bar, and an ability that reads as unusable must not still be quietly
+    /// doing its work. So the same `Some(0)` that greys the entry is what stops the
+    /// effect, and no caller has to remember to check both.
     fn in_effect(&self, id: AbilityId) -> bool {
         if id.is_passive() {
-            return self.loadout.contains(id);
+            return self.loadout.contains(id) && self.uses[id.index()] != Some(0);
         }
+        // Deliberately *not* applied to an activated ability, on
+        // [`state`](Deck::state)'s own ranking: an active window keeps running after
+        // the use that bought it was the level's last, because the effect is what the
+        // use was spent *on*. Only a passive — which has no window to be inside — is
+        // switched off by an empty budget.
         matches!(self.slots[id.index()], Slot::Active { .. })
+    }
+
+    /// **Spend the effect the world just triggered** (§8.2/#302/#243): if any ability
+    /// in effect declares `effect`, consume one of its per-level uses and report that
+    /// it fired.
+    ///
+    /// The counterpart to [`activate`](Deck::activate) for a budget that is *not*
+    /// spent by a press. A passive has no activation moment to charge (§8.2/#264), so
+    /// for a budgeted one the moment its effect is actually called upon is the only
+    /// honest place to take the use — and that moment belongs to the turn loop, not to
+    /// the keyboard.
+    ///
+    /// Keyed on the **effect**, never on an identity, exactly as
+    /// [`effect_active`](Deck::effect_active) is: the loop interprets §8.1's
+    /// vocabulary, so a second ability that one day declares the same effect is
+    /// charged for it on the same rules and the trigger site needs no new arm. An
+    /// ability with no budget simply fires and is charged nothing, which is what an
+    /// unbudgeted passive already means.
+    pub(crate) fn spend_effect(&mut self, effect: Effect) -> bool {
+        let Some(id) = AbilityId::ALL.into_iter().find(|id| {
+            self.in_effect(*id)
+                && matches!(id.def().behaviour(), Behaviour::Effects(effects) if effects.contains(&effect))
+        }) else {
+            return false;
+        };
+        if let Some(left) = &mut self.uses[id.index()] {
+            *left -= 1; // `in_effect` refuses a spent budget, so this cannot underflow
+        }
+        true
     }
 
     /// The **end-of-turn** tick for every activated ability (§8.2 timing). Pushes one

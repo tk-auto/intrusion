@@ -2346,3 +2346,107 @@ What is **not** open is the seam. The alert reaches the facility through
 the pool already documents with a direction — which is what makes the §2.3 assertion true
 by construction rather than by review, and what keeps the campaign from growing the
 private difficulty knob set the ticket was written to forbid.
+
+---
+
+## Appendix 42 — The Saver: a passive with a budget, and what a fearless bot did with it
+
+*(§2.2/§2.3/§4.5/§7.2/§8.2/§8.3/§13.4; #243. `crates/core/src/ability.rs`,
+`crates/core/src/state/guards.rs`, `docs/stats/abilities/saver.md`.)*
+
+§4.5 is one of the shortest **[SETTLED]** rules in the document: *"a guard that attempts
+to move into your cell captures you. That is the only loss condition."* #243 proposed an
+ability that suspends it — the guard that catches you is taken down instead — and the
+whole question is what may bound an exception to a settled rule.
+
+### The ticket's shape was a toggle, and the toggle is the wrong instrument
+
+As written, the ability was a self-targeted toggle: one turn to switch on, a window of
+two or three turns, a very long cooldown. Every part of that fights what it is for.
+
+A defensive window has to be **predicted**. You spend a turn standing still — in the one
+moment a guard is closing — on a guess about the next three turns, and if the guess is
+wrong you have spent a turn, opened the lockout, and are still caught. The ticket knew
+this: it flags §8.2's timing trap and insists the activation turn itself be protected.
+But that trap only exists if there *is* an activation turn. A passive has none, so the
+protection cannot be mistimed, cannot be spent on the wrong turn, and cannot be forgotten
+in the panic it exists for.
+
+The cooldown is the second half of the same mistake. A lockout ends; a run long enough
+sees the ability come back, and an insurance policy that returns is one you spend
+carelessly. The bound wanted here is the one §8.2 already offers for effects too strong
+for a clock — **uses per level** (#302) — and at one use it is stricter than any cooldown
+can be: not "rarely", but "once, and then it is a §4.5 game again."
+
+### What that combination cost in the model
+
+Passive and budgeted was **unrepresentable**, not merely unbuilt, and the reason is worth
+recording because it is a good failure. The budget lived inside `Economy` — the struct a
+passive deliberately does not have (#264 made "a passive is not an ability with duration
+0" a type-level fact). So the one axis §8.2 describes as *composing with* the time economy
+was structurally a privilege of abilities that have one.
+
+The fix is one field moved: `uses` sits on `Ability`, beside the mode rather than inside
+it. §8.2's own prose is what says this is right — *"it composes with the time economy, it
+does not replace it"* — and the non-time axis is now the non-time axis for both modes.
+Two consequences fell out rather than being designed:
+
+- **What spends it is the world, not a press** (`Deck::spend_effect`). A passive has no
+  activation to charge, so the moment its effect is actually called upon is the only
+  honest place to take the use — and that seam is keyed on the §8.1 **effect**, never on
+  an identity, so a second ability that ever declares the same effect is charged on the
+  same rules.
+- **Spent is off, for a passive only.** A budgeted passive whose supply is gone is not
+  merely un-pressable — there is nothing to press either way — it is *not in effect*, so
+  the greyed bar entry and the game's behaviour are one fact. An **activated** ability is
+  the opposite and must stay so: an active window keeps running after the use that bought
+  it was the level's last, because the effect is what the use was spent on. `Deck::state`
+  already ranked those two cases; `in_effect` now mirrors that ranking rather than
+  inventing a second one.
+
+### The body is where it stood, not where you are
+
+A takedown leaves its body on the target cell. This one cannot: a lunge that is turned
+over never arrives, and the player's own cell may be a **cupboard** (§10.3 — a witnessed
+hideout is captured into, which is one of the two ways this fires while hidden), where a
+body is a different noun entirely (stowing one locks the cupboard, §7.2). So the guard
+drops where it stood. That is also the better fiction and the better cost: you are left
+standing next to a body in a cell a guard was walking to, with the §7.3 clock already
+counting, which is exactly §7.2's economy — a takedown you cannot hide is a takedown that
+finds you later.
+
+### What the sim measured, and why it is not a verdict
+
+100 seeds a batch, all four temperaments, innate loadout against innate-plus-Saver:
+
+| profile | win rate, innate → Saver (`--seed 0`) | replication (`--seed 100`) |
+|---|---|---|
+| `balanced` | 0.35 → **0.63** | 0.30 → **0.53** |
+| `cautious` | 0.53 → **0.74** | 0.51 → **0.66** |
+| `aggressive` | 0.40 → **0.69** | 0.37 → **0.59** |
+| `careless` | 0.43 → **0.66** | 0.37 → **0.50** |
+
+Eight batches out of eight, +0.13 to +0.28. Swapped into a real three-tech kit in place
+of Confusion it is the strongest verb in the kit by a distance (`balanced` 0.45 → 0.62,
+`aggressive` 0.42 → 0.74). The takedown counter moves with it — `balanced` goes from 0 to
+62 takedowns in 100 runs — which is the save firing, since the bot itself lands almost
+none: **62 of 100 runs reach a capture moment**, and about half of those go on to be
+captured again anyway.
+
+That last number is the finding, and it is a finding about the **bot**, not about the
+game (§13.4). The bot has no fear: it will take a 5% capture risk forever, so it walks
+into the moment this ability refunds far more often than a player who is frightened of
+dying would. An ability that returns your first capture is worth exactly as much as your
+first capture is likely, and the bot's is very likely. A human's is not — which is why
+this appendix reports a measurement and not a balance decision. What the numbers *do*
+establish is that the ability is nowhere near inert, and that if it is retuned the knob is
+`SAVER_USES` and the direction is not up.
+
+### What is not open
+
+That it is an **exception**, and stays declared as one. It is written into §4.5 beside the
+settled rule rather than tucked into the ability table, because a reader who learns "a
+guard touches you and the run ends" must not later discover a footnote that quietly means
+otherwise. And it is bounded by the *level* rather than by time on purpose: whatever this
+becomes — promoted to a §12.6 modifier, retuned, or rejected — a version that comes back
+during a run is a different ability, and it is not this one.

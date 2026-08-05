@@ -241,6 +241,14 @@ makes with `Behaviour::Effects`: a small declared vocabulary you cannot silently
 skip. A passive is handled by *saying so* in its arm (§8.2/#264), so "no cue" reads
 as a decision rather than an omission.
 
+The Saver (#243) is the case where that arm has to say more than "it is passive". It
+is a passive with something to **spend** (§8.2's use budget), so the tempting cue is
+one that plays bolder while the save is unspent — and that would be the bot deciding
+the ability is good and then proving itself right. What is wanted from a §4.5 exception
+is what the *unchanged* policy's outcomes do when one capture is survivable (§13.3), so
+its arm declines and says why. A boldness knob, if it is ever wanted, belongs to
+`Profile` with the other temperament dials, never to a cue.
+
 ### 4.2 A cue returns a bid
 
 | Field | What it carries |
@@ -297,6 +305,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Pierce Wall** | a route the facility does not offer | the same crossing, at three times the price — the budget is scarcer |
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
+| **Saver** | — **passive**, and deliberately uncued even though it has a budget (#243) | — |
 
 Two of these are worth reading twice, because they are the seam's own rules biting:
 
