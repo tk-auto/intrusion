@@ -3484,9 +3484,11 @@ a campaign of **one** facility is exactly the game v1 ships.
   every facility of a campaign is also a *sayable level*: a token you can hand to
   someone, or to the sim, and play on its own (§13.1).
 - **Three things carry between facilities, and nothing carries out of the run**
-  (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** — intel
-  is currency in the campaign, not an exit key, so the gate is `IntelGate::None`
-  (§4.5) and extraction is voluntary — and the **campaign alert**, the run-level layer
+  (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** (#211) —
+  intel is currency in the campaign, not an exit key, so the gate is `IntelGate::None`
+  (§4.5), extraction is voluntary, and the balance is banked at every completed raid and
+  spent only at the map between facilities (§14 v3, appendix 47) — and the
+  **campaign alert**, the run-level layer
   above the per-facility §7.3 ladder. Nothing persists a campaign anywhere, so
   "nothing carries across runs" is a property of the type rather than a rule to
   enforce.
@@ -3726,8 +3728,29 @@ bullet below fills one of its seams.
   - **Found tech is usable the turn it is found**, in the facility it was found in.
     A reward that only switched on after extraction would make the detour a deposit
     toward a later raid rather than a tool for this one.
-- Intel as a real currency, with actual sinks: reveal facility intel, unlock an
-  alternative route, lower the alert, upgrade an ability.
+- **Intel as a real currency, with actual sinks**: reveal facility intel, unlock an
+  alternative route, lower the alert, upgrade an ability. The wallet and the seam every
+  sink spends through are #211; the sinks themselves are its sub-tickets. Appendix 47
+  records the model.
+  - **Extraction is voluntary, and everything in a facility is surplus** [SETTLED]. The
+    campaign's exit gate is `IntelGate::None` (§4.5), so you may bump the exit and leave
+    any facility at any time: intel, caches and unlockables are all things you *chose* to
+    stay for. A currency you must hand over to get out is a toll, not a currency — the
+    two rules cannot both hold, and this is the one that survives. (v1 quick play keeps
+    *objectives required, early exit refused*: it has no hub to spend at.)
+  - **One spend context: the map between facilities** [SETTLED]. There is no in-level
+    spending, so the map screen (#208) is also the **hub** — the balance is a line on it
+    and the prices are rows of it, read in one glance. A wallet you could dip into
+    mid-raid would let a player buy their way out of a §4.4 mistake, and every tight
+    corner would become a shop.
+  - **The wallet is the only debit path** [SETTLED]. A sink asks the campaign to spend
+    and is told what happened — paid, not enough intel, or not at the hub — and a
+    refusal changes *nothing*: no partial payment, no half-applied sink. The wording of
+    the refusal belongs to the wallet, so every sink refuses in one voice (§11.7).
+  - **Walking out empty-handed is not punished** [OPEN on the tuning]. Nothing is taken
+    away for a wasted raid; the run is simply poorer at a facility the alert may have
+    made harder (#210), and caches are one-shot. An explicit nudge (a small alert bump)
+    is deferred until a played run says the emergent cost is too soft.
 - Difficulty that scales with the alert level, driven through the level-modifier
   seam (§12.6) rather than a private knob set. **The whole point of the alert
   system is that being loud in facility 2 makes facility 3 harder.** Until that

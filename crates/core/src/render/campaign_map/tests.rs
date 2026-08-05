@@ -67,6 +67,7 @@ fn the_map_draws_the_country_the_run_is_in() {
         vec![
             "            THE FACILITY MAP            ",
             "    Left unnoticed — Depot off guard    ",
+            "         Intel — nothing banked         ",
             "   ▫      ▫          ★       ▫       ▫  ",
             "                                        ",
             "                                        ",
@@ -76,13 +77,13 @@ fn the_map_draws_the_country_the_run_is_in() {
             "                           ▫            ",
             "                                        ",
             "                                        ",
-            "                                        ",
-            "    ▫       ▫                           ",
+            "    ▫                                   ",
+            "            ▫                           ",
             "                   ▫      ▫         ▫   ",
             "                                        ",
             "                                        ",
-            "                                        ",
-            "           ▫                        ▫   ",
+            "           ▫                            ",
+            "                                    ▫   ",
             "   ▫                ▫        ▫          ",
             "                                        ",
             "                                        ",
@@ -91,10 +92,9 @@ fn the_map_draws_the_country_the_run_is_in() {
             "  ▫       ▫                       ▫     ",
             "                                        ",
             "                                        ",
-            "                                        ",
-            " ▫                   ▪             ?    ",
-            "         ▫          ·    $      ···     ",
-            "                   ·    ·    ···        ",
+            " ▫                                 ?    ",
+            "         ▫           ▪   $      ···     ",
+            "                    ·   ·    ···        ",
             "                   ·  ·· ····           ",
             "                  · ·····               ",
             " ▫         ▫      @···     ▫        ▫   ",
@@ -121,7 +121,12 @@ fn the_map_draws_the_country_the_run_is_in() {
 fn a_fresh_run_is_offered_the_facility_it_stands_on() {
     let run = Campaign::new(8371);
     let rows = text(&run, MapUi::default());
-    let listed: Vec<&String> = rows.iter().filter(|r| r.contains('—')).collect();
+    // The list band only: the wallet line above it (#211) is written with the same dash,
+    // and it is a readout rather than something the marker can rest on.
+    let listed: Vec<&String> = rows[list_top(H) as usize..]
+        .iter()
+        .filter(|r| r.contains('—'))
+        .collect();
     assert_eq!(listed.len(), 1, "one row: raid this one");
     assert!(listed[0].starts_with("  > Outpost — "), "{}", listed[0]);
     assert!(
@@ -241,6 +246,60 @@ fn alert_row(run: &Campaign) -> String {
     text(run, MapUi::default())[ALERT_ROW as usize]
         .trim()
         .to_string()
+}
+
+/// The wallet line as the player reads it.
+fn wallet_row(run: &Campaign) -> String {
+    text(run, MapUi::default())[WALLET_ROW as usize]
+        .trim()
+        .to_string()
+}
+
+/// **The map is the hub, so it says what there is to spend** (§2.2/§14 v3/#211).
+///
+/// Unconditional, both wordings, in the currency's own word (§11.8) — a run that has
+/// banked nothing says so rather than showing no line, because a missing readout reads as
+/// a broken one.
+#[test]
+fn the_map_says_what_the_run_has_to_spend() {
+    let mut run = Campaign::new(8371);
+    assert_eq!(wallet_row(&run), "Intel — nothing banked");
+
+    run.enter();
+    run.complete(&Verdict {
+        ending: Ending::Escaped,
+        stats: RunStats {
+            intel: 7,
+            ..RunStats::default()
+        },
+    });
+    assert_eq!(run.intel(), 7);
+    assert_eq!(wallet_row(&run), "Intel 7");
+
+    // And it moves when the hub takes some — the balance on screen is the balance the
+    // next price is read against, never a stale copy.
+    assert!(run.spend(4).paid());
+    assert_eq!(wallet_row(&run), "Intel 3");
+}
+
+/// **The wallet line does not move the picture** (§11.4). It is drawn on every frame, so
+/// the map band beneath it is the same height at a choice point, on the approach, and
+/// with the balance at zero — a readout that appeared with the first haul would make the
+/// map jump exactly once, while the player was reading it.
+#[test]
+fn the_wallet_line_never_moves_the_map_band() {
+    let fresh = text(&Campaign::new(8371), MapUi::default());
+    let mut rich = at_a_choice_point(8371);
+    assert!(rich.spend(0).paid());
+
+    for rows in [&fresh, &text(&rich, MapUi::default())] {
+        assert_eq!(rows.len(), H as usize);
+        assert!(rows[WALLET_ROW as usize].contains("Intel"));
+        assert!(
+            rows[MAP_TOP as usize - 1].trim().starts_with("Intel"),
+            "the band starts directly under the wallet line",
+        );
+    }
 }
 
 /// **The picture is true to the graph** (§14 v3): every facility the map offers is drawn

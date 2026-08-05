@@ -14,7 +14,7 @@
 //! | | Within a run | Across runs |
 //! |---|---|---|
 //! | Salvaged tech | **accumulates** ([`loadout`](Campaign::loadout)) | nothing carries |
-//! | Intel | **accumulates and is spent** ([`intel`](Campaign::intel)) | nothing carries |
+//! | Intel | **accumulates and is spent** ([`wallet`]) | nothing carries |
 //! | Alert | **carries and scales** ([`alert`](Campaign::alert)) — #210, see below | nothing carries |
 //!
 //! "Across runs nothing carries" needs no code at all: a [`Campaign`] is a plain
@@ -23,8 +23,18 @@
 //! and it is these three fields, carried from the day the layer exists rather than
 //! retrofitted. The loadout is now filled by the thing it was declared for — an
 //! equipment cache opened in a facility rides out on the verdict and is added here
-//! (#209) — the intel epic spends the wallet (#211), and the alert now closes §14 v3's
-//! loop (#210).
+//! (#209) — intel is a [`Wallet`] with a debit path rather than a counter (#211), and the
+//! alert now closes §14 v3's loop (#210).
+//!
+//! # Intel is spent here, and nowhere else
+//!
+//! The wallet's one exit is [`spend`](Campaign::spend), and the sinks that call it live at
+//! the **map between facilities** (§14 v3) — there is no in-level spending, and the stage
+//! check that makes that true is in the campaign rather than in each sink. What a
+//! campaign's intel is *for* is therefore the hub, not the exit: the exit never refuses
+//! ([`IntelGate::None`], §4.5), so a facility's intel, caches and unlockables are all
+//! **surplus** and extraction is voluntary. Appendix 47 records why, and why a raid that
+//! took nothing is left to punish itself.
 //!
 //! **The alert carries exactly one hop**, which is the whole of what §14 v3 asks for:
 //! *being loud in facility 2 makes facility 3 harder*. It is the §7.3 condition the last
@@ -66,9 +76,11 @@ pub mod loudness;
 pub mod map;
 #[cfg(test)]
 mod tests;
+pub mod wallet;
 
 pub use loudness::{Loudness, ALERTS_ALL, ALERTS_ONE};
 pub use map::{FacilityMap, Flavour, MapPos, Offer, DEPTH_TO_ARCHIVE};
+pub use wallet::{Outlay, Wallet};
 
 use map::LANES;
 
@@ -212,7 +224,10 @@ pub struct Campaign {
     path: Vec<NodeId>,
     stage: CampaignStage,
     loadout: Loadout,
-    intel: u32,
+    /// The run's **currency** (§2.2/§14 v3) — see [`wallet`]. Filled by every completed
+    /// raid and emptied by the hub's sinks, and by nothing else: the balance is not a
+    /// field anything outside [`Wallet`] can set.
+    wallet: Wallet,
     alert: u32,
 }
 
@@ -240,7 +255,7 @@ impl Campaign {
             map,
             stage: CampaignStage::Approach,
             loadout: Loadout::innate(),
-            intel: 0,
+            wallet: Wallet::empty(),
             alert: 0,
         }
     }
@@ -361,9 +376,47 @@ impl Campaign {
     }
 
     /// The intel banked so far — the run's **currency** (§2.2), not an exit key.
-    /// Harvested at every completed raid; the sinks that spend it are #211's.
+    /// Harvested at every completed raid, spent at the hub ([`spend`](Self::spend)).
     pub fn intel(&self) -> u32 {
-        self.intel
+        self.wallet.balance()
+    }
+
+    /// Whether the run could pay `cost` right now — what a sink asks before it *offers*,
+    /// so an unaffordable price is drawn as unaffordable rather than only discovered by
+    /// pressing the key.
+    ///
+    /// It answers about the balance alone. Whether the run is anywhere it may spend is
+    /// [`spend`](Self::spend)'s to say, and only that call settles it.
+    pub fn affords(&self, cost: u32) -> bool {
+        self.wallet.affords(cost)
+    }
+
+    /// **Spend intel at the hub** (§14 v3) — the one debit path, and the call every sink
+    /// makes before it applies its effect.
+    ///
+    /// Three answers, all of them [`Outlay`]'s: paid, refused for want of intel, or
+    /// refused because the run is not at the hub. A refusal changes **nothing** — no
+    /// partial payment, no half-applied sink — so a caller that branches on
+    /// [`Outlay::paid`] cannot leave the run in a state where the money went somewhere the
+    /// effect did not.
+    ///
+    /// **Where "at the hub" is** (§14 v3): the map between facilities, which is both live
+    /// stages the map screen is the surface of — standing on a facility not yet raided
+    /// ([`Approach`](CampaignStage::Approach)) and at a choice point
+    /// ([`Choosing`](CampaignStage::Choosing)). Refused [`Inside`](CampaignStage::Inside),
+    /// because there is no in-level spending and a wallet you could dip into mid-raid
+    /// would let the player buy out of a §4.4 mistake, and refused once the run is over,
+    /// because there is nothing left to spend on.
+    ///
+    /// The check lives here rather than in each sink for the reason the wallet is a
+    /// newtype: a sink that forgot it would be a shop open inside a facility, and nothing
+    /// about the sink's own code would look wrong.
+    #[must_use]
+    pub fn spend(&mut self, cost: u32) -> Outlay {
+        if self.stage == CampaignStage::Inside || self.stage.is_over() {
+            return Outlay::Closed;
+        }
+        self.wallet.spend(cost)
     }
 
     /// The campaign alert (§7.3/§14 v3/#210) — the run-level layer above the
@@ -573,8 +626,8 @@ impl Campaign {
     /// is the same statement one layer up: an alert is a fact about a raid, and the raid
     /// is over.
     fn bank(&mut self, stats: RunStats) {
-        let taken = u32::try_from(stats.intel).unwrap_or(u32::MAX);
-        self.intel = self.intel.saturating_add(taken);
+        self.wallet
+            .bank(u32::try_from(stats.intel).unwrap_or(u32::MAX));
         self.alert = stats.alert_peak;
         // **The loadout is assigned, not added to** (§8.3/#266). It used to be a fold of
         // the raid's finds, which was right while a raid could only ever *gain* tech;

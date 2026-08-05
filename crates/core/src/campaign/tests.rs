@@ -873,6 +873,107 @@ fn each_flavour_hides_the_crates_its_row_promises() {
     );
 }
 
+/// **Intel is spent through the wallet and nowhere else** (§2.2/§14 v3/#211): the balance
+/// is what raids banked minus what the hub took, a refused spend leaves both the balance
+/// and the run untouched, and the two refusals are told apart.
+#[test]
+fn the_hub_debits_the_wallet_and_a_refusal_costs_nothing() {
+    let mut run = Campaign::to_depth(99, 3);
+    assert_eq!(run.intel(), 0, "a run banks nothing before it raids");
+
+    run.enter();
+    run.complete(&extracted(4, 1));
+    assert_eq!(run.intel(), 4);
+
+    // A price the run cannot meet is refused, by name, with nothing taken.
+    assert_eq!(
+        run.spend(9),
+        Outlay::Short {
+            cost: 9,
+            balance: 4
+        },
+    );
+    assert_eq!(run.intel(), 4, "a refused spend is not a partial payment");
+    assert!(!run.affords(9) && run.affords(4));
+
+    // One it can meet is paid, and the balance is what is left to spend on the next
+    // thing — the currency row of §2.2's table, both halves of it.
+    assert_eq!(
+        run.spend(3),
+        Outlay::Paid {
+            cost: 3,
+            balance: 1
+        },
+    );
+    assert_eq!(run.intel(), 1);
+
+    // And the next raid tops it up: the wallet accumulates across facilities.
+    let next = run.offers()[0].node;
+    assert!(run.choose(next));
+    run.enter();
+    walk_on(&mut run, 2);
+    assert_eq!(run.intel(), 3, "banked on top of what was not spent");
+}
+
+/// **There is no in-level spending** (§14 v3/#211/appendix 47). The hub is the map between
+/// facilities, so a spend from inside a raid — or after the run is over — is refused as
+/// *closed* rather than as unaffordable, and takes nothing however rich the run is.
+#[test]
+fn intel_is_spendable_only_at_the_map() {
+    let mut run = Campaign::to_depth(99, 3);
+    run.enter();
+    run.complete(&extracted(9, 1));
+
+    // At a choice point: open.
+    assert_eq!(run.stage(), CampaignStage::Choosing);
+    assert!(run.spend(1).paid());
+
+    // Standing on the next facility, not yet inside it: still the map, still open — the
+    // approach is a hub stage too, which is what lets a run buy the ground it is about to
+    // walk onto.
+    let next = run.offers()[0].node;
+    assert!(run.choose(next));
+    assert_eq!(run.stage(), CampaignStage::Approach);
+    assert!(run.spend(1).paid());
+
+    // Inside: closed, and the balance says so.
+    let before = run.intel();
+    run.enter();
+    assert_eq!(run.stage(), CampaignStage::Inside);
+    assert_eq!(run.spend(1), Outlay::Closed);
+    assert_eq!(run.intel(), before, "a raid cannot dip into the wallet");
+
+    // And once the run is over there is nothing left to spend on.
+    run.complete(&captured());
+    assert!(run.stage().is_over());
+    assert_eq!(run.spend(1), Outlay::Closed);
+    assert_eq!(run.intel(), before);
+}
+
+/// **A campaign facility's exit never refuses** (§4.5/§14 v3): intel is currency, so every
+/// console in the building is *surplus* and extraction is voluntary — a run may walk out
+/// of any facility the turn it walked in.
+///
+/// The gate is stated on the config every facility boots with, whatever the run is
+/// carrying, so this is the model rather than a property of one lucky seed.
+#[test]
+fn every_campaign_facility_lets_the_run_leave_empty_handed() {
+    let mut run = Campaign::to_depth(PLAYED_SEED, 3);
+    for _ in 0..=3 {
+        assert_eq!(
+            run.next_level().modifiers.intel_to_exit,
+            IntelGate::None,
+            "the campaign exit is not an intel gate (§4.5)",
+        );
+        run.enter();
+        // Nothing taken, and the run still walks on: an empty-handed raid is *allowed*,
+        // and what makes it a bad idea is that the run is now poorer at a facility the
+        // alert may have made harder — not a penalty anyone coded (appendix 47).
+        walk_on(&mut run, 0);
+    }
+    assert_eq!(run.intel(), 0, "nothing taken is nothing banked");
+}
+
 /// **The campaign offers no way to play the run again** (§2.2/appendix 31). The gate
 /// has been in the code since the end screen shipped; this is the first thing that
 /// actually stands behind it.
