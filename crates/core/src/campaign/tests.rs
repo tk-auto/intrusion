@@ -543,10 +543,16 @@ fn a_completed_raid_banks_the_tech_it_salvaged() {
     let mut run = Campaign::to_depth(21, 3);
     run.enter().expect("a facility to raid");
     let mut verdict = extracted(2, 0);
-    verdict.stats.salvaged = Some(AbilityId::Confusion);
+    verdict.stats.salvaged = Loadout::empty()
+        .with(AbilityId::Confusion)
+        .with(AbilityId::Decoy);
     run.complete(&verdict);
 
     assert!(run.loadout().contains(AbilityId::Confusion), "the find");
+    assert!(
+        run.loadout().contains(AbilityId::Decoy),
+        "and the second crate's — a facility may hide three (§14 v3)",
+    );
     assert_eq!(run.intel(), 2, "and the haul, from the same value");
     let next = run.offers()[0].node;
     run.choose(next);
@@ -567,7 +573,7 @@ fn a_capture_carries_no_salvage_out_of_the_facility() {
     let mut run = Campaign::to_depth(21, 3);
     run.enter().expect("a facility to raid");
     let mut verdict = captured();
-    verdict.stats.salvaged = Some(AbilityId::Confusion);
+    verdict.stats.salvaged = Loadout::empty().with(AbilityId::Confusion);
     assert_eq!(run.complete(&verdict), CampaignStage::Lost);
     assert_eq!(run.loadout(), Loadout::innate(), "the run is over");
 }
@@ -576,23 +582,33 @@ fn a_capture_carries_no_salvage_out_of_the_facility() {
 /// the map names resolves into the level-seed the run walks into, crate and all — and
 /// it *pays* for it, one console fewer, so the offer is a trade rather than a bonus.
 #[test]
-fn the_workshop_flavour_plants_the_crate_it_advertises() {
-    let modifiers = Flavour::Workshop.modifiers();
-    assert!(modifiers.equipment_cache, "the crate the row promises");
-    assert_eq!(
-        modifiers.intel_count,
-        crate::modifiers::IntelCount::Fewer,
-        "and the console it costs (§2.3)",
-    );
-    // No other flavour hides one: the map's tech axis is a *choice*, not something
-    // every facility hands over.
-    for flavour in Flavour::ALL {
-        assert_eq!(
-            flavour.modifiers().equipment_cache,
-            flavour == Flavour::Workshop,
-            "{flavour:?}",
-        );
+fn each_flavour_hides_the_crates_its_row_promises() {
+    use crate::modifiers::{CacheCount, IntelCount};
+
+    // The ladder the map is a choice over (§14 v3/#209): richer flavours hide more, and
+    // each pays for its crates in a different currency.
+    for (flavour, caches) in [
+        (Flavour::Outpost, CacheCount::None),
+        (Flavour::Depot, CacheCount::One),
+        (Flavour::Workshop, CacheCount::Two),
+        (Flavour::Vault, CacheCount::Three),
+        (Flavour::Archive, CacheCount::None),
+    ] {
+        assert_eq!(flavour.modifiers().caches, caches, "{flavour:?}");
     }
+    // …and the Workshop's price is a console, where the Vault's is a guard: the two
+    // rich flavours differ in what they charge, which is what makes the choice between
+    // them a decision rather than a ranking (§2.3).
+    assert_eq!(
+        Flavour::Workshop.modifiers().intel_count,
+        IntelCount::Fewer,
+        "the console a Workshop's crates cost",
+    );
+    assert_eq!(
+        Flavour::Vault.modifiers().guard_count,
+        crate::modifiers::GuardCount::More,
+        "the guard a Vault's crates cost",
+    );
     // And it reaches the facility through the one seam (§12.6): walk a run until it
     // stands on a Workshop, and the level-seed it would boot carries the crate — which
     // is what makes the campaign facility's *token* the facility as it was played
@@ -600,13 +616,13 @@ fn the_workshop_flavour_plants_the_crate_it_advertises() {
     let mut run = Campaign::new(PLAYED_SEED);
     let mut stood_on_one = false;
     while !run.stage().is_over() {
-        let workshop = run.flavour() == Flavour::Workshop;
+        let flavour = run.flavour();
         assert_eq!(
-            run.next_level().modifiers.equipment_cache,
-            workshop,
+            run.next_level().modifiers.caches,
+            flavour.modifiers().caches,
             "the config disagrees with the row that offered it",
         );
-        stood_on_one |= workshop;
+        stood_on_one |= flavour == Flavour::Workshop;
         run.enter();
         walk_on(&mut run, 1);
     }

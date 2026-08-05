@@ -223,6 +223,92 @@ impl IntelCount {
     }
 }
 
+/// How many **equipment caches** a facility hides (§2.2/§14 v3/#209) — the campaign's
+/// *second* reward axis, and the one the run's power curve is made of.
+///
+/// A count rather than a toggle because the map's flavours differ in **how much** tech
+/// they hold, not merely in whether they hold any: a Depot has one crate, a
+/// [`Workshop`](crate::Flavour::Workshop) two, a [`Vault`](crate::Flavour::Vault)
+/// three. Bounded at three so the knob is a small enum like its neighbours — a value
+/// per rung, each with its own permanent token slot and its own help-card caption —
+/// rather than an open number the format would have to find room for.
+///
+/// **Its baseline is its zero end, and that is the difference from the other two
+/// knobs.** [`GuardCount`] and [`IntelCount`] sit at a neutral middle with a departure
+/// either side; a facility with no crate in it is not a middle, it is *none*. That
+/// makes the §12.6 pressure rule read differently here — see
+/// [`most_of`](Self::most_of).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CacheCount {
+    /// No crate at all — every quick-play level and every hand-built state.
+    /// [`Default`], because a single facility has no *rest of the run* to accumulate
+    /// into (§2.2), and because the game plays as it always did without one.
+    #[default]
+    None,
+    /// One crate: the [`Depot`](crate::Flavour::Depot)'s, and the smallest find a
+    /// facility can be worth.
+    One,
+    /// Two: the [`Workshop`](crate::Flavour::Workshop)'s, which is what that flavour
+    /// gives up a console for.
+    Two,
+    /// Three: the [`Vault`](crate::Flavour::Vault)'s — the richest facility on the map
+    /// is richest in both currencies at once, and posts a guard over them.
+    Three,
+}
+
+impl CacheCount {
+    /// The number of crates, as placement counts them.
+    pub const fn crates(self) -> usize {
+        match self {
+            CacheCount::None => 0,
+            CacheCount::One => 1,
+            CacheCount::Two => 2,
+            CacheCount::Three => 3,
+        }
+    }
+
+    /// The most crates any facility hides — the bound placement is written against and
+    /// the ceiling the token's slots cover.
+    pub const MAX: usize = 3;
+
+    /// The rung that stands for `crates`, saturating at [`MAX`](Self::MAX).
+    ///
+    /// The inverse of [`crates`](Self::crates), and it exists for one caller: the boot
+    /// path narrows a facility's count to the number of crates the draw could actually
+    /// fill ([`start_level_with`](crate::start_level_with)), so what the state carries is
+    /// what the building has rather than what its flavour asked for.
+    pub const fn for_crates(crates: usize) -> Self {
+        match crates {
+            0 => CacheCount::None,
+            1 => CacheCount::One,
+            2 => CacheCount::Two,
+            _ => CacheCount::Three,
+        }
+    }
+
+    /// Compose two contributions: **a source that stayed quiet yields, and the larger
+    /// count wins.** [`LevelModifiers::union`]'s rule for this knob.
+    ///
+    /// It is *not* [`GuardCount::harder_of`]'s rule wearing different words, and the
+    /// difference is worth stating because it is the one place §12.6's composition
+    /// invariant does not simply apply. That invariant — *no contribution can relieve
+    /// pressure another one asked for* — is about **pressure**, and this knob has none
+    /// to relieve: a crate is a pure reward, and asking for fewer of them is not a
+    /// source adding difficulty, it is a source declining to give.
+    ///
+    /// Composing the other way would also be unworkable rather than merely odd. This
+    /// knob's baseline is its own zero, so *every* source that never mentions caches
+    /// names the scarce end — and a harder-ward rule would let the player's own
+    /// [`chosen`](ModifierSources::chosen) set, which is silent about crates by
+    /// construction, wipe the flavour the map just offered. The rule that actually
+    /// holds the §2.3 promise here is the one the map needs: **what a facility was
+    /// advertised as holding, it holds.**
+    #[must_use]
+    pub fn most_of(self, other: Self) -> Self {
+        self.max(other)
+    }
+}
+
 /// The set of level modifiers active for a facility — resolved once at facility
 /// start (§12.3) into the one value guards, vision, and render branch on.
 ///
@@ -405,32 +491,33 @@ pub struct LevelModifiers {
     /// [`Vault`]: crate::Flavour::Vault
     /// [`Outpost`]: crate::Flavour::Outpost
     pub intel_count: IntelCount,
-    /// **Easier.** The facility hides an **equipment cache** (§2.2/§14 v3/#209): one
-    /// crate of salvaged tech, planted in a non-start room, whose bump unlocks a §8.3
-    /// tech ability for the rest of the run. Baseline `false` — a facility holds none,
-    /// which is every quick-play level and every campaign facility whose flavour does
-    /// not call for one.
+    /// How many **equipment caches** the facility hides (§2.2/§14 v3/#209) — crates of
+    /// salvaged tech, planted in non-start rooms, each of whose bump unlocks a §8.3
+    /// tech ability for the rest of the run. Baseline [`CacheCount::None`]: a facility
+    /// holds none, which is every quick-play level.
     ///
     /// **The fourth modifier that reaches generation**, and it reaches placement
-    /// (§10.1.8) exactly as the two count knobs do — never the carve. The cache is
+    /// (§10.1.8) exactly as the two count knobs do — never the carve. The crates are
     /// drawn from the same shuffled pool as the comms console, immediately after it, so
-    /// the two settings put the **same player, exit and intel** in the **same
-    /// building**; what differs from there on is that one of them has a crate in it and
-    /// a guard pool one cell smaller.
+    /// the settings put the **same player, exit and intel** in the **same building**;
+    /// what differs from there on is how many crates stand in it and a guard pool that
+    /// many cells smaller.
     ///
-    /// **Easier is the honest direction, and it is not a free lunch.** What the cache
-    /// gives is permanent and compounding — an ability the *rest of the run* carries
-    /// (§2.2) — so no reading of it makes the facility harder. What it costs is paid on
-    /// the map rather than in this field: the flavour that plants one
-    /// ([`Workshop`](crate::Flavour::Workshop)) also holds a console fewer, so the
-    /// choice is tech *instead of* currency and not tech *as well as*.
+    /// **Easier, and paid for on the map rather than in this field.** What a crate gives
+    /// is permanent and compounding — an ability the *rest of the run* carries (§2.2) —
+    /// so no reading of it makes the facility harder. The price is the flavour that
+    /// plants them: the richer the crate count, the more the offer costs in guards or in
+    /// consoles ([`Flavour::modifiers`](crate::Flavour::modifiers)), which is where the
+    /// §2.3 trade actually lives.
     ///
-    /// **What the cache holds is not here**, deliberately. This says a facility has one;
-    /// which ability it holds is drawn from the run's own unheld tech at boot
-    /// ([`salvage`](crate::salvage)), because a cache offering a fifth Dephase is a
-    /// reward that is not one — and that draw needs the loadout, which a level modifier
-    /// has no business carrying.
-    pub equipment_cache: bool,
+    /// **What the crates hold is not here**, deliberately. This says how many a facility
+    /// has; which abilities they hold is drawn from the run's own unheld tech at boot
+    /// ([`cache_contents`](crate::cache_contents)), because a crate offering a fifth
+    /// Dephase is a reward that is not one — and that draw needs the loadout, which a
+    /// level modifier has no business carrying. It is also what makes the count a
+    /// **ceiling** rather than a promise: a facility plants only as many crates as there
+    /// is tech left in the world for this run to find.
+    pub caches: CacheCount,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -498,7 +585,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 13] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 15] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
@@ -509,7 +596,9 @@ pub(crate) const CAPTIONS: [ActiveModifier; 13] = [
     GUARDS_FEWER,
     CONSOLES_MORE,
     CONSOLES_FEWER,
-    HOLDS_A_CACHE,
+    ONE_CACHE,
+    TWO_CACHES,
+    THREE_CACHES,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -583,14 +672,29 @@ const CONSOLES_FEWER: ActiveModifier = ActiveModifier {
     detail: Some("one fewer"),
 };
 
-/// The cache's caption names the **crate**, not the ability in it: which tech a run
-/// finds is drawn from what it does not already hold (#209), so a card printing a name
-/// here would be promising a specific prize the facility has not decided on yet — and
-/// spoiling the find if it had.
-const HOLDS_A_CACHE: ActiveModifier = ActiveModifier {
-    name: "Equipment cache",
+/// The cache knob's three rungs. Each names the **crates**, not the abilities in them:
+/// which tech a run finds is drawn from what it does not already hold (#209), so a card
+/// printing a name here would be promising a specific prize the facility has not
+/// decided on yet — and spoiling the find if it had.
+///
+/// A count, said as a count, because unlike the guard and console knobs there is no
+/// baseline behind it to depart from: a facility hides these many crates, full stop.
+const ONE_CACHE: ActiveModifier = ActiveModifier {
+    name: "Equipment caches",
     direction: ModifierDirection::Easier,
     detail: Some("one hidden"),
+};
+
+const TWO_CACHES: ActiveModifier = ActiveModifier {
+    name: "Equipment caches",
+    direction: ModifierDirection::Easier,
+    detail: Some("two hidden"),
+};
+
+const THREE_CACHES: ActiveModifier = ActiveModifier {
+    name: "Equipment caches",
+    direction: ModifierDirection::Easier,
+    detail: Some("three hidden"),
 };
 
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
@@ -640,12 +744,12 @@ pub(crate) struct PoolEntry {
 /// would be tuning quick play from inside a campaign ticket. It is driven by node
 /// flavour ([`Flavour`](crate::Flavour)) and by nothing else until someone measures it.
 ///
-/// **The equipment cache is out**, on the intel count's reasoning taken one step
-/// further (#209). It is not a difficulty knob at all: what it hands over is a §8.3
-/// ability the *rest of the campaign run* carries, so a quick-play difficulty draw that
-/// picked it would be granting a permanent reward inside a single facility — meta-
-/// progression by accident, and the one thing §2.2 forbids outright. It is driven by
-/// node flavour ([`Flavour`](crate::Flavour)) and by nothing else.
+/// **The cache count is out**, on the intel count's reasoning taken one step further
+/// (#209). It is not a difficulty knob at all: what it hands over is a §8.3 ability the
+/// *rest of the campaign run* carries, so a quick-play difficulty draw that picked it
+/// would be granting a permanent reward inside a single facility — meta-progression by
+/// accident, and the one thing §2.2 forbids outright. It is driven by node flavour
+/// ([`Flavour`](crate::Flavour)) and by nothing else.
 ///
 /// **A symmetric knob is a different case, and both its ends are in** (#232,
 /// appendix 30). [`GuardCount`]'s baseline is a neutral middle rather than one end of
@@ -736,7 +840,7 @@ impl LevelModifiers {
             automatic_doors,
             guard_count,
             intel_count,
-            equipment_cache,
+            caches,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -760,8 +864,13 @@ impl LevelModifiers {
         if automatic_doors {
             active.push(ALL_DOORS_AUTOMATIC);
         }
-        if equipment_cache {
-            active.push(HOLDS_A_CACHE);
+        // The reward knob surfaces one caption per rung, like the two count knobs
+        // surface one per end (§10.2/#209).
+        match caches {
+            CacheCount::None => {} // nothing hidden — nothing to announce
+            CacheCount::One => active.push(ONE_CACHE),
+            CacheCount::Two => active.push(TWO_CACHES),
+            CacheCount::Three => active.push(THREE_CACHES),
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -847,10 +956,10 @@ impl LevelModifiers {
             // hard direction, so a flavour asking for fewer consoles cannot be talked
             // out of it by a source that asked for more.
             intel_count: self.intel_count.harder_of(other.intel_count),
-            // A plain toggle like the ones above: any source that plants a cache
-            // plants one, and no source can take away a reward another one offered
-            // (#209).
-            equipment_cache: self.equipment_cache || other.equipment_cache,
+            // The reward knob (#209): a quiet source yields and the larger count wins,
+            // so what the map advertised, the facility holds. See `CacheCount::most_of`
+            // for why this one does not compose harder-ward like its neighbours.
+            caches: self.caches.most_of(other.caches),
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
         }
     }
@@ -1118,7 +1227,7 @@ mod tests {
             automatic_doors: true,
             guard_count: GuardCount::More,
             intel_count: IntelCount::Fewer,
-            equipment_cache: true,
+            caches: CacheCount::Three,
             intel_to_exit: IntelGate::All,
         };
         assert_eq!(stacked.active().len(), 10);
@@ -1180,7 +1289,7 @@ mod tests {
             automatic_doors: false,
             guard_count: GuardCount::Baseline,
             intel_count: IntelCount::Baseline,
-            equipment_cache: true,
+            caches: CacheCount::Two,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -1193,7 +1302,7 @@ mod tests {
             automatic_doors: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::More,
-            equipment_cache: false,
+            caches: CacheCount::None,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);
@@ -1208,10 +1317,9 @@ mod tests {
         // And the intel knob the same way, with its ends the other way up: `b` asked
         // for one more console and nothing objected, so one more it is (#207).
         assert_eq!(both.intel_count, IntelCount::More);
-        // A plain toggle, ORed like the ones above (#209): `a` plants a crate and `b`
-        // did not ask for one, so the crate stands — a source cannot take away a
-        // reward another one offered.
-        assert!(both.equipment_cache);
+        // The reward knob (#209): `a` stocks two crates and `b` asked for none, so two
+        // it is — a source that stayed quiet cannot take away a reward another offered.
+        assert_eq!(both.caches, CacheCount::Two);
         // Union with the baseline changes nothing.
         assert_eq!(a.union(LevelModifiers::default()), a);
     }

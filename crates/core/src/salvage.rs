@@ -1,54 +1,48 @@
-//! **What an equipment cache holds** (§2.2/§8.3/§14 v3/#209) — the one draw that
-//! decides which piece of salvaged tech a facility is hiding.
+//! **What a facility's equipment caches hold** (§2.2/§8.3/§14 v3/#209) — the one draw
+//! that decides which pieces of salvaged tech are in the crates.
 //!
-//! §14 v3 calls salvaged tech accumulating across facilities *"the run's power curve
-//! and the reason the campaign exists"*, and records that last time it was "fully built
-//! and reachable by nobody": no facility ever generated a cache, so no ability could
-//! ever be unlocked. [`crate::place`] plants the crate; this decides what is in it.
+//! §14 v3 calls salvaged tech accumulating across facilities *"the run's power curve and
+//! the reason the campaign exists"*, and records that last time it was "fully built and
+//! reachable by nobody": no facility ever generated a cache, so no ability could ever be
+//! unlocked. [`crate::place`] plants the crates; this decides what is in them.
 //!
-//! # It is a draw over what the run does **not** hold
+//! # It is a property of the facility, and of nothing else
 //!
-//! A cache is only a reward if it hands over something new. Drawing blind from
-//! [`AbilityId::TECH`] would offer a run its fifth Dephase soon enough — the ticket's
-//! "already-owned collision" — and the two ways out of that are to avoid it in the draw
-//! or to pay a consolation prize instead. **Avoided by draw**, here: the pool is
-//! shuffled deterministically and the first entry the run does not already hold is
-//! taken. A consolation prize would be a second reward economy invented to paper over a
-//! draw that could simply not make the mistake, and "a second copy upgrades the first"
-//! is explicitly the ability-upgrade sink's, not this.
+//! A crate's contents are drawn from the **facility seed alone** — not from what the run
+//! is carrying. A building is stocked before anybody breaks into it, and stocking it out
+//! of the intruder's pockets would be the facility knowing who was coming.
 //!
-//! **A shuffle rather than a rejection loop**, so the answer is a pure function of the
-//! seed and the held set with no unbounded draw in it — and so that a run holding two
-//! of the pool still meets the remaining six in a seeded order rather than in
-//! `AbilityId::ALL`'s.
+//! The consequence is deliberate: **a run can meet the same tech twice.** Walking up to a
+//! crate holding the Decoy you already carry is bad luck, not a bug — the bump refuses it
+//! for free ([`Affordance::SalvageCarried`](crate::Affordance)) and there are seven other
+//! things in the world to find. What it is *not* is a reward economy that has to be made
+//! whole: no consolation prize, no "second copy upgrades the first" (that is the
+//! ability-upgrade sink's, a different ticket), and no draw that peeks at the loadout to
+//! spare you the disappointment.
 //!
-//! # Exhausting the pool plants nothing
+//! # Within one facility they are all different
 //!
-//! [`None`] when the run already holds every tech there is: the facility generates
-//! **without a cache** rather than with an empty crate or a duplicate one. That is the
-//! honest reading — there is nothing left in the world for this run to find — and it is
-//! the one branch the caller has to respect *before* generation, which
-//! [`start_level_with`](crate::start_level_with) does.
+//! The flavour says how many crates a facility hides (§14 v3: a Depot one, a Workshop
+//! two, a Vault three), and this fills them **in one draw** — a seeded shuffle of
+//! [`AbilityId::TECH`], with the crates taking a prefix of it. So the three crates of a
+//! Vault hold three different things by construction, with no rejection loop and no draw
+//! that could fail: searching one building is never two of the same box.
 //!
-//! No standard run reaches it: a campaign raids one facility more than
-//! [`DEPTH_TO_ARCHIVE`](crate::DEPTH_TO_ARCHIVE) against a pool of eight, and a
-//! level-seed token cannot carry more than [`AbilityId::MAX_TECH_HELD`] tech at all. It
-//! is reachable from a hand-built loadout, which is exactly why it is defined and pinned
-//! rather than left to whatever the code happened to do.
+//! Across facilities there is no such rule, because there is nothing to enforce it with —
+//! each facility is drawn from its own seed and knows nothing of the ones before it.
 //!
 //! # Derived from the facility seed, never a fresh source
 //!
 //! The draw hangs off the level's own seed through [`SALVAGE_STREAM_SALT`] (§12.4), on
 //! the same discipline as the campaign's per-facility and per-map streams: a stream of
-//! its own, so what a cache holds cannot shift because generation drew first, and
-//! generation cannot shift because a cache was drawn.
+//! its own, so what a crate holds cannot shift because generation drew first, and
+//! generation cannot shift because a crate was drawn.
 //!
-//! It takes the **loadout** as its other input, and that is not a second source of
-//! truth: a loadout is part of the [`LevelSeed`](crate::LevelSeed) a facility boots
-//! from, so a token still reproduces the cache exactly — including a campaign
-//! facility's, whose token carries the tech the run walked in with.
+//! Taking the seed and nothing else is also what keeps a **level-seed token** honest
+//! (§13.1): the crates of a shared facility are the crates whoever shared it found,
+//! whatever either of you happened to be carrying at the time.
 
-use crate::ability::{AbilityId, Loadout};
+use crate::ability::AbilityId;
 use crate::rng::Rng;
 
 /// Separates the cache draw from every other use of a level's seed (§12.4) — the same
@@ -56,50 +50,83 @@ use crate::rng::Rng;
 /// keep.
 const SALVAGE_STREAM_SALT: u64 = 0x_CAC4_E7EC_CAC4_E7EC;
 
-/// **What the cache in this facility holds** (§8.3/#209): a piece of salvaged tech the
-/// run does not already carry, drawn deterministically from `(level seed, held set)`.
+/// **What this facility's caches hold** (§8.3/#209): `wanted` distinct pieces of
+/// salvaged tech, drawn deterministically from the level seed — one per crate, in the
+/// order the crates are placed.
 ///
-/// `None` when `held` already holds every entry of [`AbilityId::TECH`] — see the module
-/// note; the caller plants no cache at all rather than an empty one.
-pub fn cache_contents(seed: u64, held: Loadout) -> Option<AbilityId> {
+/// Shorter than `wanted` only if a facility asked for more crates than there is tech in
+/// the catalogue, which no flavour does ([`CacheCount::MAX`](crate::CacheCount) is three
+/// against a pool of eight).
+pub fn cache_contents(seed: u64, wanted: usize) -> Vec<AbilityId> {
     let mut pool = AbilityId::TECH;
     let mut rng = Rng::new(seed ^ SALVAGE_STREAM_SALT);
-    // Fisher-Yates over the whole pool, then the first unheld entry of the shuffled
-    // order — so *which* new tech a run is offered varies with the seed, and a run that
-    // holds some of the pool is not walked down the catalog order for the rest.
+    // Fisher-Yates over the whole pool, then its first `wanted` entries — so *which*
+    // tech a facility is stocked with varies with the seed, and the crates of one
+    // building are distinct by construction rather than by a check.
     for i in (1..pool.len()).rev() {
         let j = rng.below((i + 1) as u32) as usize;
         pool.swap(i, j);
     }
-    pool.into_iter().find(|&id| !held.contains(id))
+    pool.into_iter().take(wanted).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ability::Loadout;
     use crate::level_seed::{start_level, LevelSeed};
-    use crate::modifiers::LevelModifiers;
+    use crate::modifiers::{CacheCount, LevelModifiers};
+    use std::collections::HashSet;
 
-    /// **Same seed, same crate** (§12.4) — the property the golden test over a whole
+    /// **Same seed, same crates** (§12.4) — the property the golden test over a whole
     /// facility rests on, stated directly on the draw.
     #[test]
-    fn the_draw_is_a_function_of_the_seed_and_the_held_set() {
+    fn the_draw_is_a_function_of_the_seed() {
         for seed in [0, 1, 8371, u64::MAX] {
-            assert_eq!(
-                cache_contents(seed, Loadout::innate()),
-                cache_contents(seed, Loadout::innate()),
-            );
+            for wanted in 0..=CacheCount::MAX {
+                assert_eq!(
+                    cache_contents(seed, wanted),
+                    cache_contents(seed, wanted),
+                    "seed {seed}, {wanted} crates",
+                );
+            }
         }
     }
 
-    /// It is a **draw**, not a constant: different seeds hand out different tech, or the
-    /// "derived from the facility seed" acceptance would be satisfied by a hard-coded
+    /// **A facility's crates are all different.** Not by a rejection loop — by taking a
+    /// prefix of one shuffle — so it holds on every seed, at every count, with no draw
+    /// that could fail.
+    #[test]
+    fn no_two_crates_in_one_facility_hold_the_same_tech() {
+        for seed in 0..300 {
+            for wanted in 0..=CacheCount::MAX {
+                let drawn = cache_contents(seed, wanted);
+                assert_eq!(drawn.len(), wanted, "seed {seed}: short of {wanted} crates");
+                let distinct: HashSet<_> = drawn.iter().collect();
+                assert_eq!(distinct.len(), drawn.len(), "seed {seed}: {drawn:?}");
+            }
+        }
+    }
+
+    /// **A prefix, so the counts nest.** A Vault's three crates are a Workshop's two with
+    /// one more behind them on the same seed — which makes a flavour's count read as *how
+    /// much of this building's stock you get at* rather than as a different building.
+    #[test]
+    fn a_bigger_facility_holds_the_smaller_ones_crates_and_more() {
+        for seed in 0..200 {
+            let three = cache_contents(seed, 3);
+            assert_eq!(cache_contents(seed, 2), three[..2], "seed {seed}");
+            assert_eq!(cache_contents(seed, 1), three[..1], "seed {seed}");
+            assert!(cache_contents(seed, 0).is_empty());
+        }
+    }
+
+    /// It is a **draw**, not a constant: different facilities are stocked with different
+    /// tech, or "derived from the facility seed" would be satisfied by a hard-coded
     /// answer that happened to be reproducible (§2.3, the anti-facade guard).
     #[test]
     fn different_facilities_hold_different_tech() {
-        let drawn: std::collections::HashSet<_> = (0..200)
-            .filter_map(|seed| cache_contents(seed, Loadout::innate()))
-            .collect();
+        let drawn: HashSet<_> = (0..200).flat_map(|seed| cache_contents(seed, 1)).collect();
         assert_eq!(
             drawn.len(),
             AbilityId::TECH.len(),
@@ -107,97 +134,78 @@ mod tests {
         );
     }
 
-    /// **Never what the run already holds** — the no-repeat rule, avoided by draw.
+    /// **The draw does not look at the loadout** (#209): a facility is stocked before
+    /// anybody breaks into it, so meeting tech you already carry is bad luck rather than
+    /// something the world rearranges itself to prevent. Two runs standing in the same
+    /// facility find the same crates, whatever either is carrying.
     #[test]
-    fn a_cache_never_holds_tech_the_run_already_carries() {
-        for seed in 0..200 {
-            // Walk a run forward exactly as a campaign does: take what the cache holds,
-            // and ask the next facility.
-            let mut held = Loadout::innate();
-            for _ in 0..AbilityId::TECH.len() {
-                let found = cache_contents(seed, held).expect("the pool is not empty yet");
-                assert!(
-                    !held.contains(found),
-                    "seed {seed} offered {found:?} twice over",
-                );
-                held = held.with(found);
-            }
-        }
+    fn what_a_run_carries_does_not_restock_the_building() {
+        let level = |abilities| LevelSeed {
+            seed: 8371,
+            modifiers: LevelModifiers {
+                caches: CacheCount::Three,
+                ..LevelModifiers::default()
+            },
+            abilities,
+        };
+        let bare = start_level(&level(Loadout::innate())).expect("the v1 footprint carves");
+        let found = bare.cache_contents();
+        assert_eq!(found.len(), 3);
+
+        // A run walking in already holding the first crate's tech finds the very same
+        // crates in the very same cells.
+        let laden =
+            start_level(&level(Loadout::innate().with(found[0]))).expect("the v1 footprint carves");
+        assert_eq!(laden.cache_contents(), found);
+        assert_eq!(laden.equipment_caches(), bare.equipment_caches());
     }
 
     /// **The golden facility** (§12.4/#209): one named seed, booted twice, plants its
-    /// crate in the same cell holding the same tech — and those are written down, so a
+    /// crates in the same cells holding the same tech — and both are written down, so a
     /// change to the derivation is a red test rather than a silently different game for
     /// everyone who has shared a run.
     ///
     /// Presence, position and contents, which is the whole of what a cache is.
     #[test]
-    fn the_same_facility_seed_plants_the_same_crate() {
+    fn the_same_facility_seed_plants_the_same_crates() {
         let level = LevelSeed {
             seed: 8371,
             modifiers: LevelModifiers {
-                equipment_cache: true,
+                caches: CacheCount::Three,
                 ..LevelModifiers::default()
             },
             abilities: Loadout::innate(),
         };
         let boot = || start_level(&level).expect("the v1 footprint carves");
         let (a, b) = (boot(), boot());
-        assert_eq!(a.equipment_cache(), b.equipment_cache());
-        assert_eq!(a.cache_holds(), b.cache_holds());
+        assert_eq!(a.equipment_caches(), b.equipment_caches());
+        assert_eq!(a.cache_contents(), b.cache_contents());
 
-        assert_eq!(
-            (a.equipment_cache(), a.cache_holds()),
-            (Some(crate::Cell::new(16, 20)), Some(AbilityId::Confusion)),
-            "the golden facility's crate moved",
-        );
-
-        // **The loadout is an input to the draw**, so a run that already holds that
-        // tech is offered something else in the same crate — the no-repeat rule, on a
-        // real facility rather than on the draw alone.
-        let held = LevelSeed {
-            abilities: Loadout::innate().with(AbilityId::Confusion),
-            ..level
-        };
-        let other = start_level(&held).expect("the v1 footprint carves");
-        assert_eq!(
-            other.equipment_cache(),
-            a.equipment_cache(),
-            "the crate is the generator's business and must not move with the loadout",
-        );
-        assert!(matches!(other.cache_holds(), Some(id) if id != AbilityId::Confusion));
+        assert_eq!(a.cache_contents(), GOLDEN_STOCK, "the stock changed");
+        assert_eq!(a.equipment_caches(), golden_crates(), "the crates moved");
     }
 
-    /// **The modifier is what plants it** (§12.6): the same seed without it is a
-    /// facility with no crate in it at all, which is every quick-play level.
+    /// The golden facility's stock and crate cells — written out so the two assertions
+    /// above read as one statement about one building.
+    const GOLDEN_STOCK: [AbilityId; 3] = [
+        AbilityId::Confusion,
+        AbilityId::Dephase,
+        AbilityId::PierceWall,
+    ];
+    fn golden_crates() -> [crate::Cell; 3] {
+        [
+            crate::Cell::new(16, 20),
+            crate::Cell::new(31, 1),
+            crate::Cell::new(1, 21),
+        ]
+    }
+
+    /// **The knob is what plants them** (§12.6): the same seed at [`CacheCount::None`] is
+    /// a facility with no crate in it at all, which is every quick-play level.
     #[test]
-    fn no_modifier_no_crate() {
+    fn no_knob_no_crates() {
         let bare = start_level(&LevelSeed::quick_play(8371)).expect("the v1 footprint carves");
-        assert_eq!(bare.equipment_cache(), None);
-        assert_eq!(bare.cache_holds(), None);
-    }
-
-    /// A run that holds **everything** finds nothing: the pool is exhausted, so the
-    /// facility plants no cache rather than an empty crate (see the module note).
-    #[test]
-    fn an_exhausted_pool_holds_nothing() {
-        let mut everything = Loadout::innate();
-        for id in AbilityId::TECH {
-            everything = everything.with(id);
-        }
-        for seed in [0, 1, 8371] {
-            assert_eq!(cache_contents(seed, everything), None);
-        }
-        // One short of exhausted still finds the one that is left, on every seed —
-        // scarcity narrows the draw, it does not make it fail early.
-        for missing in AbilityId::TECH {
-            let mut held = Loadout::innate();
-            for id in AbilityId::TECH.into_iter().filter(|&id| id != missing) {
-                held = held.with(id);
-            }
-            for seed in [0, 1, 8371] {
-                assert_eq!(cache_contents(seed, held), Some(missing));
-            }
-        }
+        assert!(bare.equipment_caches().is_empty());
+        assert!(bare.cache_contents().is_empty());
     }
 }

@@ -497,7 +497,7 @@ impl Campaign {
     fn bank(&mut self, stats: RunStats) {
         let taken = u32::try_from(stats.intel).unwrap_or(u32::MAX);
         self.intel = self.intel.saturating_add(taken);
-        if let Some(id) = stats.salvaged {
+        for id in stats.salvaged.iter() {
             self.salvage(id);
         }
     }
@@ -505,13 +505,16 @@ impl Campaign {
     /// **Salvage tech** (§2.2/§8.3): add `id` to the loadout the rest of the run
     /// carries — the seam an equipment cache writes (#209).
     ///
-    /// Public as well as used by [`bank`](Self::bank): a raid folds its own find in
+    /// Public as well as used by [`bank`](Self::bank): a raid folds its own finds in
     /// through the verdict, and a caller that has tech to grant from somewhere else (a
     /// test, a future sink) says so here rather than reaching into the loadout.
     ///
-    /// Idempotent, and capacity is not its business: the held cap and the discard
-    /// prompt it needs are #266's, and enforcing a silent one here would drop a
-    /// pickup the player was never told about.
+    /// Idempotent, and capacity is not enforced *here*: the §8.3 cap is kept at the
+    /// **pickup**, where a bump on a crate the run has no room for is refused and says so
+    /// ([`State::step`](crate::State::step)). That is the one place the player can be
+    /// told; a silent cap in this method would drop a find nobody was warned about, so
+    /// nothing that arrives here can be over the cap in the first place. Trading one
+    /// piece of tech for another is #266's exchange screen.
     pub fn salvage(&mut self, id: AbilityId) {
         self.loadout = self.loadout.with(id);
     }

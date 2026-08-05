@@ -580,8 +580,12 @@ impl AbilityId {
 /// the shareable level-seed token ([`LevelSeed`](crate::LevelSeed)), so a handed-
 /// around run reproduces the exact loadout, not just the geometry. Held as a
 /// membership mask over [`AbilityId::ALL`] so it stays `Copy` and small.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Loadout {
+    /// `Default` is the **empty** set, matching [`empty`](Loadout::empty) — a loadout is
+    /// built up, never carved down, so the neutral value is *nothing held* rather than
+    /// the innate set. It is what makes [`RunStats`](crate::RunStats) derive `Default`
+    /// with an empty salvage haul (#209).
     present: [bool; AbilityId::ALL.len()],
 }
 
@@ -646,6 +650,15 @@ impl Loadout {
     pub fn with(mut self, id: AbilityId) -> Self {
         self.present[id.index()] = true;
         self
+    }
+
+    /// How many pieces of **salvaged tech** the loadout holds (§8.3) — the innate set
+    /// does not count, because it is never found, never drawn and never traded.
+    ///
+    /// This is the number [`AbilityId::MAX_TECH_HELD`] caps, and the one an equipment
+    /// cache's bump checks before handing anything over (#209/#266).
+    pub fn tech_held(self) -> usize {
+        self.iter().filter(|id| !id.is_innate()).count()
     }
 
     /// Whether `id` is in the loadout — the run holds this ability.

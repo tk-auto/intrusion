@@ -114,6 +114,13 @@ crate rather than as a terminal, which is what a cache is, and it is a mark the 
 uses nowhere else. It is deliberately **not** a letter: the board's letters are actors
 (`g`, `z`) and the one thing the run is aiming at (`E`).
 
+A facility may show **several** (§14 v3: a Vault hides three), all drawn the same. What
+a particular crate holds is never on the board — the usable line (§11.4) is the only
+thing that speaks about it, and only from the cell beside it: `cache: take tech`, or
+`cache: hands full` / `cache: already yours` for the two refusals. That is the same
+bargain the exit strikes with its own refusal — you learn what a bump *would* do by
+standing next to it, never by looking across the room.
+
 The **contents** rows — `}`, `=`, `$`, `Ψ`, `¤` — take the memory slate rather than the
 dim shade once they are out of view, which is the §3 knowledge state and not a
 category of their own. Only `=` names it in the table above, because it is the one
@@ -275,7 +282,7 @@ table is that a glyph is not free to mean two things.
 | `o` | An **Outpost** — thin, and thinly guarded | Neutral; **Interest** when marked |
 | `▪` | A **Depot** — the ordinary facility | Neutral; **Interest** when marked |
 | `$` | A **Vault** — worth robbing, and watched | Neutral; **Interest** when marked |
-| `¤` | A **Workshop** — salvage, and little else | Neutral; **Interest** when marked |
+| `¤` | A **Workshop** — salvage, at intel's cost | Neutral; **Interest** when marked |
 | `★` | The **archive** — the run's terminus | Interest |
 | `?` | An intel-locked route, not yet bought | Ground |
 | `▫` | A facility on the map, not on offer | Ground |

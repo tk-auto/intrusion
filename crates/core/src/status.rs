@@ -23,7 +23,7 @@
 //! with no plumbing to clear.
 
 use crate::category::Category;
-use crate::state::{Event, State};
+use crate::state::{Event, SalvageRefusal, State};
 
 mod history;
 pub use history::{MessageHistory, HISTORY_ACTIONS};
@@ -157,6 +157,18 @@ pub fn message_for(event: Event) -> Option<Message> {
         // the whole find is which ability it was — and the bar has a new row on it this
         // very turn (§11.4), so the two say the same thing at once.
         Event::TechSalvaged { id } => (format!("{} salvaged — it is yours", id.name()), 20),
+        // The two refusals (§8.3/#209), ranked with the find they are the other side of.
+        // Each says the tech by name, because what the player is walking away from is the
+        // whole of the news — and each says *why*, so the crate left standing there reads
+        // as a decision rather than as a dead cell.
+        Event::SalvageRefused {
+            id,
+            refusal: SalvageRefusal::HandsFull,
+        } => (format!("{} — no hands free for it", id.name()), 20),
+        Event::SalvageRefused {
+            id,
+            refusal: SalvageRefusal::AlreadyCarried,
+        } => (format!("another {} — you have one", id.name()), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
         // The phase safety firing (§8.3/#329). Ranked at the top of the threat ladder

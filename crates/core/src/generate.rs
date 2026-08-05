@@ -282,13 +282,14 @@ pub struct Layout {
     /// it, and the comms console must not be the one exception to that. `None` on a
     /// hand-built fixture.
     comms_console: Option<Cell>,
-    /// Where the facility's **equipment cache** goes (§2.2/§14 v3/#209), recorded rather
-    /// than stamped, exactly as [`comms_console`](Self::comms_console) is and for the
-    /// same reason: the carve handed back stays bare, so guard beats (§10.5) and the
-    /// §10.6 floods still run on a grid with no solid usable on it. The cell becomes
-    /// [`Terrain::EquipmentCache`] in [`State::new`](crate::State::new). `None` on a
+    /// Where the facility's **equipment caches** go (§2.2/§14 v3/#209), in placement
+    /// order, recorded rather than stamped — exactly as
+    /// [`comms_console`](Self::comms_console) is and for the same reason: the carve
+    /// handed back stays bare, so guard beats (§10.5) and the §10.6 floods still run on
+    /// a grid with no solid usable on it. Each cell becomes
+    /// [`Terrain::EquipmentCache`] in [`State::new`](crate::State::new). Empty on a
     /// facility whose flavour hides none — which is every quick-play level.
-    equipment_cache: Option<Cell>,
+    equipment_caches: Vec<Cell>,
 }
 
 impl Layout {
@@ -336,10 +337,11 @@ impl Layout {
         self.comms_console
     }
 
-    /// Where the equipment cache goes (§2.2/§14 v3/#209), or `None` on a facility
-    /// without one. Read once by [`State::new`](crate::State::new), which stamps it.
-    pub fn equipment_cache(&self) -> Option<Cell> {
-        self.equipment_cache
+    /// Where the equipment caches go (§2.2/§14 v3/#209), in placement order — empty on
+    /// a facility that hides none. Read once by [`State::new`](crate::State::new),
+    /// which stamps them.
+    pub fn equipment_caches(&self) -> &[Cell] {
+        &self.equipment_caches
     }
 
     /// The index (into [`ducts`](Self::ducts)) of the duct whose path includes `cell`,
@@ -395,7 +397,7 @@ impl Layout {
             regions: RegionGraph::new(w, h),
             ducts: Vec::new(),
             comms_console: None,
-            equipment_cache: None,
+            equipment_caches: Vec::new(),
         }
     }
 
@@ -408,7 +410,7 @@ impl Layout {
             regions,
             ducts: Vec::new(),
             comms_console: None,
-            equipment_cache: None,
+            equipment_caches: Vec::new(),
         }
     }
 
@@ -480,11 +482,10 @@ pub fn generate_level(
     let config = &config
         .with_guard_count(modifiers.guard_count)
         .with_intel_count(modifiers.intel_count)
-        // The **equipment-cache toggle** (#209) resolves in the same breath and reaches
-        // the same place: whether placement seats a crate, never the carve — so a
-        // Workshop is the same building as the Depot beside it, with one more thing in
-        // it (§14 v3).
-        .with_equipment_cache(modifiers.equipment_cache);
+        // The **cache count** (#209) resolves in the same breath and reaches the same
+        // place: how many crates placement seats, never the carve — so a Vault is the
+        // same building as the Outpost beside it with three more things in it (§14 v3).
+        .with_caches(modifiers.caches);
     for _ in 0..MAX_GEN_ATTEMPTS {
         let mut layout =
             generate_once(config.width, config.height, rng, &Tuning::BIASED, modifiers)?;
@@ -510,9 +511,10 @@ pub fn generate_level(
             // Record where the comms console goes; `State::new` stamps it, with the
             // other solid usables — see the doc comment above.
             layout.comms_console = Some(placement.comms());
-            // …and the equipment cache (#209), on the same terms: recorded here, stamped
-            // by `State::new`, so the carve this function hands back is still bare.
-            layout.equipment_cache = placement.cache();
+            // …and the equipment caches (#209), on the same terms: recorded here,
+            // stamped by `State::new`, so the carve this function hands back is still
+            // bare.
+            layout.equipment_caches = placement.caches().to_vec();
             // …and the player's own tunnel (§4.5/#466), laid by placement from the `E`
             // it chose. Recorded rather than stamped, for the same reason: the carve
             // handed back stays bare, and the tunnel changes no cell's terrain anyway.
@@ -661,11 +663,11 @@ fn generate_once(
         facility,
         regions,
         ducts,
-        // Placement decides where the comms console and the equipment cache go, so both
+        // Placement decides where the comms console and the equipment caches go, so both
         // are recorded on the finished carve by `generate_level`, not here (§7.3/§7.7,
         // §14 v3/#209).
         comms_console: None,
-        equipment_cache: None,
+        equipment_caches: Vec::new(),
     })
 }
 

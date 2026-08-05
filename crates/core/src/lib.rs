@@ -114,7 +114,7 @@ pub use input::{
 };
 pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
-    ActiveModifier, DebugModifiers, GuardCount, IntelCount, IntelGate, LevelModifiers,
+    ActiveModifier, CacheCount, DebugModifiers, GuardCount, IntelCount, IntelGate, LevelModifiers,
     ModifierDirection, ModifierSources,
 };
 pub use place::{LevelConfig, Placement};
@@ -136,7 +136,7 @@ pub use rng::Rng;
 pub use salvage::cache_contents;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
-    SenseMark, State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS,
+    SalvageRefusal, SenseMark, State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS,
     GUARD_CUE_DECAY_TURNS, LOCKDOWN_RADIUS, PHASE_EJECT_STUN_BASE, PLAYER_SENSE_RANGE,
     PLAYER_SENSE_RANGE_WAITING,
 };

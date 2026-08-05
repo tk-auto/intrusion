@@ -378,6 +378,18 @@ impl Facility {
             .map(|i| Cell::new(i as u32 % self.width, i as u32 / self.width))
     }
 
+    /// **Every** cell holding `terrain`, in row-major scan order — [`find`](Self::find)
+    /// for the kinds a facility carries more than one of (the equipment caches, §14
+    /// v3/#209). Scan order makes the answer deterministic (§12.4).
+    pub fn find_all(&self, terrain: Terrain) -> Vec<Cell> {
+        self.cells
+            .iter()
+            .enumerate()
+            .filter(|(_, &t)| t == terrain)
+            .map(|(i, _)| Cell::new(i as u32 % self.width, i as u32 / self.width))
+            .collect()
+    }
+
     /// Whether `cell` names a square on this grid.
     pub fn in_bounds(&self, cell: Cell) -> bool {
         cell.x < self.width && cell.y < self.height

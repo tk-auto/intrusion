@@ -4,6 +4,7 @@
 //! verdict assertable without a browser: these tests read the rows the player reads.
 
 use super::*;
+use crate::ability::Loadout;
 use crate::cell::Direction;
 use crate::difficulty::Difficulty;
 use crate::guard::Guard;
@@ -288,7 +289,7 @@ fn every_line_fits_the_v1_board() {
         takedowns: 99,
         detections: 999,
         alert_peak: 0,
-        salvaged: None,
+        salvaged: Loadout::empty(),
     };
     let mut lines: Vec<String> = vec![
         CAPTURED_HEADING.into(),

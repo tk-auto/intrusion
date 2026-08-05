@@ -10,6 +10,33 @@ use crate::state::*;
 use crate::test_support::open_room;
 use crate::{AbilityId, Loadout};
 
+/// A run holding `held` beside a crate holding `holds` — the fixture the two refusals
+/// need, since both are about the relationship between the two.
+fn scene_holding(holds: AbilityId, held: Loadout) -> State {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 6), Terrain::EquipmentCache);
+    State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(held)
+    .with_caches([holds])
+}
+
+/// A loadout carrying the §8.3 maximum — three pieces of tech, and no room for a fourth.
+fn hands_full() -> Loadout {
+    let held = Loadout::innate()
+        .with(AbilityId::Camouflage)
+        .with(AbilityId::Decoy)
+        .with(AbilityId::Autodoors);
+    assert_eq!(held.tech_held(), AbilityId::MAX_TECH_HELD);
+    held
+}
+
 /// The player next to a crate holding `holds`, in an empty room. Facing south so the
 /// first `Step(South)` is the bump, exactly as the comms-console fixture is built.
 ///
@@ -28,7 +55,7 @@ fn scene(holds: AbilityId) -> State {
         Cell::new(10, 10),
     )
     .with_loadout(Loadout::innate())
-    .with_cache(Some(holds))
+    .with_caches([holds])
 }
 
 /// §4.3/§8.3: the crate is bumped like everything else — the usable line offers `cache:
@@ -37,8 +64,12 @@ fn scene(holds: AbilityId) -> State {
 #[test]
 fn bumping_a_cache_salvages_the_tech_and_reports_it() {
     let mut s = scene(AbilityId::Decoy);
-    assert_eq!(s.equipment_cache(), Some(Cell::new(5, 6)));
-    assert_eq!(s.salvaged(), None, "nothing is salvaged until it is taken");
+    assert_eq!(s.equipment_caches(), [Cell::new(5, 6)]);
+    assert_eq!(
+        s.salvaged(),
+        Loadout::empty(),
+        "nothing is salvaged until it is taken",
+    );
     assert!(
         !s.loadout().contains(AbilityId::Decoy),
         "the run does not hold the tech before it finds it (§2.2)",
@@ -135,7 +166,7 @@ fn salvaged_tech_arrives_with_its_whole_level_budget() {
 fn an_opened_cache_offers_nothing_and_costs_nothing() {
     let mut s = scene(AbilityId::Dephase);
     s.step(Input::Step(Direction::South));
-    assert_eq!(s.salvaged(), Some(AbilityId::Dephase));
+    assert_eq!(s.salvaged(), Loadout::empty().with(AbilityId::Dephase));
 
     let turn = s.turn();
     let e = s.step(Input::Step(Direction::South));
@@ -163,9 +194,12 @@ fn an_opened_cache_offers_nothing_and_costs_nothing() {
 #[test]
 fn the_run_stats_carry_the_find_out_of_the_facility() {
     let mut s = scene(AbilityId::Lockdown);
-    assert_eq!(s.run_stats().salvaged, None);
+    assert_eq!(s.run_stats().salvaged, Loadout::empty());
     s.step(Input::Step(Direction::South));
-    assert_eq!(s.run_stats().salvaged, Some(AbilityId::Lockdown));
+    assert_eq!(
+        s.run_stats().salvaged,
+        Loadout::empty().with(AbilityId::Lockdown),
+    );
 }
 
 /// **Skipping it is legal, and costs the run nothing but the crate** — the ticket's
@@ -175,7 +209,7 @@ fn the_run_stats_carry_the_find_out_of_the_facility() {
 #[test]
 fn a_cache_left_alone_is_a_legal_run() {
     let s = scene(AbilityId::Confusion);
-    assert_eq!(s.run_stats().salvaged, None);
+    assert_eq!(s.run_stats().salvaged, Loadout::empty());
     assert_eq!(
         s.intel_needed_to_exit(),
         0,
@@ -211,9 +245,9 @@ fn a_cache_with_no_contents_is_scenery() {
         Cell::new(10, 10),
     )
     .with_loadout(Loadout::innate())
-    .with_cache(None);
+    .with_caches([]);
 
-    assert_eq!(s.equipment_cache(), None);
+    assert!(s.equipment_caches().is_empty());
     assert!(!s
         .affordances()
         .iter()
@@ -222,4 +256,139 @@ fn a_cache_with_no_contents_is_scenery() {
     let e = s.step(Input::Step(Direction::South));
     assert!(!e.iter().any(|e| matches!(e, Event::TechSalvaged { .. })));
     assert_eq!(s.turn(), turn, "a dead bump is free (§4.4)");
+}
+
+/// **The §8.3 cap is kept at the pickup** (#209/#266): a run already carrying
+/// [`AbilityId::MAX_TECH_HELD`] pieces of tech is refused, told which tech it is walking
+/// away from, and charged nothing. The crate is left unopened, so coming back with a free
+/// hand — or with #266's exchange — finds it exactly as it was.
+///
+/// Enforced here rather than silently in the loadout because this is the one moment the
+/// player can be told: a cap that dropped a find on the floor would be a rule nobody was
+/// warned about.
+#[test]
+fn a_full_run_is_refused_the_crate_and_told_why() {
+    let mut s = scene_holding(AbilityId::Dephase, hands_full());
+    assert!(
+        s.affordances()
+            .iter()
+            .any(|(_, a)| *a == Affordance::SalvageFull),
+        "the usable line says the hands are full before the walk (§11.4)",
+    );
+
+    let turn = s.turn();
+    let e = s.step(Input::Step(Direction::South));
+    assert!(
+        e.contains(&Event::SalvageRefused {
+            id: AbilityId::Dephase,
+            refusal: SalvageRefusal::HandsFull,
+        }),
+        "the refusal names what is in the crate",
+    );
+    assert_eq!(s.turn(), turn, "a refused bump is free (§4.4)");
+    assert!(!s.loadout().contains(AbilityId::Dephase), "nothing taken");
+    assert_eq!(
+        s.loadout().tech_held(),
+        AbilityId::MAX_TECH_HELD,
+        "and nothing swapped out behind the player's back — that is #266's screen",
+    );
+    // The crate is still live: it was refused, not spent.
+    assert_eq!(s.salvaged(), Loadout::empty());
+    assert!(s
+        .affordances()
+        .iter()
+        .any(|(_, a)| *a == Affordance::SalvageFull));
+}
+
+/// **A crate holding tech you already carry is bad luck, not a bug** (#209). A facility is
+/// stocked from its own seed and knows nothing of who is coming, so the run meets
+/// duplicates — and the bump refuses for free rather than spending a turn on nothing.
+#[test]
+fn a_duplicate_crate_is_refused_for_free() {
+    let held = Loadout::innate().with(AbilityId::Decoy);
+    let mut s = scene_holding(AbilityId::Decoy, held);
+    assert!(
+        s.affordances()
+            .iter()
+            .any(|(_, a)| *a == Affordance::SalvageCarried),
+        "the line says the crate is a dud rather than promising a take (§2.3)",
+    );
+
+    let turn = s.turn();
+    let e = s.step(Input::Step(Direction::South));
+    assert!(
+        e.contains(&Event::SalvageRefused {
+            id: AbilityId::Decoy,
+            refusal: SalvageRefusal::AlreadyCarried,
+        }),
+        "the refusal names the tech you already have",
+    );
+    assert_eq!(s.turn(), turn, "a refused bump is free (§4.4)");
+    assert_eq!(s.salvaged(), Loadout::empty(), "the crate is untouched");
+}
+
+/// **The duplicate answer outranks the full one**, because it is the more specific: a
+/// crate holding tech you already carry is no use to you whether or not your hands are
+/// full, and *"you have one"* is the more useful thing to be told.
+#[test]
+fn a_duplicate_reads_as_a_duplicate_even_with_full_hands() {
+    let held = hands_full();
+    let carried = held
+        .iter()
+        .find(|id| !id.is_innate())
+        .expect("a full run carries tech");
+    let mut s = scene_holding(carried, held);
+    let e = s.step(Input::Step(Direction::South));
+    assert!(e.contains(&Event::SalvageRefused {
+        id: carried,
+        refusal: SalvageRefusal::AlreadyCarried,
+    }));
+}
+
+/// **The last free hand still takes** — the cap refuses the fourth piece of tech, not the
+/// third. Off by one here would quietly cost every run an ability.
+#[test]
+fn a_run_one_short_of_the_cap_still_takes_the_crate() {
+    let held = Loadout::innate()
+        .with(AbilityId::Camouflage)
+        .with(AbilityId::Decoy);
+    assert_eq!(held.tech_held(), AbilityId::MAX_TECH_HELD - 1);
+    let mut s = scene_holding(AbilityId::Dephase, held);
+    s.step(Input::Step(Direction::South));
+    assert!(s.loadout().contains(AbilityId::Dephase), "the third fits");
+    assert_eq!(s.loadout().tech_held(), AbilityId::MAX_TECH_HELD);
+}
+
+/// **A facility may hide several crates** (§14 v3/#209: a Vault hides three), and each is
+/// its own bump with its own find. What leaves on the verdict is the set of everything
+/// opened.
+#[test]
+fn several_crates_are_several_finds() {
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 6), Terrain::EquipmentCache);
+    layout.place(Cell::new(4, 5), Terrain::EquipmentCache);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate())
+    .with_caches([AbilityId::Decoy, AbilityId::Dephase]);
+
+    // The fixture stamps two crates; `with_caches` pairs the stock against the grid in
+    // scan order, so both are live and hold different things (#209).
+    assert_eq!(s.equipment_caches().len(), 2);
+    assert_eq!(s.cache_contents().len(), 2);
+
+    s.step(Input::Step(Direction::South)); // the crate to the south
+    s.step(Input::Step(Direction::West)); // …and the one to the west
+    let found = s.salvaged();
+    assert_eq!(found.tech_held(), 2, "two crates, two finds");
+    assert_eq!(s.run_stats().salvaged, found, "and both ride out together");
+    for id in found.iter() {
+        assert!(s.loadout().contains(id), "{id:?} is on the deck");
+    }
 }
