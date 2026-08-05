@@ -30,6 +30,23 @@ pub(crate) enum PatrolStyle {
     /// **A live net.** The guard sweeps its own beat, pacing to the farthest cell it
     /// has not looked at — deterministic, and therefore learnable.
     Beat,
+    /// **A live net, with the consoles watched** (§7.5/§12.6/#319): the beat sweep
+    /// above, with every other leg diverted to a cell beside a console the guard has
+    /// not stood by this cycle ([`Guard::next_console_approach`]).
+    ///
+    /// It is a *style* rather than a flag handed down beside one, because that is
+    /// exactly what it is: one more answer to "how does a Calm guard choose where to
+    /// walk", resolved once at the level's seam
+    /// ([`State::patrol_style`](crate::State)) from the resolved modifier set (§12.3).
+    /// The two live-net styles share everything else — territory, inspected memory,
+    /// farthest-uninspected on the legs that are not console legs — so the ordinary
+    /// sweep is unchanged rather than replaced (see [`Guard::repick_patrol_target`]).
+    ///
+    /// **There is no watched-console counterpart to [`Wander`](Self::Wander)**, and
+    /// that is the rule, not an omission: the cycle is over the consoles a guard's
+    /// *beat* touches, and a silenced net has no beats to divide the building with
+    /// (§7.3). Killing the net therefore takes the console watch with it.
+    WatchedConsoles,
     /// **A silenced net** (§7.3): no partition, so the territory is the whole level the
     /// guard can reach, and the next target is drawn **at random** from the part of it
     /// the guard has not inspected.
@@ -104,6 +121,14 @@ impl Guard {
         style: PatrolStyle,
         rng: &mut Rng,
     ) {
+        // The console watch's memory is written here, on the guard's own ground: any
+        // console it is **standing beside** counts as visited this cycle, whether it
+        // walked here to see it or merely passed. Done before the keep clause below, so
+        // a console met in the middle of an ordinary leg is not queued up to be walked
+        // to again (§7.5/#319).
+        if style == PatrolStyle::WatchedConsoles {
+            self.mark_consoles_beside(facility);
+        }
         let territory = self.territory(facility, style);
         if let Some(dest) = self.destination {
             // A guard with no beat has no territory for a destination to be *outside*
@@ -119,7 +144,139 @@ impl Guard {
             .into_iter()
             .filter(|cell| walkable.contains(cell))
             .collect();
+        // **The console leg** (§12.6/#319), on the legs that are due one: head for a
+        // cell beside a console this cycle has not reached. Drawn from exactly the
+        // candidate set an ordinary leg is drawn from — the guard's own territory,
+        // filtered to ground it can walk to — so a console leg inherits every
+        // invariant the sweep has (it is on its own beat, it is reachable, it is
+        // patrollable) and adds only the preference.
+        if style == PatrolStyle::WatchedConsoles && self.console_leg_due {
+            if let Some(approach) = self.next_console_approach(facility, &within_reach) {
+                self.console_leg_due = false;
+                self.destination = Some(approach);
+                return;
+            }
+            // No console in this beat, or none it can reach: there is nothing to
+            // prefer, so the leg is an ordinary one and the guard is no worse off.
+        }
+        // **The ordinary leg** (§7.5) — and the alternation that keeps it from being
+        // starved: the next leg is a console leg, so at most every second pick is
+        // diverted and the farthest-uninspected sweep keeps covering the beat's plain
+        // ground. A guard that only ever shuttled between consoles would have turned
+        // the level into two watched rooms and a free corridor network, which is
+        // easier, not harder (§2.3).
+        self.console_leg_due = true;
         self.destination = self.next_target_in(&within_reach, style, rng);
+    }
+
+    /// Record every watched console the guard is **standing beside** as visited this
+    /// cycle (§12.6/#319) — the coverage promise is *a guard stands next to it*, so
+    /// that is the fact the memory keeps.
+    fn mark_consoles_beside(&mut self, facility: &Facility) {
+        let here = self.pos;
+        self.learn_beat_consoles(facility);
+        let beside: Vec<Cell> = self
+            .beat_consoles
+            .iter()
+            .flatten()
+            .copied()
+            // Orthogonal adjacency, said as the metric already has it: a console the
+            // guard could bump from where it stands (§4.3).
+            .filter(|&console| console.manhattan_distance(here) == 1)
+            .collect();
+        for console in beside {
+            if !self.consoles_visited.contains(&console) {
+                self.consoles_visited.push(console);
+            }
+        }
+    }
+
+    /// Where to stand to watch the next console (§12.6/#319): a patrollable cell of
+    /// `within_reach` orthogonally adjacent to the nearest console of this guard's beat
+    /// it has not stood beside this cycle. `None` when the beat touches no console it
+    /// can reach — the modifier then asks for nothing here and the leg is an ordinary
+    /// one.
+    ///
+    /// **The cycle is what makes coverage bounded rather than lucky.** A console drops
+    /// out of the candidate set once visited, so every console in the beat is taken in
+    /// turn; when the last one goes the memory is wiped and the cycle starts over —
+    /// deliberately the same shape as §7.5's inspected-memory wipe, and the reason the
+    /// bound is `[CONSOLE_CYCLE_TURNS]` rather than an expectation.
+    ///
+    /// Deterministic throughout (§12.4), drawing no RNG: **nearest** console first —
+    /// the alternating ordinary leg is what paces the guard across distances, so the
+    /// console leg does not need to — with ties broken north-west first, and the
+    /// approach cell chosen the same way. The guard's own cell is never a target, as
+    /// in [`pick_farthest`].
+    fn next_console_approach(
+        &mut self,
+        facility: &Facility,
+        within_reach: &[Cell],
+    ) -> Option<Cell> {
+        self.learn_beat_consoles(facility);
+        let consoles = self.beat_consoles.clone().unwrap_or_default();
+        let from = self.pos;
+        let reachable: HashSet<Cell> = within_reach.iter().copied().collect();
+        let approach = |console: Cell| {
+            Direction::ALL
+                .into_iter()
+                .filter_map(|dir| console.step(dir))
+                .filter(|&cell| cell != from && reachable.contains(&cell))
+                .min_by_key(|&cell| (from.manhattan_distance(cell), cell.y, cell.x))
+        };
+        let nearest = |visited: &[Cell]| {
+            consoles
+                .iter()
+                .copied()
+                .filter(|console| !visited.contains(console))
+                .filter_map(|console| approach(console).map(|cell| (console, cell)))
+                .min_by_key(|&(console, _)| {
+                    (from.manhattan_distance(console), console.y, console.x)
+                })
+        };
+        if let Some((_, cell)) = nearest(&self.consoles_visited) {
+            return Some(cell);
+        }
+        // Every console this guard can reach has been stood beside: wipe the cycle and
+        // start it over, exactly as the sweep wipes its inspected memory (§7.5).
+        self.consoles_visited.clear();
+        nearest(&[]).map(|(_, cell)| cell)
+    }
+
+    /// Work out — once — which consoles this guard's **beat** touches (§10.5/#319):
+    /// the [`Terrain::Console`] and [`Terrain::CommsConsole`] cells orthogonally
+    /// adjacent to a cell of the beat. Both are solid and bump-interacted (§10.3/§4.3),
+    /// so a console is never a cell to stand on and always one to stand *beside*.
+    ///
+    /// Cached rather than rebuilt per pick, and computed **lazily** rather than when
+    /// the beat is cut: the solid usables are stamped into the building after the
+    /// region graph a beat comes from (see [`walkable_ground`](Self::walkable_ground)
+    /// for the same asymmetry biting the sweep), so a set built at placement could miss
+    /// consoles that were not there yet. The cache is dropped whenever the beat changes
+    /// ([`set_beat`](Guard::set_beat)), which is the only thing that can move it.
+    fn learn_beat_consoles(&mut self, facility: &Facility) {
+        if self.beat_consoles.is_some() {
+            return;
+        }
+        let mut consoles: Vec<Cell> = Vec::new();
+        for &cell in &self.beat {
+            for dir in Direction::ALL {
+                let Some(neighbour) = cell.step(dir) else {
+                    continue;
+                };
+                let watched = matches!(
+                    facility.terrain(neighbour),
+                    Some(Terrain::Console | Terrain::CommsConsole)
+                );
+                if watched && !consoles.contains(&neighbour) {
+                    consoles.push(neighbour);
+                }
+            }
+        }
+        // North-west first, so the set a pick reads is in one order whatever order the
+        // beat's cells happen to be in (§12.4).
+        consoles.sort_unstable_by_key(|cell| (cell.y, cell.x));
+        self.beat_consoles = Some(consoles);
     }
 
     /// Every cell this guard could walk to from where it stands, over bare terrain
@@ -193,7 +350,12 @@ impl Guard {
         rng: &mut Rng,
     ) -> Option<Cell> {
         let pick = |guard: &Self, inspected: &VisibleSet, rng: &mut Rng| match style {
-            PatrolStyle::Beat => pick_farthest(territory, inspected, guard.pos),
+            // The console watch (#319) diverts *which leg goes where*, never how an
+            // ordinary leg is chosen — so a live net picks farthest-uninspected under
+            // either live-net style.
+            PatrolStyle::Beat | PatrolStyle::WatchedConsoles => {
+                pick_farthest(territory, inspected, guard.pos)
+            }
             PatrolStyle::Wander => pick_random(territory, inspected, guard.pos, rng),
         };
         if let Some(cell) = pick(self, &self.inspected.clone(), rng) {

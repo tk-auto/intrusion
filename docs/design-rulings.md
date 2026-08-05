@@ -1918,9 +1918,187 @@ Two consequences beyond the mapping:
   copy of the same source. It is what a wall draws when nothing autotiles it, and a
   fallback in a different shade would make the wall flicker as the sheet decoded.
 
+## Appendix 38 — A solid usable is a wall to a route, and placement has to draw like one
+
+*(§10.3, §10.6; #477, #481.)*
+
+An intel console, the comms console and the exit stamp in **solid** (§10.3), and unlike
+a closed door panel there is no move that gets anyone past one: bumping a panel *opens
+the way*, bumping a console *uses* it. So one of them dropped into a one-cell throat is
+a wall, and the ground behind it belongs to nobody — guards cannot route to it, the
+player cannot walk to it, and both can still see in, because a usable does not block
+sight. A visible alcove nobody can ever enter.
+
+Measured on the shipped generator over 300 quick-play seeds: **50 of them (17%)** had at
+least one such pocket, 52 pockets in all, and on one seed a *guard* was placed inside
+one — a patrol with two cells to pace for the whole run.
+
+**Why every existing check was quiet.** Two blind spots, and they are different ones.
+§10.6's post-placement assert proves the player's **objective route** survives the
+stamping — start → every objective → the comms console → exit — and orphaned ground
+holds no objective, so the flood never has a reason to visit it. It is the same hole
+appendix 17 records one notch further out: that one sealed rooms *with* their objectives
+inside, this one seals rooms with **nothing** inside, which is exactly why the route
+check stayed silent. Meanwhile the §10.5 region graph and the guard beats cut from it
+are computed on the **bare carve** — the usables are recorded by generation and stamped
+later by `State::new` — so the graph the partition sees still shows plain floor where the
+console will land. That ordering is why the beat-reachability property test passed over
+the whole seed range while guards froze in play (#477).
+
+**A candidate filter, not an assert-and-redraw.** Appendix 17 is the standing warning:
+the one-usable rule as a *hard guarantee* rejected ~85% of carves and stalled
+generation, which is why it is a preference with a fallback. An assert on the finished
+board costs a redraw per bad seed; a filter at the moment of choosing costs none. So
+placement draws every usable cell through the same shape `severs_pathing` already
+applies to a table: **skip a cell whose stamping would disconnect the walkable graph**.
+The check is the O(ring) local one — if every walkable neighbour of the candidate can
+still reach every other within the 3×3 ring, any route through it has a local detour —
+which is sound in the direction that matters (it never *passes* a cell that seals) and
+merely conservative in the other.
+
+Two details make it a guarantee rather than a heuristic:
+
+- **The usables already chosen are masked solid.** Each candidate is judged on the graph
+  the previous stamps left behind, so a *pair* that jointly pinches a two-cell throat is
+  caught by whichever of them lands second. With the §10.6 gate proving the bare carve is
+  one component, the induction over the sequence is the whole proof.
+- **Both movement rules, not one.** A guard refuses a cupboard and partial cover where the
+  player refuses neither, and neither rule implies the other: a detour through a cupboard
+  saves the player and not the patrol, while a cupboard's single mouth (§10.1.6) is ground
+  only the player could ever have lost. A pocket orphaned for guards alone is still a
+  coverage hole worth refusing.
+
+**And the assert anyway.** §10.6 is explicit that a generator must never merely *believe*
+a reachability property, so the finished board is still checked one-component per rule
+before a placement is accepted. The filter is what makes it free; the assert is what
+makes it true rather than argued. If it ever fires, the filter has a hole — not the seed.
+
+**What it cost.** Over the same 300 quick-play seeds, orphaned pockets went **50 → 0**
+and the guard-in-a-nook case went with them (it was a consequence of orphaned ground, not
+a separate bug). Generation barely noticed: **314 → 319 carve attempts** for the 300
+levels (6 carve rejections either way), with placement rejections 8 → 13 — every one of
+them a pool the filter narrowed, and **none** of them the finished-board assert firing.
+
+**What this does *not* change.** `Terrain::blocks_pathing` still answers `false` for the
+solid usables, and deliberately: generation asks it of a carve those cells are not stamped
+into yet, and the routing predicates pair it with the move check, which is where a usable
+becomes solid (`guard::routable`). §10.3's pathing column is about the finished board;
+the method is about the carve, and the note on it says so. Nor does it retire #477's
+guard-side route filter — the §7.5 sweep still refuses to target ground it cannot walk to,
+which is the backstop for any future terrain that severs a route.
+
+**One thing it dragged in, and it is worth naming.** Moving where the exit lands walked
+a *pre-existing* sim-bot freeze onto a pinned witness seed. Climbing out of the tunnel
+is a step with **no bump behind it** (§10.7 confines the crawl), so a closed door panel
+beside `E` is not a way out — but the bot chose the mouth's exit by the *routing* rule,
+which happily plans through a closed door because a walker opens one by bumping it
+(§10.4). The press was refused for free, nothing about the mouth changed, and it pressed
+again until the input cap: a whole run spent on turn fourteen. Seeds 231 and 288 hold it
+on `main` and are now pinned in the bot's own anti-stall test. The lesson generalises
+past the bot: **"can route through" and "can step onto" are two questions**, and a
+closed panel is the one terrain where the answers differ.
+
 ---
 
-## Appendix 38 — Crates scale with the flavour, and what is in them is the building's business
+## Appendix 39 — Watching the consoles: the cycle is the modifier, the alternation is its price
+
+*(§7.5/§12.6; #319. `crates/core/src/guard/patrol.rs`, `crates/core/src/modifiers.rs`.)*
+
+Baseline, a console is floor. The §7.5 sweep takes the farthest cell a guard has not
+looked at, and a room holding the intel is no better watched than an empty corridor —
+so *where the player must go* has no bearing on *where the guards are*, which is the
+cheapest kind of stealth. `guards_watch_consoles` is the harder modifier that fixes
+it: a Calm guard prefers a cell beside a console its beat touches, and cycles them.
+
+### The thing worth measuring is not "does it prefer them", it is "does it close"
+
+A bias is trivial to write and trivially a facade (§2.3): a guard that *sometimes*
+heads for a console is a guard that already sometimes wandered past one. What makes
+this a rule rather than a nudge is the **cycle** — a per-guard memory of which of its
+consoles it has stood beside, preferring one it has not, wiped when the last one goes,
+in deliberate imitation of §7.5's own inspected-memory wipe. Coverage then *closes*
+instead of converging in expectation.
+
+Measured over 256 generated seeds, run idle so the patrol is what is measured:
+
+| | baseline | watched |
+|---|---|---|
+| consoles never stood beside within 600 turns | **a third of them** | none |
+| typical console first stood beside | — | ~150 turns |
+| slowest console over 256 seeds | 597 (of the ones reached at all) | **578** |
+
+`CONSOLE_CYCLE_TURNS` is the **[START] 800** those numbers set, and it is a bound the
+test holds the game to, not a budget the guard reads — nothing at runtime consults it,
+which is why it is test-gated. The difference the modifier actually buys is the first
+row: not "sooner", but "at all".
+
+### Strict alternation, because the alternative is an easier level
+
+The obvious implementation — prefer a console whenever one is unvisited — makes the
+guard shuttle between consoles for the whole cycle and abandons the ground between
+them. That is not a harder level; it is **two watched rooms and a free corridor
+network**, which a player learns in one run. So the rule is strict alternation: one
+console leg, one ordinary farthest-uninspected leg, and so on.
+
+It is not free, and the cost is the bound above. A console cycle on a wide beat pays
+*two* legs per console across a 40×40 building, plus a dwell at each arrival — which
+is the whole of why the worst case is 578 turns rather than 200. The trade was taken
+in that direction on purpose: the sweep's coverage of plain ground holds at **1.00×
+baseline on average and never below 0.87×** over the swept seeds, and a bound that is
+long but real beats a tight one bought by abandoning the corridors.
+
+The console *within* a cycle is picked **nearest-first**, not farthest. §7.5's
+farthest-first is what makes patrols pace across distances and read as purposeful, and
+it is preserved exactly — on the alternating ordinary leg, which is still doing that
+job. A console leg that also insisted on being farthest would double a cost the
+alternation is already paying twice.
+
+### A silenced net takes it away, and that is the design
+
+The cycle is over the consoles a guard's **beat** touches. Killing the radio (§7.3)
+leaves no partition to divide the building with: every Calm guard takes the whole
+level and draws its target at random. There is then no "its consoles" left to cycle,
+so the console watch goes the way the beat does.
+
+That fell out of *where* the modifier is read rather than being bolted on. It resolves
+into `PatrolStyle` — the value that already answers "how does a Calm guard choose where
+to walk" — as a third variant beside `Beat` and `Wander`, at the one seam
+(`State::patrol_style`) where a silenced net is already decided. So the modifier needed
+no argument threaded down to `Guard::decide`, no field on the guard read at runtime, and
+no second place that knows it exists. And it prices well: silencing the net already
+costs a real detour (§7.3, ≥16 cells from spawn), and under this modifier it buys one
+thing more.
+
+### What the sim says, including the parts that do not support the label
+
+120 bot seeds per profile, both arms, same facilities:
+
+| profile | win rate | median turns to win | detections | diversity |
+|---|---|---|---|---|
+| balanced | 0.367 → 0.350 | 139 → 155 | 993 → 992 | 0.629 → 0.624 |
+| cautious | **0.567 → 0.467** | 250 → 221 | 1213 → 1076 | 0.466 → 0.470 |
+| aggressive | 0.383 → 0.408 | 151 → 156 | 870 → 794 | 0.544 → 0.543 |
+
+The clean signal is **cautious**, and it is the one the design predicts: the profile
+that lingers near an objective waiting for a gap is the profile a patrol that keeps
+coming back punishes, and it loses ten points of win rate. Balanced and aggressive move
+inside the noise of 120 runs (σ ≈ 4.5 points), and diversity does not move at all —
+nothing collapses into one strategy.
+
+**Detections fall in every profile, and that is not the label failing.** Guard time is
+finite: legs spent walking to consoles are legs not spent sweeping the rest of the beat,
+so a player who is *not* near an objective is seen less. The pressure this modifier adds
+is deliberately not spread evenly over the level — it is concentrated exactly on the two
+errands a run cannot skip (§4.5 take the intel, §7.3 silence the net). That is why the
+§2.3 directional assertion is stated on **turns with a guard's cone on a console** — up
+from 3403 to 5603 over 64 seeds, with no seed inverting — rather than on detections per
+run, which measures a different thing and would have this modifier reading easier.
+
+---
+
+---
+
+## Appendix 40 — Crates scale with the flavour, and what is in them is the building's business
 
 *(§2.2/§8.3/§10.6/§14 v3; #209, on the seams #206 and #207 left. `crates/core/src/salvage.rs`,
 `crates/core/src/campaign/map.rs`, `crates/core/src/place.rs`.)*
@@ -2021,7 +2199,10 @@ not your hands are full.
 
 Every crate is planted at least `PLAYER_CACHE_MIN_DISTANCE` (16 **[START]**, the comms
 console's own number) from the mouth the run climbs out of, and the crates of one
-facility **prefer distinct rooms**. §2.3 is the whole reason for both: a reward sat near
+facility **prefer distinct rooms**. They are also solid usables, so appendix 38's rule
+applies to them unchanged: a cell whose stamping would seal walkable ground off is out of
+the pool, judged **per crate** rather than once for the set — the second crate has to be
+weighed against a building the first is already standing in. §2.3 is the whole reason for both: a reward sat near
 the way in is a free grab, and three crates in one room would be a single detour paying
 out three times over — which is the price collapsing in a different direction.
 

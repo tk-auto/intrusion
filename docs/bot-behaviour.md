@@ -63,8 +63,11 @@ tried in priority order, and the first that applies wins:
 **Above all four sits the crawl** (§4.5/§10.7/#466). Inside a duct there is exactly one
 thing to do, so a crawler never reaches the ladder: it makes for the mouth and climbs out
 — never back onto the path (an interior cell may overlie ordinary floor, so a step onto
-one is another crawl) and never into a cupboard (one mouth, and it is the cell you are
-standing on). The exception is its own tunnel with the intel gate met: then it makes for
+one is another crawl), never into a cupboard (one mouth, and it is the cell you are
+standing on), and only onto ground it can actually **enter**: climbing out is a step with
+no bump behind it, so a closed door panel beside the mouth is not a way out however
+happily a *route* would plan through one (§10.4/#481). The exception is its own tunnel
+with the intel gate met: then it makes for
 the **way out** instead and presses the `exit: leave` the usable line offers, off the
 board. That is the opening and closing beat of every run — the bot starts on the border
 cell like any player and crawls in, and it leaves the same way.

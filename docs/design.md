@@ -759,6 +759,25 @@ it has not recently looked at.
   across distances instead of shuffling locally, and it is why the emergent
   patrols read as purposeful. Keep it.
 - When no uninspected cell remains, it wipes its memory and starts over.
+- **Watched consoles (#319) — a level modifier (§12.6), off at baseline.** With it on,
+  a Calm guard **alternates**: one leg to a cell beside a **console** its beat touches
+  (an intel `$` or the comms `Ψ`, §10.3 — both solid, so the destination is always a
+  cell *beside* one, never the console itself), then one ordinary
+  farthest-uninspected leg, and so on. It remembers which of its consoles it has stood
+  beside this cycle and prefers one it has not; when they are all taken the memory is
+  wiped and the cycle starts over, exactly as the inspected memory above is. So
+  **coverage is bounded rather than lucky**: every console in a beat is stood beside
+  within a **[START] 800** turns of Calm patrol, against a baseline where a third of
+  all consoles are never stood beside at all over 600 turns. The alternation is what
+  keeps the ordinary sweep alive — a guard that only shuttled between consoles would
+  have turned the level into two watched rooms and a free corridor network, which is
+  easier, not harder (§2.3). It bends **destination choice and nothing else**: the
+  arrival takes the ordinary dwell below and then leaves, so it raises how *often* a
+  console is looked at and never how *long* a guard holds it (§7.6). Calm only, like
+  everything else here. **A silenced net takes it away with the beats** (§7.3): the
+  cycle is over the consoles a guard's own beat touches, and a dead net leaves no
+  beats — one more thing the comms console buys. The measurements, the alternatives
+  and what the sim does and does not support are *appendix 39*.
 - **Dwell (#153).** On reaching a patrol target, a Calm guard **holds in place for
   3–7 turns** before picking the next — facing unchanged, no free re-aim (§5).
   This is what makes a Takedown (§7.2) approachable: a guard that walks every
@@ -1626,7 +1645,9 @@ because walking into it opens the way (§10.4); a console or the exit is not,
 because nothing a bump does to one lets anyone past. So a solid usable stamped
 into a one-cell throat seals the ground behind it off from guards and player
 alike — which §10.6's assert does not catch, since it proves the objective route
-and orphaned ground holds no objective (#477, #481).
+and orphaned ground holds no objective (#477, #481). **Placement therefore refuses
+such a cell outright** (§10.6, appendix 38): a usable is a wall to anything asking
+what a stamp severs.
 
 > **The table is partial cover, and the crouch is a bump.** A table blocks
 > movement and pathing like a wall — patrols route around it — but a guard sees
@@ -1825,6 +1846,7 @@ guard cooperation, assigned patrols, keys and circuits unbuilt (appendix 16).
 | Every room reaches a corridor | Every room is bounded by corridor walls, which qualify as door candidates |
 | Every room ≥ 6×6, ≤ ~12 rooms | Partition constants |
 | **A path exists: start → every objective → the comms console → exit** | **Assert it. See below.** The flood starts where the player first sets foot in the facility: the cells they can climb out of `E` onto (#466) |
+| **No solid usable seals walkable ground off** | A console, an equipment cache or the exit is a wall to a route (§10.3), so a candidate cell whose stamping would disconnect the walkable graph — under *either* movement rule, guard and player — is skipped, and the finished board is asserted one component per rule. A filter with a fallback, not an assert-and-redraw; appendix 38 |
 | **The exit's tunnel reaches the border, over inert geometry** | A straight run of plain wall or floor, 4–12 cells, sharing no cell with a §10.7 shortcut; a candidate `E` without one is redrawn |
 | **The comms console is a real detour** | ≥ 16 cells from the spawn, non-start room **[START]** (§7.3) |
 | **Every equipment cache is a real detour, and reachable** | ≥ 16 cells from the spawn, non-start room **[START]**, one per room where the carve allows, and in the reachability flood above (§14 v3). Optional to *take*, never optional to *reach*: a crate you cannot bump is not a choice you declined |
@@ -2968,7 +2990,9 @@ instead of hinged (§10.4/#452 — harder, and one of the two modifiers **read b
 generation** rather than at runtime: see below); the **guard count** moves the §10.2
 baseline by one either way (#232 — *"guards: one more"* harder, *"one fewer"* easier;
 the other generation-time modifier, and the one bounded knob whose baseline is a
-neutral middle); *"calm guards detect only their cone"* drops a **Calm**
+neutral middle); *"guards watch consoles"* has a Calm patrol prefer a cell beside a
+console its beat touches and cycle them, so the ground the player must reach is the
+ground that is patrolled (§7.5/#319 — harder; appendix 39); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
 wedge while a guard that is hunting still watches its sides (easier — an
 **experiment**, see below). This is the
@@ -3069,9 +3093,9 @@ its pool takes what exists rather than looping.
 > it is no longer between two runs of one board. Said here rather than left to be
 > discovered, because "byte-identical at every difficulty" was a stated property.
 
-**Both sides are now deeper than the axis reaches. [START]** The pool holds **four**
-harder entries and **three** easier ones, so ±2 are both genuine draws that differ by
-seed. The easier side used to be two deep and therefore exhaustive at −2 — the cost
+**Both sides are now deeper than the axis reaches. [START]** The pool holds **five**
+harder entries (the fifth is the watched consoles, #319) and **three** easier ones, so
+±2 are both genuine draws that differ by seed. The easier side used to be two deep and therefore exhaustive at −2 — the cost
 appendix 29 stated rather than hid — and what closed it is the guard count's easier end
 (#232), exactly the "knowledge or slack without touching the objective" that appendix
 said would.
@@ -3438,7 +3462,7 @@ bullet below fills one of its seams.
   - **Within a facility every crate is different; across a run they may repeat.** The
     stock is drawn from the facility's own seed, so a building is stocked before anyone
     breaks into it, and meeting tech you already carry is **bad luck** rather than
-    something the world rearranges itself to prevent. Appendix 38.
+    something the world rearranges itself to prevent. Appendix 40.
   - **The §8.3 held cap is enforced at the crate.** A run carries three pieces of tech;
     a bump with no room for a fourth — or on a duplicate — is **refused for free** and
     says which, leaving the crate standing for a run that comes back with a free hand.

@@ -31,6 +31,12 @@
 //!   player's actual movement graph and requires every console and the exit to be
 //!   bump-adjacent (§4.3) to it: start → every objective → the comms console → exit,
 //!   on the level as it will actually be played.
+//! - **That proof is about the *route*, which is not the same as the *building*.**
+//!   Orphaned ground holds no objective, so a usable that seals a pocket off from
+//!   everybody passes [`solvable`] in silence (#481). Every usable cell is therefore
+//!   drawn through [`seal::seals_ground`] — the candidate filter refusing a cell whose
+//!   stamping would disconnect walkable ground — and the finished board is then
+//!   checked by [`seal::nothing_orphaned`] rather than believed.
 
 use crate::beat::coordinated_beat_cells;
 use crate::cell::Cell;
@@ -45,6 +51,8 @@ use crate::region::{RegionId, RegionKind};
 use crate::rng::Rng;
 use crate::vision::{field_of_view_with_blind_spot, BlindTier, GUARD_SIGHT_ARC, GUARD_SIGHT_RANGE};
 use std::collections::HashSet;
+
+mod seal;
 
 /// The **comms console** spawns at least this far (Manhattan) from the exit `E`
 /// **[START]** — the cell the player climbs out of the tunnel into, and so the point
@@ -424,13 +432,19 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         let opens_onto_the_building = footholds(facility, exit, duct.cells()).next().is_some();
         opens_onto_the_building.then_some(duct)
     };
+    // The exit is also **solid** (§10.3), so a candidate in a one-cell throat would
+    // seal the ground behind it off from everybody (#481). Unlike the one-usable
+    // preference that is a gate, not a taste: it holds in the fallback tier too.
+    let placeable = |&&exit: &&Cell| !seal::seals_ground(facility, exit, &[]);
     let (exit, exit_duct) = start_floor
         .iter()
         .filter(|&&exit| !placement_conflict(layout, exit, &[]))
+        .filter(placeable)
         .find_map(|&exit| Some((exit, tunnel_from(exit)?)))
         .or_else(|| {
             start_floor
                 .iter()
+                .filter(placeable)
                 .find_map(|&exit| Some((exit, tunnel_from(exit)?)))
         })?;
     // The run begins on the tunnel's way-out cell, inside the crawlspace (§4.5/#466).
@@ -467,18 +481,27 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     }
     let mut intel = Vec::with_capacity(config.intel);
     for &i in others.iter().take(config.intel) {
-        // A console is a usable (§11.4): prefer a cell that keeps every floor
-        // cell to one adjacent usable, but fall back to the whole room rather
-        // than fail the draw — the preference never blocks a placement (the
-        // arrow keeps a doubled cell unambiguous).
-        let clean: Vec<Cell> = rooms[i]
+        // A console is solid (§10.3), so the cells that would seal ground off behind
+        // it are out of the room's pool entirely (#481) — a gate, judged against the
+        // usables already claimed, so a pair that jointly pinches a throat is caught
+        // by whichever of them lands second.
+        let placeable: Vec<Cell> = rooms[i]
             .1
+            .iter()
+            .copied()
+            .filter(|&c| !seal::seals_ground(facility, c, &usables))
+            .collect();
+        // It is also a usable (§11.4): prefer a cell that keeps every floor cell to
+        // one adjacent usable, but fall back to the rest of the room rather than fail
+        // the draw — *that* preference never blocks a placement (the arrow keeps a
+        // doubled cell unambiguous).
+        let clean: Vec<Cell> = placeable
             .iter()
             .copied()
             .filter(|&c| !placement_conflict(layout, c, &usables))
             .collect();
         let console =
-            pick_free(&clean, &taken, rng).or_else(|| pick_free(&rooms[i].1, &taken, rng))?;
+            pick_free(&clean, &taken, rng).or_else(|| pick_free(&placeable, &taken, rng))?;
         intel.push(console);
         taken.push(console);
         usables.push(console);
@@ -506,13 +529,20 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         .filter(|&c| !taken.contains(&c) && c.manhattan_distance(exit) >= PLAYER_COMMS_MIN_DISTANCE)
         .collect();
     shuffle(&mut comms_pool, rng);
+    // Solid like the rest (§10.3), so a cell that would seal ground off is out of the
+    // pool at both tiers (#481) — the comms console is the single most frequent
+    // sealer measured, being drawn last and from the widest pool.
+    let placeable = || {
+        comms_pool
+            .iter()
+            .copied()
+            .filter(|&c| !seal::seals_ground(facility, c, &usables))
+    };
     // A usable like any other (§11.4): prefer a cell that leaves every floor
     // neighbour with one adjacent usable, but fall back rather than fail the draw.
-    let comms = comms_pool
-        .iter()
-        .copied()
+    let comms = placeable()
         .find(|&c| !placement_conflict(layout, c, &usables))
-        .or_else(|| comms_pool.first().copied())?;
+        .or_else(|| placeable().next())?;
 
     // Claimed, so no guard spawns on top of the console it is standing on.
     taken.push(comms);
@@ -559,13 +589,22 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
             pool = others.iter().flat_map(&eligible).collect();
         }
         shuffle(&mut pool, rng);
+        // A crate is a **solid usable** (§10.3), so it is a wall to a route exactly as a
+        // console is — and a cell whose stamping would seal ground off is out of the pool
+        // at both tiers (#481), the rule the consoles above are drawn under. Applied per
+        // crate rather than once for the set, because `usables` grows as they are placed:
+        // the second crate has to be judged against a building the first is already
+        // standing in.
+        let placeable = || {
+            pool.iter()
+                .copied()
+                .filter(|&c| !seal::seals_ground(facility, c, &usables))
+        };
         // A usable like the consoles (§11.4): prefer a cell that leaves every floor
         // neighbour with one adjacent usable, but fall back rather than fail the draw.
-        let cell = pool
-            .iter()
-            .copied()
+        let cell = placeable()
             .find(|&c| !placement_conflict(layout, c, &usables))
-            .or_else(|| pool.first().copied())?;
+            .or_else(|| placeable().next())?;
         if let Some(&room) = others.iter().find(|&&i| rooms[i].1.contains(&cell)) {
             crated.push(room);
         }
@@ -639,6 +678,15 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         guard_clocks: Vec::new(),
     };
     if !solvable(facility, &placement) {
+        return None;
+    }
+    // …and the §10.6 assert the route check is silent about: no stamp orphaned any
+    // walkable ground (#481). [`seal::seals_ground`] filtered every candidate above so
+    // that this holds by construction and costs no redraw — but §10.6 is explicit that
+    // a generator must never merely *believe* a reachability property, and this is a
+    // flood fill. A rejection here means the filter has a hole, not that the seed is
+    // unlucky.
+    if !seal::nothing_orphaned(facility, &usables) {
         return None;
     }
     // Each guard's radio ping cadence (§7.3), drawn once from the run stream —
@@ -735,18 +783,12 @@ fn solvable(facility: &Facility, placement: &Placement) -> bool {
         .chain([placement.comms, placement.exit])
         .chain(placement.caches.iter().copied())
         .collect();
-    let enterable = |c: Cell| {
-        !solid.contains(&c)
-            && facility.terrain(c).is_some_and(|t| {
-                matches!(
-                    t,
-                    Terrain::Floor
-                        | Terrain::DoorPanelOpen
-                        | Terrain::DoorPanelClosed
-                        | Terrain::Hideout
-                )
-            })
-    };
+    // [`Terrain::routes_player`] is the single source of truth for where a player
+    // route may run (§10.3): floor, either door-panel pose, and a cupboard. It used
+    // to be spelled out again here as a private `matches!`, which is the drift that
+    // list exists to prevent.
+    let enterable =
+        |c: Cell| !solid.contains(&c) && facility.terrain(c).is_some_and(Terrain::routes_player);
 
     let (w, h) = (facility.width(), facility.height());
     // The run starts inside the tunnel (§4.5/#466), so the flood starts where the
@@ -1516,6 +1558,82 @@ mod tests {
             ),
             Err(GenError::RetriesExhausted { .. })
         ));
+    }
+
+    /// §10.3/§10.6 on the board a run is actually played on: **no solid usable seals
+    /// walkable ground off from anybody** (#481).
+    ///
+    /// The check placement itself makes ([`seal::nothing_orphaned`]) is by construction
+    /// quiet, so this asserts the property from the outside and on the *stamped* grid —
+    /// the intel consoles, the comms console and the exit all solid, as
+    /// [`State::new`](crate::State::new) leaves them — rather than trusting the filter
+    /// that put them there. Reported per seed, because "17% of seeds" is the shape of
+    /// this bug and a sweep that only says *some* seed failed says nothing useful.
+    ///
+    /// Both movement rules (§10.3): a guard refuses a cupboard and partial cover where
+    /// the player refuses neither, so a pocket can be orphaned for guards while the
+    /// player still walks to it. And a guard sealed *inside* a nook — the degenerate
+    /// case, seed 282 of the ticket's sweep — is caught by the same claim: with one
+    /// component there is nowhere for one to be sealed into.
+    #[test]
+    fn no_placed_usable_seals_walkable_ground_off() {
+        /// Whether one of §10.3's two movers may come to occupy a cell.
+        type Rule = fn(&Facility, Cell) -> bool;
+        /// The two movement rules, as the stamped board sees them.
+        const RULES: [(Rule, &str); 2] = [
+            (crate::guard::routable, "a guard"),
+            (
+                |f, c| f.terrain(c).is_some_and(Terrain::routes_player),
+                "the player",
+            ),
+        ];
+
+        for seed in seed_sweep(SEEDS) {
+            let (layout, p) = v1(seed);
+            let guards = p.guards(&layout);
+            let state = State::new(
+                layout,
+                p.player(),
+                Direction::North,
+                guards,
+                p.intel().iter().copied(),
+                p.exit(),
+            );
+            let facility = state.layout().facility();
+            let (w, h) = (facility.width(), facility.height());
+
+            for (rule, whom) in RULES {
+                let all: Vec<Cell> = (0..h)
+                    .flat_map(|y| (0..w).map(move |x| Cell::new(x, y)))
+                    .filter(|&c| rule(facility, c))
+                    .collect();
+                let reached: HashSet<Cell> = path::flood_from(all[0], w, h, |c| rule(facility, c))
+                    .into_iter()
+                    .collect();
+                let orphaned: Vec<Cell> = all
+                    .iter()
+                    .copied()
+                    .filter(|c| !reached.contains(c))
+                    .collect();
+                assert!(
+                    orphaned.is_empty(),
+                    "seed {seed}: {} cells are sealed off from {whom} — {:?}…",
+                    orphaned.len(),
+                    &orphaned[..orphaned.len().min(4)],
+                );
+
+                // …and every guard stands in that one component, rather than sealed
+                // into a nook it can only ever pace two cells of.
+                for guard in state.guards() {
+                    assert!(
+                        reached.contains(&guard.pos()),
+                        "seed {seed}: the guard at {:?} is sealed off from {whom}'s \
+                         side of the facility",
+                        guard.pos(),
+                    );
+                }
+            }
+        }
     }
 
     /// The post-placement solvability flood: a console sealed into a pocket the

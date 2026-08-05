@@ -194,9 +194,9 @@ mod tests {
     ];
     fn golden_crates() -> [crate::Cell; 3] {
         [
-            crate::Cell::new(16, 20),
-            crate::Cell::new(31, 1),
-            crate::Cell::new(1, 21),
+            crate::Cell::new(19, 20),
+            crate::Cell::new(29, 1),
+            crate::Cell::new(17, 29),
         ]
     }
 

@@ -339,6 +339,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
+            guards_watch_consoles: true,
             guard_count,
             intel_count,
             caches,

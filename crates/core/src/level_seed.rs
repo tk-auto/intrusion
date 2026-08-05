@@ -665,6 +665,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         full_layout_known,
         calm_guards_detect_only_their_cone,
         automatic_doors,
+        guards_watch_consoles,
         guard_count,
         intel_count,
         caches,
@@ -700,7 +701,11 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         // level you are handed is the level the map offered, consoles and all.
         matches!(intel_count, IntelCount::More),
         matches!(intel_count, IntelCount::Fewer),
-        // Slots 11, 12 and 13, appended (#209): the cache knob's three rungs, one slot
+        // Slot 11, appended (#319) — a plain toggle, taking the next free slot after
+        // the two knobs' ends exactly as the rule says: appending is free, and the
+        // position is permanent from here on.
+        guards_watch_consoles,
+        // Slots 12, 13 and 14, appended (#209): the cache knob's three rungs, one slot
         // each, on the terms the two count knobs' ends were appended under — no radix
         // moves, and a facility with no crate in it names none of them, so every token
         // minted before caches existed still encodes byte for byte.
@@ -741,7 +746,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, one_cache, two_caches, three_caches] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches] =
         active;
     let guard_count = match (more_guards, fewer_guards) {
         (false, false) => GuardCount::Baseline,
@@ -775,6 +780,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         full_layout_known,
         calm_guards_detect_only_their_cone,
         automatic_doors,
+        guards_watch_consoles,
         guard_count,
         intel_count,
         caches,
@@ -787,7 +793,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// the format. Not the same as the number of *fields*: the guard-count knob (#232) and
 /// the intel-count knob (#207) spend one slot per end, and the cache knob (#209) one
 /// slot per rung.
-const MODIFIER_FIELDS: usize = 14;
+const MODIFIER_FIELDS: usize = 15;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1169,14 +1175,14 @@ mod tests {
                 .with(AbilityId::Confusion)
                 .with(AbilityId::Vision),
         ];
-        // The boolean fields as a bitmask rather than one nested loop each: the knob
-        // (#232) would have made an eighth level of nesting out of a test whose whole
-        // content is "every combination".
-        const TOGGLE_FIELDS: u32 = 7;
+        // The boolean fields as a bitmask rather than one nested loop each: the
+        // knob (#232) would have made a further level of nesting out of a test whose
+        // whole content is "every combination".
+        const TOGGLE_FIELDS: u32 = 8;
         for bits in 0..(1u32 << TOGGLE_FIELDS) {
             let on = |field: u32| bits & (1 << field) != 0;
-            let (search, sighting, body, cones, layout, cone_only, doors) =
-                (on(0), on(1), on(2), on(3), on(4), on(5), on(6));
+            let (search, sighting, body, cones, layout, cone_only, doors, consoles) =
+                (on(0), on(1), on(2), on(3), on(4), on(5), on(6), on(7));
             for (guard_count, intel_count, caches) in [
                 (GuardCount::Baseline, IntelCount::Baseline, CacheCount::None),
                 (GuardCount::More, IntelCount::More, CacheCount::Three),
@@ -1196,6 +1202,7 @@ mod tests {
                             full_layout_known: layout,
                             calm_guards_detect_only_their_cone: cone_only,
                             automatic_doors: doors,
+                            guards_watch_consoles: consoles,
                             guard_count,
                             intel_count,
                             caches,
@@ -1212,10 +1219,12 @@ mod tests {
                         // run *can hold*, which is the claim, and refusing the rest
                         // **exactly** is the other half of it. A non-baseline knob
                         // spends a slot like any toggle, so it counts here too.
-                        let active = [search, sighting, body, cones, layout, cone_only, doors]
-                            .into_iter()
-                            .filter(|&flag| flag)
-                            .count()
+                        let active = [
+                            search, sighting, body, cones, layout, cone_only, doors, consoles,
+                        ]
+                        .into_iter()
+                        .filter(|&flag| flag)
+                        .count()
                             + usize::from(guard_count != GuardCount::Baseline)
                             + usize::from(intel_count != IntelCount::Baseline)
                             + usize::from(caches != CacheCount::None);
@@ -1332,6 +1341,7 @@ mod tests {
                 // are the same story one ticket later — the knob decodes at its
                 // baseline, which is the run this token has always named.
                 automatic_doors: false,
+                guards_watch_consoles: false,
                 guard_count: GuardCount::Baseline,
                 // Slots 9 and 10 (#207) are the third telling of the same story: the
                 // intel knob decodes at its baseline, so the token still names the run
@@ -1463,19 +1473,20 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 13, the cache knob's third rung (#209).
-        // A knob holds one value, so the highest five are the top cache rung (13), one
-        // end of each count knob (10 and 8), and the two highest toggles below them
-        // (6 and 5). Holding more than five at once is over the cap and refused
-        // outright, asserted in `every_config_round_trips`.
+        // actually hold, which now reaches slot 14, the cache knob's third rung (#209).
+        // A knob holds one value, so the highest five are the top cache rung (14), the
+        // watched consoles (11), one end of each count knob (10 and 8), and the highest
+        // toggle below them (6). Holding more than five at once is over the cap and
+        // refused outright, asserted in `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
             guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: false,
             full_layout_known: false,
-            calm_guards_detect_only_their_cone: true,
+            calm_guards_detect_only_their_cone: false,
             automatic_doors: true,
+            guards_watch_consoles: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::Fewer,
             caches: CacheCount::Three,
