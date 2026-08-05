@@ -1057,8 +1057,14 @@ to spend, refill or manage**: the number only goes down, and no decision in a ru
 about *getting more of it*. The fence that keeps it out of the charge economy
 (appendix 23):
 
-- **Set at level start from the ability's own row. No recharge** — no regeneration, no
-  pickup or console that tops it up, no way to earn one back.
+- **Set at level start from the ability's own row. No recharge, with one named
+  exception** — no regeneration, no tick, no console that tops it up, and nothing you can
+  earn one back with. The exception is **finding another copy of the tool itself** in an
+  equipment cache (§8.3/#266): a crate holding tech you already carry refills that
+  ability's budget to the level's grant and is spent doing it. It is not a way to *manage*
+  the number — there is still nothing to spend, refill on demand or plan around — and it
+  is bounded by how many crates the building hides (§14 v3, at most three). What it does
+  is give a duplicate crate, otherwise pure bad luck, one thing to be worth. Appendix 44.
 - **Single digits**, enforced at compile time. Ten uses is an inventory.
 - **It composes with the time economy, it does not replace it.** An ability may carry a
   cooldown *and* a use budget; §4.4 stands unchanged, and an activation refused for want
@@ -1131,8 +1137,11 @@ whole reason the architecture looks the way it does.
 > choice, so no guard moves while a run is deciding, the near line keeps stating the
 > question for as long as it stands, and the decline is always one press away (§11.6 —
 > never a trap).
-> A crate holding tech you **already carry** is the one refusal left: there is no decision
-> in a second copy, so it is refused for free and says so. Appendix 44.
+> A crate holding tech you **already carry** is the one refusal left — there is no decision
+> in a second copy, so it is refused for free and says so — **unless that tech has a
+> per-level use budget you have spent from** (§8.2), in which case the second copy is worth
+> a real detour: the crate refills it to the level's grant, says so (`Bore recharged`), and
+> is spent. That is the only thing anywhere that moves a budget upward. Appendix 44.
 
 | Ability | Cost | Duration | Cooldown | Effect |
 |---|---|---|---|---|
@@ -3648,7 +3657,8 @@ bullet below fills one of its seams.
     the **exchange** — drop one of your three for the crate's, or decline and leave it
     standing. The trade spends the turn a salvage would have and the decline is free; a
     bump on a **duplicate** is still the one refusal, because there is no decision in a
-    second copy. This is what makes the tech axis a shape rather than a queue: the fourth
+    second copy — except where that tech has a spent per-level budget (§8.2), which the
+    duplicate refills. This is what makes the tech axis a shape rather than a queue: the fourth
     crate of a run is where you start saying what this run *is*. Appendix 44.
   - **Found tech is usable the turn it is found**, in the facility it was found in.
     A reward that only switched on after extraction would make the detour a deposit

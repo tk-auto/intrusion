@@ -214,6 +214,16 @@ pub enum Event {
     /// of what you hold would change nothing — so this one stays a refusal, and the
     /// crate is left unopened for a run that comes back having traded that tech away.
     SalvageRefused { id: AbilityId },
+    /// A crate holding tech the run already carries **put its per-level budget back**
+    /// (§8.2/§8.3/#302/#266): `id` has `uses` presses again, and the crate is spent.
+    ///
+    /// The one payout a duplicate has, and the only event anywhere that moves a use
+    /// budget **upward** — §8.2's no-recharge fence is otherwise untouched, because what
+    /// this takes is another copy of the tool itself, out of a crate that is then empty.
+    /// A run with the budget already full finds a plain [`SalvageRefused`] instead.
+    ///
+    /// [`SalvageRefused`]: Event::SalvageRefused
+    UsesRecharged { id: AbilityId, uses: u32 },
     /// The player bumped a crate with **full hands**, and the crate is offering
     /// (§8.3/#266): `id` is what is in it, and the run is now standing at the exchange
     /// with four candidates on the bar and nothing else answering until it chooses.
@@ -502,6 +512,7 @@ impl Event {
             // three (#266) are the same find again, mid-decision: what an offer, a trade
             // and a decline are all *about* is the thing in the box.
             | Event::SalvageRefused { .. }
+            | Event::UsesRecharged { .. }
             | Event::ExchangeOffered { .. }
             | Event::Traded { .. }
             | Event::ExchangeDeclined { .. } => Category::Interest,
@@ -571,6 +582,14 @@ pub enum Affordance {
     /// may never promise what the press will not deliver, and it should not undersell it
     /// either — a run that reads *full* walks past a decision it was allowed to make.
     SalvageSwap,
+    /// A live crate holding tech the run already carries **whose per-level budget it can
+    /// refill** (§8.2/#302/#266): the bump takes it and puts the uses back.
+    ///
+    /// Its own entry rather than a version of [`SalvageTech`](Affordance::SalvageTech),
+    /// because what it hands over is not an ability — you have that — but presses of one,
+    /// and a row that promised *take tech* would be promising the wrong thing about a
+    /// crate the run is right to walk to anyway.
+    SalvageRecharge,
     /// A live crate holding tech the run **already carries** (#209): the bump will
     /// refuse, free.
     ///
@@ -607,7 +626,7 @@ impl Affordance {
     /// a variant missing from here is a label nothing checks, which is exactly the
     /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
     /// against it so a new variant cannot quietly skip the list.
-    pub(crate) const ALL: [Affordance; 17] = [
+    pub(crate) const ALL: [Affordance; 18] = [
         Affordance::Takedown,
         Affordance::ReleaseBody,
         Affordance::TakeBody,
@@ -618,6 +637,7 @@ impl Affordance {
         Affordance::SilenceRadio,
         Affordance::SalvageTech,
         Affordance::SalvageSwap,
+        Affordance::SalvageRecharge,
         Affordance::SalvageCarried,
         Affordance::Hide,
         Affordance::EnterDuct,
@@ -644,6 +664,7 @@ impl Affordance {
             Affordance::SilenceRadio => "comms: silence radio",
             Affordance::SalvageTech => "cache: take tech",
             Affordance::SalvageSwap => "cache: swap tech",
+            Affordance::SalvageRecharge => "cache: recharge",
             Affordance::SalvageCarried => "cache: already yours",
             Affordance::Hide => "cupboard: hide",
             Affordance::EnterDuct => "duct: enter",
@@ -684,6 +705,7 @@ impl Affordance {
             | Affordance::SilenceRadio
             | Affordance::SalvageTech
             | Affordance::SalvageSwap
+            | Affordance::SalvageRecharge
             | Affordance::SalvageCarried
             | Affordance::EnterExit
             | Affordance::Leave
@@ -717,6 +739,7 @@ mod affordance_tests {
                 | Affordance::SilenceRadio
                 | Affordance::SalvageTech
                 | Affordance::SalvageSwap
+                | Affordance::SalvageRecharge
                 | Affordance::SalvageCarried
                 | Affordance::Hide
                 | Affordance::EnterDuct

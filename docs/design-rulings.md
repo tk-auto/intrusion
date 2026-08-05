@@ -2562,7 +2562,8 @@ during a run is a different ability, and it is not this one.
 ## Appendix 44 — The exchange is the ability bar, and the crate is where the run says what it is
 
 *(§8.2/§8.3/§8.4/§11.4/§11.6/§2.2; #266, on the seam #209 left. `crates/core/src/exchange.rs`,
-`crates/core/src/state.rs`, `crates/core/src/state/view.rs`, `crates/core/src/render/hud.rs`.)*
+`crates/core/src/state.rs`, `crates/core/src/state/view.rs`, `crates/core/src/render/hud.rs`,
+`crates/core/src/status.rs`.)*
 
 #209 shipped the crate and the cap together, and the cap shipped as a **dead end**: a run
 already carrying `MAX_TECH_HELD` pieces of tech bumped a crate and was told *no hands
@@ -2710,12 +2711,50 @@ it is a fact about the raid that just ended, and the raid is the only thing that
 `salvaged` stays beside it as what the *facility* was worth, which is the question the end
 screen's ledger is actually asking.
 
+### A duplicate pays out once, and it is the one crack in §8.2's fence
+
+§8.2 settles use budgets with a fence, and the first clause of it is *"no recharge — no
+regeneration, no pickup or console that tops it up, no way to earn one back."* This ticket
+puts one exception in it, deliberately and by name: **a crate holding tech you already
+carry refills that tech's per-level budget**, if you have spent from it, and is emptied
+doing so. `Bore recharged`, a spent turn, the crate gone.
+
+The case for it starts with what a duplicate was: appendix 40 rules that crates are
+stocked from the facility's own seed and that meeting tech you already hold is *bad luck
+rather than a bug* — the world is not rearranged to spare you the walk. That is still
+right about the **draw**. What it left was a cell that was worth walking to only if you
+did not know what was in it, and once you did, a crate you could see and never use again.
+For seven of the eight pieces of tech that is fine; for the one with a **budget**, there
+was an obvious thing a second copy could be for, and refusing it was the game declining
+to notice.
+
+What keeps it inside the spirit of the fence rather than through it:
+
+- **It is not a resource to manage.** Nothing regenerates, nothing ticks, and there is no
+  decision anywhere in a run about *getting more of it* — the fence's actual claim. You
+  find another Bore or you do not.
+- **What it costs is what everything at a crate costs**: the detour and the turn. The
+  refill is not a reward for play, it is the crate's payout.
+- **It is bounded by the building** (§14 v3): a facility hides at most three crates, all
+  different, so the ceiling on refills in a level is the flavour's own number and not a
+  rate anyone can farm.
+- **It refills to the level's grant, not by one.** A partial refill would put a second
+  number on the axis for no gain; the row states the grant, and the crate restores it.
+- **A full budget is still the free refusal.** If there is nothing to give back the bump
+  changes nothing, so it costs nothing (§4.4) and the crate is left standing.
+
+The alternative considered and rejected was a consolation *elsewhere* — a duplicate paying
+out intel, or partial progress toward something. That is a reward economy being made
+whole, which appendix 40 rejected for good reasons and which would have made the draw's
+honesty (it does not peek at your loadout) into a thing the game apologises for. Paying
+out in the one currency the duplicated tool itself owns keeps the crate's contents
+meaningful: what you find is *that ability*, and this is what having it twice means.
+
 ### What is not here
 
-No consolation for a duplicate crate. A crate holding tech you already carry is still
-refused for free: there is no decision in a second copy, and offering a trade there would
-be offering a choice whose every branch is a loss. Appendix 40's reading of duplicates as
-bad luck stands.
+No consolation for a duplicate of anything unbudgeted. Seven of the eight pieces of tech
+have nothing a second copy could restore, so those crates stay the free refusal, and
+appendix 40's reading of them as bad luck stands.
 
 No picking a dropped ability back up. What you trade away is gone for the run — there is
 no floor to retrieve it from and no crate keeps what you put down. A takeback would make

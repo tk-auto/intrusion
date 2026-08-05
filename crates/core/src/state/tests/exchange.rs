@@ -191,7 +191,7 @@ fn the_near_line_keeps_asking_while_the_offer_is_open() {
     let mut s = offering();
     let asked = crate::near_line(&s).text;
     assert!(
-        asked.contains(OFFERED.name()),
+        asked.contains(OFFERED.bar_name()),
         "the offer speaks: {asked:?}"
     );
 

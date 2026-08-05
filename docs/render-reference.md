@@ -117,8 +117,9 @@ uses nowhere else. It is deliberately **not** a letter: the board's letters are 
 A facility may show **several** (§14 v3: a Vault hides three), all drawn the same. What
 a particular crate holds is never on the board — the usable line (§11.4) is the only
 thing that speaks about it, and only from the cell beside it: `cache: take tech`,
-`cache: swap tech` for a run with no room for it (#266), or `cache: already yours` for the
-one refusal left. That is the same bargain the exit strikes with its own refusal — you
+`cache: swap tech` for a run with no room for it (#266), `cache: recharge` for a duplicate
+that refills a spent use budget (§8.2), or `cache: already yours` for the one refusal
+left. That is the same bargain the exit strikes with its own refusal — you
 learn what a bump *would* do by standing next to it, never by looking across the room.
 
 While a **swap** is being decided the ability bar stops being the held set and becomes the

@@ -1364,6 +1364,38 @@ impl Deck {
         self.uses[id.index()]
     }
 
+    /// Whether `id`'s **per-level budget is short** of what the level granted
+    /// (§8.2/#302) — the question a duplicate crate asks (#266): is there anything here
+    /// worth taking, for a run that already holds this tech?
+    ///
+    /// `false` for an ability with no budget, and for one that has spent none of it:
+    /// in both cases a second copy would restore nothing, and a bump that changes
+    /// nothing must cost nothing (§4.4).
+    pub(crate) fn uses_spent(&self, id: AbilityId) -> bool {
+        matches!(
+            (self.uses[id.index()], id.def().uses_per_level()),
+            (Some(left), Some(granted)) if left < granted
+        )
+    }
+
+    /// **Refill `id`'s per-level budget** from its own §8.3 row (§8.2/#302/#266) — what
+    /// a crate holding tech the run already carries pays out.
+    ///
+    /// This is the one and only way a budget ever goes back up, and §8.2's fence is
+    /// otherwise unmoved: nothing regenerates, nothing ticks it up, no console tops it
+    /// up, and it is still a bound on the facility rather than a resource to manage.
+    /// What it takes is **another copy of the tool itself**, found in a crate that is
+    /// then spent — bounded by how many crates the building hides, which is the same
+    /// scarcity the §14 v3 flavour already sets.
+    ///
+    /// Back to **full**, not up by one: the level's grant is the number the row states,
+    /// and a partial refill would put a second number on the same axis for no gain.
+    pub(crate) fn recharge(&mut self, id: AbilityId) {
+        if let Some(granted) = id.def().uses_per_level() {
+            self.uses[id.index()] = Some(granted);
+        }
+    }
+
     /// The run's loadout — the abilities it holds (#244), for the UI line to list
     /// and a test to assert what was resolved.
     pub(crate) fn loadout(&self) -> Loadout {

@@ -393,3 +393,109 @@ fn several_crates_are_several_finds() {
         assert!(s.loadout().contains(id), "{id:?} is on the deck");
     }
 }
+
+/// **A duplicate crate pays out when the tech it duplicates has a budget to refill**
+/// (§8.2/§8.3/#302/#266): the run bumps a second Bore, its per-level uses go back to what
+/// the level granted, and the crate is spent.
+///
+/// The single exception to §8.2's no-recharge fence, and it is narrow on purpose: what it
+/// takes is another copy of the tool itself, out of a crate that is then empty — bounded
+/// by how many crates the building hides.
+#[test]
+fn a_duplicate_crate_recharges_a_spent_budget() {
+    let granted = AbilityId::PierceWall
+        .def()
+        .uses_per_level()
+        .expect("Bore is budgeted (§8.2)");
+
+    // The crate south of the player, and a lone interior pillar two cells north — Bore
+    // refuses the facility's outer shell (§1/§4.5), so a use can only really be spent on
+    // a wall inside the building.
+    let mut layout = open_room(12, 12);
+    layout.place(Cell::new(5, 6), Terrain::EquipmentCache);
+    layout.place(Cell::new(5, 3), Terrain::Wall);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(10, 10),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::PierceWall))
+    .with_caches([AbilityId::PierceWall]);
+
+    // Step north to the pillar's neighbour — exactly one wall around you, which is Bore's
+    // whole precondition — and spend a use on it.
+    s.step(Input::Step(Direction::North));
+    let bored = s.step(Input::Activate(AbilityId::PierceWall));
+    assert!(
+        bored.contains(&Event::AbilityActivated {
+            ability: AbilityId::PierceWall,
+            uses_left: Some(granted - 1),
+        }),
+        "a use is spent before the crate is worth anything: {bored:?}",
+    );
+
+    // Back to the crate, which now offers the recharge rather than a flat refusal.
+    s.step(Input::Step(Direction::South));
+    assert!(
+        s.affordances()
+            .iter()
+            .any(|(_, a)| *a == Affordance::SalvageRecharge),
+        "the usable line says the crate is worth the walk (§11.4): {:?}",
+        s.affordances(),
+    );
+
+    let turn = s.turn();
+    let e = s.step(Input::Step(Direction::South));
+    assert!(
+        e.contains(&Event::UsesRecharged {
+            id: AbilityId::PierceWall,
+            uses: granted,
+        }),
+        "the recharge names the tech and the count it is back to: {e:?}",
+    );
+    assert_eq!(
+        s.turn(),
+        turn + 1,
+        "a payout spends the turn, like any pickup"
+    );
+    assert!(
+        !s.affordances()
+            .iter()
+            .any(|(_, a)| matches!(a, Affordance::SalvageRecharge | Affordance::SalvageCarried)),
+        "and the crate is empty — it pays out once",
+    );
+}
+
+/// **A duplicate with nothing to give back is still the free refusal** (§4.4/#266): a
+/// full budget, or an ability with no budget at all, restores nothing — and a bump that
+/// changes nothing must cost nothing.
+#[test]
+fn a_duplicate_with_nothing_to_recharge_is_still_refused() {
+    // Budgeted, but untouched: the level's grant is already whole.
+    let mut s = scene_holding(
+        AbilityId::PierceWall,
+        Loadout::innate().with(AbilityId::PierceWall),
+    );
+    let turn = s.turn();
+    let e = s.step(Input::Step(Direction::South));
+    assert!(e.contains(&Event::SalvageRefused {
+        id: AbilityId::PierceWall
+    }));
+    assert_eq!(s.turn(), turn, "free (§4.4)");
+    assert_eq!(
+        s.salvaged(),
+        Loadout::empty(),
+        "and the crate is left standing"
+    );
+
+    // …and an ability with no budget can never be recharged, spent or not.
+    let mut s = scene_holding(AbilityId::Decoy, Loadout::innate().with(AbilityId::Decoy));
+    s.step(Input::Activate(AbilityId::Decoy));
+    let e = s.step(Input::Step(Direction::South));
+    assert!(e.contains(&Event::SalvageRefused {
+        id: AbilityId::Decoy
+    }));
+}

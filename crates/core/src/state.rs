@@ -344,6 +344,11 @@ enum BumpKind {
     /// it, so a second bump is a free no-op (§4.4) and the usable line offers nothing —
     /// the spent console's rule over the spent crate.
     Salvage,
+    /// A cache holding tech the run already carries, whose **per-level budget it can
+    /// refill** (§8.2/§8.3/#302/#266): the bump takes the crate and puts the uses back
+    /// to what the level granted. A spent turn, like any other pickup — this is the one
+    /// duplicate that pays out, and the only thing anywhere that moves a budget upward.
+    SalvageRecharge,
     /// A cache holding tech the run **already carries** (§8.3/#209): the bump refuses,
     /// free, like a refused exit — and it is named apart from [`Solid`](BumpKind::Solid)
     /// for the reason [`HingeHeld`](BumpKind::HingeHeld) is: the cell is anything but
@@ -423,6 +428,7 @@ impl BumpKind {
             BumpKind::Intel => Some(Affordance::TakeIntel),
             BumpKind::Salvage => Some(Affordance::SalvageTech),
             BumpKind::SalvageRefused => Some(Affordance::SalvageCarried),
+            BumpKind::SalvageRecharge => Some(Affordance::SalvageRecharge),
             BumpKind::SalvageSwap => Some(Affordance::SalvageSwap),
             BumpKind::SilenceRadio => Some(Affordance::SilenceRadio),
             BumpKind::Door {
@@ -1714,6 +1720,26 @@ impl State {
                 events.push(Event::TechSalvaged { id });
                 true
             }
+            // A crate holding tech the run already carries, with a budget to put back
+            // (§8.2/#302/#266). The crate is spent and the uses go to what the level
+            // granted — the one payout a duplicate has, and the one thing that ever
+            // moves a budget upward. A spent turn, priced exactly as the salvage it is a
+            // version of: the detour, and the turn.
+            BumpKind::SalvageRecharge => {
+                let id = self.live_cache_at(target);
+                if let Some(cache) = self.caches.iter_mut().find(|c| c.cell == target) {
+                    cache.taken = true;
+                }
+                self.abilities.recharge(id);
+                events.push(Event::UsesRecharged {
+                    id,
+                    uses: self.abilities.uses_left(id).unwrap_or(0),
+                });
+                self.waited = false;
+                self.crouched_behind = None;
+                self.drag_debt = false;
+                true
+            }
             // A crate holding tech the run already carries (§8.3/#209). **Free** (§4.4)
             // and the crate is left unopened, so nothing is spent and nothing is lost —
             // the refused exit's shape, and for the same reason: a bump that changes
@@ -2026,13 +2052,17 @@ impl State {
     /// **What a bump on a crate holding `id` would do** (§8.3/#209/#266) — the three
     /// answers a live cache has, decided in this order:
     ///
-    /// - **Already carried** ([`SalvageRefused`](BumpKind::SalvageRefused)). The crate
-    ///   holds tech the run has. A facility is stocked from its own seed and knows
-    ///   nothing of who is coming (#209), so this is luck rather than design — and a
-    ///   second copy would be a turn spent on nothing. Asked **first**, because it is the
+    /// - **Already carried** ([`SalvageRefused`](BumpKind::SalvageRefused), or
+    ///   [`SalvageRecharge`](BumpKind::SalvageRecharge)). The crate holds tech the run
+    ///   has. A facility is stocked from its own seed and knows nothing of who is coming
+    ///   (#209), so this is luck rather than design. Asked **first**, because it is the
     ///   more specific answer and because it is the one case where full hands are beside
     ///   the point: there is nothing here worth trading *for*, so offering the exchange
     ///   would be offering a decision whose every branch is a loss.
+    ///
+    ///   It pays out in exactly one case (§8.2/#302/#266): the tech has a **per-level use
+    ///   budget** and the run has spent some of it, in which case the second copy refills
+    ///   it. Otherwise a duplicate restores nothing and the bump is free.
     /// - **No room** ([`SalvageSwap`](BumpKind::SalvageSwap)). The run already carries
     ///   [`AbilityId::MAX_TECH_HELD`] pieces of tech, which §8.3 settles as the most a
     ///   run holds at once — it is what keeps the held set small enough for the ability
@@ -2042,7 +2072,15 @@ impl State {
     /// - **Room for it** ([`Salvage`](BumpKind::Salvage)) — the plain pickup.
     fn salvage_kind(&self, id: AbilityId) -> BumpKind {
         if self.abilities.loadout().contains(id) {
-            BumpKind::SalvageRefused
+            // A duplicate pays out exactly once: when the tech it duplicates has a
+            // per-level budget with something missing from it (§8.2/#302/#266). With the
+            // budget full — or with no budget at all — a second copy restores nothing,
+            // and the bump goes back to being the free refusal it has always been.
+            if self.abilities.uses_spent(id) {
+                BumpKind::SalvageRecharge
+            } else {
+                BumpKind::SalvageRefused
+            }
         } else if self.abilities.loadout().tech_held() >= AbilityId::MAX_TECH_HELD {
             BumpKind::SalvageSwap
         } else {
