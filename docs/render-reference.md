@@ -87,7 +87,7 @@ not a glyph swap.
 |---|---|---|
 | `#` | Wall | Neutral |
 | `·` | Floor **you can see** — floor beyond your sight draws blank | Ground |
-| `+` | Door panel, closed | System |
+| `+` | Door panel, closed | System; **Neutral** while a key gate holds it shut and you have no key (§10.4/#236) |
 | *(blank)* | Door panel, open | Ground — the gap in the wall *is* its rendering |
 | `×` | Door frame (hinge) | System |
 | `}` | Cupboard | System; **Owned** while you are hiding in it |
@@ -117,6 +117,16 @@ console (`$` Interest → Neutral) and a hiding place holding *you* (`}` System 
 Owned). Shape is *what it is*; colour is *what it means to you now*. An emptied
 equipment cache (`¤`) is the spent console's rule applied to a third glyph: the crate
 is still standing there, and there is nothing left in it.
+
+A **key-gated** door (§10.4/#236) is the spent console's rule applied to a doorway, and
+in both directions. With the locked-room modifier on, the prize room's panels draw
+Neutral rather than the working-furniture tan: to a player with no key they are a
+door-shaped wall, which is exactly what a spent console is to a player who has already
+taken its intel. The moment a takedown puts a key in hand every one of them goes back to
+System, which is the one recolour on the board that runs *toward* usefulness — the price
+just paid, made visible on the board rather than only in a message that has scrolled
+away. Only the doors the fog already shows recolour; which room the building keeps locked
+is something you learn by looking, or off the run's card.
 
 **Why `¤` for the cache, and why not another console.** The three bump-to-use goals sit
 in one category, so what tells them apart is shape alone — and the distinction is

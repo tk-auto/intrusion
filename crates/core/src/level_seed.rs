@@ -672,6 +672,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         guard_count,
         intel_count,
         caches,
+        prize_room_locked,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -737,6 +738,11 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         // second end appends it, exactly as the guard knob would have to if a third
         // rung were ever added. Wire format, never reading order.
         matches!(layout_knowledge, LayoutKnowledge::None),
+        // Slot 17, appended (#236) — a plain toggle in the next free position, on the
+        // terms every slot above it took. It is what carries "the prize room is locked"
+        // into a shared level: the token hands over the run, and a run whose prize is
+        // behind a key is a different run to play.
+        prize_room_locked,
     ]
     .into_iter()
     .enumerate()
@@ -763,7 +769,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches, show_search_areas, unknown_layout] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches, show_search_areas, unknown_layout, prize_room_locked] =
         active;
     // The layout knob's two ends (#233), rejected together for the reason the guard
     // knob's are: a knob holds one value, so a set naming both describes a config no
@@ -811,6 +817,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         guard_count,
         intel_count,
         caches,
+        prize_room_locked,
         intel_to_exit: gate,
     })
 }
@@ -820,7 +827,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// the format. Not the same as the number of *fields*: the guard-count knob (#232),
 /// the intel-count knob (#207) and the layout knob (#233) spend one slot per end, and
 /// the cache knob (#209) one slot per rung.
-const MODIFIER_FIELDS: usize = 17;
+const MODIFIER_FIELDS: usize = 18;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1205,11 +1212,20 @@ mod tests {
         // The boolean fields as a bitmask rather than one nested loop each: the
         // knob (#232) would have made a further level of nesting out of a test whose
         // whole content is "every combination".
-        const TOGGLE_FIELDS: u32 = 8;
+        const TOGGLE_FIELDS: u32 = 9;
         for bits in 0..(1u32 << TOGGLE_FIELDS) {
             let on = |field: u32| bits & (1 << field) != 0;
-            let (search, sighting, body, cones, cone_only, doors, consoles, areas) =
-                (on(0), on(1), on(2), on(3), on(4), on(5), on(6), on(7));
+            let (search, sighting, body, cones, cone_only, doors, consoles, areas, locked) = (
+                on(0),
+                on(1),
+                on(2),
+                on(3),
+                on(4),
+                on(5),
+                on(6),
+                on(7),
+                on(8),
+            );
             // The layout knob (#233) joins the knob sweep rather than the bitmask: its
             // two ends are one field, so a bit per end would build configs — both at
             // once — that a run cannot hold and the codec is right to refuse.
@@ -1257,6 +1273,7 @@ mod tests {
                             guard_count,
                             intel_count,
                             caches,
+                            prize_room_locked: locked,
                             intel_to_exit: gate,
                         };
                         let level = LevelSeed {
@@ -1272,6 +1289,7 @@ mod tests {
                         // spends a slot like any toggle, so it counts here too.
                         let active = [
                             search, sighting, body, cones, cone_only, doors, consoles, areas,
+                            locked,
                         ]
                         .into_iter()
                         .filter(|&flag| flag)
@@ -1412,6 +1430,10 @@ mod tests {
                 // caches existed decodes as the facility it always named — one with no
                 // crate in it.
                 caches: CacheCount::None,
+                // Slot 17 (#236) is the fifth telling: a token minted before the prize
+                // room could be locked decodes as the facility it always named — one
+                // where anyone can operate any door (§10.4).
+                prize_room_locked: false,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1554,6 +1576,7 @@ mod tests {
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::Fewer,
             caches: CacheCount::Three,
+            prize_room_locked: false,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {

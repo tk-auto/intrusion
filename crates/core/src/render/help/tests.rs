@@ -347,6 +347,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             guard_count,
             intel_count,
             caches,
+            prize_room_locked: true,
             intel_to_exit: gate,
         };
         let g = render_help(

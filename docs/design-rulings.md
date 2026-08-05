@@ -2940,3 +2940,167 @@ So `usage.drone` exists as a histogram slot and reads zero until a piloting poli
 That zero is a fact about the bot, which is exactly why the slot exists rather than being
 omitted: a verb with no row could not report the day it starts being pressed. The
 alternative — omitting the slot — would have hidden the gap instead of dating it.
+
+---
+
+## Appendix 46 — The locked room: what a key costs, and why the door has to shut itself
+
+*(§10.4 doors, §12.6 level modifiers, §7.2 the takedown, §10.6 guarantees, §2.2
+soft locks. The ticket is #236; §14's "Keys and locked doors" backlog line is what it
+closes.)*
+
+§10.4's baseline is one sentence — *"anyone can operate any door. No keys, no locks"* —
+and it has carried a **[START]** marker and an explicit invitation since it was written:
+keys are an obvious future axis, and one the fiction supports. This is that axis, scoped
+as a level modifier rather than as a change to the baseline, so a run either plays it or
+does not and says which on its card.
+
+The design decision was never *whether* a locked door is interesting. It is **what the
+lock costs, who can lift it, and how it survives contact with a facility full of guards
+who keep opening doors.** Four things had to be settled, and three of them are less
+obvious than they look.
+
+### 1. The key is on every guard, not on one of them
+
+The ticket's first sketch hung the key on **a specific guard**: find that one, take it
+down, get in. It reads well and it is the wrong price.
+
+The §7.2 takedown is already the most expensive verb in the game. It is permanent, it
+leaves a body, the body starts a §7.3 radio clock, and a found body is the loudest event
+there is. §2.3 asks what an addition *costs*; a lock whose key is on one named guard
+charges the takedown **plus a search** — and the search is for a `g` the player has no
+way to pick out, because every guard draws the same glyph in the same three colours by
+mood (§11.3). What that produces is not a hunt, it is a sequence of takedowns until one
+of them happens to be the right one, each with the full §7.2 cost. The modifier would
+have priced itself at three or four bodies and called it stealth.
+
+With the key on **every** guard the price is exactly one takedown, stated plainly, and
+the player chooses which guard, when and where — which is the decision §7.2 already
+exists to make interesting. The lock adds a *reason* to commit to that decision. It does
+not add a second currency.
+
+For the same reason the key goes **straight to hand** rather than onto the body. The
+ticket left the choice open and asked for it to be pinned. A key that had to be picked up
+off the floor is a second errand for one rule, and a second thing that can be lost to a
+guard walking past the cell — which is a §7.3 cost the takedown already charges once.
+
+### 2. The gated doors must be automatic, or the lock lasts one patrol
+
+This is the part that decides whether the modifier works at all, and it only becomes
+visible once you put the lock on a board with guards on it.
+
+Guards route straight through closed doors and open them by walking in (§10.4/#146).
+Guards carry the key — they must, or the locked room is off every beat and the lock is
+also a *patrol* change nobody asked for. So the very first patrol whose beat touches the
+prize room opens the door. On a **manual** door it then stays open until something closes
+it, and the only somethings are a Calm guard's seeded close-behind chance and the player.
+In practice the lock would hold for the first thirty turns of a run and then quietly stop
+existing, with nothing on the board to say it had.
+
+Making the gated doorways **automatic** (§10.4/#147) fixes it at the root rather than by
+tuning: frameless, no handle, and shut again a few turns after the doorway is last
+vacated. The lock is then a standing fact about the building for the whole level.
+
+And it turns the failure into the modifier's best moment. Those few turns are a real
+**window**: a player who is standing in the right place when a guard walks through can
+slip in with nothing in their pockets. It is thin — you have to be there, unseen, at that
+moment, next to the guard that just opened it — and it is a *decision* rather than a
+lottery, which is the shape §2.3 asks of a bypass. The modifier ends up with two ways
+through it, one bought with a body and one bought with nerve.
+
+The doors are converted **after placement**, not carved that way. Which room holds the
+prize is decided by where the crates and consoles land, so the doorways cannot be chosen
+while they are being cut. Converting folds the two hinges into the panel span, which lands
+exactly inside `DoorKind::Automatic`'s documented 3–6 panel shape — a manual doorway is
+already a 3–6 cell run with two of them solid — so nothing about the geometry had to be
+widened to accommodate it.
+
+### 3. The lock refuses entry and never exit
+
+A player slips in behind a guard. The door times out and shuts. They have no key.
+
+If the lock refused them from both sides, that is a **run ended by a mechanic the game
+invited them to gamble on**, and §2.2 does not allow that to be merely unlikely — the
+whole point of permadeath with no meta-progression is that a loss has to be readable as
+a mistake. So the rule is: the key gate refuses the bump from the **corridor** side only.
+From inside the room the door always opens.
+
+This needs nothing remembered, which is why it is cheap enough to be the rule rather
+than a special case. Every door joins a room to a corridor (§10.1.4, asserted since the
+graph landed), so "inside" is simply the door's **Room** endpoint: the side the player is
+standing on decides, and there is no stored set that can fall out of step with the board.
+
+It also makes the bypass worth attempting. A gamble you can walk away from is a
+decision; a gamble that can strand you is a trap, and players stop taking traps.
+
+### 4. Two lock sources, one door, and why `DoorLock` became a set
+
+Lockdown (§8.3/#242) already put a lock on a door, and its own note said the right thing:
+one representation for every lock source, so *"is this door locked?"* has one answer. What
+that note assumed was that a second source would be a second **variant**.
+
+It cannot be. The two locks refuse different people for different reasons and neither
+implies the other — a keyed door is one a guard walks straight through, and a Lockdown
+window over that same doorway is exactly the wall the ability is bought for. As one
+variant apiece, sealing a keyed door overwrites the key gate, and releasing the window
+then **unlocks the prize room for the rest of the run**: an ability whose entire promise
+is that it is temporary (§2.2) quietly destroying a lock it never placed, with nothing to
+notice it by.
+
+So the field holds a **set** of flags, one per source, and each source sets and clears
+only its own. `is_locked` still answers the one question consumers that do not care ask;
+the two seams that *do* care — a guard's walk-in open, and the player's bump — read the
+flag they mean. The general lesson is worth keeping: *one representation* means one
+place, not one value.
+
+### 5. What §10.6 has to prove now
+
+Placement's existing solvability check floods a board where a closed panel is routable,
+which is the truth for a player holding the key. On its own it would happily accept a
+facility whose lock had sealed the exit — or every guard in the building — behind the
+same door as the prize.
+
+So the lock owes a second assertion, stated in the frame a keyless player is actually in:
+with every keyed doorway masked solid, the flood must still reach the **exit**, every
+objective, crate and comms console **outside** the locked room, and **at least one guard
+spawn**. The last one is the interesting clause: a lock whose key does not exist in the
+reachable building is §2.2's soft lock wearing a different hat, and it is exactly the
+failure a check written only about *objectives* would have let through. A board that
+fails is rejected and the carve redrawn, like any other §10.6 shortfall.
+
+### 6. What it cost to measure, and what the sim will not say
+
+The pass draws **nothing** from the RNG. That is not tidiness — it buys the strongest
+§2.3 claim any generation-time modifier here has. From one seed the two settings carve
+the same building and place the same board down to each guard's radio clock, so the
+directional assertion is exact and per seed: **a prize a keyless flood reaches at
+baseline, it does not reach behind the lock.** Contrast `automatic_doors` (#452), which
+reaches the carve and has to settle for a distributional claim over a sweep.
+
+The bot is the honest gap. Over 100 balanced seeds under the sim preset's
+`--intel-gate one` the modifier reads harder in the documented direction — win rate 35%
+→ 24%, detections 848 → 1,086, diversity 0.60 → 0.54 — because the locked room is one it
+routes around. Under `--intel-gate all`, where the locked console is *required*, the win
+rate is **zero**: the bot knows a locked door is not a way through, and a takedown it
+takes for its own reasons opens the room, but no plan of its says *the thing I need is
+behind that door, so go and buy the key*. That is a fact about the bot, not about the
+game (§13.3).
+
+It is also the reason the modifier is **out of the §12.6 directed pool**, on
+`LayoutKnowledge::None`'s ground rather than the intel count's: mechanically it would sit
+in the pool happily, but a `+N` draw that picked it could stand a whole sweep in front of
+a door the bot will not buy its way through, and the batch would then be measuring the
+bot. It stays reachable by name, by token and by node flavour, where somebody asked for
+it. Teaching the bot to go and get a key is its own ticket, and the day it lands the pool
+row is one line.
+
+### What was accepted rather than solved
+
+- **A §10.7 duct that opens into the locked room walks past the lock.** Room selection
+  prefers a duct-free room *within* its prize tier (a crate room ahead of a console room),
+  so a crate room with a mouth in it is still locked ahead of a duct-free console room.
+  Letting the duct outrank the prize would decide what the run is about on a generation
+  accident, and choosing which prize sits behind the door is the more important of the
+  two. On those seeds the modifier is thinner than it reads. Flagged, not fixed.
+- **Pierce Wall bores in** (§8.3). That is counterplay bought with a limited-budget
+  ability, which is what the tech is for, and it is priced.

@@ -220,6 +220,12 @@ pub fn message_for(event: Event) -> Option<Message> {
         // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
         // the loud half is what happens if the body is ever seen.
         Event::TakenDown { .. } => ("the guard drops — a body is left".to_string(), 0),
+        // The key off the belt (§10.4/#236). Ranked with the objective feedback rather
+        // than with the takedown it travels beside, and above it, for the comms
+        // console's reason: it is the payoff for a price the player just paid, and *the
+        // locked room is open now* is the half of the turn they cannot read off the
+        // board — the body they can see lying there.
+        Event::KeyTaken { .. } => ("a key — the locked room opens".to_string(), 20),
         // The Saver firing (§4.5/§8.3/#243) — a hand on you, and the run not ending.
         // Ranked at 9: below the endings alone, because for one turn the player has to
         // know that the thing which ends runs just happened *and did not*, and no
