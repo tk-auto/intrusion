@@ -2,8 +2,8 @@
 //!
 //! A [`Difficulty`] is a level from −2 to +2 over the quick-play base. It resolves to
 //! a concrete [`LevelModifiers`] by drawing `|level|` modifiers from the §12.6
-//! **directed pool** ([`POOL`]) in the sign's direction — *harder* for positive,
-//! *easier* for negative — and composing them onto the base.
+//! **directed pool** ([`draw_from_pool`]) in the sign's direction — *harder* for
+//! positive, *easier* for negative — and composing them onto the base.
 //! [`Standard`](Difficulty::Standard) draws nothing at all, so it is exactly today's
 //! quick play, byte for byte.
 //!
@@ -31,10 +31,11 @@
 //! documented *harder*, and a `−N` draw only ever ones documented *easier*, so no
 //! draw can hand back a set that bends the other way from the one asked for. The pool
 //! is filtered on [`ModifierDirection`] itself rather than on a list of names, which
-//! is what makes that true by construction instead of by review.
+//! is what makes that true by construction instead of by review — and the filtering
+//! lives in [`draw_from_pool`], so the campaign alert (#210), which draws from the same
+//! pool, inherits the same guarantee rather than restating it.
 
-use crate::modifiers::{pool_size, LevelModifiers, ModifierDirection, PoolEntry, POOL};
-use crate::rng::Rng;
+use crate::modifiers::{draw_from_pool, pool_size, LevelModifiers, ModifierDirection};
 
 /// A fixed transform applied to the run seed before the difficulty draw, so it takes
 /// from a sub-stream **independent** of generation and of the loadout draw (§12.4).
@@ -180,27 +181,20 @@ impl Difficulty {
     /// the one place a run's modifiers are settled. Every entry it applies bends
     /// [`direction`](Self::direction)-wards, so the contribution can only ever add
     /// pressure to a `+N` or relief to a `−N`.
+    ///
+    /// The draw itself is [`draw_from_pool`], shared with the campaign alert (#210) so
+    /// the two sources that *pick* a rule cannot come to filter the pool differently.
+    /// What stays here is what is this axis's own: how many picks a position makes, and
+    /// the salt that keeps them off every other stream.
     #[must_use]
     pub fn draw(self, seed: u64) -> LevelModifiers {
-        let mut drawn = LevelModifiers::default();
+        let base = LevelModifiers::default();
         let Some(direction) = self.direction() else {
             // The baseline draws nothing and touches no stream — quick play at
             // Standard is byte-identical to quick play before there was an axis.
-            return drawn;
+            return base;
         };
-        let mut pool: Vec<&PoolEntry> = POOL
-            .iter()
-            .filter(|entry| entry.caption.direction == direction)
-            .collect();
-        // A partial Fisher–Yates over the directed pool, the same idiom the
-        // quick-play tech grant draws its subset with.
-        let mut rng = Rng::new(seed ^ DIFFICULTY_STREAM_SALT);
-        for i in 0..self.picks() {
-            let j = i + rng.below((pool.len() - i) as u32) as usize;
-            pool.swap(i, j);
-            (pool[i].set)(&mut drawn);
-        }
-        drawn
+        draw_from_pool(base, direction, self.picks(), seed ^ DIFFICULTY_STREAM_SALT)
     }
 
     /// One step towards the easier end, staying put at it — the slider's left, which
