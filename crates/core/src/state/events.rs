@@ -417,6 +417,37 @@ pub enum Event {
     /// every guard it could have caught is one the player was already shown, so this
     /// refuses only a press that was going to buy nothing.
     ConfusionMissed,
+    /// The player fired a **False Call** (§7.7/§8.3/#504): a forged control message went
+    /// out over `reach`, naming the cell it was fired from, and `answered` guards are now
+    /// walking to that cell to search it (§7.6). A turn-costing action (§4.4), pushed
+    /// alongside the activation.
+    ///
+    /// It carries the count for [`ConfusionFired`](Event::ConfusionFired)'s reason — most
+    /// of what a call reaches is behind a wall, so *what it bought* is exactly the fact
+    /// the board cannot show — and the `reach` itself rather than a recipe for redrawing
+    /// one, so the flash paints the very box the call was measured over.
+    ///
+    /// `answered` may be **zero**, and a firing that reaches nobody at all is still a
+    /// firing: the press is never refused for an empty reach (§8.4), because refusing it
+    /// would answer *"is anyone within ten cells of me?"* for free. So this event reports
+    /// a transmission that went out, not a result that came back.
+    ///
+    /// **`answered` is carried but never shown.** The near line says the call went out
+    /// and stops there (§11.7): the reach is not clamped to the guard sense, so a count
+    /// would report guards the player cannot perceive and turn a transmitter into a
+    /// detector. The field exists for the tests and the §13.2 sim, which are allowed to
+    /// know things the player is not.
+    FalseCallFired { reach: EffectArea, answered: u32 },
+    /// A False Call was **refused** because the radio net is dead (§7.3/§7.7/#504) — the
+    /// player silenced it at the comms console, and a spoofer is radio like everything
+    /// else on it.
+    ///
+    /// Free, and its own refusal rather than a silent zero-answer firing: a press that
+    /// spent the turn and the whole lockout to transmit into a net nobody is listening
+    /// on would be the console quietly taxing a tool the player still believes they
+    /// have. Told instead, once, in the ability's own words — and the bar greys the
+    /// entry from the moment the net dies (§11.4).
+    FalseCallDead,
     /// A §7.6 **search opened** somewhere in the facility (§11.7/#224): the turn ended
     /// with somebody sweeping an area that nobody was sweeping when it began. The
     /// temporal half of what makes a search legible — the whole hiding game is a bet on
@@ -481,6 +512,10 @@ impl Event {
             | Event::LockdownRefused
             | Event::ConfusionFired { .. }
             | Event::ConfusionMissed
+            // A forged call that *did not go out* is the same quiet band as every other
+            // refused press: nothing happened, and the line is teaching a rule. What a
+            // call that **did** go out reads as is a different question, answered below.
+            | Event::FalseCallDead
             | Event::DecoyDied { .. } => Category::Owned,
             // A machine of yours, and who is driving it (§8.1/#273): the same Owned band
             // as every other tool of your own, including the refusal to launch one.
@@ -510,7 +545,16 @@ impl Event {
             // A §7.6 search opening is the same aroused-but-not-on-you band (#224):
             // somebody is combing an area, and if they had you it would be a
             // detection instead.
-            Event::Ejected { .. }
+            // **The one ability event that is not Owned**, and the exception is the
+            // design (§8.3/#504). Every other tool reports what *you did*; this one
+            // reports that guards are converging on the cell you are standing in — which
+            // is the same fact [`CalledIn`](Event::CalledIn) carries, from the same net,
+            // and it belongs in the same band. Owned would dress the game's most
+            // dangerous press as a neutral confirmation of a button, and a player who has
+            // not yet learned that the value is in the turns *after* firing is exactly
+            // the player that wording would get caught (§11.7).
+            Event::FalseCallFired { .. }
+            | Event::Ejected { .. }
             | Event::BodyFound { .. }
             | Event::RadioSilence { .. }
             | Event::CalledIn { .. }

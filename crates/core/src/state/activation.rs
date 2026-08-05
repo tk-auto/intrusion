@@ -63,6 +63,9 @@ pub(super) enum Aimed {
     /// The blast Confusion would fire (§8.3/#325) — already known to catch at least
     /// one guard.
     Blast(EffectArea),
+    /// The reach a False Call would broadcast over (§7.7/§8.3/#504) — already known to
+    /// have a live net to travel down and at least one guard inside it.
+    Call(EffectArea),
     /// The cell a control-transfer ability would launch its remote from (§8.1/#273):
     /// the player's own, because you let it go from your hands.
     ///
@@ -90,6 +93,8 @@ pub(super) enum Refused {
     NoDoorsInReach,
     /// The blast would catch no guard (§8.3/#325).
     BlastCatchesNobody,
+    /// The radio net is dead (§7.3/§7.7/#504), so there is nothing to forge a call on.
+    NetIsDead,
     /// There is no room to launch a remote, or to take one's controls, from where the
     /// player is standing (§10.7/#273) — a crawlspace.
     NoRoomToPilot,
@@ -121,6 +126,7 @@ impl Refused {
             Refused::Bore(reason) => Some(Event::BoreRefused { reason }),
             Refused::NoDoorsInReach => Some(Event::LockdownRefused),
             Refused::BlastCatchesNobody => Some(Event::ConfusionMissed),
+            Refused::NetIsDead => Some(Event::FalseCallDead),
         }
     }
 }
@@ -177,6 +183,31 @@ impl State {
                 Err(Refused::NoDoorsInReach)
             } else {
                 Ok(Aimed::Seal(doors))
+            };
+        }
+        // The forged call asks the economy for **one** thing only (§7.7/§8.3/#504): a
+        // net to transmit on. A silenced facility has nothing listening, so the spoofer
+        // dies with the radio it spoofs — the console's trade, stated where the press is
+        // refused rather than discovered as a turn that bought nothing. That is a fact
+        // about a switch the *player* threw, so saying it gives nothing away.
+        //
+        // **It deliberately does not ask whether anybody is in reach**, which is where
+        // it parts company with Confusion's ladder above. Confusion may refuse an empty
+        // blast because its reach is clamped inside the guard sense: everything it could
+        // have caught was already drawn for the player, so the refusal tells them
+        // nothing they did not know. This reach is **not** clamped — it covers guards
+        // behind the §5 cone and, in a duct, well past the §9 sense — so a refusal here
+        // would answer *"is anyone within ten cells of me?"*, and a greyed bar entry
+        // would answer it every frame, for free, without spending the turn. That is a
+        // detector, and this ability is a transmitter (§9 stays [SETTLED]: the player's
+        // picture is sight and the sense, and nothing else). So the press always fires,
+        // always costs its turn and its lockout, and what it found is the player's to
+        // infer from what walks out of the dark.
+        if declares(id, Effect::FakeCall) {
+            return if self.radio_silenced() {
+                Err(Refused::NetIsDead)
+            } else {
+                Ok(Aimed::Call(self.false_call_area()))
             };
         }
         if declares(id, Effect::Confuse) {

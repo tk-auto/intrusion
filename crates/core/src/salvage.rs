@@ -187,16 +187,16 @@ mod tests {
 
     /// The golden facility's stock and crate cells — written out so the two assertions
     /// above read as one statement about one building.
-    /// Refreshed when the Saver joined the pool (#243), and again for the Drone (#273):
-    /// a shuffle over ten entries deals this seed a different three than a shuffle over
-    /// nine did. Every tech ever added moves this, and that is the point of pinning it —
+    /// Refreshed when the Saver joined the pool (#243), again for the Drone (#273) and
+    /// again for False Call and the Guide (#504/#505): a shuffle over twelve entries
+    /// deals this seed a different three than a shuffle over ten did. Every tech ever added moves this, and that is the point of pinning it —
     /// the stock is derived from the seed and the roster, never carried in the
     /// level-seed token, so a change to *either* has to be a visible decision rather
     /// than a quietly different game.
     const GOLDEN_STOCK: [AbilityId; 3] = [
-        AbilityId::Lockdown,
+        AbilityId::Camouflage,
         AbilityId::PierceWall,
-        AbilityId::Confusion,
+        AbilityId::Saver,
     ];
     fn golden_crates() -> [crate::Cell; 3] {
         [

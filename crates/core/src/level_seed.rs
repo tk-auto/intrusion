@@ -1791,14 +1791,31 @@ mod tests {
             assert_eq!(quick_play_loadout(seed), quick_play_loadout(seed));
             // Booting quick play (which draws a loadout) and the sim (which does not)
             // from the same seed carves the identical facility — the draw takes its
-            // own sub-stream, so it cannot shift generation. The rendered board is
-            // identical (the loadout shapes the ability line, not the map); the two
-            // presets differ only in the intel gate they carry.
+            // own sub-stream, so it cannot shift generation. The two presets differ
+            // only in the intel gate they carry.
             let quick = start_level(&LevelSeed::quick_play(seed)).expect("boots");
             let sim = start_level(&LevelSeed::sim(seed)).expect("boots");
+            // Compared **glyph by glyph**, not frame by frame, because since #505 a
+            // held ability can legitimately paint the board at boot: the Guide is a
+            // passive whose whole effect is a §11.5 background wash on one neighbouring
+            // cell, and a quick-play draw may hand it out. That is a *background*, and
+            // the claim this test makes is about generation — what was carved, and
+            // where — so it reads the layer the draw must never touch and ignores the
+            // one an ability is allowed to.
+            let (a, b) = (crate::render(&quick), crate::render(&sim));
+            assert_eq!((a.width(), a.height()), (b.width(), b.height()));
+            let map = |grid: &crate::Grid| -> Vec<(char, crate::Category, crate::Visibility)> {
+                (0..grid.height())
+                    .flat_map(|y| (0..grid.width()).map(move |x| (x, y)))
+                    .map(|(x, y)| {
+                        let cell = grid.get(x, y);
+                        (cell.glyph, cell.fg, cell.vis)
+                    })
+                    .collect()
+            };
             assert_eq!(
-                crate::render(&quick),
-                crate::render(&sim),
+                map(&a),
+                map(&b),
                 "seed {seed}: the loadout draw shifted the facility",
             );
         }

@@ -160,7 +160,9 @@ pub const fn remote_kind(id: AbilityId) -> Option<RemoteKind> {
         | AbilityId::Vision
         | AbilityId::PierceWall
         | AbilityId::Lockdown
-        | AbilityId::Saver => None,
+        | AbilityId::Saver
+        | AbilityId::FalseCall
+        | AbilityId::Guide => None,
     }
 }
 

@@ -99,6 +99,33 @@ pub const URGE_NONE: u8 = 0;
 /// standing on floor, not another turn a guard has to close on the landing.
 pub const CROSSING_CLEARANCE: u32 = 3;
 
+/// How much room a False Call wants from **every guard it would call** (**[START] = 8**):
+/// the turn the press costs, plus the turns it takes to be somewhere else once the
+/// responders start walking.
+///
+/// Measured against the *called* set rather than against
+/// [`Moment::nearest_guard`](Moment::nearest_guard), and the difference is load-bearing
+/// twice over. The nearest guard in view may not be one the call reaches at all; and the
+/// call may reach one the bot has no picture of, which a check written against what the
+/// bot perceives would miss entirely.
+///
+/// Much larger than the crossing's clearance ([`CROSSING_CLEARANCE`]), because the two
+/// buy opposite things. A phase asks only that nobody wanders onto the landing cell in
+/// the three turns it takes; this **summons** guards, deliberately more than one, from
+/// every side of a box — so what it needs is not a cell of elbow room but a head start
+/// long enough to be out of the neighbourhood before the first of them arrives. At 4 the
+/// §13.2 batch took the balanced win rate from 0.35 to 0.05: the bot called searches onto
+/// its own feet, which is exactly the failure §8.3's row warns a *player* about.
+pub const FALSE_CALL_CLEARANCE: u32 = 8;
+
+/// How far down the route a False Call looks for ground worth emptying (**[START]**).
+///
+/// Not one cell, and the reason is structural rather than a tuning taste: the router
+/// already prices watched cells out ([`Profile::watched_penalty`]), so the step it hands
+/// over is almost never itself watched, and a cue keyed on that single cell is shy by
+/// construction. What the ability is for is the ground the bot is *heading for*.
+pub const FALSE_CALL_SCOUT: usize = 6;
+
 /// **A faint fit**: it might help. A step is probably worth more, and by default
 /// the bot takes the step (the floor sits above this).
 pub const URGE_FAINT: u8 = 25;
@@ -228,6 +255,7 @@ impl Moment<'_> {
             AbilityId::Confusion => self.confusion(status),
             AbilityId::PierceWall => self.pierce_wall(status),
             AbilityId::Lockdown => self.lockdown(status),
+            AbilityId::FalseCall => self.false_call(status),
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"
             // reads as a decision and not an omission.
@@ -255,7 +283,16 @@ impl Moment<'_> {
             // usage histogram (`Verb::Drone`) with this comment and
             // `docs/stats/abilities/drone.md` saying which kind of zero it is (§13.3).
             AbilityId::Drone => None,
-            AbilityId::Vision | AbilityId::Saver => None,
+            // The **Guide** (§8.3/#505) is the Vision answer again, and for exactly the
+            // Vision reason: a passive has no activation to cue. It is worth naming the
+            // temptation it does raise, since unlike Vision it hands over something the
+            // policy could act on — a bearing. Acting on it would be the bot routing to
+            // an objective it has never *seen*, which is the one thing §11.5a forbids the
+            // policy to do (`known_intel` is the no-cheat gate), so a cue here could not
+            // be written without punching a hole in that gate. The honest measurement is
+            // the with/without pair on `docs/stats/abilities/guide.md`, and what it
+            // watches is whether the *human* holding it stops exploring.
+            AbilityId::Vision | AbilityId::Saver | AbilityId::Guide => None,
         }
     }
 
@@ -595,6 +632,114 @@ impl Moment<'_> {
             (
                 URGE_PLAIN,
                 "one door in reach while hunted — a sealed handle is a detour they have to walk (§8.3)",
+            )
+        };
+        self.press(status, urge, reason, 0)
+    }
+
+    /// False Call (§7.7/§8.3/#504): a forged control message naming the cell you fired
+    /// from, which every guard in reach walks to and searches. What it is **for** is
+    /// *"a vacuum, not a trap"* — the ground you empty, not the guards you gather.
+    ///
+    /// So the cue is written as that sentence and nothing wider. It fires only where the
+    /// bot is **going somewhere** and the call would pull the guards **behind** it, which
+    /// is the one arrangement in which the ability does what its §8.3 row says rather
+    /// than what its most obvious misreading says. That narrowness is deliberate: the
+    /// ability's whole value is in the turns *after* the press, and a cue that pressed it
+    /// without checking where the bot was about to walk would be measuring the bot
+    /// getting itself caught (§13.3).
+    fn false_call(&self, status: AbilityStatus) -> Option<Bid> {
+        // Never in flight. Calling the net to your own cell while something is hunting
+        // you is the suicide press the §8.3 row warns about — the escapes are Run,
+        // Autodoors and Lockdown, and every one of them is about the guards having
+        // *less* reason to be where you are.
+        if !matches!(self.intent, Intent::Pursue | Intent::Explore) {
+            return None;
+        }
+        // A vacuum needs somewhere to go. With no route the bot is standing still, and a
+        // call fired from a cell it is not leaving is a search fired at itself.
+        let step = self.route?;
+        let ahead = self.state.player().step(step)?;
+        // Who it would actually pull. Read off the reach rather than off what the bot
+        // perceives, because the two are **not the same set** here: the broadcast is a
+        // radio and is not clamped to the guard sense (§8.3/#504), so it can summon
+        // guards the bot has no picture of — and those are exactly the ones a check
+        // written against `nearest_guard` would miss. Legality is core's: a call
+        // reaching nobody, or one fired into a dead net, is `Unusable`, so `press`
+        // refuses it and this is never empty.
+        let reach = self.state.false_call_area();
+        let called: Vec<Cell> = self
+            .state
+            .guards()
+            .iter()
+            .map(|guard| guard.pos())
+            .filter(|&at| reach.contains(at))
+            .collect();
+        let player = self.state.player();
+        // **Room to be gone before anybody arrives**, measured against the guards being
+        // *called* and not merely the nearest one in view. The turn is spent standing
+        // still (§4.4) and the responders start walking on it, so a guard summoned from
+        // close by arrives while the bot is still in the neighbourhood — which is the
+        // press paying for its own capture.
+        if called
+            .iter()
+            .any(|&at| player.manhattan_distance(at) < FALSE_CALL_CLEARANCE)
+        {
+            return None;
+        }
+        // **Rule one: only call them to a cell you are already walking away from.** If
+        // the next step of the route does not open the gap on every guard the call would
+        // pull, the responders are converging *across* the bot's own way out — which is
+        // the trap the ability is not, spelled as the one predicate that separates the
+        // two. Note the direction this takes the guards: toward the cell being left, and
+        // therefore away from the route.
+        if !called
+            .iter()
+            .all(|&at| ahead.manhattan_distance(at) > player.manhattan_distance(at))
+        {
+            return None;
+        }
+        // **Rule two: there has to be ground worth emptying.** A call that pulls a
+        // patrol which was not looking at anything the bot wanted buys nothing at all —
+        // it just puts guards where the bot is. So the step the plan would take must be
+        // **watched** (§11.5's detection set, read exactly as the router prices it), and
+        // what the call then does is take those cones off it while the bot walks
+        // through.
+        //
+        // The two rules together are the ability's §8.3 sentence as a predicate: the
+        // guards watch the ground *ahead* but do not stand on the way to it, so
+        // answering a call behind them walks them off the route rather than down it.
+        //
+        // It looks a **little** way down the route rather than only at the very next
+        // cell, and the reason is a Catch-22 the first version walked straight into: the
+        // router already prices watched cells out ([`Profile::watched_penalty`]), so the
+        // step it hands over is almost never watched, and a cue keyed on that one cell
+        // fired about once in a hundred runs. The ground the bot is *heading for* is the
+        // honest question; the ground it has already decided to stand on next turn is
+        // not.
+        let scout: Vec<Cell> = std::iter::successors(Some(player), |cell| cell.step(step))
+            .take(FALSE_CALL_SCOUT + 1)
+            .skip(1)
+            .collect();
+        if !self
+            .state
+            .visible_cone_cells()
+            .any(|cell| scout.contains(&cell))
+        {
+            return None;
+        }
+        // Never decisive: nothing about a shortcut through a patrol is worth the run, and
+        // emptying ground is worth exactly what it empties — one guard pulled off a
+        // corridor is a convenience, three is a wing.
+        let (urge, reason) = if called.len() > 1 {
+            (
+                URGE_STRONG,
+                "walking away from a knot of guards — forge a call and empty the ground behind me (§8.3)",
+            )
+        } else {
+            (
+                URGE_PLAIN,
+                "one guard behind me and a route ahead — call it to the cell I am leaving (§8.3)",
             )
         };
         self.press(status, urge, reason, 0)

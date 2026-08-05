@@ -433,48 +433,77 @@ impl State {
         }
     }
 
-    /// Send up to `count` guards to search `at` — the one call seam every §7.7
-    /// call-in and the §7.3 radio dispatch share. Picks the nearest respondable
-    /// guards ([`nearest_respondable`], which never takes one that has the live
-    /// player), skipping `exclude` — whoever is already dealing with this lead.
+    /// The facility's own call (§7.3/§7.7): send up to `count` guards to search `at`,
+    /// skipping `exclude` — whoever is already dealing with this lead.
     ///
-    /// Returns whether anybody was actually sent, so the caller only reports a call
-    /// that someone answered: with nobody free the call is simply unanswered, never
-    /// queued or retried (§7.7).
-    ///
-    /// **A killed net sends nobody** (§7.7): with the radio silenced at the comms
-    /// console there is no channel for a call to travel down, so both cooperation
-    /// call-ins stop firing here — one gate on the one shared seam, so no future call
-    /// can forget it. What does *not* stop is a guard already on its way: an errand
-    /// given before the net died is **finished**, not recalled. That is the deliberate
-    /// choice of the two the design leaves open, and it follows §7.7's own rule that a
-    /// call, once made, is never queued or retried — there is no channel to un-send it
-    /// down either. It also keeps the console honest as counterplay rather than a panic
-    /// button: silencing the net stops the *next* wave, it does not erase the search
-    /// already bearing down on you (§2.3 — cost is load-bearing).
-    ///
-    /// The guard that made the discovery still searches on its own either way — that is
-    /// §7.6/§7.2 behaviour, not a call — so a silenced facility is lonelier, never
-    /// blind.
+    /// [`send_call`](Self::send_call) below is where a call actually happens; this is
+    /// the shape control's own calls take, which is *by count and nothing else* — no
+    /// reach, no priority, no second dial (§7.7). Returns whether anybody was actually
+    /// sent, so the caller only reports a call that someone answered: with nobody free
+    /// the call is simply unanswered, never queued or retried.
     #[cfg(test)]
     pub(crate) fn call_guards_to_for_test(&mut self, at: Cell, count: usize) -> bool {
         self.call_guards_to(at, &[], count)
     }
 
     fn call_guards_to(&mut self, at: Cell, exclude: &[usize], count: usize) -> bool {
+        self.send_call(at, count, |_, index| !exclude.contains(&index)) > 0
+    }
+
+    /// **The one call seam** (§7.7): send up to `count` of the guards `admits` accepts
+    /// to search `at`, nearest first, and report how many actually went.
+    ///
+    /// Everything a call is made of lives here and only here — the killed-net gate, the
+    /// [`nearest_respondable`] selection that never takes a guard which has the live
+    /// player, and the [`respond_to`](crate::Guard::respond_to) that turns a chosen
+    /// guard into a searcher. Control's dispatch to a silent post (§7.3), both §7.7
+    /// call-ins and the player's own forged call (§8.3/#504) are the same call with a
+    /// different *who*: the facility's calls pick by count alone, and the spoofer picks
+    /// by a box around the transmitter.
+    ///
+    /// **`admits` is the caller's filter, never the net's** (§7.7's "no radio range").
+    /// A caller may narrow whom *it* is talking to — the call-ins exclude whoever is
+    /// already on the lead, False Call reaches only what its hand-held transmitter
+    /// reaches — but nothing here gives control's own net a reach, and no future call
+    /// can acquire one by editing this function. It takes the guard as well as its
+    /// index so a geometric filter needs no second lookup.
+    ///
+    /// **A killed net sends nobody** (§7.7): with the radio silenced at the comms
+    /// console there is no channel for a call to travel down, so both cooperation
+    /// call-ins — and the player's spoofer, which is radio like any other (§7.3/#504) —
+    /// stop firing here. One gate on the one shared seam, so no future call can forget
+    /// it. What does *not* stop is a guard already on its way: an errand given before
+    /// the net died is **finished**, not recalled. That is the deliberate choice of the
+    /// two the design leaves open, and it follows §7.7's own rule that a call, once
+    /// made, is never queued or retried — there is no channel to un-send it down
+    /// either. It also keeps the console honest as counterplay rather than a panic
+    /// button: silencing the net stops the *next* wave, it does not erase the search
+    /// already bearing down on you (§2.3 — cost is load-bearing).
+    ///
+    /// The guard that made the discovery still searches on its own either way — that is
+    /// §7.6/§7.2 behaviour, not a call — so a silenced facility is lonelier, never
+    /// blind.
+    ///
+    /// [`nearest_respondable`]: radio::nearest_respondable
+    pub(super) fn send_call(
+        &mut self,
+        at: Cell,
+        count: usize,
+        admits: impl Fn(&Guard, usize) -> bool,
+    ) -> usize {
         if self.radio_silenced {
-            return false;
+            return 0;
         }
         let sent: Vec<usize> =
             radio::nearest_respondable(&self.guards, at, self.guards.len(), self.layout.facility())
                 .into_iter()
-                .filter(|g| !exclude.contains(g))
+                .filter(|&g| admits(&self.guards[g], g))
                 .take(count)
                 .collect();
         for g in &sent {
             self.guards[*g].respond_to(at);
         }
-        !sent.is_empty()
+        sent.len()
     }
 
     /// **The Saver firing** (§4.5/§7.2/§8.3/#243): the guard indexed `guard` lunged

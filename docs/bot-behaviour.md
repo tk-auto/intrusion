@@ -336,10 +336,12 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Dephase** | a short crossing you can see the far side of | the `crossing` the policy found on its own cost field |
 | **Pierce Wall** | a route the facility does not offer | the same crossing, at three times the price — the budget is scarcer |
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
+| **False Call** | emptying the ground you are walking away from | the route step, the guards inside core's reach, and whether that step opens the gap on **every** one of them |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
+| **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |
 | **Saver** | — **passive**, and deliberately uncued even though it has a budget (#243) | — |
 
-Two of these are worth reading twice, because they are the seam's own rules biting:
+Three of these are worth reading twice, because they are the seam's own rules biting:
 
 - **Confusion is the only cue that speaks at a gap of one.** Run and Autodoors both
   decline there — the activation turn is spent standing still, which a guard at arm's
@@ -352,6 +354,16 @@ Two of these are worth reading twice, because they are the seam's own rules biti
   the histogram fills, and nothing happens. One function answers both "is there a
   crossing worth it?" and "which way do I step while phased", which is what makes that
   impossible rather than merely unlikely.
+- **False Call is the narrowest cue here, and the narrowness is the point.** The
+  ability's value is entirely in the turns *after* the press — §8.3 calls it "a vacuum,
+  not a trap" — so a cue that fired it without checking where the bot was about to walk
+  would be measuring the bot summoning a search onto its own feet, and the histogram
+  would be reporting the policy rather than the verb (§13.3). The predicate that keeps
+  it honest is one line: the step the plan would take must **increase** the distance to
+  every guard the call would pull. Fire it and stand still and it is a suicide button;
+  the cue is not allowed to press it in a moment where standing still is what follows.
+  It is also the only cue that declines in `Flee` outright, where most of the others
+  live: what this does is give the guards a reason to come to you.
 - **A phased step is judged by the cell it ends on, not the one it enters.** Run is
   innate and nothing forbids holding it with Dephase, so one press can move two cells
   — and phased there is no bump to stop the free second one at a wall. The policy
@@ -359,6 +371,17 @@ Two of these are worth reading twice, because they are the seam's own rules biti
   the crossing offer is withdrawn outright while the sprint is up (a two-cell step
   overshoots the far side). Both guard the same thing: a duration that expires inside
   a solid costs the safety eject plus a stun as long as the throw (§8.3).
+
+**The Guide's zero is a third kind, and it is the interesting one.** Vision and the
+Saver have no cue because there is no key; the Guide has no key *either*, but unlike
+them it hands the policy something it could act on — a bearing to an objective. Acting
+on it is exactly what the bot may not do. §11.5a's no-cheat gate is that the bot routes
+only to intel it has **seen** (`known_intel`), and a policy that walked a compass needle
+would be routing to a console it has never laid eyes on. So the ability cannot be cued
+without punching a hole in the one rule that keeps the sim's exploration numbers honest,
+and the measurement it wants is the with/without pair a human reads —
+`docs/stats/abilities/guide.md` — watching whether the *player* holding it stops
+exploring.
 
 ### 4.5 Arbitration
 

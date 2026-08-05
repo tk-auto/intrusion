@@ -164,6 +164,7 @@ pub(super) fn area_radius(effect: Effect) -> Option<u32> {
     match effect {
         Effect::Confuse => Some(CONFUSION_RADIUS),
         Effect::SealDoors => Some(LOCKDOWN_RADIUS),
+        Effect::FakeCall => Some(FALSE_CALL_RADIUS),
         // Everything else acts on the player themselves, not on a region around them.
         // Reversal (#243) acts on the one cell the player is standing in — the guard
         // has to reach *them* — so it has no footprint to draw either.
@@ -173,6 +174,10 @@ pub(super) fn area_radius(effect: Effect) -> Option<u32> {
         | Effect::Phase
         | Effect::AutoDoors
         | Effect::EnhancedSight
+        // The Guide's bearing (#505) acts on **one** cell, picked by direction rather
+        // than measured out by a radius — so it has no footprint to declare here, and
+        // its cell comes from [`guide_bearing`](State::guide_bearing) instead.
+        | Effect::ObjectiveBearing
         | Effect::ReverseCapture => None,
     }
 }
@@ -285,6 +290,47 @@ pub(super) struct EffectMark {
 /// borrow outlives the match arm.
 const NO_CELLS: &[Cell] = &[];
 
+/// Which of the eight cells around `from` lies in the direction of `to` (§8.3/#505) —
+/// the compass needle, resolved to a neighbour. `None` when `to` *is* `from`, or when
+/// the neighbour would fall outside the grid.
+///
+/// **Eight equal 45° sectors.** The minor axis is dropped — a pure N/E/S/W bearing —
+/// only when the target is inside 22.5° of that axis; otherwise the answer is the
+/// diagonal. The test is exact integer arithmetic, which is worth a line of explanation
+/// because it looks like a magic inequality:
+///
+/// ```text
+/// axis  ⟺  b/a < tan 22.5° = √2 − 1  ⟺  b(√2 + 1) < a  ⟺  b√2 < a − b  ⟺  2b² < (a − b)²
+/// ```
+///
+/// with `a = max(|dx|, |dy|)` and `b = min(…)`, and the final form valid because `a > b`
+/// is checked first. So the sectors are genuinely equal and there is no float anywhere —
+/// §12.4 keeps a replay's compass pointing the same way on every machine.
+///
+/// **Diagonals are kept even though movement is cardinal** (§8.3). It is a needle, not
+/// a suggested move: rounding a diagonal bearing to the nearest cardinal would throw
+/// away half the information the ability has to give.
+fn bearing_cell(from: Cell, to: Cell) -> Option<Cell> {
+    let (dx, dy) = (to.x as i64 - from.x as i64, to.y as i64 - from.y as i64);
+    if dx == 0 && dy == 0 {
+        return None;
+    }
+    let (ax, ay) = (dx.abs(), dy.abs());
+    let (a, b) = (ax.max(ay), ax.min(ay));
+    // Inside 22.5° of the major axis: drop the minor component and point straight.
+    let axis = a > b && 2 * b * b < (a - b) * (a - b);
+    let (mut sx, mut sy) = (dx.signum(), dy.signum());
+    if axis {
+        if ax >= ay {
+            sy = 0;
+        } else {
+            sx = 0;
+        }
+    }
+    let (nx, ny) = (from.x as i64 + sx, from.y as i64 + sy);
+    (nx >= 0 && ny >= 0).then(|| Cell::new(nx as u32, ny as u32))
+}
+
 impl State {
     /// The blast **Confusion fires from where the player stands** (§8.3/§9/#240/#325):
     /// the §6.1 box of [`CONFUSION_RADIUS`], clamped down to the player's live
@@ -326,6 +372,131 @@ impl State {
         }
     }
 
+    /// The reach **a False Call fired from where the player stands would broadcast
+    /// over** (§7.7/§8.3/#504): the §6.1 box of [`FALSE_CALL_RADIUS`], read from the one
+    /// [`area_radius`] table so the ability's reach and the table cannot drift apart.
+    ///
+    /// The firing seam, in [`confusion_blast`](Self::confusion_blast)'s and
+    /// [`lockdown_area`](Self::lockdown_area)'s shape and for the same reason: one
+    /// object carries the geometry to the rule that picks the guards
+    /// ([`fire_false_call`](Self::fire_false_call)), to the event, and to the mark the
+    /// player reads — so what is painted is what was measured.
+    ///
+    /// **Unclamped**, which is [`lockdown_area`](Self::lockdown_area)'s answer rather
+    /// than [`confusion_blast`](Self::confusion_blast)'s, and the difference between the
+    /// two is what decides it. Confusion is narrowed to what the player can *perceive*
+    /// because a guard frozen out of sense range is an effect with no readout at all.
+    /// Neither of the two facts that makes true is true here. A called guard is not held
+    /// out of view: it **walks to you**, arriving inside the §9 sense long before it
+    /// arrives anywhere else, so the effect delivers its own readout. And the near line
+    /// says **how many answered** at the moment of firing (§11.7), so what was summoned
+    /// is stated even where it cannot yet be sensed.
+    ///
+    /// It is a **radio**, and clamping a transmitter to eyesight is not a rule about
+    /// radios — it is the rule for a blast, borrowed. The guard sense is the player's
+    /// body; the reach here is the device in their hand, and the two are not the same
+    /// channel (§9's "the sense is a separate, innate channel" cuts both ways). The
+    /// consequence worth stating is the one that follows for a **duct** (§10.7): a
+    /// crawling player broadcasts exactly as far as a standing one, because a
+    /// crawlspace degrades *perception* and a transmitter does not perceive.
+    ///
+    /// It is pure, so the ability bar may ask it every frame to decide whether the press
+    /// would reach anybody (§11.4/#345) and get the answer the press itself would — and
+    /// unlike Confusion there is no read-moment question at all, since §9.1's widened
+    /// Wait is not something this ability is measured in.
+    ///
+    /// The centre is where the player is standing, and the call names that cell **by
+    /// value** ([`fire_false_call`](Self::fire_false_call)): the responders keep walking
+    /// to where you *were*. That staleness is the ability, not a limitation of it —
+    /// §7.7 already says as much about genuine calls ("the searched cell is stale by
+    /// construction… the tail is not the threat, the net is").
+    pub fn false_call_area(&self) -> EffectArea {
+        EffectArea {
+            centre: self.player,
+            radius: area_radius(Effect::FakeCall).expect("False Call is an area effect"),
+        }
+    }
+
+    /// **The Guide's bearing** (§8.3/§11.5a/#505): which of the eight cells around the
+    /// player lies in the direction of the nearest **unclaimed objective**, or `None`
+    /// when the run does not hold the ability or there is nothing left to point at.
+    ///
+    /// # A compass, not a route
+    ///
+    /// "Nearest" here is the **straight line**, ignoring walls, doors and reachability
+    /// entirely — the deliberate opposite of §7.3's "nearest means the shortest walk".
+    /// Control dispatches by walk because it is routing a guard; this points because it
+    /// is pointing. **Do not "fix" this into a pathfind**: a guide that pathed would be
+    /// a solver, it would answer §10's exploration outright, and the first bug report
+    /// ("it points into a wall") is the specification rather than a defect.
+    ///
+    /// # What counts as an objective
+    ///
+    /// Unclaimed intel consoles and unclaimed equipment caches — both things you go and
+    /// *take*, both inert once taken (§11.2's "spent objectives"), so a claim drops one
+    /// out of the candidate set on the turn it happens. Caches are campaign-only (§8.3),
+    /// so in a quick-play facility this is a compass to consoles, which is the same
+    /// worded-over-both shape Autodoors already has.
+    ///
+    /// **Not the comms console.** §7.3 is explicit that "the cost is the route, not the
+    /// switch", and that its placement distance is a balance knob the sim sweeps (#448);
+    /// a passive that pointed at it would hand the counterplay over for the price of a
+    /// slot and quietly re-tune that knob. It is also not an objective — you never have
+    /// to take it. **Not the exit** either: the tunnel is drawn as itself from turn one
+    /// (§11.5a), so it needs no compass.
+    ///
+    /// # It reveals nothing else (§11.5a **[SETTLED]**)
+    ///
+    /// The objective stays unrevealed, unremembered and undrawn until the player has
+    /// eyes on it. What this hands over is **an eighth of a circle** and not a location,
+    /// which is exactly what leaves #215's v3 intel sink — POI reveal, sold for currency
+    /// — something to sell. Nothing here touches tile memory or the fog.
+    ///
+    /// # It pulses (§8.3/#505)
+    ///
+    /// The bearing shows on one turn in [`GUIDE_BLINK_TURNS`] and is **dark on the
+    /// rest**, turn zero included. A standing needle is a line you follow without
+    /// thinking; a pulsing one gives you a *fix* you then have to walk on your own
+    /// memory of, which is both what a compass feels like to use and what leaves
+    /// §11.5a's exploration intact. The phase is the **turn counter** and nothing else,
+    /// so it is deterministic (§12.4), it is the same for every run, and a player can
+    /// count to it.
+    ///
+    /// # Determinism (§12.4)
+    ///
+    /// Two equidistant objectives are separated by a **fixed** rule and never a draw: the
+    /// level's own ordering, consoles in placement order and then caches. A compass that
+    /// flickered between two answers on a replay would be a desync.
+    pub fn guide_bearing(&self) -> Option<Cell> {
+        if !self.abilities.effect_active(Effect::ObjectiveBearing) {
+            return None;
+        }
+        // Dark on turn zero and on the two turns between each fix — see
+        // [`GUIDE_BLINK_TURNS`]. A `0 % n == 0` would light the opening frame, which is
+        // the one frame the ability must not answer on.
+        if self.turn == 0 || !self.turn.is_multiple_of(GUIDE_BLINK_TURNS) {
+            return None;
+        }
+        let candidates = self
+            .objectives
+            .iter()
+            .filter(|o| !o.taken)
+            .map(|o| o.cell)
+            .chain(self.caches.iter().filter(|c| !c.taken).map(|c| c.cell));
+        // Squared Euclidean, in exact integers: the metric is the crow's line, and
+        // squaring keeps it off floating point, which §12.4 would otherwise make a
+        // hazard. `min_by_key` keeps the **first** minimum, so the candidate order above
+        // *is* the tiebreak — fixed, seed-independent, identical on replay.
+        let target = candidates.min_by_key(|&cell| {
+            let (dx, dy) = (
+                cell.x as i64 - self.player.x as i64,
+                cell.y as i64 - self.player.y as i64,
+            );
+            dx * dx + dy * dy
+        })?;
+        bearing_cell(self.player, target)
+    }
+
     /// The area **a Lockdown fired from where the player stands would seal** (§8.3/#242):
     /// the §6.1 box of [`LOCKDOWN_RADIUS`], read from the one [`area_radius`] table so
     /// the ability's reach and the table cannot drift apart.
@@ -355,6 +526,22 @@ impl State {
     /// following the player who fired it. Painted through walls and fog on purpose: the
     /// reach of your own gadget is not something the fog can keep from you, and it
     /// reveals nothing about the facility (§11.5a).
+    /// The **Guide's** bearing joins this reading (§8.3/#505) rather than the mark
+    /// record, and it is the layer's one **live** cell read. A passive is held from
+    /// level start and has no activation event to latch from
+    /// ([`record_effect_marks`](Self::record_effect_marks) keys on *what happened*), so
+    /// there is no moment at which a `MarkPlace::Cells` could be lit — and a bearing is
+    /// a live query anyway, recomputed as the player walks and as objectives are
+    /// claimed. It is the same reasoning that makes
+    /// [`ConcealedPlayer`](MarkPlace::ConcealedPlayer) and
+    /// [`PhasedPlayer`](MarkPlace::PhasedPlayer) live reads on the other query.
+    ///
+    /// It lands **here**, in the wash, deliberately: this is the weakest background on
+    /// the board, so the compass loses to a sensed dot, a watcher line and the danger
+    /// overlay alike. That ordering is not incidental — the Guide is a convenience, and
+    /// it must never sit on top of the thing that can kill you (§11.5 **[SETTLED]**).
+    /// Yielded last for the same reason, though paint order among washes cannot matter:
+    /// one background, painted once.
     pub fn effect_cell_marks(&self) -> impl Iterator<Item = Cell> + '_ {
         self.effect_marks
             .iter()
@@ -367,6 +554,7 @@ impl State {
                 | MarkPlace::PilotedRemote => NO_CELLS,
             })
             .copied()
+            .chain(self.guide_bearing())
     }
 
     /// The cells where a mark rides a **thing** (#338/#340/#341): the position of every
@@ -484,6 +672,36 @@ impl State {
         });
     }
 
+    /// Fire the False Call over `reach` (§7.7/§8.3/#504): call every guard standing
+    /// inside it **right now** to the cell it was fired from, and report how many
+    /// answered.
+    ///
+    /// The world change is [`send_call`](Self::send_call) and nothing else — the same
+    /// call control makes when a post goes silent and the same one a guard makes on a
+    /// lost sighting, with the *who* narrowed to the transmitter's box instead of to a
+    /// count. So the responders **search** (§7.6) rather than chase, a guard that has
+    /// the live player is never pulled off it, a guard already on an errand is
+    /// redirected like any other respondable one, and a killed net answers with nobody
+    /// — none of which this function decides, because none of it is this ability's to
+    /// decide.
+    ///
+    /// The set is taken here and nowhere else. A guard that wanders into the reach next
+    /// turn was not in the call and is untouched; the cell named is a snapshot passed by
+    /// value, so walking away narrows nothing, widens nothing, and moves nothing.
+    ///
+    /// Nothing steps the alert ladder (§7.3). Nothing was seen and no ping was missed —
+    /// a forged transmission is, to the facility, an ordinary call — so escalating here
+    /// would be the ability climbing the ladder by a side door.
+    pub(super) fn fire_false_call(&mut self, reach: EffectArea, events: &mut Vec<Event>) {
+        let answered = self.send_call(reach.centre(), self.guards.len(), |guard, _| {
+            reach.contains(guard.pos())
+        });
+        events.push(Event::FalseCallFired {
+            reach,
+            answered: answered as u32,
+        });
+    }
+
     /// Count one turn off every dazed guard (§8.3/#325). Run once per **spent** turn,
     /// at end of turn beside the ability clocks, on §8.2's convention: a guard dazed
     /// for N is frozen for N turns *including* the one the blast went off in, every
@@ -567,6 +785,24 @@ impl State {
                         MarkLife::Standing,
                     );
                 }
+                // The False Call wears the **wash alone** (§7.7/§8.3/#504), which is
+                // Confusion's pair with the standing half deliberately absent. The box
+                // is a moment — *this far the message carried* — and it is the one
+                // thing neither the board nor the near line can otherwise say, since
+                // most of what it reached is behind a wall.
+                //
+                // What it caught needs no mark of its own, and that is the difference
+                // from a blast: a called guard is not *held*, it is walking, and the
+                // §7.7 legibility tell for a call is already the responder's own sensed
+                // dot peeling off toward the cell (§9/§9.3). Recolouring those dots
+                // would restate the thing they are doing while the player watches them
+                // do it — and would go on claiming an effect over a guard that had long
+                // since finished its search and gone back to its beat.
+                Event::FalseCallFired { reach, .. } => self.light_mark(
+                    AbilityId::FalseCall,
+                    MarkPlace::Cells(reach.cells(self.layout.facility())),
+                    MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                ),
                 Event::WallBored { at } => self.light_mark(
                     AbilityId::PierceWall,
                     MarkPlace::Cells(vec![at]),

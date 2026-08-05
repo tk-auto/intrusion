@@ -704,7 +704,19 @@ mark) > investigation area > Effect wash.**
 | **Sensed**, full (orange) | A guard felt through a wall right now — its exact cell, position only |
 | **Sensed**, quiet (orange) | Where the sense felt something a turn or two ago: the trail behind a moving guard, the ghost of one that left the box, a door that changed away from you (§9.5). It fades to nothing over a couple of turns — *was just here*, never a heading |
 | **Warning** (orange) | The area a §7.6 search is sweeping — the `SEARCH_RADIUS` box around a searching guard's focus. Only with the `show_search_areas` modifier on (§12.6); baseline the board draws no investigation area at all |
-| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds |
+| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds, the reach a False Call broadcast over — **or**, uniquely, where one is *pointing*: the Guide's bearing (§8.3/#505), one cell of the eight around you, **on one turn in three** |
+
+**The Guide's cell is the one Effect cue that is not about a thing** (#505), and it is
+worth flagging because cyan is already busy: it marks a held guard, a live decoy, your
+own camouflage, a Phase Out eject cell and a gadget's reach — all of them *something
+happening*. A wash one step from the player is a new kind of user of that colour, and it
+sits exactly where the eye lives. It **pulses** rather than stands (one turn in three),
+which is a balance decision first — a standing needle is a line you follow without
+thinking — but it earns its keep here too: the colour is not permanently spoken for. It is at the **bottom** of the stack for that reason and not by accident: a
+convenience must never sit on top of the thing that can kill you, so every threat
+channel above paints straight over it. If it reads as *"an ability is running on that
+cell"* rather than as *"that way"*, that is the thing to fix, and the fix is not to
+promote it.
 
 The **investigation area** (#224) is the second advisory layer, and it is advisory in
 exactly the sense the wash is: orange says *a guard's attention is on this ground*, never

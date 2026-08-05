@@ -368,6 +368,33 @@ pub fn message_for(event: Event) -> Option<Message> {
         // as a dropped key. It names the rule the player is learning: the blast only
         // reaches what you can already sense.
         Event::ConfusionMissed => ("nothing near enough to daze".to_string(), 0),
+        // The forged call, reported (§7.7/§8.3/#504) — and worded as the **warning it
+        // is**, not as a confirmation that a key was pressed. This ability's whole value
+        // is in the turns after firing, and its whole failure mode is a player who has
+        // not learned that; so the line says *here*, which is the one word that makes
+        // standing still feel like the mistake it is. It sits at **3**, alongside
+        // `CalledIn` and the radio silence: all three say guards are converging on a
+        // named cell, and it makes no difference to the ranking that this one was the
+        // player's own doing.
+        // The forged call, reported — and reported as **what you did**, never as what
+        // it found (§8.3/§11.7/#504). Confusion says how many it caught because its
+        // blast is clamped inside the guard sense and every one of them was already
+        // drawn; this reach is not clamped, so a count would name guards behind the §5
+        // cone and, in a duct, well past the §9 sense — free information about the dark,
+        // out of a tool that is a transmitter and not a detector.
+        //
+        // So the line says the transmission went out and stops. What answered is the
+        // player's to learn the way they learn everything else about guards: by sensing
+        // the dots turn toward them (§9/§9.3, the §7.7 legibility tell). It keeps its
+        // rung at **3** alongside `CalledIn` and the radio silence — all three say guards
+        // are converging on a named cell — and it keeps the word *here*, which is the one
+        // word that makes standing still feel like the mistake it is.
+        Event::FalseCallFired { .. } => ("your call goes out — to here".to_string(), 3),
+        // The one refusal (§8.3/#504): free, changed nothing, and it has to say why for
+        // the refused bore's reason — a press that silently did nothing reads as a
+        // dropped key. It gives nothing away, because it reports a switch the player
+        // threw themselves.
+        Event::FalseCallDead => ("the radio is dead — nothing to spoof".to_string(), 0),
         // The §7.6 search, made legible in time (§11.7/#224). Both sit at **1** — a
         // new rung, deliberately below the threat ladder's bottom (a fresh detection
         // at 2) and above routine self-narration: a search opening is the
