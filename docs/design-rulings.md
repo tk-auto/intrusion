@@ -3470,3 +3470,94 @@ it. `Harder` remains the safer of the two labels because the structural change (
 throats, no hand-close) is the harder-direction one and is what §2.3's assertion can
 actually hold. #258 is where that question gets answered properly.
 
+
+## Appendix 50 — The save is a snapshot, because a replay resumes a different game
+
+*(§12.5 saves, §12.4 determinism, §2.2 permadeath, §12.7 the campaign layer, §14 v2's
+saves deliverable. The ticket is #514; the menu it grows a row on is #268.)*
+
+§12.5 shipped as an open choice: snapshot the run, or store `(seed, inputs)` and re-feed
+them. Determinism (§12.4) is [SETTLED] and the replay machinery already existed — the
+shell records every input, the copy-replay control hands the pair around, the sim replays
+it — so the replay save was the one that cost nothing to build and a fifth of a kilobyte
+to store. It is still the wrong save, and the reason is worth writing down, because it is
+not the reason the design doc guessed.
+
+### The measurement that was *not* decisive
+
+The obvious objection to a replay save is restore cost: it re-runs the run. Measured on
+the release build, a turn costs about **174 µs** — 3000 turns is **0.52 s** natively, and
+a wasm build is slower again, so a long run would resume with a second or more of frozen
+page, growing with exactly the runs the feature exists to protect. That is a real cost
+and it is not the decisive one: a "restoring…" frame would have covered it.
+
+### The reason that is decisive
+
+**A replay reproduces the run *this build* would play, not the run that was saved.**
+
+The page updates whenever `main` merges. A player who leaves a run on Tuesday comes back
+to Wednesday's build, and if a single §12.6 [START] number moved in between — a dwell
+chance, a sighting window, a search radius — re-feeding their inputs produces a different
+run: the same first move, a guard a cell to the left, an alert rung that never rose. It
+does not error. Nothing about the page can tell the player that the run they are looking
+at is not the run they left, because from the code's point of view nothing went wrong.
+
+A snapshot has the opposite failure mode, and it is the safe one. It stores the state
+rather than a recipe for it, so a build with a different rule restores the *stored* world
+and plays on under the new rules; and a build whose state has a different **shape** fails
+to decode, which is caught, which is discarded, which is a menu without a continue row.
+The version stamp beside it covers the third case — same shape, different meaning —
+where the format cannot notice on its own.
+
+That asymmetry is the whole ruling. A save is a promise about the past; a replay is a
+computation in the present, and the present moves.
+
+### What it cost
+
+`serde` derives across the state graph — about seventy types, one line each, plus the
+`serde` feature on the pinned PRNG so the run's random position rides along. That is a
+real dependency in a crate that had two, and it is the price of the snapshot branch. The
+codec (`serde_json`) stays in the shell: §12.1's core is still pure, still clockless, and
+gains no I/O.
+
+The stored record is ~150 KB for a 300-turn quick-play run against a multi-megabyte
+`localStorage` quota — two orders of magnitude of headroom, pinned by a test rather than
+by this paragraph.
+
+### Two things the ticket did not ask for, and why they are in anyway
+
+**The input recording rides in the save.** A snapshot does not need it. The shell's
+recorder does (§12.4/#411): a resumed run whose recording restarted at the resume would
+hand the copy-replay control a script that reproduces a *different* run — the exact
+failure this appendix is about, re-entering through the back door. A few bytes a turn
+closes it.
+
+**A reload of the run in progress resumes it.** The shell reflects a live run's token
+into the address bar (§13.1/#110), so a refresh mid-run arrives carrying that token and
+is indistinguishable from a shared link — and #268's rule for a link is *boot straight
+in*, which would roll the level fresh and throw away the run. When the named level is the
+saved run's own level, the load is read as a reload and the save wins. A token naming a
+different level is a genuine link and starts fresh, overwriting the slot forward like any
+new run.
+
+### The campaign came along
+
+§12.7 said "nothing persists a campaign anywhere", and #514 scoped campaign saves out to
+v3. It turned out to be a handful of lines: the record carries `Option<Campaign>` and the
+map screen's marker row, and the only genuinely new idea is that **the run being over is
+not the same question as the facility being over** — a campaign facility's verdict is the
+middle of the run (§12.7), so only `CampaignStage::is_over` may empty the slot. Two
+moments outside the turn loop had to arm a write as well, because between raids no turn
+is taken: the map coming up, and a road bought at the hub (#212) — intel spent and then
+reloaded away would be a road bought twice.
+
+§12.7's sentence is now about the *slot's lifetime* rather than about nothing existing:
+the campaign is persisted in one place for one purpose, and that place is emptied when
+the run ends. §2.2 is unmoved.
+
+### What is left open
+
+The debounce numbers are **[START]** and unmeasured against real play: 2 s and a 20-turn
+cap were chosen against the 120 ms key repeat, not against a session. The right evidence
+is how many turns players actually lose to a killed tab, which needs the feature in
+players' hands first.
