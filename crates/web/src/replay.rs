@@ -754,7 +754,9 @@ mod tests {
     /// reproducible here if it ever fails.
     #[test]
     fn a_long_random_stream_round_trips_even_past_the_runs_end() {
-        let level = LevelSeed::quick_play(97);
+        // Seed 98 since #481 re-carved the level set; 97's stream no longer outlives
+        // its run, which is the move the assertion below names as its own remedy.
+        let level = LevelSeed::quick_play(98);
         let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut next = move || {
             x ^= x << 13;

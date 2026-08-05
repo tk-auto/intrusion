@@ -237,6 +237,53 @@ fn placed_guard_territories_are_reachable_and_cover_corridors() {
     }
 }
 
+/// The sibling that closes the blind spot above (#481): the **same claim on the
+/// stamped board** — every cell a guard's beat leaves it to sweep is walkable from
+/// where the guard stands, with the intel consoles, the comms console and the exit
+/// all solid.
+///
+/// [`placed_guard_territories_are_reachable_and_cover_corridors`] cannot see this,
+/// because [`generate_level`](crate::generate_level) hands back a bare carve and the
+/// usables are stamped by [`State::new`](crate::State::new) afterwards. It is the
+/// weaker claim documented rather than fixed when #477 landed, and it passed over the
+/// whole seed range while 17% of seeds shipped a pocket nobody could enter.
+///
+/// The territory is what a guard actually sweeps, so it is already filtered to the
+/// [`patrollable`] cells — a console cell is never a target, whoever's beat it fell
+/// in. What this asserts is the part that filter cannot fix: that everything left
+/// **is** reachable. The board-wide property it rests on — that no stamp orphaned any
+/// ground at all — is `place`'s `no_placed_usable_seals_walkable_ground_off`.
+#[test]
+fn placed_guard_territories_are_reachable_on_the_stamped_board() {
+    use crate::level_seed::{start_level, LevelSeed};
+    use crate::test_support::seed_sweep;
+    use std::collections::HashSet;
+
+    for seed in seed_sweep(32) {
+        let state = start_level(&LevelSeed::quick_play(seed)).expect("quick play generates");
+        let facility = state.layout().facility();
+        for guard in state.guards() {
+            let territory = guard.territory(facility, PatrolStyle::Beat);
+            assert!(!territory.is_empty(), "seed {seed}: an empty beat");
+
+            let reached: HashSet<Cell> =
+                path::flood_from(guard.pos(), facility.width(), facility.height(), |c| {
+                    routable(facility, c)
+                })
+                .into_iter()
+                .collect();
+            for &cell in &territory {
+                assert!(
+                    reached.contains(&cell),
+                    "seed {seed}: territory cell {cell:?} is not walkable from the \
+                     guard at {:?} once the usables are stamped",
+                    guard.pos(),
+                );
+            }
+        }
+    }
+}
+
 /// §7.5/#477 on the board a run is actually played on: **a Calm guard is never
 /// walking at ground it cannot reach.**
 ///

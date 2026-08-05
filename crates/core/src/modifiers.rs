@@ -391,7 +391,7 @@ pub struct LevelModifiers {
     /// consoles" left to cycle, so the console watch goes the way the beat does. That is
     /// one more thing the comms console buys, priced by the same detour (§7.3).
     ///
-    /// **`Harder`, and what the sim does and does not support** (appendix 38). The §2.3
+    /// **`Harder`, and what the sim does and does not support** (appendix 39). The §2.3
     /// assertion it is held to is *turns with a guard's cone on a console*, which rises
     /// on every seed of the sweep and never falls. Over 120 bot seeds per profile the
     /// **cautious** profile — the one that lingers near an objective waiting for a gap —
