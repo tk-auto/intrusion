@@ -1009,7 +1009,13 @@ Trying "what if there were a smoke grenade" should mean **adding a row**, not
 writing a system.
 
 When a primitive won't stretch — piloting a drone, rewinding time — there is an
-escape hatch to plain code behind the same interface. **Start data-driven; promote
+escape hatch to plain code behind the same interface. Both named cases now have a
+user: Pierce Wall turns a solid into floor (#303), and the **Drone** (§8.3/#273) is
+the literal one — it transfers the player's *input* to another entity, which no
+arrangement of effect primitives expresses. That seam is deliberately a **remote
+unit** rather than a drone (`control::remote_kind`), so taking over a guard later is
+a row in one table plus a spawn rule rather than a second control system
+(appendix 44). **Start data-driven; promote
 to code only when the vocabulary genuinely can't express it.** Resist the urge to
 grow the vocabulary to cover a one-off; that's how DSLs become bad programming
 languages.
@@ -1130,6 +1136,7 @@ whole reason the architecture looks the way it does.
 | **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot get it open, so its route goes the long way round (§7.6/§10.4). (It used to say *"cannot work the handle"*; on an all-automatic level there is no handle to work — §10.4/#452 — and the seal holds the door shut whatever kind it is.) A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it. **You** are never refused — a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in; that costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4). Appendix 24. |
 | **Saver** | — | **passive** | — | **[START]/experiment (#243).** The **first guard to reach you in a facility takes you down — and instead goes down itself**: §4.5's capturing step is turned into a §7.2 takedown of that guard, which drops **where it stood** (a lunge turned over never arrives, and your own cell may be a cupboard where a body means something else), leaves a body and starts the §7.3 clock. Then it is **spent for the rest of the level** — `1/level` (§8.2), no recharge — so a second guard reaching you the same turn captures you exactly as the settled rule says. There is **no activation**: held is on, which is the whole reason it is a passive rather than the toggle first proposed — a defensive window you have to predict is one you mistime, and §8.2's timing trap needs an activation turn to be a trap at all. **Surviving is not free**: you are left standing beside a body you did not choose the place of, in a cell a guard was walking to, with the radio already counting; and the slot it holds is a flight tool you do not have for every *other* crisis of the run. **This is the one declared exception to a [SETTLED] rule (§4.5)** — it is on trial, and the sim says it is strong: a fearless bot handed it wins nearly twice as often (appendix 43). |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
+| **Drone** | 1 turn | 30 | 40 | **[START]/experiment (#273).** Launch a drone from the cell you stand on and **fly it yourself**: your input moves the machine and your body stands still, so every drone move is a full turn the guards get (§4.2) while nobody is watching where you left yourself. Press again and the controls come back — **free** (§4.4), and the window does **not** end: the drone holds the cell you left it in and keeps feeding you its camera for the rest of the duration, and you can take the controls back later for the price of a turn. **One clock covers both halves**, which is the design: how much of the 30 you spend flying rather than watching is the decision the ability sells, and the bar's `[N]` means *turns of machine* throughout (appendix 44). Its camera is the full **360°** at `DRONE_SIGHT_RANGE` (**8** **[START]**) and is unioned into your own sight — your eyes keep working — and what it sees is remembered (§11.5a). The **guard sense (§9) is not widened with it**: that is your body's channel, and your body is what this costs. It **respects the building** (floor and open doorways, never a wall or a shut door), is **not an actor** (nothing blocks it, it blocks nothing, no door shuts on it), has **no interaction verb at all** — it opens nothing, takes nothing, wins nothing — and **guards cannot perceive it** in any way. While flying, every other ability is greyed and refused: your hands are on the controls. **Launching, and taking the controls back, needs you on your feet** — a crawlspace refuses both (§10.7), because a body nothing can reach pays nothing, and the exposed body is the whole cost (§2.3). |
 
 Notes carried forward, because they are good and non-obvious:
 
@@ -1140,6 +1147,14 @@ Notes carried forward, because they are good and non-obvious:
   this pair closely in playtest** — if being seen is still free, the answer is
   more consequence, not a slower player.
 - **Camouflage does not stop capture.** Invisible is not safe (§4.5).
+- **The drone's cost is your body, and nothing else is allowed to be.** It cannot be
+  seen, chased or destroyed, so the only pressure on it is the turns your body spends
+  standing unattended in a patrolled facility while you look elsewhere (§4.5: capture is
+  contact). If playtest says it is too strong, the levers are the clock, the camera's
+  reach, and drone-only vision while flying — **not** letting guards shoot it down, which
+  is a different ability and a separate ticket. Watch it against §11.5a especially: a
+  tool that cheaply reveals every console before you move deletes the exploration reward
+  the fog exists to create.
 - **Dephase does not conceal.** It's a movement tool. And while dephased you
   cannot *bump*, so you cannot open doors, use consoles, or win — you pass
   straight through everything you came for. That constraint is excellent; keep it.
@@ -1163,8 +1178,8 @@ Notes carried forward, because they are good and non-obvious:
   you.
 - **Which tech you start with is a level modifier** (`starting_abilities`, §12.6/#244),
   not a fixed roster. Quick play grants the innate set plus a **seeded** draw of three
-  tech from a pool that defaults to the whole shipped set (nine tech now ship, so
-  "three random" is a genuine draw of three of the nine — the pool has outgrown the
+  tech from a pool that defaults to the whole shipped set (ten tech now ship, so
+  "three random" is a genuine draw of three of the ten — the pool has outgrown the
   grant and it finally bites, #241); a campaign accumulates its set
   instead (§2.2). A **passive** (§8.2/#264) is drawn from that pool like any other
   tech — it competes for the same slot, which is exactly what it pays with. The

@@ -241,6 +241,20 @@ impl Moment<'_> {
             // holding it cannot answer that. If the with/without pair shows the
             // temperaments barely moving, a boldness cue is the next experiment, and it
             // belongs to `Profile` where the other temperament knobs live.
+            // The **Drone** (§8.1/#273) is a third kind of "no cue", and the reason is
+            // not that it is weak: piloting is a **control mode**, and this bot does not
+            // have one. Pressing it would transfer the keys to a machine while the
+            // policy went on issuing steps for a body that is no longer listening — the
+            // bot would fly its drone into a wall for thirty turns and call the result a
+            // measurement.
+            //
+            // What it would take is a real second policy: a flight plan over the fog
+            // (§11.5a — where has nobody looked?), a judgement about how long the body
+            // can be left standing where it stands, and a reason to come back. That is
+            // its own ticket, and until it exists the honest report is a zero in the
+            // usage histogram (`Verb::Drone`) with this comment and
+            // `docs/stats/abilities/drone.md` saying which kind of zero it is (§13.3).
+            AbilityId::Drone => None,
             AbilityId::Vision | AbilityId::Saver => None,
         }
     }

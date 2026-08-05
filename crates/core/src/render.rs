@@ -48,6 +48,10 @@ use crate::state::{GuardPerception, State};
 pub(crate) const PLAYER_GLYPH: char = '@';
 pub(crate) const GUARD_GLYPH: char = 'g';
 pub(crate) const BODY_GLYPH: char = 'z';
+/// A **remote unit** of yours in the facility (§8.3/§11.3/#273) — the drone. A small
+/// mark for a small machine, and one no terrain or actor already speaks: the `@` is
+/// yours and the decoy's, `g` and `z` are the guards' living and dead.
+pub(crate) const REMOTE_GLYPH: char = '*';
 /// Floor draws as a dot **while you can see it**, and as nothing once you cannot
 /// (§11.5, #470): the dot is the FOV's own ink, so the sight boundary is the edge
 /// between dots and bare page rather than a gap between two shades of dot. Named so
@@ -355,8 +359,9 @@ impl Grid {
 ///
 /// The old renderer was last-writer-wins, so a guard standing in a doorway rendered
 /// arbitrarily. Here the order is **defined**: entities always draw over terrain, and
-/// among glyphs the ranking is **player > guard > body > decoy** (§7.2/§8.3). We
-/// write terrain, then the decoy, then bodies, then seen guards, then the player, so
+/// among glyphs the ranking is **player > guard > body > remote > decoy** (§7.2/§8.3/
+/// #273). We write terrain, then the decoy, then the remote, then bodies, then seen
+/// guards, then the player, so
 /// the highest-priority glyph is the last writer at any cell — a defined order, not an
 /// accident. A *sensed* guard (§9.2) is not a glyph at all — it is an orange
 /// background highlight, painted with the danger overlay below — so it never competes
@@ -593,6 +598,26 @@ fn entity_pass(state: &State, cells: &mut [GlyphCell]) {
             },
             state.facing(),
         );
+    }
+
+    // A **remote** of yours (§8.1/§8.3/#273) draws with the decoy, on the same terms and
+    // for the same reason (§11.5a's second exception, #321): it is a machine you put
+    // there, so its cell is your own knowledge rather than a content of the facility you
+    // have to keep looking at, and a marker you could only see by standing next to it
+    // would be one the ability cannot use. It is trivially in view anyway — it is inside
+    // its own camera, and that camera is unioned into the FOV (§6/#273) — so unlike the
+    // decoy it needs no remembered branch: while it exists, it is being seen.
+    //
+    // It draws **below** the guards and bodies deliberately (§11.3's priority): a remote
+    // flies over everything, and a threat is never hidden by a thing of yours. What says
+    // *this is the one your keys move* is the §11.5 effect mark underneath it, which no
+    // glyph can cover.
+    //
+    // It faces nowhere: a drone's camera is the full circle (§6.2), so there is no
+    // stance to draw and none is invented.
+    if let Some(remote) = state.remote() {
+        cells[(remote.cell().y * width + remote.cell().x) as usize] =
+            GlyphCell::on_board(REMOTE_GLYPH, Category::Owned, Visibility::Live);
     }
 
     // Entities are live state: whatever is drawn here is being seen right now. The

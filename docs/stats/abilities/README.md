@@ -5,7 +5,8 @@ bot's **cue** says it is for (`crates/sim/src/cue.rs`), and what a batch measure
 when the bot was actually given it. The set is exhaustive over `AbilityId` on
 purpose — the same move the cue seam makes in code (#366), so a missing file means
 "not an ability", never "nobody got round to it". A verb with no cue still gets a
-file; it says so, and says why — today that is the two passives, Vision and the Saver.
+file; it says so, and says why — today that is the two passives (Vision and the Saver)
+and the Drone, whose press exists but whose *control mode* the bot does not have (#273).
 
 ## These are numbers, not verdicts (§13.4)
 

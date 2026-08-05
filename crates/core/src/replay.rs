@@ -62,6 +62,9 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
         // written into a script anyway (it has no activation to spell) — it exists so
         // the map stays exhaustive over the catalogue, as Vision's does.
         "Saver" => 'e',
+        // `o` for the middle of *drone*: `d` is the Decoy's and the letters have to
+        // stay unique for [`parse_script`] to be unambiguous.
+        "Drone" => 'o',
         _ => return None,
     })
 }

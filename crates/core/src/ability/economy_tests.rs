@@ -117,6 +117,44 @@ fn the_catalog_matches_the_design_coded() {
     assert_eq!(AbilityId::PierceWall.script_letter(), 'b');
 }
 
+/// The **Drone**'s row (§8.1's escape hatch, #273), the second coded ability and the
+/// one the design names when it reserves the hatch. Every number here is [START].
+///
+/// The single duration is the load-bearing part: it covers **both** halves of the
+/// ability — the turns spent flying and the turns the machine hovers after the player
+/// hands the controls back — so there is one number to read and the §11.4 bar's `[N]`
+/// means *turns of machine*, start to finish.
+#[test]
+fn the_catalog_matches_the_design_drone() {
+    let def = AbilityId::Drone.def();
+    let economy = def.economy().expect("the Drone is activated");
+    assert_eq!(economy.cost(), 1, "activation costs the turn (§4.4)");
+    assert_eq!(
+        economy.targeting(),
+        TargetingMode::Itself,
+        "you launch it from your own cell"
+    );
+    assert_eq!(economy.duration(), 30, "[START] — flying *and* hovering");
+    assert_eq!(economy.cooldown(), 40, "[START]");
+    assert_eq!(
+        economy.duration() + economy.cooldown(),
+        70,
+        "the longest lockout in the catalogue (§8.2), for the strongest information tool",
+    );
+    assert_eq!(
+        def.uses_per_level(),
+        None,
+        "the clock is the whole economy here (§8.2)"
+    );
+    assert!(
+        matches!(def.behaviour(), Behaviour::Coded),
+        "transferring control is not a primitive the effect vocabulary has (§8.1)",
+    );
+    assert_eq!(AbilityId::Drone.name(), "Drone");
+    assert_eq!(AbilityId::Drone.bar_name(), "Drone", "§11.4 fits 5 cells");
+    assert_eq!(AbilityId::Drone.script_letter(), 'o');
+}
+
 /// **Every** activated ability is pinned by one of the catalog tests — the
 /// guard against a row being added and quietly escaping the value-by-value pin,
 /// which a hand-written list of tuples otherwise invites.
@@ -128,7 +166,7 @@ fn every_activated_ability_is_pinned_by_a_catalog_test() {
             // list; a row missing from it fails here rather than silently.
             Behaviour::Effects(_) => PINNED_ACTIVATED.contains(&id),
             // The coded rows are covered one by one by `..._coded`.
-            Behaviour::Coded => id == AbilityId::PierceWall,
+            Behaviour::Coded => matches!(id, AbilityId::PierceWall | AbilityId::Drone),
         };
         assert!(pinned, "{} is in no catalog pin", id.name());
     }

@@ -414,6 +414,92 @@ fn a_live_decoy_draws_the_effect_mark_under_its_owned_at() {
     assert_ne!(render(&s).get(4, 6).bg, Some(Category::Effect));
 }
 
+/// §8.3/§11.3 (#273): a drone of yours draws as an Owned `*` — a machine you put
+/// there, in the same blue vocabulary as the decoy and the cupboard you hide in — and
+/// while you are flying it, the §11.5 effect mark under it says **this is the one your
+/// keys move**. Two things of yours on the board, told apart by the wash rather than by
+/// the player having to remember which cell they left their body on.
+#[test]
+fn a_piloted_drone_draws_as_a_marked_owned_star() {
+    use crate::AbilityId;
+    let mut s = state_holding(12, 12, Cell::new(4, 4), Vec::new(), AbilityId::Drone);
+    s.step(Input::Activate(AbilityId::Drone));
+    s.step(Input::Step(Direction::East));
+    s.step(Input::Step(Direction::East));
+
+    let g = render(&s);
+    let drone = g.get(6, 4);
+    assert_eq!(drone.glyph, '*');
+    assert_eq!(drone.fg, Category::Owned, "a thing you made (§11.2)");
+    assert_eq!(drone.vis, Visibility::Live, "it is inside its own camera");
+    assert_eq!(
+        drone.bg,
+        Some(Category::Effect),
+        "the mark that says the keys are its",
+    );
+    assert_eq!(
+        g.get(4, 4).glyph,
+        '@',
+        "and your body still draws where it is"
+    );
+    assert_ne!(
+        g.get(4, 4).bg,
+        Some(Category::Effect),
+        "your body is not the thing you are driving",
+    );
+
+    // Hand the keys back: the machine stays and stays yours, the mark goes dark. This
+    // is the disagreement with the §11.4 bar the mark exists for — the entry still
+    // reads `Drone[N]` throughout.
+    s.step(Input::Deactivate(AbilityId::Drone));
+    let g = render(&s);
+    assert_eq!(g.get(6, 4).glyph, '*', "still hovering, still yours");
+    assert_eq!(g.get(6, 4).fg, Category::Owned);
+    assert_ne!(
+        g.get(6, 4).bg,
+        Some(Category::Effect),
+        "…but nobody is flying it",
+    );
+    assert!(
+        matches!(
+            s.ability_state(AbilityId::Drone),
+            crate::AbilityState::Active { .. }
+        ),
+        "while the bar says the window is still open — the fact the mark carries",
+    );
+}
+
+/// §11.3/§11.5/#273: **a drone never hides anything.** Flown over a guard it keeps the
+/// guard's `g` on top (the glyph priority), and its own background mark yields to the
+/// danger overlay under it — being seen outranks, which is the one claim the board is
+/// never allowed to lose (§11.5 **[SETTLED]**). Where nothing louder is claiming the
+/// cell, the mark is what says where the machine is
+/// ([`a_piloted_drone_draws_as_a_marked_owned_star`]).
+#[test]
+fn a_drone_never_hides_a_threat_or_its_overlay() {
+    use crate::AbilityId;
+    let guard = Cell::new(4, 2);
+    let mut s = state_holding_facing_north(
+        12,
+        12,
+        Cell::new(4, 4),
+        vec![Guard::stationary(guard)],
+        AbilityId::Drone,
+    );
+    s.step(Input::Activate(AbilityId::Drone));
+    s.step(Input::Step(Direction::North));
+    s.step(Input::Step(Direction::North));
+    assert_eq!(s.remote().map(|r| r.cell()), Some(guard));
+
+    let cell = render(&s).get(guard.x, guard.y);
+    assert_eq!(cell.glyph, 'g', "the guard is not covered by your drone");
+    assert_eq!(
+        cell.bg,
+        Some(Category::Danger),
+        "and neither is the detection set — the mark yields to the overlay (§11.5)",
+    );
+}
+
 /// §8.3/§11.5a (#321/#340): the fake's mark follows the glyph it sits under, so it
 /// is painted out of the FOV too — a wash you could only read by standing next to
 /// the fake would be a wash the ability cannot use.

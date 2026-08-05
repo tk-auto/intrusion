@@ -11,6 +11,8 @@
 //! [`super::traversal`], [`ducts`] for
 //! the §10.7 crawlspace, [`tunnel`] for the player's own way in and out (§4.5/#466),
 //! [`comms`] for the §7.7 comms console that kills the radio net,
+//! [`control`] for the §8.1 control-transfer seam and the drone that first uses it
+//! (#273),
 //! [`saver`] for §4.5's one declared exception (#243), and
 //! [`watched_consoles`] for the §12.6 modifier that patrols the objectives. They share [`crate::test_support`]'s builders rather than a common
 //! harness here, so each file stands alone.
@@ -21,6 +23,7 @@ mod alert;
 mod bore;
 mod cache;
 mod comms;
+mod control;
 mod doors;
 mod ducts;
 mod effects;

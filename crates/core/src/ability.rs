@@ -348,6 +348,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#243), **passive and budgeted**: the one guard that lays
     /// hands on you this facility goes down instead of taking you.
     Saver,
+    /// Salvaged tech (§8.3/#273): launch a drone and **fly it yourself** — then let go
+    /// and leave it watching for the rest of the window.
+    Drone,
 }
 
 impl AbilityId {
@@ -356,7 +359,7 @@ impl AbilityId {
     /// which bar slot a held ability lands in and therefore which digit fires it
     /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
     /// must not drift.
-    pub const ALL: [AbilityId; 10] = [
+    pub const ALL: [AbilityId; 11] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -367,6 +370,7 @@ impl AbilityId {
         AbilityId::PierceWall,
         AbilityId::Lockdown,
         AbilityId::Saver,
+        AbilityId::Drone,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
@@ -380,7 +384,7 @@ impl AbilityId {
     /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
     /// from here like any other tech — it competes for the same slot, which is exactly
     /// what it pays with.
-    pub const TECH: [AbilityId; 9] = [
+    pub const TECH: [AbilityId; 10] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -390,6 +394,7 @@ impl AbilityId {
         AbilityId::PierceWall,
         AbilityId::Lockdown,
         AbilityId::Saver,
+        AbilityId::Drone,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -452,6 +457,7 @@ impl AbilityId {
             AbilityId::PierceWall => "Pierce Wall",
             AbilityId::Lockdown => "Lockdown",
             AbilityId::Saver => "Saver",
+            AbilityId::Drone => "Drone",
         }
     }
 
@@ -478,6 +484,7 @@ impl AbilityId {
             AbilityId::PierceWall => "Bore",
             AbilityId::Lockdown => "Lock",
             AbilityId::Saver => "Saver",
+            AbilityId::Drone => "Drone",
         }
     }
 
@@ -537,6 +544,10 @@ impl AbilityId {
                 "The next guard to lay hands on you goes down instead of taking you, \
                  leaving a body. Once a facility, and then never again."
             }
+            AbilityId::Drone => {
+                "Fly a drone while your body stands still. Press again to let go: it \
+                 hovers on, watching, till the window ends. Guards never see it."
+            }
         }
     }
 
@@ -570,6 +581,7 @@ impl AbilityId {
             AbilityId::PierceWall => &PIERCE_WALL,
             AbilityId::Lockdown => &LOCKDOWN,
             AbilityId::Saver => &SAVER,
+            AbilityId::Drone => &DRONE,
         }
     }
 
@@ -586,6 +598,7 @@ impl AbilityId {
             AbilityId::PierceWall => 7,
             AbilityId::Lockdown => 8,
             AbilityId::Saver => 9,
+            AbilityId::Drone => 10,
         }
     }
 }
@@ -1117,6 +1130,39 @@ const SAVER: Ability = Ability {
     mode: AbilityMode::Passive,
     uses: Some(SAVER_USES),
     behaviour: Behaviour::Effects(&[Effect::ReverseCapture]),
+};
+
+// Drone [START] (§8.1/§8.3/#273): the second **[`Behaviour::Coded`]** ability, and the
+// one §8.1 names when it reserves the hatch (*"piloting a drone"*). What it does is not
+// an effect on the player's body at all — it changes **who the keys are for** — so no
+// arrangement of the effect vocabulary could express it without inventing a primitive
+// for one row, which is exactly the DSL-rot §8.1 warns against.
+//
+// **One duration for both halves, and that is the design** (#273). Activating launches
+// the drone and hands it the controls; pressing again hands them back, **free** (§4.4)
+// — and the drone stays out there, hovering, feeding you its camera for whatever is
+// left of the window. So the 30 turns are not "30 turns of flying": they are 30 turns
+// of *machine*, and how much of that you spend flying versus watching is the whole
+// decision. Two clocks would have made that a pair of numbers the player has to add up,
+// and the bar can honestly show only one of them (§8.2's timing rule).
+//
+// **What it costs** (§2.3). Every turn you fly is a turn your body stands still in a
+// patrolled building while you look somewhere else: the guard phase runs (§4.2), capture
+// is contact (§4.5), and a patrol walking into your parked body ends the run while you
+// are watching a corridor two rooms away. Scouting deep costs exactly as many turns of
+// blind exposure as it buys of vision — which is why the tuning lever is the clock and
+// never the drone's invulnerability. The good player's "when would I not use this" is
+// therefore answered by geometry: you fly from somewhere nobody walks, and if you have
+// nowhere like that, you do not fly.
+//
+// The lockout is 30 + 40 = **70**, the longest in the catalogue, because information is
+// the thing §11.5a most deliberately withholds and a run that could re-scout every
+// twenty turns would never have to plan under fog at all.
+const DRONE: Ability = Ability {
+    id: AbilityId::Drone,
+    mode: activated(1, TargetingMode::Itself, 30, 40),
+    uses: None,
+    behaviour: Behaviour::Coded,
 };
 
 /// How many captures one facility lets you walk away from — **[START]** (§4.5/§8.3/#243).

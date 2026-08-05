@@ -54,6 +54,7 @@ use crate::body::Body;
 
 use crate::category::Category;
 use crate::cell::{Cell, Direction};
+use crate::control::{transfers_control, Remote};
 use crate::cover;
 use crate::duct::Duct;
 use crate::facility::{Facility, Terrain};
@@ -79,6 +80,7 @@ use crate::DoorAction;
 mod abilities;
 mod activation;
 mod bore;
+mod control;
 mod doors;
 mod effects;
 mod events;
@@ -605,6 +607,24 @@ pub struct State {
     /// ability's active window, both ways: expiry and early toggle-off remove
     /// it, and being stepped on ends the ability into its full cooldown.
     decoy: Option<Cell>,
+    /// The **remote unit** the player has put into the facility (§8.1/#273), if any —
+    /// a drone today, whatever a later control-transfer ability deploys tomorrow. At
+    /// most one: the abilities that place one are activated (§8.2), so a second could
+    /// only overlap the first by way of an ability that is already running.
+    ///
+    /// Its life is its source ability's active window and nothing else
+    /// ([`Remote::source`]) — there is no linger counter, because the linger *is* the
+    /// rest of the duration (#273).
+    remote: Option<Remote>,
+    /// Whether the player's input drives the [`remote`](Self::remote) rather than their
+    /// own body (§8.1/#273).
+    ///
+    /// Deliberately **not** derived from the ability's window: the whole shape of a
+    /// control transfer is that letting go and the machine dying are different events,
+    /// so "is it alive" and "am I holding the keys" are two facts and this is the
+    /// second. Derived purely from the input stream — the press that takes the controls
+    /// and the press that hands them back — so a replay reproduces it (§12.4).
+    piloting: bool,
     /// The **half-speed convention** (§8.3: "you move at half speed while
     /// dragging"), documented here: a successful move while dragging leaves a
     /// haul debt, and the next spent turn pays it — a Step under debt is spent
@@ -881,6 +901,8 @@ impl State {
             bodies: Vec::new(),
             dragging: None,
             decoy: None,
+            remote: None,
+            piloting: false,
             drag_debt: false,
             // A hand-built state holds the **innate** set and nothing else (§8.3):
             // loadouts are built up from empty, never carved down from everything,
@@ -1203,6 +1225,13 @@ impl State {
                 if declares(ability, Effect::SpawnDecoy) {
                     self.decoy = None;
                 }
+                // A remote's life is its ability's window and nothing else (§8.1/#273):
+                // the window ending kills the machine and, if the player was still
+                // flying it, hands the keys back with it. This is the *only* way a
+                // remote ends — there is no early recall, because letting go does not
+                // end the window (§8.2: cancelling refunds nothing, and here it is not
+                // even a cancel).
+                self.end_remote(ability, &mut events);
                 // Every seal is released with the window that placed it (§8.3/#242).
                 // This is the guarantee that a temporary wall is temporary: the
                 // duration is the only clock, so a door cannot stay sealed past it.
@@ -1306,6 +1335,17 @@ impl State {
             self.waited = false;
             return true;
         }
+        // **Flying** (§8.1/#273): while the player holds a remote's controls, phase 1
+        // is not about their body at all. The keys that move it move the machine, a
+        // wait hovers, letting go is the free toggle-off (§4.4), and everything else —
+        // every other ability, every interaction — is refused, because your hands are
+        // on the controls. One rule with no carve-outs, exactly as the stun above:
+        // "you are not driving your body" stops being true the moment it has
+        // exceptions, and the §11.4 surfaces grey the whole bar to say so
+        // ([`aim`](Self::aim), [`affordances`](Self::affordances)).
+        if self.piloting {
+            return self.piloted_phase(input, events);
+        }
         match input {
             // Waiting is a real action: it spends the turn where you stand (§5) —
             // and buys the 360° look-around the coming sight phase grants (§8.3).
@@ -1361,6 +1401,29 @@ impl State {
             // contextual `Unusable`), which is what stops it advertising a press that
             // cannot fire.
             Input::Activate(id) => {
+                // **Taking the controls back** (§8.1/#273): the remote is out, its
+                // window still runs, and nobody is flying it. The press is not an
+                // activation — the deck is already `Active` and would refuse one
+                // (§8.2) — so it never reaches the economy; what it spends is the turn
+                // (§4.4), which is the same turn the launch cost and buys the same
+                // thing: your body parked while you look elsewhere. It still goes
+                // through the one precondition ladder, so taking the keys from inside a
+                // crawlspace is refused exactly as launching from one is.
+                if self.remote_awaits(id) {
+                    return match self.aim(id) {
+                        Ok(_) => {
+                            self.take_control(events);
+                            self.waited = false;
+                            self.crouched_behind = None;
+                            self.drag_debt = false;
+                            true
+                        }
+                        Err(refused) => {
+                            events.extend(refused.event());
+                            false
+                        }
+                    };
+                }
                 let aimed = match self.aim(id) {
                     Ok(aimed) => aimed,
                     Err(refused) => {
@@ -1387,6 +1450,7 @@ impl State {
                         Aimed::Bore(wall) => self.bore_wall(wall, events),
                         Aimed::Seal(doors) => self.seal_doors(&doors, events),
                         Aimed::Blast(blast) => self.fire_confusion(blast, events),
+                        Aimed::Launch(from) => self.deploy_remote(id, from, events),
                         Aimed::Nothing | Aimed::Decoy(_) => {}
                     }
                     self.waited = false;
@@ -2332,6 +2396,24 @@ impl State {
                 self.player_sight_range(),
             )
         };
+        // **What a remote sees is folded in here** (§6/§11.5a/#273), at the one place
+        // sight is produced, so everything downstream follows on its own: the fog lifts
+        // over the corridor the drone is watching, entities there draw, the §11.5 danger
+        // overlay paints the cones it can see, and tile memory accumulates it all
+        // (§11.5a — once seen, remembered, which is the ability's actual payoff).
+        //
+        // A **union**, not a replacement: your own eyes keep working while you fly, so
+        // being at the controls does not blind you at home. It is fed whether or not
+        // anybody is holding the controls — a camera left in a junction watches that
+        // junction while you walk the other way, and that is what the second half of the
+        // window is worth (§8.2).
+        //
+        // What is deliberately *not* widened is the §9 guard sense: that is your body's
+        // own innate channel, and leaving it on your body is what keeps a parked body a
+        // real risk rather than one more thing the drone covers for you.
+        if let Some(remote_fov) = self.remote_fov() {
+            self.player_fov.absorb(&remote_fov);
+        }
         // The debug reveal (§12.6): the player's sight is *replaced* by the whole
         // grid — the playtest build where you can see the level. It is done here, at
         // the one place sight is produced, rather than as a special case in each view

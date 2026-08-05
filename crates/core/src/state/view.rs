@@ -876,6 +876,16 @@ impl State {
     /// draws `Run[3]` while active and `Run` while ready
     /// ([`AbilityStatus::bar_entry`]).
     pub fn ability_input(&self, id: AbilityId) -> Input {
+        // **A control-transfer ability's key is a three-state toggle** (§8.1/#273), which
+        // is the one place this rule needs an arm of its own. Its window outlives the
+        // flying: while the remote hovers unattended the ability is still `Active`, and
+        // the ordinary reading would resolve the key to a toggle-off that ends nothing.
+        // What the player wants there is the opposite — the keys back — so an unattended
+        // remote resolves to `Activate` (take control, a spent turn) and only an
+        // *attended* one resolves to `Deactivate` (let go, free).
+        if self.remote_awaits(id) {
+            return Input::Activate(id);
+        }
         match self.ability_state(id) {
             AbilityState::Active { .. } => Input::Deactivate(id),
             AbilityState::Ready
@@ -953,6 +963,14 @@ impl State {
         // same reason — and it covers the standing-on entry too, since a stunned wait
         // is not a wait at all (it takes hold of nothing).
         if self.stunned > 0 {
+            return Vec::new();
+        }
+        // **Flying, the row is empty too** (§8.1/#273), and for the same reason: your
+        // hands are on the controls, so no bump is available to anybody. The remote has
+        // no interaction verb of its own to offer in its place — it opens nothing and
+        // takes nothing (§4.3's one verb belongs to hands) — so a row about the cells
+        // around *it* would promise exactly what the next press will not deliver.
+        if self.piloting() {
             return Vec::new();
         }
         let mut out = Vec::new();
