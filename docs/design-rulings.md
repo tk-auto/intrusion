@@ -2299,6 +2299,12 @@ reappearing inside the ticket that exists to end it. The fiction agrees — the 
 reaches a lane two across that no open edge from here can, so it is the one road the noise
 did not travel — and it gives #212's sink something real to sell at condition 3.
 
+> **Revisited by #212 (appendix 48).** This held while the edge was inert. Once intel can
+> open it, a bought road that the condition-3 sweep skipped would make intel a way out of
+> the top rung — undoing the one thing that rung says. The rule now splits: never the
+> marked road at condition 2 (the argument above, intact), reached like everything else at
+> condition 3.
+
 **The last hop still carries.** A node one short of the archive has exactly one
 successor, so a loud raid there alerts the archive itself. That is the geography biting
 rather than a special case: there is nowhere else for the noise to go, and the run's last
@@ -3107,7 +3113,232 @@ row is one line.
 
 ---
 
-## Appendix 47 — Pool membership is about the level, not about what the bot can score
+## Appendix 47 — Intel is currency: one wallet, one counter, and no punishment for coming home empty
+
+*(§2.2/§2.3/§4.4/§4.5/§12.7/§14 v3; #211. `crates/core/src/campaign/wallet.rs`,
+`crates/core/src/campaign.rs`, `crates/core/src/render/campaign_map.rs`.)*
+
+§2.2's table has said from the beginning that intel *"accumulates and is spent"* within a
+run. Half of that was true in code long before this ticket — every completed raid banked
+its haul into a `u32` on the campaign — and the other half was a comment pointing at a
+future ticket. What #211 settles is not "add a spend function": it is the three questions
+that had to be answered before a spend function could mean anything.
+
+### Intel cannot be both the exit key and the currency
+
+In quick play the exit asks for intel (§4.5): gather the set, then leave. That gate is
+what makes a facility an objective rather than a shopping trip, and it is right for a
+mode whose whole life is one building.
+
+It cannot survive a campaign. A currency you must hand over to get out is a **toll**: the
+run banks nothing it did not overshoot the gate by, and every sink is priced against the
+surplus rather than against the haul. Worse, the two rules interfere in the direction that
+kills the choice — a facility whose gate is *all* the intel makes "how much do I take"
+a question with one answer, and the map's flavours (Vault against Outpost) stop being a
+trade about how much you want.
+
+So the campaign takes the gate off (`IntelGate::None`) and the consequence is stated
+rather than discovered: **extraction is voluntary**. You may bump the exit and leave any
+facility on the turn you entered it. Intel, caches, unlockables — everything in the
+building is *surplus*, and what a raid was worth is settled at the hub afterwards.
+
+The alternative considered and rejected was a *reduced* gate — one console, as the sim
+uses (§13.2). It looks like a compromise and is not: one console is either trivial (in
+which case it is a ceremony, not a rule) or it is the thing that kills a run on the seed
+where the nearest console is behind a patrol. A rule that only bites by accident is the
+worst kind, and §2.3's cost test is unanswerable for it — *when would a good player
+choose not to?* There is no such moment; you always take one console.
+
+### One spend context, and it is the map
+
+The wallet could have been spendable from inside a facility. It is not, and the reason is
+§4.4: turn cost is the game's central pressure, and a shop you can open mid-raid is a way
+to pay money instead of turns. *Stuck in a corridor with a guard closing?* — buy something.
+Every tight corner becomes a transaction, and the one resource the design actually cares
+about stops being the one under pressure.
+
+So spending happens at the map between facilities, and the check lives on the campaign
+rather than in each sink. That placement is the load-bearing part: a sink that forgot to
+ask *am I at the hub?* would be a shop open inside a building, and nothing about the
+sink's own code would look wrong. Putting it in `Campaign::spend` makes forgetting
+impossible instead of unlikely. It is why the refusal type has a third answer —
+`Outlay::Closed` — rather than folding "not here" into "not enough": a player told they
+are poor when the truth is they are in the wrong place has been told the wrong fact.
+
+Both stages the map screen is the surface of are open for spending: standing on a facility
+not yet raided, and at a choice point. That is not a loosening of "between facilities" but
+a statement of what it means — the approach is the map too, and it is where a run buys the
+ground it is about to walk onto (#212).
+
+### The map screen *is* the hub
+
+A separate shop screen was the obvious shape and it is the wrong one. Everything intel buys
+is a fact about the country ahead — a route, an alert on a road, what is inside the next
+facility — so the prices belong on the picture of that country. A second modal screen
+would carry one list, teach the player a screen, and say nothing the map could not have
+said in a line.
+
+So the map grew a wallet line, and it is drawn on **every** frame, balance zero included.
+A readout that appeared with the run's first haul would make the map band jump exactly
+once — at the moment the player was reading it — which is the layout rule (§11.4) that
+made the alert line a subtitle rather than a panel. Zero has its own wording ("nothing
+banked") rather than a bare `Intel 0`, because for a run that has just walked out of a
+facility with nothing, that line is the only feedback there is.
+
+### Nothing is taken away for a wasted raid
+
+The tempting rule is an explicit penalty: leave empty-handed and the alert bumps. It was
+considered and deferred, and the argument against it is that the cost is **already there
+and already compounding**.
+
+A run that took nothing is a run that:
+
+- has nothing to spend at the hub, so the route it wanted is not available;
+- has burned one of a fixed number of facilities (depth six to the archive, §14 v3);
+- meets the *next* facility with whatever noise the wasted raid made carried onto it
+  (#210) — and a raid that achieved nothing was not necessarily a quiet one;
+- has spent the caches in that building for good, because they are one-shot.
+
+Adding a penalty on top charges twice for one mistake, and it charges in the currency that
+is *already* the punishment. The emergent cost also has the property a designed one would
+not: it scales with how badly the raid went, without anyone tuning a number.
+
+The honest caveat is that nobody has played a full run yet, so this is `[OPEN]` on the
+tuning rather than `[SETTLED]`. If a played campaign shows a run farming the easiest
+Outposts and walking straight back out — the degenerate strategy this reasoning would
+have missed — the lever is a small alert bump on an empty-handed extraction, and it is one
+line at the `bank` seam. The bar for pulling it is a run that shows the exploit, not a
+suspicion that it exists.
+
+### What the wallet is, as a type
+
+A newtype over a counter, and the constraint is the point: intel goes **in** whole (a
+raid's haul) and comes **out** only through a spend that can refuse. Nothing outside the
+type may set the balance, so "the wallet went negative" and "a sink debited without
+checking" are not states the rest of the campaign can reach — the same argument
+`CampaignStage` makes for not being a pair of flags.
+
+A refusal changes nothing at all. There is no partial payment, so a sink that branches on
+`Outlay::paid` cannot end up with the money gone and the effect unapplied — which is the
+one bug class a currency with several buyers reliably grows.
+
+---
+
+## Appendix 48 — The alternative route: intel buys ground, and the top of the ladder still sweeps it
+
+*(§2.3/§14 v3; #212, revisiting appendix 41. `crates/core/src/campaign.rs`,
+`crates/core/src/campaign/loudness.rs`, `crates/core/src/render/campaign_map.rs`.)*
+
+#207 shipped the map's intel-locked successor inert: an edge drawn, named and refused. This
+is the ticket that gives it a price, and two of its three decisions were only decidable
+once the edge could actually be taken.
+
+### One intel — the price is what you know, not what you earn
+
+The ticket landed at **four**, reasoned from income: a facility hides three consoles at the
+§10.2 recipe, so four puts one unlock slightly above a whole facility's haul, a run cannot
+buy a route at every junction, and *which* junction is worth it becomes the decision.
+
+That reasoning was rejected on review, and the objection is the better one: **four intel is
+too much for a route we know nothing about.** It priced the road as though the buyer could
+see it. They cannot — the map draws unbought ground as `?` (§14 v3's "shape, not
+contents"), so what four intel bought was an entire raid's income spent on a lane that
+might hold an Outpost. A price has to be proportionate to what the buyer knows, and this
+buyer knows one fact: where the road goes, not what is on it.
+
+So **one**. It still asks for something real, and the shape of the ask is the interesting
+part: nothing is banked until a raid has been walked out of, so the **first** choice point
+of every run cannot afford one — the sink switches on when the run has actually done
+something, which is a better gate than a number that scales with greed.
+
+**Where the bite comes from instead.** The rejected argument put it in *scarcity*: make it
+dear enough and choosing becomes hard. The real source is **opportunity cost** — the sinks
+behind it (#213–#216) spend the same wallet, so a route bought here is an alert not lowered
+or a facility not scouted there. That is the right axis for a purchase this cheap, and it
+is the axis §14 v3 was describing all along when it listed four sinks over one currency.
+
+**And if it turns out to be reflexive?** If a played run buys the route at every junction,
+the temptation will be to raise the price back. That is treating the symptom. The reason
+buying is reflexive is that the alternative — *not* buying — has no information behind it:
+you cannot compare a road you cannot see to roads you can. The fix is to let the player
+see, which is exactly what the scouting sinks (#215/#216) sell. Raise the price only if
+buying stays reflexive *after* the player can tell what they are buying.
+
+### Buying does not commit the run, and that is what stops it being a coin flip
+
+The obvious shape is *pay, and you are on that road*. It is wrong, and the argument against
+it is a rule the map already settled: **flavours are visible when offered** (§14 v3
+[SETTLED]), because a choice made blind is a coin flip. An unbought edge draws as `?`, so a
+purchase that also committed the run would be selling exactly the coin flip that rule
+exists to forbid — and selling it for more than a facility's income.
+
+So the purchase turns the edge into an **ordinary offer**: flavour showing, sitting in the
+list beside the open roads, and the run may still take one of those instead. What four
+intel buys is ground *and* the knowledge of what stands on it. The bet is real — the seed
+may have put an Outpost on the lane you paid to reach — but it is a bet you get to decline
+after seeing it, which is a different and much better decision than a bet you are locked
+into before.
+
+This is also where the sink's §2.3 answer comes from. *When would a good player choose not
+to buy?* When the open roads already hold the flavour the run needs; when the intel is
+wanted for a sink that has not landed yet; when four intel is most of a wallet that took
+two raids to fill. All three are live at the same junction.
+
+### The condition-3 sweep now reaches it — appendix 41 revisited
+
+Appendix 41 reasoned that the alert should never mark the locked edge: marking ground the
+run cannot walk onto is "an alert with nothing behind it", §2.3's decoration failure inside
+the ticket meant to end it. That was right **while the edge was inert**, and it stops being
+right the moment intel can open it.
+
+Left alone, the old rule had a consequence nobody chose: at condition 3 — where §14 v3
+[SETTLED] says *every* road ahead is watched and what the escalation takes away is the
+route around it — a run with a single intel banked could buy an unwatched one. Intel would be a way
+out of the alert's top rung, which is a second, unwritten rule about what the alert is, and
+it would hollow out the one thing condition 3 says.
+
+So the two rungs now treat the edge differently, on purpose:
+
+- **Condition 2 — never the marked road.** The play at that rung is finding the road
+  nobody is watching, and having that option must not cost intel. Appendix 41's argument
+  survives here intact.
+- **Condition 3 — reached like everything else**, bought or not. A road you paid for is
+  still a road ahead.
+
+The sink loses nothing by it. What it sells at condition 3 was never *safety*: it is a lane
+the map was not offering, on a rung where the open roads are all alerted anyway — so the
+choice becomes *which* alerted facility, from a wider set, which is exactly the kind of
+option the map exists to sell.
+
+The answer is a fact about the **edge**, not about the purchase: the map's alert line says
+the same thing before and after the money changes hands, so a player cannot be surprised by
+a road that changed its mind once they had paid for it.
+
+### The priced row is a row like any other
+
+The marker used to step over the locked row, on #268's rule that it only rests where Enter
+does something. The rule has not changed — the row has. An intel-locked row is now a
+**price**, and pressing Enter on it buys the road or says why it cannot; a row that answers
+is a row the marker belongs on.
+
+Two smaller consequences, both of them the §2.3 courtesy of showing a cost before charging
+for the discovery:
+
+- The row prints the campaign's own `ROUTE_UNLOCK_COST`, so a change to the price moves
+  what the player is charged and what they are told in one edit.
+- A price the wallet cannot meet draws in **Ground** — the meaning this screen already
+  gives the road behind you — so it reads as out of reach at a glance rather than only
+  when pressed.
+
+And the hub's answer lands on the **wallet line**, replacing the balance rather than
+sitting beside it. Every `Outlay` message already names the balance ("spent 1 intel — 3
+left", "needs 1 intel — you have 0"), so the readout is not a fact the player loses; two
+lines saying the balance twice would be the screen repeating itself. It clears the moment
+the marker moves: a message about the row you have just left is a message about nothing.
+
+---
+
+## Appendix 49 — Pool membership is about the level, not about what the bot can score
 
 *(§12.6 level modifiers and the difficulty draw, §13.1/§13.3/§13.4 the experiment loop,
 §11.5a the fogged layout, §10.4 doors. The ticket is #518; the three modifiers it admits
@@ -3238,3 +3469,4 @@ instead. Admitting it to a pool labelled by difficulty does not settle that — 
 it. `Harder` remains the safer of the two labels because the structural change (wider
 throats, no hand-close) is the harder-direction one and is what §2.3's assertion can
 actually hold. #258 is where that question gets answered properly.
+

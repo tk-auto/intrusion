@@ -77,8 +77,8 @@ impl Game {
             MapNav::Prev => self.select_facility(map.prev(&ahead)),
             MapNav::Next => self.select_facility(map.next(&ahead)),
             MapNav::Activate => {
-                if let Some(offer) = ahead.get(map.selected(&ahead)) {
-                    self.raid(offer.node);
+                if let Some(&offer) = ahead.get(map.selected(&ahead)) {
+                    self.apply_map_hit(intrusion_core::hit_of(offer));
                 }
             }
             MapNav::ToggleTheme => {
@@ -97,11 +97,34 @@ impl Game {
     pub(crate) fn apply_map_hit(&mut self, hit: MapHit) {
         match hit {
             MapHit::Facility(node) => self.raid(node),
+            MapHit::Unlock(node) => self.unlock(node),
             MapHit::ToggleTheme => {
                 self.ui.theme = self.ui.theme.toggled();
                 self.draw();
             }
         }
+    }
+
+    /// **Buy the alternative route** (§14 v3/#212) and say what happened.
+    ///
+    /// The rule is [`Campaign::unlock`]'s — whether the row is a locked offer, whether the
+    /// wallet covers it, what comes out — and the shell's whole part is putting the answer
+    /// somewhere the player reads it. Paid or refused, the map redraws with the outlay on
+    /// the wallet line; a paid one has already flipped the row to takeable underneath it,
+    /// so the next press raids where this one bought.
+    ///
+    /// The map does **not** come back up from scratch: `show_map` resets the marker, and a
+    /// purchase should leave the player on the row they just bought rather than back at the
+    /// top of a list they were part-way down.
+    fn unlock(&mut self, node: NodeId) {
+        let Some(run) = self.campaign.as_mut() else {
+            return;
+        };
+        let outlay = run.unlock(node);
+        if let Some(map) = self.ui.map {
+            self.ui.map = Some(map.saying(outlay));
+        }
+        self.draw();
     }
 
     /// Move the marker and repaint.

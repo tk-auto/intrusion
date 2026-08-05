@@ -14,7 +14,7 @@
 //! | | Within a run | Across runs |
 //! |---|---|---|
 //! | Salvaged tech | **accumulates** ([`loadout`](Campaign::loadout)) | nothing carries |
-//! | Intel | **accumulates and is spent** ([`intel`](Campaign::intel)) | nothing carries |
+//! | Intel | **accumulates and is spent** ([`wallet`]) | nothing carries |
 //! | Alert | **carries and scales** ([`alert`](Campaign::alert)) — #210, see below | nothing carries |
 //!
 //! "Across runs nothing carries" needs no code at all: a [`Campaign`] is a plain
@@ -23,8 +23,18 @@
 //! and it is these three fields, carried from the day the layer exists rather than
 //! retrofitted. The loadout is now filled by the thing it was declared for — an
 //! equipment cache opened in a facility rides out on the verdict and is added here
-//! (#209) — the intel epic spends the wallet (#211), and the alert now closes §14 v3's
-//! loop (#210).
+//! (#209) — intel is a [`Wallet`] with a debit path rather than a counter (#211), and the
+//! alert now closes §14 v3's loop (#210).
+//!
+//! # Intel is spent here, and nowhere else
+//!
+//! The wallet's one exit is [`spend`](Campaign::spend), and the sinks that call it live at
+//! the **map between facilities** (§14 v3) — there is no in-level spending, and the stage
+//! check that makes that true is in the campaign rather than in each sink. What a
+//! campaign's intel is *for* is therefore the hub, not the exit: the exit never refuses
+//! ([`IntelGate::None`], §4.5), so a facility's intel, caches and unlockables are all
+//! **surplus** and extraction is voluntary. Appendix 47 records why, and why a raid that
+//! took nothing is left to punish itself.
 //!
 //! **The alert carries exactly one hop**, which is the whole of what §14 v3 asks for:
 //! *being loud in facility 2 makes facility 3 harder*. It is the §7.3 condition the last
@@ -66,9 +76,11 @@ pub mod loudness;
 pub mod map;
 #[cfg(test)]
 mod tests;
+pub mod wallet;
 
 pub use loudness::{Loudness, ALERTS_ALL, ALERTS_ONE};
 pub use map::{FacilityMap, Flavour, MapPos, Offer, DEPTH_TO_ARCHIVE};
+pub use wallet::{Outlay, Wallet};
 
 use map::LANES;
 
@@ -114,6 +126,25 @@ impl NodeId {
         self.0
     }
 }
+
+/// **What an alternative route costs** (§14 v3's first intel sink, #212) — the price of
+/// flipping the map's intel-locked successor to takeable.
+///
+/// **One [START], and the number follows from what is being sold.** The map draws unbought
+/// ground as `?`: what the run is paying for is a lane two across with **no idea what
+/// stands on it**. A price has to be proportionate to what the buyer knows, and against a
+/// facility's whole haul — three consoles at the §10.2 recipe — a road bought blind is not
+/// worth a raid. One intel is what an unseen road is worth, and the sink still asks for
+/// something real: the **first** choice point of every run is unaffordable, because
+/// nothing has been raided yet.
+///
+/// **It does not rest on scarcity.** The bite is opportunity cost — the sinks behind it
+/// (#213–#216) spend the same wallet, so a route bought here is an alert not lowered or a
+/// facility not scouted there. If a played run buys one reflexively at every junction, the
+/// first lever is **not** the price: it is that the player cannot see what they are buying,
+/// and the scouting sinks are what fix that. Appendix 48 records this and the reasoning it
+/// replaced.
+pub const ROUTE_UNLOCK_COST: u32 = 1;
 
 /// Separates the per-facility seed draw from every other use of the run seed, exactly
 /// as the loadout draw is separated from generation (§12.4): two streams that never
@@ -212,8 +243,20 @@ pub struct Campaign {
     path: Vec<NodeId>,
     stage: CampaignStage,
     loadout: Loadout,
-    intel: u32,
+    /// The run's **currency** (§2.2/§14 v3) — see [`wallet`]. Filled by every completed
+    /// raid and emptied by the hub's sinks, and by nothing else: the balance is not a
+    /// field anything outside [`Wallet`] can set.
+    wallet: Wallet,
     alert: u32,
+    /// The intel-locked edges this run has **bought** (§14 v3/#212), in the order it
+    /// bought them.
+    ///
+    /// A list of node identities rather than a flag on the map, for the reason the map
+    /// holds no node table at all: the country is a function of the seed and buying a road
+    /// does not change the country — it changes what *this run* may walk down. Two runs of
+    /// one seed differ in exactly this and in the path they took, which is the whole of
+    /// what a run is.
+    unlocked: Vec<NodeId>,
 }
 
 impl Campaign {
@@ -240,8 +283,9 @@ impl Campaign {
             map,
             stage: CampaignStage::Approach,
             loadout: Loadout::innate(),
-            intel: 0,
+            wallet: Wallet::empty(),
             alert: 0,
+            unlocked: Vec::new(),
         }
     }
 
@@ -274,11 +318,67 @@ impl Campaign {
     /// Empty at the archive and empty **inside** a facility: an offer is something to
     /// act on between raids, and handing one out mid-raid would invite a caller to move
     /// the run while it was still in a building.
+    ///
+    /// **A route this run has bought is not locked** (#212). The map still calls the edge
+    /// locked — the country is a function of the seed and a purchase does not change it —
+    /// so the run's own purchases are folded in here, at the one place every caller reads
+    /// its options from. That is what makes [`choose`](Self::choose) accept a bought road
+    /// without knowing the sink exists.
     pub fn offers(&self) -> Vec<Offer> {
         if self.stage != CampaignStage::Choosing {
             return Vec::new();
         }
-        self.map.successors(self.node())
+        self.map
+            .successors(self.node())
+            .into_iter()
+            .map(|offer| Offer {
+                locked: offer.locked && !self.unlocked.contains(&offer.node),
+                ..offer
+            })
+            .collect()
+    }
+
+    /// Whether this run has bought its way onto `node` (#212) — the purchase itself,
+    /// asked about directly rather than read off an [`Offer`], for a caller standing
+    /// somewhere the offers are not.
+    pub fn is_unlocked(&self, node: NodeId) -> bool {
+        self.unlocked.contains(&node)
+    }
+
+    /// **Buy the alternative route** (§14 v3's first intel sink, #212): spend
+    /// [`ROUTE_UNLOCK_COST`] to flip the map's intel-locked successor to takeable, and
+    /// hand back what the wallet said.
+    ///
+    /// What the intel buys is **ground**, not a better facility: the locked edge reaches a
+    /// lane *two* across, which no open edge from here can reach, and what stands on it is
+    /// whatever the seed put there. It is bought unseen — the map draws unbought ground as
+    /// `?` — so the purchase is a bet on a part of the country that was not on offer.
+    ///
+    /// **It does not commit the run.** A bought edge becomes an ordinary offer, flavour
+    /// visible like every other (§14 v3 **[SETTLED]**: no fog on what is offered), and the
+    /// run may still take one of the open roads instead. So what is bought is ground *and*
+    /// the knowledge of what is on it, and the §2.3 answer to *when would a good player
+    /// choose not to?* is: when the open offers already hold what the run needs, or when
+    /// the intel is wanted for something else.
+    ///
+    /// Refused, with nothing spent, for anything that is not a locked edge on offer right
+    /// now — including every call made outside a choice point, since
+    /// [`offers`](Self::offers) is empty there. Buying the same road twice is refused the
+    /// same way: after the first purchase it is no longer locked.
+    #[must_use]
+    pub fn unlock(&mut self, node: NodeId) -> Outlay {
+        let locked = self
+            .offers()
+            .into_iter()
+            .any(|offer| offer.node == node && offer.locked);
+        if !locked {
+            return Outlay::Closed;
+        }
+        let outlay = self.spend(ROUTE_UNLOCK_COST);
+        if outlay.paid() {
+            self.unlocked.push(node);
+        }
+        outlay
     }
 
     /// **The facilities the run may walk into next** — what the map screen (#208) puts
@@ -311,11 +411,10 @@ impl Campaign {
     /// ready to enter. `true` if the run moved.
     ///
     /// Refused — and the run left exactly where it was — for anything that is not an
-    /// open edge from here: a node the map does not offer, the **intel-locked** one
-    /// (#212 opens that, and until it does this is what "shipped inert" means), and any
-    /// call made while a raid is under way or the run is over. Forward-only is not
-    /// enforced by a check: the offers only ever point forward, so there is nothing to
-    /// refuse.
+    /// open edge from here: a node the map does not offer, an **intel-locked** one the run
+    /// has not bought ([`unlock`](Self::unlock)), and any call made while a raid is under
+    /// way or the run is over. Forward-only is not enforced by a check: the offers only
+    /// ever point forward, so there is nothing to refuse.
     pub fn choose(&mut self, node: NodeId) -> bool {
         let offered = self
             .offers()
@@ -361,9 +460,47 @@ impl Campaign {
     }
 
     /// The intel banked so far — the run's **currency** (§2.2), not an exit key.
-    /// Harvested at every completed raid; the sinks that spend it are #211's.
+    /// Harvested at every completed raid, spent at the hub ([`spend`](Self::spend)).
     pub fn intel(&self) -> u32 {
-        self.intel
+        self.wallet.balance()
+    }
+
+    /// Whether the run could pay `cost` right now — what a sink asks before it *offers*,
+    /// so an unaffordable price is drawn as unaffordable rather than only discovered by
+    /// pressing the key.
+    ///
+    /// It answers about the balance alone. Whether the run is anywhere it may spend is
+    /// [`spend`](Self::spend)'s to say, and only that call settles it.
+    pub fn affords(&self, cost: u32) -> bool {
+        self.wallet.affords(cost)
+    }
+
+    /// **Spend intel at the hub** (§14 v3) — the one debit path, and the call every sink
+    /// makes before it applies its effect.
+    ///
+    /// Three answers, all of them [`Outlay`]'s: paid, refused for want of intel, or
+    /// refused because the run is not at the hub. A refusal changes **nothing** — no
+    /// partial payment, no half-applied sink — so a caller that branches on
+    /// [`Outlay::paid`] cannot leave the run in a state where the money went somewhere the
+    /// effect did not.
+    ///
+    /// **Where "at the hub" is** (§14 v3): the map between facilities, which is both live
+    /// stages the map screen is the surface of — standing on a facility not yet raided
+    /// ([`Approach`](CampaignStage::Approach)) and at a choice point
+    /// ([`Choosing`](CampaignStage::Choosing)). Refused [`Inside`](CampaignStage::Inside),
+    /// because there is no in-level spending and a wallet you could dip into mid-raid
+    /// would let the player buy out of a §4.4 mistake, and refused once the run is over,
+    /// because there is nothing left to spend on.
+    ///
+    /// The check lives here rather than in each sink for the reason the wallet is a
+    /// newtype: a sink that forgot it would be a shop open inside a facility, and nothing
+    /// about the sink's own code would look wrong.
+    #[must_use]
+    pub fn spend(&mut self, cost: u32) -> Outlay {
+        if self.stage == CampaignStage::Inside || self.stage.is_over() {
+            return Outlay::Closed;
+        }
+        self.wallet.spend(cost)
     }
 
     /// The campaign alert (§7.3/§14 v3/#210) — the run-level layer above the
@@ -398,10 +535,11 @@ impl Campaign {
     /// (§12.6) — what the map screen (#208) reads to say *which* facility ahead is
     /// expecting you.
     ///
-    /// `None` for every facility the noise did not reach, for the locked edge (which it
-    /// never reaches, #212), and before the run's first raid. It answers about any node,
-    /// but only the ones the map has just offered can ever be `Some`: the alert reaches
-    /// one hop and no further.
+    /// `None` for every facility the noise did not reach and before the run's first raid.
+    /// It answers about any node, but only the ones the map has just offered can ever be
+    /// `Some`: the alert reaches one hop and no further. The **alternative route** (#212)
+    /// is among them at the top of the ladder and only there — see [`Loudness::reaches`],
+    /// which is where that asymmetry is argued.
     pub fn alert_reaches(&self, node: NodeId) -> Option<ModifierDirection> {
         let loudness = self.loudness()?;
         let from = self.noise_made_at()?;
@@ -573,8 +711,8 @@ impl Campaign {
     /// is the same statement one layer up: an alert is a fact about a raid, and the raid
     /// is over.
     fn bank(&mut self, stats: RunStats) {
-        let taken = u32::try_from(stats.intel).unwrap_or(u32::MAX);
-        self.intel = self.intel.saturating_add(taken);
+        self.wallet
+            .bank(u32::try_from(stats.intel).unwrap_or(u32::MAX));
         self.alert = stats.alert_peak;
         // **The loadout is assigned, not added to** (§8.3/#266). It used to be a fold of
         // the raid's finds, which was right while a raid could only ever *gain* tech;

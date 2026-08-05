@@ -67,6 +67,7 @@ fn the_map_draws_the_country_the_run_is_in() {
         vec![
             "            THE FACILITY MAP            ",
             "    Left unnoticed — Depot off guard    ",
+            "         Intel — nothing banked         ",
             "   ▫      ▫          ★       ▫       ▫  ",
             "                                        ",
             "                                        ",
@@ -76,13 +77,13 @@ fn the_map_draws_the_country_the_run_is_in() {
             "                           ▫            ",
             "                                        ",
             "                                        ",
-            "                                        ",
-            "    ▫       ▫                           ",
+            "    ▫                                   ",
+            "            ▫                           ",
             "                   ▫      ▫         ▫   ",
             "                                        ",
             "                                        ",
-            "                                        ",
-            "           ▫                        ▫   ",
+            "           ▫                            ",
+            "                                    ▫   ",
             "   ▫                ▫        ▫          ",
             "                                        ",
             "                                        ",
@@ -91,10 +92,9 @@ fn the_map_draws_the_country_the_run_is_in() {
             "  ▫       ▫                       ▫     ",
             "                                        ",
             "                                        ",
-            "                                        ",
-            " ▫                   ▪             ?    ",
-            "         ▫          ·    $      ···     ",
-            "                   ·    ·    ···        ",
+            " ▫                                 ?    ",
+            "         ▫           ▪   $      ···     ",
+            "                    ·   ·    ···        ",
             "                   ·  ·· ····           ",
             "                  · ·····               ",
             " ▫         ▫      @···     ▫        ▫   ",
@@ -103,7 +103,7 @@ fn the_map_draws_the_country_the_run_is_in() {
             "                                        ",
             "    Vault — worth robbing, and watched  ",
             "                                        ",
-            "    Alternative route — costs intel     ",
+            "    Alternative route — 1 intel         ",
             "                                        ",
             "                                        ",
             "                                        ",
@@ -121,7 +121,12 @@ fn the_map_draws_the_country_the_run_is_in() {
 fn a_fresh_run_is_offered_the_facility_it_stands_on() {
     let run = Campaign::new(8371);
     let rows = text(&run, MapUi::default());
-    let listed: Vec<&String> = rows.iter().filter(|r| r.contains('—')).collect();
+    // The list band only: the wallet line above it (#211) is written with the same dash,
+    // and it is a readout rather than something the marker can rest on.
+    let listed: Vec<&String> = rows[list_top(H) as usize..]
+        .iter()
+        .filter(|r| r.contains('—'))
+        .collect();
     assert_eq!(listed.len(), 1, "one row: raid this one");
     assert!(listed[0].starts_with("  > Outpost — "), "{}", listed[0]);
     assert!(
@@ -243,6 +248,207 @@ fn alert_row(run: &Campaign) -> String {
         .to_string()
 }
 
+/// The wallet line as the player reads it.
+fn wallet_row(run: &Campaign) -> String {
+    text(run, MapUi::default())[WALLET_ROW as usize]
+        .trim()
+        .to_string()
+}
+
+/// **The map is the hub, so it says what there is to spend** (§2.2/§14 v3/#211).
+///
+/// Unconditional, both wordings, in the currency's own word (§11.8) — a run that has
+/// banked nothing says so rather than showing no line, because a missing readout reads as
+/// a broken one.
+#[test]
+fn the_map_says_what_the_run_has_to_spend() {
+    let mut run = Campaign::new(8371);
+    assert_eq!(wallet_row(&run), "Intel — nothing banked");
+
+    run.enter();
+    run.complete(&Verdict {
+        ending: Ending::Escaped,
+        stats: RunStats {
+            intel: 7,
+            ..RunStats::default()
+        },
+    });
+    assert_eq!(run.intel(), 7);
+    assert_eq!(wallet_row(&run), "Intel 7");
+
+    // And it moves when the hub takes some — the balance on screen is the balance the
+    // next price is read against, never a stale copy.
+    assert!(run.spend(4).paid());
+    assert_eq!(wallet_row(&run), "Intel 3");
+}
+
+/// **The wallet line does not move the picture** (§11.4). It is drawn on every frame, so
+/// the map band beneath it is the same height at a choice point, on the approach, and
+/// with the balance at zero — a readout that appeared with the first haul would make the
+/// map jump exactly once, while the player was reading it.
+#[test]
+fn the_wallet_line_never_moves_the_map_band() {
+    let fresh = text(&Campaign::new(8371), MapUi::default());
+    let mut rich = at_a_choice_point(8371);
+    assert!(rich.spend(0).paid());
+
+    for rows in [&fresh, &text(&rich, MapUi::default())] {
+        assert_eq!(rows.len(), H as usize);
+        assert!(rows[WALLET_ROW as usize].contains("Intel"));
+        assert!(
+            rows[MAP_TOP as usize - 1].trim().starts_with("Intel"),
+            "the band starts directly under the wallet line",
+        );
+    }
+}
+
+/// A run at a choice point with `intel` banked — what the hub's rows are read against.
+fn at_a_choice_point_holding(seed: u64, intel: usize) -> Campaign {
+    let mut run = Campaign::new(seed);
+    run.enter();
+    run.complete(&Verdict {
+        ending: Ending::Escaped,
+        stats: RunStats {
+            intel,
+            ..RunStats::default()
+        },
+    });
+    assert_eq!(run.stage(), CampaignStage::Choosing);
+    run
+}
+
+/// The list band as the player reads it, one string per row.
+fn rows_of(run: &Campaign, ui: MapUi) -> Vec<String> {
+    text(run, ui)[list_top(H) as usize..]
+        .iter()
+        .filter(|r| !r.trim().is_empty())
+        .map(|r| r.trim().to_string())
+        .collect()
+}
+
+/// **The priced row prints the campaign's price** (§14 v3/#212), not a number the screen
+/// invented — so a change to [`ROUTE_UNLOCK_COST`] moves what the player is charged and
+/// what they are told in one edit.
+#[test]
+fn the_alternative_route_row_says_what_it_costs() {
+    let run = at_a_choice_point(8371);
+    let priced = rows_of(&run, MapUi::default())
+        .into_iter()
+        .find(|r| r.contains(LOCKED_LABEL))
+        .expect("a priced row");
+    assert!(
+        priced.ends_with(&format!("{ROUTE_UNLOCK_COST} intel")),
+        "{priced}",
+    );
+}
+
+/// **An unaffordable price reads as unaffordable** (§2.3): Ground, the meaning this screen
+/// already gives the road behind you and gave the lock before it had a price — *on the
+/// map, not available to you*. Affordable, it is as live as any other row.
+///
+/// Told at a glance rather than only when pressed, which is the courtesy of showing a cost
+/// before charging for the discovery.
+#[test]
+fn a_price_the_run_cannot_meet_is_drawn_as_out_of_reach() {
+    let row_category_of = |run: &Campaign| {
+        let ahead = run.ahead();
+        let i = ahead.iter().position(|o| o.locked).expect("a priced row");
+        // Off the marker, so the marker's own Interest is not what is being read.
+        let ui = MapUi {
+            selected: if i == 0 { 1 } else { 0 },
+            outlay: None,
+        };
+        let grid = render_map(W, H, run, ui);
+        grid.get(list_column(W, &ahead) + 2, row_of(H, i)).fg
+    };
+
+    let broke = at_a_choice_point_holding(8371, (ROUTE_UNLOCK_COST - 1) as usize);
+    assert_eq!(row_category_of(&broke), Category::Ground);
+
+    let flush = at_a_choice_point_holding(8371, ROUTE_UNLOCK_COST as usize);
+    assert_eq!(row_category_of(&flush), Category::Neutral);
+}
+
+/// **A bought road becomes an ordinary row** (§14 v3 **[SETTLED]**: what is offered shows
+/// its flavour). The purchase buys ground *and* the knowledge of what stands on it — and
+/// it does not commit the run, which is what stops the sink being a blind coin flip.
+#[test]
+fn buying_the_route_turns_the_price_into_a_facility() {
+    let mut run = at_a_choice_point_holding(8371, ROUTE_UNLOCK_COST as usize);
+    let locked = run
+        .ahead()
+        .into_iter()
+        .find(|o| o.locked)
+        .expect("a priced row");
+    assert!(rows_of(&run, MapUi::default())
+        .iter()
+        .any(|r| r.contains(LOCKED_LABEL)));
+    assert_eq!(
+        cells_of(&render_map(W, H, &run, MapUi::default()), LOCKED_GLYPH).len(),
+        1
+    );
+
+    let outlay = run.unlock(locked.node);
+    assert!(outlay.paid());
+
+    // The row now names the facility, and the `?` on the picture is the flavour's glyph.
+    let rows = rows_of(&run, MapUi::default());
+    assert!(!rows.iter().any(|r| r.contains(LOCKED_LABEL)), "{rows:?}");
+    let bought = run.map().flavour(locked.node);
+    assert!(
+        rows.iter().any(|r| r.contains(bought.label())),
+        "the bought road names itself: {rows:?}",
+    );
+    let grid = render_map(W, H, &run, MapUi::default());
+    assert!(cells_of(&grid, LOCKED_GLYPH).is_empty());
+    assert!(cells_of(&grid, flavour_glyph(bought))
+        .iter()
+        .any(|c| c.fg != Category::Ground));
+}
+
+/// **The hub answers on the wallet line** (#211's `Outlay`, #212's press) — paid in Owned,
+/// refused in Warning, and every message names the balance, so the readout it replaces is
+/// not a fact the player loses.
+#[test]
+fn the_wallet_line_carries_what_the_hub_just_said() {
+    let mut broke = at_a_choice_point_holding(8371, (ROUTE_UNLOCK_COST - 1) as usize);
+    let locked = broke.ahead().into_iter().find(|o| o.locked).expect("a row");
+
+    let refused = broke.unlock(locked.node);
+    assert!(!refused.paid());
+    let ui = MapUi::default().saying(refused);
+    assert_eq!(
+        text(&broke, ui)[WALLET_ROW as usize].trim(),
+        refused.message(),
+    );
+    assert_eq!(
+        render_map(W, H, &broke, ui)
+            .get(
+                centre(W, refused.message().chars().count() as u32),
+                WALLET_ROW
+            )
+            .fg,
+        Category::Warning,
+        "a refusal is a warning, the meaning this screen already gives a rule bent against you",
+    );
+
+    let mut flush = at_a_choice_point_holding(8371, ROUTE_UNLOCK_COST as usize);
+    let paid = flush.unlock(locked.node);
+    assert!(paid.paid());
+    let ui = MapUi::default().saying(paid);
+    assert_eq!(text(&flush, ui)[WALLET_ROW as usize].trim(), paid.message());
+
+    // Both wordings fit the board (§10.2/§11.4) — they are formatted rather than const,
+    // so the bound is asserted here instead of at compile time.
+    for outlay in [paid, refused, Outlay::Closed] {
+        assert!(
+            outlay.message().chars().count() <= W as usize,
+            "{:?} does not fit the board",
+            outlay,
+        );
+    }
+}
+
 /// **The picture is true to the graph** (§14 v3): every facility the map offers is drawn
 /// at its own position, the locked one included, and the run's own cell carries the
 /// player's glyph rather than the facility's.
@@ -351,53 +557,72 @@ fn the_screen_names_a_category_for_everything_it_draws() {
     assert_eq!(grid.get(x, y).fg, Category::Interest);
 }
 
-/// **The marker only ever rests where Enter does something** (#268's rule, one screen
-/// over): it wraps both ways over the open offers and steps over the intel-locked row.
+/// **The marker rests on every row, the priced one included** (#268's rule, #212's row).
+///
+/// It used to step over the lock, because the marker only ever rests where Enter does
+/// something. The rule has not changed and the row has: an intel-locked row is a **price**
+/// now, and pressing Enter on it buys the road or says why it cannot.
 #[test]
-fn the_marker_walks_the_open_offers_and_steps_over_the_lock() {
+fn the_marker_walks_every_row_including_the_priced_one() {
     let run = at_a_choice_point(8371);
     let ahead = run.ahead();
-    assert!(ahead.iter().any(|o| o.locked), "there is a lock to skip");
+    assert!(ahead.iter().any(|o| o.locked), "there is a priced row");
 
-    let open: Vec<usize> = (0..ahead.len()).filter(|&i| !ahead[i].locked).collect();
     let mut ui = MapUi::default();
     let mut walked = vec![ui.selected(&ahead)];
-    for _ in 0..open.len() {
+    for _ in 0..ahead.len() {
         ui = ui.next(&ahead);
         walked.push(ui.selected(&ahead));
     }
     assert_eq!(
         walked,
-        open.iter()
-            .copied()
-            .chain([open[0]])
-            .collect::<Vec<usize>>(),
-        "next walks the open rows and wraps to the first",
+        (0..ahead.len()).chain([0]).collect::<Vec<usize>>(),
+        "next walks every row and wraps to the first",
     );
     assert_eq!(
         MapUi::default().prev(&ahead).selected(&ahead),
-        *open.last().expect("an open row"),
-        "prev past the first wraps to the last open row",
+        ahead.len() - 1,
+        "prev past the first wraps to the last row",
     );
 
-    // A marker left pointing past a shorter list, or at the lock, resolves to a row that
-    // can actually be fired — the list changes under it at every choice point.
-    for stale in [ahead.len() - 1, ahead.len(), 99] {
-        let resolved = MapUi { selected: stale }.selected(&ahead);
-        assert!(!ahead[resolved].locked, "stale marker {stale} landed live");
+    // A marker left pointing past a shorter list resolves to a row that exists — the list
+    // changes under it at every choice point.
+    for stale in [ahead.len(), 99] {
+        let resolved = MapUi {
+            selected: stale,
+            outlay: None,
+        }
+        .selected(&ahead);
+        assert!(
+            resolved < ahead.len(),
+            "stale marker {stale} landed off the list"
+        );
     }
+
+    // Moving the marker drops the hub\'s last word: a message about the row you have just
+    // left is a message about nothing.
+    let saying = MapUi::default().saying(Outlay::Closed);
+    assert_eq!(saying.outlay, Some(Outlay::Closed));
+    assert_eq!(saying.next(&ahead).outlay, None);
+    assert_eq!(saying.prev(&ahead).outlay, None);
 }
 
-/// **Every takeable row is reachable by finger too** (§11.6): a press anywhere along it
-/// raids that facility, the blank between rows swallows a mis-aimed tap, and the locked
-/// row is not a target at all — the touch half of the marker's rule.
+/// **Every row is reachable by finger too** (§11.6): a press anywhere along it raids that
+/// facility — or **buys** it, where the row is the priced one (#212) — and the blank
+/// between rows swallows a mis-aimed tap. The touch half of the marker's rule, and the two
+/// verbs are told apart in one place so a tap and a keypress cannot come to disagree.
 #[test]
-fn a_press_on_a_row_raids_the_facility_that_row_names() {
+fn a_press_on_a_row_does_what_that_row_says() {
     let run = at_a_choice_point(8371);
     let ahead = run.ahead();
     for (i, offer) in ahead.iter().enumerate() {
         let row = row_of(H, i);
-        let expected = (!offer.locked).then_some(MapHit::Facility(offer.node));
+        let expected = Some(if offer.locked {
+            MapHit::Unlock(offer.node)
+        } else {
+            MapHit::Facility(offer.node)
+        });
+        assert_eq!(Some(hit_of(*offer)), expected, "row {i}");
         for x in [0, W / 2, W - 1] {
             assert_eq!(
                 map_hit(W, H, &run, x, row),

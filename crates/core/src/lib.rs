@@ -44,7 +44,9 @@
 //! The map is a **graph with real edges, grown lazily**: an open edge only ever reaches
 //! an adjacent lane, so where the run stands decides what is in front of it, and each
 //! offer names its facility's [`Flavour`] outright. Nothing survives the run itself,
-//! which is what permadeath means here (§2.2).
+//! which is what permadeath means here (§2.2). Intel is that run's **currency** — a
+//! [`Wallet`] banked at every completed raid and spent at the map between facilities
+//! (§14 v3), never at the exit, which in a campaign never refuses.
 //!
 //! **Configuration.** [`LevelModifiers`] (§12.6) resolved once per run, and
 //! [`LevelSeed`] composing seed, modifiers and loadout into one shareable token — the
@@ -98,7 +100,7 @@ pub use body::Body;
 pub use campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
 pub use campaign::{
     facility_seed, Campaign, CampaignStage, FacilityMap, Flavour, Loudness, MapPos, NodeId, Offer,
-    ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE,
+    Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE, ROUTE_UNLOCK_COST,
 };
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
@@ -127,7 +129,7 @@ pub use region::{
 };
 pub use render::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid,
-    flavour_glyph, help_hit, is_help_button, is_message_button, map_hit, menu_hit,
+    flavour_glyph, help_hit, hit_of, is_help_button, is_message_button, map_hit, menu_hit,
     message_log_rows, render, render_map, render_screen, verdict_hit, EndUi, Fill, GlyphCell, Grid,
     HelpHit, HelpTab, InputModality, MapHit, MapUi, MenuEntry, MenuHit, MenuScreen, MenuUi,
     OptionsControl, ScreenUi, SeedCopy, Surface, Visibility, BOTTOM_ROWS, TOP_ROWS,

@@ -485,7 +485,7 @@ pub struct LevelModifiers {
     /// different one. That reading is unchanged and the entry is admitted anyway, with
     /// the cost stated: a `+N` quick-play run can be dealt a fogged-geometry facility the
     /// player never named, and the Level info card's *"Layout unknown"* is their only
-    /// warning. It is the largest player-facing cost in that change, and appendix 47 is
+    /// warning. It is the largest player-facing cost in that change, and appendix 49 is
     /// where it is argued.
     pub layout_knowledge: LayoutKnowledge,
     /// **Retired — slot 5, frozen (#442).** This was the `calm_guards_detect_only_
@@ -1149,7 +1149,7 @@ pub(crate) const POOL: [PoolEntry; 12] = [
     },
     // The three admitted together by #518, listed in the slot order the rest of the
     // table keeps. Each was held back for its own reason and each of those reasons is
-    // now either superseded or deliberately accepted — appendix 47 has the trade.
+    // now either superseded or deliberately accepted — appendix 49 has the trade.
     //
     // Slot 6 (#452). **The one entry that reaches the carve**, and the reason the
     // `same_building` guarantee below is now stated with an exception rather than

@@ -2301,6 +2301,17 @@ is the case this serves.
   outright which shade it wants — reaching for the map's "explored" knowledge state
   to get the dim one for free would pick the right colour by telling a lie.
 
+  **The band stops at the controls.** It runs edge to edge across every cell the words
+  can use — including the ones they do not fill — but under the `[?]` and the deploy
+  control the row keeps the screen's own background, so the one static tan those two
+  wear is read against the same backdrop as every other control on the screen rather
+  than against a tint of the standing mood, which is not enough separation and left
+  the row's two most important controls its least legible. Held back the control's own
+  three cells each, so the band meets the button edge to edge and stays one continuous
+  run; this is **paint and never layout**, and the row's capacity is untouched. The
+  span is read off the same layout as the drawing and both hit-tests (see
+  [`docs/render-reference.md`](render-reference.md) §5).
+
   > **The row is laid out once, and the message's width comes *from* it.**
   > **[SETTLED]** Both controls, both hit-tests and the words' span are read off a
   > single layout: the message starts clear of the `[?]` and stops a cell short of
@@ -2696,7 +2707,7 @@ so a watched cell out of your sight still paints red, now with nothing on top of
 > the consequence stated rather than argued away: a `+1` quick-play run can now be dealt
 > a fogged-geometry facility the player never named, and the Level info card's *"Layout
 > unknown"* is the only warning they get. It is the largest player-facing cost in that
-> change (appendix 47), and the thing to watch is whether the card is enough or whether
+> change (appendix 49), and the thing to watch is whether the card is enough or whether
 > this end wants a louder cue on turn one.
 >
 > **The exit is the exception that keeps the run playable.** It draws as itself from
@@ -3518,9 +3529,11 @@ a campaign of **one** facility is exactly the game v1 ships.
   every facility of a campaign is also a *sayable level*: a token you can hand to
   someone, or to the sim, and play on its own (§13.1).
 - **Three things carry between facilities, and nothing carries out of the run**
-  (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** — intel
-  is currency in the campaign, not an exit key, so the gate is `IntelGate::None`
-  (§4.5) and extraction is voluntary — and the **campaign alert**, the run-level layer
+  (§2.2's table): the **salvaged-tech loadout** (§8.3), the **intel wallet** (#211) —
+  intel is currency in the campaign, not an exit key, so the gate is `IntelGate::None`
+  (§4.5), extraction is voluntary, and the balance is banked at every completed raid and
+  spent only at the map between facilities (§14 v3, appendix 47) — and the
+  **campaign alert**, the run-level layer
   above the per-facility §7.3 ladder. Nothing persists a campaign anywhere, so
   "nothing carries across runs" is a property of the type rather than a rule to
   enforce.
@@ -3710,9 +3723,10 @@ bullet below fills one of its seams.
     construction rather than by a rejection loop — a branch whose options generate the
     same facility is the flat list wearing a costume.
   - **One further successor is intel-locked** [SETTLED] — the alternative-route sink
-    below. It reaches a lane *two* across, which no open edge can, so what intel buys
-    is **ground**: a part of the map that was not on offer, rather than a better
-    facility handed over. What stands on that ground is whatever the seed put there.
+    below, now priced and spendable (#212). It reaches a lane *two* across, which no open
+    edge can, so what intel buys is **ground**: a part of the map that was not on offer,
+    rather than a better facility handed over. What stands on that ground is whatever the
+    seed put there.
   - **Every route converges on the archive** [SETTLED], the one node with no
     successors. Reaching it ends traversal; what it holds and what arriving concludes
     are the ending's (#217).
@@ -3760,8 +3774,52 @@ bullet below fills one of its seams.
   - **Found tech is usable the turn it is found**, in the facility it was found in.
     A reward that only switched on after extraction would make the detour a deposit
     toward a later raid rather than a tool for this one.
-- Intel as a real currency, with actual sinks: reveal facility intel, unlock an
-  alternative route, lower the alert, upgrade an ability.
+- **Intel as a real currency, with actual sinks**: reveal facility intel, unlock an
+  alternative route, lower the alert, upgrade an ability. The wallet and the seam every
+  sink spends through are #211; the sinks themselves are its sub-tickets. Appendix 47
+  records the model.
+  - **Extraction is voluntary, and everything in a facility is surplus** [SETTLED]. The
+    campaign's exit gate is `IntelGate::None` (§4.5), so you may bump the exit and leave
+    any facility at any time: intel, caches and unlockables are all things you *chose* to
+    stay for. A currency you must hand over to get out is a toll, not a currency — the
+    two rules cannot both hold, and this is the one that survives. (v1 quick play keeps
+    *objectives required, early exit refused*: it has no hub to spend at.)
+  - **One spend context: the map between facilities** [SETTLED]. There is no in-level
+    spending, so the map screen (#208) is also the **hub** — the balance is a line on it
+    and the prices are rows of it, read in one glance. A wallet you could dip into
+    mid-raid would let a player buy their way out of a §4.4 mistake, and every tight
+    corner would become a shop.
+  - **The wallet is the only debit path** [SETTLED]. A sink asks the campaign to spend
+    and is told what happened — paid, not enough intel, or not at the hub — and a
+    refusal changes *nothing*: no partial payment, no half-applied sink. The wording of
+    the refusal belongs to the wallet, so every sink refuses in one voice (§11.7).
+  - **The first sink: the alternative route** (#212). Spending **one intel** [START] at a
+    choice point flips the map's intel-locked successor to takeable. What it buys is
+    **ground** — a lane two across, which no open edge from there can reach — and *not* a
+    better facility: what stands on it is whatever the seed put there.
+    - **The price is what you know, not what you earn** [START]. Unbought ground draws as
+      `?`, so the road is bought *unseen*, and a price has to be proportionate to that: a
+      facility's whole haul is three consoles, and a blind road is not worth a raid. It
+      still asks for something real — nothing is banked until a raid is walked out of, so
+      the first choice point of a run cannot afford one. The bite is **opportunity cost**
+      against the other sinks rather than scarcity; if a played run buys one reflexively
+      at every junction, the first lever is not the price but that the player cannot see
+      what they are buying, which is what the scouting sinks (#215/#216) are for.
+      Appendix 48, which also records the price this one replaced.
+    - **Buying does not commit the run** [SETTLED]. A bought edge becomes an ordinary
+      offer with its flavour showing, and the run may still take an open road instead. So
+      the purchase buys ground *and* the knowledge of what is on it, which is what keeps
+      "flavours are visible when offered" true and stops the sink being a coin flip you
+      paid for.
+    - **A bought road is alerted at condition 3 like any other** [SETTLED]. The top of the
+      ladder takes away *the route around it*; intel that bought immunity from the alert
+      would be a second, unwritten rule about what the alert is. At condition 2 the
+      locked edge is never the marked road — finding the unwatched one is the play there,
+      and it must not cost intel.
+  - **Walking out empty-handed is not punished** [OPEN on the tuning]. Nothing is taken
+    away for a wasted raid; the run is simply poorer at a facility the alert may have
+    made harder (#210), and caches are one-shot. An explicit nudge (a small alert bump)
+    is deferred until a played run says the emergent cost is too soft.
 - Difficulty that scales with the alert level, driven through the level-modifier
   seam (§12.6) rather than a private knob set. **The whole point of the alert
   system is that being loud in facility 2 makes facility 3 harder.** Until that
@@ -3772,7 +3830,8 @@ bullet below fills one of its seams.
     open road ahead *off guard*, drawn one **easier** rule: the cherry on a ghost
     raid. Condition 1 carries nothing. Condition 2 leaves **one** open road
     *alerted*, drawn one **harder** rule. Condition 3 leaves **all** of them
-    alerted, each drawn its own.
+    alerted, each drawn its own — the **alternative route included** (#212, appendix 48),
+    so intel buys ground rather than a way out of the top rung.
   - **The step from 2 to 3 is breadth, not depth** [SETTLED]. Both switch on one
     rule; what the top of the ladder takes away is the *route around it*. At
     condition 2 there is still an unwatched road and finding it is the play; at

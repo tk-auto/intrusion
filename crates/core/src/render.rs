@@ -1195,7 +1195,7 @@ mod menu;
 mod message_log;
 mod usable;
 mod verdict;
-pub use campaign_map::{flavour_glyph, map_hit, render_map, MapHit, MapUi};
+pub use campaign_map::{flavour_glyph, hit_of, map_hit, render_map, MapHit, MapUi};
 pub use help::{help_hit, HelpHit, HelpTab, SeedCopy};
 pub use hud::{
     ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, is_help_button,

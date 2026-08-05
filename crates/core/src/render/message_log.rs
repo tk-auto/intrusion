@@ -229,7 +229,7 @@ pub(crate) fn near_line_text_max(width: u32) -> usize {
 }
 
 /// The deploy control's label, or `None` when there is nothing to deploy — *what* the
-/// corner shows, leaving *where* to [`corner_controls`](super::hud::corner_controls),
+/// corner shows, leaving *where* to [`near_line_controls`](super::hud::near_line_controls),
 /// which is the one place the near line's layout lives.
 pub(super) fn deploy_label(state: &State, open: bool) -> Option<String> {
     if log_rows(state).is_empty() {
@@ -259,25 +259,18 @@ pub fn is_message_button(state: &State, x: u32, y: u32) -> bool {
 }
 
 /// Draw the message-log toggle over the already-built near line `row` (§11.7):
-/// the [`deploy_label`] right-aligned, its glyphs in System — the HUD
-/// control colour, like the ability line's deploy button — over the loudest
-/// message's own category band, which keeps painting behind it.
-pub(super) fn draw_message_button(
-    row: &mut [GlyphCell],
-    width: u32,
-    start: u32,
-    band: Category,
-    fill: Fill,
-    label: &str,
-) {
+/// the [`deploy_label`] right-aligned, its glyphs in System — the HUD control colour,
+/// like the `[?]` at the row's other end — on the screen's own background, which the row
+/// holds its band back from underneath it (§11.4/#502). It is the only way to the rest
+/// of the messages, so it is one of the two things on the row that must always be
+/// legible; the band meeting it edge to edge is what stopped it being.
+pub(super) fn draw_message_button(row: &mut [GlyphCell], width: u32, start: u32, label: &str) {
     for (i, glyph) in label.chars().enumerate() {
         let x = start + i as u32;
         if x < width {
             row[x as usize] = GlyphCell {
                 glyph,
                 fg: Category::System,
-                bg: Some(band),
-                fill,
                 ..GlyphCell::blank()
             };
         }
@@ -859,9 +852,12 @@ mod tests {
             row_text(&before, NEAR_ROW),
             "the same near line, verbatim"
         );
+        // Sampled off a banded column: column 0 is the `[?]`, which the row holds its
+        // band back from underneath (§11.4/#502), so it answers `None` either way.
+        let banded = super::hud::HELP_BUTTON_LEN + 1;
         assert_eq!(
-            g.get(0, NEAR_ROW).bg,
-            before.get(0, NEAR_ROW).bg,
+            g.get(banded, NEAR_ROW).bg,
+            before.get(banded, NEAR_ROW).bg,
             "the same category band"
         );
         assert!(
