@@ -60,6 +60,7 @@ mod body;
 mod campaign;
 mod category;
 mod cell;
+mod control;
 mod cover;
 mod difficulty;
 mod door;
@@ -101,6 +102,7 @@ pub use campaign::{
 };
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
+pub use control::{remote_kind, transfers_control, Remote, RemoteKind, DRONE_SIGHT_RANGE};
 pub use difficulty::{Difficulty, SPAN as DIFFICULTY_SPAN};
 pub use door::DoorAction;
 pub use duct::Duct;

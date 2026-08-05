@@ -23,6 +23,7 @@
 //! with no plumbing to clear.
 
 use crate::category::Category;
+use crate::control::transfers_control;
 use crate::state::{Event, State};
 
 mod history;
@@ -81,6 +82,10 @@ fn is_instant(ability: crate::AbilityId) -> bool {
 pub fn message_for(event: Event) -> Option<Message> {
     let (text, priority) = match event {
         Event::Moved { .. } => return None,
+        // Flying is silent for [`Event::Moved`]'s reason exactly (§11.7): the machine
+        // moved and you watched it move. What is *not* silent is the transfer at either
+        // end of it, because that is the fact that changes what the next key does.
+        Event::RemoteMoved { .. } => return None,
         Event::Bumped { .. } => ("blocked".to_string(), 0),
         Event::Crouched { .. } => ("you duck behind the table".to_string(), 0),
         Event::EnteredHideout { .. } => ("you slip into the cupboard".to_string(), 0),
@@ -277,6 +282,17 @@ pub fn message_for(event: Event) -> Option<Message> {
         // Your fake, trampled (§8.3) — quiet Owned narration; the fade-out by
         // duration reads as the ability's own expiry message.
         Event::DecoyDied { .. } => ("the decoy is trampled".to_string(), 0),
+        // The control transfer (§8.1/#273), at both ends. It says *what the keys do
+        // now*, because that is the only thing about this ability a player can get
+        // wrong: pressing a direction and moving the wrong thing. The release also says
+        // what you are left holding — the machine is still out there, still watching,
+        // and the bar's `[N]` is now counting its life rather than your flight.
+        Event::ControlTaken { .. } => ("you have the drone".to_string(), 0),
+        Event::ControlReleased { .. } => ("the drone holds — you have your body".to_string(), 0),
+        // A launch refused by the crawlspace (§10.7/#273): free, changed nothing, and it
+        // has to say why — the rule it enforces is invisible (a body in a duct is a body
+        // nothing can reach, so flying from one would cost nothing at all).
+        Event::LaunchRefused => ("no room to fly from in here".to_string(), 0),
         // Your own tools (§8), routine self-narration like a bump or a crouch —
         // low priority, Owned band (from `Event::category`).
         // A **budgeted** ability's activation is silent (§8.2/#302). The count it
@@ -293,6 +309,12 @@ pub fn message_for(event: Event) -> Option<Message> {
         // ability *did* is reported by its own event — the bore, the blast — which is
         // the fact worth the row.
         Event::AbilityActivated { ability, .. } if is_instant(ability) => return None,
+        // A **control-transfer** ability's activation is silent for a third version of
+        // the same reason (§8.1/#273): the launch already speaks, through the
+        // [`Event::ControlTaken`] it travels with, and that message says strictly more —
+        // *the keys are the drone's* rather than *the ability is on*. Two lines for one
+        // press would spend the near line's one row on the weaker half (§11.7).
+        Event::AbilityActivated { ability, .. } if transfers_control(ability) => return None,
         Event::AbilityActivated {
             ability,
             uses_left: None,

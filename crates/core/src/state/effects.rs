@@ -222,6 +222,25 @@ pub(super) enum MarkPlace {
     /// Read live off [`can_rematerialize`](State::can_rematerialize), the very predicate
     /// the eject rule consumes, so the mark cannot claim a turn the rule would not.
     PhasedPlayer,
+    /// The **remote the player is currently flying** (§8.1/#273) — the third conditional
+    /// placement, and it joins on [`ConcealedPlayer`](Self::ConcealedPlayer)'s rule
+    /// rather than as an exception to it.
+    ///
+    /// While a control transfer is in force there are two things of yours on the board
+    /// and only one of them answers the arrow keys. That is the single thing a player
+    /// can get wrong about this ability, and it is a fact the §11.4 bar cannot carry: it
+    /// reads `Drone[23]` whether you are at the controls or standing in a room three
+    /// corridors away watching a camera. So the mark rides the machine exactly while it
+    /// is *yours to drive*, goes dark the moment you hand the keys back, and comes back
+    /// on if you take them again — the disagreement with the bar entry that is the price
+    /// of admission here.
+    ///
+    /// It rides the thing rather than the cell for [`LiveDecoy`](Self::LiveDecoy)'s
+    /// reason, and it earns its place in this channel for a second one: a remote flies
+    /// over guards, and a guard's `g` outranks it in the glyph layer (§11.3 — a threat
+    /// is never hidden). The background survives that, so the one cue that says *this is
+    /// what your keys move* cannot be covered by the thing you flew it over.
+    PilotedRemote,
 }
 
 /// How long an effect mark lives (§11.5/#338). Both arms run on the one decay schedule
@@ -342,7 +361,8 @@ impl State {
                 MarkPlace::HeldGuards
                 | MarkPlace::LiveDecoy
                 | MarkPlace::ConcealedPlayer
-                | MarkPlace::PhasedPlayer => NO_CELLS,
+                | MarkPlace::PhasedPlayer
+                | MarkPlace::PilotedRemote => NO_CELLS,
             })
             .copied()
     }
@@ -382,12 +402,19 @@ impl State {
         // yield: the layer paints a background, and painting it twice would say
         // nothing the first paint did not.
         let phased = riding(MarkPlace::PhasedPlayer) && !self.can_rematerialize();
+        // The remote is marked only while the keys are actually its (#273) — read live
+        // off [`piloting`](State::piloting), the same flag the turn loop dispatches on,
+        // so the cue and the rule are one fact. It carries no perception gate for the
+        // decoy's reason (§11.5a's second exception): a machine of your own is drawn
+        // wherever it is, and it is trivially inside its own camera anyway.
+        let piloted = riding(MarkPlace::PilotedRemote) && self.piloting;
         self.guards
             .iter()
             .filter(move |guard| held && self.guard_under_effect(guard))
             .map(|guard| guard.pos())
             .chain(self.decoy.filter(|_| decoyed))
             .chain((concealed || phased).then_some(self.player))
+            .chain(self.remote.filter(|_| piloted).map(|remote| remote.cell))
     }
 
     /// Whether Camouflage's concealment is **in force right now** (§8.3): its window is
@@ -638,6 +665,21 @@ impl State {
                 Event::AbilityActivated { ability, .. } if declares(ability, Effect::Phase) => {
                     self.light_mark(ability, MarkPlace::PhasedPlayer, MarkLife::Standing)
                 }
+                // A control transfer (§8.1/#273) is lit once, at the launch, and then
+                // left to blink with [`piloting`](State::piloting): the placement is a
+                // live read of who holds the keys, so handing them back darkens the mark
+                // and taking them again relights it with nothing to relight. Keyed on
+                // the launch's own event rather than on the ability's identity, so a
+                // second control ability joins the layer for free.
+                Event::ControlTaken { .. } => {
+                    if let Some(remote) = self.remote {
+                        self.light_mark(
+                            remote.source,
+                            MarkPlace::PilotedRemote,
+                            MarkLife::Standing,
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -724,6 +766,11 @@ impl State {
         let decoy_alive = self.decoy.is_some();
         let camouflaged = self.abilities.effect_active(Effect::ConcealWhileStill);
         let phasing = self.abilities.effect_active(Effect::Phase);
+        // Kept for the ability's whole **window**, not for the turns anybody is flying —
+        // the conditional placements' rule (see above): dropping the record on a turn the
+        // player had let go would delete a mark nothing ever relights, and taking the
+        // keys back would go unmarked.
+        let remote_out = self.remote.is_some();
         self.effect_marks.retain_mut(|mark| match &mut mark.life {
             MarkLife::Momentary(ttl) => {
                 *ttl -= 1;
@@ -734,6 +781,7 @@ impl State {
                 MarkPlace::LiveDecoy => decoy_alive,
                 MarkPlace::ConcealedPlayer => camouflaged,
                 MarkPlace::PhasedPlayer => phasing,
+                MarkPlace::PilotedRemote => remote_out,
                 MarkPlace::Cells(_) => true,
             },
         });

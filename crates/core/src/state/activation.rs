@@ -63,6 +63,14 @@ pub(super) enum Aimed {
     /// The blast Confusion would fire (§8.3/#325) — already known to catch at least
     /// one guard.
     Blast(EffectArea),
+    /// The cell a control-transfer ability would launch its remote from (§8.1/#273):
+    /// the player's own, because you let it go from your hands.
+    ///
+    /// It carries a cell it could have re-read from the state, for the reason every
+    /// other arm does: what the effect acts on is settled by the precondition and handed
+    /// to the world change, so a launch can never happen somewhere the ladder did not
+    /// approve.
+    Launch(Cell),
 }
 
 /// Why a press would not fire — the [`Err`] half of [`State::aim`], and the reason
@@ -82,6 +90,12 @@ pub(super) enum Refused {
     NoDoorsInReach,
     /// The blast would catch no guard (§8.3/#325).
     BlastCatchesNobody,
+    /// There is no room to launch a remote, or to take one's controls, from where the
+    /// player is standing (§10.7/#273) — a crawlspace.
+    NoRoomToPilot,
+    /// The player's hands are on a remote's controls (§8.1/#273), so this is not an
+    /// ability they can press right now.
+    HandsOnTheControls,
 }
 
 impl Refused {
@@ -97,6 +111,13 @@ impl Refused {
     pub(super) fn event(self) -> Option<Event> {
         match self {
             Refused::NoDecoyCell => None,
+            // Silent for the decoy's reason exactly: the rule is already on the board.
+            // The remote is drawn under its own mark and every other bar entry is
+            // greyed (§11.4), so a player who presses one has been shown why — and a
+            // line per stray keypress would spend the one row the near line has on the
+            // fact it is currently spending it on (§11.7).
+            Refused::HandsOnTheControls => None,
+            Refused::NoRoomToPilot => Some(Event::LaunchRefused),
             Refused::Bore(reason) => Some(Event::BoreRefused { reason }),
             Refused::NoDoorsInReach => Some(Event::LockdownRefused),
             Refused::BlastCatchesNobody => Some(Event::ConfusionMissed),
@@ -118,6 +139,26 @@ impl State {
     /// ever consults this ladder once the economy has already said the ability is
     /// pressable.
     pub(super) fn aim(&self, id: AbilityId) -> Result<Aimed, Refused> {
+        // **Flying comes first, and refuses everything else** (§8.1/#273). While the
+        // player holds a remote's controls their hands are not free for any other tool,
+        // so every ability but the one they are flying is refused here — which is what
+        // greys the whole bar rather than leaving it advertising presses the loop will
+        // swallow (§11.4). The remote's own ability is exempt because its key is the way
+        // *out* of the mode, and it resolves to the toggle-off, not to this.
+        if self.piloting() && !self.flying(id) {
+            return Err(Refused::HandsOnTheControls);
+        }
+        // A control-transfer ability (§8.1/#273) launches from the player's own cell,
+        // and asks only that the player is on their feet to do it — the precondition
+        // that keeps the ability's cost real (§2.3), since a body in a crawlspace is a
+        // body nothing can reach.
+        if transfers_control(id) {
+            return if self.can_take_controls() {
+                Ok(Aimed::Launch(self.player))
+            } else {
+                Err(Refused::NoRoomToPilot)
+            };
+        }
         if declares(id, Effect::SpawnDecoy) {
             return self
                 .decoy_spawn_cell()

@@ -53,6 +53,7 @@ outranks knowledge**, always.
 | `z` | A body | Caution — trouble waiting to be found |
 | `z` | A body in your hands | Owned — yours, and in play |
 | `z` | A body stowed in a cupboard | Neutral — the cupboard is spent |
+| `*` | A drone you launched (§8.3/#273) | Owned; **Effect** background while you are flying it |
 
 A seen guard's colour *is* the AI state machine, read directly: yellow → orange →
 red. A sensed guard deliberately has no glyph, because a glyph would imply a
@@ -68,6 +69,17 @@ job — telling you at a glance which cupboards you have used up — never depen
 the colour. Owned is the tighter word for it: on a cupboard, Owned already means
 *you are hidden in this one* (`}`, §2.2 below), so a spent cupboard wearing it would
 put two opposite readings in one ink on one piece of furniture.
+
+The drone is the second thing on the board wearing the "made by you" ink, and the
+first that is a machine rather than a copy of you — hence a glyph of its own rather
+than the decoy's borrowed `@`. Its **background** is what says who is driving: while
+your input moves it, the cell carries the §11.5 effect mark, and the moment you hand
+the controls back the mark goes dark while the `*` stays. That is the one thing the
+§11.4 bar cannot say — the entry reads `Drone[23]` either way — and it is the one
+thing a player can get wrong about the ability. It draws **under** a guard's `g` and
+a body's `z` on purpose (a thing of yours never hides a threat), and its mark yields
+to the danger overlay for the same reason, which is why the cue is a background and
+not a glyph swap.
 
 ### 2.2 Terrain
 

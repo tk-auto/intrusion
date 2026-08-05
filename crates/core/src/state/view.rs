@@ -886,8 +886,24 @@ impl State {
         // very same digit, letter and tap that fire an ability answer the offer instead.
         // Deciding it here — at the one seam both input paths already meet at — is what
         // keeps the shells from each needing to know the exchange exists.
+        //
+        // It is asked **before** the control transfer below, and the order is free rather
+        // than load-bearing: an offer opens by bumping a crate (§4.3), which is a thing
+        // hands do, so it can never be open while the player's hands are on a remote's
+        // controls (#273). Asking the modal one first is what the order would have to be
+        // if the two ever did meet — a prompt that must be answered outranks a toggle.
         if self.exchange.is_some() {
             return Input::Discard(id);
+        }
+        // **A control-transfer ability's key is a three-state toggle** (§8.1/#273), which
+        // is the one place this rule needs an arm of its own. Its window outlives the
+        // flying: while the remote hovers unattended the ability is still `Active`, and
+        // the ordinary reading would resolve the key to a toggle-off that ends nothing.
+        // What the player wants there is the opposite — the keys back — so an unattended
+        // remote resolves to `Activate` (take control, a spent turn) and only an
+        // *attended* one resolves to `Deactivate` (let go, free).
+        if self.remote_awaits(id) {
+            return Input::Activate(id);
         }
         match self.ability_state(id) {
             AbilityState::Active { .. } => Input::Deactivate(id),
@@ -1020,6 +1036,14 @@ impl State {
         // same reason — and it covers the standing-on entry too, since a stunned wait
         // is not a wait at all (it takes hold of nothing).
         if self.stunned > 0 {
+            return Vec::new();
+        }
+        // **Flying, the row is empty too** (§8.1/#273), and for the same reason: your
+        // hands are on the controls, so no bump is available to anybody. The remote has
+        // no interaction verb of its own to offer in its place — it opens nothing and
+        // takes nothing (§4.3's one verb belongs to hands) — so a row about the cells
+        // around *it* would promise exactly what the next press will not deliver.
+        if self.piloting() {
             return Vec::new();
         }
         let mut out = Vec::new();

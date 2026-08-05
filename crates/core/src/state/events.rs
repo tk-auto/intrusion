@@ -277,6 +277,40 @@ pub enum Event {
     /// *gone* — no cone will ever find it — and the cupboard is **locked**, no
     /// longer a hideout. A spent turn (§4.4); the player's hands come free.
     BodyStored { at: Cell },
+    /// The player took the controls of a remote unit (§8.1/#273) — the launch that
+    /// deployed it, or a later press that took the keys back off a hovering one. From
+    /// now until they let go, `Step` moves the machine at `at` and their body stands
+    /// still (§4.2).
+    ///
+    /// One event for both takings, deliberately: what changes for the player is the
+    /// same fact either way — *the keys are the drone's* — and a launch already says the
+    /// rest through its own [`AbilityActivated`](Event::AbilityActivated).
+    ControlTaken { at: Cell },
+    /// The player handed a remote's controls back to their own body (§4.4/#273): free,
+    /// and — unlike every other toggle-off — it does **not** end the ability's window.
+    /// The machine holds `at` and keeps feeding its camera for the rest of the duration
+    /// (§8.2); what ends is only who is driving.
+    ///
+    /// Also fired when the window ends under a player who was still flying, immediately
+    /// before the [`AbilityExpired`](Event::AbilityExpired) that killed the machine: the
+    /// keys come back the same way whichever end let go.
+    ControlReleased { at: Cell },
+    /// The remote the player is flying moved to `to` (§8.1/#273) — a spent turn, so the
+    /// world ran while the body stood still.
+    ///
+    /// Distinct from [`Moved`](Event::Moved), which is the *player* moving and is read
+    /// as such by the rules that care (Camouflage's stillness, §8.3; the crouch-walk,
+    /// §10.3). Flying is not moving: your body did not go anywhere, and every rule that
+    /// asks whether it did must keep getting the answer no.
+    RemoteMoved { to: Cell },
+    /// A launch — or a press to take a hovering remote's controls back — was **refused**
+    /// because the player is inside a crawlspace (§10.7/#273). Free and nothing changed,
+    /// like a wall bump.
+    ///
+    /// It speaks (§11.7) because the rule is invisible: what it enforces is that the
+    /// ability's whole cost is the body you leave behind, and a body in a duct cannot be
+    /// touched (§4.5) — which is a thing to learn, not a thing the board shows.
+    LaunchRefused,
     /// The decoy was stepped on — by anything, the player included — and died
     /// (§8.3). Its ability drops into the full cooldown, as an early toggle-off
     /// would. Expiry by duration is [`Event::AbilityExpired`], not this.
@@ -408,9 +442,10 @@ impl Event {
         match self {
             // Routine self-narration: inert facts about scenery and your own steps.
             // Crawling a duct is the same kind of routine movement (§10.7).
-            Event::Moved { .. } | Event::Bumped { .. } | Event::DuctCrawled { .. } => {
-                Category::Neutral
-            }
+            Event::Moved { .. }
+            | Event::Bumped { .. }
+            | Event::DuctCrawled { .. }
+            | Event::RemoteMoved { .. } => Category::Neutral,
             // Things you made — including making yourself hidden (§10.3: the
             // occupied cupboard and the covering table recolour to Owned; their
             // messages match). Vanishing into a duct is the same move (§10.7).
@@ -434,6 +469,11 @@ impl Event {
             | Event::ConfusionFired { .. }
             | Event::ConfusionMissed
             | Event::DecoyDied { .. } => Category::Owned,
+            // A machine of yours, and who is driving it (§8.1/#273): the same Owned band
+            // as every other tool of your own, including the refusal to launch one.
+            Event::ControlTaken { .. }
+            | Event::ControlReleased { .. }
+            | Event::LaunchRefused => Category::Owned,
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it
             // left (§8.3) is the same hands: grabbing and releasing are Owned.

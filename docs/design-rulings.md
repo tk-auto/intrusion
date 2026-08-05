@@ -2766,3 +2766,177 @@ exchange is judged by playing it until the bot learns to salvage — at which po
 bot trades for* is the first thing worth watching, because a policy that always keeps what
 it has is the same as one with no exchange at all.
 
+## Appendix 45 — Transferring control: one window for the flying and the watching
+
+*(§2.3/§4.4/§4.5/§8.1/§8.2/§8.3/§11.5a/§13.2; #273. `crates/core/src/control.rs`,
+`crates/core/src/state/control.rs`, `docs/stats/abilities/drone.md`.)*
+
+§8.1 reserves a code escape hatch and names two things it is for: *"piloting a drone,
+rewinding time"*. #273 is the first of those, and building it turned out to be less
+about the drone than about the seam under it — what it means for the player's input to
+drive something that is not the player.
+
+### The ability is a control mode, not an effect
+
+Every other ability changes what your body can do: how far it steps (Run), what sees it
+(Camouflage), what it can walk through (Dephase), what it can reach (Pierce Wall). No
+arrangement of the §8.1 effect vocabulary expresses *the keys now move a different
+thing*, and inventing a `TransferControl` primitive for one row would be exactly the
+DSL-rot the section warns against. So it is `Behaviour::Coded`, which is the design's
+own prescription rather than a shortcut.
+
+What that buys, and the reason the state is called a **remote** rather than a drone:
+taking over a guard (Messiah-style) is the obvious second use, and it should be a row in
+one table (`control::remote_kind`) plus a spawn rule, not a rewrite of the turn loop.
+The rules that are genuinely the drone's — that a wall stops it, that its camera is a
+short full circle, that the facility cannot perceive it — live on the *kind*. The rules
+that are the seam's — who the keys move, what a transfer costs, when it ends — live on
+the loop and never name an ability.
+
+### Two clocks became one, and the one clock is the ability
+
+The ticket proposed two numbers: a pilot duration, and a **~50-turn linger** after
+deactivation during which the drone keeps granting vision. That is two timers, and they
+interact badly in three ways.
+
+- **The bar can only honestly show one of them.** §8.2's timing rule is that every
+  surface reports the number the player actually gets. `Drone[7]` would mean seven turns
+  of flying and then fifty of something else — a number that is true and useless.
+- **Deactivation stops being the §4.4 free toggle-off and becomes a conversion.** The
+  player is no longer switching something off; they are trading one currency for
+  another, at a rate the interface cannot state.
+- **Total time balloons.** Pilot + linger + cooldown is three numbers to tune against
+  each other, and the ability's real lever — *how long is the facility watched?* — is
+  the sum of the first two, which nothing displays.
+
+The window opened at 30 and was set to **40** on the first play-through: 30 is enough
+machine to fly somewhere or to leave a camera behind, and not enough to do both, which
+collapses the very decision the single clock exists to create. The lockout absorbs it —
+80 turns is a long way from the next press either way.
+
+So there is **one duration, covering both halves** — **40 turns [START]**, against a
+40-turn cooldown, for an 80-turn lockout that is comfortably the longest in the
+catalogue. Press to launch and fly; press again
+and the controls come back to your body — free, refunding nothing, and **not ending the
+window**. The drone holds the cell you left it in and keeps feeding its camera until the
+duration runs out, and only then does the cooldown start.
+
+This is a better ability than the two-clock version, not merely a tidier one. It makes
+the decision *how much of the window do I spend flying?* — deep scouting now, or a long
+watch on a junction you have to come back through — and that decision is made turn by
+turn with the number on the bar in front of you. It also makes the key a three-state
+toggle worth pressing more than twice: an unattended drone can be **taken back**, for
+the same turn the launch cost, which turns the ability into a remote eye you can jump
+into rather than a one-shot with a tail.
+
+### The cost is the parked body, so the body must be reachable
+
+§2.3 asks what an ability costs and when a good player declines it. An invisible,
+indestructible, unblockable scout with free movement is the section's own failure mode
+written out, so the answer has to be load-bearing rather than decorative: **while you
+fly, your body stands still in a patrolled building and the world keeps running**
+(§4.2). Capture is contact (§4.5), so a patrol walking into that body ends the run while
+you are looking through a camera two rooms away. Scouting deep costs exactly as many
+turns of blind exposure as it buys of vision, and the good player's *"when would I not
+do this"* is answered by geometry: you fly from somewhere nobody walks, and if you have
+nowhere like that, you do not fly.
+
+That answer has exactly one leak, and it is worth naming because it is the sort of thing
+that quietly makes an ability free. **A body inside a duct cannot be touched** (§10.7),
+so piloting from a crawlspace costs nothing at all — and the run *opens* inside its own
+tunnel (§4.5/#466), which would let a player read the whole facility before setting foot
+in it. Hence the one precondition in the §8.4 ladder: you launch, and take the controls
+back, on your feet. It is not fussiness; it is the thing that keeps the cost true, and
+it is why the refusal speaks (§11.7) where the decoy's silent one does not — the rule it
+enforces is invisible.
+
+A **cupboard** is deliberately not held to the same rule, though it conceals too
+(§10.3). What it grants is weaker and it is paid for: a guard that watched you climb in
+flushes you out (§15 Q5), you walked to a specific piece of furniture to get it, and you
+cannot act on anything the camera shows you until you climb back out. Hiding somewhere
+sensible before you fly is the play this ability ought to reward. A duct is none of
+those things — it is a travel network, it is blanket contact-safe, and the run starts
+inside one.
+
+The two knobs deliberately **not** used as cost are the drone's invulnerability and its
+mobility. Letting guards see and shoot it down is a different ability and a separate
+ticket; if playtest says this one is too strong, the honest levers are the clock, the
+camera's reach, and drone-only vision while flying.
+
+### What it is allowed to do, and the two things it is not
+
+It **respects the building, at its own scale**. A wall-ignoring drone is Dephase plus
+omniscience, and the facility's shape — the thing every other system in the game is
+about — stops mattering; what makes this one sweep easily is that nothing threatens it,
+not that it is incorporeal. But *scale* is the whole point of the exceptions: the thing
+is hand-sized and airborne, so it goes **over a table** (furniture at waist height, solid
+only to somebody walking) and **through a shut door's ventilation holes**. A door frame
+stops it dead, because a hinge is structure rather than a door, and so do the solid
+usables — a console is a thing you bump, not a passage, at any size.
+
+The line that draws is *fabric versus passage*: a shut door is a passage that happens to
+be closed and a wall is a wall at any scale. Two consequences are worth stating rather
+than discovering — a **closed-door wing is scoutable**, and a §8.3 **Lockdown seals
+nothing against a camera**. Neither is a leak, because the drone crosses a door
+**without opening it**: it changes nothing in the world it flies through, so what it
+buys is still only information, at the price of the body it left behind.
+
+It has **no interaction verb**. §4.3's one verb is the bump, and a bump is hands: the
+drone opens no door, takes no intel, touches no guard and cannot win the run. It changes
+nothing in the world at all — it only looks. A step into a wall is the free mis-input a
+wall bump has always been.
+
+And **your hands are on the controls**: while flying, every other ability is refused
+through the same §8.4 ladder, so the §11.4 bar greys the whole row rather than
+advertising presses the loop will swallow, and the usable line is empty. One rule with
+no carve-outs, on the stun's reasoning (#329): *"you are not driving your body"* stops
+being true the moment it has exceptions.
+
+### Vision is a union, and the guard sense is not part of it
+
+`State::player_fov` was one cast from one viewer. It is now the union of the body's cast
+and the remote's, folded in at the single place sight is produced — so everything
+downstream follows on its own: the §11.5a fog lifts, entities draw, the §11.5 danger
+overlay paints the cones the camera can see, and tile memory accumulates it all, which
+is the ability's actual payoff.
+
+Two deliberate asymmetries in that union:
+
+- **Your own eyes keep working while you fly.** The alternative (drone-only vision) is
+  tenser and more punishing and is worth a playtest, but it makes the ability's cost
+  *two* things at once, and the parked body is the one that should be doing the work.
+- **The §9 guard sense stays on the body.** It is your own innate channel, and leaving
+  it there is what keeps the parked body a live risk you can read rather than one more
+  thing the drone covers for you. The camera also reaches **less far than your own
+  sight** (8 against 15, pinned at compile time): it goes where you cannot, it is not a
+  better pair of eyes.
+
+### Two things of yours on the board
+
+The §11.5 effect layer already had the shape for the one legibility problem this
+creates. The drone draws as an `Owned` `*` for as long as it exists, and the *piloted*
+one carries a standing effect mark — the third **conditional** placement, joining
+Camouflage's and Dephase's on their own rule: it says the thing the §11.4 bar cannot,
+because the bar reads `Drone[23]` whether you are at the controls or standing three
+corridors away. The mark goes dark when you let go and comes back if you take the keys
+again.
+
+It rides the *thing* rather than the cell for a second reason: a drone flies over
+guards, and a guard's `g` outranks it in the glyph layer, because a threat is never
+hidden by a thing of yours. A background survives that. It still yields to the danger
+overlay, which is §11.5 **[SETTLED]** working exactly as intended — on a watched cell
+the board says *you would be seen here* and says nothing else.
+
+### What the sim does not say about it
+
+The §13.2 bot gets **no cue**, and this is a third kind of "no cue" distinct from a
+passive's. Vision has none because there is no press; this has a press and no bot that
+could survive making it. Piloting is a control mode the stealth policy does not have, so
+a bot that pressed the key would transfer control and then go on issuing steps for a
+body that is no longer listening — flying into a wall for thirty turns and reporting the
+result as a measurement.
+
+So `usage.drone` exists as a histogram slot and reads zero until a piloting policy lands.
+That zero is a fact about the bot, which is exactly why the slot exists rather than being
+omitted: a verb with no row could not report the day it starts being pressed. The
+alternative — omitting the slot — would have hidden the gap instead of dating it.

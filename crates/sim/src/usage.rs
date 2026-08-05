@@ -104,13 +104,26 @@ pub enum Verb {
     /// `Terrain::CommsConsole` had no source in the sim at all — every alert number was
     /// measured in a world where the counterplay was never taken.
     SilenceRadio,
+    /// Launched a drone and took its controls (§8.3/#273) —
+    /// [`Event::AbilityActivated`](intrusion_core::Event::AbilityActivated), like every
+    /// other activation. Taking the keys *back* off a hovering drone is not counted
+    /// twice: the histogram counts the decision to spend the ability, and the resume is
+    /// the same ability still running.
+    ///
+    /// **Expect a zero here until a piloting policy exists**, and read it as an
+    /// unexercised verb rather than a dead one: piloting is a control mode the bot does
+    /// not have (`docs/stats/abilities/drone.md`), so its cue declines by design. This
+    /// is the one row in the histogram whose zero is a fact about the *bot* — which is
+    /// exactly why it has a row at all, since a verb with no slot could not report the
+    /// day the policy lands.
+    Drone,
 }
 
 impl Verb {
     /// Every verb, in the fixed order the histogram, signature vector and JSON
     /// object all use. Reordering this reorders the schema, so it is a deliberate,
     /// pinned decision (the tests below assert the order).
-    pub const ALL: [Verb; 14] = [
+    pub const ALL: [Verb; 15] = [
         Verb::Wait,
         Verb::Run,
         Verb::Camouflage,
@@ -125,6 +138,7 @@ impl Verb {
         Verb::Crouch,
         Verb::Stow,
         Verb::SilenceRadio,
+        Verb::Drone,
     ];
 
     /// The verb an [`AbilityId`] activation counts as — the bridge from an
@@ -150,6 +164,7 @@ impl Verb {
             AbilityId::Confusion => Verb::Confusion,
             AbilityId::PierceWall => Verb::PierceWall,
             AbilityId::Lockdown => Verb::Lockdown,
+            AbilityId::Drone => Verb::Drone,
             AbilityId::Vision | AbilityId::Saver => return None,
         })
     }
@@ -207,6 +222,7 @@ impl Verb {
             Verb::Crouch => "crouch",
             Verb::Stow => "stow",
             Verb::SilenceRadio => "silence_radio",
+            Verb::Drone => "drone",
         }
     }
 
@@ -330,7 +346,8 @@ mod tests {
                 "lockdown",
                 "crouch",
                 "stow",
-                "silence_radio"
+                "silence_radio",
+                "drone"
             ]
         );
         // Each ability activation lands in its own slot.
