@@ -144,6 +144,13 @@ fell into:
 - **It will not hide within reach of a body it left.** A guard that finds a body
   searches the cupboards beside it (§15 Q5), so a bolthole next to your own handiwork
   is a trap.
+- **It will not walk into a lock it cannot open** (§10.4/#236). With the locked-room
+  modifier on, a key-gated doorway the bot holds no key for is barred like a wall: the
+  bump is refused and changes nothing, so a router that treated the panel as the
+  walk-through §10.4 usually makes it would plan at that door and press it for the rest
+  of the run. Only the *closed* ones — a gated door a guard has just walked through is
+  the slip-in the modifier is built around, and the bot takes it like any other open
+  panel. The bars lift the instant a takedown puts the key in its hand.
 - **It will not step onto a body it is carrying.** A bump into the body in hand
   *lets it go* (§8.3), so the direct route back to a cupboard is the move that drops
   what you are carrying. The body is barred from **this turn's step** but left
@@ -532,6 +539,16 @@ Stated so they read as decisions rather than oversights:
   escape tool.
 - **No cue reads the alert level or the radio net** (§7.3/#107), so nothing bids
   differently as a facility winds up.
+- **Nothing goes and *buys* a key** (§10.4/#236). The bot knows a locked doorway is not
+  a way through (§3.1) and it opens the room the moment a takedown it took for its own
+  reasons hands over the key — but no plan says *the console I need is behind that door,
+  so strike a guard*. Under the sim preset's `--intel-gate one` that costs it a little:
+  over 100 balanced seeds the modifier reads harder in the documented direction (35% →
+  24% win rate, detections 848 → 1,086, diversity 0.60 → 0.54), because the locked room
+  is a room it must route around rather than one it cannot enter. Under `--intel-gate
+  all`, where the locked console is required, the win rate goes to **zero** — and that is
+  the bot, not the game (§13.3). It is why the modifier is kept out of the §12.6 directed
+  pool: a difficulty draw must not be able to put a batch in that position by accident.
 - **Loadout.** A batch holds the innate set unless `--abilities` grants otherwise, so
   every tech verb reads a structural zero in the committed baseline. That zero is the
   loadout, not the cue — see `docs/stats/abilities/`.

@@ -711,7 +711,9 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
 ///
 /// This is what "the mouth opens onto the building" means, and the same set the
 /// solvability flood starts from — the player picks whichever side they come up on.
-fn footholds<'a>(
+/// Shared with the §10.6 check the key lock owes (§10.4/#236), so both floods start the
+/// run in the same place rather than each deciding where a run begins.
+pub(crate) fn footholds<'a>(
     facility: &'a Facility,
     exit: Cell,
     tunnel: &'a [Cell],

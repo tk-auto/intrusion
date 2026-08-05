@@ -1850,16 +1850,47 @@ one unit.
     always. The window's length is the tuning lever, not the rule.
 - **Anyone can operate any door.** No keys, no locks. **[START]** — keys are an
   obvious future axis, and one the fiction supports.
+  - **The second exception, and the axis itself (#236): a lock with a key.** The
+    **locked prize room** is a level modifier (§12.6), and where the Lockdown seal
+    below is the player's, this one is the building's. One room — a room hiding an
+    **equipment cache** if the facility hides one, otherwise a room holding an
+    **intel console** — has *every* one of its doorways key-gated. So what the lock
+    gates depends on the run: in quick play, where there are no crates and the exit
+    wants all the intel, it is a gate on the **win**; in a campaign facility rich
+    enough to hide crates it gates **loot**, and skipping it is a real choice.
+    - **Every guard carries the key**, so the price is exactly one **takedown**
+      (§7.2) and its whole §7.3 cost — a body, a clock, evidence to hide — and not a
+      hunt for one particular `g` the player has no way to pick out. It goes straight
+      to hand: the body is the price, and a key on the floor would be a second errand.
+    - **The gated doors are automatic** (below), and that is what makes the lock
+      hold rather than the flavour it looks like. Guards have keys, so they open the
+      door walking through it as they always did; a lock that let the doorway stand
+      open would last until the first patrol came past and never again. Frameless and
+      self-closing, it shuts a few turns after it is last vacated — and those turns
+      are the modifier's one bypass: **slip in behind a guard**, with nothing in your
+      pockets, at the price of standing next to the guard that just opened it.
+    - **The lock is on the way in, never on the way out.** From inside the room the
+      door always opens, key or no key, so the slip-in can cost a run its stealth but
+      never the run itself (§2.2/§7.2's soft-lock class). Every door joins a room to
+      a corridor, so "inside" needs nothing remembered.
+    - **§10.6 gains a second assertion** (appendix 46): with every keyed doorway
+      treated as a wall, the player must still reach the exit, everything outside the
+      locked room, and **a guard** — a lock with no key in the building is the soft
+      lock in a different hat. A board that fails it is redrawn.
   - **One bounded exception so far (#242): a lock that expires.** The **Lockdown**
     tech (§8.3) seals the doors around you for its window — a sealed door refuses a
     *guard's* walk-in open, so guard routes treat it as solid and go the long way,
     while the player bumps it open as always. It is a lock on the **handle**, not a
     hold on the door: a sealed door standing open is as passable as any other. The
     lock lives on the door itself, one representation for every lock source, so the
-    key-gated doors of the locked-doors modifier extend it rather than inventing a
-    second — and the ability's duration is the only clock any seal has, which is
-    what keeps this side of the **[START]** baseline and clear of §2.2/§7.2's
-    soft-lock class.
+    key-gated doors above extend it rather than inventing a second — and the ability's
+    duration is the only clock any seal has, which is what keeps this side of the
+    **[START]** baseline and clear of §2.2/§7.2's soft-lock class.
+    - The two sources **compose**, so the lock on a door is a **set** rather than one
+      value (#236): a lockdown window over a key-gated doorway seals it for the window
+      and leaves the key gate standing when the window closes. As one value apiece, an
+      ability whose whole promise is that it is temporary would have unlocked the prize
+      room for the rest of the run.
 - **A door cannot close if anything occupies a panel cell.** Doors never crush
   anyone.
 - **Closed panels do not block pathfinding** — deliberately. Guards route through
@@ -3155,16 +3186,20 @@ modifier that overrides a [SETTLED] rule**, and for that reason kept out of the 
 pool below: see §11.5a); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
 summon anyone (harder); *"all doors automatic"* generates every doorway frameless
-instead of hinged (§10.4/#452 — harder, and one of the two modifiers **read by
+instead of hinged (§10.4/#452 — harder, and one of the modifiers **read by
 generation** rather than at runtime: see below); the **guard count** moves the §10.2
 baseline by one either way (#232 — *"guards: one more"* harder, *"one fewer"* easier;
-the other generation-time modifier, and the one bounded knob whose baseline is a
+another generation-time modifier, and the one bounded knob whose baseline is a
 neutral middle); *"guards watch consoles"* has a Calm patrol prefer a cell beside a
 console its beat touches and cycle them, so the ground the player must reach is the
 ground that is patrolled (§7.5/#319 — harder; appendix 39); *"search areas shown"* paints
 the area every §7.6 search is sweeping in the Warning orange, so *where* a guard is
 combing is on the board rather than inferred from a wandering cone (§11.5/#224 — easier;
-the *when* is free and unconditional, and only the *where* is priced); *"calm guards detect only their cone"* drops a **Calm**
+the *when* is free and unconditional, and only the *where* is priced); *"locked room"*
+key-gates every doorway of the one room holding the facility's prize and puts a key on
+every guard (§10.4/#236 — harder, the **fifth** modifier read by generation, and the one
+that reaches *past* placement rather than into it: it draws nothing, so both settings are
+the same board and only one room's doorways differ); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
 wedge while a guard that is hunting still watches its sides (easier — an
 **experiment**, see below). This is the
@@ -3183,10 +3218,10 @@ every read site that must handle it. Each field carries a documented **direction
 at least as much pressure as baseline, the easier one reveals at least as much —
 so a flag that changes nothing observable cannot pass for shipped.
 
-> **Two modifiers reach generation, and they reach different parts of it**
-> (§10.4/#452, §10.2/#232). Every other field here is read at runtime or by the
-> renderer, so a directional assertion can hold the *facility* fixed and vary only the
-> rule. Both of these are resolved **before** `generate_level` and threaded in as a
+> **Several modifiers reach generation, and they reach different depths of it**
+> (§10.4/#452, §10.2/#232, §10.4/#236). Every other field here is read at runtime or by
+> the renderer, so a directional assertion can hold the *facility* fixed and vary only
+> the rule. Each of these is resolved **before** `generate_level` and threaded in as a
 > parameter — never consulted from a global, or the generator would have a hidden input
 > and §12.4's determinism would be a claim nobody could check. What they cost differs,
 > and the difference is exactly how deep into generation they reach.
@@ -3206,6 +3241,15 @@ so a flag that changes nothing observable cannot pass for shipped.
 > guards watch. What does shift after placement is everything drawn from the stream
 > behind it (the comms console, the radio clocks), so the two settings are the same
 > *level* played out differently, not the same run.
+>
+> The **locked room** reaches deepest in one sense and shallowest in another: it runs
+> *after* placement, on the finished board, because which room holds the prize is decided
+> by where the crates and consoles landed. And it draws **nothing** — no shuffle, no pick
+> — so it buys the strongest claim of the three: from one seed the two settings carve the
+> same building, place the same board down to each guard's radio clock, and differ in
+> exactly the cells of one room's doorways, where two hinges have become panels. That is
+> what lets its §2.3 assertion be stated per seed and in the simplest possible form: a
+> prize a keyless flood reaches at baseline, it does not reach behind the lock.
 >
 > It is also why adding to this set is not free: a modifier that reaches the **carve**
 > breaks **seed stability**. Dropping the old per-doorway draw shifted the RNG stream,
@@ -3255,7 +3299,11 @@ seed's **carve** is byte-identical at every difficulty — which is what makes t
 arms of a comparison the same building. The pool
 is filtered on the fields' own documented **direction**, which makes §2.3's
 directional assertion true by construction rather than by review; a level deeper than
-its pool takes what exists rather than looping.
+its pool takes what exists rather than looping. The **locked room** (#236) is out of the
+pool on the hidden layout's ground rather than its own: the §13.2 bot has no notion of a
+key, so a `+N` draw that picked it could stand a whole sweep in front of a door the bot
+will not buy its way through, and the numbers would then measure the bot (§13.3). It is
+in every other route into the seam, where it is asked for by name.
 
 > **What "the same building" now means, precisely** (#232). Every pool entry used to be
 > read at runtime, so the ±N arms of a comparison were the same *level* down to the last
@@ -3726,7 +3774,7 @@ Deliberately parked. Each is an experiment for the loop in §13, not a commitmen
 - Smoke screen
 - A deployable drone with its own abilities
 - Rewind a few turns *(nearly free given §12.4)*
-- Keys and locked doors
+- ~~Keys and locked doors~~ *(shipped as the §10.4/§12.6 locked-room modifier, #236)*
 - Electrical circuits and powered doors
 - In-level lore
 - Ability upgrade trees

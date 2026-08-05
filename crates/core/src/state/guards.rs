@@ -499,6 +499,10 @@ impl State {
         self.bodies.push(Body::new(fell, clock, self.turn));
         events.push(Event::CaptureSaved { at });
         events.push(Event::TakenDown { at: fell });
+        // "Everything after that is an ordinary takedown" includes the belt it is
+        // lifted off (§10.4/#236): a guard the Saver put down is as down as any other,
+        // and the key is on every guard.
+        self.take_key_from_guard(fell, events);
     }
 
     /// Pass 6 — each guard `decide`s a step (§7.5) and takes it. A guard moving into

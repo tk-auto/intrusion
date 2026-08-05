@@ -67,7 +67,7 @@ use crate::guard::{
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{DebugModifiers, LevelModifiers};
 use crate::radio;
-use crate::region::{DoorCell, DoorId, RegionId};
+use crate::region::{DoorCell, DoorId, RegionId, RegionKind};
 use crate::rng::Rng;
 use crate::status::MessageHistory;
 use crate::targeting::Targeting;
@@ -374,6 +374,18 @@ enum BumpKind {
     /// hinge. Only an **open panel** is *not* a door action: it classifies as
     /// [`BumpKind::Move`], the walk-through, exactly as the bump resolves.
     Door { action: DoorAction },
+    /// A **key-gated** doorway the player cannot work (§10.4/#236): the locked-room
+    /// modifier's lock, bumped from the corridor side without a key. A free no-op —
+    /// nothing moves, so nothing is charged (§4.4) — and named apart from
+    /// [`Solid`](BumpKind::Solid) so the usable line can say *locked* rather than go
+    /// quiet on a doorway that is plainly a doorway.
+    ///
+    /// Classified **before** every other door arm, so a lock is a lock: it outranks the
+    /// ordinary open, the #148 frame bump and the Autodoors walk-through alike (§8.3 —
+    /// the ability opens doors, it does not pick locks). An **open** keyed door is not
+    /// here at all: what the lock refuses is the handle, never the doorway (§10.4), so
+    /// a keyed door standing open is walked through like any other.
+    DoorLocked,
     /// The **hinge of a door the player's immediately preceding action opened**
     /// (#320): the close is withheld for exactly that one action, so the frame is a
     /// **dead bump** — offered to the #57 lateral shift, which rounds the player onto
@@ -442,6 +454,7 @@ impl BumpKind {
             BumpKind::Door {
                 action: DoorAction::Closed,
             } => Some(Affordance::CloseDoor),
+            BumpKind::DoorLocked => Some(Affordance::LockedDoor),
             BumpKind::Hide => Some(Affordance::Hide),
             BumpKind::EnterDuct => Some(Affordance::EnterDuct),
             BumpKind::EnterExitDuct => Some(Affordance::EnterExit),
@@ -674,6 +687,16 @@ pub struct State {
     /// construction: nothing in the loop writes `false`, so there is no window in which
     /// the net could come back and no timer to read.
     radio_silenced: bool,
+    /// Whether the player is carrying a guard's **key** (§10.4/#236) — what opens the
+    /// prize room the locked-room modifier shuts. Every guard carries one, so any
+    /// takedown (§7.2) sets it, and like [`radio_silenced`](Self::radio_silenced) it is
+    /// one-way: nothing in the loop writes `false`. A key is a key; having taken it off
+    /// a guard once, you do not go on needing another.
+    ///
+    /// It is a plain flag rather than an inventory because there is exactly one lock in
+    /// the building and one key that opens it. A per-door key would be a search on top
+    /// of a takedown, which is a second price for one rule (§2.3).
+    holds_key: bool,
     exit: Cell,
     turn: u32,
     /// The facility-wide alert (§7.3): the [`Alert`] ladder's rung and the tallies
@@ -939,6 +962,8 @@ impl State {
             caches: Vec::new(),
             exchange: None,
             radio_silenced: false,
+            // Nobody starts a raid holding the building's keys (§10.4/#236).
+            holds_key: false,
             exit,
             turn: 0,
             alert: Alert::new(),
@@ -1686,6 +1711,7 @@ impl State {
                 self.bodies
                     .push(Body::new(target, guard.radio_clock(), self.turn));
                 events.push(Event::TakenDown { at: target });
+                self.take_key_from_guard(target, events);
                 true
             }
             // An aware guard has you in its cone (§7.2's gate): the bump is a
@@ -1875,6 +1901,15 @@ impl State {
                 }
                 DoorAction::Obstructed => false,
             },
+            // A door the key gate refuses (§10.4/#236): free, like every other bump that
+            // changes nothing (§4.4). The `Bumped` event is the same one a wall raises —
+            // the usable line has already said *locked*, one row down, every turn the
+            // player stood there, so a message of its own would be repeating a fact they
+            // read before they pressed.
+            BumpKind::DoorLocked => {
+                events.push(Event::Bumped { into: target });
+                false
+            }
             // Autodoors (§8.3/§7.6): the closed door in the player's path opens as
             // they step into it — no manual bump — and the same step carries them
             // through onto the panel, saving the open-turn. The door is armed to
@@ -2259,6 +2294,14 @@ impl State {
             return BumpKind::SilenceRadio;
         }
         if let Some(action) = self.layout.preview_door_bump(target, |c| self.occupied(c)) {
+            // The locked prize room (§10.4/#236), ahead of every other door arm: a key
+            // gate refuses the handle, so there is no open to withhold, no frame to
+            // slide past and no Autodoors step to take. Only the *closed* door is
+            // reached here at all — an open panel never previews as a door action, so a
+            // keyed door standing open is walked through like any other (the slip-in).
+            if self.key_gate_refuses(target) {
+                return BumpKind::DoorLocked;
+            }
             // The withheld frame (#320): the hinge of the door the player's *previous*
             // action opened does not shut it — for that one action it is a dead bump
             // that the #57 slide can round instead, so a player walking into a doorway

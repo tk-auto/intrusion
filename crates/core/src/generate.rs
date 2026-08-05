@@ -60,6 +60,7 @@ mod ducts;
 mod exit_duct;
 mod features;
 mod hideouts;
+mod locks;
 mod sightlines;
 mod walls;
 use carve::*;
@@ -67,6 +68,7 @@ use doors::*;
 use ducts::*;
 use features::*;
 use hideouts::*;
+use locks::*;
 use sightlines::*;
 use walls::*;
 
@@ -508,6 +510,22 @@ pub fn generate_level(
         // redraw is a pure function of the attempts before it (§12.4).
         let before_placement = rng.clone();
         if let Some(placement) = place(&layout, config, rng) {
+            // **The locked prize room** (§10.4/§12.6/#236), last of all: the room to
+            // shut is decided by where the crates and consoles landed, so it cannot be
+            // chosen any earlier — and it draws nothing, so a seed carves and places the
+            // same board whether the modifier is on or off (§12.4). A board the lock
+            // would seal the way out (or every guard) behind is rejected here with the
+            // rest of the §10.6 shortfalls, and the carve is redrawn.
+            if modifiers.prize_room_locked {
+                let Some(locked) = lock_prize_room(&mut layout, &placement) else {
+                    *rng = before_placement;
+                    continue;
+                };
+                if !unlocked_reach_holds(&layout, &placement, locked) {
+                    *rng = before_placement;
+                    continue;
+                }
+            }
             // Record where the comms console goes; `State::new` stamps it, with the
             // other solid usables — see the doc comment above.
             layout.comms_console = Some(placement.comms());

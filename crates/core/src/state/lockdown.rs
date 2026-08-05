@@ -126,18 +126,83 @@ impl State {
         self.layout.release_sealed_doors();
     }
 
-    /// Whether the door at `cell` is locked (§10.4/#242) — the question the guard's
-    /// walk-in open asks before it works a handle.
+    /// Whether the door at `cell` is locked **against a guard** (§10.4/#242) — the
+    /// question the guard's walk-in open asks before it works a handle.
     ///
     /// Deliberately keyed on the *door*, not on the cell's terrain: a lock is a fact
-    /// about the doorway, and a sealed door standing open is still sealed. Every lock
-    /// source answers here, so #236's key-gated doors will refuse a guard through the
-    /// same call.
+    /// about the doorway, and a sealed door standing open is still sealed.
+    ///
+    /// Only the **seal** answers here (#236). A key-gated door is one every guard
+    /// carries the key to — that is the modifier's fiction and, mechanically, the whole
+    /// reason it works: a locked room a patrol never opened would never open at all,
+    /// and the slip-in behind a guard (§10.4) would not exist. So the two lock sources
+    /// share one field and are read apart at exactly the two seams that care: guards
+    /// here, and the player's own bump in [`bump_kind`](super::State::bump_kind).
     pub(super) fn door_locked_at(&self, cell: Cell) -> bool {
         let regions = self.layout.regions();
         regions
             .door_at(cell)
-            .is_some_and(|id| regions.door(id).is_locked())
+            .is_some_and(|id| regions.door(id).lock().is_sealed())
+    }
+
+    /// Whether the player's bump on the door at `cell` is **refused by its key gate**
+    /// (§10.4/#236) — the one thing the locked prize room actually does.
+    ///
+    /// Three ways it is not refused, and the third is the rule that keeps the modifier
+    /// out of §2.2's soft-lock class:
+    ///
+    /// - the door carries no key gate (every door on a baseline facility);
+    /// - the player **holds a key**, taken off a guard (§7.2) — it opens every keyed
+    ///   door in the building for the rest of the level;
+    /// - the player is stood **inside the room the door locks**. The lock is on the way
+    ///   in, never on the way out, so a player who slipped in behind a guard and watched
+    ///   the door shut is never sealed in. Every door joins a room to a corridor
+    ///   (§10.1.4), so "inside" is simply the door's **Room** endpoint — there is
+    ///   nothing to remember and nothing that can fall out of step with the board.
+    pub(super) fn key_gate_refuses(&self, cell: Cell) -> bool {
+        if self.holds_key {
+            return false;
+        }
+        let regions = self.layout.regions();
+        let Some(id) = regions.door_at(cell) else {
+            return false;
+        };
+        if !regions.door(id).is_keyed() {
+            return false;
+        }
+        let standing_in = regions.region_at(self.player);
+        let inside = regions
+            .door(id)
+            .regions()
+            .into_iter()
+            .any(|r| regions.kind(r) == RegionKind::Room && Some(r) == standing_in);
+        !inside
+    }
+
+    /// Take the **key** off a guard that has just gone down at `at` (§7.2/§10.4/#236) —
+    /// the one thing the locked-room modifier hangs on the takedown.
+    ///
+    /// Straight to hand, not onto the body. The body is already the takedown's price
+    /// (§7.2/§7.3), and a key that had to be picked up off the floor would be a second
+    /// errand for one rule and a second thing to lose to a guard walking past.
+    ///
+    /// Silent on a facility with no lock in it, and silent after the first: the flag is
+    /// one-way, so the event fires exactly once per run and only where it means
+    /// something. Called from both takedown sites — the bump and the Saver — because a
+    /// guard that is down is down (§8.3/#243).
+    pub(super) fn take_key_from_guard(&mut self, at: Cell, events: &mut Vec<Event>) {
+        if !self.modifiers.prize_room_locked || self.holds_key {
+            return;
+        }
+        self.holds_key = true;
+        events.push(Event::KeyTaken { at });
+    }
+
+    /// Whether the player is carrying a guard's key (§10.4/#236) — read by the shell
+    /// and by the §13.2 bot, which both have to know whether the locked room is a wall
+    /// or a door for them.
+    pub fn holds_key(&self) -> bool {
+        self.holds_key
     }
 
     /// The cells a **guard's route** must treat as solid because a seal holds them
@@ -154,11 +219,15 @@ impl State {
     /// It is handed to the router as blocked cells rather than stamped into terrain,
     /// because the lock is live state on the door (§11.3) and the *player's* routing is
     /// deliberately unchanged by it — the one asymmetry this ability is made of.
+    /// **Seals only** (#236): a guard carries the key to a key-gated door, so its route
+    /// runs through one exactly as it always did — which is what keeps the locked room
+    /// on a patrol's beat, and the guard traffic through it is the player's one way in
+    /// without a key (§10.4).
     pub(super) fn sealed_route_blocks(&self) -> Vec<Cell> {
         let regions = self.layout.regions();
         regions
             .doors()
-            .filter(|(_, door)| door.is_locked() && !door.is_open())
+            .filter(|(_, door)| door.lock().is_sealed() && !door.is_open())
             .flat_map(|(_, door)| door.panels().iter().copied())
             .collect()
     }
@@ -174,11 +243,31 @@ impl State {
     /// through the fog because it is the player's own gadget: your lock is not
     /// something the building can keep from you (the same reasoning that lets the
     /// effect footprint reach over unseen ground, §11.5).
+    /// **Seals only** (#236): this mark says *your gadget is holding this door*, and a
+    /// key gate is the building's lock rather than one of your things. The prize room's
+    /// doors are cued on their own channel ([`keyed_door_cells`](Self::keyed_door_cells)).
     pub fn sealed_door_cells(&self) -> impl Iterator<Item = Cell> + '_ {
         self.layout
             .regions()
             .doors()
-            .filter(|(_, door)| door.is_locked())
+            .filter(|(_, door)| door.lock().is_sealed())
+            .flat_map(|(_, door)| door.cells().collect::<Vec<_>>())
+    }
+
+    /// Every cell of every **key-gated** door (§10.4/#236) — what the renderer paints
+    /// [`Neutral`](crate::Category) so a locked doorway reads as the inert thing it is
+    /// until the key is in hand, and goes back to the ordinary System tan the moment it
+    /// is (§11.2/§11.3).
+    ///
+    /// Unlike the seal's mark this is a fact about the **building**, not about the
+    /// player's gadget, so it is drawn only where the fog allows — the renderer's own
+    /// rule. Which room is locked is something you find out by walking up to it, or by
+    /// reading the run's card (§12.6).
+    pub fn keyed_door_cells(&self) -> impl Iterator<Item = Cell> + '_ {
+        self.layout
+            .regions()
+            .doors()
+            .filter(|(_, door)| door.is_keyed())
             .flat_map(|(_, door)| door.cells().collect::<Vec<_>>())
     }
 }
