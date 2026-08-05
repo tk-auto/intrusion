@@ -5,7 +5,7 @@ use crate::facility::{Facility, Terrain};
 use crate::guard::Guard;
 use crate::state::{Event, Input, State, CONFUSION_RADIUS};
 use crate::test_support::open_room;
-use crate::LevelModifiers;
+use crate::{LayoutKnowledge, LevelModifiers};
 
 /// A hand-built state on a `w × h` walled box: the player, some guards, and a far
 /// exit, no objectives. Enough to render. Faces **south**, toward where these
@@ -1226,10 +1226,10 @@ fn an_unscouted_doorway_reads_as_a_gap_in_the_wall_line() {
     );
 }
 
-/// The §12.6 `full_layout_known` modifier, directional (§2.3's anti-facade
-/// guard): with it on, geometry the player has never had eyes on draws as the
-/// real building instead of the schematic — the same picture the game gave
-/// everyone before #307.
+/// The §12.6 layout knob's **easier** end ([`LayoutKnowledge::Full`]), directional
+/// (§2.3's anti-facade guard): with it on, geometry the player has never had eyes
+/// on draws as the real building instead of the schematic — the same picture the
+/// game gave everyone before #307.
 ///
 /// And the line it must not cross: it buys the **architecture, not the
 /// objectives**. A console and a cupboard are contents (§11.5a), so they stay
@@ -1238,7 +1238,7 @@ fn an_unscouted_doorway_reads_as_a_gap_in_the_wall_line() {
 /// quietly become a cheat rather than a difficulty knob.
 #[test]
 fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
-    let build = |layout_known: bool| {
+    let build = |knowledge: LayoutKnowledge| {
         let mut layout = open_room(20, 20);
         layout.place(Cell::new(8, 15), Terrain::DoorPanelClosed);
         layout.place(Cell::new(9, 15), Terrain::DuctEntry);
@@ -1253,13 +1253,13 @@ fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
             Cell::new(18, 18),
         )
         .with_modifiers(LevelModifiers {
-            full_layout_known: layout_known,
+            layout_knowledge: knowledge,
             ..LevelModifiers::default()
         })
     };
 
     // Baseline: the schematic, as everywhere else in this module.
-    let g = render(&build(false));
+    let g = render(&build(LayoutKnowledge::Plans));
     assert_eq!(
         g.get(8, 15).glyph,
         ' ',
@@ -1270,7 +1270,7 @@ fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
 
     // Modifier on: the building, drawn — and still honestly reported as
     // never-explored on the seam, because it has not been.
-    let g = render(&build(true));
+    let g = render(&build(LayoutKnowledge::Full));
     assert_eq!(g.get(8, 15).glyph, '+', "the doorway is on the plans");
     assert_eq!(g.get(9, 15).glyph, '=', "so is the duct mouth");
     assert_eq!(g.get(12, 16).glyph, 'π', "so is the furniture");
@@ -1292,6 +1292,228 @@ fn the_full_layout_modifier_reveals_the_building_but_not_its_contents() {
         ' ',
         "and so does an unscouted console — masked by the floor space around it",
     );
+}
+
+/// The same knob's **harder** end ([`LayoutKnowledge::None`], #233): with it on, ground
+/// the player has never had eyes on draws as **nothing at all** — not the schematic,
+/// not a dimmer one. Route-planning stops being free and becomes what exploring buys.
+///
+/// This is the one modifier that overrides a [SETTLED] rule (§11.5a: *"geometry —
+/// always visible, from turn one. Never fogged."*), so what the test pins is the whole
+/// of what the override is allowed to be: the **unexplored** layer, and nothing else.
+///
+/// The **exit** is the exception it must not take away. It is the tunnel the player dug
+/// and came in by (§4.5), and with the building gone it is the one fixed point an escape
+/// plan can still be hung on (§7.6). If this ever goes green on a blank `E`, the run has
+/// lost its anchor.
+#[test]
+fn the_unknown_layout_modifier_hides_the_building_until_it_is_walked() {
+    let build = |knowledge: LayoutKnowledge| {
+        let mut layout = open_room(20, 20);
+        // A wall run with a framed doorway, well behind the north-facing player, plus
+        // the fabric and the contents the schematic sorts between.
+        for x in 6..=12 {
+            layout.place(Cell::new(x, 15), Terrain::Wall);
+        }
+        layout.place(Cell::new(8, 15), Terrain::DoorHinge);
+        layout.place(Cell::new(9, 15), Terrain::DuctEntry);
+        layout.place(Cell::new(10, 15), Terrain::Hideout);
+        layout.place(Cell::new(12, 16), Terrain::PartialCover);
+        layout.place(Cell::new(16, 2), Terrain::Exit);
+        State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(14, 16)],
+            Cell::new(16, 2),
+        )
+        .with_modifiers(LevelModifiers {
+            layout_knowledge: knowledge,
+            ..LevelModifiers::default()
+        })
+    };
+
+    // Baseline first, so the test states what it is taking away: the plans read as
+    // fabric and gaps, and the far corner of the box is a wall run on the map.
+    let g = render(&build(LayoutKnowledge::Plans));
+    assert_eq!(g.get(6, 15).glyph, SCHEMATIC_WALL, "wall run, on the plans");
+    assert_eq!(g.get(9, 15).glyph, SCHEMATIC_WALL, "duct mouth is fabric");
+    assert_eq!(g.get(19, 19).glyph, SCHEMATIC_WALL, "the far box corner");
+
+    // The modifier on: every one of those is blank, and blank in the same colourless
+    // way — the §11.5a masking rule is what stops the fog leaking what it hides, so a
+    // cell that draws nothing must also carry no ink for the category channel.
+    let g = render(&build(LayoutKnowledge::None));
+    for (cell, what) in [
+        (Cell::new(6, 15), "a wall run"),
+        (Cell::new(8, 15), "a door frame"),
+        (Cell::new(9, 15), "a duct mouth"),
+        (Cell::new(10, 15), "a cupboard"),
+        (Cell::new(12, 16), "a table"),
+        (Cell::new(14, 16), "a console"),
+        (Cell::new(19, 19), "the far box corner"),
+    ] {
+        let drawn = g.get(cell.x, cell.y);
+        assert_eq!(drawn.glyph, ' ', "{what} should draw nothing");
+        assert_eq!(
+            drawn.fg,
+            Category::Ground,
+            "{what} must not be told apart by colour either",
+        );
+        assert_eq!(drawn.vis, Visibility::Unexplored, "{what}");
+    }
+
+    // The exit is still yours, from turn one, with its own face and its own colour.
+    let exit = g.get(16, 2);
+    assert_eq!(exit.glyph, 'E', "the tunnel you came in by is never fogged");
+    assert_eq!(exit.fg, Category::Interest);
+
+    // And what the player *can* see is untouched: the modifier moves the unexplored
+    // layer and only that.
+    let lit = g.get(10, 9);
+    assert_eq!(lit.glyph, FLOOR_DOT, "floor in the FOV is floor");
+    assert_eq!(lit.vis, Visibility::Live);
+}
+
+/// The directional assertion §2.3 requires of every shipped modifier, over the whole
+/// knob at once (#225/#233): along `Full → Plans → None` each setting draws a
+/// **subset** of what the one before it draws, on the same seed and the same inputs.
+///
+/// It is stated as a subset rather than as a count because that is the promise the
+/// captions make — the easier end *reveals at least as much* as the baseline, the
+/// harder end *at most as much* — and a count could hold while the two settings drew
+/// different cells. What the player has actually seen is asserted **equal** across all
+/// three: a knob over the plans may not touch memory.
+#[test]
+fn the_layout_knob_only_ever_reveals_less_as_it_hardens() {
+    let build = |knowledge: LayoutKnowledge| {
+        let mut layout = open_room(24, 20);
+        for x in 4..=14 {
+            layout.place(Cell::new(x, 15), Terrain::Wall);
+        }
+        layout.place(Cell::new(7, 15), Terrain::DoorHinge);
+        layout.place(Cell::new(8, 15), Terrain::DoorPanelClosed);
+        layout.place(Cell::new(9, 15), Terrain::DoorHinge);
+        layout.place(Cell::new(11, 15), Terrain::DuctEntry);
+        layout.place(Cell::new(13, 15), Terrain::Hideout);
+        layout.place(Cell::new(16, 16), Terrain::PartialCover);
+        State::new(
+            layout,
+            Cell::new(10, 10),
+            Direction::North,
+            Vec::new(),
+            [Cell::new(18, 17)],
+            Cell::new(21, 3),
+        )
+        .with_modifiers(LevelModifiers {
+            layout_knowledge: knowledge,
+            ..LevelModifiers::default()
+        })
+    };
+    let drawn = |knowledge| {
+        let s = build(knowledge);
+        let g = render(&s);
+        let seen: Vec<Cell> = (0..20)
+            .flat_map(|y| (0..24).map(move |x| Cell::new(x, y)))
+            .filter(|c| g.get(c.x, c.y).glyph != ' ')
+            .collect();
+        (s, seen)
+    };
+
+    let (state, full) = drawn(LayoutKnowledge::Full);
+    let (_, plans) = drawn(LayoutKnowledge::Plans);
+    let (_, none) = drawn(LayoutKnowledge::None);
+
+    assert!(
+        plans.iter().all(|c| full.contains(c)),
+        "the schematic must reveal no cell the full layout does not",
+    );
+    assert!(
+        none.iter().all(|c| plans.contains(c)),
+        "hiding the layout must reveal no cell the schematic does not",
+    );
+    assert!(
+        none.len() < plans.len() && plans.len() < full.len(),
+        "each step must actually bite: {} < {} < {}",
+        none.len(),
+        plans.len(),
+        full.len(),
+    );
+
+    // Everything the player has genuinely seen draws identically under all three —
+    // the knob is over the *plans*, and memory is not its to move (§11.5a).
+    let g_full = render(&build(LayoutKnowledge::Full));
+    let g_none = render(&build(LayoutKnowledge::None));
+    for cell in state.player_fov().cells() {
+        assert_eq!(
+            g_full.get(cell.x, cell.y),
+            g_none.get(cell.x, cell.y),
+            "seen ground must not depend on the knob at {cell:?}",
+        );
+    }
+}
+
+/// The layout knob is **presentation of knowledge, never physics** (§11.5a/§12.1), and
+/// determinism (§12.4) is the sharp way to say so: from the same seed, the same
+/// modifiers-but-for-this-knob and the same inputs, the run the core steps is identical
+/// under all three settings — the same events, the same outcome, the same player.
+///
+/// It matters beyond tidiness. A guard's sight, a search's flush box and the §9 sense
+/// all read the *facility*, not the fog, so a knob that quietly reached any of them
+/// would make "the player cannot see the wall" mean "the guard cannot either". What the
+/// knob moves is the picture, and the picture is what the last assertion checks did
+/// move.
+#[test]
+fn hiding_the_layout_changes_the_picture_and_not_the_run() {
+    let inputs: Vec<Input> = std::iter::once(Input::Step(Direction::West))
+        .chain(std::iter::repeat_n(Input::Wait, 40))
+        .collect();
+    let run = |knowledge| {
+        let mut layout = open_room(16, 12);
+        layout.place(Cell::new(4, 5), Terrain::Hideout);
+        layout.place(Cell::new(4, 4), Terrain::Wall);
+        let mut s = State::new(
+            layout,
+            Cell::new(5, 5),
+            Direction::North,
+            vec![Guard::patrolling(Cell::new(5, 1))],
+            Vec::new(),
+            Cell::new(14, 10),
+        )
+        .with_rng(crate::rng::Rng::new(0x125))
+        .with_modifiers(LevelModifiers {
+            layout_knowledge: knowledge,
+            ..LevelModifiers::default()
+        });
+        let events: Vec<Event> = inputs.iter().flat_map(|&i| s.step(i)).collect();
+        (
+            events,
+            s.outcome(),
+            s.player(),
+            s.hidden(),
+            s.turn(),
+            render(&s),
+        )
+    };
+
+    let plans = run(LayoutKnowledge::Plans);
+    let hidden = run(LayoutKnowledge::None);
+    let given = run(LayoutKnowledge::Full);
+    assert_eq!(
+        (&plans.0, plans.1, plans.2, plans.3, plans.4),
+        (&hidden.0, hidden.1, hidden.2, hidden.3, hidden.4),
+        "hiding the layout must not reach the simulation",
+    );
+    assert_eq!(
+        (&plans.0, plans.1, plans.2, plans.3, plans.4),
+        (&given.0, given.1, given.2, given.3, given.4),
+        "nor must handing it over",
+    );
+    // The picture, though, is three different pictures — or the knob is a facade
+    // (§2.3).
+    assert_ne!(plans.5, hidden.5);
+    assert_ne!(plans.5, given.5);
 }
 
 /// Terrain categories follow §11.2: an exit and a console are Interest, a hideout

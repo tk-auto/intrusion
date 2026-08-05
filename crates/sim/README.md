@@ -68,12 +68,20 @@ newly shipped ability is spellable the day it lands. The modifier names are the
 
 ```
 guards-always-search-hideouts   sighting-lost-calls-a-guard   body-found-calls-two-guards
-always-show-vision-cones        full-layout-known             automatic-doors
-guard-count-more                guard-count-fewer
+always-show-vision-cones        layout-knowledge-full         layout-knowledge-none
+automatic-doors                 guard-count-more              guard-count-fewer
 ```
 
-The last three are read by **generation** rather than at runtime, and they are not
-read at the same depth (§12.6):
+`layout-knowledge-full` / `layout-knowledge-none` (#307/#233) are a knob's two ends
+like the guard count below, over how much of the building a run is given before
+setting foot in it. **The bot cannot honestly play the `none` end**: it is granted
+geometry unconditionally ([`docs/bot-behaviour.md`](../../docs/bot-behaviour.md) §2, on
+the authority of the §11.5a rule that end overrides), so it routes through walls it has
+never seen. Naming it is useful for `--inspect` and for a replay a human plays; a batch
+that names it measures the bot rather than the game (§13.3).
+
+`automatic-doors` and the two `guard-count-*` ends are read by **generation** rather
+than at runtime, and they are not read at the same depth (§12.6):
 
 - `automatic-doors` (#452) decides whether a doorway is a hinged manual door or a
   frameless automatic one, so it reaches the **carve**: a batch that names it plays a

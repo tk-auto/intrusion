@@ -35,7 +35,7 @@ raw `State` internals. This is the constraint everything else is built inside:
 
 | Channel | What the bot may use |
 |---|---|
-| **Geometry** | Always known — walls, floors, doors, hideouts (§11.5a: *"geometry always"*). So is the **exit**: it is the player's own tunnel, the way they came in |
+| **Geometry** | Always known — walls, floors, doors, hideouts (§11.5a: *"geometry always"*). So is the **exit**: it is the player's own tunnel, the way they came in. **One modifier makes this a cheat — see below** |
 | **Contents** | *Fogged.* Intel consoles are unknown until seen and remembered after (`State::memory`). The bot cannot route to a console it has never laid eyes on — it explores to find them, exactly as a player must |
 | **Guards** | Through `State::perceive_guard` (§9.2). A **seen** guard's cone is known and avoided (the danger overlay, §11.5); a **sensed** guard is a bare position to keep away from; one that is neither is invisible. The §9.5 fading marks (`State::sense_marks`) are deliberately *not* read: a trail is the board reminding a human of what it showed a turn ago, and the bot reads the live channel directly, so using it would double-count what it already knows |
 | **Rules** | Asked of core, never re-implemented. Routing asks `Terrain::routes_player`; ability legality asks the contextual `AbilityState` |
@@ -44,6 +44,25 @@ That last row is load-bearing and easy to erode. A private copy of a game rule
 inside the bot is how its metrics quietly stop describing *this* game — so the
 routing predicate and the ability-legality predicate are both thin wrappers over
 core's own answer, and there are tests whose only job is to keep them that way.
+
+> **The geometry row has one known hole, and it is written here rather than left to be
+> discovered** (#233). That row rests on §11.5a's **[SETTLED]** rule that geometry is
+> never fogged — and the layout knob's hard end (`--modifier layout-knowledge-none`)
+> deliberately overrides exactly that rule. Under it the *player* sees only what they
+> have walked; the bot still reads the whole facility, so it routes confidently through
+> walls it has never seen, never explores to find a way round, and never pays the price
+> the modifier exists to charge.
+>
+> So: **a batch under that modifier measures the bot, not the game** (§13.3), and no
+> number from one belongs in a balance argument. The modifier is kept out of the §12.6
+> directed pool partly for this reason, so no difficulty draw can put a batch there by
+> accident; naming it explicitly is still allowed, because `--inspect` and a captured
+> replay show what the *player* would be shown and that is worth looking at.
+>
+> Closing the hole means giving the bot an **optimistic explorer**: route over known
+> geometry, treat the unseen as passable until a bump says otherwise, and re-plan on
+> what it learns — which is a change to the routing core of the policy, not a flag. It
+> is its own piece of work, and until it lands this modifier is judged by playing it.
 
 ## 3. The decision loop
 

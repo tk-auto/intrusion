@@ -1089,7 +1089,7 @@ const LOCKDOWN: Ability = Ability {
 // here: held is on (§8.2/#264), so the protection is never mistimed and there is no
 // turn spent buying it. What replaces the cooldown is the scarcer bound the same
 // section already offers — **one use per facility** (§8.2/#302) — which is stricter
-// than any cooldown can be: a lockout ends, and this does not (appendix 42).
+// than any cooldown can be: a lockout ends, and this does not (appendix 43).
 //
 // **What it costs.** The loadout slot, permanently (§8.2's answer for every passive)
 // — this is one of three, held instead of a flight tool for every other crisis of the

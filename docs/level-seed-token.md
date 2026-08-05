@@ -62,7 +62,7 @@ no token (§6).
 
 A held set — the active modifiers, the tech a run holds — is encoded as a
 **combination index over 256 reserved slots**, not over the entries that exist today
-(six tech and sixteen modifier slots as of writing).
+(six tech and seventeen modifier slots as of writing).
 
 This is the single most important property of the format.
 
@@ -105,9 +105,19 @@ version bump, and every link ever shared stops decoding. Two slots out of 256 ch
 radix at all. **So a knob joins the format for free if its ends can be slots**, and only
 a knob whose values are too many to spell as slots is worth a field.
 
+**A knob's ends need not be adjacent, and one of them may arrive years later.** The
+**layout knob** (#233) is that case: slot 4 was the `full_layout_known` *toggle*, and
+when the opposite rule shipped the two became one knob — the toggle's slot kept its
+meaning as the knob's easier end, and the harder end was **appended at slot 16** rather
+than tidied in beside it. Both halves of that follow the rule above: a slot number is
+permanent, so an existing slot whose meaning is unchanged keeps decoding every token
+ever minted, and a new value takes the next free position wherever that lands. Slot
+order is the wire format; it was never a reading order.
+
 A set naming **both ends at once** is refused by `decode` (§6): the encoder cannot
 produce one, so it describes no run, and there is no honest way to pick which end was
-meant.
+meant. This holds over the slot *pairs*, not over adjacency — the layout knob's ends are
+twelve slots apart.
 
 The compiler helps: `modifier_slots` destructures `LevelModifiers` by name, so a new
 modifier will not compile until it is given a slot.

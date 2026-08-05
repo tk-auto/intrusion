@@ -282,7 +282,7 @@ If you are adding an ability and about to make it free, re-read §2.3.
   > clock — **one use per facility, and no recharge** (§8.2) — so the settled rule is
   > suspended once and then holds for the rest of the building, second guard of the
   > same turn included. It is held like any other tech and it costs a slot like any
-  > other passive; nothing about it is free. **[START]**, and on trial: appendix 42
+  > other passive; nothing about it is free. **[START]**, and on trial: appendix 43
   > records why it is shaped this way and what the sim measured, which is that a bot
   > handed a free first capture wins nearly twice as often. Promote to a §12.6
   > modifier, retune, or reject — but do not read it as softening the rule above.
@@ -1123,7 +1123,7 @@ whole reason the architecture looks the way it does.
 | **Confusion** | 1 turn | — (instant) | 45 | **Fired once**, from the cell you press it in (#325). Every guard standing within the blast at that moment — `CONFUSION_RADIUS`, through walls like the guard sense (§9) — is **blinded and frozen** for `CONFUSION_DAZE_TURNS` (**6** **[START]**), a countdown each guard carries itself. A costed panic-buy of time, not a kill: a dazed chaser **pauses** (keeps its lead), it does not reset. **After the flash, distance stops mattering** — a guard you run away from stays dazed, and one that walks into the cells the blast covered was never in it and is untouched, which is what keeps it from being a no-guard-may-act field you carry. Capture-is-contact still holds (§4.5): a dazed adjacent guard cannot step into you, but the daze is no shield to walk into a guard the blast never caught, and a frozen guard's cell stays solid. **The clamp [SETTLED]:** the reach fired is `min(CONFUSION_RADIUS, sense_range())`, so the blast can never freeze what you cannot sense — inert on open floor (`min(6, 10)`), and shrunk to **5** inside a duct (§10.7). It can only ever shrink the blast, never widen it. A firing with nothing in reach is a **free no-op** with a near-line message (§4.4/§8.4); a real firing says how many it caught (§11.7). The long cooldown is what keeps it rare (#240). Appendix 24. |
 | **Pierce Wall** | 1 turn | — (instant) | — | **Bore straight through your one adjacent wall**, permanently. Usable only when **exactly one** of your four neighbours is a wall, so the target is unique by precondition and there is nothing to aim (§8.4) — which also rules the panic-bore out by construction, since a corridor and a corner both have two. The facility's outer shell is never a candidate (§1/§4.5); nothing else is off limits. It does **not** ask what is behind the wall — boring a two-cell-thick run (§10.1.5) opens a one-cell **pocket**, which is a use of the tool rather than a waste of it. It conceals nothing (it is not a cupboard, §10.3), so **three walls around you means you can dig a hole to hide in, never a tunnel**. Its scarcity is a **per-level use budget of 3** (§8.2), not a clock. The hole is real terrain in the one spatial model (§10.5) — guards route through it and see through it, for the rest of the level. Appendix 24. |
 | **Lockdown** | 1 turn | 8 | 40 | While active, every door within `LOCKDOWN_RADIUS` of **where you fired it** is **shut and sealed** — a guard cannot get it open, so its route goes the long way round (§7.6/§10.4). (It used to say *"cannot work the handle"*; on an all-automatic level there is no handle to work — §10.4/#452 — and the seal holds the door shut whatever kind it is.) A **snapshot**, not a travelling bubble: a door does not unseal because you walked away from it. **You** are never refused — a sealed door bumps open for you exactly as any closed door does, which is what stops a lockdown ever boxing its owner in; that costs the turn and leaves the door *open*, so a lockdown fired across a route you still have to travel is a real mistake. **Every seal is released when the window ends**, expiry or early toggle-off alike (§8.2) — the duration is the only clock, which is what keeps a temporary wall from ever becoming the permanent one §2.2/§7.2 forbid. A lockdown with **no door in reach** is refused for free (§4.4). Appendix 24. |
-| **Saver** | — | **passive** | — | **[START]/experiment (#243).** The **first guard to reach you in a facility takes you down — and instead goes down itself**: §4.5's capturing step is turned into a §7.2 takedown of that guard, which drops **where it stood** (a lunge turned over never arrives, and your own cell may be a cupboard where a body means something else), leaves a body and starts the §7.3 clock. Then it is **spent for the rest of the level** — `1/level` (§8.2), no recharge — so a second guard reaching you the same turn captures you exactly as the settled rule says. There is **no activation**: held is on, which is the whole reason it is a passive rather than the toggle first proposed — a defensive window you have to predict is one you mistime, and §8.2's timing trap needs an activation turn to be a trap at all. **Surviving is not free**: you are left standing beside a body you did not choose the place of, in a cell a guard was walking to, with the radio already counting; and the slot it holds is a flight tool you do not have for every *other* crisis of the run. **This is the one declared exception to a [SETTLED] rule (§4.5)** — it is on trial, and the sim says it is strong: a fearless bot handed it wins nearly twice as often (appendix 42). |
+| **Saver** | — | **passive** | — | **[START]/experiment (#243).** The **first guard to reach you in a facility takes you down — and instead goes down itself**: §4.5's capturing step is turned into a §7.2 takedown of that guard, which drops **where it stood** (a lunge turned over never arrives, and your own cell may be a cupboard where a body means something else), leaves a body and starts the §7.3 clock. Then it is **spent for the rest of the level** — `1/level` (§8.2), no recharge — so a second guard reaching you the same turn captures you exactly as the settled rule says. There is **no activation**: held is on, which is the whole reason it is a passive rather than the toggle first proposed — a defensive window you have to predict is one you mistime, and §8.2's timing trap needs an activation turn to be a trap at all. **Surviving is not free**: you are left standing beside a body you did not choose the place of, in a cell a guard was walking to, with the radio already counting; and the slot it holds is a flight tool you do not have for every *other* crisis of the run. **This is the one declared exception to a [SETTLED] rule (§4.5)** — it is on trial, and the sim says it is strong: a fearless bot handed it wins nearly twice as often (appendix 43). |
 | **Vision** | — | **passive** | — | **Always on while held** (§8.2): your sight arc is the full **360°** and your range box grows from 15 to **20** (§5/§6.1). No activation, no turn, no cooldown — it costs the loadout slot and nothing else. **Vision only**: the guard sense (§9) is a separate, innate channel and is deliberately *not* widened with it, so a wait still buys something (§9.1). It erodes the §5 "can't see behind you" constraint on purpose — that is what makes it worth a permanent slot, and what the sim watches (#265). |
 
 Notes carried forward, because they are good and non-obvious:
@@ -2591,9 +2591,48 @@ so a watched cell out of your sight still paints red, now with nothing on top of
 > are everywhere — slating all of them would bury the two or three marks that change a
 > plan. A colour that marks everything marks nothing.
 >
-> **The cost is meant to be payable.** §12.6's `full_layout_known` modifier hands
-> the whole layout over as an *easier*-direction modifier — so under the directed
-> difficulty draw it is bought with pressure taken on elsewhere, never given away.
+> **The cost is meant to be payable.** §12.6's layout knob (`layout_knowledge`) hands
+> the whole layout over at its `Full` end as an *easier*-direction modifier — so under
+> the directed difficulty draw it is bought with pressure taken on elsewhere, never
+> given away.
+
+> **The one deliberate override of this rule, and it is a modifier** (#233). The same
+> knob's hard end, `layout_knowledge: None`, fogs the **geometry layer too**: ground the
+> player has never had eyes on draws as nothing at all, and only what has been seen is
+> on the board. The first row of the table above is then false for that run, on purpose.
+>
+> It is stated here rather than hidden in §12.6 because a **[SETTLED]** rule that
+> something quietly bends is not settled. The bending is confined to one modifier, the
+> base game keeps the visible layout, and a run that gives it up says so on its card
+> (*"Layout unknown"*, harder).
+>
+> **What it costs is the pillar this section was written to protect.** Read the §7.6
+> note two paragraphs down — *"a player who is chased and improvising in unknown
+> geometry is not playing a stealth game, they're rolling dice"* — and then read it as
+> a description of what this modifier turns on. That is the modifier's whole content:
+> route-planning stops being free and becomes what exploring buys, and a chase through
+> ground you have not scouted is exactly the dice-roll the doc warns of. It is therefore
+> **not a difficulty step** and stays out of §12.6's directed pool: a player who asked
+> for *+1 harder* would be handed a different game, not a harder facility.
+>
+> **The exit is the exception that keeps the run playable.** It draws as itself from
+> turn one like always (row five), and with the building gone it is the one fixed point
+> an escape plan can still be hung on. The **§9 guard sense** is likewise untouched: a
+> sensed guard is still a bare position through walls, so the player gets a dot floating
+> in blank space and does not know what stands between them and it. That reads oddly and
+> is meant to — the sense was never line of sight, and special-casing it here would
+> invent a second knowledge rule for one channel to paper over the first one's
+> consequences.
+>
+> **The sim cannot yet weigh it.** The §13.2 bot is granted geometry unconditionally on
+> this section's authority ([`bot-behaviour.md`](bot-behaviour.md) §2), so with the
+> layout hidden it routes through walls it has never seen: a batch that names the
+> modifier measures the bot, not the game (§13.3). Teaching the bot to explore unknown
+> geometry is its own piece of work, and until it exists this modifier is judged by
+> playing it.
+>
+> Why it is a knob's end rather than a second toggle, and why the pool cannot draw it:
+> appendix 42.
 
 This resolves the tension between two pillars that pull against each other:
 
@@ -3060,11 +3099,16 @@ A **level modifier** is a named toggle or bounded knob that shifts a facility's
 flips a rule an existing system already owns rather than adding a parallel one:
 *"guards always search hideouts"* forces the §7.6 search to check occupied
 cupboards unconditionally (harder); *"always show vision cones"* paints the §11.5
-danger overlay in full (easier); *"full layout known"* draws the building's real
-architecture where the §11.5a schematic would otherwise stand, so doorways, duct
-mouths and furniture are all on the map from turn one (easier — the duct mouth is
-the one *content* it hands over, because a mouth reads off a plan the way a doorway
-does; a scouted mouth is still the one that gets the memory slate, #450); the two
+danger overlay in full (easier); the **layout knob** (`layout_knowledge`) moves how much
+of the building a run is given before setting foot in it, either side of §11.5a's
+schematic — *"full layout known"* draws the real architecture where the schematic would
+otherwise stand, so doorways, duct mouths and furniture are all on the map from turn one
+(easier — the duct mouth is the one *content* it hands over, because a mouth reads off a
+plan the way a doorway does; a scouted mouth is still the one that gets the memory slate,
+#450), and *"layout unknown"* draws nothing there at all, so the geometry is fogged like
+the contents and route-planning becomes what exploring buys (#233 — harder, the **one
+modifier that overrides a [SETTLED] rule**, and for that reason kept out of the directed
+pool below: see §11.5a); the two
 **cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
 summon anyone (harder); *"all doors automatic"* generates every doorway frameless
 instead of hinged (§10.4/#452 — harder, and one of the two modifiers **read by
@@ -3196,6 +3240,19 @@ because its baseline is a **neutral middle** rather than an end the base has alr
 walked to: composing an easier pick onto a base that asked for nothing leaves the pick
 standing, so no replacement rule is needed. That distinction — where a knob's baseline
 sits — is what decides whether the pool can reach it (appendix 31).
+
+**A knob may also join the pool at one end only** (#233). The **layout knob** has a
+neutral middle like the guard count, and its easier end (*"full layout known"*) is a pool
+entry — but its harder end (*"layout unknown"*) is not, and the reason is neither of the
+two above. It is read by the renderer on the same board, so nothing mechanical objects;
+it is simply **not a difficulty step**. The axis promises the same game under more or
+less pressure, and hiding the layout removes §11.5a's route-planning and with it the
+§7.6 pillar the visible layout exists to support — a player who asked for *+1* would be
+handed an unfamiliar mode rather than a harder facility. Keeping it out also keeps a
+difficulty draw from putting a sim batch in a position the §13.2 bot cannot honestly play
+(§11.5a). So the third question the pool asks of a candidate, after *can it be composed*
+and *where is its baseline*, is **is this pressure or is it a different game** (appendix
+42).
 
 **The slider is a pre-run dialog** (#298). Quick play opens a **level options** screen
 before it boots: the five stops, a *Play* and a *Back*, drawn in the character grid

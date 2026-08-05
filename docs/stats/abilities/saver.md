@@ -7,7 +7,7 @@ it is spent for the rest of the level — no recharge (§8.2) — so a second gu
 the player, that turn or twenty turns later, captures exactly as §4.5 says.
 
 It is **the one declared exception to a [SETTLED] rule** (§4.5: contact is the only
-loss condition), which is why it is on trial rather than settled. Appendix 42 records
+loss condition), which is why it is on trial rather than settled. Appendix 43 records
 why it is a passive with a budget rather than the toggle-and-cooldown #243 proposed.
 
 ## What the cue says

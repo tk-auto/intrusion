@@ -84,7 +84,9 @@ use crate::ability::{AbilityId, Loadout};
 use crate::cell::Direction;
 use crate::difficulty::Difficulty;
 use crate::generate::{generate_level, GenError};
-use crate::modifiers::{CacheCount, GuardCount, IntelCount, IntelGate, LevelModifiers};
+use crate::modifiers::{
+    CacheCount, GuardCount, IntelCount, IntelGate, LayoutKnowledge, LevelModifiers,
+};
 use crate::place::LevelConfig;
 use crate::rng::Rng;
 use crate::state::State;
@@ -662,7 +664,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         sighting_lost_calls_a_guard,
         body_found_calls_two_guards,
         always_show_vision_cones,
-        full_layout_known,
+        layout_knowledge,
         calm_guards_detect_only_their_cone,
         automatic_doors,
         guards_watch_consoles,
@@ -678,7 +680,11 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         sighting_lost_calls_a_guard,
         body_found_calls_two_guards,
         always_show_vision_cones,
-        full_layout_known,
+        // Slot 4 is the layout knob's **easier** end, and it is the slot the toggle
+        // `full_layout_known` held before #233 made the two ends one knob. Its meaning
+        // is unchanged — *the full layout is on the map* — so every token minted
+        // before the knob existed still decodes to exactly the run it named.
+        matches!(layout_knowledge, LayoutKnowledge::Full),
         calm_guards_detect_only_their_cone,
         // Slot 6, appended (#452) — never inserted. A slot number is permanent: the
         // token encodes it by index, so renumbering would silently re-point every
@@ -725,6 +731,12 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         // three rungs, taken rather than tidied in beside the easier toggles it reads
         // with. Order here is the token's wire format, never a reading order.
         show_search_areas,
+        // Slot 16, appended (#233) — the layout knob's **harder** end, taken at the end
+        // of the list rather than beside its own easier end at slot 4. That is the rule
+        // rather than an oversight: a slot number is permanent, so a knob that grows a
+        // second end appends it, exactly as the guard knob would have to if a third
+        // rung were ever added. Wire format, never reading order.
+        matches!(layout_knowledge, LayoutKnowledge::None),
     ]
     .into_iter()
     .enumerate()
@@ -751,8 +763,17 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches, show_search_areas] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches, show_search_areas, unknown_layout] =
         active;
+    // The layout knob's two ends (#233), rejected together for the reason the guard
+    // knob's are: a knob holds one value, so a set naming both describes a config no
+    // run can be in — and there is no honest way to pick which end was meant.
+    let layout_knowledge = match (full_layout, unknown_layout) {
+        (false, false) => LayoutKnowledge::Plans,
+        (true, false) => LayoutKnowledge::Full,
+        (false, true) => LayoutKnowledge::None,
+        (true, true) => return None,
+    };
     let guard_count = match (more_guards, fewer_guards) {
         (false, false) => GuardCount::Baseline,
         (true, false) => GuardCount::More,
@@ -782,7 +803,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         sighting_lost_calls_a_guard,
         body_found_calls_two_guards,
         always_show_vision_cones,
-        full_layout_known,
+        layout_knowledge,
         calm_guards_detect_only_their_cone,
         automatic_doors,
         guards_watch_consoles,
@@ -796,10 +817,10 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 
 /// How many modifier slots this build actually uses — the live count, against which
 /// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
-/// the format. Not the same as the number of *fields*: the guard-count knob (#232) and
-/// the intel-count knob (#207) spend one slot per end, and the cache knob (#209) one
-/// slot per rung.
-const MODIFIER_FIELDS: usize = 16;
+/// the format. Not the same as the number of *fields*: the guard-count knob (#232),
+/// the intel-count knob (#207) and the layout knob (#233) spend one slot per end, and
+/// the cache knob (#209) one slot per rung.
+const MODIFIER_FIELDS: usize = 17;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1184,28 +1205,42 @@ mod tests {
         // The boolean fields as a bitmask rather than one nested loop each: the
         // knob (#232) would have made a further level of nesting out of a test whose
         // whole content is "every combination".
-        const TOGGLE_FIELDS: u32 = 9;
+        const TOGGLE_FIELDS: u32 = 8;
         for bits in 0..(1u32 << TOGGLE_FIELDS) {
             let on = |field: u32| bits & (1 << field) != 0;
-            let (search, sighting, body, cones, layout, cone_only, doors, consoles, areas) = (
-                on(0),
-                on(1),
-                on(2),
-                on(3),
-                on(4),
-                on(5),
-                on(6),
-                on(7),
-                on(8),
-            );
-            for (guard_count, intel_count, caches) in [
-                (GuardCount::Baseline, IntelCount::Baseline, CacheCount::None),
-                (GuardCount::More, IntelCount::More, CacheCount::Three),
-                (GuardCount::Fewer, IntelCount::Fewer, CacheCount::Two),
+            let (search, sighting, body, cones, cone_only, doors, consoles, areas) =
+                (on(0), on(1), on(2), on(3), on(4), on(5), on(6), on(7));
+            // The layout knob (#233) joins the knob sweep rather than the bitmask: its
+            // two ends are one field, so a bit per end would build configs — both at
+            // once — that a run cannot hold and the codec is right to refuse.
+            for (guard_count, intel_count, caches, layout_knowledge) in [
+                (
+                    GuardCount::Baseline,
+                    IntelCount::Baseline,
+                    CacheCount::None,
+                    LayoutKnowledge::Plans,
+                ),
+                (
+                    GuardCount::More,
+                    IntelCount::More,
+                    CacheCount::Three,
+                    LayoutKnowledge::Full,
+                ),
+                (
+                    GuardCount::Fewer,
+                    IntelCount::Fewer,
+                    CacheCount::Two,
+                    LayoutKnowledge::None,
+                ),
                 // The knobs crossed the other way, so the sweep covers a set holding one
                 // end of each rather than only matched pairs (#207), and every rung of
                 // the cache knob (#209).
-                (GuardCount::More, IntelCount::Fewer, CacheCount::One),
+                (
+                    GuardCount::More,
+                    IntelCount::Fewer,
+                    CacheCount::One,
+                    LayoutKnowledge::Full,
+                ),
             ] {
                 for gate in gates {
                     for abilities in loadouts {
@@ -1214,7 +1249,7 @@ mod tests {
                             sighting_lost_calls_a_guard: sighting,
                             body_found_calls_two_guards: body,
                             always_show_vision_cones: cones,
-                            full_layout_known: layout,
+                            layout_knowledge,
                             calm_guards_detect_only_their_cone: cone_only,
                             automatic_doors: doors,
                             guards_watch_consoles: consoles,
@@ -1236,15 +1271,15 @@ mod tests {
                         // **exactly** is the other half of it. A non-baseline knob
                         // spends a slot like any toggle, so it counts here too.
                         let active = [
-                            search, sighting, body, cones, layout, cone_only, doors, consoles,
-                            areas,
+                            search, sighting, body, cones, cone_only, doors, consoles, areas,
                         ]
                         .into_iter()
                         .filter(|&flag| flag)
                         .count()
                             + usize::from(guard_count != GuardCount::Baseline)
                             + usize::from(intel_count != IntelCount::Baseline)
-                            + usize::from(caches != CacheCount::None);
+                            + usize::from(caches != CacheCount::None)
+                            + usize::from(layout_knowledge != LayoutKnowledge::Plans);
                         if active > MODIFIER_CAP {
                             assert_eq!(
                                 level.encode(),
@@ -1349,7 +1384,13 @@ mod tests {
                 sighting_lost_calls_a_guard: false,
                 body_found_calls_two_guards: true,
                 always_show_vision_cones: false,
-                full_layout_known: false,
+                // Slot 4 was the `full_layout_known` toggle when this token was minted
+                // and is now the layout knob's easier end (#233). Its *meaning* did not
+                // move, so the token still decodes to the run it named: this one never
+                // set it, and the knob reads at §11.5a's own plans. Slot 16 — the knob's
+                // harder end — is the appended half, and decodes off like every other
+                // slot minted after a token was written.
+                layout_knowledge: LayoutKnowledge::Plans,
                 calm_guards_detect_only_their_cone: false,
                 // Slot 6 did not exist when this token was minted (#452), so the
                 // frozen string decodes it off — which is exactly the property the
@@ -1505,7 +1546,7 @@ mod tests {
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: false,
-            full_layout_known: false,
+            layout_knowledge: LayoutKnowledge::Plans,
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
             guards_watch_consoles: true,
@@ -1590,6 +1631,41 @@ mod tests {
             None,
             "a tech slot this build does not have",
         );
+    }
+
+    /// A slot set naming **both ends of one knob** is rejected exactly, for every knob
+    /// that spends a slot per end (#232/#207/#233). The encoder cannot produce one — a
+    /// knob holds a single value — so such a set describes a config no run can be in,
+    /// and there is no honest way to pick which end was meant.
+    ///
+    /// The layout knob (#233) is the case worth pinning by hand: its two ends are slots
+    /// **4 and 16**, twelve apart because the harder end was appended rather than tidied
+    /// in beside its partner, so a rejection that quietly assumed adjacent slots would
+    /// let *"the full layout, and also no layout"* through as a run.
+    #[test]
+    fn a_token_naming_both_ends_of_a_knob_is_rejected() {
+        let both = |a: usize, b: usize| {
+            let mut slots = SlotSet::default();
+            slots.push(a).expect("first end");
+            slots.push(b).expect("second end");
+            modifiers_from_slots(&slots, IntelGate::All)
+        };
+        // The layout knob: slot 4 is `Full`, slot 16 is `None`.
+        assert_eq!(both(4, 16), None, "the full layout and no layout at once");
+        // Its ends still decode on their own, so the rejection is the *pair*.
+        for (slot, expected) in [(4, LayoutKnowledge::Full), (16, LayoutKnowledge::None)] {
+            let mut one = SlotSet::default();
+            one.push(slot).expect("one end");
+            assert_eq!(
+                modifiers_from_slots(&one, IntelGate::All).map(|m| m.layout_knowledge),
+                Some(expected),
+                "slot {slot} alone",
+            );
+        }
+        // And the knobs that had the rule before it, so the guard rail covers the set.
+        assert_eq!(both(7, 8), None, "one more guard and one fewer");
+        assert_eq!(both(9, 10), None, "one more console and one fewer");
+        assert_eq!(both(12, 13), None, "one cache and two");
     }
 
     /// A malformed token decodes to `None` — the graceful fall to a fresh run the
