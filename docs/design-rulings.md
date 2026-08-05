@@ -2649,10 +2649,21 @@ camera's reach, and drone-only vision while flying.
 
 ### What it is allowed to do, and the two things it is not
 
-It **respects the building**: floor and open doorways, never a wall or a shut door. A
-wall-ignoring drone is Dephase plus omniscience, and the facility's shape — the thing
-every other system in the game is about — stops mattering. What makes it sweep easily is
-that nothing threatens it, not that it is incorporeal.
+It **respects the building, at its own scale**. A wall-ignoring drone is Dephase plus
+omniscience, and the facility's shape — the thing every other system in the game is
+about — stops mattering; what makes this one sweep easily is that nothing threatens it,
+not that it is incorporeal. But *scale* is the whole point of the exceptions: the thing
+is hand-sized and airborne, so it goes **over a table** (furniture at waist height, solid
+only to somebody walking) and **through a shut door's ventilation holes**. A door frame
+stops it dead, because a hinge is structure rather than a door, and so do the solid
+usables — a console is a thing you bump, not a passage, at any size.
+
+The line that draws is *fabric versus passage*: a shut door is a passage that happens to
+be closed and a wall is a wall at any scale. Two consequences are worth stating rather
+than discovering — a **closed-door wing is scoutable**, and a §8.3 **Lockdown seals
+nothing against a camera**. Neither is a leak, because the drone crosses a door
+**without opening it**: it changes nothing in the world it flies through, so what it
+buys is still only information, at the price of the body it left behind.
 
 It has **no interaction verb**. §4.3's one verb is the bump, and a bump is hands: the
 drone opens no door, takes no intel, touches no guard and cannot win the run. It changes

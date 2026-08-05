@@ -8,8 +8,9 @@ controls back — free (§4.4) — and the drone **stays where you left it**, fe
 360° camera at `DRONE_SIGHT_RANGE` (8) for whatever is left of the window. One clock
 covers both halves, so the number on the bar always means *turns of machine*. Guards
 never perceive it: no cone detects it, nothing can be done to it. It respects the
-building — floor and open doorways, never a wall or a shut door — and has no
-interaction verb at all.
+building at its own scale — everywhere a person could squeeze, plus over a table and
+through a shut door's vents, but never a wall, a door frame or a solid usable — and it
+has no interaction verb at all, so a door it crosses stays shut.
 
 **What it costs (§2.3):** every turn you fly is a turn your body stands unattended in a
 patrolled facility. Capture is contact (§4.5), and a patrol walking into that body ends

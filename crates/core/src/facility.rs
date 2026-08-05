@@ -214,6 +214,48 @@ impl Terrain {
         matches!(self, Terrain::PartialCover)
     }
 
+    /// Whether a **drone** may occupy this cell (§8.3/#273) — the one place the
+    /// miniature machine's own geometry is stated, beside the terrain's other
+    /// property matches so a new kind cannot ship without an answer.
+    ///
+    /// It is *not* the actor rule ([`can_enter`](Facility::can_enter)) and not the
+    /// pathing one. A drone is a hand-sized thing that flies, so it goes everywhere a
+    /// person could squeeze **plus two**:
+    ///
+    /// - **Over a table.** Partial cover is furniture at waist height (§10.1a); solid
+    ///   to a person walking, nothing at all to something flying above it.
+    /// - **Through a shut door.** A door panel is vented, and the drone is small enough
+    ///   for the holes — which is also why a **hinge** stops it dead: the frame is
+    ///   structure, not a door. A shut door is a passage that happens to be closed, and
+    ///   a machine this size does not care that it is; a wall is a wall at any scale.
+    ///
+    /// What refuses it is the building's own **fabric** — wall, hinge, duct entry — and
+    /// the **solid usables** you operate by bumping (§4.3): a console, the comms
+    /// terminal, a crate, the exit. Those are not passages in any sense, at any size,
+    /// and a drone that could sit inside the exit would be a drone that had stopped
+    /// meaning anything.
+    ///
+    /// The consequence worth naming: a closed-door wing is scoutable, and a §8.3
+    /// Lockdown seals nothing against a camera. Neither is an oversight — the drone
+    /// changes nothing in the world it flies through, so what it buys is still only
+    /// information, at the price of the body it left behind (§2.3).
+    pub fn admits_drone(self) -> bool {
+        match self {
+            // Where a person goes, so does the drone — a cupboard included: it is an
+            // alcove somebody climbs into, not a solid.
+            Terrain::Floor | Terrain::DoorPanelOpen | Terrain::Hideout => true,
+            // Over the top, and through the vents.
+            Terrain::PartialCover | Terrain::DoorPanelClosed => true,
+            Terrain::Wall
+            | Terrain::DoorHinge
+            | Terrain::DuctEntry
+            | Terrain::Console
+            | Terrain::CommsConsole
+            | Terrain::EquipmentCache
+            | Terrain::Exit => false,
+        }
+    }
+
     /// Whether this terrain blocks **pathfinding** (§10.3). The one deliberate
     /// surprise: a **closed door panel does not**. Guards route through closed
     /// doors and open them by walking in, so guard traffic monotonically opens the

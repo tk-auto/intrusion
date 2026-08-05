@@ -43,6 +43,12 @@
 //! it opens no door, takes no intel, touches no guard, and cannot win the run (§4.3's
 //! one verb belongs to hands). It changes nothing in the world at all — it only looks.
 //! A step into a wall is the free mis-input a wall bump has always been (§4.4).
+//!
+//! Nor is it incorporeal. It flies **over a table and through a shut door's vents**
+//! ([`Terrain::admits_drone`]) because it is hand-sized and airborne, and it is stopped
+//! dead by the building's fabric — a wall, a door frame, a duct entry — and by the solid
+//! usables. It passes through a door **without opening it**, which is the whole
+//! difference between a machine that reads a wing and a machine that unlocks one.
 
 use super::*;
 use crate::control::{remote_kind, Remote, RemoteKind};
@@ -229,19 +235,25 @@ impl State {
 
     /// Whether `kind` may occupy `cell` (§10.3/#273).
     ///
-    /// A drone respects the building: the same terrain test an actor's step makes
-    /// ([`ACTOR_FILL`]), so floor and an open doorway admit it and a wall, a shut door,
-    /// a table, a console and a cupboard do not. It is the *fill* test rather than a
-    /// bespoke one because "what counts as solid" is the facility's answer to give, and
-    /// a drone that had its own opinion would be a second geometry to keep in step
-    /// (§10.5's one spatial model).
+    /// A drone respects the building, and what "the building" means for a hand-sized
+    /// flying machine is the terrain's own answer ([`Terrain::admits_drone`], §10.5's
+    /// one spatial model): everywhere a person could squeeze, **plus over a table and
+    /// through a shut door's vents** — never a wall, a door frame, a duct entry or a
+    /// solid usable.
     ///
-    /// The player's own zero-fill phase (§8.3, Dephase) is deliberately *not* what a
-    /// drone gets: a remote that crossed walls would make the level's shape stop
-    /// mattering, and being unthreatened is what lets it sweep, not being incorporeal.
+    /// It is a predicate of its own rather than the actor fill test, because a drone is
+    /// neither an actor nor a phased player. The zero-fill phase (§8.3, Dephase) is
+    /// emphatically *not* what it gets: a remote that crossed **walls** would make the
+    /// level's shape stop mattering, and being unthreatened is what lets it sweep, not
+    /// being incorporeal. A vented door is a passage that happens to be shut; a wall is
+    /// a wall at any scale.
     fn remote_can_enter(&self, kind: RemoteKind, cell: Cell) -> bool {
         match kind {
-            RemoteKind::Drone => self.layout.facility().can_enter(cell, ACTOR_FILL),
+            RemoteKind::Drone => self
+                .layout
+                .facility()
+                .terrain(cell)
+                .is_some_and(Terrain::admits_drone),
         }
     }
 

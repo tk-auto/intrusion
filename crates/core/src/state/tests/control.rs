@@ -230,6 +230,114 @@ fn the_drone_cannot_cross_a_wall() {
     );
 }
 
+/// A **table** and a **shut door** do not (§10.3/#273): the machine is hand-sized and
+/// airborne, so it goes over the furniture and through the panel's vents — and through
+/// the panel **without opening it**, which is the difference between reading a wing and
+/// unlocking one.
+#[test]
+fn the_drone_flies_over_tables_and_through_shut_doors() {
+    let mut layout = open_room(20, 20);
+    layout.place(Cell::new(6, 5), Terrain::PartialCover);
+    layout.place(Cell::new(7, 5), Terrain::DoorPanelClosed);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Drone));
+    s.step(Input::Activate(AbilityId::Drone));
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        s.remote().map(|r| r.cell()),
+        Some(Cell::new(6, 5)),
+        "over the table",
+    );
+    assert_eq!(
+        events,
+        vec![Event::RemoteMoved {
+            to: Cell::new(6, 5)
+        }]
+    );
+
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(
+        s.remote().map(|r| r.cell()),
+        Some(Cell::new(7, 5)),
+        "and through the shut door's vents",
+    );
+    assert_eq!(
+        events,
+        vec![Event::RemoteMoved {
+            to: Cell::new(7, 5)
+        }]
+    );
+    assert_eq!(
+        s.layout().facility().terrain(Cell::new(7, 5)),
+        Some(Terrain::DoorPanelClosed),
+        "and the door is still shut — a drone has no hands (§4.3)",
+    );
+
+    // Out the far side, so the crossing is a crossing and not a cul-de-sac.
+    s.step(Input::Step(Direction::East));
+    assert_eq!(s.remote().map(|r| r.cell()), Some(Cell::new(8, 5)));
+}
+
+/// A door's **frame** stops it (§10.4/#273): the hinge is structure, not a door, and
+/// there is nothing to fly through.
+#[test]
+fn a_door_frame_stops_the_drone() {
+    let mut layout = open_room(20, 20);
+    layout.place(Cell::new(6, 5), Terrain::DoorHinge);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Drone));
+    s.step(Input::Activate(AbilityId::Drone));
+    let turn = s.turn();
+    let events = s.step(Input::Step(Direction::East));
+    assert_eq!(s.remote().map(|r| r.cell()), Some(Cell::new(5, 5)));
+    assert_eq!(s.turn(), turn, "and the refusal is free (§4.4)");
+    assert_eq!(
+        events,
+        vec![Event::Bumped {
+            into: Cell::new(6, 5)
+        }]
+    );
+}
+
+/// The solid usables stop it too (§4.3/#273): a console is a thing you bump, not a
+/// passage, at any scale.
+#[test]
+fn a_console_stops_the_drone() {
+    let mut layout = open_room(20, 20);
+    layout.place(Cell::new(6, 5), Terrain::Console);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::North,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .with_loadout(Loadout::innate().with(AbilityId::Drone));
+    s.step(Input::Activate(AbilityId::Drone));
+    s.step(Input::Step(Direction::East));
+    assert_eq!(
+        s.remote().map(|r| r.cell()),
+        Some(Cell::new(5, 5)),
+        "solid furniture is solid to it",
+    );
+}
+
 /// Actors do not (§4.3/#273): it flies straight over a guard, and the guard neither
 /// notices nor is touched.
 #[test]

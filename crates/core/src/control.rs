@@ -66,11 +66,15 @@ const _: () = assert!(DRONE_SIGHT_RANGE < crate::vision::PLAYER_SIGHT_RANGE);
 pub enum RemoteKind {
     /// A **drone** (§8.3/#273): a flying camera you launch from your own cell.
     ///
-    /// - **It respects the building.** Floor and open doorways, never a wall or a shut
-    ///   door. A drone that ignored geometry would be Dephase plus omniscience, and the
-    ///   facility's shape — the thing every other system is about — would stop
-    ///   mattering. What makes it sweep easily is that nothing threatens it, not that
-    ///   it is incorporeal.
+    /// - **It respects the building, at its own scale.** Everywhere a person could
+    ///   squeeze, plus **over a table** and **through a shut door's ventilation holes**
+    ///   — but never a wall, a door frame, a duct entry or a solid usable
+    ///   ([`Terrain::admits_drone`](crate::Terrain::admits_drone)). A drone that ignored
+    ///   geometry outright would be Dephase plus omniscience, and the facility's shape —
+    ///   the thing every other system is about — would stop mattering. What makes it
+    ///   sweep easily is that nothing threatens it, not that it is incorporeal; and it
+    ///   crosses a shut door without **opening** it, which is the difference between
+    ///   reading a wing and unlocking one.
     /// - **It is not an actor.** It blocks nothing and nothing blocks it: it flies over
     ///   guards, bodies and the player alike, and no door ever shuts on it.
     /// - **The facility cannot perceive it.** No cone detects it, no guard state
