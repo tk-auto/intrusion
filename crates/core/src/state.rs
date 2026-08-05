@@ -2090,9 +2090,17 @@ impl State {
     /// divide the building between them, so every Calm guard takes the whole level and
     /// draws its next target at random. Silencing is one-way for the level, so the
     /// style never changes back.
+    /// The `guards_watch_consoles` modifier (§12.6/#319) rides on the live-net style
+    /// and only there, which is the one thing to read carefully here. Its cycle is over
+    /// the consoles a guard's **beat** touches, and a silenced net leaves no beats at
+    /// all — so the console watch goes the way coordination does, and the comms console
+    /// (§7.3) buys off this modifier along with the dispatches. Resolved at this one
+    /// seam, so no other read site learns the flag exists (§12.3).
     fn patrol_style(&self) -> PatrolStyle {
         if self.radio_silenced {
             PatrolStyle::Wander
+        } else if self.modifiers.guards_watch_consoles {
+            PatrolStyle::WatchedConsoles
         } else {
             PatrolStyle::Beat
         }

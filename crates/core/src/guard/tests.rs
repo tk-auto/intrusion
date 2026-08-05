@@ -1766,3 +1766,214 @@ fn a_deferred_first_spot_rotation_still_watches_its_flanks() {
         );
     }
 }
+
+/// The **watched consoles** picker (§7.5/§12.6/#319) — the modifier's whole mechanism,
+/// exercised where it lives: [`Guard::repick_patrol_target`] under
+/// [`PatrolStyle::WatchedConsoles`], one leg at a time.
+///
+/// The scenes below all use one shape — a room, a console or two stamped into it, and
+/// the whole interior as the guard's beat — and walk the guard by teleporting it onto
+/// each destination it picks, which is what an arrival *is* as far as the picker is
+/// concerned. The loop-level facts (the silenced net, the coverage bound, the
+/// directional assertion) live in `state::tests::watched_consoles`.
+mod watched_consoles {
+    use super::*;
+
+    /// The room every scene here is set in, and the guard's whole beat.
+    fn room(consoles: &[Cell]) -> (Facility, Vec<Cell>) {
+        let mut facility = Facility::walled_box(13, 7);
+        for console in consoles {
+            facility.set_terrain(console.x, console.y, Terrain::Console);
+        }
+        (facility, open_beat(13, 7))
+    }
+
+    /// Whether `cell` is a cell to watch `console` from — orthogonally adjacent, the
+    /// bump range a console is used at (§4.3/§10.3).
+    fn beside(cell: Cell, console: Cell) -> bool {
+        cell.manhattan_distance(console) == 1
+    }
+
+    /// The next `count` patrol destinations this guard picks, arriving at each — one
+    /// entry per leg, in order.
+    fn legs(guard: &mut Guard, facility: &Facility, style: PatrolStyle, count: usize) -> Vec<Cell> {
+        let mut rng = Rng::new(0);
+        (0..count)
+            .filter_map(|_| {
+                guard.repick_patrol_target(facility, style, &mut rng);
+                let destination = guard.destination?;
+                guard.place_at(destination); // arrived
+                Some(destination)
+            })
+            .collect()
+    }
+
+    /// §7.5/#319: the first leg of a watched beat stands the guard **beside** the
+    /// console — never on it, which is solid and bump-interacted (§10.3/§4.3) — while
+    /// the same guard at baseline takes the farthest uninspected cell and leaves the
+    /// console to luck. That contrast is the ticket in one assertion.
+    #[test]
+    fn a_watched_beat_sends_the_first_leg_to_stand_beside_the_console() {
+        let console = Cell::new(6, 3);
+        let (facility, beat) = room(&[console]);
+
+        let mut watching = Guard::patrolling(Cell::new(1, 1)).with_beat(beat.clone());
+        watching.repick_patrol_target(&facility, PatrolStyle::WatchedConsoles, &mut Rng::new(0));
+        let destination = watching
+            .destination
+            .expect("a patrol picks somewhere to go");
+        assert!(beside(destination, console), "{destination:?}");
+        assert_ne!(destination, console, "a guard never stands on a console");
+
+        let mut sweeping = Guard::patrolling(Cell::new(1, 1)).with_beat(beat);
+        sweeping.repick_patrol_target(&facility, PatrolStyle::Beat, &mut Rng::new(0));
+        let plain = sweeping.destination.expect("a patrol picks");
+        assert!(
+            !beside(plain, console),
+            "baseline takes the farthest uninspected cell (§7.5): {plain:?}",
+        );
+    }
+
+    /// §7.5/§2.3/#319: **the ordinary sweep is not starved.** Console legs and
+    /// farthest-uninspected legs strictly alternate, so at most every second leg is
+    /// diverted — a guard that only shuttled between consoles would have turned the
+    /// level into two watched rooms and a free corridor network, which is easier, not
+    /// harder.
+    #[test]
+    fn console_legs_alternate_with_the_farthest_uninspected_sweep() {
+        let console = Cell::new(6, 3);
+        let (facility, beat) = room(&[console]);
+        let mut guard = Guard::patrolling(Cell::new(1, 1)).with_beat(beat);
+
+        let walked = legs(&mut guard, &facility, PatrolStyle::WatchedConsoles, 8);
+        let watched: Vec<bool> = walked.iter().map(|&cell| beside(cell, console)).collect();
+        assert_eq!(
+            watched,
+            [true, false, true, false, true, false, true, false],
+            "legs: {walked:?}",
+        );
+    }
+
+    /// §7.5/#319: the cycle **takes every console before it returns to one**, then wipes
+    /// and starts over — §7.5's own inspected-memory wipe, over the watched set rather
+    /// than over the ground. This is what makes coverage bounded rather than lucky.
+    ///
+    /// Nearest-unvisited-first and deterministic (§12.4), so the order is the same on
+    /// every run of the same board: the guard starts in the west corner and takes the
+    /// western console first.
+    #[test]
+    fn the_cycle_takes_every_console_before_returning_to_one() {
+        let (near, far) = (Cell::new(4, 3), Cell::new(10, 3));
+        let (facility, beat) = room(&[near, far]);
+        let mut guard = Guard::patrolling(Cell::new(1, 1)).with_beat(beat);
+
+        let visits: Vec<Cell> = legs(&mut guard, &facility, PatrolStyle::WatchedConsoles, 8)
+            .into_iter()
+            .filter_map(|cell| [near, far].into_iter().find(|&c| beside(cell, c)))
+            .collect();
+        assert_eq!(
+            visits,
+            [near, far, near, far],
+            "each cycle takes both consoles, and the second cycle starts over",
+        );
+    }
+
+    /// §10.3/§7.5/#319: a console **sealed off** from the guard is not a destination it
+    /// walks at. The preference is drawn from the same candidate set the ordinary sweep
+    /// uses — the guard's own territory, filtered to ground it can actually walk to
+    /// (#477) — so an unreachable console is simply not in the cycle, and the leg falls
+    /// back to the ordinary sweep rather than freezing the guard on a target it can
+    /// never arrive at.
+    ///
+    /// ```text
+    ///   0        9 11
+    ///   #############   row 0
+    ///   #@........$.#   row 1 — the console at (10,1) seals the alcove behind it
+    ///   #############   row 2
+    /// ```
+    #[test]
+    fn a_console_the_guard_cannot_reach_is_not_in_its_cycle() {
+        let mut facility = Facility::walled_box(13, 3);
+        facility.set_terrain(10, 1, Terrain::Console);
+        let beat: Vec<Cell> = (1..12).map(|x| Cell::new(x, 1)).collect();
+        let mut guard = Guard::patrolling(Cell::new(1, 1)).with_beat(beat);
+
+        guard.repick_patrol_target(&facility, PatrolStyle::WatchedConsoles, &mut Rng::new(0));
+
+        // (11,1) is beside the console and is the farthest cell in the beat — and it is
+        // behind the console, so no route reaches it. The only other cell beside the
+        // console is (9,1), which the guard *can* reach: that is the watch position.
+        assert_eq!(guard.destination, Some(Cell::new(9, 1)));
+    }
+
+    /// §7.4/§7.6/#319: **Calm only.** A guard that is chasing, investigating or
+    /// responding walks the lead its transition set, exactly as at baseline — this
+    /// modifier must not survive into a hunt in any form, and the seam it is read at is
+    /// the Calm repick that a reactive `decide` never reaches.
+    #[test]
+    fn only_a_calm_guard_prefers_a_console() {
+        let console = Cell::new(6, 3);
+        let (facility, beat) = room(&[console]);
+        let quarry = Cell::new(1, 5);
+
+        for state in [
+            GuardState::Chasing,
+            GuardState::Investigating,
+            GuardState::Responding,
+        ] {
+            let mut guard = Guard::patrolling_to(Cell::new(1, 1), quarry)
+                .with_beat(beat.clone())
+                .with_state(state);
+            // A warm lead: a reactive guard whose alert has run out stands down and
+            // patrols, which is §7.6's backstop rather than anything to do with #319.
+            guard.alert = ALERT_DURATION;
+            guard.decide(
+                &facility,
+                &[],
+                &mut Rng::new(0),
+                Dwell::NEVER,
+                PatrolStyle::WatchedConsoles,
+                BlindPolicy::FlankWhileCalm,
+            );
+            assert_eq!(
+                guard.destination,
+                Some(quarry),
+                "{state:?} walks its own lead, not a console",
+            );
+        }
+    }
+
+    /// §7.5/§10.5/#319: a **recut** beat (§7.3/#374 — a reinforcement's errand ends and
+    /// the level is divided again) hands the guard new ground, so the consoles it
+    /// watches and the cycle it tracks them by are both re-read. A guard must never keep
+    /// cycling consoles that are now somebody else's.
+    #[test]
+    fn a_recut_beat_re_reads_the_consoles_it_watches() {
+        let (west, east) = (Cell::new(3, 3), Cell::new(10, 3));
+        let (facility, _) = room(&[west, east]);
+        let western: Vec<Cell> = open_beat(13, 7)
+            .into_iter()
+            .filter(|cell| cell.x <= 6)
+            .collect();
+        let eastern: Vec<Cell> = open_beat(13, 7)
+            .into_iter()
+            .filter(|cell| cell.x >= 7)
+            .collect();
+
+        let mut guard = Guard::patrolling(Cell::new(1, 1)).with_beat(western);
+        guard.repick_patrol_target(&facility, PatrolStyle::WatchedConsoles, &mut Rng::new(0));
+        assert!(
+            beside(guard.destination.expect("a pick"), west),
+            "the western beat watches the western console",
+        );
+
+        guard.set_beat(eastern);
+        guard.place_at(Cell::new(12, 1));
+        guard.destination = None;
+        guard.repick_patrol_target(&facility, PatrolStyle::WatchedConsoles, &mut Rng::new(0));
+        assert!(
+            beside(guard.destination.expect("a pick"), east),
+            "after the recut it watches the console on its new ground",
+        );
+    }
+}

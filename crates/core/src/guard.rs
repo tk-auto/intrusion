@@ -225,6 +225,27 @@ pub struct Guard {
     /// sight of you (§10.3). Cleared whenever the search ends or a fresher lead
     /// supersedes it.
     body_search: bool,
+    /// The consoles this guard's **beat** touches (§12.6/#319), worked out once and
+    /// kept: the `$` and `Ψ` cells orthogonally adjacent to a cell of
+    /// [`beat`](Self::beat). `None` until the first patrol pick asks for it, and
+    /// dropped whenever the beat changes — see
+    /// [`learn_beat_consoles`](Self::learn_beat_consoles) for why it is learned late
+    /// rather than at placement. Read only under
+    /// [`PatrolStyle::WatchedConsoles`](PatrolStyle); the field costs a baseline run
+    /// nothing but the `None`.
+    beat_consoles: Option<Vec<Cell>>,
+    /// Which of those consoles this guard has stood beside **this cycle**
+    /// (§12.6/#319). The console leg prefers one that is not in here; when they all
+    /// are, the cycle is wiped and starts over — §7.5's inspected-memory wipe, over
+    /// the watched set rather than over the ground. This is what makes coverage
+    /// bounded ([`CONSOLE_CYCLE_TURNS`]) instead of lucky.
+    consoles_visited: Vec<Cell>,
+    /// Whether the **next** patrol pick is a console leg (§12.6/#319) — the whole of
+    /// the interleaving rule, flipped at each repick so at most every second leg is
+    /// diverted and §7.5's farthest-uninspected sweep keeps covering the plain ground
+    /// between them. `true` at spawn, so a watched beat's consoles are visited early
+    /// rather than after a full sweep.
+    console_leg_due: bool,
     /// Turns of **daze** left (§8.3/#325): how much longer this guard is blinded and
     /// frozen by a Confusion blast it was standing inside when the flash went off.
     ///
@@ -365,6 +386,37 @@ pub(crate) const GUARD_DWELL_TURNS_MAX: u32 = 7;
 // [START] numbers are retuned to.
 const _: () = assert!(GUARD_DWELL_TURNS_MIN >= 1 && GUARD_DWELL_TURNS_MIN <= GUARD_DWELL_TURNS_MAX);
 
+/// How long a watched beat's console cycle may take, in turns (§12.6/#319,
+/// **[START] = 300**): under `guards_watch_consoles`, every console inside a guard's
+/// beat has that guard **stand orthogonally beside it** within this many turns of
+/// uninterrupted Calm patrol, counted from the start of the level.
+///
+/// It is a *bound*, not a period: the cycle's real length is a beat's own business —
+/// how many consoles it holds, how far apart they are, and the §7.5 dwell it pays at
+/// every arrival, plus the ordinary farthest-uninspected leg alternating between them.
+/// What the constant promises is that the cycle **closes**, which is the difference
+/// between this modifier and a guard that merely happens past a console (§2.3).
+///
+/// Measured rather than chosen. Over 256 generated seeds run idle, the **typical**
+/// console is stood beside inside ~150 turns; the slowest was 578, on a wide beat
+/// holding three consoles, where a cycle pays six legs of a 40×40 building plus a dwell
+/// at each. The bound sits above that with room, so an unlucky carve reads as a wider
+/// beat rather than as a failing test.
+///
+/// It is worth stating what it is a bound *against*: at baseline, over the same seeds,
+/// **a third of all consoles are never stood beside at all** within 600 turns. The
+/// difference between "within 800" and "possibly never" is the whole modifier.
+///
+/// Pinned by `every_console_in_a_beat_is_stood_beside_within_the_cycle_bound`; if the
+/// interleave or the dwell is retuned, that test is where it shows.
+///
+/// **Nothing reads it at runtime**, which is why it is test-gated: the cycle is what
+/// bounds coverage, and a guard that consulted a turn budget would be a timer, not a
+/// patrol. It lives here rather than in the test file because it is a statement about
+/// the rule, and the rule is here.
+#[cfg(test)]
+pub(crate) const CONSOLE_CYCLE_TURNS: u32 = 800;
+
 /// Every guard looks **south** at spawn (§7.1). One definition, shared by the
 /// constructors below and by placement's turn-one-safety check (§10.6, `place`) —
 /// if the spawn facing ever changes, the "no guard eyes the player's spawn"
@@ -394,6 +446,9 @@ impl Guard {
             radio: RadioClock::DEFAULT,
             witnessed_hideout: None,
             body_search: false,
+            beat_consoles: None,
+            consoles_visited: Vec::new(),
+            console_leg_due: true,
             dazed: 0,
         }
     }
@@ -432,7 +487,7 @@ impl Guard {
     /// errand ends ([`State::settle_new_beats`](crate::State)); a guard given no beat
     /// has no territory and holds.
     pub fn with_beat(mut self, beat: Vec<Cell>) -> Self {
-        self.beat = beat;
+        self.set_beat(beat);
         self
     }
 
@@ -441,6 +496,14 @@ impl Guard {
     /// exists ([`State::settle_new_beats`](crate::State)).
     pub(crate) fn set_beat(&mut self, beat: Vec<Cell>) {
         self.beat = beat;
+        // New ground, new consoles to watch (§12.6/#319): the cached set and the cycle
+        // it is tracked against both belong to the *old* beat, so a recut drops them
+        // rather than leaving a guard cycling consoles that are now somebody else's.
+        // The alternation restarts with it, on the same reading a spawn takes — new
+        // ground is ground whose consoles have not been looked at.
+        self.beat_consoles = None;
+        self.consoles_visited.clear();
+        self.console_leg_due = true;
     }
 
     /// Whether this guard has a §7.5 beat to patrol. `false` is a guard with no
