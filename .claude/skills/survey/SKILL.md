@@ -4,8 +4,9 @@ description: >-
   Quick code-health survey of the Intrusion codebase to surface refactor and
   cleanup opportunities — files or functions that have grown too large or too
   complex, muddy or inconsistent naming, modules that have lost their single
-  focus, duplication, stale comments and dead code, and drift from the design's
-  conventions (docs/design.md, CLAUDE.md). Use whenever the user wants to
+  focus, duplication, stale comments and dead code, drift from the design's
+  conventions (docs/design.md, CLAUDE.md), and bloat in the always-loaded docs
+  themselves. Use whenever the user wants to
   survey, review, or audit the code for things to improve, asks "what should we
   clean up", "is anything getting too big or messy", "where's the tech debt", or
   wants a health check before planning the next slice of work. This is a
@@ -27,9 +28,10 @@ the good ones) or `/work-ticket` (to fix one now).
 
 ## 1. Scope it
 
-Default to the whole `crates/` tree. If the user names a path, a crate, or a
-concern ("just the guard code", "naming only"), survey that instead and say so.
-Skip `target/`, generated output, and vendored code.
+Default to the whole `crates/` tree, plus the docs every session pays for —
+`CLAUDE.md` and `docs/design.md` (§3, last lens). If the user names a path, a
+crate, or a concern ("just the guard code", "naming only"), survey that instead
+and say so. Skip `target/`, generated output, and vendored code.
 
 ## 2. Measure before you judge
 
@@ -43,6 +45,10 @@ findings point at actual outliers:
   not need a metrics tool.
 - **Churn, if cheap:** a file that is both large *and* frequently touched
   (`git log --oneline -- <file> | wc -l`) is where cleanup pays back fastest.
+- **Context weight:** `wc -l CLAUDE.md docs/*.md` — and note which of those are
+  loaded every session (`CLAUDE.md`, `docs/design.md`) versus read on demand
+  (`docs/design-rulings.md`, the references). Growth in the first two is the
+  expensive kind.
 
 Then **read the top offenders.** Size is a smell, not a defect: a long file that
 is genuinely one cohesive thing is fine, and a short file can still be a mess.
@@ -50,7 +56,8 @@ Confirm every finding by looking at the code.
 
 ## 3. Look through these lenses
 
-Sweep the surveyed code for each. They overlap; that's fine — dedupe at the end.
+Sweep the surveyed code for each — and the docs for the last one. They overlap;
+that's fine — dedupe at the end.
 
 - **Too large / too complex.** A file or function doing too much at once; deep
   nesting; a function you can't hold in your head. Ask: *what are the seams?* A
@@ -74,6 +81,27 @@ Sweep the surveyed code for each. They overlap; that's fine — dedupe at the en
   purity (no I/O, clock, or unseeded RNG — §12.1/§12.4), rendering as a pure
   function of state, the fmt/clippy idiom, the comment-density and English-only
   conventions in `CLAUDE.md`.
+- **Doc bloat.** `CLAUDE.md` and `docs/design.md` are read at the start of
+  nearly every session, so every line in them is paid for on every task — they
+  need to stay small, and they only grow. Flag:
+  - **Duplication.** The same rule stated in two places — the design doc *and* a
+    skill, §11.2 *and* the render reference, `CLAUDE.md` *and* the skill it
+    points at. One home, cited from the others; `CLAUDE.md` points at the docs
+    and skills, it does not restate them.
+  - **Long prose.** Paragraphs where a sentence, a table row or a numbered rule
+    would carry the same content. The design doc states *how the game is
+    supposed to be*; it is not an essay about it.
+  - **Post-mortems of discarded ideas.** The alternatives tried, the sim runs,
+    the rework history — that is `docs/design-rulings.md`, appended and numbered
+    and read only when someone relitigates. In the design doc, leave the ruling
+    and a citation (*appendix 12*), not the argument.
+  - **Dead weight.** Sections overtaken by shipped work, `[OPEN]` questions
+    §15 has since settled, worked examples that only restate the rule above them.
+
+  Cutting is not free: a `[SETTLED]` rule stated once, a starting value, or the
+  short *why* behind a contentious decision is load-bearing — propose moving or
+  compressing it, never dropping it. Each finding should say roughly how many
+  lines it saves and where the content lands.
 
 ## 4. Judge honestly
 
