@@ -1997,3 +1997,100 @@ again until the input cap: a whole run spent on turn fourteen. Seeds 231 and 288
 on `main` and are now pinned in the bot's own anti-stall test. The lesson generalises
 past the bot: **"can route through" and "can step onto" are two questions**, and a
 closed panel is the one terrain where the answers differ.
+
+---
+
+## Appendix 39 — Watching the consoles: the cycle is the modifier, the alternation is its price
+
+*(§7.5/§12.6; #319. `crates/core/src/guard/patrol.rs`, `crates/core/src/modifiers.rs`.)*
+
+Baseline, a console is floor. The §7.5 sweep takes the farthest cell a guard has not
+looked at, and a room holding the intel is no better watched than an empty corridor —
+so *where the player must go* has no bearing on *where the guards are*, which is the
+cheapest kind of stealth. `guards_watch_consoles` is the harder modifier that fixes
+it: a Calm guard prefers a cell beside a console its beat touches, and cycles them.
+
+### The thing worth measuring is not "does it prefer them", it is "does it close"
+
+A bias is trivial to write and trivially a facade (§2.3): a guard that *sometimes*
+heads for a console is a guard that already sometimes wandered past one. What makes
+this a rule rather than a nudge is the **cycle** — a per-guard memory of which of its
+consoles it has stood beside, preferring one it has not, wiped when the last one goes,
+in deliberate imitation of §7.5's own inspected-memory wipe. Coverage then *closes*
+instead of converging in expectation.
+
+Measured over 256 generated seeds, run idle so the patrol is what is measured:
+
+| | baseline | watched |
+|---|---|---|
+| consoles never stood beside within 600 turns | **a third of them** | none |
+| typical console first stood beside | — | ~150 turns |
+| slowest console over 256 seeds | 597 (of the ones reached at all) | **578** |
+
+`CONSOLE_CYCLE_TURNS` is the **[START] 800** those numbers set, and it is a bound the
+test holds the game to, not a budget the guard reads — nothing at runtime consults it,
+which is why it is test-gated. The difference the modifier actually buys is the first
+row: not "sooner", but "at all".
+
+### Strict alternation, because the alternative is an easier level
+
+The obvious implementation — prefer a console whenever one is unvisited — makes the
+guard shuttle between consoles for the whole cycle and abandons the ground between
+them. That is not a harder level; it is **two watched rooms and a free corridor
+network**, which a player learns in one run. So the rule is strict alternation: one
+console leg, one ordinary farthest-uninspected leg, and so on.
+
+It is not free, and the cost is the bound above. A console cycle on a wide beat pays
+*two* legs per console across a 40×40 building, plus a dwell at each arrival — which
+is the whole of why the worst case is 578 turns rather than 200. The trade was taken
+in that direction on purpose: the sweep's coverage of plain ground holds at **1.00×
+baseline on average and never below 0.87×** over the swept seeds, and a bound that is
+long but real beats a tight one bought by abandoning the corridors.
+
+The console *within* a cycle is picked **nearest-first**, not farthest. §7.5's
+farthest-first is what makes patrols pace across distances and read as purposeful, and
+it is preserved exactly — on the alternating ordinary leg, which is still doing that
+job. A console leg that also insisted on being farthest would double a cost the
+alternation is already paying twice.
+
+### A silenced net takes it away, and that is the design
+
+The cycle is over the consoles a guard's **beat** touches. Killing the radio (§7.3)
+leaves no partition to divide the building with: every Calm guard takes the whole
+level and draws its target at random. There is then no "its consoles" left to cycle,
+so the console watch goes the way the beat does.
+
+That fell out of *where* the modifier is read rather than being bolted on. It resolves
+into `PatrolStyle` — the value that already answers "how does a Calm guard choose where
+to walk" — as a third variant beside `Beat` and `Wander`, at the one seam
+(`State::patrol_style`) where a silenced net is already decided. So the modifier needed
+no argument threaded down to `Guard::decide`, no field on the guard read at runtime, and
+no second place that knows it exists. And it prices well: silencing the net already
+costs a real detour (§7.3, ≥16 cells from spawn), and under this modifier it buys one
+thing more.
+
+### What the sim says, including the parts that do not support the label
+
+120 bot seeds per profile, both arms, same facilities:
+
+| profile | win rate | median turns to win | detections | diversity |
+|---|---|---|---|---|
+| balanced | 0.367 → 0.350 | 139 → 155 | 993 → 992 | 0.629 → 0.624 |
+| cautious | **0.567 → 0.467** | 250 → 221 | 1213 → 1076 | 0.466 → 0.470 |
+| aggressive | 0.383 → 0.408 | 151 → 156 | 870 → 794 | 0.544 → 0.543 |
+
+The clean signal is **cautious**, and it is the one the design predicts: the profile
+that lingers near an objective waiting for a gap is the profile a patrol that keeps
+coming back punishes, and it loses ten points of win rate. Balanced and aggressive move
+inside the noise of 120 runs (σ ≈ 4.5 points), and diversity does not move at all —
+nothing collapses into one strategy.
+
+**Detections fall in every profile, and that is not the label failing.** Guard time is
+finite: legs spent walking to consoles are legs not spent sweeping the rest of the beat,
+so a player who is *not* near an objective is seen less. The pressure this modifier adds
+is deliberately not spread evenly over the level — it is concentrated exactly on the two
+errands a run cannot skip (§4.5 take the intel, §7.3 silence the net). That is why the
+§2.3 directional assertion is stated on **turns with a guard's cone on a console** — up
+from 3403 to 5603 over 64 seeds, with no seed inverting — rather than on detections per
+run, which measures a different thing and would have this modifier reading easier.
+

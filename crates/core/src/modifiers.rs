@@ -364,6 +364,44 @@ pub struct LevelModifiers {
     /// it is threaded in as a parameter rather than consulted from a global — see
     /// that function's own note.
     pub automatic_doors: bool,
+    /// **Harder.** A **Calm** guard prefers a **console** as its next patrol
+    /// destination (§7.5/#319): every other patrol leg heads for a patrollable cell
+    /// beside an intel console `$` or the comms console `Ψ` its beat touches, and it
+    /// cycles them, so every console in a beat is stood beside within a bounded number
+    /// of turns rather than by luck.
+    ///
+    /// Baseline, a console is just floor the farthest-uninspected sweep may or may not
+    /// wander past: the room holding the intel is no better watched than an empty
+    /// corridor, so *where the player must go* has no bearing on *where the guards
+    /// are*. With this on, both of the run's fixed errands — take the intel (§4.5) and
+    /// silence the net (§7.3) — have to be timed against a patrol that comes back.
+    ///
+    /// **It bends destination choice and nothing else.** The guard still walks 1
+    /// cell/turn (§7.1 **[SETTLED]**), still takes the ordinary §7.5 dwell on arrival
+    /// and then leaves, and drops the whole thing the instant it turns reactive — so it
+    /// raises how *often* a console is looked at, never how *long* a guard holds it
+    /// (§7.6's anti-tracking-turret rule). The player's own tunnel is deliberately not
+    /// in the set: no guard knows where you came in (§1/§4.5), and adding the exit
+    /// would invent facility knowledge the fiction denies.
+    ///
+    /// **A silenced net switches it off with the beats** (§7.3). The cycle is over the
+    /// consoles a guard's *beat* touches, and killing the net leaves no partition to
+    /// divide the building — every Calm guard takes the whole level and draws at random
+    /// ([`PatrolStyle::Wander`](crate::guard::PatrolStyle)). There is then no "its
+    /// consoles" left to cycle, so the console watch goes the way the beat does. That is
+    /// one more thing the comms console buys, priced by the same detour (§7.3).
+    ///
+    /// **`Harder`, and what the sim does and does not support** (appendix 39). The §2.3
+    /// assertion it is held to is *turns with a guard's cone on a console*, which rises
+    /// on every seed of the sweep and never falls. Over 120 bot seeds per profile the
+    /// **cautious** profile — the one that lingers near an objective waiting for a gap —
+    /// loses ten points of win rate; balanced and aggressive move inside the noise, and
+    /// diversity does not move at all. **Detections per run fall in all three**, because
+    /// guard time is finite and legs spent on the consoles are legs not spent sweeping
+    /// the rest of the beat. That is the shape of the modifier rather than a hole in it:
+    /// the pressure is concentrated on the two errands a run cannot skip, not spread
+    /// over the level.
+    pub guards_watch_consoles: bool,
     /// How many guards patrol the facility (§10.2/#232) — one step either side of the
     /// recipe's count, [`More`](GuardCount::More) harder and
     /// [`Fewer`](GuardCount::Fewer) easier. Baseline
@@ -472,13 +510,14 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 12] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 13] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
     SHOWS_ALL_CONES,
     KNOWS_FULL_LAYOUT,
     ALL_DOORS_AUTOMATIC,
+    WATCHES_CONSOLES,
     GUARDS_MORE,
     GUARDS_FEWER,
     CONSOLES_MORE,
@@ -521,6 +560,15 @@ const ALL_DOORS_AUTOMATIC: ActiveModifier = ActiveModifier {
     name: "Doors",
     direction: ModifierDirection::Harder,
     detail: Some("all automatic"),
+};
+
+/// Named for the **ground**, not for the rule that bends: what a player can act on is
+/// that the consoles are patrolled, not that a destination pick is biased. It is the
+/// same reading the other harder captions take — say what the guards do.
+const WATCHES_CONSOLES: ActiveModifier = ActiveModifier {
+    name: "Guards watch consoles",
+    direction: ModifierDirection::Harder,
+    detail: None,
 };
 
 /// The knob's two ends read as a **count**, not as a rule — "one more" says what the
@@ -611,7 +659,7 @@ pub(crate) struct PoolEntry {
 /// that keeps the gate out does not arise. It is the third easier candidate appendix
 /// 29 said would close its own question, and it closes it: −2 is a genuine draw of
 /// two from three rather than the one exhaustive pair every seed used to get.
-pub(crate) const POOL: [PoolEntry; 7] = [
+pub(crate) const POOL: [PoolEntry; 8] = [
     PoolEntry {
         caption: SEARCHES_HIDEOUTS,
         set: |m| m.guards_always_search_hideouts = true,
@@ -643,6 +691,13 @@ pub(crate) const POOL: [PoolEntry; 7] = [
     PoolEntry {
         caption: GUARDS_FEWER,
         set: |m| m.guard_count = GuardCount::Fewer,
+    },
+    // Slot 11, appended (#319) — a runtime rule like every other entry above the
+    // guard knob, so the ±N arms of a comparison that draws it are the same board
+    // down to the last radio clock.
+    PoolEntry {
+        caption: WATCHES_CONSOLES,
+        set: |m| m.guards_watch_consoles = true,
     },
 ];
 
@@ -690,6 +745,7 @@ impl LevelModifiers {
             full_layout_known,
             calm_guards_detect_only_their_cone,
             automatic_doors,
+            guards_watch_consoles,
             guard_count,
             intel_count,
             intel_to_exit,
@@ -714,6 +770,9 @@ impl LevelModifiers {
         }
         if automatic_doors {
             active.push(ALL_DOORS_AUTOMATIC);
+        }
+        if guards_watch_consoles {
+            active.push(WATCHES_CONSOLES);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -789,6 +848,7 @@ impl LevelModifiers {
             calm_guards_detect_only_their_cone: self.calm_guards_detect_only_their_cone
                 || other.calm_guards_detect_only_their_cone,
             automatic_doors: self.automatic_doors || other.automatic_doors,
+            guards_watch_consoles: self.guards_watch_consoles || other.guards_watch_consoles,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
             // in its documented direction, so sources add pressure, never cancel.
             // For the guard count that reads as "the end that departs from the
@@ -1052,7 +1112,7 @@ mod tests {
         assert_eq!(fewer.active()[0].detail, Some("one fewer"));
 
         // Several sources at once: every active field is listed, in reading order.
-        // **Nine, not ten, with every field set** — `calm_guards_detect_only_their_cone`
+        // **Ten, not eleven, with every field set** — `calm_guards_detect_only_their_cone`
         // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
         // asked for is the rule the level plays regardless, so a caption for it would
         // tell the player about a difference that no longer exists.
@@ -1064,11 +1124,12 @@ mod tests {
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
+            guards_watch_consoles: true,
             guard_count: GuardCount::More,
             intel_count: IntelCount::Fewer,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 9);
+        assert_eq!(stacked.active().len(), 10);
         assert!(
             !stacked
                 .active()
@@ -1098,9 +1159,10 @@ mod tests {
         // The pool covers every live toggle — the fields, less the retired slot 5,
         // which asks for the rule the level plays regardless (#442) — plus the guard
         // knob's two ends, one on each side (#232). The easier side is three deep, so
-        // −2 is a genuine draw rather than the one exhaustive pair of appendix 29.
-        assert_eq!(POOL.len(), 7);
-        assert_eq!(pool_size(ModifierDirection::Harder), 4);
+        // −2 is a genuine draw rather than the one exhaustive pair of appendix 29; the
+        // harder side is five with the watched consoles (#319).
+        assert_eq!(POOL.len(), 8);
+        assert_eq!(pool_size(ModifierDirection::Harder), 5);
         assert_eq!(pool_size(ModifierDirection::Easier), 3);
         assert_eq!(
             pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
@@ -1125,6 +1187,7 @@ mod tests {
             full_layout_known: false,
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
+            guards_watch_consoles: false,
             guard_count: GuardCount::Baseline,
             intel_count: IntelCount::Baseline,
             intel_to_exit: IntelGate::All,
@@ -1137,6 +1200,7 @@ mod tests {
             full_layout_known: true,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
+            guards_watch_consoles: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::More,
             intel_to_exit: IntelGate::None,

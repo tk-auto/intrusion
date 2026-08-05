@@ -126,7 +126,7 @@ impl Difficulty {
     ///
     /// Counted off [`picks`](Self::picks) rather than off the level, so it stays
     /// **honest when the pool is thinner than the level asks for** — today the easier
-    /// side has two candidates and the harder side three, and a −2 that could only
+    /// side has three candidates and the harder side five, and a −2 that could only
     /// find one rule to bend must not claim two. It says nothing about *which* rules:
     /// the seed is not decided until the run starts, and the resolved set is the Level
     /// info tab's to show once it is.

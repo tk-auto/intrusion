@@ -267,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 10] = [
+const MODIFIERS: [(&str, SetModifier); 11] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -285,6 +285,10 @@ const MODIFIERS: [(&str, SetModifier); 10] = [
     // (§12.6/#452): it decides what a doorway is, so a batch that names it carves a
     // different facility from the same seed. That is the point of measuring it.
     ("automatic-doors", |m| m.automatic_doors = true),
+    // Read at the patrol-destination seam (§7.5/#319), so a batch that names it plays
+    // the baseline's building with the same guards walking different legs — the
+    // strongest frame a directional assertion can be stated in.
+    ("guards-watch-consoles", |m| m.guards_watch_consoles = true),
     // The **guard-count knob**'s two ends (§10.2/#232), one name each — a knob is not
     // a toggle, so the name has to say which end. Read by placement rather than by the
     // carve, so a batch that names one plays the *same building* as the baseline with
@@ -586,6 +590,7 @@ mod tests {
             full_layout_known,
             calm_guards_detect_only_their_cone,
             automatic_doors,
+            guards_watch_consoles,
             guard_count,
             intel_count,
             intel_to_exit,
@@ -596,6 +601,7 @@ mod tests {
         assert!(always_show_vision_cones);
         assert!(full_layout_known);
         assert!(automatic_doors);
+        assert!(guards_watch_consoles);
         // The knob's two ends are two names over one field, so naming both leaves the
         // one named last rather than accumulating — see [`RunConfig::with_modifier`].
         assert_eq!(guard_count, GuardCount::Fewer);
