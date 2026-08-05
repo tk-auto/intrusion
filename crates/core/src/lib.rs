@@ -64,6 +64,7 @@ mod cover;
 mod difficulty;
 mod door;
 mod duct;
+mod exchange;
 mod facility;
 mod generate;
 mod guard;
@@ -103,14 +104,15 @@ pub use cell::{Cell, Direction};
 pub use difficulty::{Difficulty, SPAN as DIFFICULTY_SPAN};
 pub use door::DoorAction;
 pub use duct::Duct;
+pub use exchange::{Choice, Exchange};
 pub use facility::{Facility, Terrain};
 pub use generate::{generate, generate_level, GenError, Layout, SIGHTLINE_MAX_RUN};
 pub use guard::{Guard, GuardState};
 pub use input::{
-    ability_slot_for_code, end_nav_for_gesture, end_nav_for_key, help_nav_for_gesture,
-    help_nav_for_key, input_for_gesture, input_for_key, key_for_code, map_nav_for_gesture,
-    map_nav_for_key, menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, EndNav, Gesture,
-    HelpNav, MapNav, MenuNav, UiCommand,
+    ability_slot_for_code, declines_exchange, end_nav_for_gesture, end_nav_for_key,
+    help_nav_for_gesture, help_nav_for_key, input_for_gesture, input_for_key, key_for_code,
+    map_nav_for_gesture, map_nav_for_key, menu_nav_for_gesture, menu_nav_for_key,
+    ui_command_for_key, EndNav, Gesture, HelpNav, MapNav, MenuNav, UiCommand,
 };
 pub use level_seed::{start_level, start_level_with, LevelSeed};
 pub use modifiers::{
@@ -136,7 +138,7 @@ pub use rng::Rng;
 pub use salvage::cache_contents;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
-    SalvageRefusal, SenseMark, State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS,
+    SenseMark, State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS,
     GUARD_CUE_DECAY_TURNS, LOCKDOWN_RADIUS, PHASE_EJECT_STUN_BASE, PLAYER_SENSE_RANGE,
     PLAYER_SENSE_RANGE_WAITING,
 };

@@ -130,7 +130,12 @@ fn replay(level: &LevelSeed, inputs: &[Input]) -> State {
 /// A verdict as a finished raid would hand one back, without playing one — the fixture
 /// for the transitions, whose subject is what the campaign does with a verdict rather
 /// than how one is reached.
-fn extracted(intel: usize, alert_peak: u32) -> Verdict {
+///
+/// `held` is what the raid walked out **holding** (#266), and it is a parameter rather
+/// than a default because the campaign *assigns* it: a raid that found and traded
+/// nothing still reports the set it carried in, and a fixture that reported the empty
+/// set would be a raid claiming to have dropped everything.
+fn extracted_holding(held: Loadout, intel: usize, alert_peak: u32) -> Verdict {
     Verdict {
         ending: Ending::Escaped,
         stats: RunStats {
@@ -138,9 +143,16 @@ fn extracted(intel: usize, alert_peak: u32) -> Verdict {
             intel,
             intel_total: 3,
             alert_peak,
+            held,
             ..RunStats::default()
         },
     }
+}
+
+/// The same, for a run that is carrying nothing but the innate set — every campaign
+/// starts there (§8.3), so it is what most of these transitions want.
+fn extracted(intel: usize, alert_peak: u32) -> Verdict {
+    extracted_holding(Loadout::innate(), intel, alert_peak)
 }
 
 /// A capture, anywhere, by anyone.
@@ -167,7 +179,10 @@ fn captured() -> Verdict {
 /// these tests keep measuring the transitions rather than the alert's mapping — which
 /// has tests of its own, here and in [`loudness`](super::loudness).
 fn walk_on(run: &mut Campaign, intel: usize) {
-    run.complete(&extracted(intel, 1));
+    // The raid walks out holding what it walked in with: these tests are about the
+    // transitions, not about the tech axis, so nothing is found and nothing traded.
+    let verdict = extracted_holding(run.loadout(), intel, 1);
+    run.complete(&verdict);
     if run.stage() == CampaignStage::Choosing {
         let next = run.offers()[0].node;
         assert!(run.choose(next), "an offered node is takeable");
@@ -711,6 +726,44 @@ fn salvaged_tech_rides_into_the_next_facility() {
     assert_eq!(Campaign::new(21).loadout(), Loadout::innate());
 }
 
+/// **A raid that *traded* carries the set it walked out with** (§2.2/§8.3/#266) — the
+/// half the accumulation could not express while a loadout could only grow.
+///
+/// The campaign takes the raid's held set outright rather than folding its finds in, so
+/// the tech given up at a crate is gone from the next facility too. Fold-the-finds would
+/// have carried the dropped ability forward and quietly undone the choice.
+#[test]
+fn a_raid_that_traded_tech_carries_the_trade_forward() {
+    let mut run = Campaign::to_depth(21, 3);
+    run.salvage(AbilityId::Camouflage);
+    run.enter().expect("a facility to raid");
+
+    // The raid found Lockdown in a crate and gave up Camouflage for it.
+    let mut verdict = extracted_holding(run.loadout(), 1, 0);
+    verdict.stats.salvaged = Loadout::empty().with(AbilityId::Lockdown);
+    verdict.stats.held = verdict
+        .stats
+        .held
+        .without(AbilityId::Camouflage)
+        .with(AbilityId::Lockdown);
+    run.complete(&verdict);
+
+    assert!(run.loadout().contains(AbilityId::Lockdown), "what it took");
+    assert!(
+        !run.loadout().contains(AbilityId::Camouflage),
+        "and what it gave up stays given up — the choice survives the raid",
+    );
+    let next = run.offers()[0].node;
+    run.choose(next);
+    let level = run.enter().expect("the next facility");
+    assert!(level.abilities.contains(AbilityId::Lockdown));
+    assert!(!level.abilities.contains(AbilityId::Camouflage));
+    assert!(
+        level.abilities.contains(AbilityId::Run),
+        "the innate set is under it either way (§8.3)",
+    );
+}
+
 /// **A raid's find rides out on its verdict** (§2.2/#209) — the whole seam, end to
 /// end: the campaign banks the salvage the same way it banks the intel, and the next
 /// facility boots holding it.
@@ -723,8 +776,15 @@ fn salvaged_tech_rides_into_the_next_facility() {
 fn a_completed_raid_banks_the_tech_it_salvaged() {
     let mut run = Campaign::to_depth(21, 3);
     run.enter().expect("a facility to raid");
-    let mut verdict = extracted(2, 0);
+    let mut verdict = extracted_holding(run.loadout(), 2, 0);
     verdict.stats.salvaged = Loadout::empty()
+        .with(AbilityId::Confusion)
+        .with(AbilityId::Decoy);
+    // What the facility gave, and what the run therefore walks out holding — the two
+    // halves a raid reports, and it is the second one the campaign takes (#266).
+    verdict.stats.held = verdict
+        .stats
+        .held
         .with(AbilityId::Confusion)
         .with(AbilityId::Decoy);
     run.complete(&verdict);

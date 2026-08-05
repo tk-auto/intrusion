@@ -23,7 +23,7 @@
 //! with no plumbing to clear.
 
 use crate::category::Category;
-use crate::state::{Event, SalvageRefusal, State};
+use crate::state::{Event, State};
 
 mod history;
 pub use history::{MessageHistory, HISTORY_ACTIONS};
@@ -156,19 +156,43 @@ pub fn message_for(event: Event) -> Option<Message> {
         // buried by a guard event on the same turn. The line names the ability, because
         // the whole find is which ability it was — and the bar has a new row on it this
         // very turn (§11.4), so the two say the same thing at once.
-        Event::TechSalvaged { id } => (format!("{} salvaged — it is yours", id.name()), 20),
-        // The two refusals (§8.3/#209), ranked with the find they are the other side of.
-        // Each says the tech by name, because what the player is walking away from is the
-        // whole of the news — and each says *why*, so the crate left standing there reads
-        // as a decision rather than as a dead cell.
-        Event::SalvageRefused {
-            id,
-            refusal: SalvageRefusal::HandsFull,
-        } => (format!("{} — no hands free for it", id.name()), 20),
-        Event::SalvageRefused {
-            id,
-            refusal: SalvageRefusal::AlreadyCarried,
-        } => (format!("another {} — you have one", id.name()), 20),
+        Event::TechSalvaged { id } => (format!("{} salvaged — it is yours", id.bar_name()), 20),
+        // The one refusal a crate has left (§8.3/#209/#266), ranked with the find it is
+        // the other side of, so the crate left standing there reads as luck rather than
+        // as a dead cell.
+        //
+        // **The whole crate family speaks in bar names** (§11.4/#266) — `Doors`, not
+        // `Autodoors` — and this is the line that forced it: at eleven cells the longest
+        // full names put these over the row's budget (`the_crate_lines_fit_the_near_line`).
+        // The bar name is the spelling the player is reading two rows down at the very
+        // moment the message lands, so it costs nothing to recognise and always fits.
+        Event::SalvageRefused { id } => (format!("Already got: {}", id.bar_name()), 20),
+        // The one payout a duplicate has (§8.2/#302/#266): the tech is the tech you are
+        // already carrying, so what changed is the *number of presses* you have of it.
+        // The count rides on the event and is deliberately not printed — the bar shows
+        // `Bore(3)` on this very frame, which is where a number belongs (§11.4).
+        Event::UsesRecharged { id, .. } => (format!("{} recharged", id.bar_name()), 20),
+        // The exchange, all three beats of it (§8.3/#266), ranked with the salvage they
+        // are a version of.
+        //
+        // The offer is the one line on this list that is an **instruction**: the game is
+        // waiting on the player, and a near line that only announced the find would leave
+        // them pressing keys that no longer do anything. Where to press is the usable
+        // line's to say one row down — this says what is on the table and that a choice
+        // is owed.
+        Event::ExchangeOffered { id } => (format!("{} — drop one for it", id.bar_name()), 20),
+        // A trade names **both** halves, in the order they happen to the run: what you
+        // gave and what you got. Naming only the prize would make the loss something the
+        // player had to notice for themselves on the bar, and it is the more expensive
+        // half of the two.
+        Event::Traded { taken, dropped } => (
+            format!("traded {} for {}", dropped.bar_name(), taken.bar_name()),
+            20,
+        ),
+        // The decline says the crate is still there, because that is the part worth
+        // knowing: the tech was not lost, it was left, and it is exactly where it was for
+        // a run that comes back having traded that piece away.
+        Event::ExchangeDeclined { id } => (format!("{} left in the crate", id.bar_name()), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
         // The phase safety firing (§8.3/#329). Ranked at the top of the threat ladder
@@ -548,7 +572,26 @@ fn objective_and_security(taken: usize, total: usize, alert: u32) -> String {
 /// what it used to do, dropping the objective the moment the ladder stepped and never
 /// mentioning the facility before it did.
 fn ambient(state: &State) -> Message {
-    let (text, category) = if state.stunned() > 0 {
+    let (text, category) = if let Some(offer) = state.exchange() {
+        // **A crate is waiting on an answer** (§8.3/#266), and it outranks every other
+        // ambient fact for the reason the stun below it does: there is no other decision
+        // to weigh until it is made — the loop takes nothing else (`State::step`). It
+        // belongs on the *floor* rather than only in the offer's own message, because it
+        // is a standing state and not news: it has to keep saying itself for as long as
+        // the question is up, however many keys are pressed at it.
+        //
+        // It cannot co-occur with the stun underneath: a stun comes only from the phase
+        // eject, and a phased run cannot bump at all (§8.3), so it can never open an
+        // offer. Placed first anyway, because if the two ever did meet, the question is
+        // the one the player has to answer to get moving again.
+        //
+        // Interest, like the find it is about (§11.2) — and like the offer's own message,
+        // so the row does not change colour under the player when the live line ages out.
+        (
+            format!("{} — drop one for it", offer.offered().bar_name()),
+            Category::Interest,
+        )
+    } else if state.stunned() > 0 {
         // Stunned (§8.3/#329) outranks every other ambient fact, because it is the
         // only one that removes the decision entirely: there is nothing to weigh
         // until the count reaches zero. Derived straight off the counter, so the line

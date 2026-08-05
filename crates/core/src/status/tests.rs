@@ -1195,3 +1195,43 @@ fn the_search_lines_name_the_world() {
         }
     }
 }
+
+/// **Every crate line fits the row, for every ability in the catalogue** (§11.4/§11.7,
+/// #266) — the bound the overflow that produced it went looking for.
+///
+/// `another Autodoors — you have one` was 32 cells against a 32-cell budget and clipped
+/// on a real screen the moment the deploy control was up; `Pierce Wall salvaged — it is
+/// yours` was worse. The fix is the **bar name** throughout the family, and this is what
+/// keeps it fixed: the check runs over `AbilityId::ALL`, so a longer name or a reworded
+/// line fails here rather than in a screenshot.
+///
+/// Measured at the **worst case** — the narrow budget, with the deploy control up, which
+/// it can be for any of these (the history outlives the action that cleared the row).
+#[test]
+fn the_crate_lines_fit_the_near_line() {
+    let max = crate::render::near_line_text_max(crate::LevelConfig::V1.width);
+    for id in AbilityId::ALL {
+        let lines = [
+            Event::TechSalvaged { id },
+            Event::SalvageRefused { id },
+            Event::UsesRecharged { id, uses: 3 },
+            Event::ExchangeOffered { id },
+            Event::ExchangeDeclined { id },
+            // The trade names both halves, so it is measured with the same ability on
+            // both sides — the longest that pairing can be.
+            Event::Traded {
+                taken: id,
+                dropped: id,
+            },
+        ];
+        for event in lines {
+            let text = message_for(event).expect("every crate event speaks").text;
+            let len = text.chars().count();
+            assert!(
+                len <= max,
+                "{text:?} is {len} cells, over the {max} the near line leaves beside \
+                 its controls (§11.4)",
+            );
+        }
+    }
+}

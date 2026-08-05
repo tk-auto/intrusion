@@ -11,6 +11,7 @@
 //! [`super::traversal`], [`ducts`] for
 //! the §10.7 crawlspace, [`tunnel`] for the player's own way in and out (§4.5/#466),
 //! [`comms`] for the §7.7 comms console that kills the radio net,
+//! [`exchange`] for the §8.3 crate trade a full run is offered (#266),
 //! [`saver`] for §4.5's one declared exception (#243), and
 //! [`watched_consoles`] for the §12.6 modifier that patrols the objectives. They share [`crate::test_support`]'s builders rather than a common
 //! harness here, so each file stands alone.
@@ -24,6 +25,7 @@ mod comms;
 mod doors;
 mod ducts;
 mod effects;
+mod exchange;
 mod guards;
 mod lockdown;
 mod reinforcements;

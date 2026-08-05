@@ -28,7 +28,7 @@
 //! three-digit cooldown or a bigger tech grant breaks the **build**, not the frame.
 
 use super::*;
-use crate::ability::{AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
+use crate::ability::{max_bar_name, AbilityId, AbilityState, AbilityStatus, MAX_BAR_ENTRY};
 use crate::mnemonic;
 use crate::place::LevelConfig;
 use crate::status::near_line;
@@ -75,6 +75,26 @@ const BAR_GAP: u32 = 1;
 /// then only glance at, which is the whole point of it being always-on (§11.4).
 /// Position is muscle memory, and since #359 it *is* the key as well (§11.6).
 const BAR_SLOT: u32 = MAX_BAR_ENTRY as u32 + BAR_GAP;
+
+/// The cells an entry's **slot number** takes when the row draws one (§11.6/#266):
+/// `1 ` — the digit and one space before the name.
+///
+/// It is spent *inside* the existing slot rather than widening it, which is what keeps
+/// the numbered row on the same columns as the ordinary one: the hit-test, the layout
+/// and the compile-time width bound below are all untouched by it. There is room because
+/// the row that numbers itself is the exchange's, whose entries draw their bare names
+/// (an exchange candidate has no clock to show) — the longest is 5 cells against a
+/// [`MAX_BAR_ENTRY`] of 9.
+const SLOT_NUMBER_WIDTH: u32 = 2;
+
+/// The numbered row must fit the slot it is drawn in (§11.4): the widest **bar name**
+/// plus the number's own cells, since a numbered entry never carries a state notation.
+/// A longer name fails the build here rather than clipping a digit off the row a player
+/// is choosing from.
+const _: () = assert!(
+    max_bar_name() + SLOT_NUMBER_WIDTH as usize <= MAX_BAR_ENTRY,
+    "a numbered ability-bar entry must fit its slot (§11.4): shorten a bar name",
+);
 
 /// The widest the ability bar can ever be, in cells (§11.4/#287): one [`BAR_SLOT`]
 /// for every ability a run can hold ([`AbilityId::MAX_HELD`]).
@@ -416,13 +436,16 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
                 level: state.level(),
                 modifiers: state.modifiers(),
                 alert: &state.alert_readout(),
-                loadout: state.loadout(),
+                bar: state.bar_statuses().iter().map(|s| s.id).collect(),
                 debug: state.debug(),
             },
         );
     }
 
-    let statuses = state.ability_statuses();
+    // The bar's own row (§11.4/#266): the held set, or the exchange's four candidates
+    // while a crate is offering. One derivation for what is drawn and what the keys
+    // fire, so the two can never name different abilities.
+    let statuses = state.bar_statuses();
 
     let map = render(state);
 
@@ -485,13 +508,20 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // nothing to act on, the innate-verb floor in the modality the shell says the
     // player is using (#323). A floor, never a competitor: one usable and the
     // affordances have the row back.
-    cells.extend(super::usable::usable_row(
-        width,
-        &state.affordances(),
-        ui.modality,
-    ));
+    // …unless a crate is offering (§8.3/#266), in which case the row says how to answer
+    // the exchange instead. Not an extra entry beside the affordances but *instead* of
+    // them: while an offer is open no press does anything else, so a row still naming a
+    // bump would be promising what the next press will not deliver.
+    cells.extend(match state.exchange() {
+        Some(_) => super::usable::exchange_row(width, ui.modality),
+        None => super::usable::usable_row(width, &state.affordances(), ui.modality),
+    });
     cells.extend(map.cells);
-    cells.extend(ability_bar(width, &statuses));
+    // The row is **numbered while a crate is offering** (#266): an exchange is picked
+    // from rather than glanced at, and a player choosing what to give up should not have
+    // to count slots to find the digit. It fits because a candidate draws its bare name
+    // — no clock, no marker — which leaves the width the numbers need.
+    cells.extend(ability_bar(width, &statuses, state.exchange().is_some()));
 
     let mut screen = Grid {
         width,
@@ -562,7 +592,7 @@ fn ability_line_layout(width: u32, statuses: &[AbilityStatus]) -> Vec<(usize, u3
 /// is not on offer, and the eye would be pulled to exactly the entry it should skip.
 /// The letter still *works* there (it resolves like any other, and refuses for free in
 /// the economy, §4.4); it simply does not shout.
-fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
+fn ability_bar(width: u32, statuses: &[AbilityStatus], numbered: bool) -> Vec<GlyphCell> {
     let blank = GlyphCell::blank();
     let mut cells = vec![blank; width as usize];
 
@@ -579,19 +609,30 @@ fn ability_bar(width: u32, statuses: &[AbilityStatus]) -> Vec<GlyphCell> {
         }
     };
 
+    let indent = if numbered { SLOT_NUMBER_WIDTH } else { 0 };
     let layout = ability_line_layout(width, statuses);
     let mnemonics = mnemonic::claim(&drawn_bar_names(&layout, statuses));
     for ((i, start), letter) in layout.into_iter().zip(mnemonics) {
         let status = &statuses[i];
         let category = bar_category(status.state);
-        put(&mut cells, start, &status.bar_entry(), category);
+        // The slot's **number**, when the row is being picked from rather than read
+        // (§11.6/#266): `1 Camo`, in the key colour the mnemonic mark wears, so the two
+        // keys that fire an entry read as the one kind of thing. Off on the ordinary
+        // bar, where position is muscle memory and the width belongs to the clocks.
+        if numbered {
+            put(&mut cells, start, &format!("{} ", i + 1), Category::Neutral);
+        }
+        put(&mut cells, start + indent, &status.bar_entry(), category);
         // The mark is the letter's own colour — no band behind it, nothing added
         // beside it — so the bar stays the quiet strip §11.4 asks for and the entry
         // reads as one word with one letter picked out of it.
         if category == Category::Ground {
             continue; // an entry you cannot use does not advertise its key
         }
-        if let Some(x) = letter.map(|l| start + l as u32).filter(|x| *x < width) {
+        if let Some(x) = letter
+            .map(|l| start + indent + l as u32)
+            .filter(|x| *x < width)
+        {
             cells[x as usize].fg = Category::Neutral;
         }
     }
@@ -618,7 +659,7 @@ fn drawn_bar_names(layout: &[(usize, u32)], statuses: &[AbilityStatus]) -> Vec<&
 /// at this very moment ([`ability_bar`]) and the letter the help panel prints — one
 /// derivation, three readers, no chance of the screen naming a key that does not fire.
 pub fn ability_mnemonic(state: &State, slot: usize) -> Option<char> {
-    let statuses = state.ability_statuses();
+    let statuses = state.bar_statuses();
     let layout = ability_line_layout(state.layout().facility().width(), &statuses);
     let names = drawn_bar_names(&layout, &statuses);
     let index = (*mnemonic::claim(&names).get(slot)?)?;
@@ -639,7 +680,7 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
         (Some(c), None) => c.to_ascii_lowercase(),
         _ => return None, // named keys ("Tab", "ArrowUp") are never a mnemonic
     };
-    let statuses = state.ability_statuses();
+    let statuses = state.bar_statuses();
     let layout = ability_line_layout(state.layout().facility().width(), &statuses);
     let names = drawn_bar_names(&layout, &statuses);
     mnemonic::claim(&names)
@@ -694,7 +735,7 @@ fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32, band: Categor
 /// slot the row truncated away (an oversized hand-built state — see
 /// [`ability_line_layout`]) is `None` too, so no key fires an entry nobody can see.
 pub fn ability_in_slot(state: &State, slot: usize) -> Option<AbilityId> {
-    let statuses = state.ability_statuses();
+    let statuses = state.bar_statuses();
     ability_line_layout(state.layout().facility().width(), &statuses)
         .get(slot)
         .map(|&(i, _)| statuses[i].id)
@@ -721,7 +762,7 @@ pub fn ability_at(state: &State, x: u32, y: u32) -> Option<AbilityId> {
     if y != ability_row(facility.height()) {
         return None; // the bar is the frame's last row and nothing else is the bar
     }
-    let slot = ability_line_layout(facility.width(), &state.ability_statuses())
+    let slot = ability_line_layout(facility.width(), &state.bar_statuses())
         .into_iter()
         .position(|(_, start)| x >= start && x < start + MAX_BAR_ENTRY as u32)?;
     ability_in_slot(state, slot)
@@ -747,6 +788,11 @@ fn bar_category(state: AbilityState) -> Category {
         | AbilityState::Passive => Category::Owned,
         AbilityState::Cooling { .. } => Category::System,
         AbilityState::Exhausted | AbilityState::Unusable => Category::Ground,
+        // The crate's own tech on an exchange row (#266) is **Interest** — the reward
+        // channel the `¤` it came out of is drawn in, and the intel console beside it.
+        // It is the one entry on that row that is not yours yet, and the colour is what
+        // says so: three blue entries you hold, one gold one you are being offered.
+        AbilityState::Offered => Category::Interest,
     }
 }
 

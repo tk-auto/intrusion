@@ -2183,17 +2183,19 @@ ability missing. Not enforcing it at all would make the §8.3 cap a comment: the
 bar's one-row width bound (§11.4) is sized against it, and a passive's whole price is a
 slot.
 
-Refusing is deliberately the *unsatisfying* answer, and it is the honest one for now: the
-interesting version is a **swap**, and swapping needs a screen to choose on. That is
-#266. Until it exists, the crate is left standing rather than opened-and-discarded, so a
-run that comes back with a free hand — or with the exchange, once it ships — finds it
-exactly as it was.
+Refusing is deliberately the *unsatisfying* answer, and it was the honest one at the
+time: the interesting version is a **swap**, and swapping needs somewhere to choose. That
+is #266, and it has since shipped — a full run is now **offered** the crate's tech and
+picks which of the four to drop (appendix 43). What survives of this section is the cap
+itself and where it is kept; what has gone is the dead end. The two rejected alternatives
+above are unchanged by it, because both are about enforcing the cap silently, and the
+exchange is the loudest possible place to enforce it.
 
-The two refusals are kept apart in the vocabulary (`SalvageRefusal`) and on the usable
-line (`cache: hands full`, `cache: already yours`) because they are different problems:
-one is a decision waiting on #266, the other is luck. And *already carried* is asked
-first, because it is the more specific answer — that crate is no use to you whether or
-not your hands are full.
+*Already carried* is the one refusal left, and it is still asked **first**: a crate
+holding tech you already carry is no use to you whether or not your hands are full, and
+offering a trade there would be offering a decision whose every branch is a loss. The
+usable line says which of the two a bump would be (`cache: swap tech`, `cache: already
+yours`) because they are different problems: one is a decision, the other is luck.
 
 ### Where they stand, and why they are still reachable
 
@@ -2554,3 +2556,213 @@ guard touches you and the run ends" must not later discover a footnote that quie
 otherwise. And it is bounded by the *level* rather than by time on purpose: whatever this
 becomes — promoted to a §12.6 modifier, retuned, or rejected — a version that comes back
 during a run is a different ability, and it is not this one.
+
+---
+
+## Appendix 44 — The exchange is the ability bar, and the crate is where the run says what it is
+
+*(§8.2/§8.3/§8.4/§11.4/§11.6/§2.2; #266, on the seam #209 left. `crates/core/src/exchange.rs`,
+`crates/core/src/state.rs`, `crates/core/src/state/view.rs`, `crates/core/src/render/hud.rs`,
+`crates/core/src/status.rs`.)*
+
+#209 shipped the crate and the cap together, and the cap shipped as a **dead end**: a run
+already carrying `MAX_TECH_HELD` pieces of tech bumped a crate and was told *no hands
+free for it*. Appendix 40 said outright that this was the unsatisfying answer and that
+the interesting one is a swap. This is the swap.
+
+The consequence is bigger than one refusal turning into a prompt. Under the refusal, the
+tech axis was a **queue**: a campaign's third crate was the last decision it ever offered,
+and every crate after it was scenery you walked past. Under the exchange, the fourth crate
+is where a run starts saying what it is — you are no longer collecting tech, you are
+choosing a loadout, one piece at a time, against what the next facility is likely to ask
+for (§2.2's *"you get meaningfully stronger inside a run"*, read as *shaped* rather than
+merely *bigger*).
+
+### You press the one you drop, and that is the whole vocabulary
+
+The four candidates are the run's three pieces of tech and the crate's one. Pressing any
+of them **discards** it. Three of those presses are the trade; the fourth — the crate's
+own — is the decline, because declining a crate *is* discarding what it was offering.
+
+That collapse is the point. The obvious shape was *choose which to keep* plus a separate
+*cancel*, and it carries two verbs that mean nearly the same thing and can drift: a cancel
+path is code nothing else exercises, and the first time it forgets to close the offer or
+forgets to leave the crate standing, the bug is invisible until someone plays it. One
+input (`Input::Discard`), one resolution (`Exchange::resolve`), three outcomes — and
+`Escape` is *mapped to* the decline rather than being a second way of causing it.
+
+Innate abilities are not candidates. Run is never found, never drawn and never traded
+(§8.3), so a row that listed it would be offering a press that has to refuse.
+
+### Drawn on the bar, because the selection spine already existed
+
+§8.4's rule is *build targeting up front and reuse it*, and the reason is the old
+version's free unlimited-range neutralise: every ability that grew its own way of picking
+a thing grew its own way of picking the wrong thing. A fifth modal screen for one decision
+would have been that mistake in the UI layer — a second list to navigate, a second nav
+enum, a second hit-test, a second set of keys, all for four entries.
+
+The ability bar is already a four-slot selection surface: a digit binds by position
+(#359), a mnemonic letter by the letter drawn (#360), a tap by the column (#267), and all
+three resolve through one seam (`ability_in_slot`). So the exchange **is** the bar for as
+long as it is open. `State::bar_statuses` decides which row that is — held set, or
+candidates — and every key, letter and thumb follows it for free, which is also what makes
+"the keys fire what the row draws" true by construction rather than by two matching
+edits.
+
+It fits by arithmetic, not by luck: `MAX_BAR_WIDTH` is sized for `MAX_HELD` entries, the
+innate set plus the cap, and an exchange row is the cap plus one — the same four. The
+crate's entry is drawn in **Interest**, the reward colour of the `¤` it is still sitting
+in, against the three Owned ones beside it.
+
+**The candidates carry no clocks**, and that was a deliberate reversal of the first
+attempt. Drawing each candidate's real state looked more honest and read worse: a cooling
+entry drew in the *unavailable* tan and an exhausted one in the receding grey that §11.4
+reserves for "plainly not an option now" — greying out entries that are perfectly
+droppable. A spent `Bore` is as tradeable as anything else. While the offer is open the
+row is not a readout of the economy at all; it is the choice, and a number on it would be
+about a press that is not on offer.
+
+**What that width bought instead: the slot numbers.** The ordinary bar has never drawn
+them — position is muscle memory (#287/#359) and the cells belong to the clocks — but the
+exchange row is *picked from* rather than glanced at, and counting slots to find the digit
+is exactly the friction a decision screen must not have. So the numbered form is the
+exchange's alone (`1 Camo`, the digit in the same key colour the mnemonic mark wears), and
+it is spent **inside** the existing slot rather than widening it, so the hit-test, the
+layout and the width bound are all untouched. A candidate's bare name is 5 cells against a
+9-cell entry, which is where the two cells come from.
+
+The crate's entry wore a `(+)` for exactly one iteration, and the numbers are what
+retired it: with a digit in front of every entry, the marker was three cells restating
+what the colour already said, on the one row whose width was worth spending on keys.
+Two channels for one fact is a channel too many when the other one is *which key do I
+press*.
+
+### The world stops, and the rule lives in the core
+
+While an offer is open, `State::step` answers nothing but the discard. Every other input
+— a step, a wait, an activation — stops at the door, so no guard moves while a run is
+deciding.
+
+It stops **before the message bookkeeping**, and that is not a detail: the first version
+swallowed the input *inside* the player phase, which meant the turn loop still filed the
+outgoing messages and replaced them with an empty set — so pressing an arrow at a crate
+wiped the very near line telling the player what they were being asked. A swallowed input
+is not a free action that happened and reported nothing; it is an input that never
+arrived, and it must un-say nothing.
+
+The belt to that brace is the **ambient floor** (§11.4): while an offer stands, the near
+line's quiet floor *is* the question, above the stun and everything else on the ladder.
+That is where a standing state belongs — the same argument the phase-eject countdown
+already made — and it means the row keeps asking however long the player takes and
+whatever they press, rather than relying on one message staying live.
+
+Putting that in the **core** rather than in the shell that draws the row is the load-
+bearing half. A shell can only make its own input path obey it, and there are three: the
+browser, a replayed script, and the §13.2 sim. A run that could walk away from a
+half-answered crate in one of them and not the others is a run that does not replay
+(§12.4) — the seed-plus-inputs guarantee would hold only for shells that happened to
+implement the same modality.
+
+For the same reason the choice is an `Input` with a script token (`!<letter>`) rather than
+a shell-side click. It is a third **sign** on the same letter, not a reuse of `-`: a
+toggle-off and a trade are different actions on one ability, and a script that spelled
+them alike would replay the run as a different one — the ability still held, every later
+token fed to a loadout the original never had.
+
+### The turn it costs, and the one it does not
+
+The bump that opens the offer is free (§4.4 — nothing changed), and the trade spends the
+turn a plain salvage would have. So trading at a crate costs exactly what taking from one
+costs: a walk and a turn. A decline costs what the old refusal cost, which is nothing.
+
+The alternative — charging the turn at the bump and resolving the choice out of time —
+would make opening a crate you then decline a turn spent on nothing, and *deciding* would
+become something you paid for. §4.4's line is that an action which changes nothing costs
+nothing, and until a choice is made, nothing has changed.
+
+### Revoking an ability, and the two traps in it
+
+An activated ability is *in effect* by its **slot**, not by loadout membership. So trading
+one away mid-window has to switch it off first, or the run keeps the effect of a tool it
+no longer holds with nothing on the bar to say so. `Deck::revoke` does exactly that, and
+the world half — a decoy still standing, a lockdown's seals — rides the same unwind an
+early toggle-off takes (`State::unwind_effect`, now shared by both).
+
+The in-wall case cannot arise, and pleasingly not by a guard: while phased there is **no
+bump at all** (§8.3 — every in-bounds cell is a plain move), so a phased run can never
+open an offer, and Dephase can never be traded away from inside a solid.
+
+The slot and the per-level budget are otherwise left where they are. A run that trades a
+cooling ability away and finds the same tech in a later crate picks it up exactly as cool
+as it put it down: drop-and-refind is not a free recharge (§8.2's fence).
+
+### The campaign takes the set, it no longer folds the finds
+
+This is the change #266 forced one layer up. `Campaign::bank` used to union the raid's
+`salvaged` set into the run's loadout, which is correct for as long as a loadout can only
+**grow**. Once it can shrink, ordering matters: a run that swaps A for B, then later finds
+A again and swaps C for it, ends holding a set that no union of *found* and *given up* can
+reconstruct.
+
+So the verdict carries `RunStats::held` — what the raid walked out holding — and the
+campaign **assigns** it, the same shape `alert_peak` already had and for a related reason:
+it is a fact about the raid that just ended, and the raid is the only thing that knows it.
+`salvaged` stays beside it as what the *facility* was worth, which is the question the end
+screen's ledger is actually asking.
+
+### A duplicate pays out once, and it is the one crack in §8.2's fence
+
+§8.2 settles use budgets with a fence, and the first clause of it is *"no recharge — no
+regeneration, no pickup or console that tops it up, no way to earn one back."* This ticket
+puts one exception in it, deliberately and by name: **a crate holding tech you already
+carry refills that tech's per-level budget**, if you have spent from it, and is emptied
+doing so. `Bore recharged`, a spent turn, the crate gone.
+
+The case for it starts with what a duplicate was: appendix 40 rules that crates are
+stocked from the facility's own seed and that meeting tech you already hold is *bad luck
+rather than a bug* — the world is not rearranged to spare you the walk. That is still
+right about the **draw**. What it left was a cell that was worth walking to only if you
+did not know what was in it, and once you did, a crate you could see and never use again.
+For seven of the eight pieces of tech that is fine; for the one with a **budget**, there
+was an obvious thing a second copy could be for, and refusing it was the game declining
+to notice.
+
+What keeps it inside the spirit of the fence rather than through it:
+
+- **It is not a resource to manage.** Nothing regenerates, nothing ticks, and there is no
+  decision anywhere in a run about *getting more of it* — the fence's actual claim. You
+  find another Bore or you do not.
+- **What it costs is what everything at a crate costs**: the detour and the turn. The
+  refill is not a reward for play, it is the crate's payout.
+- **It is bounded by the building** (§14 v3): a facility hides at most three crates, all
+  different, so the ceiling on refills in a level is the flavour's own number and not a
+  rate anyone can farm.
+- **It refills to the level's grant, not by one.** A partial refill would put a second
+  number on the axis for no gain; the row states the grant, and the crate restores it.
+- **A full budget is still the free refusal.** If there is nothing to give back the bump
+  changes nothing, so it costs nothing (§4.4) and the crate is left standing.
+
+The alternative considered and rejected was a consolation *elsewhere* — a duplicate paying
+out intel, or partial progress toward something. That is a reward economy being made
+whole, which appendix 40 rejected for good reasons and which would have made the draw's
+honesty (it does not peek at your loadout) into a thing the game apologises for. Paying
+out in the one currency the duplicated tool itself owns keeps the crate's contents
+meaningful: what you find is *that ability*, and this is what having it twice means.
+
+### What is not here
+
+No consolation for a duplicate of anything unbudgeted. Seven of the eight pieces of tech
+have nothing a second copy could restore, so those crates stay the free refusal, and
+appendix 40's reading of them as bad luck stands.
+
+No picking a dropped ability back up. What you trade away is gone for the run — there is
+no floor to retrieve it from and no crate keeps what you put down. A takeback would make
+the choice a rehearsal, and the whole reason the cap is interesting is that it is not one.
+
+The sim measures none of this yet, and says so: the bot has no cue for a crate, so the
+cache count still has no `--modifier` name (#209) and no batch can plant one. The
+exchange is judged by playing it until the bot learns to salvage — at which point *what a
+bot trades for* is the first thing worth watching, because a policy that always keeps what
+it has is the same as one with no exchange at all.
+

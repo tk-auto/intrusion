@@ -32,6 +32,18 @@ pub enum Input {
     /// never refunds — the full cooldown still runs (§8.2). A no-op on an ability
     /// that is not active.
     Deactivate(AbilityId),
+    /// **Answer an open [exchange](crate::Exchange)** (§8.3/#266) by discarding the
+    /// ability named — one of the four candidates the crate's offer put on the bar.
+    ///
+    /// One input for both answers, because there are not two: naming one of the three
+    /// held pieces of tech is the **trade** (it goes, the crate's comes, the turn is
+    /// spent), and naming the crate's own is the **decline** (nothing moves, nothing is
+    /// charged). A separate cancel verb would be a second spelling of the second one,
+    /// free to drift from it; `Escape` is simply mapped to this.
+    ///
+    /// With no exchange open — or naming an ability that is not a candidate — it is a
+    /// mis-input and resolves as a **free** no-op, like every other (§4.4).
+    Discard(AbilityId),
 }
 
 /// Something the loop did this turn, reported in resolution order. Each event knows
@@ -191,17 +203,51 @@ pub enum Event {
     /// ledger each want from it. One-way, like the silenced net — nothing takes a
     /// salvaged ability back within a run, and nothing carries it out of one (§2.2).
     TechSalvaged { id: AbilityId },
-    /// The player bumped a crate the run **cannot take from** (§8.3/§14 v3/#209) — a
-    /// free refusal, like the exit's (§4.4). `id` is what the crate holds, because both
-    /// refusals are about a specific thing you are walking away from: the tech you have
-    /// no room for, or the one you already have.
+    /// The player bumped a crate holding tech the run **already carries**
+    /// (§8.3/§14 v3/#209) — a free refusal, like the exit's (§4.4). `id` is what the
+    /// crate holds, because the refusal is about a specific thing you are walking away
+    /// from.
     ///
-    /// The crate is left unopened, so a run that comes back with a free hand — or, once
-    /// #266 ships the exchange, with something to trade — finds it exactly as it was.
-    SalvageRefused {
-        id: AbilityId,
-        refusal: SalvageRefusal,
+    /// It is the *only* refusal a crate has left (#266). Full hands used to be the
+    /// other one; they open the [exchange](Event::ExchangeOffered) now, which is a
+    /// decision rather than a dead end. A duplicate is not a decision — a second copy
+    /// of what you hold would change nothing — so this one stays a refusal, and the
+    /// crate is left unopened for a run that comes back having traded that tech away.
+    SalvageRefused { id: AbilityId },
+    /// A crate holding tech the run already carries **put its per-level budget back**
+    /// (§8.2/§8.3/#302/#266): `id` has `uses` presses again, and the crate is spent.
+    ///
+    /// The one payout a duplicate has, and the only event anywhere that moves a use
+    /// budget **upward** — §8.2's no-recharge fence is otherwise untouched, because what
+    /// this takes is another copy of the tool itself, out of a crate that is then empty.
+    /// A run with the budget already full finds a plain [`SalvageRefused`] instead.
+    ///
+    /// [`SalvageRefused`]: Event::SalvageRefused
+    UsesRecharged { id: AbilityId, uses: u32 },
+    /// The player bumped a crate with **full hands**, and the crate is offering
+    /// (§8.3/#266): `id` is what is in it, and the run is now standing at the exchange
+    /// with four candidates on the bar and nothing else answering until it chooses.
+    ///
+    /// A **free** event, like the bump that raised it: nothing has been taken, nothing
+    /// dropped, no turn spent (§4.4). What it reports is that the game is waiting.
+    ExchangeOffered { id: AbilityId },
+    /// The run **traded** `dropped` away for `taken` (§2.2/§8.3/#266): the crate is
+    /// open, the new tech is on the deck and usable this turn, and the old one is gone
+    /// for the rest of the run — there is no floor to pick it back up off, and no crate
+    /// keeps what you put down.
+    ///
+    /// The turn-spending half of the exchange, and the one place a loadout ever shrinks.
+    Traded {
+        taken: AbilityId,
+        dropped: AbilityId,
     },
+    /// The run **declined** the crate (§8.3/#266): the exchange is closed, the loadout
+    /// is exactly what it was, and the crate still stands with `id` in it.
+    ///
+    /// Free, like the refusal it replaces — a decision that changed nothing costs
+    /// nothing (§4.4) — and non-trapping (§11.6): it is always reachable, so an offer
+    /// can never leave a run stuck at a box it does not want.
+    ExchangeDeclined { id: AbilityId },
     /// The facility alert climbed to `rung`, because of `trigger` (§7.3): the
     /// concrete, explainable escalation the alert system was always meant to provide
     /// (§2.3). Fired **once per escalation** — a trigger at or below the rung the
@@ -462,8 +508,14 @@ impl Event {
             | Event::CommsSilenced { .. }
             | Event::TechSalvaged { .. }
             // A refused crate is still the reward channel talking — it is the same find
-            // reported as *not yours*, not a threat and not furniture.
-            | Event::SalvageRefused { .. } => Category::Interest,
+            // reported as *not yours*, not a threat and not furniture. The exchange's
+            // three (#266) are the same find again, mid-decision: what an offer, a trade
+            // and a decline are all *about* is the thing in the box.
+            | Event::SalvageRefused { .. }
+            | Event::UsesRecharged { .. }
+            | Event::ExchangeOffered { .. }
+            | Event::Traded { .. }
+            | Event::ExchangeDeclined { .. } => Category::Interest,
             // A threat that has you, literally (§4.5) — or the wall does (§8.3).
             Event::Captured { .. } | Event::Entombed { .. } => Category::Danger,
             // A hand *did* land on you (§4.5): the Saver is why the run continues, but
@@ -474,22 +526,6 @@ impl Event {
             Event::CaptureSaved { .. } => Category::Danger,
         }
     }
-}
-
-/// **Why a crate cannot be taken from** (§8.3/§14 v3/#209) — the two ways a bump on a
-/// live cache is refused, kept apart because they are different problems with different
-/// answers.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SalvageRefusal {
-    /// The run already carries [`AbilityId::MAX_TECH_HELD`] pieces of tech (§8.3), and
-    /// there is no room for another. A *decision* waiting to be made — which is exactly
-    /// what #266's exchange screen is for; until it exists the crate is simply left where
-    /// it stands, and coming back with a free hand finds it unopened.
-    HandsFull,
-    /// The crate holds tech the run already carries. A facility is stocked from its own
-    /// seed and knows nothing of who is coming (#209), so this is luck rather than
-    /// design — the world is not rearranged to spare you the walk.
-    AlreadyCarried,
 }
 
 /// One thing a bump would do right now — the **usable line**'s vocabulary
@@ -538,10 +574,22 @@ pub enum Affordance {
     /// Never offered on a crate already opened — an empty one is scenery, exactly as a
     /// spent console is.
     SalvageTech,
-    /// A live crate the run has **no room for** (§8.3/#209): the bump will refuse, free.
-    /// Offered rather than left silent because the refusal is a fact worth having before
-    /// you spend the walk — the refused exit's precedent, one usable over.
-    SalvageFull,
+    /// A live crate the run has **no room for** (§8.3/#266): the bump opens the
+    /// [exchange](crate::Exchange) — four candidates on the bar, press the one to drop.
+    ///
+    /// It used to say *hands full* and mean a refusal. Saying what the bump will
+    /// actually do is the same discipline the rest of this list keeps (§2.3): the line
+    /// may never promise what the press will not deliver, and it should not undersell it
+    /// either — a run that reads *full* walks past a decision it was allowed to make.
+    SalvageSwap,
+    /// A live crate holding tech the run already carries **whose per-level budget it can
+    /// refill** (§8.2/#302/#266): the bump takes it and puts the uses back.
+    ///
+    /// Its own entry rather than a version of [`SalvageTech`](Affordance::SalvageTech),
+    /// because what it hands over is not an ability — you have that — but presses of one,
+    /// and a row that promised *take tech* would be promising the wrong thing about a
+    /// crate the run is right to walk to anyway.
+    SalvageRecharge,
     /// A live crate holding tech the run **already carries** (#209): the bump will
     /// refuse, free.
     ///
@@ -578,7 +626,7 @@ impl Affordance {
     /// a variant missing from here is a label nothing checks, which is exactly the
     /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
     /// against it so a new variant cannot quietly skip the list.
-    pub(crate) const ALL: [Affordance; 17] = [
+    pub(crate) const ALL: [Affordance; 18] = [
         Affordance::Takedown,
         Affordance::ReleaseBody,
         Affordance::TakeBody,
@@ -588,7 +636,8 @@ impl Affordance {
         Affordance::TakeIntel,
         Affordance::SilenceRadio,
         Affordance::SalvageTech,
-        Affordance::SalvageFull,
+        Affordance::SalvageSwap,
+        Affordance::SalvageRecharge,
         Affordance::SalvageCarried,
         Affordance::Hide,
         Affordance::EnterDuct,
@@ -614,7 +663,8 @@ impl Affordance {
             Affordance::TakeIntel => "console: take intel",
             Affordance::SilenceRadio => "comms: silence radio",
             Affordance::SalvageTech => "cache: take tech",
-            Affordance::SalvageFull => "cache: hands full",
+            Affordance::SalvageSwap => "cache: swap tech",
+            Affordance::SalvageRecharge => "cache: recharge",
             Affordance::SalvageCarried => "cache: already yours",
             Affordance::Hide => "cupboard: hide",
             Affordance::EnterDuct => "duct: enter",
@@ -654,7 +704,8 @@ impl Affordance {
             Affordance::TakeIntel
             | Affordance::SilenceRadio
             | Affordance::SalvageTech
-            | Affordance::SalvageFull
+            | Affordance::SalvageSwap
+            | Affordance::SalvageRecharge
             | Affordance::SalvageCarried
             | Affordance::EnterExit
             | Affordance::Leave
@@ -687,7 +738,8 @@ mod affordance_tests {
                 | Affordance::TakeIntel
                 | Affordance::SilenceRadio
                 | Affordance::SalvageTech
-                | Affordance::SalvageFull
+                | Affordance::SalvageSwap
+                | Affordance::SalvageRecharge
                 | Affordance::SalvageCarried
                 | Affordance::Hide
                 | Affordance::EnterDuct
