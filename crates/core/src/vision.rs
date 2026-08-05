@@ -64,7 +64,6 @@ pub const ENHANCED_SIGHT_RANGE: u32 = 20;
 pub const GUARD_SIGHT_RANGE: u32 = 10;
 /// A guard's sight arc (§7.1/§6.2): width 2, the ~90° forward wedge. **[START]**
 pub const GUARD_SIGHT_ARC: u8 = 2;
-
 /// How much of a guard's **touching ring** (§6.1) is blind — the lowest §6.2 ring
 /// tier dropped from its detection set, and everything above it with it.
 ///
@@ -161,6 +160,67 @@ impl BlindPolicy {
             BlindPolicy::FlankWhileCalm if state == crate::GuardState::Calm => BlindTier::FLANK,
             BlindPolicy::FlankWhileCalm => BlindTier::REAR,
         }
+    }
+}
+
+/// **How a guard sees on this level** (§6.1/§7.1/§12.6) — the cone's shape and what
+/// its ring detects, as one value resolved from the level's modifiers and handed down
+/// to every guard that looks.
+///
+/// It exists because the arc and the range are about to stop being constants (#495).
+/// They are read by the cast, by §7.6's two-zone detection and by the danger overlay
+/// drawn from both, so a level modifier that moves them is either one value threaded
+/// where [`BlindPolicy`] already was, or a second parameter beside it at every call.
+/// **One value**, because a second sight-affecting modifier should then be a change to
+/// this struct's contents and not another thread through the same six signatures.
+///
+/// [`BlindPolicy`] is a **field** rather than a neighbour for the same reason: it is
+/// already the answer to *"how does a guard look this level?"*, asked about the ring
+/// instead of the wedge. Nothing may carry a copy on the guard — the value is derived
+/// from [`State`](crate::State) and passed per call, so a guard's cone and the §11.5
+/// overlay drawn from it read one truth (§12.3, the #199/#200 shape).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GuardSight {
+    /// The §6.2 arc width the cone is carved with.
+    pub arc: u8,
+    /// How far the cone reaches — a square box (§6.1), range *R* being `(2R+1)²`.
+    pub range: u32,
+    /// How much of the touching ring is dropped from detection (§6.1/#442).
+    pub blind: BlindPolicy,
+}
+
+impl GuardSight {
+    /// **§7.1's guard, unmodified** — the ~90° wedge out to 10, with the shipped
+    /// [`BlindPolicy::FlankWhileCalm`] carve. Every run that does not draw the §12.6
+    /// narrowed-cones modifier, and every hand-built guard in a test.
+    pub const BASELINE: Self = Self {
+        arc: GUARD_SIGHT_ARC,
+        range: GUARD_SIGHT_RANGE,
+        blind: BlindPolicy::FlankWhileCalm,
+    };
+
+    /// **The §155 control arm** ([`BlindPolicy::Rear`]) over §7.1's own cone: every
+    /// guard blind at its back alone, whatever its mood. Not reachable in a shipped
+    /// run — it is the contrast the flank rule's tests are stated against, which is why
+    /// it is a test-only constant rather than a fourth thing a level could ask for.
+    #[cfg(test)]
+    pub(crate) const REAR_CARVE: Self = Self {
+        arc: GUARD_SIGHT_ARC,
+        range: GUARD_SIGHT_RANGE,
+        blind: BlindPolicy::Rear,
+    };
+
+    /// The tier this level's policy carves for a guard in `state` — see
+    /// [`BlindPolicy::tier`]. Resolved against the guard's own mood, which is why the
+    /// whole value comes down rather than a bare [`BlindTier`].
+    pub(crate) fn tier(self, state: crate::GuardState) -> BlindTier {
+        self.blind.tier(state)
+    }
+}
+
+impl Default for GuardSight {
+    fn default() -> Self {
+        Self::BASELINE
     }
 }
 

@@ -213,7 +213,7 @@ impl State {
     /// eyes. Sight is a pure recompute drawing no RNG (§12.4), so this cannot perturb
     /// the stream.
     fn sense_guards(&mut self, senses: &GuardSenses, events: &mut Vec<Event>) {
-        let blind = self.guard_blind_policy();
+        let sight = self.guard_sight();
         for index in 0..self.guards.len() {
             if !senses.acts(index) {
                 continue;
@@ -224,7 +224,7 @@ impl State {
             // player — the transition [`Event::Detected`] reports, and the §13.2
             // sim counts. A held chase re-detects every turn and stays silent.
             let was_aware = guard.detected_player();
-            guard.sense(senses.player, senses.concealed[index]);
+            guard.sense(senses.player, senses.concealed[index], sight);
             if guard.detected_player() && !was_aware {
                 events.push(Event::Detected { by: guard.pos() });
             }
@@ -247,7 +247,7 @@ impl State {
             // patrol that stayed a patrol keeps the cone it looked with.
             if self.guards[index].state() != senses.plans[index].state {
                 let facility = self.layout.facility();
-                self.guards[index].look(facility, blind);
+                self.guards[index].look(facility, sight);
             }
         }
     }
@@ -529,7 +529,7 @@ impl State {
         // any one guard: with the comms console bumped there is no coordination left to
         // divide the building, so every Calm guard wanders the whole of it.
         let style = self.patrol_style();
-        let blind = self.guard_blind_policy();
+        let sight = self.guard_sight();
         // Guards the Saver put down **this pass** (§4.5/§8.3/#243), by index. They are
         // out of the game from the instant they lunge — their body is already on the
         // floor — but they are not *removed* until the pass ends, because the phase's
@@ -591,10 +591,10 @@ impl State {
                     &mut self.rng,
                     dwell,
                     style,
-                    blind,
+                    sight,
                 )
             } else {
-                self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style, blind)
+                self.guards[i].decide(facility, &blocked, &mut self.rng, dwell, style, sight)
             };
             if was_chasing {
                 self.call_in_lost_sighting(i, events);
@@ -693,7 +693,7 @@ impl State {
             if self.layout.facility().can_enter(target, ACTOR_FILL) && !held_by_a_guard {
                 let from = self.guards[i].pos();
                 let facility = self.layout.facility();
-                self.guards[i].advance_to(target, dir, facility, blind);
+                self.guards[i].advance_to(target, dir, facility, sight);
                 // A guard arriving on the decoy's cell tramples it (§8.3):
                 // walking into the "intruder" is how the fake is found out.
                 self.stomp_decoy(target, events);
