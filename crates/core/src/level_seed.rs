@@ -666,6 +666,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         calm_guards_detect_only_their_cone,
         automatic_doors,
         guards_watch_consoles,
+        show_search_areas,
         guard_count,
         intel_count,
         caches,
@@ -720,6 +721,10 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         matches!(caches, CacheCount::One),
         matches!(caches, CacheCount::Two),
         matches!(caches, CacheCount::Three),
+        // Slot 15, appended (#224) — the next free position after the cache knob's
+        // three rungs, taken rather than tidied in beside the easier toggles it reads
+        // with. Order here is the token's wire format, never a reading order.
+        show_search_areas,
     ]
     .into_iter()
     .enumerate()
@@ -746,7 +751,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches, show_search_areas] =
         active;
     let guard_count = match (more_guards, fewer_guards) {
         (false, false) => GuardCount::Baseline,
@@ -781,6 +786,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         calm_guards_detect_only_their_cone,
         automatic_doors,
         guards_watch_consoles,
+        show_search_areas,
         guard_count,
         intel_count,
         caches,
@@ -793,7 +799,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// the format. Not the same as the number of *fields*: the guard-count knob (#232) and
 /// the intel-count knob (#207) spend one slot per end, and the cache knob (#209) one
 /// slot per rung.
-const MODIFIER_FIELDS: usize = 15;
+const MODIFIER_FIELDS: usize = 16;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1178,11 +1184,20 @@ mod tests {
         // The boolean fields as a bitmask rather than one nested loop each: the
         // knob (#232) would have made a further level of nesting out of a test whose
         // whole content is "every combination".
-        const TOGGLE_FIELDS: u32 = 8;
+        const TOGGLE_FIELDS: u32 = 9;
         for bits in 0..(1u32 << TOGGLE_FIELDS) {
             let on = |field: u32| bits & (1 << field) != 0;
-            let (search, sighting, body, cones, layout, cone_only, doors, consoles) =
-                (on(0), on(1), on(2), on(3), on(4), on(5), on(6), on(7));
+            let (search, sighting, body, cones, layout, cone_only, doors, consoles, areas) = (
+                on(0),
+                on(1),
+                on(2),
+                on(3),
+                on(4),
+                on(5),
+                on(6),
+                on(7),
+                on(8),
+            );
             for (guard_count, intel_count, caches) in [
                 (GuardCount::Baseline, IntelCount::Baseline, CacheCount::None),
                 (GuardCount::More, IntelCount::More, CacheCount::Three),
@@ -1203,6 +1218,7 @@ mod tests {
                             calm_guards_detect_only_their_cone: cone_only,
                             automatic_doors: doors,
                             guards_watch_consoles: consoles,
+                            show_search_areas: areas,
                             guard_count,
                             intel_count,
                             caches,
@@ -1221,6 +1237,7 @@ mod tests {
                         // spends a slot like any toggle, so it counts here too.
                         let active = [
                             search, sighting, body, cones, layout, cone_only, doors, consoles,
+                            areas,
                         ]
                         .into_iter()
                         .filter(|&flag| flag)
@@ -1342,6 +1359,9 @@ mod tests {
                 // baseline, which is the run this token has always named.
                 automatic_doors: false,
                 guards_watch_consoles: false,
+                // And slot 15 (#224) is the telling after that: an appended toggle
+                // decodes off, so this token still names the run it always named.
+                show_search_areas: false,
                 guard_count: GuardCount::Baseline,
                 // Slots 9 and 10 (#207) are the third telling of the same story: the
                 // intel knob decodes at its baseline, so the token still names the run
@@ -1473,11 +1493,13 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 14, the cache knob's third rung (#209).
-        // A knob holds one value, so the highest five are the top cache rung (14), the
-        // watched consoles (11), one end of each count knob (10 and 8), and the highest
-        // toggle below them (6). Holding more than five at once is over the cap and
-        // refused outright, asserted in `every_config_round_trips`.
+        // actually hold, which now reaches slot 15, the shown search areas (#224). A
+        // knob holds one value, so the highest five are the shown areas (15), the top
+        // cache rung (14), the watched consoles (11) and one end of each count knob (10
+        // and 8) — appending slot 15 pushed the automatic doors (6) out of the set,
+        // which is what "the widest payload" moving with the roster looks like. Holding
+        // more than five at once is over the cap and refused outright, asserted in
+        // `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
             guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
@@ -1485,8 +1507,9 @@ mod tests {
             always_show_vision_cones: false,
             full_layout_known: false,
             calm_guards_detect_only_their_cone: false,
-            automatic_doors: true,
+            automatic_doors: false,
             guards_watch_consoles: true,
+            show_search_areas: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::Fewer,
             caches: CacheCount::Three,

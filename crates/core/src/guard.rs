@@ -663,6 +663,35 @@ impl Guard {
         self.focus
     }
 
+    /// Whether this guard is running a §7.6 **search** right now — the Hunted phase,
+    /// sweeping its [`focus`](Self::focus) disc rather than chasing anything (§7.4).
+    ///
+    /// [`Alerted`](GuardState::Alerted) *is* the search: it is entered by
+    /// [`begin_search`](Self::begin_search) and by [`find_body`](Self::find_body), and
+    /// left by [`release_from_search`](Self::release_from_search) or by any fresher
+    /// lead. So the mood is the whole question, and reading it here rather than the
+    /// `search` counter is what keeps the answer the same one §7.7's call-in and the
+    /// hideout check already give (both gate on the state too).
+    ///
+    /// It is what the facility-wide search messages (§11.7/#224) count, and what the
+    /// investigation overlay (§11.5) paints from.
+    pub(crate) fn searching(&self) -> bool {
+        self.state == GuardState::Alerted
+    }
+
+    /// The centre of the §7.6 search this guard is running, or `None` when it is not
+    /// searching (§11.5/#224) — [`focus`](Self::focus) gated on the mood.
+    ///
+    /// The gate is load-bearing: a guard keeps its focus through the post-search
+    /// **watch** ([`release_from_search`](Self::release_from_search)), so an ungated
+    /// read would paint an investigation area over a guard that is Calm again and has
+    /// stopped investigating — the overlay claiming attention that is no longer there.
+    /// It is the same gate [`checks_hideout_at`](Self::checks_hideout_at) applies, so
+    /// the area drawn is the area a hideout is actually flushed inside of.
+    pub(crate) fn search_focus(&self) -> Option<Cell> {
+        self.searching().then_some(self.focus).flatten()
+    }
+
     /// The turn this guard has already decided on (§4.2/#430) — its state of mind
     /// and the cell it is walking to, as a value the guard phase snapshots before
     /// any look is folded in ([`GuardSenses`](crate::State)).

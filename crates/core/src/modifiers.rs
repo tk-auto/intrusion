@@ -488,6 +488,35 @@ pub struct LevelModifiers {
     /// the pressure is concentrated on the two errands a run cannot skip, not spread
     /// over the level.
     pub guards_watch_consoles: bool,
+    /// **Easier.** Paint every live §7.6 **investigation area** (§11.5/#224): the
+    /// `SEARCH_RADIUS` box around each searching guard's focus washes orange, so *where*
+    /// a search is sweeping is on the board rather than inferred from a wandering cone.
+    ///
+    /// Baseline, a search is legible only in **time** — the near line says one starts
+    /// and says when it is called off (§11.7) — and that is the half a hidden player
+    /// needs most, since the guard doing the searching is typically one they cannot see.
+    /// This adds the half a message cannot carry: *is hiding **here** risky?* It is the
+    /// literal flush zone, the same box [`checks_hideout_at`] tests a cupboard against,
+    /// so a player who can see the area can see the mistake #219 made available — diving
+    /// into the sweep a body of your own leaving started.
+    ///
+    /// **It is a separate, advisory layer and never the red one** (§11.5 **[SETTLED]**).
+    /// Red means *a guard detects you here*; this orange means only *a guard's attention
+    /// is on this area*, and where the two overlap red paints last and wins. It widens
+    /// what is drawn and hides nothing, so the overlay's one non-negotiable promise —
+    /// if your cell isn't red, no guard you can see will detect you — is untouched.
+    ///
+    /// **Every live search projects one, seen or not.** The §11.5 "never a guess" rule
+    /// binds the detection set, not an advisory layer, and a see-only rule would go dark
+    /// exactly when the area is worth most: in a cupboard, watching a guard you cannot
+    /// see decide whether to open it. That is the same shape
+    /// [`always_show_vision_cones`] takes, and it is why this sits on the *easier* side
+    /// of the §12.6 directed pool — knowing which ground is being combed is a real
+    /// advantage, and it has to be paid for by taking a harder rule elsewhere.
+    ///
+    /// [`checks_hideout_at`]: crate::Guard::checks_hideout_at
+    /// [`always_show_vision_cones`]: LevelModifiers::always_show_vision_cones
+    pub show_search_areas: bool,
     /// How many guards patrol the facility (§10.2/#232) — one step either side of the
     /// recipe's count, [`More`](GuardCount::More) harder and
     /// [`Fewer`](GuardCount::Fewer) easier. Baseline
@@ -623,7 +652,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 16] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 17] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
@@ -638,6 +667,7 @@ pub(crate) const CAPTIONS: [ActiveModifier; 16] = [
     ONE_CACHE,
     TWO_CACHES,
     THREE_CACHES,
+    SHOWS_SEARCH_AREAS,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -684,6 +714,17 @@ const ALL_DOORS_AUTOMATIC: ActiveModifier = ActiveModifier {
 const WATCHES_CONSOLES: ActiveModifier = ActiveModifier {
     name: "Guards watch consoles",
     direction: ModifierDirection::Harder,
+    detail: None,
+};
+
+/// Named for what the **board** gains, like its easier neighbours above (#224): the
+/// player reads that the searched ground is drawn, not that a guard has a focus disc.
+/// "Search areas" rather than "investigation areas" because *search* is the word §7.6
+/// and the near line already use for the same thing — one name for one mechanic
+/// (§11.8).
+const SHOWS_SEARCH_AREAS: ActiveModifier = ActiveModifier {
+    name: "Search areas shown",
+    direction: ModifierDirection::Easier,
     detail: None,
 };
 
@@ -807,7 +848,7 @@ pub(crate) struct PoolEntry {
 /// that keeps the gate out does not arise. It is the third easier candidate appendix
 /// 29 said would close its own question, and it closes it: −2 is a genuine draw of
 /// two from three rather than the one exhaustive pair every seed used to get.
-pub(crate) const POOL: [PoolEntry; 8] = [
+pub(crate) const POOL: [PoolEntry; 9] = [
     PoolEntry {
         caption: SEARCHES_HIDEOUTS,
         set: |m| m.guards_always_search_hideouts = true,
@@ -846,6 +887,12 @@ pub(crate) const POOL: [PoolEntry; 8] = [
     PoolEntry {
         caption: WATCHES_CONSOLES,
         set: |m| m.guards_watch_consoles = true,
+    },
+    // Slot 15, appended (#224) — the easier side's fourth entry, which is what takes
+    // −2 off the two-of-three draw appendix 29 flagged and this one leaves at four.
+    PoolEntry {
+        caption: SHOWS_SEARCH_AREAS,
+        set: |m| m.show_search_areas = true,
     },
 ];
 
@@ -894,6 +941,7 @@ impl LevelModifiers {
             calm_guards_detect_only_their_cone,
             automatic_doors,
             guards_watch_consoles,
+            show_search_areas,
             guard_count,
             intel_count,
             caches,
@@ -930,6 +978,9 @@ impl LevelModifiers {
             CacheCount::One => active.push(ONE_CACHE),
             CacheCount::Two => active.push(TWO_CACHES),
             CacheCount::Three => active.push(THREE_CACHES),
+        }
+        if show_search_areas {
+            active.push(SHOWS_SEARCH_AREAS);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -1006,6 +1057,7 @@ impl LevelModifiers {
                 || other.calm_guards_detect_only_their_cone,
             automatic_doors: self.automatic_doors || other.automatic_doors,
             guards_watch_consoles: self.guards_watch_consoles || other.guards_watch_consoles,
+            show_search_areas: self.show_search_areas || other.show_search_areas,
             // A bounded knob composes *harder-ward* (§12.6): take the value further
             // in its documented direction, so sources add pressure, never cancel.
             // For the guard count that reads as "the end that departs from the
@@ -1273,7 +1325,7 @@ mod tests {
         assert_eq!(fewer.active()[0].detail, Some("one fewer"));
 
         // Several sources at once: every active field is listed, in reading order.
-        // **Eleven, not twelve, with every field set** — `calm_guards_detect_only_their_cone`
+        // **Twelve, not thirteen, with every field set** — `calm_guards_detect_only_their_cone`
         // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
         // asked for is the rule the level plays regardless, so a caption for it would
         // tell the player about a difference that no longer exists.
@@ -1286,12 +1338,13 @@ mod tests {
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guards_watch_consoles: true,
+            show_search_areas: true,
             guard_count: GuardCount::More,
             intel_count: IntelCount::Fewer,
             caches: CacheCount::Three,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 11);
+        assert_eq!(stacked.active().len(), 12);
         assert!(
             !stacked
                 .active()
@@ -1320,12 +1373,13 @@ mod tests {
         }
         // The pool covers every live toggle — the fields, less the retired slot 5,
         // which asks for the rule the level plays regardless (#442) — plus the guard
-        // knob's two ends, one on each side (#232). The easier side is three deep, so
-        // −2 is a genuine draw rather than the one exhaustive pair of appendix 29; the
-        // harder side is five with the watched consoles (#319).
-        assert_eq!(POOL.len(), 8);
+        // knob's two ends, one on each side (#232). The easier side is **four** deep
+        // with the shown search areas (#224), so −2 is a draw of two from four rather
+        // than the one exhaustive pair appendix 29 flagged; the harder side is five
+        // with the watched consoles (#319).
+        assert_eq!(POOL.len(), 9);
         assert_eq!(pool_size(ModifierDirection::Harder), 5);
-        assert_eq!(pool_size(ModifierDirection::Easier), 3);
+        assert_eq!(pool_size(ModifierDirection::Easier), 4);
         assert_eq!(
             pool_size(ModifierDirection::Harder) + pool_size(ModifierDirection::Easier),
             POOL.len(),
@@ -1350,6 +1404,7 @@ mod tests {
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
             guards_watch_consoles: false,
+            show_search_areas: false,
             guard_count: GuardCount::Baseline,
             intel_count: IntelCount::Baseline,
             caches: CacheCount::Two,
@@ -1364,6 +1419,7 @@ mod tests {
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guards_watch_consoles: true,
+            show_search_areas: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::More,
             caches: CacheCount::None,
