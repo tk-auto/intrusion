@@ -3470,3 +3470,123 @@ it. `Harder` remains the safer of the two labels because the structural change (
 throats, no hand-close) is the harder-direction one and is what §2.3's assertion can
 actually hold. #258 is where that question gets answered properly.
 
+
+---
+
+## Appendix 50 — Blind guards: the zones follow the cone, and the arc is where the pressure is
+
+*(§6.1 the cone and the blind spot, §7.6 two-zone detection, §12.6 the directed pool
+and the same-building guarantee, §10.1.9 placement. The ticket is #495.)*
+
+The §12.6 easier side had four entries and a shape problem. Every one of them handed
+over **information** (*all vision cones shown*, *full layout known*, *search areas
+shown*) or **slack** (*guards: one fewer*) — the family appendix 29 called *"knowledge
+or slack without touching the objective"*, and a family with a ceiling: there are only
+so many things left to reveal, and each one reveals a little more of the game the player
+is there to discover. This is the first easier entry that bends what a guard can **do**.
+Four short-sighted guards is a different problem from three ordinary ones — more bodies
+to route around, less reach each — rather than another window onto the same run.
+
+Three things had to be decided to ship it, and two of them cost the measurement below.
+
+### 1. The zones are the cone's halves, not two absolutes
+
+§7.6's certain zone was `5` and its glimpse edge was `GUARD_SIGHT_RANGE`, which is `10`.
+Shorten the range and the glimpse edge follows for free — but a certain zone pinned at
+`5` against a range of `6` leaves a **one-ring glimpse zone**, and past that it vanishes
+entirely and every sighting becomes certain. That is an *easier* modifier biting
+**harder** on contact than the baseline, which is the one thing a `−N` draw must never
+hand back.
+
+So the zones are stated as a proportion of the cone: **certain is its inner half,
+glimpse the rest**. At §7.1's range 10 that is exactly `5` and `6–10` — the baseline is
+untouched, which is what made this the cheap answer rather than a retune. A narrowed
+guard gets `3` and `4–6`: both zones shorter, the modifier easier in both. The
+invariant — every cone has a certain zone at least a cell deep and a glimpse ring
+outside it — is asserted at **compile time** over every sight configuration the game can
+deal, the way §7.3's radio relations are, so a future cone that collapsed the ladder
+fails the build rather than a playtest.
+
+One relation moves and it moves the right way. §7.6 designed Run's gain to be *exactly*
+the certain→glimpse distance; against a narrowed cone the gain overshoots — 5 cells
+against a 3-cell gap — so breaking contact is easier than designed. On the easier side,
+that is the correct direction for a break.
+
+### 2. Placement keeps §7.1's own cone
+
+The §10.1.9 turn-one check refuses a guard spawn whose opening cone covers the player's
+exit. A **smaller** cone passes *more* spawn cells, so reading the modifier there would
+move where the guards stand — and the ±N arms of a comparison would stop being the same
+building, which is most of what makes comparing them worth anything.
+
+This was already settled once, for the flank experiment (#410): placement pins
+`BlindTier::REAR` for the same reason, on the grounds that *"a paired A/B whose two arms
+generate different geometry cannot attribute what it measures"*. The baseline is the
+conservative bound in both directions — a cell safe under §7.1's reach and the rear
+carve is safe under any shorter cone or any wider blind spot — so pinning costs only the
+very-slightly-closer spawns a smaller cone would have allowed. The entry therefore sits
+on the **byte-identical** tier of the pool's graded guarantee: same carve, same
+placement, same board down to each guard's radio clock.
+
+The ticket asked whether that guarantee had already been bent, since a promise nobody
+keeps is worse than either answer. It had — `automatic_doors` reaches the carve — but
+#518 had already restated it in three graded tiers, pinned by
+`a_difficulty_draw_moves_the_building_only_where_it_is_meant_to`. Nothing needed
+correcting; this entry simply joins the strictest tier.
+
+### 3. The arc is the lever, and the range is what makes it legible
+
+The numbers picked themselves only after a sweep. Four temperaments, 100 seeds each,
+`--modifier narrowed-guard-cones` against the stored baseline, holding the arc at 1 and
+moving the range:
+
+| profile | baseline (arc 2, range 10) | range 8 | range 7 | range 6 |
+|---|---|---|---|---|
+| balanced | 0.35 | 0.65 | 0.59 | 0.63 |
+| cautious | 0.53 | 0.82 | 0.86 | 0.89 |
+| aggressive | 0.40 | 0.68 | 0.76 | 0.72 |
+| careless | 0.43 | 0.77 | 0.71 | 0.68 |
+
+*(win rate; detections fall 40–70% across the same batches)*
+
+**The range barely matters.** Almost the whole lift is already there at 8, and 6 adds
+nothing outside the noise — because indoors the walls bound a guard's sight long before
+its range box does, which is the same fact §10.1a's corridor cap is stated against. What
+is actually doing the work is the **arc**: one rung down §6.2's tier ladder turns a ~90°
+wedge into a ~53° one, and that halves the angular width at every depth, wall or no
+wall.
+
+So the range is chosen on design grounds rather than on the sweep. Six is kept because
+it is the one that a player can **see**: a 13×13 box against 21×21 reads plainly shorter
+on the §11.5 overlay, where 17×17 would be a caption more than a change. It is also the
+shortest reduction that leaves the ladder in §1 with two rungs worth naming.
+
+**And it is the note for whoever retunes this.** If the `−N` step turns out too generous
+in play, the knob is the **arc**, not the range: shortening further buys almost nothing,
+and widening back to 2 gives most of the step back while keeping the cone visibly
+shorter.
+
+### What the batch says, and what it does not
+
+The lift is large — 25 to 36 points of win rate across the four temperaments, where
+§10.2 puts one guard at 8–10. Detections fall on every profile and `alert_peak_mean`
+falls on every profile: the pressure genuinely comes off. Diversity rises on three of
+four, so it is not buying safety by collapsing the run onto one line.
+
+Two things move the *other* way and both are coherent. The striking profiles land **more
+takedowns** (aggressive 22→33, careless 21→34) and leave **more bodies found** (3→11,
+17→25), and `careless` reaches rung 3 on 22 seeds against 14. A shorter, thinner cone
+makes walking up behind a guard easier, so a temperament that wants the verb gets it
+more often — and a body left on the floor is still the loudest event in the game (§7.3).
+The noise does not go away; it moves from *"you were seen"* to *"you left something"*,
+which is the trade §7.2 prices and not a hole in the modifier.
+
+**The bot plays this one honestly**, which is worth saying because most of the easier
+side it joins is bot-blind (§12.6/#518: three of the four existing easier entries are
+no-ops to the policy). The bot builds its danger set from the cones of the guards it can
+see, and those cones shrink with the modifier, so the ground it judges safe is the ground
+that *is* safe. No cue was needed; what changed is the board the existing cues read.
+
+None of which is a verdict. §13.4's rule stands — the sim is a smoke detector, not a
+judge — and *how much easier a −1 draw should feel* is exactly the kind of question
+§13.1 reserves for playing it.

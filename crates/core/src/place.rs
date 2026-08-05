@@ -641,7 +641,10 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
             // the better answer rather than a workaround for that: a smaller cone
             // would pass *more* cells, so a modifier that shrinks what a guard sees
             // would also shift where guards spawn — and a paired A/B whose two arms
-            // generate different geometry cannot attribute what it measures.
+            // generate different geometry cannot attribute what it measures. That is
+            // also what keeps the §12.6 narrowed-cones draw off the *byte-identical*
+            // tier of the pool's same-building guarantee: it bends a rule and leaves
+            // the grid alone.
             //
             // The baseline is the conservative one in both directions — a cell safe
             // under §7.1's reach and the rear carve is safe under any shorter cone or

@@ -379,6 +379,18 @@ it trivialises the hiding game.
 - **Range is a square box, not a circle.** Range 10 means a 21×21 box. There is
   no distance falloff. **[START]** — a circle would be more natural; the box is
   cheap and was never noticed. Worth trying.
+- **A guard's arc and range are a level's, not a constant's** (§12.6/#495). §7.1's
+  guard is the ~90° wedge out to 10 and every run plays it unless the difficulty draw
+  says otherwise; the *narrowed cones* modifier hands every guard a ~53° wedge out to
+  6 instead — the arc one rung down §6.2's tier ladder, so only the cell directly ahead
+  is a transparent ring neighbour. The **player's** sight is not on this seam and no
+  modifier moves it. Placement is not either: the §10.1.9 turn-one spawn check always
+  uses §7.1's own cone, so a shorter one cannot pass spawn cells the baseline refuses
+  and the ±N arms of a comparison stay the same building (§12.6). **This is a different
+  knob from the blind spot above**, on the same subsystem: the blind spot decides what a
+  guard's touching ring *detects*, this decides the shape of the cone itself, and
+  neither supersedes the other — a narrowed Calm guard detects exactly its narrowed
+  wedge.
 - **The 8 cells immediately around a viewer are always seen** — with one
   exception, the guard rear blind spot below. For the **player** this is
   unqualified and **[SETTLED]**: you can never stand adjacent to the player
@@ -893,6 +905,19 @@ cleanly in the danger overlay as **two shades of red**, and — critically — *
 gives Run a job**: 5 cells of gain is exactly the distance from the certain zone
 to the glimpse zone. That relationship should be *designed*, not coincidental. If
 you retune Run, retune the zones.
+
+**The zones are the cone's own halves** (#495): certain is the inner half of a guard's
+sight range and glimpse is the rest of it, which at §7.1's range 10 is exactly the 5
+and the 6–10 above. Stated as a proportion rather than as two absolutes because a level
+modifier now shortens the cone (§6.1/§12.6), and the zones have to shorten with it: a
+certain zone pinned at 5 against a range of 6 would leave a single glimpse ring and make
+a short-sighted guard *more* certain of what it caught than an ordinary one — an easier
+rule biting harder on contact. Every cone the game can deal keeps both zones, asserted
+at compile time. The Run relation follows the same proportion, and against a narrowed
+cone it overshoots — 5 cells of gain against a 3-cell gap — which is a break in the
+player's favour on the side of the axis where it belongs. Appendix 50 has the argument,
+and the measurement that says the *arc* is where a narrowed cone's pressure actually
+sits.
 
 **2. Losing sight must lead to a search, not an instant give-up.**
 
@@ -3219,7 +3244,10 @@ the *when* is free and unconditional, and only the *where* is priced); *"locked 
 key-gates every doorway of the one room holding the facility's prize and puts a key on
 every guard (§10.4/#236 — harder, the **fifth** modifier read by generation, and the one
 that reaches *past* placement rather than into it: it draws nothing, so both settings are
-the same board and only one room's doorways differ); *"calm guards detect only their cone"* drops a **Calm**
+the same board and only one room's doorways differ); *"guard cones: shorter and thinner"*
+gives every guard a ~53° wedge out to 6 where §7.1's is ~90° out to 10, and §7.6's two
+zones shorten with it (§6.1/#495 — easier, and the first entry on that side that bends a
+rule rather than handing over knowledge or slack: see below); *"calm guards detect only their cone"* drops a **Calm**
 guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
 wedge while a guard that is hunting still watches its sides (easier — an
 **experiment**, see below). This is the
@@ -3345,10 +3373,23 @@ labelling the batch, never for a thinner game. It was never a small problem eith
 three of the four *easier* entries are already bot-blind, so a `−N` bot batch has long
 been drawing no-ops.
 
-So the pool now holds **twelve** entries, **eight harder and four easier** — the three
-admitted by #518 are all harder, which is why the sides are no longer the same depth.
-Nothing lies about it (the slider's blurb counts *picks*, not pool depth), but a `+N` run
-has more variety than a `−N` one, and the easier side is the one to grow next.
+So the pool now holds **thirteen** entries, **eight harder and five easier**. The three
+admitted by #518 are all harder, which is why the sides stopped being the same depth;
+the narrowed cones (#495) are the first step back the other way. Nothing lies about the
+gap (the slider's blurb counts *picks*, not pool depth), but a `+N` run still has more
+variety than a `−N` one, and the easier side is still the one to grow.
+
+**What kind of easier entry, not how many** (#495). Growing the easier side is not only
+arithmetic: every entry on it before the narrowed cones handed over **information**
+(*"all vision cones shown"*, *"full layout known"*, *"search areas shown"*) or **slack**
+(the guard count's easier end) — *knowledge or slack without touching the objective*,
+the family appendix 29 named, and one with a ceiling. There are only so many things left
+to reveal, and each one reveals a little more of the game the player is there to
+discover. The narrowed cones bend what a guard can **do** instead, so the easier side
+now holds a rule-bending entry alongside its knowledge-and-slack ones — a facility with
+four short-sighted guards is a different problem from one with three ordinary ones,
+rather than another window onto the same run. That is the axis the easier side has left
+to grow along (appendix 50).
 
 > **What "the same building" now means, precisely** (#232). Every pool entry used to be
 > read at runtime, so the ±N arms of a comparison were the same *level* down to the last
@@ -3359,14 +3400,13 @@ has more variety than a `−N` one, and the easier side is the one to grow next.
 > it is no longer between two runs of one board. Said here rather than left to be
 > discovered, because "byte-identical at every difficulty" was a stated property.
 
-**Both sides are now deeper than the axis reaches. [START]** The pool holds **five**
-harder entries (the fifth is the watched consoles, #319) and **four** easier ones (the
-fourth is the shown search areas, #224), so
-±2 are both genuine draws that differ by seed. The easier side used to be two deep and therefore exhaustive at −2 — the cost
-appendix 29 stated rather than hid — and what closed it is the guard count's easier end
-(#232), exactly the "knowledge or slack without touching the objective" that appendix
-said would; #224 is the third of that kind, and takes −2 from a draw of two-from-three to
-one of two-from-four.
+**Both sides are deeper than the axis reaches. [START]** With eight harder entries and
+five easier ones, ±2 are both genuine draws that differ by seed. The easier side used to
+be two deep and therefore exhaustive at −2 — the cost appendix 29 stated rather than hid
+— and what closed it is the guard count's easier end (#232), exactly the "knowledge or
+slack without touching the objective" that appendix said would; the shown search areas
+(#224) are the third of that kind, and the narrowed cones (#495) take −2 to a draw of
+two-from-five.
 
 Relaxing the **intel gate** would have been the other candidate, and it is still not
 taken: the gate is a knob `union` composes harder-ward, and quick play already sits at

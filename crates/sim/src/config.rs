@@ -267,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 14] = [
+const MODIFIERS: [(&str, SetModifier); 15] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -339,6 +339,16 @@ const MODIFIERS: [(&str, SetModifier); 14] = [
     // the §12.6 directed pool; the name is here so `--inspect` and a replay can still
     // show what the *player* would be shown.
     ("prize-room-locked", |m| m.prize_room_locked = true),
+    // Read at the sight seam (§6.1/§7.1/§7.6/#495), so a batch that names it plays the
+    // baseline's building with the same guards seeing a shorter, thinner piece of it —
+    // the same byte-identical frame the runtime modifiers above are swept in.
+    //
+    // **The bot plays this one honestly**, which is not true of most of the easier side
+    // (`docs/bot-behaviour.md` §2): its danger set is built from the cones of the guards
+    // it can see, and those cones shrink with the modifier, so the ground it judges safe
+    // is the ground that *is* safe. No new cue — what changed is the board the existing
+    // ones read.
+    ("narrowed-guard-cones", |m| m.narrowed_guard_cones = true),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -640,6 +650,7 @@ mod tests {
             intel_count,
             caches,
             prize_room_locked,
+            narrowed_guard_cones,
             intel_to_exit,
         } = all.modifiers;
         assert!(prize_room_locked);
@@ -650,6 +661,7 @@ mod tests {
         assert!(automatic_doors);
         assert!(guards_watch_consoles);
         assert!(show_search_areas);
+        assert!(narrowed_guard_cones);
         // The knob's two ends are two names over one field, so naming both leaves the
         // one named last rather than accumulating — see [`RunConfig::with_modifier`].
         assert_eq!(guard_count, GuardCount::Fewer);

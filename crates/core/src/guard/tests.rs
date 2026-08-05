@@ -1561,6 +1561,111 @@ fn a_player_beyond_the_glimpse_range_is_not_seen() {
     assert_eq!(guard.state(), GuardState::Calm, "> 10 detects nothing");
 }
 
+/// §7.6/§12.6/#495: **the two zones survive a narrowed cone**, which is the whole of
+/// the zone decision the modifier had to make. The zones are the cone's own halves, so
+/// a shorter cone keeps a certain zone, a glimpse ring outside it and a gone zone
+/// beyond — all three rungs, on a cone barely over half the length.
+///
+/// The failure it guards against is the one a fixed `CERTAIN_RANGE` of 5 would have
+/// produced against a range of 6: a single glimpse ring, and every other sighting
+/// certain. That would leave an **easier** modifier biting harder on contact than the
+/// baseline, which is the one thing a −N draw must never hand back.
+#[test]
+fn a_narrowed_cone_keeps_both_detection_zones() {
+    let sight = GuardSight::NARROWED;
+    assert!(sight.range < GuardSight::BASELINE.range, "shorter");
+    assert!(sight.arc < GuardSight::BASELINE.arc, "and thinner");
+
+    let facility = Facility::walled_box(11, 20);
+    // Straight down the cone's axis, so the thinner arc cannot be what excludes a
+    // cell: only the range and the zones are under test here.
+    let at = |depth: u32| Cell::new(5, 2 + depth);
+    let look = || {
+        let mut guard = Guard::stationary(Cell::new(5, 2)); // faces south (§7.1)
+        guard.look(&facility, sight);
+        guard
+    };
+
+    let mut certain = look();
+    certain.see(at(sight.certain_range()), false, sight);
+    assert_eq!(
+        certain.state(),
+        GuardState::Chasing,
+        "the inner half is still a certain track",
+    );
+
+    let mut glimpse = look();
+    let edge = at(sight.glimpse_range());
+    assert!(glimpse.fov.contains(edge), "precondition: in the cone");
+    glimpse.see(edge, false, sight);
+    assert_eq!(
+        glimpse.state(),
+        GuardState::Investigating,
+        "…and the outer half is still only a glimpse",
+    );
+
+    let mut gone = look();
+    let far = at(sight.glimpse_range() + 1);
+    assert!(!gone.fov.contains(far), "precondition: out of the cone");
+    gone.see(far, false, sight);
+    assert_eq!(gone.state(), GuardState::Calm, "past the cone, nothing");
+
+    // And the baseline is untouched by the derivation: §7.6's own [START] numbers.
+    assert_eq!(
+        (
+            GuardSight::BASELINE.certain_range(),
+            GuardSight::BASELINE.glimpse_range(),
+        ),
+        (5, 10),
+        "deriving the zones from the cone must not move the baseline's",
+    );
+}
+
+/// §6.1/§12.6/#495: a narrowed cone is a **subset** of the baseline's from the same
+/// cell and facing — shorter *and* thinner, never merely different — and both keep
+/// §6.1's touching ring, which is not the modifier's to bend.
+///
+/// Stated on open floor so the claim is about the arc and the range rather than about
+/// which wall happened to be in the way.
+#[test]
+fn a_narrowed_cone_is_a_strict_subset_of_the_baseline_cone() {
+    let facility = Facility::walled_box(31, 31);
+    let cone = |sight| {
+        let mut guard = Guard::stationary(Cell::new(15, 15));
+        guard.look(&facility, sight);
+        guard.fov.cells().collect::<HashSet<Cell>>()
+    };
+    let baseline = cone(GuardSight::BASELINE);
+    let narrowed = cone(GuardSight::NARROWED);
+
+    assert!(
+        narrowed.is_subset(&baseline),
+        "a narrowed guard must see less, not elsewhere",
+    );
+    assert!(
+        narrowed.len() < baseline.len(),
+        "…and strictly less: {} cells against {}",
+        narrowed.len(),
+        baseline.len(),
+    );
+    // Shorter: the far half of the axis is gone. Thinner: a cell the ~90° wedge
+    // covers at width is not in the ~53° one, at a depth both cones still reach.
+    assert!(
+        baseline.contains(&Cell::new(15, 23)) && !narrowed.contains(&Cell::new(15, 23)),
+        "shorter — 8 down the axis is inside the baseline cone alone",
+    );
+    assert!(
+        baseline.contains(&Cell::new(19, 19)) && !narrowed.contains(&Cell::new(19, 19)),
+        "thinner — the 45° diagonal at depth 4 is inside the baseline cone alone",
+    );
+    for ring in [Cell::new(15, 16), Cell::new(14, 16), Cell::new(16, 16)] {
+        assert!(
+            narrowed.contains(&ring),
+            "§6.1's touching ring is not the modifier's to bend: {ring:?}",
+        );
+    }
+}
+
 /// §7.2's takedown gate is **per-turn fact, not mood**: a guard whose latest
 /// look detected the player is aware; one whose latest look missed them —
 /// concealment here — is not, even while its Chasing state lingers. That gap

@@ -287,10 +287,12 @@ impl GuardSight {
     /// cell.
     ///
     /// **The cone's inner half, not an absolute** (#495). At §7.1's range 10 this is
-    /// exactly §7.6's **[START] = 5**, so the baseline game is unchanged; a shorter
-    /// cone shortens the zone with it, which is what will keep an *easier* modifier
-    /// easier in **both** zones rather than leaving a guard that sees less **more**
-    /// certain of what it caught.
+    /// exactly §7.6's **[START] = 5**, so the baseline game is unchanged; under the
+    /// narrowed-cones modifier (§12.6) the zone shortens with the cone that carries
+    /// it. That is what keeps an *easier* modifier easier in **both** zones: a fixed 5
+    /// against a range of 6 would leave a one-ring glimpse zone and make a narrowed
+    /// guard *more* certain of what it caught than a normal one, which is the shape a
+    /// −N draw must never hand back.
     ///
     /// The relation is the one §7.6 already designed rather than a new number: Run's
     /// 5-cell gain is *"exactly the distance from the certain zone to the glimpse
@@ -315,6 +317,27 @@ impl GuardSight {
         self.range
     }
 }
+
+/// The §7.6 zone invariant, held over **every** sight configuration a run can be dealt
+/// (§2.3): each cone has two zones, an inner certain one at least a cell deep and a
+/// glimpse ring outside it. A cone short enough to collapse the two — every sighting
+/// certain, the ladder gone — fails the build rather than reaching a playtest.
+const _: () = {
+    let mut i = 0;
+    while i < GuardSight::ALL.len() {
+        let sight = GuardSight::ALL[i];
+        assert!(
+            sight.certain_range() >= 1,
+            "a guard sight config has no certain zone (§7.6)",
+        );
+        assert!(
+            sight.certain_range() < sight.glimpse_range(),
+            "a guard sight config has no glimpse zone: shortening the cone past this \
+             makes every sighting certain, which is harsher than the baseline (§7.6)",
+        );
+        i += 1;
+    }
+};
 
 /// How many turns a guard **searches** a lost lead before releasing to patrol
 /// (§7.6 fix 2, **[START] = 12**). When a reactive guard reaches its last-known cell

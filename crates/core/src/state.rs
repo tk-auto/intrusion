@@ -2567,16 +2567,20 @@ impl State {
     ///   the *policy* was never the interesting part — what matters is that the tier is
     ///   resolved from the guard's mood at look time, so a guard's sides come back the
     ///   turn it stops being Calm, with no new state and no timer.
-    /// - **The cone's shape is about to become a level modifier** (§12.6/#495), which
-    ///   is why it is resolved here as a value rather than read as a constant at each
-    ///   of the sites that used to.
+    /// - **The cone's shape is a level modifier** (§12.6/#495): the narrowed-cones draw
+    ///   hands every guard [`GuardSight::NARROWED`] — a shorter, thinner wedge — and
+    ///   with it §7.6's zones, which are that cone's own halves.
     ///
     /// Still a function rather than a constant, and still read fresh on every use
     /// (§12.3) exactly like [`patrol_style`](Self::patrol_style) — one truth, so a
     /// guard's cone, the sighting it resolves and the §11.5 danger overlay drawn from
     /// them cannot disagree.
     pub(crate) fn guard_sight(&self) -> GuardSight {
-        GuardSight::BASELINE
+        if self.modifiers.narrowed_guard_cones {
+            GuardSight::NARROWED
+        } else {
+            GuardSight::BASELINE
+        }
     }
 
     /// Phase 2 (§4.2): recompute every viewer's field of view from its current
