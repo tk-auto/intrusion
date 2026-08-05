@@ -169,6 +169,16 @@ pub enum Event {
     /// [`RadioSilence`](Event::RadioSilence), which is a single *guard* gone quiet and
     /// is bad news; this is the net itself, and it is the player's doing.
     CommsSilenced { at: Cell },
+    /// The player bumped an **equipment cache** and salvaged the tech in it
+    /// (§2.2/§8.3/§14 v3/#209): `id` is now theirs — usable this turn, in this facility,
+    /// and in every facility the run reaches after it.
+    ///
+    /// It carries the ability rather than a cell, because the ability is the whole
+    /// event: where the crate stood stops mattering the instant it is opened, and *what
+    /// you now have* is the only thing the near line, the campaign layer and the run's
+    /// ledger each want from it. One-way, like the silenced net — nothing takes a
+    /// salvaged ability back within a run, and nothing carries it out of one (§2.2).
+    TechSalvaged { id: AbilityId },
     /// The facility alert climbed to `rung`, because of `trigger` (§7.3): the
     /// concrete, explainable escalation the alert system was always meant to provide
     /// (§2.3). Fired **once per escalation** — a trigger at or below the rung the
@@ -367,10 +377,15 @@ impl Event {
             // the reward for routing to the comms console, and it reads in that band
             // rather than the Owned one your abilities use: it is a fact about the
             // *facility* now, not a tool you are holding.
+            // Salvaging tech (§8.3/#209) reads in the same band, and the same argument
+            // decides it: the *find* is the reward the facility was hiding, which is
+            // Interest. That the thing found is a tool you now hold is the ability bar's
+            // to say in Owned, one row down.
             Event::IntelTaken { .. }
             | Event::ExitRefused { .. }
             | Event::Won
-            | Event::CommsSilenced { .. } => Category::Interest,
+            | Event::CommsSilenced { .. }
+            | Event::TechSalvaged { .. } => Category::Interest,
             // A threat that has you, literally (§4.5) — or the wall does (§8.3).
             Event::Captured { .. } | Event::Entombed { .. } => Category::Danger,
         }
@@ -419,6 +434,10 @@ pub enum Affordance {
     /// the level (§7.3/§7.7). Never offered on a console already used — a silenced net
     /// has nothing left to switch off.
     SilenceRadio,
+    /// An **equipment cache** still holding its tech: bump to salvage it (§4.3/#209).
+    /// Never offered on a crate already opened — an empty one is scenery, exactly as a
+    /// spent console is.
+    SalvageTech,
     /// An empty cupboard: bump to climb in and be concealed (§10.3).
     Hide,
     /// A duct entry: bump to climb into the crawlspace shortcut (§10.7).
@@ -446,7 +465,7 @@ impl Affordance {
     /// a variant missing from here is a label nothing checks, which is exactly the
     /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
     /// against it so a new variant cannot quietly skip the list.
-    pub(crate) const ALL: [Affordance; 14] = [
+    pub(crate) const ALL: [Affordance; 15] = [
         Affordance::Takedown,
         Affordance::ReleaseBody,
         Affordance::TakeBody,
@@ -455,6 +474,7 @@ impl Affordance {
         Affordance::CloseDoor,
         Affordance::TakeIntel,
         Affordance::SilenceRadio,
+        Affordance::SalvageTech,
         Affordance::Hide,
         Affordance::EnterDuct,
         Affordance::EnterExit,
@@ -478,6 +498,7 @@ impl Affordance {
             Affordance::CloseDoor => "door: close",
             Affordance::TakeIntel => "console: take intel",
             Affordance::SilenceRadio => "comms: silence radio",
+            Affordance::SalvageTech => "cache: take tech",
             Affordance::Hide => "cupboard: hide",
             Affordance::EnterDuct => "duct: enter",
             Affordance::EnterExit => "exit: enter",
@@ -490,7 +511,8 @@ impl Affordance {
     /// What acting on this affordance is *about* (§11.2): doors, cupboards and
     /// tables are System furniture; both consoles and the exit are the goal,
     /// Interest — the comms console is a place worth routing to (§7.7), which is what
-    /// puts it there rather than with the furniture; a takedown is about the unaware
+    /// puts it there rather than with the furniture, and an equipment cache (#209) is
+    /// there on the same reading; a takedown is about the unaware
     /// threat it targets — Caution,
     /// matching the yellow `g` it points at; the body in your hands is Owned,
     /// like its recoloured glyph (§11.3). Stowing a body is a cupboard
@@ -514,6 +536,7 @@ impl Affordance {
             // (§4.5/#466): what it is *for* is leaving.
             Affordance::TakeIntel
             | Affordance::SilenceRadio
+            | Affordance::SalvageTech
             | Affordance::EnterExit
             | Affordance::Leave
             | Affordance::ExitRefused => Category::Interest,
@@ -544,6 +567,7 @@ mod affordance_tests {
                 | Affordance::CloseDoor
                 | Affordance::TakeIntel
                 | Affordance::SilenceRadio
+                | Affordance::SalvageTech
                 | Affordance::Hide
                 | Affordance::EnterDuct
                 | Affordance::EnterExit

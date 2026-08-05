@@ -667,6 +667,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         automatic_doors,
         guard_count,
         intel_count,
+        equipment_cache,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -699,6 +700,11 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         // level you are handed is the level the map offered, consoles and all.
         matches!(intel_count, IntelCount::More),
         matches!(intel_count, IntelCount::Fewer),
+        // Slot 11, appended (#209): the equipment cache, a plain toggle on the terms
+        // slot 6 was appended under. A campaign facility's flavour is what turns it on,
+        // so this is the last piece of "the level you are handed is the level the map
+        // offered" (§12.7) — a Workshop's token carries its crate.
+        equipment_cache,
     ]
     .into_iter()
     .enumerate()
@@ -725,7 +731,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel] =
+    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout_known, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, equipment_cache] =
         active;
     let guard_count = match (more_guards, fewer_guards) {
         (false, false) => GuardCount::Baseline,
@@ -751,6 +757,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         automatic_doors,
         guard_count,
         intel_count,
+        equipment_cache,
         intel_to_exit: gate,
     })
 }
@@ -759,7 +766,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
 /// the format. Not the same as the number of *fields*: the guard-count knob (#232) and
 /// the intel-count knob (#207) spend one slot per end.
-const MODIFIER_FIELDS: usize = 11;
+const MODIFIER_FIELDS: usize = 12;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -913,10 +920,30 @@ pub fn start_level(level: &LevelSeed) -> Result<State, GenError> {
 /// loadout; only the recipe the facility carves from differs.
 pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State, GenError> {
     let mut rng = Rng::new(level.seed);
+    // **What the equipment cache holds is decided before the building is carved**
+    // (§2.2/§14 v3/#209), because whether there *is* one depends on the answer: the draw
+    // is over the tech this run does not already carry
+    // ([`cache_contents`](crate::cache_contents)), and a run that carries all of it has
+    // nothing left to find. Rather than plant an empty crate, the modifier is withdrawn
+    // for this facility and the level generates without one — so the grid and the prize
+    // can never disagree.
+    //
+    // Unreachable in a real run and defined all the same: a campaign is seven facilities
+    // against a pool of eight, and a level-seed token cannot carry more than
+    // `AbilityId::MAX_TECH_HELD` tech at all. It takes a hand-built loadout to get here.
+    let salvage = level
+        .modifiers
+        .equipment_cache
+        .then(|| crate::salvage::cache_contents(level.seed, level.abilities))
+        .flatten();
+    let modifiers = LevelModifiers {
+        equipment_cache: salvage.is_some(),
+        ..level.modifiers
+    };
     // **Modifiers are resolved before the carve** (§12.6/#452). Most of them are read
     // at runtime, but `automatic_doors` decides what a doorway *is*, so it has to
     // reach the generator — threaded as a parameter, never consulted from a global.
-    let (layout, placement) = generate_level(config, &level.modifiers, &mut rng)?;
+    let (layout, placement) = generate_level(config, &modifiers, &mut rng)?;
     let guards = placement.guards(&layout);
     Ok(State::new(
         layout,
@@ -927,7 +954,11 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
         placement.exit(),
     )
     .with_rng(rng)
-    .with_level(*level))
+    // After `with_level`, which is where the loadout lands: the crate's contents were
+    // drawn from that same loadout, and the deck this grants against has to be the one
+    // the run is actually holding.
+    .with_level(*level)
+    .with_cache(salvage))
 }
 
 #[cfg(test)]
@@ -1124,14 +1155,14 @@ mod tests {
                 .with(AbilityId::Confusion)
                 .with(AbilityId::Vision),
         ];
-        // The seven boolean fields as a bitmask rather than seven nested loops: the
-        // knob (#232) would have made an eighth level of nesting out of a test whose
-        // whole content is "every combination".
-        const TOGGLE_FIELDS: u32 = 7;
+        // The boolean fields as a bitmask rather than one nested loop each: the knob
+        // (#232) would have made an eighth level of nesting out of a test whose whole
+        // content is "every combination", and the cache (#209) a ninth.
+        const TOGGLE_FIELDS: u32 = 8;
         for bits in 0..(1u32 << TOGGLE_FIELDS) {
             let on = |field: u32| bits & (1 << field) != 0;
-            let (search, sighting, body, cones, layout, cone_only, doors) =
-                (on(0), on(1), on(2), on(3), on(4), on(5), on(6));
+            let (search, sighting, body, cones, layout, cone_only, doors, cache) =
+                (on(0), on(1), on(2), on(3), on(4), on(5), on(6), on(7));
             for (guard_count, intel_count) in [
                 (GuardCount::Baseline, IntelCount::Baseline),
                 (GuardCount::More, IntelCount::More),
@@ -1152,6 +1183,7 @@ mod tests {
                             automatic_doors: doors,
                             guard_count,
                             intel_count,
+                            equipment_cache: cache,
                             intel_to_exit: gate,
                         };
                         let level = LevelSeed {
@@ -1165,10 +1197,12 @@ mod tests {
                         // run *can hold*, which is the claim, and refusing the rest
                         // **exactly** is the other half of it. A non-baseline knob
                         // spends a slot like any toggle, so it counts here too.
-                        let active = [search, sighting, body, cones, layout, cone_only, doors]
-                            .into_iter()
-                            .filter(|&flag| flag)
-                            .count()
+                        let active = [
+                            search, sighting, body, cones, layout, cone_only, doors, cache,
+                        ]
+                        .into_iter()
+                        .filter(|&flag| flag)
+                        .count()
                             + usize::from(guard_count != GuardCount::Baseline)
                             + usize::from(intel_count != IntelCount::Baseline);
                         if active > MODIFIER_CAP {
@@ -1289,6 +1323,10 @@ mod tests {
                 // intel knob decodes at its baseline, so the token still names the run
                 // it named the day it was minted.
                 intel_count: IntelCount::Baseline,
+                // And slot 11 (#209) is the fourth: a token minted before caches
+                // existed decodes as the facility it always named — one with no crate
+                // in it.
+                equipment_cache: false,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1411,21 +1449,22 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 10, the intel knob's scarce end (#207).
-        // Each knob's two ends cannot both be held, so the highest five are one end of
-        // each knob (8 and 10) plus the three highest toggles below them (4, 5, 6).
-        // Holding more than five at once is over the cap and refused outright, asserted
-        // in `every_config_round_trips`.
+        // actually hold, which now reaches slot 11, the equipment cache (#209). Each
+        // knob's two ends cannot both be held, so the highest five are the cache (11),
+        // one end of each knob (10 and 8), and the two highest toggles below them
+        // (6 and 5). Holding more than five at once is over the cap and refused
+        // outright, asserted in `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
             guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: false,
-            full_layout_known: true,
+            full_layout_known: false,
             calm_guards_detect_only_their_cone: true,
             automatic_doors: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::Fewer,
+            equipment_cache: true,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {

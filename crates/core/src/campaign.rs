@@ -21,8 +21,9 @@
 //! value with no persistence behind it, so a lost run is a dropped value and the
 //! next one is built from scratch. What *does* need code is the within-a-run half,
 //! and it is these three fields, carried from the day the layer exists rather than
-//! retrofitted. Later tickets give them their behaviour: caches fill the loadout
-//! (#209) and the intel epic spends the wallet (#211).
+//! retrofitted. The loadout is now filled by the thing it was declared for — an
+//! equipment cache opened in a facility rides out on the verdict and is added here
+//! (#209) — and the intel epic spends the wallet (#211).
 //!
 //! **The alert is the exception, deliberately.** Its field is here — later tickets
 //! need a place to put a run-level alert, and retrofitting one would touch every
@@ -480,8 +481,14 @@ impl Campaign {
         self.stage
     }
 
-    /// Add a raid's haul to what the run carries: the consoles it took, and — once
-    /// #210 says what a loud raid is worth — its loudness.
+    /// Add a raid's haul to what the run carries: the consoles it took, the **tech it
+    /// salvaged** (#209), and — once #210 says what a loud raid is worth — its loudness.
+    ///
+    /// The salvage is folded here rather than at the moment the crate was opened, and
+    /// the two are not in tension: within the facility the ability is already on the
+    /// player's deck (that is what "usable immediately" means), and this is the run
+    /// *keeping* it — which only a raid the player walked out of has earned. A capture
+    /// banks nothing, tech included, because there is no later facility to carry it to.
     ///
     /// The raid's [`alert_peak`](RunStats::alert_peak) is deliberately *not* read here.
     /// It is the obvious thing to fold in and the wrong thing to fold in blind: a rule
@@ -490,10 +497,17 @@ impl Campaign {
     fn bank(&mut self, stats: RunStats) {
         let taken = u32::try_from(stats.intel).unwrap_or(u32::MAX);
         self.intel = self.intel.saturating_add(taken);
+        if let Some(id) = stats.salvaged {
+            self.salvage(id);
+        }
     }
 
     /// **Salvage tech** (§2.2/§8.3): add `id` to the loadout the rest of the run
     /// carries — the seam an equipment cache writes (#209).
+    ///
+    /// Public as well as used by [`bank`](Self::bank): a raid folds its own find in
+    /// through the verdict, and a caller that has tech to grant from somewhere else (a
+    /// test, a future sink) says so here rather than reaching into the loadout.
     ///
     /// Idempotent, and capacity is not its business: the held cap and the discard
     /// prompt it needs are #266's, and enforcing a silent one here would drop a

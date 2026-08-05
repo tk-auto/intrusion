@@ -150,6 +150,13 @@ pub fn message_for(event: Event) -> Option<Message> {
         // buried by a guard event on the same turn, because "did that work?" is the one
         // question the bump raises. Nothing ever unsays it: the flag is one-way.
         Event::CommsSilenced { .. } => ("the radio net goes dead".to_string(), 20),
+        // The campaign's power curve, one crate at a time (§2.2/§14 v3/#209). Ranked
+        // with the other objective feedback and for the comms console's reason: it is
+        // the payoff for a detour the player chose, and *what you now have* must not be
+        // buried by a guard event on the same turn. The line names the ability, because
+        // the whole find is which ability it was — and the bar has a new row on it this
+        // very turn (§11.4), so the two say the same thing at once.
+        Event::TechSalvaged { id } => (format!("{} salvaged — it is yours", id.name()), 20),
         Event::Won => ("you slip away — the run is won".to_string(), 20),
         Event::Captured { .. } => ("caught".to_string(), 10),
         // The phase safety firing (§8.3/#329). Ranked at the top of the threat ladder

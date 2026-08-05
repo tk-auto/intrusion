@@ -336,6 +336,13 @@ enum BumpKind {
     EnterExitDuct,
     /// An objective console still holding its intel.
     Intel,
+    /// An **equipment cache** still holding its tech (§2.2/§8.3/§14 v3/#209): bumping it
+    /// salvages the ability inside — usable from this turn on, and carried by the run
+    /// into every facility after this one. A spent turn, like taking intel. Once opened
+    /// the same cell classifies as [`Solid`](BumpKind::Solid): there is nothing left in
+    /// it, so a second bump is a free no-op (§4.4) and the usable line offers nothing —
+    /// the spent console's rule over the spent crate.
+    Salvage,
     /// The comms console while the radio net is still live (§7.3/§7.7): bumping it
     /// silences the net for the rest of the level — a spent turn. Once silenced the
     /// same cell classifies as [`Solid`](BumpKind::Solid): there is nothing left to
@@ -401,6 +408,7 @@ impl BumpKind {
             BumpKind::Exit { ready: true } => Some(Affordance::Leave),
             BumpKind::Exit { ready: false } => Some(Affordance::ExitRefused),
             BumpKind::Intel => Some(Affordance::TakeIntel),
+            BumpKind::Salvage => Some(Affordance::SalvageTech),
             BumpKind::SilenceRadio => Some(Affordance::SilenceRadio),
             BumpKind::Door {
                 action: DoorAction::Opened,
@@ -465,6 +473,22 @@ pub enum Outcome {
 #[derive(Clone, Copy, Debug)]
 struct Objective {
     cell: Cell,
+    taken: bool,
+}
+
+/// The facility's **equipment cache** (§2.2/§8.3/§14 v3/#209): where the crate stands,
+/// what is in it, and whether it has been opened.
+///
+/// **What it holds is decided before the level boots**, by
+/// [`cache_contents`](crate::cache_contents) over the run's seed and the tech it already
+/// carries — so a cache never offers a run its fifth Dephase, and a facility whose seed
+/// is handed to someone else holds the same crate. Once taken it stays on the state as
+/// spent scenery: the renderer recolours it Neutral like a used console (§11.2), and
+/// what it gave is on the loadout, not here.
+#[derive(Clone, Copy, Debug)]
+struct Cache {
+    cell: Cell,
+    holds: AbilityId,
     taken: bool,
 }
 
@@ -590,6 +614,11 @@ pub struct State {
     /// taken as a parameter, so no boot path has to remember to pass it and the cell
     /// can never disagree with the terrain.
     comms_console: Option<Cell>,
+    /// The facility's equipment cache (§2.2/§14 v3/#209), or `None` for a facility that
+    /// hides none — every quick-play level, and every hand-built test state. Set at boot
+    /// by [`with_cache`](Self::with_cache), which is where the crate's cell (the
+    /// generator's) and its contents (the run's own unheld tech) meet.
+    cache: Option<Cache>,
     /// Whether the radio net has been **killed** for the rest of the level (§7.3/§7.7)
     /// — set by bumping the comms console and never cleared. One-way and permanent by
     /// construction: nothing in the loop writes `false`, so there is no window in which
@@ -774,6 +803,15 @@ impl State {
         if let Some(cell) = layout.comms_console() {
             layout.place(cell, Terrain::CommsConsole);
         }
+        // The equipment cache (§2.2/§14 v3/#209), stamped here with the other solid
+        // usables and for the same reason. Only the *crate* lands here: what is in it
+        // arrives with the loadout ([`with_cache`](Self::with_cache)), and a state that
+        // never gets one plays a facility whose crate is scenery — which is why the two
+        // halves are not allowed to drift apart, and why `with_cache` reads the cell
+        // back off the grid rather than being told it a second time.
+        if let Some(cell) = layout.equipment_cache() {
+            layout.place(cell, Terrain::EquipmentCache);
+        }
         // One source of truth for the cell: the grid. Reading it back also picks up a
         // hand-built fixture that stamped its own console without a placement.
         let comms_console = layout.facility().find(Terrain::CommsConsole);
@@ -843,6 +881,10 @@ impl State {
             abilities: Deck::new(Loadout::innate()),
             objectives,
             comms_console,
+            // Filled by [`with_cache`](Self::with_cache): `State::new` stamps the crate
+            // (below) but cannot say what is in it, because that is drawn from the
+            // run's loadout and a bare state has no loadout yet.
+            cache: None,
             radio_silenced: false,
             exit,
             turn: 0,
@@ -1022,6 +1064,35 @@ impl State {
     #[must_use]
     pub fn with_loadout(mut self, loadout: Loadout) -> Self {
         self.abilities = Deck::new(loadout);
+        self
+    }
+
+    /// Thread in **what the facility's equipment cache holds** (§2.2/§8.3/§14 v3/#209):
+    /// the piece of salvaged tech a bump on the crate hands over.
+    ///
+    /// The cell is read back off the **grid** rather than passed in, exactly as the
+    /// comms console's is: [`new`](Self::new) stamped it from the layout, so the terrain
+    /// is the one source of truth for *where* and this decides only *what*. A state with
+    /// no crate stamped keeps `None` whatever it is handed — there is nothing for the
+    /// tech to be in — and a crate with nothing in it is left as the scenery it is,
+    /// which is the pool-exhausted case [`cache_contents`](crate::cache_contents)
+    /// answers `None` for.
+    ///
+    /// Called by [`start_level`](crate::start_level) at boot, after the loadout is known
+    /// — a cache's contents are drawn from what the run does *not* already carry, so it
+    /// cannot be decided before there is a run.
+    #[must_use]
+    pub fn with_cache(mut self, holds: Option<AbilityId>) -> Self {
+        self.cache = self
+            .layout
+            .facility()
+            .find(Terrain::EquipmentCache)
+            .zip(holds)
+            .map(|(cell, holds)| Cache {
+                cell,
+                holds,
+                taken: false,
+            });
         self
     }
 
@@ -1501,6 +1572,29 @@ impl State {
                 }
                 true
             }
+            // An equipment cache (§2.2/§8.3/§14 v3/#209): salvage the tech in it. The
+            // ability joins the deck **now**, not at the end of the raid — §14 v3 asks
+            // for a power curve, and one that only paid out after you had left would
+            // make the detour a deposit rather than a find. It joins the *run* too: the
+            // campaign layer reads it off the verdict ([`RunStats::salvaged`]) and folds
+            // it into the loadout every later facility boots with (§2.2).
+            //
+            // Deliberately **quiet**. A crate is not a terminal control room reports on,
+            // so opening one raises no alert (§7.3) — the console's `console_tampered`
+            // step has no counterpart here. What it costs is the detour and the turn,
+            // which is the §2.3 price the placement rule (`PLAYER_CACHE_MIN_DISTANCE`)
+            // is there to make real.
+            BumpKind::Salvage => {
+                let cache = self
+                    .cache
+                    .as_mut()
+                    .expect("bump_kind classified an unopened cache here");
+                cache.taken = true;
+                let id = cache.holds;
+                self.abilities.grant(id);
+                events.push(Event::TechSalvaged { id });
+                true
+            }
             // The comms console (§7.3/§7.7): one bump kills the radio net for the rest
             // of the level. A spent turn — the counterplay costs the detour that got
             // you here plus this turn, and nothing else, because the flag is one-way
@@ -1863,6 +1957,12 @@ impl State {
         }
         if self.objectives.iter().any(|o| o.cell == target && !o.taken) {
             return BumpKind::Intel;
+        }
+        // The equipment cache (§2.2/§14 v3/#209), while it still holds its tech. An
+        // opened crate falls through to the plain solid bump below, on the spent
+        // console's own terms.
+        if self.cache.is_some_and(|c| c.cell == target && !c.taken) {
+            return BumpKind::Salvage;
         }
         // The comms console (§7.3/§7.7), while the net is still live. A silenced one
         // falls through to the plain solid bump below — spent scenery, offering

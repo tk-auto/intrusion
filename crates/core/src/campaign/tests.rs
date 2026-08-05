@@ -530,6 +530,92 @@ fn salvaged_tech_rides_into_the_next_facility() {
     assert_eq!(Campaign::new(21).loadout(), Loadout::innate());
 }
 
+/// **A raid's find rides out on its verdict** (§2.2/#209) — the whole seam, end to
+/// end: the campaign banks the salvage the same way it banks the intel, and the next
+/// facility boots holding it.
+///
+/// This is the acceptance criterion "usable for the rest of the run" said at the layer
+/// that owns the rest of the run. [`salvaged_tech_rides_into_the_next_facility`] pins
+/// the same accumulation driven by hand; what this adds is that a *finished raid* is
+/// what drives it, with nothing in between.
+#[test]
+fn a_completed_raid_banks_the_tech_it_salvaged() {
+    let mut run = Campaign::to_depth(21, 3);
+    run.enter().expect("a facility to raid");
+    let mut verdict = extracted(2, 0);
+    verdict.stats.salvaged = Some(AbilityId::Confusion);
+    run.complete(&verdict);
+
+    assert!(run.loadout().contains(AbilityId::Confusion), "the find");
+    assert_eq!(run.intel(), 2, "and the haul, from the same value");
+    let next = run.offers()[0].node;
+    run.choose(next);
+    assert!(
+        run.enter()
+            .expect("the next facility")
+            .abilities
+            .contains(AbilityId::Confusion),
+        "the facility after boots holding what the one before handed over",
+    );
+}
+
+/// **A captured run banks nothing, tech included** (§2.2). There is no later facility
+/// to carry a find to, and a run that kept its salvage past a capture would be keeping
+/// something past the run — the "start over stronger" §2.2 rules out.
+#[test]
+fn a_capture_carries_no_salvage_out_of_the_facility() {
+    let mut run = Campaign::to_depth(21, 3);
+    run.enter().expect("a facility to raid");
+    let mut verdict = captured();
+    verdict.stats.salvaged = Some(AbilityId::Confusion);
+    assert_eq!(run.complete(&verdict), CampaignStage::Lost);
+    assert_eq!(run.loadout(), Loadout::innate(), "the run is over");
+}
+
+/// **A Workshop is the facility its offer said it was** (§2.3/§14 v3/#209): the flavour
+/// the map names resolves into the level-seed the run walks into, crate and all — and
+/// it *pays* for it, one console fewer, so the offer is a trade rather than a bonus.
+#[test]
+fn the_workshop_flavour_plants_the_crate_it_advertises() {
+    let modifiers = Flavour::Workshop.modifiers();
+    assert!(modifiers.equipment_cache, "the crate the row promises");
+    assert_eq!(
+        modifiers.intel_count,
+        crate::modifiers::IntelCount::Fewer,
+        "and the console it costs (§2.3)",
+    );
+    // No other flavour hides one: the map's tech axis is a *choice*, not something
+    // every facility hands over.
+    for flavour in Flavour::ALL {
+        assert_eq!(
+            flavour.modifiers().equipment_cache,
+            flavour == Flavour::Workshop,
+            "{flavour:?}",
+        );
+    }
+    // And it reaches the facility through the one seam (§12.6): walk a run until it
+    // stands on a Workshop, and the level-seed it would boot carries the crate — which
+    // is what makes the campaign facility's *token* the facility as it was played
+    // (§12.7), rather than a label the map printed.
+    let mut run = Campaign::new(PLAYED_SEED);
+    let mut stood_on_one = false;
+    while !run.stage().is_over() {
+        let workshop = run.flavour() == Flavour::Workshop;
+        assert_eq!(
+            run.next_level().modifiers.equipment_cache,
+            workshop,
+            "the config disagrees with the row that offered it",
+        );
+        stood_on_one |= workshop;
+        run.enter();
+        walk_on(&mut run, 1);
+    }
+    assert!(
+        stood_on_one,
+        "a run that never meets a Workshop cannot test one — pick another seed",
+    );
+}
+
 /// **The campaign offers no way to play the run again** (§2.2/appendix 31). The gate
 /// has been in the code since the end screen shipped; this is the first thing that
 /// actually stands behind it.

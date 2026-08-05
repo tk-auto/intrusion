@@ -66,6 +66,22 @@ use std::collections::HashSet;
 /// nothing left for the relation to compare against.
 const PLAYER_COMMS_MIN_DISTANCE: u32 = 16;
 
+/// The **equipment cache** spawns at least this far (Manhattan) from the exit `E`
+/// **[START]** — the comms console's rule, over the reward the campaign's whole power
+/// curve hangs on (§2.2/§14 v3/#209).
+///
+/// **Cost is load-bearing (§2.3).** A cache is optional — the campaign's exit never
+/// refuses (`IntelGate::None`), so skipping one is a legal and sometimes correct choice
+/// — and an optional reward is only a *decision* if taking it costs something. Sat near
+/// the mouth it would be a free grab on the way past, and the choice would be nobody's;
+/// sat a real detour deep, taking it is turns and exposure spent against a permanent
+/// ability, which is the trade the flavour offered on the map.
+///
+/// Held at the comms console's own distance rather than at a number of its own: both
+/// say the same thing — *this is worth a trip across the building* — and one **[START]**
+/// that moves for both is easier to tune than two that drift.
+const PLAYER_CACHE_MIN_DISTANCE: u32 = PLAYER_COMMS_MIN_DISTANCE;
+
 // The shipped recipe sits **strictly inside** the guard-count envelope (#232), so
 // both ends of the knob always bite on the level the game actually ships. Held at
 // compile time rather than in a test: retuning §10.2's [START] count to an edge of
@@ -88,6 +104,20 @@ pub struct LevelConfig {
     /// How many intel consoles to place — exactly this many, or the seed is
     /// rejected. The v1 exit rule is *all intel required* (§10.2).
     pub intel: usize,
+    /// How many **equipment caches** to place (§2.2/§14 v3/#209) — **zero or one**,
+    /// and zero for every recipe the game ships. It is resolved out of the §12.6
+    /// `equipment_cache` modifier by
+    /// [`with_equipment_cache`](Self::with_equipment_cache), which is the only thing
+    /// that sets it above zero: a campaign facility whose flavour is a
+    /// [`Workshop`](crate::Flavour::Workshop).
+    ///
+    /// A count rather than a `bool` because it sits with the other piece counts and is
+    /// placed by the same "exactly this many, or the seed is rejected" rule (§10.6) —
+    /// but **one is the ceiling the design states**: the run's power curve is a facility
+    /// at a time, and two crates in one building would hand over two abilities for one
+    /// raid's exposure. Nothing enforces a cap here, so a sim sweep may ask for more and
+    /// find out what that plays like.
+    pub caches: usize,
 }
 
 impl LevelConfig {
@@ -104,6 +134,10 @@ impl LevelConfig {
         height: 40,
         guards: 4,
         intel: 3,
+        // No cache: quick play is one facility, and salvaged tech that accumulated
+        // across a single level would accumulate into nothing (§2.2). The campaign
+        // turns this on through the flavour seam and nothing else does.
+        caches: 0,
     };
 
     /// The fewest guards the [`GuardCount`] modifier may leave a facility with
@@ -187,6 +221,23 @@ impl LevelConfig {
         };
         Self { intel, ..self }
     }
+
+    /// This recipe with the §12.6 **equipment-cache toggle** applied (#209) — the third
+    /// modifier the recipe resolves, beside the two count knobs.
+    ///
+    /// **A set, not a step**, and that is the difference from its neighbours: the count
+    /// knobs move a recipe's own number by one because the recipe *has* a baseline
+    /// number of guards and consoles to depart from. A facility either hides a crate or
+    /// it does not, so the modifier names the state outright — and naming it *off* is
+    /// what keeps a recipe that asked for a cache from inheriting one when the flavour
+    /// changes.
+    #[must_use]
+    pub const fn with_equipment_cache(self, cache: bool) -> Self {
+        Self {
+            caches: if cache { 1 } else { 0 },
+            ..self
+        }
+    }
 }
 
 /// Where everything starts: the output of §10.1 steps 7–9 — the cell each piece
@@ -211,6 +262,10 @@ pub struct Placement {
     /// silences. Exactly one per facility: "one interaction shuts the whole net" is
     /// the design, so a second would only be a second switch for a net already dead.
     comms: Cell,
+    /// The facility's **equipment cache** (§2.2/§14 v3/#209), or `None` on a facility
+    /// whose flavour hides none — which is every quick-play level. At most one: see
+    /// [`LevelConfig::caches`].
+    cache: Option<Cell>,
     guards: Vec<Cell>,
     /// Each guard's radio ping cadence (§7.3), parallel to `guards` and drawn from
     /// the run seed in [`place`] so the whole ping schedule is deterministic
@@ -249,6 +304,14 @@ impl Placement {
     /// other usable (§10.6). Bumping it kills the radio net for the level.
     pub fn comms(&self) -> Cell {
         self.comms
+    }
+
+    /// The equipment cache (§2.2/§14 v3/#209) — never the start room, at least
+    /// [`PLAYER_CACHE_MIN_DISTANCE`] from the spawn, and bump-reachable like any other
+    /// usable (§10.6). Bumping it salvages a piece of §8.3 tech for the rest of the run.
+    /// `None` on a facility whose recipe asked for none.
+    pub fn cache(&self) -> Option<Cell> {
+        self.cache
     }
 
     /// The guard spawn cells — never the start room, never eyeing the player's
@@ -454,6 +517,39 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
 
     // Claimed, so no guard spawns on top of the console it is standing on.
     taken.push(comms);
+    usables.push(comms);
+
+    // The **equipment cache** (§2.2/§14 v3/#209), on the comms console's terms and for
+    // the same reasons: a non-start room, at least `PLAYER_CACHE_MIN_DISTANCE` from the
+    // spawn so taking it is a real detour rather than a grab on the way past, sharing a
+    // room with anything else if it must, and drawn **before the guards** so the §12.6
+    // guard-count knob still reaches nothing but the guard set (#232/#466).
+    //
+    // Drawn from a pool built exactly like the console's, one draw later. A recipe that
+    // asks for no cache draws **nothing at all** — no shuffle, no pick — so a
+    // quick-play level's stream is untouched by this existing (§12.4): the facility a
+    // seed produced before #209 is the facility it produces after it.
+    let mut cache = None;
+    for _ in 0..config.caches {
+        let mut pool: Vec<Cell> = others
+            .iter()
+            .flat_map(|&i| rooms[i].1.iter().copied())
+            .filter(|&c| {
+                !taken.contains(&c) && c.manhattan_distance(exit) >= PLAYER_CACHE_MIN_DISTANCE
+            })
+            .collect();
+        shuffle(&mut pool, rng);
+        // A usable like the consoles (§11.4): prefer a cell that leaves every floor
+        // neighbour with one adjacent usable, but fall back rather than fail the draw.
+        let cell = pool
+            .iter()
+            .copied()
+            .find(|&c| !placement_conflict(layout, c, &usables))
+            .or_else(|| pool.first().copied())?;
+        cache = Some(cell);
+        taken.push(cell);
+        usables.push(cell);
+    }
 
     // §10.1.9 + §10.6: guards in any room except the start room, and never where
     // the turn-one detection set — the real §6 field of view from the spawn cell,
@@ -515,6 +611,7 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
         exit_duct,
         intel,
         comms,
+        cache,
         guards,
         guard_clocks: Vec::new(),
     };
@@ -600,12 +697,20 @@ fn pick_free(floor: &[Cell], taken: &[Cell], rng: &mut Rng) -> Option<Cell> {
 /// required to win, so a stricter reading might let it be walled off — but the whole
 /// point of the §7.7 answer to the radio net is that it is there to be found, and a
 /// seed that seals it away silently deletes the mechanic from that run.
+///
+/// The **equipment cache** (#209) is held to it for exactly that reason, one system
+/// over. It is optional by design — the campaign's exit never refuses, so skipping one
+/// is a legal choice — but *choosing* to skip it and never being able to reach it are
+/// not the same thing, and only the first is a decision. A sealed-off crate is the
+/// campaign's power curve silently deleted from that facility, which is the failure
+/// §14 v3 says the axis has already suffered once.
 fn solvable(facility: &Facility, placement: &Placement) -> bool {
     let solid: Vec<Cell> = placement
         .intel
         .iter()
         .copied()
         .chain([placement.comms, placement.exit])
+        .chain(placement.cache)
         .collect();
     let enterable = |c: Cell| {
         !solid.contains(&c)
@@ -653,6 +758,20 @@ mod tests {
     /// *accepted* seeds universally, not on a lucky one (§10.6). The routine gate
     /// samples this via [`seed_sweep`]; CI (`INTRUSION_SLOW_TESTS=1`) runs it whole.
     const SEEDS: u64 = 64;
+
+    /// The same v1 facility with the §12.6 cache toggle on — the campaign's
+    /// [`Workshop`](crate::Flavour::Workshop) as placement sees it.
+    fn with_cache(seed: u64) -> (Layout, Placement) {
+        generate_level(
+            &LevelConfig::V1,
+            &crate::LevelModifiers {
+                equipment_cache: true,
+                ..crate::LevelModifiers::default()
+            },
+            &mut Rng::new(seed),
+        )
+        .expect("the v1 config places a cache")
+    }
 
     fn v1(seed: u64) -> (Layout, Placement) {
         generate_level(
@@ -966,6 +1085,129 @@ mod tests {
         }
     }
 
+    /// The **equipment cache** is planted exactly where the design says (§2.2/§14
+    /// v3/§10.6/#209): one per facility whose flavour calls for one, outside the start
+    /// room, at least [`PLAYER_CACHE_MIN_DISTANCE`] from the way in, and bump-reachable.
+    ///
+    /// The distance is the §2.3 cost pinned as a number: an optional reward sat next to
+    /// the mouth is a free grab, and a choice nobody has to make. A later tune is then a
+    /// visible edit rather than a quiet drift.
+    #[test]
+    fn a_planted_cache_is_one_real_detour_from_the_way_in() {
+        assert_eq!(
+            PLAYER_CACHE_MIN_DISTANCE, 16,
+            "the [START] cache detour distance"
+        );
+        for seed in seed_sweep(SEEDS) {
+            let (layout, p) = with_cache(seed);
+            let cache = p.cache().expect("the flavour asked for a crate");
+
+            let distance = cache.manhattan_distance(p.exit());
+            assert!(
+                distance >= PLAYER_CACHE_MIN_DISTANCE,
+                "seed {seed}: the cache spawned {distance} from the way in",
+            );
+            assert_ne!(
+                room_of(&layout, cache),
+                room_of(&layout, p.exit()),
+                "seed {seed}: cache in the start room",
+            );
+            // It shares no cell with anything else placed (§10.6), and the carve handed
+            // back is **bare** — recorded, not stamped, like the comms console.
+            assert!(
+                !p.intel().contains(&cache) && cache != p.comms() && cache != p.exit(),
+                "seed {seed}: the cache landed on another piece",
+            );
+            assert!(
+                !p.guard_cells().contains(&cache),
+                "seed {seed}: a guard spawned on the crate",
+            );
+            assert_eq!(layout.equipment_cache(), Some(cache), "seed {seed}");
+
+            // One crate, in the grid a run actually plays.
+            let state = State::new(
+                layout,
+                p.player(),
+                Direction::North,
+                Vec::new(),
+                p.intel().iter().copied(),
+                p.exit(),
+            );
+            let facility = state.layout().facility();
+            let stamped = (0..facility.height())
+                .flat_map(|y| (0..facility.width()).map(move |x| Cell::new(x, y)))
+                .filter(|&c| facility.terrain(c) == Some(Terrain::EquipmentCache))
+                .count();
+            assert_eq!(stamped, 1, "seed {seed}: {stamped} caches");
+        }
+    }
+
+    /// **No modifier, no crate, and no draw either** (§12.4/#209): a facility whose
+    /// flavour does not call for a cache generates exactly the facility it did before
+    /// caches existed — the same building with the same pieces in it, guards and all.
+    ///
+    /// The second half is what makes this worth a test rather than an assertion: the
+    /// cache pool is shuffled off the run's stream, so a draw taken *unconditionally*
+    /// would re-roll every quick-play level in the game. Placement draws nothing when
+    /// the count is zero, and this is where that stays true.
+    #[test]
+    fn a_facility_with_no_cache_is_the_facility_it_always_was() {
+        for seed in seed_sweep(SEEDS) {
+            let (layout, p) = v1(seed);
+            assert_eq!(p.cache(), None, "seed {seed}: an unasked-for crate");
+            assert_eq!(layout.equipment_cache(), None, "seed {seed}");
+
+            // Byte-for-byte the same board as a run generated with the field explicitly
+            // off — the baseline this ticket must not have moved.
+            let (again, q) = generate_level(
+                &LevelConfig::V1,
+                &crate::LevelModifiers {
+                    equipment_cache: false,
+                    ..crate::LevelModifiers::default()
+                },
+                &mut Rng::new(seed),
+            )
+            .expect("the v1 config places");
+            assert_eq!(p, q, "seed {seed}: the pieces moved");
+            let (a, b) = (layout.facility(), again.facility());
+            for y in 0..a.height() {
+                for x in 0..a.width() {
+                    assert_eq!(a.terrain_at(x, y), b.terrain_at(x, y), "seed {seed}");
+                }
+            }
+        }
+    }
+
+    /// The crate is planted in the **same building** as the facility without one, and
+    /// the pieces drawn before it do not move (#207/#232's nesting property, one
+    /// modifier later): the cache reaches placement, never the carve.
+    ///
+    /// That is what makes a Workshop honest (§2.3) — it is the Depot beside it with one
+    /// more thing in it, so a player choosing between them is choosing the crate rather
+    /// than a differently-generated level.
+    #[test]
+    fn the_cache_changes_what_is_in_the_building_not_the_building() {
+        for seed in seed_sweep(SEEDS) {
+            let (bare_layout, bare) = v1(seed);
+            let (layout, p) = with_cache(seed);
+
+            let (a, b) = (bare_layout.facility(), layout.facility());
+            for y in 0..a.height() {
+                for x in 0..a.width() {
+                    assert_eq!(a.terrain_at(x, y), b.terrain_at(x, y), "seed {seed}");
+                }
+            }
+            assert_eq!(p.player(), bare.player(), "seed {seed}");
+            assert_eq!(p.exit(), bare.exit(), "seed {seed}");
+            assert_eq!(p.intel(), bare.intel(), "seed {seed}");
+            assert_eq!(p.comms(), bare.comms(), "seed {seed}");
+            // The guards are drawn *after* the crate, from a pool one cell smaller, so
+            // they are allowed to differ — what must hold is that there are still
+            // exactly as many as the recipe asked for (§10.6).
+            assert_eq!(p.guard_cells().len(), LevelConfig::V1.guards, "seed {seed}");
+        }
+    }
+
     /// §10.1.7: the exit sits in the **largest room**, and behind it runs the player's
     /// own tunnel (§4.5/#466) — straight, short, and ending on the level border, where
     /// the run begins.
@@ -1216,8 +1458,9 @@ mod tests {
 
     /// The post-placement solvability flood: a console sealed into a pocket the
     /// player cannot bump from outside fails the check; the same console with its
-    /// pocket open passes. Holds for the **comms** console (§7.7) exactly as for an
-    /// objective — unreachable counterplay is no counterplay. (On generated levels the
+    /// pocket open passes. Holds for the **comms** console (§7.7) and the **equipment
+    /// cache** (#209) exactly as for an objective — unreachable counterplay is no
+    /// counterplay, and an unreachable reward is no choice. (On generated levels the
     /// §10.6 gate makes this rare — this pins the assertion itself.)
     #[test]
     fn solvability_requires_every_target_bump_adjacent() {
@@ -1239,11 +1482,20 @@ mod tests {
             ]),
             intel: vec![pocket],
             comms: Cell::new(8, 5),
+            cache: None,
             guards: Vec::new(),
             guard_clocks: Vec::new(),
         };
         let with_comms = |pocket: Cell| Placement {
             comms: pocket,
+            intel: vec![Cell::new(8, 5)],
+            ..with_intel(Cell::new(8, 5))
+        };
+        // The equipment cache is held to the same standard (#209): optional to *take*,
+        // never optional to *reach* — a crate the player cannot bump is the campaign's
+        // power curve deleted from that facility rather than declined.
+        let with_cache = |pocket: Cell| Placement {
+            cache: Some(pocket),
             intel: vec![Cell::new(8, 5)],
             ..with_intel(Cell::new(8, 5))
         };
@@ -1257,9 +1509,11 @@ mod tests {
         let pocket = Cell::new(1, 1);
         assert!(!solvable(&sealed, &with_intel(pocket)), "sealed intel");
         assert!(!solvable(&sealed, &with_comms(pocket)), "sealed comms");
+        assert!(!solvable(&sealed, &with_cache(pocket)), "sealed cache");
 
         let open = Facility::walled_box(10, 10);
         assert!(solvable(&open, &with_intel(pocket)));
         assert!(solvable(&open, &with_comms(pocket)));
+        assert!(solvable(&open, &with_cache(pocket)));
     }
 }

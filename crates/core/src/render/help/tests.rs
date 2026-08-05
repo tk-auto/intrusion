@@ -325,6 +325,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             automatic_doors: true,
             guard_count,
             intel_count,
+            equipment_cache: true,
             intel_to_exit: gate,
         };
         let g = render_help(

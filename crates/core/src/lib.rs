@@ -78,6 +78,7 @@ mod region;
 mod render;
 mod replay;
 mod rng;
+mod salvage;
 mod state;
 mod status;
 mod targeting;
@@ -132,6 +133,7 @@ pub use replay::{
     to_script,
 };
 pub use rng::Rng;
+pub use salvage::cache_contents;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
     SenseMark, State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS,

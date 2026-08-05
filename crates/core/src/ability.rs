@@ -1233,6 +1233,26 @@ impl Deck {
         self.loadout
     }
 
+    /// **Salvage `id` into the run** (§2.2/§8.3/#209): add it to the loadout mid-level,
+    /// so an ability found in a crate is usable from the turn the crate was opened.
+    ///
+    /// The one thing that grows a loadout after boot, and it grows it only. A deck's
+    /// slots and use budgets were seeded for the whole catalog in
+    /// [`new`](Deck::new) — every ability starts [`Ready`](Slot::Ready) with its budget
+    /// full, held or not — so what was missing was never state, it was **permission**:
+    /// [`state`](Deck::state) and [`activate`](Deck::activate) both refuse an ability the
+    /// loadout does not contain. Granting it lifts exactly that, which is why this
+    /// touches nothing else: a salvaged ability arrives ready, with its full per-level
+    /// budget (§8.2/#302), and rebuilding the deck to achieve that would instead reset
+    /// the clocks and budgets of everything the run was already carrying.
+    ///
+    /// Idempotent. Nothing here enforces the §8.3 held cap: the cap and its discard
+    /// prompt are #266's, and silently dropping a pickup the player was never told about
+    /// is the failure that ticket exists to avoid.
+    pub(crate) fn grant(&mut self, id: AbilityId) {
+        self.loadout = self.loadout.with(id);
+    }
+
     /// Activate `id` if the run holds it and it is [`Ready`](Slot::Ready). Returns
     /// whether it activated — `true` means the turn is spent (§4.4). Activating an
     /// ability that is not in the loadout (#244), a **passive** (#264 — there is no

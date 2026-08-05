@@ -610,8 +610,9 @@ impl State {
         }
     }
 
-    /// The cells of consoles that have been **used up** — spent objectives (§11.2),
-    /// plus a comms console whose radio net is already dead (§7.3/§7.7). Terrain alone
+    /// The cells of usables that have been **used up** — spent objectives (§11.2), a
+    /// comms console whose radio net is already dead (§7.3/§7.7), and an equipment cache
+    /// already emptied (§14 v3/#209). Terrain alone
     /// can't tell a spent console from a live one (both keep their terrain kind); the
     /// `taken` flag and [`radio_silenced`](Self::radio_silenced) live here, so the
     /// renderer reads them to draw a used console as inert Neutral scenery rather than a
@@ -626,6 +627,36 @@ impl State {
             .filter(|o| o.taken)
             .map(|o| o.cell)
             .chain(self.comms_console.filter(|_| self.radio_silenced))
+            // An opened equipment cache is spent on exactly the same terms (#209): the
+            // crate is still there, and there is nothing left in it.
+            .chain(self.cache.filter(|c| c.taken).map(|c| c.cell))
+    }
+
+    /// **What this raid salvaged** (§2.2/§8.3/§14 v3/#209): the tech taken out of the
+    /// facility's equipment cache, or `None` if there was no crate or it was left
+    /// unopened.
+    ///
+    /// Read by [`run_stats`](Self::run_stats), and so by the campaign layer, which folds
+    /// it into the loadout the rest of the run carries. Within *this* facility the
+    /// ability is already on the deck ([`loadout`](Self::loadout)) — the crate grants it
+    /// the turn it is opened, not the turn the raid ends.
+    pub fn salvaged(&self) -> Option<AbilityId> {
+        self.cache.filter(|c| c.taken).map(|c| c.holds)
+    }
+
+    /// Where the facility's equipment cache stands (§2.2/§14 v3/#209), or `None` for a
+    /// facility that hides none. Its cell is static geometry; whether it has been
+    /// opened is [`salvaged`](Self::salvaged).
+    pub fn equipment_cache(&self) -> Option<Cell> {
+        self.cache.map(|c| c.cell)
+    }
+
+    /// **What the crate holds**, opened or not (§8.3/#209) — the draw
+    /// [`cache_contents`](crate::cache_contents) made for this facility, for a test to
+    /// pin and for a tool to read. The player learns it by bumping it; nothing on the
+    /// board says it in advance, which is what makes the find a find.
+    pub fn cache_holds(&self) -> Option<AbilityId> {
+        self.cache.map(|c| c.holds)
     }
 
     /// The facility's comms console (§7.3/§7.7), or `None` for a facility without one.
@@ -696,6 +727,9 @@ impl State {
             // The ladder never decays (§7.3), so the rung standing now is the run's
             // peak — no separate high-water mark to keep, and none to let drift.
             alert_peak: self.alert(),
+            // The crate, if it was opened (#209) — the one line that carries a §8.3
+            // ability out of a facility and into the run (§2.2).
+            salvaged: self.salvaged(),
         }
     }
 

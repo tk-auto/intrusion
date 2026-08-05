@@ -77,7 +77,7 @@ fn a_two_hop_path_grows_the_same_graph_every_time() {
         vec![
             (2, Flavour::Depot, false),
             (3, Flavour::Vault, false),
-            (4, Flavour::Outpost, true),
+            (4, Flavour::Workshop, true),
         ],
         "the first choice moved",
     );
@@ -93,11 +93,11 @@ fn a_two_hop_path_grows_the_same_graph_every_time() {
         vec![
             (3, Flavour::Outpost, false),
             (4, Flavour::Depot, false),
-            // Two across, and the flavour is whatever stands there — here the same one
-            // the open edge to lane 4 offers. Intel buys *ground*, not a better
-            // facility handed over; what that ground is worth is the seed's business
-            // and, once #212 prices the unlock, the player's judgement.
-            (1, Flavour::Depot, true),
+            // Two across, and the flavour is whatever stands there — here a facility
+            // neither open edge reaches. Intel buys *ground*, not a better facility
+            // handed over; what that ground is worth is the seed's business and, once
+            // #212 prices the unlock, the player's judgement.
+            (1, Flavour::Vault, true),
         ],
         "the second choice moved",
     );

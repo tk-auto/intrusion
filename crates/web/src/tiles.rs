@@ -218,7 +218,7 @@ const TILES_OFF: &str = "0";
 ///
 /// The tests below assert this covers every glyph `docs/render-reference.md` §2
 /// lists, *and* that each entry matches what [`SLOT_TABLE`] says that slot is for.
-const SPRITES: [(char, u32); 14] = [
+const SPRITES: [(char, u32); 15] = [
     ('#', 0),  // wall
     ('□', 1),  // the schematic's building fabric (§11.5a)
     ('+', 2),  // a closed door panel
@@ -233,6 +233,7 @@ const SPRITES: [(char, u32); 14] = [
     ('@', 11), // you, and a decoy you placed
     ('g', 12), // a guard you can see
     ('z', 13), // a body
+    ('¤', 14), // an equipment cache
 ];
 
 /// The sprite index for a glyph, or `None` when the sheet has no art for it — the
@@ -805,7 +806,7 @@ mod tests {
     /// the sheet stops being a tileset.
     #[test]
     fn every_board_glyph_has_a_sprite() {
-        const TERRAIN: [Terrain; 11] = [
+        const TERRAIN: [Terrain; 12] = [
             Terrain::Floor,
             Terrain::Wall,
             Terrain::DoorHinge,
@@ -816,6 +817,7 @@ mod tests {
             Terrain::DuctEntry,
             Terrain::Console,
             Terrain::CommsConsole,
+            Terrain::EquipmentCache,
             Terrain::Exit,
         ];
         for terrain in TERRAIN {

@@ -288,6 +288,7 @@ fn every_line_fits_the_v1_board() {
         takedowns: 99,
         detections: 999,
         alert_peak: 0,
+        salvaged: None,
     };
     let mut lines: Vec<String> = vec![
         CAPTURED_HEADING.into(),

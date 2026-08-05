@@ -405,6 +405,32 @@ pub struct LevelModifiers {
     /// [`Vault`]: crate::Flavour::Vault
     /// [`Outpost`]: crate::Flavour::Outpost
     pub intel_count: IntelCount,
+    /// **Easier.** The facility hides an **equipment cache** (§2.2/§14 v3/#209): one
+    /// crate of salvaged tech, planted in a non-start room, whose bump unlocks a §8.3
+    /// tech ability for the rest of the run. Baseline `false` — a facility holds none,
+    /// which is every quick-play level and every campaign facility whose flavour does
+    /// not call for one.
+    ///
+    /// **The fourth modifier that reaches generation**, and it reaches placement
+    /// (§10.1.8) exactly as the two count knobs do — never the carve. The cache is
+    /// drawn from the same shuffled pool as the comms console, immediately after it, so
+    /// the two settings put the **same player, exit and intel** in the **same
+    /// building**; what differs from there on is that one of them has a crate in it and
+    /// a guard pool one cell smaller.
+    ///
+    /// **Easier is the honest direction, and it is not a free lunch.** What the cache
+    /// gives is permanent and compounding — an ability the *rest of the run* carries
+    /// (§2.2) — so no reading of it makes the facility harder. What it costs is paid on
+    /// the map rather than in this field: the flavour that plants one
+    /// ([`Workshop`](crate::Flavour::Workshop)) also holds a console fewer, so the
+    /// choice is tech *instead of* currency and not tech *as well as*.
+    ///
+    /// **What the cache holds is not here**, deliberately. This says a facility has one;
+    /// which ability it holds is drawn from the run's own unheld tech at boot
+    /// ([`salvage`](crate::salvage)), because a cache offering a fifth Dephase is a
+    /// reward that is not one — and that draw needs the loadout, which a level modifier
+    /// has no business carrying.
+    pub equipment_cache: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -472,7 +498,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 12] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 13] = [
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
@@ -483,6 +509,7 @@ pub(crate) const CAPTIONS: [ActiveModifier; 12] = [
     GUARDS_FEWER,
     CONSOLES_MORE,
     CONSOLES_FEWER,
+    HOLDS_A_CACHE,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -556,6 +583,16 @@ const CONSOLES_FEWER: ActiveModifier = ActiveModifier {
     detail: Some("one fewer"),
 };
 
+/// The cache's caption names the **crate**, not the ability in it: which tech a run
+/// finds is drawn from what it does not already hold (#209), so a card printing a name
+/// here would be promising a specific prize the facility has not decided on yet — and
+/// spoiling the find if it had.
+const HOLDS_A_CACHE: ActiveModifier = ActiveModifier {
+    name: "Equipment cache",
+    direction: ModifierDirection::Easier,
+    detail: Some("one hidden"),
+};
+
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
     name: "Intel to exit",
     direction: ModifierDirection::Harder,
@@ -602,6 +639,13 @@ pub(crate) struct PoolEntry {
 /// it, and a difficulty draw that quietly decided how many consoles a run must clear
 /// would be tuning quick play from inside a campaign ticket. It is driven by node
 /// flavour ([`Flavour`](crate::Flavour)) and by nothing else until someone measures it.
+///
+/// **The equipment cache is out**, on the intel count's reasoning taken one step
+/// further (#209). It is not a difficulty knob at all: what it hands over is a §8.3
+/// ability the *rest of the campaign run* carries, so a quick-play difficulty draw that
+/// picked it would be granting a permanent reward inside a single facility — meta-
+/// progression by accident, and the one thing §2.2 forbids outright. It is driven by
+/// node flavour ([`Flavour`](crate::Flavour)) and by nothing else.
 ///
 /// **A symmetric knob is a different case, and both its ends are in** (#232,
 /// appendix 30). [`GuardCount`]'s baseline is a neutral middle rather than one end of
@@ -692,6 +736,7 @@ impl LevelModifiers {
             automatic_doors,
             guard_count,
             intel_count,
+            equipment_cache,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -714,6 +759,9 @@ impl LevelModifiers {
         }
         if automatic_doors {
             active.push(ALL_DOORS_AUTOMATIC);
+        }
+        if equipment_cache {
+            active.push(HOLDS_A_CACHE);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -799,6 +847,10 @@ impl LevelModifiers {
             // hard direction, so a flavour asking for fewer consoles cannot be talked
             // out of it by a source that asked for more.
             intel_count: self.intel_count.harder_of(other.intel_count),
+            // A plain toggle like the ones above: any source that plants a cache
+            // plants one, and no source can take away a reward another one offered
+            // (#209).
+            equipment_cache: self.equipment_cache || other.equipment_cache,
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
         }
     }
@@ -1052,7 +1104,7 @@ mod tests {
         assert_eq!(fewer.active()[0].detail, Some("one fewer"));
 
         // Several sources at once: every active field is listed, in reading order.
-        // **Nine, not ten, with every field set** — `calm_guards_detect_only_their_cone`
+        // **Ten, not eleven, with every field set** — `calm_guards_detect_only_their_cone`
         // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
         // asked for is the rule the level plays regardless, so a caption for it would
         // tell the player about a difference that no longer exists.
@@ -1066,9 +1118,10 @@ mod tests {
             automatic_doors: true,
             guard_count: GuardCount::More,
             intel_count: IntelCount::Fewer,
+            equipment_cache: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 9);
+        assert_eq!(stacked.active().len(), 10);
         assert!(
             !stacked
                 .active()
@@ -1127,6 +1180,7 @@ mod tests {
             automatic_doors: false,
             guard_count: GuardCount::Baseline,
             intel_count: IntelCount::Baseline,
+            equipment_cache: true,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -1139,6 +1193,7 @@ mod tests {
             automatic_doors: true,
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::More,
+            equipment_cache: false,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);
@@ -1153,6 +1208,10 @@ mod tests {
         // And the intel knob the same way, with its ends the other way up: `b` asked
         // for one more console and nothing objected, so one more it is (#207).
         assert_eq!(both.intel_count, IntelCount::More);
+        // A plain toggle, ORed like the ones above (#209): `a` plants a crate and `b`
+        // did not ask for one, so the crate stands — a source cannot take away a
+        // reward another one offered.
+        assert!(both.equipment_cache);
         // Union with the baseline changes nothing.
         assert_eq!(a.union(LevelModifiers::default()), a);
     }

@@ -157,6 +157,23 @@ pub enum Flavour {
     /// map exists to offer, and the reason an [`Outpost`](Self::Outpost) is not simply
     /// the correct answer every time.
     Vault,
+    /// **Somebody else's kit, badly locked up** (§14 v3/#209): the facility that hides
+    /// an **equipment cache**, and the only way salvaged tech enters a run.
+    ///
+    /// It is the third position on the reward axis rather than a fourth rung on the
+    /// same ladder, and that is the whole reason it exists. A [`Vault`](Self::Vault)
+    /// pays in **intel**, which is currency the run spends (§2.2); this pays in a §8.3
+    /// **ability**, which the run keeps for every facility after it — §14 v3's "power
+    /// curve, and the reason the campaign exists". Two rewards you cannot convert
+    /// between is what makes a choice point a decision rather than a ranking.
+    ///
+    /// **And it costs a console.** One fewer than the recipe asks for, so the trade is
+    /// tech *instead of* currency rather than tech *as well as* — the §2.3 rule that a
+    /// reward with no cost is not a choice, applied on the map rather than inside the
+    /// building. Guards stay at the recipe's count: a facility that were both poorer
+    /// and better watched would be one nobody picks, which is the same failure as one
+    /// everybody does.
+    Workshop,
     /// **The archive** (§14 v3): the run's terminus at [`DEPTH_TO_ARCHIVE`], and the one
     /// node nobody chooses between. More guards, and a search that flushes hideouts —
     /// the last raid should be the hard one.
@@ -174,16 +191,22 @@ impl Flavour {
     ///
     /// The order is the risk/reward ladder, quiet end first, and the cycle's *step* is
     /// what guarantees a differentiated offer — see [`FacilityMap::flavour`].
-    pub const OFFERED: [Flavour; 3] = [Flavour::Outpost, Flavour::Depot, Flavour::Vault];
+    pub const OFFERED: [Flavour; 4] = [
+        Flavour::Outpost,
+        Flavour::Depot,
+        Flavour::Vault,
+        Flavour::Workshop,
+    ];
 
     /// **Every** flavour, [`OFFERED`](Self::OFFERED) plus the terminus — what an
     /// exhaustive check walks. The map screen (#208) measures its rows against this at
     /// **compile time**, so a blurb too long for the board fails the build rather than
     /// being discovered as a clipped line in a screenshot.
-    pub const ALL: [Flavour; 4] = [
+    pub const ALL: [Flavour; 5] = [
         Flavour::Outpost,
         Flavour::Depot,
         Flavour::Vault,
+        Flavour::Workshop,
         Flavour::Archive,
     ];
 
@@ -194,6 +217,7 @@ impl Flavour {
             Flavour::Outpost => "Outpost",
             Flavour::Depot => "Depot",
             Flavour::Vault => "Vault",
+            Flavour::Workshop => "Workshop",
             Flavour::Archive => "Archive",
         }
     }
@@ -208,6 +232,7 @@ impl Flavour {
             Flavour::Outpost => "thin, and thinly guarded",
             Flavour::Depot => "an ordinary facility",
             Flavour::Vault => "worth robbing, and watched",
+            Flavour::Workshop => "salvage, and little else",
             Flavour::Archive => "what you came for",
         }
     }
@@ -240,6 +265,15 @@ impl Flavour {
             Flavour::Vault => LevelModifiers {
                 guard_count: GuardCount::More,
                 intel_count: IntelCount::More,
+                ..LevelModifiers::neutral()
+            },
+            // The cache, and the console it costs (#209). Both halves are here rather
+            // than the reward alone, because a flavour is a *position* on the axes and
+            // not a bonus: what the run buys with the console it gives up is an ability
+            // it keeps for the rest of the campaign (§2.2).
+            Flavour::Workshop => LevelModifiers {
+                equipment_cache: true,
+                intel_count: IntelCount::Fewer,
                 ..LevelModifiers::neutral()
             },
             // The terminus is the hard raid, and it is hard through **pressure** rather

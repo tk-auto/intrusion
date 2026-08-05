@@ -303,6 +303,14 @@ const MODIFIERS: [(&str, SetModifier); 10] = [
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
     // field, so the compiler keeps this decision deliberate rather than forgotten.
+    //
+    // `equipment-cache` is **not** here either (#209), for a sharper reason. The bot has
+    // no cue for a crate: it would walk past one every run, so a batch that named this
+    // would measure a facility with one cell of floor missing and a bot that cannot see
+    // the thing under test — the §13.3 trap of measuring the bot rather than the game.
+    // The cache is a **campaign** reward (§2.2) and the sim plays single facilities, so
+    // there is nothing to sweep until the bot learns to salvage; the name lands with
+    // that cue, not before it.
 ];
 
 /// The `--alert` vocabulary (§7.3/#376): each threshold paired with the field it
@@ -588,6 +596,7 @@ mod tests {
             automatic_doors,
             guard_count,
             intel_count,
+            equipment_cache,
             intel_to_exit,
         } = all.modifiers;
         assert!(guards_always_search_hideouts);
@@ -603,6 +612,11 @@ mod tests {
         assert!(
             !calm_guards_detect_only_their_cone,
             "the retired slot has no name, so naming every modifier must not set it",
+        );
+        assert!(
+            !equipment_cache,
+            "the cache has no name until the bot has a cue for it (#209), so naming \
+             every modifier must not plant one",
         );
         assert_eq!(
             intel_to_exit,
