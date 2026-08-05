@@ -33,7 +33,7 @@
 //! check that makes that true is in the campaign rather than in each sink. What a
 //! campaign's intel is *for* is therefore the hub, not the exit: the exit never refuses
 //! ([`IntelGate::None`], §4.5), so a facility's intel, caches and unlockables are all
-//! **surplus** and extraction is voluntary. Appendix 46 records why, and why a raid that
+//! **surplus** and extraction is voluntary. Appendix 47 records why, and why a raid that
 //! took nothing is left to punish itself.
 //!
 //! **The alert carries exactly one hop**, which is the whole of what §14 v3 asks for:

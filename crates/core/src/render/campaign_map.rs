@@ -220,7 +220,7 @@ const WALLET_LABEL: &str = "Intel";
 /// starting state, said rather than left as a bare `Intel 0` the player has to interpret.
 ///
 /// Its own wording because zero is the interesting case for a run that has just walked out
-/// of a facility empty-handed: nothing is taken away for that (appendix 46), and the line
+/// of a facility empty-handed: nothing is taken away for that (appendix 47), and the line
 /// saying so plainly is the only feedback there is.
 const WALLET_EMPTY: &str = "nothing banked";
 

@@ -13,7 +13,7 @@
 
 use crate::state::*;
 use crate::test_support::{open_room, region_strip};
-use crate::{DoorId, DoorLock};
+use crate::DoorId;
 
 /// A player holding Lockdown in the [`region_strip`] fixture: a 16×6 strip of
 /// room–corridor–room–corridor with a **closed manual door** in wall columns 4, 7 and
@@ -328,10 +328,7 @@ fn the_seal_can_never_outlive_its_window() {
         "the window is the duration, and nothing else",
     );
     assert!(
-        s.layout()
-            .regions()
-            .doors()
-            .all(|(_, d)| d.lock() == DoorLock::Unlocked),
+        s.layout().regions().doors().all(|(_, d)| !d.is_locked()),
         "every seal is released with the window that placed it",
     );
 

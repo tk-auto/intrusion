@@ -7,7 +7,9 @@
 //! ladder, [`effects`] for [`super::effects`]'s marks and areas, [`alert`] for the
 //! §7.3 facility alert ladder and [`reinforcements`] for the
 //! guards its top two rungs send in, [`bore`] for [`super::bore`], [`lockdown`] for
-//! [`super::lockdown`], [`traversal`] for
+//! [`super::lockdown`]'s seal and [`keys`] for its second lock source — the locked
+//! prize room and the key a takedown buys (§10.4/#236) —
+//! [`traversal`] for
 //! [`super::traversal`], [`ducts`] for
 //! the §10.7 crawlspace, [`tunnel`] for the player's own way in and out (§4.5/#466),
 //! [`comms`] for the §7.7 comms console that kills the radio net,
@@ -30,6 +32,7 @@ mod ducts;
 mod effects;
 mod exchange;
 mod guards;
+mod keys;
 mod lockdown;
 mod reinforcements;
 mod saver;

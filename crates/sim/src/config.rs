@@ -267,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 13] = [
+const MODIFIERS: [(&str, SetModifier); 14] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -325,6 +325,20 @@ const MODIFIERS: [(&str, SetModifier); 13] = [
     // channels (§13.2), so what the board shows is a legitimate thing to sweep on the
     // day the bot learns to route around a search — see `docs/bot-behaviour.md`.
     ("show-search-areas", |m| m.show_search_areas = true),
+    // Read by generation's **last** pass (§10.4/§12.6/#236) — after placement, and
+    // drawing nothing — so a batch that names it plays the baseline's building with one
+    // room's doorways locked. The strongest frame any generation-time modifier here has.
+    //
+    // **The bot plays it only half-honestly** (`docs/bot-behaviour.md`): it knows a
+    // locked doorway is not a way through ([`blocked_cells`](crate::bot)), so it routes
+    // round the room instead of bumping the door for the rest of the run — and a
+    // takedown it takes for its own reasons hands it the key and opens the room. What it
+    // has no cue for is *going and getting* the key, so under `--intel-gate all`, where
+    // the locked console is required, a batch that names this measures a bot that will
+    // not deliberately buy its way in (§13.3). That gap is why the modifier is out of
+    // the §12.6 directed pool; the name is here so `--inspect` and a replay can still
+    // show what the *player* would be shown.
+    ("prize-room-locked", |m| m.prize_room_locked = true),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -625,8 +639,10 @@ mod tests {
             guard_count,
             intel_count,
             caches,
+            prize_room_locked,
             intel_to_exit,
         } = all.modifiers;
+        assert!(prize_room_locked);
         assert!(guards_always_search_hideouts);
         assert!(sighting_lost_calls_a_guard);
         assert!(body_found_calls_two_guards);

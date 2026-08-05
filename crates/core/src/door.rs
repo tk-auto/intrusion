@@ -25,17 +25,24 @@
 //! turn loop passes in, built from the live actors (the player, guards, bodies).
 //!
 //! Locking is the one exception to §10.4's *"anyone can operate any door"*
-//! (**[START]**), and it lives here too: [`seal_door`](Layout::seal_door) shuts and
-//! locks a door for the Lockdown window (§8.3/#242) and
-//! [`release_sealed_doors`](Layout::release_sealed_doors) unlocks them all when it
-//! closes. The lock is stored on the door itself ([`DoorLock`]) so that a second lock
-//! source has one representation to extend rather than a second to invent; who a lock
-//! *refuses* is the caller's rule, not the door's — the turn loop declines a guard's
-//! walk-in open on a locked door, and the player's own bump is untouched.
+//! (**[START]**), and it lives here too — now with two sources, which is why
+//! [`DoorLock`] is a **set** of flags rather than one value:
+//!
+//! - [`seal_door`](Layout::seal_door) shuts and seals a door for the Lockdown window
+//!   (§8.3/#242); [`release_sealed_doors`](Layout::release_sealed_doors) lifts every
+//!   seal when the window closes, and *only* the seals.
+//! - [`key_gate_door`](Layout::key_gate_door) puts the locked-room modifier's key gate
+//!   on one of the prize room's doorways (§10.4/#236) and makes it frameless and
+//!   self-closing, so the lock survives the guard traffic that keeps opening it.
+//!
+//! Both locks live on the door itself, so "is this door locked?" has one answer; who a
+//! lock *refuses* is the caller's rule, not the door's — the turn loop declines a
+//! guard's walk-in open on a **sealed** door, and the player's bump on a **keyed** one
+//! from outside the room it locks.
 
 use crate::cell::Cell;
 use crate::facility::Terrain;
-use crate::region::{DoorCell, DoorId, DoorKind, DoorLock};
+use crate::region::{DoorCell, DoorId, DoorKind};
 use crate::Layout;
 
 /// What operating a door did (§10.4).
@@ -197,11 +204,42 @@ impl Layout {
             .door(door)
             .is_open()
             .then(|| self.close_door(door, occupied));
-        self.parts_mut().1.door_mut(door).set_lock(DoorLock::Sealed);
+        let locks = self.regions().door(door).lock().with_seal();
+        self.parts_mut().1.door_mut(door).set_lock(locks);
         shut
     }
 
-    /// Release every [`Sealed`](DoorLock::Sealed) lock in the level (§8.3/#242) — the
+    /// **Key-gate** `door` for the locked-room modifier (§10.4/#236): shut it and put
+    /// the room's lock on it, as a **frameless automatic** door.
+    ///
+    /// Three things at once, because they are one rule and a door with any of them
+    /// missing is not a locked door:
+    ///
+    /// - the **lock**, which refuses the player's bump from the corridor side until
+    ///   they hold a guard's key ([`DoorLock::is_keyed`]);
+    /// - **automatic**, so the doorway shuts itself again a few turns after it is last
+    ///   vacated ([`make_automatic`](crate::Door::make_automatic)). A key lock on a door
+    ///   that stayed open would last exactly until the first guard walked through it,
+    ///   and then never again;
+    /// - **shut**, because generation may have posed it open (#145) and a locked room
+    ///   standing open on turn one is not a locked room.
+    ///
+    /// Generation-time, so there is nothing on the board to crush: the close is the
+    /// unconditional one, and the panels are restamped in lockstep as ever.
+    pub(crate) fn key_gate_door(&mut self, door: DoorId, delay: u32) {
+        let hinges: Vec<Cell> = self.regions().door(door).hinges().to_vec();
+        let locks = self.regions().door(door).lock().with_key_gate();
+        let (facility, regions) = self.parts_mut();
+        regions.door_mut(door).make_automatic(delay);
+        regions.door_mut(door).set_lock(locks);
+        // The folded-in hinges are panels now, and a panel's terrain is its pose.
+        for hinge in hinges {
+            facility.set_terrain(hinge.x, hinge.y, Terrain::DoorPanelClosed);
+        }
+        self.set_door_open(door, false);
+    }
+
+    /// Release every [`sealed`](DoorLock::is_sealed) lock in the level (§8.3/#242) — the
     /// end of the Lockdown window, whether it expired or was toggled off early (§4.4).
     ///
     /// Total by construction: it walks *every* door rather than a remembered list, so
@@ -210,16 +248,19 @@ impl Layout {
     /// the guarantee is structural, not a matter of every caller remembering.
     ///
     /// Locks from other sources (#236's key) are untouched: this releases the seal it
-    /// placed, not the concept of a lock.
+    /// placed, not the concept of a lock — which is exactly why [`DoorLock`] is a set
+    /// of flags rather than one variant per source. A window that closed over the prize
+    /// room's doorway leaves the key gate standing.
     pub(crate) fn release_sealed_doors(&mut self) {
         let sealed: Vec<DoorId> = self
             .regions()
             .doors()
-            .filter(|(_, door)| door.lock() == DoorLock::Sealed)
+            .filter(|(_, door)| door.lock().is_sealed())
             .map(|(id, _)| id)
             .collect();
         for id in sealed {
-            self.parts_mut().1.door_mut(id).set_lock(DoorLock::Unlocked);
+            let released = self.regions().door(id).lock().without_seal();
+            self.parts_mut().1.door_mut(id).set_lock(released);
         }
     }
 
@@ -264,7 +305,7 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use crate::facility::Facility;
-    use crate::region::{DoorId, DoorKind, DoorLock, RegionGraph, RegionKind};
+    use crate::region::{DoorId, DoorKind, RegionGraph, RegionKind};
     use crate::test_support::seed_sweep;
     use crate::{generate, Cell, DoorAction, Layout, Rng, Terrain};
 
@@ -579,7 +620,7 @@ mod tests {
         // A closed door has nothing to shut; the lock still lands.
         assert_eq!(layout.seal_door(door, vacant), None, "already shut");
         assert!(layout.regions().door(door).is_locked());
-        assert_eq!(layout.regions().door(door).lock(), DoorLock::Sealed);
+        assert!(layout.regions().door(door).lock().is_sealed());
 
         // An open one is shut *and* locked, its panels restamped solid.
         layout.release_sealed_doors();
@@ -631,10 +672,7 @@ mod tests {
 
         layout.release_sealed_doors();
         assert!(
-            layout
-                .regions()
-                .doors()
-                .all(|(_, d)| d.lock() == DoorLock::Unlocked),
+            layout.regions().doors().all(|(_, d)| !d.is_locked()),
             "every seal, not a remembered subset",
         );
         assert!(

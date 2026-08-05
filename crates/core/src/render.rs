@@ -424,6 +424,7 @@ pub fn render(state: &State) -> Grid {
     // danger overlay, which always paints last and always wins (§11.5).
     let mut cells = terrain_pass(state);
     spent_console_recolour(state, &mut cells);
+    locked_door_recolour(state, &mut cells);
     duct_pass(state, &mut cells);
     entity_pass(state, &mut cells);
     crouch_signal(state, &mut cells);
@@ -514,6 +515,35 @@ fn spent_console_recolour(state: &State, cells: &mut [GlyphCell]) {
     let fov = state.player_fov();
     let memory = state.memory();
     for cell in state.spent_consoles() {
+        if fov.contains(cell) || memory.contains(cell) {
+            cells[(cell.y * width + cell.x) as usize].fg = Category::Neutral;
+        }
+    }
+}
+
+/// A **key-gated** door the player cannot open is Neutral scenery (§11.2/§10.4/#236):
+/// the doorways of the locked prize room keep their `+`/`×` glyphs and recolour from
+/// the working-furniture tan to the same white a spent console wears, because that is
+/// what they are to a player without a key — a door-shaped wall.
+///
+/// It is the spent-console recolour's exact shape, and it says the same kind of thing:
+/// *this looks like a thing you use, and it is not one*. The moment a takedown puts a
+/// key in hand ([`State::holds_key`]) every one of them goes back to System tan on the
+/// next frame, which is the payoff for the price the player just paid made visible on
+/// the board rather than only in a message that has since scrolled away.
+///
+/// Recoloured only where the door actually shows, live or in memory — never on a
+/// schematic cell standing in for geometry the player has not walked (§11.5a). Which
+/// room the building keeps locked is something you learn by looking at it, or off the
+/// run's card (§12.6); the fog does not give it away.
+fn locked_door_recolour(state: &State, cells: &mut [GlyphCell]) {
+    if state.holds_key() {
+        return;
+    }
+    let width = state.layout().facility().width();
+    let fov = state.player_fov();
+    let memory = state.memory();
+    for cell in state.keyed_door_cells() {
         if fov.contains(cell) || memory.contains(cell) {
             cells[(cell.y * width + cell.x) as usize].fg = Category::Neutral;
         }

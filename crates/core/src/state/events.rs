@@ -140,6 +140,17 @@ pub enum Event {
     /// The player took an unaware adjacent guard down (§7.2): the guard is
     /// permanently out, and a body now lies at `at`.
     TakenDown { at: Cell },
+    /// The player lifted a **key** off the guard they have just taken down
+    /// (§10.4/#236) — the prize room is open to them from now on.
+    ///
+    /// Fired once per run, on the first takedown of a level whose prize room is locked,
+    /// and never on a facility that has no lock in it. It travels beside the
+    /// [`TakenDown`](Event::TakenDown) that produced it rather than being a flag on it,
+    /// for the reason [`CaptureSaved`](Event::CaptureSaved) is separate: what it says is
+    /// not "a guard fell" but that a **door** the player could not open is now open, and
+    /// a near line that only narrated the body would leave them to discover the payoff
+    /// by walking back across the building and pressing.
+    KeyTaken { at: Cell },
     /// A guard's capturing step was **turned over** by the Saver (§4.5/§8.3/#243):
     /// the run's one exception to the only loss condition fired, at the cell `at`
     /// where the player stood. The guard that reached them is taken down where it
@@ -546,6 +557,11 @@ impl Event {
             | Event::ExitRefused { .. }
             | Event::Won
             | Event::CommsSilenced { .. }
+            // The key off a guard's belt (§10.4/#236) reads in the reward band for the
+            // comms console's reason, not the takedown's: what it changes is a fact about
+            // the *facility* — one room is open now — and the body the same turn left
+            // behind is already narrating itself in Owned.
+            | Event::KeyTaken { .. }
             | Event::TechSalvaged { .. }
             // A refused crate is still the reward channel talking — it is the same find
             // reported as *not yours*, not a threat and not furniture. The exchange's
@@ -604,6 +620,16 @@ pub enum Affordance {
     OpenDoor,
     /// An open door's hinge: bump to close (§10.4).
     CloseDoor,
+    /// A **key-gated** door the player cannot open (§10.4/#236): the bump will refuse,
+    /// free.
+    ///
+    /// Its own row rather than the silence a solid cell gets, for
+    /// [`SalvageCarried`](Affordance::SalvageCarried)'s reason: the cell is anything but
+    /// inert, and a line that went quiet would leave the player to work out by pressing
+    /// that this doorway is different from every other one on the board. It says
+    /// *locked* and not *needs a key*, because the door does not tell you where the key
+    /// is — the run's card does (§12.6), and the guards do.
+    LockedDoor,
     /// An untaken intel console: bump to take the intel (§4.3).
     TakeIntel,
     /// The comms console with the radio net still live: bump to kill it for the rest of
@@ -666,13 +692,14 @@ impl Affordance {
     /// a variant missing from here is a label nothing checks, which is exactly the
     /// drift the bound exists to stop. `affordance_labels_fit_the_row` walks the enum
     /// against it so a new variant cannot quietly skip the list.
-    pub(crate) const ALL: [Affordance; 18] = [
+    pub(crate) const ALL: [Affordance; 19] = [
         Affordance::Takedown,
         Affordance::ReleaseBody,
         Affordance::TakeBody,
         Affordance::StoreBody,
         Affordance::OpenDoor,
         Affordance::CloseDoor,
+        Affordance::LockedDoor,
         Affordance::TakeIntel,
         Affordance::SilenceRadio,
         Affordance::SalvageTech,
@@ -700,6 +727,7 @@ impl Affordance {
             Affordance::StoreBody => "cupboard: stow body",
             Affordance::OpenDoor => "door: open",
             Affordance::CloseDoor => "door: close",
+            Affordance::LockedDoor => "door: locked",
             Affordance::TakeIntel => "console: take intel",
             Affordance::SilenceRadio => "comms: silence radio",
             Affordance::SalvageTech => "cache: take tech",
@@ -734,6 +762,9 @@ impl Affordance {
             Affordance::ReleaseBody => Category::Owned,
             Affordance::OpenDoor
             | Affordance::CloseDoor
+            // A door that will not open is still a door — furniture, on the same
+            // System row as the ones that do (§11.2/#236).
+            | Affordance::LockedDoor
             | Affordance::Hide
             | Affordance::StoreBody
             | Affordance::EnterDuct
@@ -775,6 +806,7 @@ mod affordance_tests {
                 | Affordance::StoreBody
                 | Affordance::OpenDoor
                 | Affordance::CloseDoor
+                | Affordance::LockedDoor
                 | Affordance::TakeIntel
                 | Affordance::SilenceRadio
                 | Affordance::SalvageTech

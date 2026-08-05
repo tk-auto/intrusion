@@ -915,7 +915,7 @@ fn the_hub_debits_the_wallet_and_a_refusal_costs_nothing() {
     assert_eq!(run.intel(), 3, "banked on top of what was not spent");
 }
 
-/// **There is no in-level spending** (§14 v3/#211/appendix 46). The hub is the map between
+/// **There is no in-level spending** (§14 v3/#211/appendix 47). The hub is the map between
 /// facilities, so a spend from inside a raid — or after the run is over — is refused as
 /// *closed* rather than as unaffordable, and takes nothing however rich the run is.
 #[test]
@@ -968,7 +968,7 @@ fn every_campaign_facility_lets_the_run_leave_empty_handed() {
         run.enter();
         // Nothing taken, and the run still walks on: an empty-handed raid is *allowed*,
         // and what makes it a bad idea is that the run is now poorer at a facility the
-        // alert may have made harder — not a penalty anyone coded (appendix 46).
+        // alert may have made harder — not a penalty anyone coded (appendix 47).
         walk_on(&mut run, 0);
     }
     assert_eq!(run.intel(), 0, "nothing taken is nothing banked");

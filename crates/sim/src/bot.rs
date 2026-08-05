@@ -1464,6 +1464,23 @@ fn blocked_cells(state: &State) -> HashSet<Cell> {
             cells.insert(guard.pos());
         }
     }
+    // A **key-gated** doorway with no key in hand (§10.4/#236): the bump is refused and
+    // changes nothing, so a router that treated a locked panel as the walk-through §10.4
+    // makes it would plan straight at the door and press it for the rest of the run.
+    // Blocked, the bot routes round the locked room instead — and the moment a takedown
+    // puts the key in its hand the cells stop being blocked and the room is a room again.
+    //
+    // Only the **closed** ones: what the lock refuses is the handle, never the doorway,
+    // so a keyed door a guard has just walked through is exactly the slip-in the modifier
+    // is built around, and the bot may take it like any other open panel.
+    if !state.holds_key() {
+        let regions = state.layout().regions();
+        cells.extend(state.keyed_door_cells().filter(|&c| {
+            regions
+                .door_at(c)
+                .is_some_and(|id| !regions.door(id).is_open())
+        }));
+    }
     cells
 }
 

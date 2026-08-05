@@ -680,6 +680,69 @@ pub struct LevelModifiers {
     /// **ceiling** rather than a promise: a facility plants only as many crates as there
     /// is tech left in the world for this run to find.
     pub caches: CacheCount,
+    /// **Harder.** The doors of the one room holding the facility's **prize** are
+    /// **locked**, and every guard carries a key (§10.4/#236). Baseline, §10.4's
+    /// **[START]** rule stands untouched: anyone can operate any door, no keys, no
+    /// locks.
+    ///
+    /// **Which room.** A room hiding an **equipment cache** if the facility hides one
+    /// (§10.2/#209), otherwise a room holding an **intel console**. So what the lock
+    /// gates depends on the run: in quick play, where there are no crates and the exit
+    /// wants every console (`IntelGate::All`), it is a **hard gate** on the win and the
+    /// modifier's whole promise lands — you cannot leave without committing a takedown.
+    /// In a campaign facility rich enough to hide crates it gates **loot**, which is the
+    /// same rule reading as a choice rather than a toll. Among the candidates a room no
+    /// §10.7 duct opens into is preferred, so a shortcut cannot walk round the lock and
+    /// leave the modifier a caption.
+    ///
+    /// **Why the key is on every guard, and not on one of them.** The §7.2 takedown is
+    /// the price, and it is already a steep one — a permanent body on the §7.3 radio
+    /// clock, evidence to hide, an alert if it is found. Hanging the key on one *named*
+    /// guard would add a search on top of that price and turn the modifier into a hunt
+    /// for a particular `g` the player has no way to pick out; with the key on all of
+    /// them the cost is exactly the takedown, which is the cost §2.3 asks the modifier
+    /// to charge. It goes **straight to hand**, not onto the body: the body is the cost,
+    /// and a key lying on the floor would be a second errand and a second thing to lose.
+    ///
+    /// **The doors are automatic, and that is what makes the lock hold** (§10.4/#147).
+    /// Guards carry keys, so they walk through as they always did — a key lock that let
+    /// the door stand open would last until the first patrol came past and never again.
+    /// Frameless and self-closing, the doorway shuts a few turns after it is last
+    /// vacated, and those turns are the modifier's one bypass: a player standing beside
+    /// a door a guard has just opened can **slip in without a key**, at the price of
+    /// standing next to that guard. Thin, and a decision rather than a lottery.
+    ///
+    /// **The lock refuses entry, never exit.** From inside the room the door always
+    /// opens. A slip-in that could seal a player in a locked room with no key would be a
+    /// run ended by a mechanic they were invited to gamble on — §2.2/§7.2's soft-lock
+    /// class, which the design does not allow to be merely unlikely.
+    ///
+    /// **The fifth modifier that reaches generation**, and it reaches *past* placement
+    /// rather than into it. The room cannot be chosen until the crates and consoles are
+    /// seated, so the lock is applied after [`place`](crate::place) on the finished
+    /// board — and it draws nothing at all, so a seed carves and places the **same
+    /// building** either way and the two settings differ in exactly the cells this rule
+    /// touches. That is the strongest frame a §2.3 directional assertion has been stated
+    /// in here: on one seed, the prize is reachable at baseline and not reachable behind
+    /// the locks (`the_lock_puts_the_prize_out_of_reach`).
+    ///
+    /// **Deliberately out of the directed pool** (§12.6/[`POOL`]), on
+    /// [`LayoutKnowledge::None`]'s reasoning rather than the intel count's: the §13.2
+    /// bot knows a locked door is not a way through and opens the room the moment a
+    /// takedown hands it the key, but no plan of its says *the thing I need is behind
+    /// that door, so go and buy the key*. Under the sim preset's `--intel-gate one` that
+    /// costs it a little and the modifier reads harder in the documented direction (over
+    /// 100 balanced seeds: win rate 35% → 24%, detections 848 → 1,086, diversity 0.60 →
+    /// 0.54); under `--intel-gate all`, where the locked console is required, the win
+    /// rate goes to **zero**, which is a fact about the bot rather than about the game
+    /// (§13.3). A difficulty draw must not be able to put a batch in that position by
+    /// accident. It stays reachable by name, by token and by node flavour, where it is
+    /// asked for deliberately.
+    ///
+    /// Appendix 46 has the argument: why the key is on every guard rather than on one,
+    /// why the gated doors have to shut themselves, why the lock refuses entry and never
+    /// exit, and what the §10.6 guarantee had to grow.
+    pub prize_room_locked: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -747,7 +810,8 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 18] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 19] = [
+    LOCKED_PRIZE_ROOM,
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
     CALLS_IN_BODIES,
@@ -896,6 +960,16 @@ const THREE_CACHES: ActiveModifier = ActiveModifier {
     detail: Some("three hidden"),
 };
 
+/// Named for the **ground and the way through it** (#236), which is the pair a player
+/// can act on: one room is shut, and the guards are what open it. Naming the rule
+/// instead ("Doors: keyed") would say which system bends without saying the one thing
+/// worth knowing before turn one — that the way in is a takedown.
+const LOCKED_PRIZE_ROOM: ActiveModifier = ActiveModifier {
+    name: "Locked room",
+    direction: ModifierDirection::Harder,
+    detail: Some("guards hold the key"),
+};
+
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
     name: "Intel to exit",
     direction: ModifierDirection::Harder,
@@ -966,6 +1040,14 @@ pub(crate) struct PoolEntry {
 /// §11.5a's authority), so with this end on it routes through walls it has never seen.
 /// Keeping it out of the pool means no difficulty draw can quietly put a sim batch in
 /// that position while the bot still believes the layout is free.
+///
+/// **The locked prize room is out on that same last ground** (#236). Mechanically it
+/// would sit here happily — a plain harder toggle whose two settings are the same
+/// building down to the cell — but the §13.2 bot has no notion of a key, so a `+N` draw
+/// that picked it could stand a whole sweep in front of a door the bot bumps forever,
+/// and the batch would then be measuring the bot rather than the game (§13.3). It is
+/// out until the bot can play it, exactly as the hidden layout is, and reachable by
+/// every other route into the seam meanwhile.
 ///
 /// **A symmetric knob is a different case, and both its ends are in** (#232,
 /// appendix 30). [`GuardCount`]'s baseline is a neutral middle rather than one end of
@@ -1118,6 +1200,7 @@ impl LevelModifiers {
             guard_count,
             intel_count,
             caches,
+            prize_room_locked,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -1159,6 +1242,12 @@ impl LevelModifiers {
         }
         if show_search_areas {
             active.push(SHOWS_SEARCH_AREAS);
+        }
+        // Read before turn one or not at all (#236): with this on, one room's doorways
+        // will not open to a bump, and a player who was not told would read that as the
+        // game being broken rather than as the rule it is.
+        if prize_room_locked {
+            active.push(LOCKED_PRIZE_ROOM);
         }
         // Slot 5 is **retired** (#442) — see the field's own note. A run that
         // decodes a token with the bit set gets no caption, because there is nothing
@@ -1254,6 +1343,9 @@ impl LevelModifiers {
             // so what the map advertised, the facility holds. See `CacheCount::most_of`
             // for why this one does not compose harder-ward like its neighbours.
             caches: self.caches.most_of(other.caches),
+            // A plain toggle like the ones above (#236): one source asking for the lock
+            // is enough, and no source can talk another out of it.
+            prize_room_locked: self.prize_room_locked || other.prize_room_locked,
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
         }
     }
@@ -1524,9 +1616,10 @@ mod tests {
             guard_count: GuardCount::More,
             intel_count: IntelCount::Fewer,
             caches: CacheCount::Three,
+            prize_room_locked: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 12);
+        assert_eq!(stacked.active().len(), 13);
         assert!(
             !stacked
                 .active()
@@ -1590,6 +1683,7 @@ mod tests {
             guard_count: GuardCount::Baseline,
             intel_count: IntelCount::Baseline,
             caches: CacheCount::Two,
+            prize_room_locked: true,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -1605,6 +1699,7 @@ mod tests {
             guard_count: GuardCount::Fewer,
             intel_count: IntelCount::More,
             caches: CacheCount::None,
+            prize_room_locked: false,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);

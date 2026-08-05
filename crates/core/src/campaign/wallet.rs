@@ -15,7 +15,7 @@
 //! unlockable in a facility are *surplus*, the exit never refuses, and what a raid was
 //! worth is settled at the hub afterwards rather than at the mouth of the tunnel.
 //!
-//! That is a deliberate relaxation and not an oversight — see appendix 46, which also
+//! That is a deliberate relaxation and not an oversight — see appendix 47, which also
 //! records why walking out empty-handed carries **no** explicit penalty: the campaign
 //! escalates on its own (#210) and caches are one-shot, so a wasted raid already leaves
 //! the run weaker for a harder facility. A punishment on top would be charging twice for
