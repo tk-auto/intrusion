@@ -1606,3 +1606,140 @@ fn the_theme_survives_run_after_run() {
         assert_eq!(ui.theme, chosen.theme);
     }
 }
+
+/// A full-handed run standing at a crate that is offering, with the exchange already
+/// open (§8.3/#266) — the fixture the three tests below share.
+fn offering_bar() -> State {
+    offering_bar_on(10)
+}
+
+/// The same, on a board `height` tall — the help-panel test needs a screen with room
+/// for four entries, and the panel is sized to the board behind it (§11.4).
+fn offering_bar_on(height: u32) -> State {
+    let mut layout = open_room(40, height);
+    layout.place(Cell::new(15, 6), Terrain::EquipmentCache);
+    let mut s = State::new(
+        layout,
+        Cell::new(15, 5),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(38, height - 2),
+    )
+    .with_loadout(granted())
+    .with_caches([AbilityId::Lockdown]);
+    s.step(Input::Step(Direction::South));
+    assert!(s.exchange().is_some(), "the bump opens the offer");
+    s
+}
+
+/// **The bar becomes the exchange** (§8.3/§11.4/#266): while a crate is offering, the
+/// row drops the innate entry and draws the four candidates — the three pieces of tech
+/// the run holds, then the crate's own marked `(+)`.
+///
+/// No clocks on it: the row has stopped being a readout of the economy and become the
+/// choice, because nothing can be activated while the offer is open.
+#[test]
+fn the_bar_draws_the_exchange_row() {
+    let s = offering_bar();
+    let g = render_screen(&s, ScreenUi::default());
+    let row: String = (0..g.width())
+        .map(|x| g.get(x, ability_row(10)).glyph)
+        .collect();
+    assert_eq!(row, "Camo      Decoy     Phase     Lock(+)   ", "{row:?}",);
+    assert!(
+        !row.contains("Run"),
+        "an innate ability is not on the table (§8.3), so it leaves the row",
+    );
+}
+
+/// **The crate's entry reads in the reward channel** (§11.2/#266): the three you hold
+/// are Owned, the one you are being offered is Interest — the colour of the `¤` it is
+/// still sitting in. One glance says which of the four is the new thing.
+#[test]
+fn the_offered_entry_wears_the_reward_colour() {
+    let s = offering_bar();
+    let g = render_screen(&s, ScreenUi::default());
+    let bar = ability_row(10);
+    // Read the whole slot rather than one cell of it: one cell of every entry is its
+    // mnemonic, lifted to Neutral (#360), and which cell that is depends on the run.
+    let slot_colour = |start: u32| -> Vec<Category> {
+        (start..start + 10)
+            .map(|x| g.get(x, bar))
+            .filter(|cell| cell.glyph != ' ' && cell.fg != Category::Neutral)
+            .map(|cell| cell.fg)
+            .collect()
+    };
+    for start in [0, 10, 20] {
+        assert!(
+            slot_colour(start).iter().all(|c| *c == Category::Owned),
+            "the tech you hold reads as yours, at {start}",
+        );
+    }
+    assert!(
+        slot_colour(30).iter().all(|c| *c == Category::Interest),
+        "and the crate's reads as the find it still is",
+    );
+}
+
+/// **The keys and the taps follow the row** (§11.6/#359/#266): a digit, a mnemonic
+/// letter and a tap all land on a *candidate*, and each resolves to the discard that
+/// answers the offer rather than to an activation.
+///
+/// This is the whole reason the exchange is drawn on the bar rather than in a modal of
+/// its own: the selection spine is already here, and it did not have to be built twice.
+#[test]
+fn the_bar_keys_answer_the_exchange() {
+    let s = offering_bar();
+    let bar = ability_row(10);
+    for (slot, id) in [
+        (0, AbilityId::Camouflage),
+        (1, AbilityId::Decoy),
+        (2, AbilityId::Dephase),
+        (3, AbilityId::Lockdown),
+    ] {
+        assert_eq!(ability_in_slot(&s, slot), Some(id), "slot {slot}");
+        assert_eq!(
+            ability_at(&s, slot as u32 * 10, bar),
+            Some(id),
+            "a tap on slot {slot}",
+        );
+        assert_eq!(
+            s.ability_input(id),
+            Input::Discard(id),
+            "a press on slot {slot} answers the offer, it does not activate",
+        );
+        let letter = ability_mnemonic(&s, slot).expect("every candidate keeps a letter");
+        assert_eq!(
+            ability_slot_for_letter(&s, &letter.to_string()),
+            Some(slot),
+            "the mnemonic on slot {slot} fires the entry it is drawn on",
+        );
+    }
+}
+
+/// **The help panel documents the exchange's four, not the held set** (§11.4/#266).
+///
+/// The tab's whole job is the `key / bar name` pairing plus what each ability *does*,
+/// and while a crate is offering the bar is the candidates and the digits follow it. A
+/// panel drawn from the loadout there would pair every entry with the wrong digit — and
+/// would leave out the one ability the player most needs to read about, at the only
+/// moment they can read it before choosing.
+#[test]
+fn the_help_panel_documents_the_offer_while_it_is_open() {
+    let s = offering_bar_on(26);
+    let ui = ScreenUi {
+        help_open: true,
+        help_tab: HelpTab::Abilities,
+        ..ScreenUi::default()
+    };
+    let text = render_screen(&s, ui).to_text().join("\n");
+    assert!(
+        text.contains(AbilityId::Lockdown.name()),
+        "the crate's tech is on the tab, so it can be read before it is chosen:\n{text}",
+    );
+    assert!(
+        !text.contains(AbilityId::Run.name()),
+        "and the innate entry is off it, because it is off the row:\n{text}",
+    );
+}

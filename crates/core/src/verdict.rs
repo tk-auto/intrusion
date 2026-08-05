@@ -100,7 +100,26 @@ pub struct RunStats {
     ///
     /// A [`Loadout`] because a haul of abilities *is* a set of abilities, and because it
     /// keeps [`RunStats`] `Copy` where a list would not — the end screen relies on that.
+    ///
+    /// It says what this facility **gave**, which since #266 is no longer the same
+    /// question as what the run walks out **holding** — see [`held`](Self::held).
     pub salvaged: Loadout,
+    /// **The loadout the raid ended holding** (§2.2/§8.3/#266) — what the run carries
+    /// into the next facility, and the seam the campaign accumulates along.
+    ///
+    /// It exists because a raid can now *trade* tech away at a crate (#266), so the
+    /// run's set stopped being "what it arrived with, plus what it found": ordering
+    /// matters once a set can shrink, and no pair of add/remove sets can reconstruct it
+    /// afterwards. Rather than have the layer above replay a raid's exchanges, the raid
+    /// simply reports the answer.
+    ///
+    /// The campaign therefore **assigns** it rather than folding it in
+    /// ([`Campaign::complete`](crate::Campaign::complete)) — the same shape
+    /// [`alert_peak`](Self::alert_peak) already has, and for a related reason: this is a
+    /// fact about the raid that just ended, and the raid is the only thing that knows
+    /// it. [`salvaged`](Self::salvaged) stays beside it as what the *facility* was worth,
+    /// which is what the end screen's ledger is asking.
+    pub held: Loadout,
 }
 
 /// A finished run, as the end screen reads it: why it ended, and what it cost.

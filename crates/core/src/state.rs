@@ -56,6 +56,7 @@ use crate::category::Category;
 use crate::cell::{Cell, Direction};
 use crate::cover;
 use crate::duct::Duct;
+use crate::exchange::{Choice, Exchange};
 use crate::facility::{Facility, Terrain};
 use crate::generate::Layout;
 use crate::guard::{
@@ -91,7 +92,7 @@ mod view;
 
 pub use bore::BoreRefusal;
 pub use effects::EffectArea;
-pub use events::{Affordance, Event, Input, SalvageRefusal};
+pub use events::{Affordance, Event, Input};
 pub(crate) use reinforcements::{RUNG_THREE_REINFORCEMENTS, RUNG_TWO_REINFORCEMENTS};
 pub use sense::SenseMark;
 
@@ -343,12 +344,18 @@ enum BumpKind {
     /// it, so a second bump is a free no-op (§4.4) and the usable line offers nothing —
     /// the spent console's rule over the spent crate.
     Salvage,
-    /// A cache the bump would **refuse**, still holding its tech (§8.3/#209) — hands
-    /// full, or something the run already carries. Free, like a refused exit, and named
-    /// apart from [`Solid`](BumpKind::Solid) for the reason [`HingeHeld`](BumpKind::HingeHeld)
-    /// is: the cell is anything but inert, and the usable line owes the player the
-    /// *reason* rather than a silence they would have to work out by pressing.
-    SalvageRefused { refusal: SalvageRefusal },
+    /// A cache holding tech the run **already carries** (§8.3/#209): the bump refuses,
+    /// free, like a refused exit — and it is named apart from [`Solid`](BumpKind::Solid)
+    /// for the reason [`HingeHeld`](BumpKind::HingeHeld) is: the cell is anything but
+    /// inert, and the usable line owes the player the *reason* rather than a silence
+    /// they would have to work out by pressing.
+    SalvageRefused,
+    /// A cache the run has **no room for** (§8.3/#266): the bump opens the
+    /// [exchange](crate::Exchange) — the crate offers its tech and the run picks which
+    /// of the four to drop. **Free**, like the refusal it replaces: opening an offer
+    /// takes nothing and changes nothing (§4.4), and it is the trade that spends the
+    /// turn, one turn, exactly as a plain [`Salvage`](BumpKind::Salvage) does.
+    SalvageSwap,
     /// The comms console while the radio net is still live (§7.3/§7.7): bumping it
     /// silences the net for the rest of the level — a spent turn. Once silenced the
     /// same cell classifies as [`Solid`](BumpKind::Solid): there is nothing left to
@@ -415,10 +422,8 @@ impl BumpKind {
             BumpKind::Exit { ready: false } => Some(Affordance::ExitRefused),
             BumpKind::Intel => Some(Affordance::TakeIntel),
             BumpKind::Salvage => Some(Affordance::SalvageTech),
-            BumpKind::SalvageRefused { refusal } => Some(match refusal {
-                SalvageRefusal::HandsFull => Affordance::SalvageFull,
-                SalvageRefusal::AlreadyCarried => Affordance::SalvageCarried,
-            }),
+            BumpKind::SalvageRefused => Some(Affordance::SalvageCarried),
+            BumpKind::SalvageSwap => Some(Affordance::SalvageSwap),
             BumpKind::SilenceRadio => Some(Affordance::SilenceRadio),
             BumpKind::Door {
                 action: DoorAction::Opened,
@@ -629,6 +634,15 @@ pub struct State {
     /// test state. Set at boot by [`with_caches`](Self::with_caches), which is where the
     /// crates' cells (the generator's) and their contents (the facility's stock) meet.
     caches: Vec<Cache>,
+    /// The **exchange** a crate is offering right now (§8.3/#266), or `None` — which is
+    /// almost always, since it takes a full run bumping a crate to open one.
+    ///
+    /// World state rather than view state, and that is the load-bearing part: while it
+    /// is `Some` the turn loop answers nothing but [`Input::Discard`], so the facility
+    /// is genuinely *waiting* on the player rather than a picture drawn over a game that
+    /// carried on underneath (§12.1's split read the other way — this changes the world,
+    /// so it is not the shell's to hold). It is cleared by the answer, either one.
+    exchange: Option<Exchange>,
     /// Whether the radio net has been **killed** for the rest of the level (§7.3/§7.7)
     /// — set by bumping the comms console and never cleared. One-way and permanent by
     /// construction: nothing in the loop writes `false`, so there is no window in which
@@ -895,6 +909,7 @@ impl State {
             // crates (below) but cannot say what is in them, because the stock is drawn
             // at boot and a bare state has none.
             caches: Vec::new(),
+            exchange: None,
             radio_silenced: false,
             exit,
             turn: 0,
@@ -1306,6 +1321,20 @@ impl State {
             self.waited = false;
             return true;
         }
+        // **An open exchange takes nothing but its answer** (§8.3/#266). While a crate is
+        // offering, the only input the loop resolves is the discard: a step, a wait, an
+        // activation are all free no-ops, so the world cannot move on around a decision
+        // it is waiting for.
+        //
+        // The rule lives **here**, in the core, and not in the shell that draws the row.
+        // A shell can only make its own input path obey it; this makes every path obey
+        // it — the browser, a replayed script and the §13.2 sim alike — so a run cannot
+        // walk away from a half-answered crate in one of them and not the others (§12.4).
+        // Non-trapping either way (§11.6): the decline is one of the four presses, so
+        // there is always a way out of the offer.
+        if self.exchange.is_some() && !matches!(input, Input::Discard(_)) {
+            return false;
+        }
         match input {
             // Waiting is a real action: it spends the turn where you stand (§5) —
             // and buys the 360° look-around the coming sight phase grants (§8.3).
@@ -1417,23 +1446,89 @@ impl State {
                     return false;
                 }
                 if self.abilities.deactivate(id) {
-                    if declares(id, Effect::SpawnDecoy) {
-                        self.decoy = None;
-                    }
-                    // The seals are the window (§8.3/#242): ending it early hands every
-                    // door back at once. Free, like every toggle-off, and it refunds
-                    // nothing — the full lockout still runs (§8.2).
-                    if declares(id, Effect::SealDoors) {
-                        self.release_lockdown();
-                    }
-                    // The effect is gone, so its marks go with it (#308/#338) — an
-                    // early toggle-off leaves no residue to fade over nothing.
-                    self.clear_effect_marks(id);
+                    self.unwind_effect(id);
                     events.push(Event::AbilityDeactivated { ability: id });
                 }
                 false
             }
+            // **Answering the exchange** (§8.3/#266). The four candidates on the bar are
+            // the run's three pieces of tech and the crate's one, and this names the one
+            // to discard — a trade if it is held, the decline if it is the crate's.
+            //
+            // A press naming anything else, or arriving with no offer open, is a
+            // mis-input: free, silent, nothing changed (§4.4). The same shape as
+            // activating an ability that is cooling.
+            Input::Discard(id) => {
+                let Some(offer) = self.exchange else {
+                    return false;
+                };
+                match offer.resolve(self.abilities.loadout(), id) {
+                    // The trade: the crate opens, the old tech goes and the new arrives
+                    // on the deck ready to use this turn — the same "usable immediately"
+                    // a plain salvage promises (§14 v3). **This is the one spent turn in
+                    // the whole exchange**, and it is the one a plain salvage would have
+                    // cost: the bump that opened the offer was free, so trading at a
+                    // crate costs exactly what taking from one costs.
+                    Some(Choice::Trade { dropped }) => {
+                        let taken = offer.offered();
+                        let at = offer.at();
+                        if let Some(cache) = self.caches.iter_mut().find(|c| c.cell == at) {
+                            cache.taken = true;
+                        }
+                        // Dropped first, then granted: the two are one exchange, and in
+                        // this order the run is never momentarily over the §8.3 cap.
+                        self.abilities.revoke(dropped);
+                        // Whatever the dropped ability was still doing to the world goes
+                        // with it — the same unwind an early toggle-off does, because
+                        // that is what `revoke` just did to its slot.
+                        self.unwind_effect(dropped);
+                        self.abilities.grant(taken);
+                        self.exchange = None;
+                        events.push(Event::Traded { taken, dropped });
+                        self.waited = false;
+                        self.crouched_behind = None;
+                        // A spent turn pays the haul debt (§8.3), like a Wait.
+                        self.drag_debt = false;
+                        true
+                    }
+                    // The decline: the crate keeps its tech and stands where it was, so
+                    // a run that comes back having traded that piece away finds it
+                    // unopened. Free — nothing changed (§4.4).
+                    Some(Choice::Decline) => {
+                        self.exchange = None;
+                        events.push(Event::ExchangeDeclined {
+                            id: offer.offered(),
+                        });
+                        false
+                    }
+                    None => false,
+                }
+            }
         }
+    }
+
+    /// Take back whatever an ability's **window** was still doing to the world, after
+    /// its slot has been switched off (§8.2): the decoy it was standing up, the doors it
+    /// was holding shut, the marks it had painted.
+    ///
+    /// One helper for the two ways a window can end early — the player's free toggle-off
+    /// (§4.4/#304) and the exchange trading the ability away (#266) — so an ability that
+    /// grows something to unwind cannot have it unwound on one path and left behind on
+    /// the other. Expiry has its own copy in the turn loop, where the whole expired set
+    /// is walked at once.
+    fn unwind_effect(&mut self, id: AbilityId) {
+        // The decoy's lifetime is its ability's active window (§8.3).
+        if declares(id, Effect::SpawnDecoy) {
+            self.decoy = None;
+        }
+        // The seals are the window (§8.3/#242): ending it early hands every door back
+        // at once. It refunds nothing — the full lockout still runs (§8.2).
+        if declares(id, Effect::SealDoors) {
+            self.release_lockdown();
+        }
+        // The effect is gone, so its marks go with it (#308/#338) — an early end
+        // leaves no residue to fade over nothing.
+        self.clear_effect_marks(id);
     }
 
     /// Whether the spent step just resolved was a **crouch-walk** (§10.3): the
@@ -1612,23 +1707,32 @@ impl State {
                 events.push(Event::TechSalvaged { id });
                 true
             }
-            // A crate the run cannot take from (§8.3/#209): hands full, or tech it
-            // already carries. **Free** (§4.4) and the crate is left unopened, so nothing
-            // is spent and nothing is lost — the refused exit's shape, and for the same
-            // reason: a bump that changes nothing must cost nothing.
+            // A crate holding tech the run already carries (§8.3/#209). **Free** (§4.4)
+            // and the crate is left unopened, so nothing is spent and nothing is lost —
+            // the refused exit's shape, and for the same reason: a bump that changes
+            // nothing must cost nothing. It is the luck of a facility stocked before
+            // anyone knew who was coming, and there is no decision in it: a second copy
+            // of what you hold would change nothing whichever way you answered.
+            BumpKind::SalvageRefused => {
+                events.push(Event::SalvageRefused {
+                    id: self.live_cache_at(target),
+                });
+                false
+            }
+            // A crate the run has no room for (§8.3/#266): the crate **offers**, and the
+            // run is now standing at the exchange. Free, exactly as the refusal it
+            // replaces was — the crate is still shut, the loadout is untouched and no
+            // turn has been spent. What has changed is that the game is waiting: until
+            // the offer is answered, [`player_phase`](Self::player_phase) takes nothing
+            // but the discard.
             //
-            // The near line says which refusal it was, because the two are different
-            // problems. *Hands full* is a decision waiting to be made — #266's exchange
-            // screen is where it gets made — and *already carried* is simply the luck of
-            // a facility stocked before anyone knew who was coming (#209).
-            BumpKind::SalvageRefused { refusal } => {
-                let id = self
-                    .caches
-                    .iter()
-                    .find(|c| c.cell == target && !c.taken)
-                    .expect("bump_kind classified a live cache here")
-                    .holds;
-                events.push(Event::SalvageRefused { id, refusal });
+            // Opening it is **idempotent** in the way that matters: the offer names the
+            // crate, so a second bump on the same crate re-states the same offer rather
+            // than stacking a second one.
+            BumpKind::SalvageSwap => {
+                let id = self.live_cache_at(target);
+                self.exchange = Some(Exchange::new(id, target));
+                events.push(Event::ExchangeOffered { id });
                 false
             }
             // The comms console (§7.3/§7.7): one bump kills the radio net for the rest
@@ -1912,30 +2016,41 @@ impl State {
         })
     }
 
-    /// **Why a bump on a crate holding `id` would be refused**, or `None` if it would
-    /// hand the tech over (§8.3/#209).
+    /// **What a bump on a crate holding `id` would do** (§8.3/#209/#266) — the three
+    /// answers a live cache has, decided in this order:
     ///
-    /// Two refusals, and both are stated rather than one swallowing the other:
-    ///
-    /// - **Already carried.** The crate holds tech the run has. A facility is stocked
-    ///   from its own seed and knows nothing of who is coming (#209), so this is luck
-    ///   rather than design — and a second copy would be a turn spent on nothing. Asked
-    ///   first, because it is the more specific answer: *this* crate is no use to you,
-    ///   whether or not your hands are full.
-    /// - **Hands full.** The run already carries [`AbilityId::MAX_TECH_HELD`] pieces of
-    ///   tech, which §8.3 settles as the most a run holds at once — it is what keeps the
-    ///   held set small enough for the ability bar to name every entry on one row
-    ///   (§11.4), and what a passive pays with. Enforced **here, at the pickup**, because
-    ///   this is the one moment the player can be told: a cap enforced silently inside
-    ///   the loadout would drop a find nobody was warned about. Swapping one out is
-    ///   #266's exchange screen; until that exists the honest answer is a refusal that
-    ///   says so.
-    fn salvage_refusal(&self, id: AbilityId) -> Option<SalvageRefusal> {
+    /// - **Already carried** ([`SalvageRefused`](BumpKind::SalvageRefused)). The crate
+    ///   holds tech the run has. A facility is stocked from its own seed and knows
+    ///   nothing of who is coming (#209), so this is luck rather than design — and a
+    ///   second copy would be a turn spent on nothing. Asked **first**, because it is the
+    ///   more specific answer and because it is the one case where full hands are beside
+    ///   the point: there is nothing here worth trading *for*, so offering the exchange
+    ///   would be offering a decision whose every branch is a loss.
+    /// - **No room** ([`SalvageSwap`](BumpKind::SalvageSwap)). The run already carries
+    ///   [`AbilityId::MAX_TECH_HELD`] pieces of tech, which §8.3 settles as the most a
+    ///   run holds at once — it is what keeps the held set small enough for the ability
+    ///   bar to name every entry on one row (§11.4), and what a passive pays with. The
+    ///   cap is kept **here, at the crate**, because this is the one moment the player
+    ///   can be told; what it now costs is a choice rather than the find.
+    /// - **Room for it** ([`Salvage`](BumpKind::Salvage)) — the plain pickup.
+    fn salvage_kind(&self, id: AbilityId) -> BumpKind {
         if self.abilities.loadout().contains(id) {
-            return Some(SalvageRefusal::AlreadyCarried);
+            BumpKind::SalvageRefused
+        } else if self.abilities.loadout().tech_held() >= AbilityId::MAX_TECH_HELD {
+            BumpKind::SalvageSwap
+        } else {
+            BumpKind::Salvage
         }
-        (self.abilities.loadout().tech_held() >= AbilityId::MAX_TECH_HELD)
-            .then_some(SalvageRefusal::HandsFull)
+    }
+
+    /// What the unopened crate at `cell` holds — for the arms that have already been
+    /// told by [`bump_kind`](Self::bump_kind) that one is standing there.
+    fn live_cache_at(&self, cell: Cell) -> AbilityId {
+        self.caches
+            .iter()
+            .find(|c| c.cell == cell && !c.taken)
+            .expect("bump_kind classified a live cache here")
+            .holds
     }
 
     /// What bumping the orthogonally adjacent `target` would do (§4.3) — the **single**
@@ -2022,14 +2137,11 @@ impl State {
         }
         // An equipment cache (§2.2/§14 v3/#209), while it still holds its tech. An opened
         // crate falls through to the plain solid bump below, on the spent console's own
-        // terms — and so does a crate the *bump* would refuse, but not silently: the two
-        // refusals are their own kinds, because the usable line has to say which
-        // (§11.4/§2.3).
+        // terms. A live one is never silent: taking it, trading for it (#266) and being
+        // refused it are three kinds of their own, because the usable line has to say
+        // which (§11.4/§2.3).
         if let Some(cache) = self.caches.iter().find(|c| c.cell == target && !c.taken) {
-            return match self.salvage_refusal(cache.holds) {
-                None => BumpKind::Salvage,
-                Some(refusal) => BumpKind::SalvageRefused { refusal },
-            };
+            return self.salvage_kind(cache.holds);
         }
         // The comms console (§7.3/§7.7), while the net is still live. A silenced one
         // falls through to the plain solid bump below — spent scenery, offering

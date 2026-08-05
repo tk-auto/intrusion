@@ -576,9 +576,14 @@ impl Campaign {
         let taken = u32::try_from(stats.intel).unwrap_or(u32::MAX);
         self.intel = self.intel.saturating_add(taken);
         self.alert = stats.alert_peak;
-        for id in stats.salvaged.iter() {
-            self.salvage(id);
-        }
+        // **The loadout is assigned, not added to** (§8.3/#266). It used to be a fold of
+        // the raid's finds, which was right while a raid could only ever *gain* tech;
+        // the exchange lets one be traded away, and once a set can shrink the order of
+        // the moves matters — a run that swaps A for B and later finds A again ends
+        // holding something no union of "found" and "given up" can reconstruct. So the
+        // raid reports what it walked out with ([`RunStats::held`]) and this takes it,
+        // the same way the alert takes the rung the raid ended at.
+        self.loadout = stats.held;
     }
 
     /// **Salvage tech** (§2.2/§8.3): add `id` to the loadout the rest of the run

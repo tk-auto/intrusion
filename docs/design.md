@@ -1088,11 +1088,23 @@ whole reason the architecture looks the way it does.
 > you the walk.
 >
 > **You carry three, and the cap is kept at the crate.** `MAX_TECH_HELD` (§8.3) is
-> enforced where the pickup happens: a bump on a crate you have no room for — or on one
-> holding tech you already have — is **refused for free** (§4.4) and says which, and the
-> crate is left standing for a run that comes back with a free hand. Trading one piece of
-> tech for another is the exchange screen (#266); until it exists, a full run's answer is
-> the refusal.
+> enforced where the pickup happens, and what a full run meets there is **the exchange**
+> (#266), not a refusal: the crate offers what is in it, and you choose which of the four
+> — your three, and its one — to **drop**. Dropping one of yours is the trade: the new
+> tech is on the deck that turn and the old one is gone for the rest of the run. Dropping
+> the crate's own is the decline, and the crate is left standing for a run that comes back
+> having traded that piece away. The bump that opens the offer is **free** (§4.4) and the
+> trade spends the one turn a plain salvage would have — so a swap costs a walk and a
+> turn, and a decline costs nothing.
+>
+> **The exchange is the ability bar, not a screen** (§8.4). While it is open the bar draws
+> the four candidates in its own four slots — the crate's marked `(+)` and drawn in the
+> reward colour — and the keys, the mnemonics and the taps that fire an ability answer the
+> offer instead; `Esc` is a second spelling of dropping the crate's own. **Nothing else
+> happens while it is open**: the turn loop takes only the choice, so no guard moves while
+> a run is deciding, and the decline is always one press away (§11.6 — never a trap).
+> A crate holding tech you **already carry** is the one refusal left: there is no decision
+> in a second copy, so it is refused for free and says so. Appendix 43.
 
 | Ability | Cost | Duration | Cooldown | Effect |
 |---|---|---|---|---|
@@ -3602,10 +3614,13 @@ bullet below fills one of its seams.
     stock is drawn from the facility's own seed, so a building is stocked before anyone
     breaks into it, and meeting tech you already carry is **bad luck** rather than
     something the world rearranges itself to prevent. Appendix 40.
-  - **The §8.3 held cap is enforced at the crate.** A run carries three pieces of tech;
-    a bump with no room for a fourth — or on a duplicate — is **refused for free** and
-    says which, leaving the crate standing for a run that comes back with a free hand.
-    The exchange that makes a full run's choice interesting is #266's.
+  - **The §8.3 held cap is kept at the crate, and it is a choice rather than a wall**
+    (#266). A run carries three pieces of tech; a bump with no room for a fourth opens
+    the **exchange** — drop one of your three for the crate's, or decline and leave it
+    standing. The trade spends the turn a salvage would have and the decline is free; a
+    bump on a **duplicate** is still the one refusal, because there is no decision in a
+    second copy. This is what makes the tech axis a shape rather than a queue: the fourth
+    crate of a run is where you start saying what this run *is*. Appendix 43.
   - **Found tech is usable the turn it is found**, in the facility it was found in.
     A reward that only switched on after extraction would make the detour a deposit
     toward a later raid rather than a tool for this one.

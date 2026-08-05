@@ -258,46 +258,48 @@ fn a_cache_with_no_contents_is_scenery() {
     assert_eq!(s.turn(), turn, "a dead bump is free (§4.4)");
 }
 
-/// **The §8.3 cap is kept at the pickup** (#209/#266): a run already carrying
-/// [`AbilityId::MAX_TECH_HELD`] pieces of tech is refused, told which tech it is walking
-/// away from, and charged nothing. The crate is left unopened, so coming back with a free
-/// hand — or with #266's exchange — finds it exactly as it was.
+/// **The §8.3 cap is kept at the crate** (#209/#266): a run already carrying
+/// [`AbilityId::MAX_TECH_HELD`] pieces of tech does not walk past the find — the bump
+/// **opens the exchange**, free, with the crate still shut and the loadout untouched.
 ///
-/// Enforced here rather than silently in the loadout because this is the one moment the
+/// Kept here rather than silently in the loadout because this is the one moment the
 /// player can be told: a cap that dropped a find on the floor would be a rule nobody was
-/// warned about.
+/// warned about. What the offer then does is [`super::exchange`]'s to pin.
 #[test]
-fn a_full_run_is_refused_the_crate_and_told_why() {
+fn a_full_run_is_offered_the_exchange_rather_than_refused() {
     let mut s = scene_holding(AbilityId::Dephase, hands_full());
     assert!(
         s.affordances()
             .iter()
-            .any(|(_, a)| *a == Affordance::SalvageFull),
-        "the usable line says the hands are full before the walk (§11.4)",
+            .any(|(_, a)| *a == Affordance::SalvageSwap),
+        "the usable line says the bump is a swap before the walk (§11.4)",
     );
 
     let turn = s.turn();
     let e = s.step(Input::Step(Direction::South));
     assert!(
-        e.contains(&Event::SalvageRefused {
+        e.contains(&Event::ExchangeOffered {
             id: AbilityId::Dephase,
-            refusal: SalvageRefusal::HandsFull,
         }),
-        "the refusal names what is in the crate",
+        "the offer names what is in the crate",
     );
-    assert_eq!(s.turn(), turn, "a refused bump is free (§4.4)");
-    assert!(!s.loadout().contains(AbilityId::Dephase), "nothing taken");
+    assert_eq!(s.turn(), turn, "opening an offer is free (§4.4)");
+    assert!(
+        !s.loadout().contains(AbilityId::Dephase),
+        "nothing taken yet"
+    );
     assert_eq!(
         s.loadout().tech_held(),
         AbilityId::MAX_TECH_HELD,
-        "and nothing swapped out behind the player's back — that is #266's screen",
+        "and nothing swapped out behind the player's back — the choice is theirs",
     );
-    // The crate is still live: it was refused, not spent.
+    // The crate is still live: it was offered, not spent.
     assert_eq!(s.salvaged(), Loadout::empty());
-    assert!(s
-        .affordances()
-        .iter()
-        .any(|(_, a)| *a == Affordance::SalvageFull));
+    assert_eq!(
+        s.exchange().map(|x| x.offered()),
+        Some(AbilityId::Dephase),
+        "the run is standing at the exchange",
+    );
 }
 
 /// **A crate holding tech you already carry is bad luck, not a bug** (#209). A facility is
@@ -318,8 +320,7 @@ fn a_duplicate_crate_is_refused_for_free() {
     let e = s.step(Input::Step(Direction::South));
     assert!(
         e.contains(&Event::SalvageRefused {
-            id: AbilityId::Decoy,
-            refusal: SalvageRefusal::AlreadyCarried,
+            id: AbilityId::Decoy
         }),
         "the refusal names the tech you already have",
     );
@@ -327,9 +328,10 @@ fn a_duplicate_crate_is_refused_for_free() {
     assert_eq!(s.salvaged(), Loadout::empty(), "the crate is untouched");
 }
 
-/// **The duplicate answer outranks the full one**, because it is the more specific: a
+/// **The duplicate answer outranks the exchange**, because it is the more specific: a
 /// crate holding tech you already carry is no use to you whether or not your hands are
-/// full, and *"you have one"* is the more useful thing to be told.
+/// full, and offering a trade there would be offering a decision whose every branch is a
+/// loss.
 #[test]
 fn a_duplicate_reads_as_a_duplicate_even_with_full_hands() {
     let held = hands_full();
@@ -339,10 +341,12 @@ fn a_duplicate_reads_as_a_duplicate_even_with_full_hands() {
         .expect("a full run carries tech");
     let mut s = scene_holding(carried, held);
     let e = s.step(Input::Step(Direction::South));
-    assert!(e.contains(&Event::SalvageRefused {
-        id: carried,
-        refusal: SalvageRefusal::AlreadyCarried,
-    }));
+    assert!(e.contains(&Event::SalvageRefused { id: carried }));
+    assert_eq!(
+        s.exchange(),
+        None,
+        "a duplicate is not a decision, so no offer is opened (#266)",
+    );
 }
 
 /// **The last free hand still takes** — the cap refuses the fourth piece of tech, not the

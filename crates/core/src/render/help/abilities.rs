@@ -25,14 +25,20 @@
 //! - The **blurb**, [`AbilityId::blurb`] — behaviour only, never numbers, so a
 //!   retuned `[START]` value moves the panel on its own (§11.3).
 //!
-//! **Held abilities only** (§11.4), in [`Loadout::iter`]'s ability-bar slot order —
-//! never [`AbilityId::ALL`]. A run holds at most [`AbilityId::MAX_HELD`] of the
-//! catalogue's eight, and a tab that named the other four would advertise tech this
-//! run has not got. A codex of everything that exists is a different feature and
-//! belongs with the salvaged-tech caches (#209).
+//! **The ability bar's own row** (§11.4), in its slot order — never
+//! [`AbilityId::ALL`]. A run holds at most [`AbilityId::MAX_HELD`] of the catalogue's
+//! eight, and a tab that named the other four would advertise tech this run has not
+//! got. A codex of everything that exists is a different feature and belongs with the
+//! salvaged-tech caches (#209).
+//!
+//! Taking the *bar's* row rather than the loadout is what keeps the pairing true during
+//! an **exchange** (§8.3/#266): while a crate is offering, the bar is the four
+//! candidates and the digits follow it, so this tab documents those four — the offered
+//! tech included, which is the one a player deciding what to drop most needs to read
+//! about, and the only moment it can be read before the choice is made.
 
 use super::{ability_keys_column_start, CONTENT_INDENT};
-use crate::ability::{AbilityId, Loadout};
+use crate::ability::AbilityId;
 use crate::category::Category;
 use crate::mnemonic;
 use crate::place::LevelConfig;
@@ -64,20 +70,19 @@ const BLURB_MAX_ROWS: usize = 4;
 
 /// Draw the **Abilities** tab: one entry per ability the run holds, in ability-bar
 /// slot order (§11.4).
-pub(super) fn draw_abilities(grid: &mut Grid, mut y: u32, loadout: Loadout) {
+pub(super) fn draw_abilities(grid: &mut Grid, mut y: u32, ids: &[AbilityId]) {
     draw(grid, 2, y, "ABILITIES", Category::System);
     y += 2;
 
     let mut any = false;
     // The mnemonics are claimed over the **whole bar at once** (§11.6/#360) — a letter
     // depends on what the entries to its left already took — so they are derived here,
-    // from the same loadout order the bar draws across, rather than per entry.
-    let ids: Vec<AbilityId> = loadout.iter().collect();
+    // from the same row order the bar draws across, rather than per entry.
     let names: Vec<&str> = ids.iter().map(|id| id.bar_name()).collect();
     let mnemonics = mnemonic::claim(&names);
-    // Enumerated, because the key an entry shows *is* its position: the loadout
-    // iterates in ability-bar slot order (§11.4), so the nth entry here is the nth
-    // entry on the bar and answers to the nth digit (§11.6/#359).
+    // Enumerated, because the key an entry shows *is* its position: the row arrives in
+    // ability-bar slot order (§11.4), so the nth entry here is the nth entry on the bar
+    // and answers to the nth digit (§11.6/#359).
     for (slot, id) in ids.iter().copied().enumerate() {
         any = true;
         let letter = mnemonics[slot].map(|i| mnemonic::letter_at(names[slot], i));
@@ -270,6 +275,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ability::Loadout;
     use crate::render::help::tests::{render_tab, text_of, H};
     use crate::render::help::HelpTab;
 

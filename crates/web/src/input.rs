@@ -40,11 +40,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use intrusion_core::{
-    ability_in_slot, ability_slot_for_code, ability_slot_for_letter, end_nav_for_gesture,
-    end_nav_for_key, help_nav_for_gesture, help_nav_for_key, input_for_gesture, input_for_key,
-    key_for_code, map_nav_for_gesture, map_nav_for_key, menu_nav_for_gesture, menu_nav_for_key,
-    ui_command_for_key, Cell, Direction, EndExit, EndNav, Gesture, HelpHit, HelpNav, HelpTab,
-    Input, InputModality, MapNav, MenuNav, SeedCopy, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    ability_in_slot, ability_slot_for_code, ability_slot_for_letter, declines_exchange,
+    end_nav_for_gesture, end_nav_for_key, help_nav_for_gesture, help_nav_for_key,
+    input_for_gesture, input_for_key, key_for_code, map_nav_for_gesture, map_nav_for_key,
+    menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, Cell, Direction, EndExit, EndNav,
+    Gesture, HelpHit, HelpNav, HelpTab, Input, InputModality, MapNav, MenuNav, SeedCopy, UiCommand,
+    BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -125,6 +126,18 @@ impl Game {
                 return true;
             }
             return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
+        }
+        // An **open exchange** (§8.3/#266) claims `Escape`, and only `Escape`. Its four
+        // candidates are the ability bar's own slots, so the digits and the mnemonic
+        // letters below already reach every one of them — including the crate's, whose
+        // discard *is* the decline. This is the second spelling of that one press, for
+        // the hand that reaches for `Escape` when a game asks a question, and it resolves
+        // to the same `Input::Discard` rather than to a cancel path of its own.
+        if let Some(offer) = self.state.exchange() {
+            if declines_exchange(key) {
+                self.step_and_draw(Input::Discard(offer.offered()));
+                return true;
+            }
         }
         // UI commands (§11.4) come next: they toggle view state and redraw without
         // ever touching the turn loop. `m` deploys the message list; `?` opens help.

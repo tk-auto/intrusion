@@ -1,5 +1,6 @@
 use super::*;
 use crate::ability::AbilityId;
+use crate::ability::Loadout;
 use crate::alert::{AlertEffect, AlertTrigger, AlertTuning};
 use crate::modifiers::{
     ActiveModifier, CacheCount, GuardCount, IntelCount, IntelGate, LayoutKnowledge,
@@ -55,7 +56,7 @@ pub(super) fn panel_run<'a>(
         level,
         modifiers,
         alert,
-        loadout,
+        bar: loadout.iter().collect(),
         debug: DebugModifiers::default(),
     }
 }

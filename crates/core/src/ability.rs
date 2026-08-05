@@ -104,6 +104,15 @@ pub enum AbilityState {
     /// Not usable right now for a reason other than cooldown — no adjacent target
     /// for a takedown, no body to drag (§8.3). Discoverable, but greyed.
     Unusable,
+    /// **The tech an open crate is offering** (§8.3/#266) — not held, not a clock, and
+    /// the one entry on an exchange's bar row that is not already yours.
+    ///
+    /// It exists because the exchange is drawn on the ability bar rather than in a
+    /// modal of its own ([`State::exchange`](crate::State::exchange)): the row lists the
+    /// four candidates and the player presses the one to drop, so exactly one of them
+    /// has to read as *the new one*. It reads [`OFFERED_MARKER`] — a bare `(+)`,
+    /// parenthetical like the other two states that are not countdowns.
+    Offered,
 }
 
 impl AbilityState {
@@ -123,6 +132,9 @@ impl AbilityState {
             AbilityState::Cooling { remaining } => format!("/{remaining}/"),
             AbilityState::Limited { uses } => format!("({uses})"),
             AbilityState::Passive => PASSIVE_MARKER.to_string(),
+            // The crate's own tech during an exchange (#266) — the one entry on that
+            // row you do not already hold, marked as the thing on offer.
+            AbilityState::Offered => OFFERED_MARKER.to_string(),
             // Spent is unusable, and says so in the one word the bar has for it.
             AbilityState::Exhausted | AbilityState::Unusable => "—".to_string(),
         }
@@ -136,6 +148,15 @@ impl AbilityState {
 /// the bar's whole budget is per-entry width, so an always-on marker that cost more
 /// than a countdown would have made passives the reason names had to shrink.
 pub(crate) const PASSIVE_MARKER: &str = "(on)";
+
+/// What the crate's own tech shows on an **exchange** row (§8.3/#266): `(+)` — the
+/// entry you do not hold yet, beside the three you do.
+///
+/// Parenthetical like [`PASSIVE_MARKER`] and the use budget, because it is the same
+/// kind of thing as those and not the other kind: a fact about the entry, never a
+/// number counting anywhere. The `+` is the replay notation's own sign for *gaining*
+/// an ability, so the mark reads the same way in the two places it appears.
+pub(crate) const OFFERED_MARKER: &str = "(+)";
 
 /// One entry on the always-on ability bar (§11.4): a held ability's identity and
 /// the state it is in. Assembled from live runtime by
@@ -212,6 +233,12 @@ const fn decimal_width(n: u32) -> usize {
 /// marker's own width. `const` so [`MAX_STATE_NOTATION`] is a compile-time fact.
 const fn max_state_notation() -> usize {
     let mut widest = PASSIVE_MARKER.len();
+    // The exchange's mark (#266) is measured beside it: it is the third notation that
+    // is not a clock, and a wider one would push the swap row past the board exactly
+    // as a three-digit cooldown would push the ordinary bar past it.
+    if OFFERED_MARKER.len() > widest {
+        widest = OFFERED_MARKER.len();
+    }
     let mut i = 0;
     while i < AbilityId::ALL.len() {
         match AbilityId::ALL[i].def().mode {
@@ -649,6 +676,20 @@ impl Loadout {
     #[must_use]
     pub fn with(mut self, id: AbilityId) -> Self {
         self.present[id.index()] = true;
+        self
+    }
+
+    /// The same loadout with `id` **gone** — the exchange's half of [`with`](Self::with)
+    /// (§8.3/#266): what a run gives up to make room for what a crate is offering.
+    ///
+    /// The one way a loadout shrinks, and it is deliberately as blunt as `with`: it
+    /// removes what it is told to and asks nothing about caps or innateness, because
+    /// *which* ability may be traded away is the exchange's question
+    /// ([`Exchange`](crate::Exchange)) and not the set's. A no-op for an ability the
+    /// loadout does not hold.
+    #[must_use]
+    pub fn without(mut self, id: AbilityId) -> Self {
+        self.present[id.index()] = false;
         self
     }
 
@@ -1259,11 +1300,36 @@ impl Deck {
     /// budget (§8.2/#302), and rebuilding the deck to achieve that would instead reset
     /// the clocks and budgets of everything the run was already carrying.
     ///
-    /// Idempotent. Nothing here enforces the §8.3 held cap: the cap and its discard
-    /// prompt are #266's, and silently dropping a pickup the player was never told about
-    /// is the failure that ticket exists to avoid.
+    /// Idempotent. Nothing here enforces the §8.3 held cap, and that is deliberate: the
+    /// cap is kept at the **crate**, where a full run is offered the exchange instead
+    /// (#266, [`Exchange`](crate::Exchange)) — that is the one moment the player can be
+    /// told. A silent cap in here would drop a find nobody was warned about, which is
+    /// the failure the exchange exists to avoid.
     pub(crate) fn grant(&mut self, id: AbilityId) {
         self.loadout = self.loadout.with(id);
+    }
+
+    /// **Trade `id` away** (§8.3/#266): drop it from the loadout, so the run stops
+    /// holding it from this turn on — the exchange's half of [`grant`](Deck::grant).
+    ///
+    /// It **switches the ability off first**, and that is the whole subtlety here: an
+    /// activated ability is *in effect* by its slot alone ([`in_effect`](Deck::in_effect)),
+    /// not by loadout membership, so an ability dropped mid-window would keep running
+    /// with nothing on the bar to say so. Ending it first is the same free toggle-off
+    /// §8.2 already defines, and it refunds nothing — the cooldown it leaves behind
+    /// simply belongs to an ability the run no longer has.
+    ///
+    /// The slot and the per-level budget are otherwise **left where they are**. Dropping
+    /// an ability is not a way to launder its clocks: a run that trades tech away and
+    /// finds the same tech again later picks it up exactly as cool — or as spent — as it
+    /// put it down, which is what stops drop-and-refind being a free recharge.
+    ///
+    /// The state a *world* has to unwind with it — a decoy standing on the board, a
+    /// lockdown's seals — is the turn loop's, not the deck's, and rides the same path
+    /// an early toggle-off takes ([`State::step`](crate::State::step)).
+    pub(crate) fn revoke(&mut self, id: AbilityId) {
+        self.deactivate(id);
+        self.loadout = self.loadout.without(id);
     }
 
     /// Activate `id` if the run holds it and it is [`Ready`](Slot::Ready). Returns

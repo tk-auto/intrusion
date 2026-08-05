@@ -290,6 +290,7 @@ fn every_line_fits_the_v1_board() {
         detections: 999,
         alert_peak: 0,
         salvaged: Loadout::empty(),
+        held: Loadout::innate(),
     };
     let mut lines: Vec<String> = vec![
         CAPTURED_HEADING.into(),

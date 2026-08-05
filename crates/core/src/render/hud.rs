@@ -416,13 +416,16 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
                 level: state.level(),
                 modifiers: state.modifiers(),
                 alert: &state.alert_readout(),
-                loadout: state.loadout(),
+                bar: state.bar_statuses().iter().map(|s| s.id).collect(),
                 debug: state.debug(),
             },
         );
     }
 
-    let statuses = state.ability_statuses();
+    // The bar's own row (§11.4/#266): the held set, or the exchange's four candidates
+    // while a crate is offering. One derivation for what is drawn and what the keys
+    // fire, so the two can never name different abilities.
+    let statuses = state.bar_statuses();
 
     let map = render(state);
 
@@ -485,11 +488,14 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     // nothing to act on, the innate-verb floor in the modality the shell says the
     // player is using (#323). A floor, never a competitor: one usable and the
     // affordances have the row back.
-    cells.extend(super::usable::usable_row(
-        width,
-        &state.affordances(),
-        ui.modality,
-    ));
+    // …unless a crate is offering (§8.3/#266), in which case the row says how to answer
+    // the exchange instead. Not an extra entry beside the affordances but *instead* of
+    // them: while an offer is open no press does anything else, so a row still naming a
+    // bump would be promising what the next press will not deliver.
+    cells.extend(match state.exchange() {
+        Some(_) => super::usable::exchange_row(width, ui.modality),
+        None => super::usable::usable_row(width, &state.affordances(), ui.modality),
+    });
     cells.extend(map.cells);
     cells.extend(ability_bar(width, &statuses));
 
@@ -618,7 +624,7 @@ fn drawn_bar_names(layout: &[(usize, u32)], statuses: &[AbilityStatus]) -> Vec<&
 /// at this very moment ([`ability_bar`]) and the letter the help panel prints — one
 /// derivation, three readers, no chance of the screen naming a key that does not fire.
 pub fn ability_mnemonic(state: &State, slot: usize) -> Option<char> {
-    let statuses = state.ability_statuses();
+    let statuses = state.bar_statuses();
     let layout = ability_line_layout(state.layout().facility().width(), &statuses);
     let names = drawn_bar_names(&layout, &statuses);
     let index = (*mnemonic::claim(&names).get(slot)?)?;
@@ -639,7 +645,7 @@ pub fn ability_slot_for_letter(state: &State, key: &str) -> Option<usize> {
         (Some(c), None) => c.to_ascii_lowercase(),
         _ => return None, // named keys ("Tab", "ArrowUp") are never a mnemonic
     };
-    let statuses = state.ability_statuses();
+    let statuses = state.bar_statuses();
     let layout = ability_line_layout(state.layout().facility().width(), &statuses);
     let names = drawn_bar_names(&layout, &statuses);
     mnemonic::claim(&names)
@@ -694,7 +700,7 @@ fn draw_help_button(row: &mut [GlyphCell], width: u32, start: u32, band: Categor
 /// slot the row truncated away (an oversized hand-built state — see
 /// [`ability_line_layout`]) is `None` too, so no key fires an entry nobody can see.
 pub fn ability_in_slot(state: &State, slot: usize) -> Option<AbilityId> {
-    let statuses = state.ability_statuses();
+    let statuses = state.bar_statuses();
     ability_line_layout(state.layout().facility().width(), &statuses)
         .get(slot)
         .map(|&(i, _)| statuses[i].id)
@@ -721,7 +727,7 @@ pub fn ability_at(state: &State, x: u32, y: u32) -> Option<AbilityId> {
     if y != ability_row(facility.height()) {
         return None; // the bar is the frame's last row and nothing else is the bar
     }
-    let slot = ability_line_layout(facility.width(), &state.ability_statuses())
+    let slot = ability_line_layout(facility.width(), &state.bar_statuses())
         .into_iter()
         .position(|(_, start)| x >= start && x < start + MAX_BAR_ENTRY as u32)?;
     ability_in_slot(state, slot)
@@ -747,6 +753,11 @@ fn bar_category(state: AbilityState) -> Category {
         | AbilityState::Passive => Category::Owned,
         AbilityState::Cooling { .. } => Category::System,
         AbilityState::Exhausted | AbilityState::Unusable => Category::Ground,
+        // The crate's own tech on an exchange row (#266) is **Interest** — the reward
+        // channel the `¤` it came out of is drawn in, and the intel console beside it.
+        // It is the one entry on that row that is not yours yet, and the colour is what
+        // says so: three blue entries you hold, one gold one you are being offered.
+        AbilityState::Offered => Category::Interest,
     }
 }
 

@@ -61,7 +61,7 @@ use super::{
     blank_grid, draw, Grid, ScreenUi, BODY_GLYPH, FLOOR_DOT, GUARD_GLYPH, PLAYER_GLYPH,
     SCHEMATIC_WALL,
 };
-use crate::ability::Loadout;
+use crate::ability::AbilityId;
 use crate::alert::AlertReadout;
 use crate::category::Category;
 use crate::facility::Terrain;
@@ -747,7 +747,7 @@ pub(super) fn render_help(width: u32, height: u32, ui: ScreenUi, run: PanelRun<'
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
     match tab {
         HelpTab::LevelInfo => draw_level_info(&mut grid, CONTENT_TOP, &run, ui.seed_copy),
-        HelpTab::Abilities => abilities::draw_abilities(&mut grid, CONTENT_TOP, run.loadout),
+        HelpTab::Abilities => abilities::draw_abilities(&mut grid, CONTENT_TOP, &run.bar),
         HelpTab::Help => draw_help_card(&mut grid, CONTENT_TOP),
         HelpTab::Debug => draw_debug(&mut grid, CONTENT_TOP, ui, &run),
     }
@@ -760,7 +760,7 @@ pub(super) fn render_help(width: u32, height: u32, ui: ScreenUi, run: PanelRun<'
 /// because the panel's tabs each want a different subset and the list only grows:
 /// [`render_screen`](super::render_screen) fills it from the live
 /// [`State`](crate::State), and a test fills it by hand without needing one.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct PanelRun<'a> {
     /// The run's reproducible config (§13.1/#245), whose token the Level info tab
     /// draws and both copy controls hand over. `None` for a hand-built state that no
@@ -771,8 +771,16 @@ pub(super) struct PanelRun<'a> {
     /// The facility alert as it stands (§7.3/#375) — the one section that moves while
     /// the panel is closed.
     pub(super) alert: &'a AlertReadout,
-    /// The abilities this run holds (§8.3/#343) — the Abilities tab.
-    pub(super) loadout: Loadout,
+    /// **The abilities the ability bar is drawing**, in its slot order (§8.3/#343) —
+    /// the Abilities tab's list, and the source of the `key / bar name` pairing it
+    /// prints beside each one.
+    ///
+    /// The *bar's* row rather than the run's loadout, because the two differ while a
+    /// crate is offering (§8.3/#266): the bar becomes the exchange's four candidates,
+    /// and the digits follow it. A panel drawn from the held set there would pair every
+    /// entry with the wrong digit — and would leave out the one ability the player most
+    /// needs to read about, the one they are being offered.
+    pub(super) bar: Vec<AbilityId>,
     /// The **live** debug switches (§12.6/#459) — read, never held, so the Debug
     /// tab's omni-vision line says what the sight phase is actually doing.
     pub(super) debug: DebugModifiers,

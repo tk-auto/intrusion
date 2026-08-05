@@ -347,6 +347,25 @@ pub fn ui_command_for_key(key: &str) -> Option<UiCommand> {
     }
 }
 
+/// Whether `key` **declines an open exchange** (§8.3/§11.6/#266) — `Escape`, and
+/// nothing else.
+///
+/// The exchange needs no navigation table of its own: its four candidates are the
+/// ability bar's four slots, so the digits ([`ability_slot_for_code`]) and the mnemonic
+/// letters already reach every one of them, the crate's own included — and discarding
+/// *that* one **is** the decline. This is the conventional second spelling of it, for a
+/// player whose hand reaches for `Escape` when a game asks a question, and the shell
+/// resolves it to the very same [`Input::Discard`](crate::Input) rather than to a cancel
+/// verb of its own.
+///
+/// `Escape` binds to nothing on the board otherwise (§11.6), so this claims no key from
+/// anything and gives it back the moment the offer is answered. There is deliberately no
+/// gesture counterpart: a finger declines by pressing the entry the bar marks `(+)`,
+/// which is a control that is *on screen*, and no swipe dismisses a decision (#336).
+pub fn declines_exchange(key: &str) -> bool {
+    key == "Escape"
+}
+
 /// Map a key (a browser `KeyboardEvent.key` name) to the [`Input`] it drives, or
 /// `None` for a key the game does not own — which the shell must then leave to
 /// the page (scrolling, browser shortcuts).
@@ -774,6 +793,26 @@ mod tests {
                 "{key:?} is swallowed while the run's verdict is up",
             );
         }
+    }
+
+    /// **`Escape` declines an open exchange, and binds to nothing else on the board**
+    /// (§8.3/§11.6/#266).
+    ///
+    /// The offer needs no table of its own — its four candidates are the bar's four
+    /// slots, so the digits and the mnemonics already reach every one of them — and this
+    /// is the conventional second spelling of the one press that declines. It is safe to
+    /// claim because `Escape` is otherwise unbound in play: it is a movement key nowhere,
+    /// a UI toggle nowhere, and the modal screens that *do* answer it are drawn instead
+    /// of the board rather than over it.
+    #[test]
+    fn escape_declines_an_open_exchange_and_nothing_else_does() {
+        assert!(declines_exchange("Escape"));
+        for key in ["w", ".", "n", "m", "?", "Enter", " ", "c", "ArrowUp", "5"] {
+            assert!(!declines_exchange(key), "{key:?} is not the decline");
+        }
+        // The key it claims is free on the board: no step, no UI command.
+        assert_eq!(input_for_key("Escape"), None);
+        assert_eq!(ui_command_for_key("Escape"), None);
     }
 
     /// #359's binding, pinned: the top row's four digits are the bar's four slots,
