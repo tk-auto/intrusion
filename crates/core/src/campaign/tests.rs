@@ -534,11 +534,22 @@ fn a_loud_raid_alerts_the_roads_ahead_and_a_ghost_raid_eases_one() {
             for offer in &reached {
                 assert_eq!(run.alert_reaches(offer.node), wanted);
             }
-            // The intel-locked road is never the one the noise settled on: it is
-            // ground the run cannot walk onto (#212), so an alert on it would be an
-            // alert with nothing behind it (§2.3).
+            // The alternative route is never the road the noise *settled on* — at
+            // condition 2 the play is finding the unwatched one, and it must not cost
+            // intel (#212). At condition 3 it is swept with everything else: what the top
+            // of the ladder takes away is the route around it, and a road you bought is
+            // still a road ahead.
             for offer in offers.iter().filter(|offer| offer.locked) {
-                assert_eq!(run.alert_reaches(offer.node), None, "seed {seed}");
+                let on_the_lock = if condition >= ALERTS_ALL {
+                    wanted
+                } else {
+                    None
+                };
+                assert_eq!(
+                    run.alert_reaches(offer.node),
+                    on_the_lock,
+                    "seed {seed} at condition {condition}",
+                );
             }
         }
     }
@@ -948,6 +959,219 @@ fn intel_is_spendable_only_at_the_map() {
     assert!(run.stage().is_over());
     assert_eq!(run.spend(1), Outlay::Closed);
     assert_eq!(run.intel(), before);
+}
+
+/// The locked edge on offer from where the run stands — every choice point has exactly
+/// one (§14 v3), and it is what #212's sink is priced against.
+fn locked_offer(run: &Campaign) -> NodeId {
+    let locked: Vec<Offer> = run.offers().into_iter().filter(|o| o.locked).collect();
+    assert_eq!(locked.len(), 1, "a choice point offers one locked edge");
+    locked[0].node
+}
+
+/// Bank enough for `n` route unlocks by walking a raid out with a fat haul.
+fn bank_for_unlocks(run: &mut Campaign, n: u32) {
+    run.enter();
+    let haul = (ROUTE_UNLOCK_COST * n) as usize;
+    run.complete(&extracted(haul, 1));
+    assert_eq!(run.stage(), CampaignStage::Choosing);
+}
+
+/// **Intel buys ground** (§14 v3's first sink, #212): paying [`ROUTE_UNLOCK_COST`] at a
+/// choice point turns the map's intel-locked successor into an ordinary offer the run may
+/// take — and the wallet is debited exactly once for it.
+#[test]
+fn buying_the_alternative_route_makes_it_takeable() {
+    let mut run = Campaign::to_depth(99, 3);
+    bank_for_unlocks(&mut run, 1);
+    let locked = locked_offer(&run);
+    assert!(!run.is_unlocked(locked));
+    assert!(!run.choose(locked), "an unbought road is refused (§14 v3)");
+
+    assert_eq!(
+        run.unlock(locked),
+        Outlay::Paid {
+            cost: ROUTE_UNLOCK_COST,
+            balance: 0,
+        },
+    );
+    assert!(run.is_unlocked(locked));
+
+    // It is an ordinary offer now, flavour and all — the purchase bought ground, not a
+    // facility chosen for the run.
+    let bought = run
+        .offers()
+        .into_iter()
+        .find(|o| o.node == locked)
+        .expect("the bought road is still offered");
+    assert!(!bought.locked);
+    assert_eq!(bought.flavour, run.map().flavour(locked));
+
+    // And it reaches a lane two across, which no open edge from here could (§14 v3).
+    let from = run.node();
+    assert_eq!(locked.lane().abs_diff(from.lane()), 2);
+    assert_eq!(locked.depth(), from.depth() + 1);
+
+    assert!(run.choose(locked), "the run may now walk down it");
+    assert_eq!(run.node(), locked);
+}
+
+/// **A run that cannot pay does not get the road** (#211's spend seam, #212's price), and
+/// is told which fact it is: too poor is not the same as nothing to buy.
+#[test]
+fn an_unaffordable_route_is_refused_and_costs_nothing() {
+    let mut run = Campaign::to_depth(99, 3);
+    run.enter();
+    run.complete(&extracted((ROUTE_UNLOCK_COST - 1) as usize, 1));
+    let locked = locked_offer(&run);
+
+    assert_eq!(
+        run.unlock(locked),
+        Outlay::Short {
+            cost: ROUTE_UNLOCK_COST,
+            balance: ROUTE_UNLOCK_COST - 1,
+        },
+    );
+    assert_eq!(run.intel(), ROUTE_UNLOCK_COST - 1, "nothing was taken");
+    assert!(!run.is_unlocked(locked));
+    assert!(!run.choose(locked), "and the road is still shut");
+}
+
+/// **Only a locked road on offer can be bought.** An open successor, a facility elsewhere
+/// in the country, a road already paid for, and any call made away from a choice point are
+/// all refused as *nothing to buy here* — with the wallet untouched, however rich the run.
+#[test]
+fn only_a_locked_offer_is_for_sale() {
+    let mut run = Campaign::to_depth(99, 3);
+    bank_for_unlocks(&mut run, 3);
+    let rich = run.intel();
+    let locked = locked_offer(&run);
+
+    // An open successor is not for sale: it is already takeable, and charging for it
+    // would be selling the player something they own.
+    let open = run.offers()[0].node;
+    assert!(!run.offers()[0].locked);
+    assert_eq!(run.unlock(open), Outlay::Closed);
+
+    // Nor is a facility the map is not offering from here.
+    assert_eq!(run.unlock(run.map().archive()), Outlay::Closed);
+    assert_eq!(run.intel(), rich, "no refusal charged anything");
+
+    // Bought once, it is not for sale again — the second press is not a second charge.
+    assert!(run.unlock(locked).paid());
+    let after = run.intel();
+    assert_eq!(run.unlock(locked), Outlay::Closed);
+    assert_eq!(run.intel(), after);
+
+    // And there is nothing to buy anywhere but a choice point: on the approach the map
+    // offers only the facility under the run's feet, and inside a raid it offers nothing.
+    assert!(run.choose(open));
+    assert_eq!(run.stage(), CampaignStage::Approach);
+    assert_eq!(run.unlock(locked), Outlay::Closed);
+    run.enter();
+    assert_eq!(run.unlock(locked), Outlay::Closed);
+    assert_eq!(run.intel(), after);
+}
+
+/// **The bought road is alerted at the top of the ladder and only there** (§14 v3/#210).
+///
+/// Condition 3's escalation is *breadth* — what it takes away is the route around it — so
+/// an alternative route would be intel buying immunity from the alert if the noise skipped
+/// it. At condition 2 it is never the marked road: finding the unwatched one is the play
+/// there, and it must not cost intel.
+#[test]
+fn the_alternative_route_is_alerted_only_when_every_road_is() {
+    for seed in 0..12 {
+        for condition in [ALERTS_ONE, ALERTS_ALL] {
+            let mut run = Campaign::to_depth(seed, 3);
+            run.enter();
+            run.complete(&extracted(ROUTE_UNLOCK_COST as usize, condition));
+            let locked = locked_offer(&run);
+            let reached = run.alert_reaches(locked).is_some();
+            assert_eq!(
+                reached,
+                condition == ALERTS_ALL,
+                "seed {seed} at condition {condition}",
+            );
+
+            // Buying it changes nothing about that: the line says the same thing before
+            // and after the money changes hands.
+            assert!(run.unlock(locked).paid());
+            assert_eq!(run.alert_reaches(locked).is_some(), reached);
+        }
+    }
+}
+
+/// **The price is one knob** (§14 v3 **[START]**), and it is pinned here so a change to it
+/// is a visible change rather than a number that drifted.
+#[test]
+fn the_route_costs_one_start_number() {
+    assert_eq!(ROUTE_UNLOCK_COST, 1);
+
+    // **Well under a facility's whole haul** at the §10.2 recipe, and that is the point:
+    // the map draws unbought ground as `?`, so what is being sold is a road nobody has
+    // seen. A price has to be proportionate to what the buyer knows (appendix 48).
+    let recipe = LevelConfig::V1.intel as u32;
+    assert!(
+        ROUTE_UNLOCK_COST < recipe,
+        "a road bought blind must not cost a facility's raid",
+    );
+
+    // It still asks for something real: nothing is banked until a raid is walked out of,
+    // so the **first** choice point of every run cannot afford one.
+    let mut fresh = Campaign::to_depth(99, 3);
+    fresh.enter();
+    fresh.complete(&extracted(0, 1));
+    assert!(!fresh.affords(ROUTE_UNLOCK_COST));
+    assert_eq!(
+        fresh.unlock(locked_offer(&fresh)),
+        Outlay::Short {
+            cost: ROUTE_UNLOCK_COST,
+            balance: 0,
+        },
+    );
+
+    let mut run = Campaign::to_depth(99, 3);
+    bank_for_unlocks(&mut run, 1);
+    let locked = locked_offer(&run);
+    assert_eq!(run.intel(), ROUTE_UNLOCK_COST);
+    assert!(run.affords(ROUTE_UNLOCK_COST));
+    assert!(run.unlock(locked).paid());
+    assert_eq!(run.intel(), 0, "exactly the price, and no more");
+}
+
+/// **Determinism holds across purchases** (§12.4): the same run seed and the same sequence
+/// of choices *and spends* grows the same country, unlocks the same roads and boots the
+/// same facilities. Buying a road is an input, not a new source.
+#[test]
+fn a_run_that_buys_a_route_replays_identically() {
+    let walk = |seed: u64| -> Vec<(NodeId, u64, u32)> {
+        let mut run = Campaign::to_depth(seed, 3);
+        let mut trail = Vec::new();
+        for _ in 0..3 {
+            let level = run.enter().expect("a facility to raid");
+            trail.push((run.node(), level.seed, run.intel()));
+            run.complete(&extracted(ROUTE_UNLOCK_COST as usize, 1));
+            if run.stage() != CampaignStage::Choosing {
+                break;
+            }
+            // Buy the alternative route wherever there is one to buy and the wallet can
+            // cover it — the last hop before the archive offers none, and that is the
+            // graph converging rather than a case to special-case.
+            let bought = run
+                .offers()
+                .into_iter()
+                .find(|offer| offer.locked)
+                .filter(|offer| run.unlock(offer.node).paid())
+                .map(|offer| offer.node);
+            let next = bought.unwrap_or_else(|| run.offers()[0].node);
+            assert!(run.choose(next));
+        }
+        trail
+    };
+    for seed in [1, 42, 8371] {
+        assert_eq!(walk(seed), walk(seed), "seed {seed}");
+    }
 }
 
 /// **A campaign facility's exit never refuses** (§4.5/§14 v3): intel is currency, so every

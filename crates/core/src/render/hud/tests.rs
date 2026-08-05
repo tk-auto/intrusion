@@ -6,7 +6,7 @@ use crate::guard::GuardState;
 use crate::modifiers::LevelModifiers;
 use crate::state::{BoreRefusal, Event, Input, State};
 use crate::test_support::open_room;
-use crate::{Difficulty, EndExit, EndUi, RunMode, RunOptions};
+use crate::{Difficulty, EndExit, EndUi, Outlay, RunMode, RunOptions};
 
 /// A **legal** run loadout (§8.3/#244): innate Run plus a three-tech grant — the
 /// shape quick play resolves, and the shape the bar's width bound is sized for.
@@ -1531,7 +1531,10 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         message_log_open: true,
         help_open: true,
         menu: Some(MenuUi::default()),
-        map: Some(MapUi { selected: 1 }),
+        map: Some(MapUi {
+            selected: 1,
+            outlay: Some(Outlay::Closed),
+        }),
         help_tab: HelpTab::Abilities,
         theme: Theme::default().toggled(),
         seed_copy: SeedCopy::Copied,

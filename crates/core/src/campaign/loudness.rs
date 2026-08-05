@@ -45,16 +45,22 @@
 //! an escalation the player can read off the map screen and act on, which a second
 //! modifier stacked on one facility would not be.
 //!
-//! # The locked edge is never alerted
+//! # The alternative route is alerted at the top of the ladder, and only there
 //!
-//! The mark lands only on the **open** successors — the ones
-//! [`Campaign::choose`](super::Campaign::choose) will actually take. A mark on the
-//! intel-locked edge (§14 v3's alternative-route sink, #212) would be a raid's
-//! consequence landing on ground the run cannot walk onto: an alert with nothing behind
-//! it, which is the §2.3 failure this ticket exists to avoid, on roughly one choice
-//! point in four. The fiction agrees with the arithmetic — the locked edge reaches a lane
-//! two across that the open edges cannot, so it is the one road the noise did not travel
-//! — and it gives #212's sink something real to sell at condition 3.
+//! At condition 2 the mark lands only on the **open** successors. The play at that rung is
+//! finding the road nobody is watching, and a run should not have to *buy* one to have the
+//! option — a mark on the intel-locked edge (§14 v3's alternative-route sink, #212) would
+//! also be a consequence landing on ground the run has not paid to walk onto. The fiction
+//! agrees with the arithmetic: that edge reaches a lane two across that the open ones
+//! cannot, so it is the road the noise did not travel.
+//!
+//! At **condition 3** it is reached like everything else, bought or not. What the top of
+//! the ladder takes away is *the route around it*, and a road you paid for is still a road
+//! ahead; intel that bought immunity from the escalation would be a second, unwritten rule
+//! about what the alert is, and it would quietly undo the one [SETTLED] thing condition 3
+//! says. What #212's sink sells at that rung is **ground the map was not offering** — a
+//! lane the run could not otherwise reach — which is worth intel without being a way out
+//! of the alert.
 
 use crate::alert::TOP_RUNG;
 use crate::modifiers::{draw_from_pool, LevelModifiers, ModifierDirection};
@@ -161,19 +167,36 @@ impl Loudness {
 
     /// Whether the noise made in `from` reached `to`.
     ///
-    /// False for anything that is not an **open** successor of `from`, so the locked
-    /// edge (#212) is never marked and a node the run could not have walked to from
-    /// there is never claimed.
+    /// False for a node the run could not have walked to from there at all — the noise
+    /// settles on the ground ahead, not on the country at large.
+    ///
+    /// **The intel-locked edge is reached at the top of the ladder and nowhere else**
+    /// (#212). The two rungs are different statements and they treat a bought road
+    /// differently on purpose:
+    ///
+    /// - At **condition 2** the noise settles on *one* open road ([`marked`]), drawn from
+    ///   the map's own open successors. The alternative route is never that one, because
+    ///   the play at condition 2 is finding the unwatched road and a run should not have to
+    ///   buy one to have the option.
+    /// - At **condition 3** it reaches **every** road ahead, the locked one included —
+    ///   which is §14 v3's *"what the top of the ladder takes away is the route around it"*
+    ///   [SETTLED] meant literally. A road you paid for is still a road ahead, and intel
+    ///   that bought immunity from the escalation would be a second, unwritten rule about
+    ///   what the alert is.
+    ///
+    /// It answers about the *edge*, not about the purchase: an alternative route is
+    /// reported alerted at condition 3 whether or not this run has bought it, so the map's
+    /// line says the same thing before and after the money changes hands.
     #[must_use]
     pub fn reaches(self, map: FacilityMap, from: NodeId, to: NodeId) -> bool {
         if self.direction().is_none() {
             return false;
         }
-        let open = open_successors(map, from);
-        if !open.contains(&to) {
-            return false;
+        if self.reaches_every_offer() {
+            return map.successors(from).iter().any(|offer| offer.node == to);
         }
-        self.reaches_every_offer() || marked(map, &open) == Some(to)
+        let open = open_successors(map, from);
+        open.contains(&to) && marked(map, &open) == Some(to)
     }
 
     /// **The contribution** the campaign alert makes to the facility at `to`, having
@@ -286,8 +309,8 @@ mod tests {
     }
 
     /// **How far the noise carries**, over every country in the spread: one open road at
-    /// condition 2, all of them at condition 3, one at condition 0, none at condition 1
-    /// — and never the locked edge.
+    /// condition 2, all of them at condition 3, one at condition 0, none at condition 1 —
+    /// and the intel-locked edge only at the top of the ladder (#212).
     #[test]
     fn the_noise_reaches_one_road_ahead_or_all_of_them() {
         for seed in SEEDS {
@@ -313,15 +336,23 @@ mod tests {
             // been alerted.
             assert_eq!(reached(Loudness::Unnoticed), reached(Loudness::Noticed));
 
-            // Never the locked edge, at any loudness — it is not ground the run can walk
-            // onto (#212), so an alert on it would be an alert with nothing behind it.
+            // **The alternative route is reached at the top of the ladder and only there**
+            // (#212). At condition 2 the play is finding the unwatched road, and a run
+            // should not have to buy one to have that option; at condition 3 what the
+            // escalation takes away is the route around it, and a road you paid for is
+            // still a road ahead — intel that bought immunity from the alert would be a
+            // second, unwritten rule about what the alert is.
             for offer in offers.iter().filter(|offer| offer.locked) {
-                for loudness in [Loudness::Unnoticed, Loudness::Noticed, Loudness::Hunted] {
+                for loudness in [Loudness::Unnoticed, Loudness::Noticed] {
                     assert!(
                         !loudness.reaches(map, from, offer.node),
-                        "seed {seed}: the locked edge was alerted",
+                        "seed {seed}: the alternative route was alerted below the top rung",
                     );
                 }
+                assert!(
+                    Loudness::Hunted.reaches(map, from, offer.node),
+                    "seed {seed}: the alternative route escaped a condition-3 sweep",
+                );
             }
 
             // And never a node that is not ahead of `from` at all.
