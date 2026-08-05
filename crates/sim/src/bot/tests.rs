@@ -325,6 +325,14 @@ fn the_balanced_profile_is_the_default_bot() {
 /// row this pin carries. Neither branch produced it alone, which is exactly what a
 /// change-detector is for; the committed baseline refreshed on the merged tree is
 /// what says whether the timeout tail actually grew.
+/// **#481 moved every row again, and it is a re-carve once more.** Refusing a console
+/// or the exit any cell whose stamping would seal walkable ground off changes which
+/// cell each usable lands on, so all 48 seeds place a different board; the same PR's
+/// bot fix (a crawler cannot bump a door open from the mouth, so the climb-out is
+/// judged by what it can *enter*) moves the openings that used to stall. The aggregate
+/// goes **20 wins to 17**, which is not a difficulty finding — the refreshed baseline
+/// in the same PR is what judges that, and it puts the win rates flat.
+///
 /// This list is the bot's play against a fixed game, so a change to the *game*
 /// moves it exactly as a change to the cue seam would — which is why the refresh
 /// belongs in the PR that changed the game, with the deltas read rather than waved
@@ -333,53 +341,53 @@ fn the_balanced_profile_is_the_default_bot() {
 #[test]
 fn the_cue_seam_reproduces_the_hardcoded_bots_runs() {
     const PINNED: [&str; 48] = [
-        "balanced 0 won 104 ",
+        "balanced 0 lost 26 rc",
         "balanced 1 won 145 rr",
-        "balanced 2 lost 181 rrcdr",
-        "balanced 3 lost 366 rrcrcrrrdrdr",
-        "balanced 4 lost 203 crdrdrd",
+        "balanced 2 lost 95 rrdr",
+        "balanced 3 won 202 rrcd",
+        "balanced 4 lost 197 crdrdcr",
         "balanced 5 lost 38 rc",
         "balanced 6 lost 48 rdr",
-        "balanced 7 won 64 ",
+        "balanced 7 won 52 ",
         "balanced 8 lost 40 rd",
-        "balanced 9 lost 389 crrrrrrrrrrrrrdr",
-        "balanced 10 lost 39 rc",
+        "balanced 9 won 221 c",
+        "balanced 10 lost 38 rc",
         "balanced 11 lost 59 crdr",
-        "cautious 0 won 112 c",
+        "cautious 0 lost 29 c",
         "cautious 1 won 118 ",
-        "cautious 2 won 226 rd",
-        "cautious 3 won 450 rrrd",
-        "cautious 4 lost 327 ccrdrdrd",
-        "cautious 5 won 221 rcdcrrc",
+        "cautious 2 won 268 r",
+        "cautious 3 won 316 rrrd",
+        "cautious 4 lost 609 ccrdrdrddrdrdrr",
+        "cautious 5 won 251 rcdcrrc",
         "cautious 6 lost 65 rr",
-        "cautious 7 won 64 ",
+        "cautious 7 won 52 ",
         "cautious 8 lost 44 rd",
         "cautious 9 lost 43 cr",
-        "cautious 10 won 102 c",
-        "cautious 11 lost 246 crdcrrdrr",
-        "aggressive 0 lost 73 rdc",
+        "cautious 10 lost 38 rc",
+        "cautious 11 lost 418 crdcrrdrdrrrdrr",
+        "aggressive 0 lost 26 rc",
         "aggressive 1 won 100 rcr",
-        "aggressive 2 won 192 ",
-        "aggressive 3 lost 53 r",
-        "aggressive 4 lost 43 rc",
+        "aggressive 2 won 144 rrdrr",
+        "aggressive 3 lost 44 rr",
+        "aggressive 4 lost 44 r",
         "aggressive 5 lost 38 rc",
-        "aggressive 6 lost 104 rrrc",
-        "aggressive 7 won 64 ",
+        "aggressive 6 won 251 rrrcrd",
+        "aggressive 7 won 52 ",
         "aggressive 8 won 118 rdcr",
         "aggressive 9 lost 51 rc",
-        "aggressive 10 lost 39 rc",
+        "aggressive 10 lost 38 rc",
         "aggressive 11 won 142 rc",
-        "careless 0 won 164 rcrcd",
+        "careless 0 lost 26 rc",
         "careless 1 lost 99 rr",
-        "careless 2 lost 153 rrdc",
-        "careless 3 lost 53 r",
-        "careless 4 lost 40 rc",
+        "careless 2 lost 113 rrdcr",
+        "careless 3 lost 190 rd",
+        "careless 4 lost 62 rcdr",
         "careless 5 lost 38 rc",
         "careless 6 lost 75 rcrc",
-        "careless 7 won 64 ",
+        "careless 7 won 52 ",
         "careless 8 won 118 rdcr",
         "careless 9 lost 131 rcrrcd",
-        "careless 10 lost 39 rc",
+        "careless 10 lost 38 rc",
         "careless 11 lost 89 rcrd",
     ];
 
@@ -711,10 +719,10 @@ fn every_bore_opens_a_route_the_bot_has_seen() {
     /// A pinned seed per temperament on which that profile bores (see [`witness_sweep`]).
     fn witness(profile: Profile) -> u64 {
         match profile.name {
-            "balanced" => 2,
-            "cautious" => 3,
-            "careless" => 19,
-            _ => 25,
+            "balanced" => 0,
+            "cautious" => 10,
+            "careless" => 0,
+            _ => 0,
         }
     }
 
@@ -1003,9 +1011,9 @@ fn every_profile_ducks_behind_a_bench() {
         // negative below.
         fn duck_witness(profile: Profile) -> u64 {
             match profile.name {
-                "balanced" => 3,
-                "cautious" => 4,
-                _ => 58,
+                "balanced" => 9,
+                "cautious" => 0,
+                _ => 12,
             }
         }
 
@@ -1159,8 +1167,8 @@ fn the_bot_crouch_walks_along_the_bench() {
     /// A pinned seed per temperament on which the shuffle happens (see [`witness_sweep`]).
     fn witness(profile: Profile) -> u64 {
         match profile.name {
-            "cautious" => 4,
-            _ => 3,
+            "cautious" => 9,
+            _ => 23,
         }
     }
 
@@ -1296,9 +1304,17 @@ fn every_profile_finishes_its_runs() {
 /// kept under **`balanced`** — though what facility each carves has moved since (#466
 /// re-anchored placement on the exit), so they are a spread of levels now rather than
 /// the exact scenes that failed.
+///
+/// **231 and 288 are #481's** — a third shape of the same failure, and the one this
+/// test caught rather than pinned. Climbing out of the tunnel is a step with no bump
+/// behind it (§10.7), so a closed door panel beside `E` is not a way out; the bot
+/// chose it anyway, because it picked the mouth's exit by the *routing* rule, which
+/// opens closed doors (§10.4). The press was refused for free and nothing about the
+/// mouth changed, so it pressed again until the cap: a whole run spent on turn
+/// fourteen. Both seeds held it before that fix and neither does now.
 #[test]
 fn the_bot_never_burns_its_inputs_on_free_actions() {
-    for seed in [30, 43, 33, 34, 44, 58, 64, 65] {
+    for seed in [30, 43, 33, 34, 44, 58, 64, 65, 231, 288] {
         let record = run_one(seed, &mut StealthBot::new(), DEFAULT_INPUT_CAP).expect("generates");
         if record.outcome == RunOutcome::Timeout {
             assert_eq!(
@@ -1524,8 +1540,8 @@ fn the_careful_temperaments_silence_the_comms_console() {
     /// commits.
     fn witness(profile: Profile) -> u64 {
         match profile.name {
-            "balanced" => 3,
-            _ => 78,
+            "balanced" => 30,
+            _ => 25,
         }
     }
 
@@ -1583,7 +1599,7 @@ fn the_careful_temperaments_silence_the_comms_console() {
 fn the_silence_is_the_cores_affordance_and_never_a_terrain_scan() {
     /// The pinned seed on which `balanced` walks past a live console and throws the
     /// switch (see [`witness_sweep`]).
-    const WITNESS: u64 = 3;
+    const WITNESS: u64 = 30;
 
     let mut silences = 0;
     for seed in witness_sweep(WITNESS, 0..120) {
@@ -1681,7 +1697,7 @@ fn the_bot_never_detours_to_the_comms_console() {
 fn a_closing_patrol_outranks_the_comms_switch() {
     /// The pinned seed on which `cautious` actually throws the switch — without
     /// one, every assertion below passes vacuously (see [`witness_sweep`]).
-    const WITNESS: u64 = 24;
+    const WITNESS: u64 = 25;
 
     let mut silences = 0;
     for seed in witness_sweep(WITNESS, 0..40) {

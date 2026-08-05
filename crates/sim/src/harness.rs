@@ -304,6 +304,11 @@ mod tests {
     /// modifier dropped the per-doorway RNG draw, so seed 42 re-carved and a 130-turn
     /// win became the capture at 98 this row held until #466.
     ///
+    /// **#481 moved it again, and this one is a re-carve too**: refusing a console or
+    /// the exit any cell whose stamping would seal walkable ground off changes which
+    /// cell each usable lands on, so seed 42 carves and places a different board. The
+    /// 168-turn win became a capture at 116.
+    ///
     /// Before that it moved when the guards began **partitioning the whole level**
     /// (§7.5) — seed 42 was a 111-turn win with zero detections through ground nobody
     /// patrolled — which *was* a real cost, and is the sharpest illustration of one in
@@ -311,7 +316,7 @@ mod tests {
     /// history: a re-carve makes the row incomparable, a rule change makes it evidence.
     #[test]
     fn the_default_config_reproduces_the_hardcoded_preset_byte_for_byte() {
-        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"win\",\"turns\":168,\"detections\":8,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":44,\"run\":4,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":2,\"alert_escalations\":[{\"turn\":25,\"rung\":1,\"trigger\":\"sighting\"},{\"turn\":124,\"rung\":2,\"trigger\":\"console-tampered\"}],\"reinforcements\":1}";
+        const PINNED: &str = "{\"seed\":42,\"profile\":\"balanced\",\"outcome\":\"capture\",\"turns\":116,\"detections\":3,\"takedowns\":0,\"bodies_found\":0,\"usage\":{\"wait\":12,\"run\":1,\"camouflage\":0,\"decoy\":0,\"dephase\":0,\"autodoors\":0,\"confusion\":0,\"takedown\":0,\"drag\":0,\"pierce_wall\":0,\"lockdown\":0,\"crouch\":0,\"stow\":0,\"silence_radio\":0},\"alert_peak\":1,\"alert_escalations\":[{\"turn\":116,\"rung\":1,\"trigger\":\"sighting\"}],\"reinforcements\":0}";
         let record = run_one(42, &mut StealthBot::new(), 400).expect("generates");
         assert_eq!(record.to_json_line(), PINNED);
         // …and the explicit default is the same run, not merely a similar one.

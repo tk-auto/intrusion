@@ -1917,3 +1917,83 @@ Two consequences beyond the mapping:
 - **The `#` glyph sprite is the band's interior tile**, not a separately normalised
   copy of the same source. It is what a wall draws when nothing autotiles it, and a
   fallback in a different shade would make the wall flicker as the sheet decoded.
+
+## Appendix 38 — A solid usable is a wall to a route, and placement has to draw like one
+
+*(§10.3, §10.6; #477, #481.)*
+
+An intel console, the comms console and the exit stamp in **solid** (§10.3), and unlike
+a closed door panel there is no move that gets anyone past one: bumping a panel *opens
+the way*, bumping a console *uses* it. So one of them dropped into a one-cell throat is
+a wall, and the ground behind it belongs to nobody — guards cannot route to it, the
+player cannot walk to it, and both can still see in, because a usable does not block
+sight. A visible alcove nobody can ever enter.
+
+Measured on the shipped generator over 300 quick-play seeds: **50 of them (17%)** had at
+least one such pocket, 52 pockets in all, and on one seed a *guard* was placed inside
+one — a patrol with two cells to pace for the whole run.
+
+**Why every existing check was quiet.** Two blind spots, and they are different ones.
+§10.6's post-placement assert proves the player's **objective route** survives the
+stamping — start → every objective → the comms console → exit — and orphaned ground
+holds no objective, so the flood never has a reason to visit it. It is the same hole
+appendix 17 records one notch further out: that one sealed rooms *with* their objectives
+inside, this one seals rooms with **nothing** inside, which is exactly why the route
+check stayed silent. Meanwhile the §10.5 region graph and the guard beats cut from it
+are computed on the **bare carve** — the usables are recorded by generation and stamped
+later by `State::new` — so the graph the partition sees still shows plain floor where the
+console will land. That ordering is why the beat-reachability property test passed over
+the whole seed range while guards froze in play (#477).
+
+**A candidate filter, not an assert-and-redraw.** Appendix 17 is the standing warning:
+the one-usable rule as a *hard guarantee* rejected ~85% of carves and stalled
+generation, which is why it is a preference with a fallback. An assert on the finished
+board costs a redraw per bad seed; a filter at the moment of choosing costs none. So
+placement draws every usable cell through the same shape `severs_pathing` already
+applies to a table: **skip a cell whose stamping would disconnect the walkable graph**.
+The check is the O(ring) local one — if every walkable neighbour of the candidate can
+still reach every other within the 3×3 ring, any route through it has a local detour —
+which is sound in the direction that matters (it never *passes* a cell that seals) and
+merely conservative in the other.
+
+Two details make it a guarantee rather than a heuristic:
+
+- **The usables already chosen are masked solid.** Each candidate is judged on the graph
+  the previous stamps left behind, so a *pair* that jointly pinches a two-cell throat is
+  caught by whichever of them lands second. With the §10.6 gate proving the bare carve is
+  one component, the induction over the sequence is the whole proof.
+- **Both movement rules, not one.** A guard refuses a cupboard and partial cover where the
+  player refuses neither, and neither rule implies the other: a detour through a cupboard
+  saves the player and not the patrol, while a cupboard's single mouth (§10.1.6) is ground
+  only the player could ever have lost. A pocket orphaned for guards alone is still a
+  coverage hole worth refusing.
+
+**And the assert anyway.** §10.6 is explicit that a generator must never merely *believe*
+a reachability property, so the finished board is still checked one-component per rule
+before a placement is accepted. The filter is what makes it free; the assert is what
+makes it true rather than argued. If it ever fires, the filter has a hole — not the seed.
+
+**What it cost.** Over the same 300 quick-play seeds, orphaned pockets went **50 → 0**
+and the guard-in-a-nook case went with them (it was a consequence of orphaned ground, not
+a separate bug). Generation barely noticed: **314 → 319 carve attempts** for the 300
+levels (6 carve rejections either way), with placement rejections 8 → 13 — every one of
+them a pool the filter narrowed, and **none** of them the finished-board assert firing.
+
+**What this does *not* change.** `Terrain::blocks_pathing` still answers `false` for the
+solid usables, and deliberately: generation asks it of a carve those cells are not stamped
+into yet, and the routing predicates pair it with the move check, which is where a usable
+becomes solid (`guard::routable`). §10.3's pathing column is about the finished board;
+the method is about the carve, and the note on it says so. Nor does it retire #477's
+guard-side route filter — the §7.5 sweep still refuses to target ground it cannot walk to,
+which is the backstop for any future terrain that severs a route.
+
+**One thing it dragged in, and it is worth naming.** Moving where the exit lands walked
+a *pre-existing* sim-bot freeze onto a pinned witness seed. Climbing out of the tunnel
+is a step with **no bump behind it** (§10.7 confines the crawl), so a closed door panel
+beside `E` is not a way out — but the bot chose the mouth's exit by the *routing* rule,
+which happily plans through a closed door because a walker opens one by bumping it
+(§10.4). The press was refused for free, nothing about the mouth changed, and it pressed
+again until the input cap: a whole run spent on turn fourteen. Seeds 231 and 288 hold it
+on `main` and are now pinned in the bot's own anti-stall test. The lesson generalises
+past the bot: **"can route through" and "can step onto" are two questions**, and a
+closed panel is the one terrain where the answers differ.

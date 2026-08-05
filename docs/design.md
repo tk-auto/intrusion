@@ -1601,7 +1601,9 @@ because walking into it opens the way (§10.4); a console or the exit is not,
 because nothing a bump does to one lets anyone past. So a solid usable stamped
 into a one-cell throat seals the ground behind it off from guards and player
 alike — which §10.6's assert does not catch, since it proves the objective route
-and orphaned ground holds no objective (#477, #481).
+and orphaned ground holds no objective (#477, #481). **Placement therefore refuses
+such a cell outright** (§10.6, appendix 38): a usable is a wall to anything asking
+what a stamp severs.
 
 > **The table is partial cover, and the crouch is a bump.** A table blocks
 > movement and pathing like a wall — patrols route around it — but a guard sees
@@ -1800,6 +1802,7 @@ guard cooperation, assigned patrols, keys and circuits unbuilt (appendix 16).
 | Every room reaches a corridor | Every room is bounded by corridor walls, which qualify as door candidates |
 | Every room ≥ 6×6, ≤ ~12 rooms | Partition constants |
 | **A path exists: start → every objective → the comms console → exit** | **Assert it. See below.** The flood starts where the player first sets foot in the facility: the cells they can climb out of `E` onto (#466) |
+| **No solid usable seals walkable ground off** | A console or the exit is a wall to a route (§10.3), so a candidate cell whose stamping would disconnect the walkable graph — under *either* movement rule, guard and player — is skipped, and the finished board is asserted one component per rule. A filter with a fallback, not an assert-and-redraw; appendix 38 |
 | **The exit's tunnel reaches the border, over inert geometry** | A straight run of plain wall or floor, 4–12 cells, sharing no cell with a §10.7 shortcut; a candidate `E` without one is redrawn |
 | **The comms console is a real detour** | ≥ 16 cells from the spawn, non-start room **[START]** (§7.3) |
 | **One usable beside any floor cell (preferred)** | Conflict-aware stamping, best-effort; the arrow disambiguates the rest. See below. |
