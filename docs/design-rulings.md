@@ -2940,3 +2940,114 @@ So `usage.drone` exists as a histogram slot and reads zero until a piloting poli
 That zero is a fact about the bot, which is exactly why the slot exists rather than being
 omitted: a verb with no row could not report the day it starts being pressed. The
 alternative — omitting the slot — would have hidden the gap instead of dating it.
+
+---
+
+## Appendix 46 — Intel is currency: one wallet, one counter, and no punishment for coming home empty
+
+*(§2.2/§2.3/§4.4/§4.5/§12.7/§14 v3; #211. `crates/core/src/campaign/wallet.rs`,
+`crates/core/src/campaign.rs`, `crates/core/src/render/campaign_map.rs`.)*
+
+§2.2's table has said from the beginning that intel *"accumulates and is spent"* within a
+run. Half of that was true in code long before this ticket — every completed raid banked
+its haul into a `u32` on the campaign — and the other half was a comment pointing at a
+future ticket. What #211 settles is not "add a spend function": it is the three questions
+that had to be answered before a spend function could mean anything.
+
+### Intel cannot be both the exit key and the currency
+
+In quick play the exit asks for intel (§4.5): gather the set, then leave. That gate is
+what makes a facility an objective rather than a shopping trip, and it is right for a
+mode whose whole life is one building.
+
+It cannot survive a campaign. A currency you must hand over to get out is a **toll**: the
+run banks nothing it did not overshoot the gate by, and every sink is priced against the
+surplus rather than against the haul. Worse, the two rules interfere in the direction that
+kills the choice — a facility whose gate is *all* the intel makes "how much do I take"
+a question with one answer, and the map's flavours (Vault against Outpost) stop being a
+trade about how much you want.
+
+So the campaign takes the gate off (`IntelGate::None`) and the consequence is stated
+rather than discovered: **extraction is voluntary**. You may bump the exit and leave any
+facility on the turn you entered it. Intel, caches, unlockables — everything in the
+building is *surplus*, and what a raid was worth is settled at the hub afterwards.
+
+The alternative considered and rejected was a *reduced* gate — one console, as the sim
+uses (§13.2). It looks like a compromise and is not: one console is either trivial (in
+which case it is a ceremony, not a rule) or it is the thing that kills a run on the seed
+where the nearest console is behind a patrol. A rule that only bites by accident is the
+worst kind, and §2.3's cost test is unanswerable for it — *when would a good player
+choose not to?* There is no such moment; you always take one console.
+
+### One spend context, and it is the map
+
+The wallet could have been spendable from inside a facility. It is not, and the reason is
+§4.4: turn cost is the game's central pressure, and a shop you can open mid-raid is a way
+to pay money instead of turns. *Stuck in a corridor with a guard closing?* — buy something.
+Every tight corner becomes a transaction, and the one resource the design actually cares
+about stops being the one under pressure.
+
+So spending happens at the map between facilities, and the check lives on the campaign
+rather than in each sink. That placement is the load-bearing part: a sink that forgot to
+ask *am I at the hub?* would be a shop open inside a building, and nothing about the
+sink's own code would look wrong. Putting it in `Campaign::spend` makes forgetting
+impossible instead of unlikely. It is why the refusal type has a third answer —
+`Outlay::Closed` — rather than folding "not here" into "not enough": a player told they
+are poor when the truth is they are in the wrong place has been told the wrong fact.
+
+Both stages the map screen is the surface of are open for spending: standing on a facility
+not yet raided, and at a choice point. That is not a loosening of "between facilities" but
+a statement of what it means — the approach is the map too, and it is where a run buys the
+ground it is about to walk onto (#212).
+
+### The map screen *is* the hub
+
+A separate shop screen was the obvious shape and it is the wrong one. Everything intel buys
+is a fact about the country ahead — a route, an alert on a road, what is inside the next
+facility — so the prices belong on the picture of that country. A second modal screen
+would carry one list, teach the player a screen, and say nothing the map could not have
+said in a line.
+
+So the map grew a wallet line, and it is drawn on **every** frame, balance zero included.
+A readout that appeared with the run's first haul would make the map band jump exactly
+once — at the moment the player was reading it — which is the layout rule (§11.4) that
+made the alert line a subtitle rather than a panel. Zero has its own wording ("nothing
+banked") rather than a bare `Intel 0`, because for a run that has just walked out of a
+facility with nothing, that line is the only feedback there is.
+
+### Nothing is taken away for a wasted raid
+
+The tempting rule is an explicit penalty: leave empty-handed and the alert bumps. It was
+considered and deferred, and the argument against it is that the cost is **already there
+and already compounding**.
+
+A run that took nothing is a run that:
+
+- has nothing to spend at the hub, so the route it wanted is not available;
+- has burned one of a fixed number of facilities (depth six to the archive, §14 v3);
+- meets the *next* facility with whatever noise the wasted raid made carried onto it
+  (#210) — and a raid that achieved nothing was not necessarily a quiet one;
+- has spent the caches in that building for good, because they are one-shot.
+
+Adding a penalty on top charges twice for one mistake, and it charges in the currency that
+is *already* the punishment. The emergent cost also has the property a designed one would
+not: it scales with how badly the raid went, without anyone tuning a number.
+
+The honest caveat is that nobody has played a full run yet, so this is `[OPEN]` on the
+tuning rather than `[SETTLED]`. If a played campaign shows a run farming the easiest
+Outposts and walking straight back out — the degenerate strategy this reasoning would
+have missed — the lever is a small alert bump on an empty-handed extraction, and it is one
+line at the `bank` seam. The bar for pulling it is a run that shows the exploit, not a
+suspicion that it exists.
+
+### What the wallet is, as a type
+
+A newtype over a counter, and the constraint is the point: intel goes **in** whole (a
+raid's haul) and comes **out** only through a spend that can refuse. Nothing outside the
+type may set the balance, so "the wallet went negative" and "a sink debited without
+checking" are not states the rest of the campaign can reach — the same argument
+`CampaignStage` makes for not being a pair of flags.
+
+A refusal changes nothing at all. There is no partial payment, so a sink that branches on
+`Outlay::paid` cannot end up with the money gone and the effect unapplied — which is the
+one bug class a currency with several buyers reliably grows.

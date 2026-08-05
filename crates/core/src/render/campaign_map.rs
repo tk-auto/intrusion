@@ -34,10 +34,17 @@
 //! # Colour is named, never chosen (§11.2)
 //!
 //! Every glyph here carries a [`Category`] and the shell owns the table: **Owned** for
-//! where you stand (it is yours), **Interest** for the archive and for the row the
-//! marker rests on (the thing worth reaching for), **Neutral** for a live option,
-//! **Ground** for the road behind you, the facilities you have spent, and the locked
-//! edge you cannot take yet.
+//! where you stand (it is yours) and for the intel in the wallet (likewise), **Interest**
+//! for the archive and for the row the marker rests on (the thing worth reaching for),
+//! **Neutral** for a live option, **Ground** for the road behind you, the facilities you
+//! have spent, and the locked edge you cannot take yet.
+//!
+//! # It is also the hub (§14 v3/#211)
+//!
+//! Intel is the run's currency and this is the one screen it is spent on, so the balance
+//! is a line of the picture rather than a panel somewhere else: the prices and the purse
+//! are read in one glance. There is no separate shop — a second modal screen carrying one
+//! list would be a screen to learn for no fact it could not have said here.
 
 use super::alert::condition_line;
 use super::help::{theme_control, theme_control_len, theme_control_start, FOOTER_INDENT};
@@ -97,8 +104,8 @@ const EDGE_GLYPH: char = '·';
 /// geometry always, contents once you are close enough to see.
 const UNKNOWN_GLYPH: char = '▫';
 
-/// The screen row the heading sits on, the row the campaign alert reports on, and the
-/// first row of the map band beneath them.
+/// The screen row the heading sits on, the row the campaign alert reports on, the row the
+/// **wallet** reports on, and the first row of the map band beneath them.
 ///
 /// The alert takes the blank that used to separate the heading from the picture, so the
 /// band keeps every row it had: the line is a **subtitle** — what the country ahead
@@ -106,9 +113,15 @@ const UNKNOWN_GLYPH: char = '▫';
 /// when there is a raid behind the run to report on ([`alert_text`]), and the layout does
 /// not move when it is not: a map band that changed height between two looks at the same
 /// screen would be a picture that jumped.
+///
+/// The wallet line (#211) costs the band a real row, and it is a **fixed** one for the
+/// same reason: it is drawn on every frame, balance zero included, so the picture below it
+/// never moves. A readout that appeared with the run's first haul would make the map jump
+/// exactly once, at the moment the player was reading it.
 const HEADING_ROW: u32 = 0;
 const ALERT_ROW: u32 = 1;
-const MAP_TOP: u32 = 2;
+const WALLET_ROW: u32 = 2;
+const MAP_TOP: u32 = 3;
 
 /// Rows the list of rows-you-may-take needs beneath the map: one per offer at
 /// [`ENTRY_SPACING`], for the widest offer a choice point can make — three open edges
@@ -192,6 +205,46 @@ const OFF_GUARD: &str = "off guard";
 /// here rather than clip a line on a player's screen.
 const CONDITION_LEN: usize = "Condition 0 of 0".len();
 const _: () = assert!(TOP_RUNG < 10, "a two-digit rung would widen the alert line");
+
+/// How the wallet line names the currency (§11.8: *intel* is already the world's word, so
+/// there is nothing to translate) — the readout that makes the map the run's **hub**
+/// (§14 v3/#211).
+///
+/// It is here and not in the level's HUD because a campaign's intel is not a thing you
+/// carry through a facility: inside one it is the raid's own count, and only a completed
+/// raid banks it. The balance is what the *next* decision is made against, so it belongs
+/// on the screen that decision is made on.
+const WALLET_LABEL: &str = "Intel";
+
+/// What the wallet line says when the run has nothing banked — the whole of the currency's
+/// starting state, said rather than left as a bare `Intel 0` the player has to interpret.
+///
+/// Its own wording because zero is the interesting case for a run that has just walked out
+/// of a facility empty-handed: nothing is taken away for that (appendix 46), and the line
+/// saying so plainly is the only feedback there is.
+const WALLET_EMPTY: &str = "nothing banked";
+
+/// The widest the wallet line can ever be, in cells. The balance is bounded in practice by
+/// the consoles a run can carry out, not by the type, so the bound reserves a sane number
+/// of digits and asserts the wording fits around them rather than pretending a `u32` could
+/// not be wider.
+const WALLET_DIGITS: usize = 4;
+const WALLET_LINE_MAX: usize = {
+    let counted = WALLET_LABEL.len() + 1 + WALLET_DIGITS;
+    let empty = WALLET_LABEL.len() + SEPARATOR.len() + WALLET_EMPTY.len();
+    if counted > empty {
+        counted
+    } else {
+        empty
+    }
+};
+
+/// The wallet line fits the board too (§10.2/§11.4), on the terms every other line here
+/// does.
+const _: () = assert!(
+    WALLET_LINE_MAX <= LevelConfig::V1.width as usize,
+    "the wallet line must fit the v1 board (§10.2): shorten its wording",
+);
 
 /// The widest the alert line can ever be, in cells — the widest lead against the widest
 /// tail, with the widest flavour label standing in the tail that names one.
@@ -453,6 +506,25 @@ fn alert_text(run: &Campaign, ahead: &[Offer]) -> Option<(String, Category)> {
     Some((format!("{lead}{SEPARATOR}{tail}"), category))
 }
 
+/// **What the run has to spend** (§2.2/§14 v3/#211), as the line under the alert says it.
+///
+/// The map is the campaign's **hub**: it is where intel is spent, and a currency whose
+/// balance is not on the screen the prices are on is a currency the player has to keep in
+/// their head. So the line is unconditional — a run that has banked nothing says so
+/// ([`WALLET_EMPTY`]) rather than showing no line at all, which would read as the readout
+/// being broken rather than as the wallet being empty.
+///
+/// **Owned**, not Interest (§11.2): the intel in the wallet is already yours, in the same
+/// sense the `@` on the picture is. Interest is what is worth reaching for, and it is
+/// spoken for on this screen by the archive and by the marked row — a third claim on it
+/// would blunt both.
+fn wallet_text(run: &Campaign) -> String {
+    match run.intel() {
+        0 => format!("{WALLET_LABEL}{SEPARATOR}{WALLET_EMPTY}"),
+        banked => format!("{WALLET_LABEL} {banked}"),
+    }
+}
+
 /// What the line says the noise did to the facility it names.
 fn suffix(direction: ModifierDirection) -> &'static str {
     match direction {
@@ -557,6 +629,18 @@ pub fn render_map(width: u32, height: u32, run: &Campaign, ui: MapUi) -> Grid {
         let len = line.chars().count() as u32;
         draw(&mut grid, centre(width, len), ALERT_ROW, &line, category);
     }
+
+    // What the run has to spend (§2.2/#211) — always, so the hub's balance is never a
+    // thing the player has to remember.
+    let wallet = wallet_text(run);
+    let len = wallet.chars().count() as u32;
+    draw(
+        &mut grid,
+        centre(width, len),
+        WALLET_ROW,
+        &wallet,
+        Category::Owned,
+    );
 
     let at = |node: NodeId| plot(map.position(node), map.depth(), width, map_h);
 

@@ -44,7 +44,9 @@
 //! The map is a **graph with real edges, grown lazily**: an open edge only ever reaches
 //! an adjacent lane, so where the run stands decides what is in front of it, and each
 //! offer names its facility's [`Flavour`] outright. Nothing survives the run itself,
-//! which is what permadeath means here (§2.2).
+//! which is what permadeath means here (§2.2). Intel is that run's **currency** — a
+//! [`Wallet`] banked at every completed raid and spent at the map between facilities
+//! (§14 v3), never at the exit, which in a campaign never refuses.
 //!
 //! **Configuration.** [`LevelModifiers`] (§12.6) resolved once per run, and
 //! [`LevelSeed`] composing seed, modifiers and loadout into one shareable token — the
@@ -98,7 +100,7 @@ pub use body::Body;
 pub use campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
 pub use campaign::{
     facility_seed, Campaign, CampaignStage, FacilityMap, Flavour, Loudness, MapPos, NodeId, Offer,
-    ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE,
+    Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE,
 };
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
