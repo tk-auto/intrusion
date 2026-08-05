@@ -1917,3 +1917,100 @@ Two consequences beyond the mapping:
 - **The `#` glyph sprite is the band's interior tile**, not a separately normalised
   copy of the same source. It is what a wall draws when nothing autotiles it, and a
   fallback in a different shade would make the wall flicker as the sheet decoded.
+
+---
+
+## Appendix 38 — The cache is a flavour of its own, and what it holds is drawn from what you lack
+
+*(§2.2/§8.3/§10.6/§14 v3; #209, on the seams #206 and #207 left. `crates/core/src/salvage.rs`,
+`crates/core/src/campaign/map.rs`, `crates/core/src/place.rs`.)*
+
+§14 v3's complaint about the old campaign is unusually specific: salvaged tech was
+"fully built and reachable by nobody — no facility was ever generated with an equipment
+cache, so no ability could ever be unlocked." Building the crate is not the interesting
+part of fixing that. Three decisions around it were.
+
+### Which facilities hide one
+
+The ticket says "a facility whose flavour calls for one", and when it was written no
+flavour did: #207 shipped *Outpost / Depot / Vault / Archive*, a ladder on two axes
+(guards for risk, consoles for reward) with nothing about tech in it. So the choice was
+to hang the cache on an existing flavour — a Vault, the rich one — or to add a flavour
+for it.
+
+**A flavour of its own, the Workshop.** Hanging it on the Vault would have made the map
+one-dimensional again in the way #207 was written to prevent: every reward would sit on
+one row, and *more of everything, watched harder* would be the only trade the country
+ever offered. The two rewards are genuinely different goods — intel is currency the run
+**spends** (§2.2, and #211's sinks), an ability is a tool the run **keeps** — and there
+is no exchange rate between them. A choice between incommensurable rewards is a
+decision; a choice between more and less of one reward is a ranking, and a ranking is
+what a flat list already was.
+
+It **costs a console** (`IntelCount::Fewer`), and that is the half that took the
+argument. Guards were the obvious price — a cache behind a heavier patrol — but a
+facility that is both poorer *and* better watched is one no player picks, which fails
+exactly as badly as one everybody picks. Paying in the *other* reward keeps the
+Workshop's row honest without making it a trap: tech instead of currency, never as well
+as. The risk that makes the crate cost something is in the building rather than on the
+map (below).
+
+The flavour cycle grew from three to four, and the §14 v3 "no two open successors ever
+share a flavour" guarantee survived untouched: it rests on three consecutive lanes
+being distinct modulo the cycle length, which holds for any cycle of three or more.
+What a longer cycle costs is coverage — with four flavours in a three-wide window, one
+is missing from any given choice point. That is the map having somewhere left to send
+you, not a shortfall.
+
+### What a crate holds, when you already hold it
+
+The ticket left this open with two named ways out: avoid the collision in the draw, or
+fall back to a small intel reward. **Avoided in the draw.** The pool is
+`AbilityId::TECH` shuffled off the facility's own seed, and the crate holds the first
+entry the run does not already carry.
+
+The consolation prize was rejected on grounds of what it would have been for: a second
+reward economy, invented to paper over a draw that could simply not make the mistake.
+It also reads badly — *you crossed the building for a crate of tech you already own,
+here is some money* is a worse moment than the game has any need to contain. ("A second
+copy upgrades the first" is a real answer, and it belongs to the ability-upgrade sink,
+which is a different ticket.)
+
+A shuffle rather than a rejection loop, so the answer is a pure function of `(seed,
+held set)` with no unbounded draw in it, and so that a run holding two of the pool meets
+the remaining six in a seeded order rather than walked down the catalogue.
+
+**An exhausted pool plants no crate.** When the run holds every piece of tech there is,
+the modifier is withdrawn before the building is carved and the facility generates
+without one — the honest reading, since there is nothing left in the world for that run
+to find, and better than an empty crate the player is invited to bump. No standard run
+reaches it (seven facilities against a pool of eight, and a level-seed token cannot
+carry more than three tech at all); it takes a hand-built loadout. It is defined and
+pinned anyway, because "unreachable" is a claim that stops being true the day a number
+moves.
+
+The draw takes the **loadout** as an input, which looks at first like a second source of
+truth for a facility's contents. It is not: a loadout is part of the `LevelSeed` a
+facility boots from, so a token still reproduces the crate exactly — including a
+campaign facility's, whose token carries the tech the run walked in with. The one thing
+this rules out is putting the contents *in* the token as a field of their own, which
+would have been a level-seed format bump (§8 of the token spec) for a value already
+derivable from two fields the token has.
+
+### Where it stands, and why it is still reachable
+
+The crate is planted at least `PLAYER_CACHE_MIN_DISTANCE` (16 **[START]**, the comms
+console's own number) from the mouth the run climbs out of. §2.3 is the whole reason:
+an optional reward sat near the way in is a free grab on the way past, and a choice
+nobody has to make. Sat a real detour deep, taking it is turns and exposure spent
+against a permanent ability — which is the trade the flavour advertised on the map.
+
+And it is held to the §10.6 reachability flood, which reads at first like a
+contradiction: the ticket calls a cache an *optional* reward, so why must every seed
+guarantee you can reach it? Because **choosing to skip it and being unable to reach it
+are not the same thing, and only the first is a decision.** A crate sealed behind
+geometry is the campaign's power curve silently deleted from that facility — which is
+the failure §14 v3 records the axis having already suffered once, arrived at from a
+different direction. It is the same argument that puts the comms console in the flood
+(§7.7: unreachable counterplay is no counterplay), and it costs a redraw on the rare
+seed that trips it.

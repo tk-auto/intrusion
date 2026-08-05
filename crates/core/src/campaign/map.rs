@@ -388,11 +388,16 @@ impl FacilityMap {
     /// per depth from the run seed.
     ///
     /// That buys the guarantee outright: the open successors of a node are distinct lanes
-    /// inside a window three wide ([`open_lanes`]), and any two distinct values in three
-    /// consecutive integers differ modulo three — so **every open offer is a choice
-    /// between different things**, on every seed, at every node, with no rejection loop
-    /// and no draw that could fail. The rotation is what stops that being a fixed stripe
-    /// down the country.
+    /// inside a window three wide ([`open_lanes`]), and any two distinct values inside a
+    /// window of three consecutive integers differ modulo any cycle length of three or
+    /// more — so **every open offer is a choice between different things**, on every
+    /// seed, at every node, with no rejection loop and no draw that could fail. The
+    /// rotation is what stops that being a fixed stripe down the country.
+    ///
+    /// It therefore survived the cycle growing from three flavours to four (#209), and
+    /// would survive a fifth. What a longer cycle costs is *coverage*: with four
+    /// flavours over a three-wide window, one of them is missing from any given choice
+    /// point — which is the map having somewhere to send you rather than a shortfall.
     ///
     /// And it is still a property of the *node*: two runs standing on the same facility
     /// see the same flavour, whichever way they came.

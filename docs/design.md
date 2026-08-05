@@ -1040,6 +1040,19 @@ whole reason the architecture looks the way it does.
 
 **Salvaged tech** — found in the facility:
 
+> **Where it is found: the equipment cache** (§14 v3, #209). A campaign facility whose
+> flavour calls for one hides exactly one **crate** (`¤`, §10.3/§11.2 Interest) —
+> **bump it** to salvage the tech inside (§4.3's one interaction verb, the console's
+> pattern with a different prize). What you find is **usable that turn** and carried
+> by the run for every facility after it (§2.2); nothing carries out of the run.
+> **Which** tech a crate holds is drawn from the facility's own seed over the tech the
+> run does **not** already hold, so a cache never offers you a fifth Dephase; a run
+> that somehow held all of it would find no crate at all rather than an empty one.
+> The crate is planted a real detour from the way in (§10.6) and is **optional** — the
+> campaign's exit never asks for it (§4.5), so walking past one is a legal and
+> sometimes correct choice. Quick play plants none: a single facility has no *rest of
+> the run* to accumulate into (§2.2).
+
 | Ability | Cost | Duration | Cooldown | Effect |
 |---|---|---|---|---|
 | **Camouflage** | 1 turn | 10 | 20 | Undetectable **while you don't move**. Moving reveals you for that turn. |
@@ -1584,6 +1597,7 @@ fail**. Guard the minimum.
 | **Partial cover (table)** | `π` | Yes | **No** | Yes |
 | **Console** | `$` | Yes | No | Yes — the bump *uses* it |
 | **Comms console** | `Ψ` | Yes | No | Yes — the bump *uses* it |
+| **Equipment cache** | `¤` | Yes | No | Yes — the bump *uses* it |
 | **Exit** | `E` | Yes | No | Yes — the bump *uses* it |
 | **Player** | `@` | Yes | No | No |
 | **Guard** | `g` | Yes | No | No |
@@ -1802,6 +1816,7 @@ guard cooperation, assigned patrols, keys and circuits unbuilt (appendix 16).
 | **A path exists: start → every objective → the comms console → exit** | **Assert it. See below.** The flood starts where the player first sets foot in the facility: the cells they can climb out of `E` onto (#466) |
 | **The exit's tunnel reaches the border, over inert geometry** | A straight run of plain wall or floor, 4–12 cells, sharing no cell with a §10.7 shortcut; a candidate `E` without one is redrawn |
 | **The comms console is a real detour** | ≥ 16 cells from the spawn, non-start room **[START]** (§7.3) |
+| **An equipment cache is a real detour, and reachable** | ≥ 16 cells from the spawn, non-start room **[START]**, and in the reachability flood above (§14 v3). Optional to *take*, never optional to *reach*: a crate you cannot bump is not a choice you declined |
 | **One usable beside any floor cell (preferred)** | Conflict-aware stamping, best-effort; the arrow disambiguates the rest. See below. |
 
 **Do not rely on a structural argument. Assert reachability and reject the seed.**
@@ -3003,7 +3018,8 @@ deliberately distinct:
   alert, and higher alert switches on harder modifiers for later facilities. This
   is where *"levels adapt to the strategy you lean on"* (§2) lives.
 - **Flavour** (per-node) — a facility's own character on the campaign map (#207): an
-  *Outpost* is thin and thinly guarded, a *Vault* rich and watched. A flavour **is**
+  *Outpost* is thin and thinly guarded, a *Vault* rich and watched, a *Workshop* has a
+  crate in it and thin pickings otherwise (#209). A flavour **is**
   the modifier set it contributes and nothing else, which is what stops the map's
   branches from being three differently-worded labels on the same facility (§2.3).
 
@@ -3362,9 +3378,11 @@ bullet below fills one of its seams.
   - **Flavours are visible when offered** [SETTLED] — no fog, because the choice *is*
     the mechanic and a choice made blind is a coin flip. The starting set [START] is
     *Outpost* (one guard and one console fewer), *Depot* (the §10.2 recipe untouched),
-    *Vault* (one more of each) and the *Archive*. Two axes, risk and reward, so no
-    option is simply the right answer; a flavour reaches the facility through the §12.6
-    flavour source, so what the map said and what the building is are one statement.
+    *Vault* (one more of each), *Workshop* (an **equipment cache**, and one console
+    fewer to pay for it — #209) and the *Archive*. Three axes now, risk and the two
+    rewards, so no option is simply the right answer; a flavour reaches the facility
+    through the §12.6 flavour source, so what the map said and what the building is are
+    one statement.
   - **No two open successors ever share a flavour** [SETTLED]. The flavours are a fixed
     cycle laid across the lanes and rotated per depth, so this is guaranteed by
     construction rather than by a rejection loop — a branch whose options generate the
@@ -3398,6 +3416,24 @@ bullet below fills one of its seams.
   and it is the reason the campaign exists. It was fully built last time and
   reachable by nobody: no facility was ever generated with an equipment cache, so
   no ability could ever be unlocked. The progression axis existed only on paper.
+  - **The cache is a facility's, and the flavour is what calls for one** (#209). A
+    **Workshop** hides one crate; every other flavour hides none, so the tech axis is
+    something you *route toward* on the map rather than something every raid hands
+    over. It is a third position on the reward axis and not a fourth rung of the
+    same ladder: a Vault pays in **intel**, which the run spends, and a Workshop in
+    an **ability**, which the run keeps — two rewards you cannot convert between,
+    which is what makes a choice point a decision rather than a ranking.
+  - **And it costs a console.** A Workshop holds one intel fewer than the recipe
+    asks for, so the trade is tech *instead of* currency, never as well as (§2.3).
+    Guards stay at the recipe's count: a facility both poorer *and* better watched
+    is one nobody picks, which fails the same way as one everybody does.
+  - **Caches do not repeat within a run**, and the collision is avoided **in the
+    draw** rather than paid off with a consolation prize — the crate holds the first
+    entry of a seeded shuffle the run does not already carry. "A second copy upgrades
+    the first" belongs to the ability-upgrade sink, not here. Appendix 38.
+  - **Found tech is usable the turn it is found**, in the facility it was found in.
+    A reward that only switched on after extraction would make the detour a deposit
+    toward a later raid rather than a tool for this one.
 - Intel as a real currency, with actual sinks: reveal facility intel, unlock an
   alternative route, lower the alert, upgrade an ability.
 - Difficulty that scales with the alert level, driven through the level-modifier

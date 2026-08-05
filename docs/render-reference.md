@@ -83,6 +83,7 @@ put two opposite readings in one ink on one piece of furniture.
 | `=` | Duct mouth | System; **memory slate** once scouted and out of view (§3) |
 | `$` | Intel console | Interest; **Neutral** once spent |
 | `Ψ` | Comms console | Interest; **Neutral** once used |
+| `¤` | Equipment cache — salvaged tech (§2.2/§14 v3) | Interest; **Neutral** once emptied |
 | `E` | The exit | Interest |
 
 Floor draws as a **dot inside your field of view and as nothing outside it**
@@ -101,9 +102,19 @@ nothing. The full argument, and the consequences that fell out of it, are
 
 Two glyphs recolour rather than change shape when their meaning shifts — a spent
 console (`$` Interest → Neutral) and a hiding place holding *you* (`}` System →
-Owned). Shape is *what it is*; colour is *what it means to you now*.
+Owned). Shape is *what it is*; colour is *what it means to you now*. An emptied
+equipment cache (`¤`) is the spent console's rule applied to a third glyph: the crate
+is still standing there, and there is nothing left in it.
 
-The **contents** rows — `}`, `=`, `$`, `Ψ` — take the memory slate rather than the
+**Why `¤` for the cache, and why not another console.** The three bump-to-use goals sit
+in one category, so what tells them apart is shape alone — and the distinction is
+worth drawing sharply, because *what a bump gets you* is the whole difference between
+them: intel to spend, a radio net to kill, an ability to keep (§8.3). `¤` reads as a
+crate rather than as a terminal, which is what a cache is, and it is a mark the board
+uses nowhere else. It is deliberately **not** a letter: the board's letters are actors
+(`g`, `z`) and the one thing the run is aiming at (`E`).
+
+The **contents** rows — `}`, `=`, `$`, `Ψ`, `¤` — take the memory slate rather than the
 dim shade once they are out of view, which is the §3 knowledge state and not a
 category of their own. Only `=` names it in the table above, because it is the one
 whose layer moved (#450) and the note is there to stop it drifting back.
@@ -264,15 +275,18 @@ table is that a glyph is not free to mean two things.
 | `o` | An **Outpost** — thin, and thinly guarded | Neutral; **Interest** when marked |
 | `▪` | A **Depot** — the ordinary facility | Neutral; **Interest** when marked |
 | `$` | A **Vault** — worth robbing, and watched | Neutral; **Interest** when marked |
+| `¤` | A **Workshop** — salvage, and little else | Neutral; **Interest** when marked |
 | `★` | The **archive** — the run's terminus | Interest |
 | `?` | An intel-locked route, not yet bought | Ground |
 | `▫` | A facility on the map, not on offer | Ground |
 | `·` | A road between two facilities | Ground |
 | *(any of the above)* | A facility already raided | Ground |
 
-**Three glyphs are borrowed, and each says the same thing it says on the board.** `@`
+**Four glyphs are borrowed, and each says the same thing it says on the board.** `@`
 is you, so *you are here* needs no legend. `$` is the intel console, so the rich
-facility reads as *the place with the loot in it*. And a facility that has been raided
+facility reads as *the place with the loot in it*, and `¤` is the equipment cache, so a
+Workshop is *the place with the crate in it* on the same terms — one glyph, one
+meaning, across both screens. And a facility that has been raided
 recolours to Ground exactly as a spent console does (§2.2's recolour rule): shape is
 what it is, colour is what it means to you now.
 
