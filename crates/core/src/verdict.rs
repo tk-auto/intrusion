@@ -23,6 +23,8 @@
 //! reusing this screen. §14 v3 does not exist yet; the gate does, in shape, which is
 //! the whole point of writing it down now (see design appendix 31).
 
+use serde::{Deserialize, Serialize};
+
 use crate::ability::Loadout;
 use crate::cell::Cell;
 use crate::difficulty::Difficulty;
@@ -34,7 +36,7 @@ use crate::level_seed::LevelSeed;
 /// One variant per way a run can stop, each carrying exactly what the end screen has
 /// to say and nothing more. The two losses are genuinely different facts and read
 /// differently: a guard reached you, or the wall did (§8.3's phase safety, #329).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Ending {
     /// A guard walked into the player (§4.5) — the game's one ordinary loss.
     ///
@@ -137,7 +139,7 @@ pub struct Verdict {
 /// Not a difficulty and not a level modifier (§12.6): those bend the facility, and
 /// this bends nothing inside it. It says what the run *is for* — practice, or the
 /// run itself — and the only thing that reads it is [`exits`](Self::exits).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum RunMode {
     /// Quick play (§10.2/§14 v1): one tuned facility, played as **training**. The
     /// level is a building to learn, so the end screen hands back the same level and
@@ -173,7 +175,7 @@ impl RunMode {
 /// is already resolved into a level's modifiers by the time it boots (§12.6/#298) —
 /// what is kept here is the *setting the player chose*, which is what "a new run with
 /// the same options" means.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct RunOptions {
     /// Whether this is a training run or the campaign — the exit gate.
     pub mode: RunMode,

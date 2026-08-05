@@ -22,6 +22,8 @@
 //! ([`State::affordances`](crate::State::affordances)), recomputed every frame
 //! with no plumbing to clear.
 
+use serde::{Deserialize, Serialize};
+
 use crate::category::Category;
 use crate::control::transfers_control;
 use crate::state::{Event, State};
@@ -32,7 +34,7 @@ pub use history::{MessageHistory, HISTORY_ACTIONS};
 /// One §11.7 message: what the near line says, the §11.2 category that colours
 /// its band, and its rung on the priority ladder. (A source cell joins when
 /// modal source-anchored messages land.)
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Message {
     /// The words. Kept short: the near line is one grid row.
     pub text: String,

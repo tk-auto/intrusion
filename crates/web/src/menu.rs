@@ -51,10 +51,25 @@ pub(crate) const SCREEN_PLAY: &str = "play";
 /// separately so the headless smoke check can tell a map from a board.
 pub(crate) const SCREEN_MAP: &str = "map";
 
-/// The view state a fresh load opens on: the menu's entry list, Quick play selected.
-pub(crate) fn opening_ui() -> ScreenUi {
+/// The view state a fresh load opens on: the menu's entry list, with the marker on
+/// the row a player is most likely to want.
+///
+/// `resumable` says whether the shell found a run to continue (§12.5/#514). When it
+/// did, *Continue run* is listed **and** marked: someone with an interrupted run came
+/// back for it, so resuming is one keypress from the load and starting a fresh run
+/// over it stays a deliberate move down the list. Otherwise the screen is the one it
+/// has always been, Quick play selected.
+pub(crate) fn opening_ui(resumable: bool) -> ScreenUi {
     ScreenUi {
-        menu: Some(MenuUi::default()),
+        menu: Some(MenuUi {
+            continue_run: resumable,
+            selected: if resumable {
+                MenuEntry::ContinueRun
+            } else {
+                MenuEntry::default()
+            },
+            ..MenuUi::default()
+        }),
         ..ScreenUi::default()
     }
 }
@@ -121,9 +136,9 @@ impl Game {
         match nav {
             // The list walks only while the list is showing: with the seed prompt up,
             // up/down belong to the text box, not to a selection nobody can see.
-            MenuNav::Prev if on_list(menu) => self.select(menu.selected.prev()),
-            MenuNav::Next if on_list(menu) => self.select(menu.selected.next()),
-            MenuNav::Activate if on_list(menu) => self.choose(menu.selected),
+            MenuNav::Prev if on_list(menu) => self.select(menu.prev_entry()),
+            MenuNav::Next if on_list(menu) => self.select(menu.next_entry()),
+            MenuNav::Activate if on_list(menu) => self.choose(menu.selection()),
             // The level-options dialog (#298). Up and down walk its two controls —
             // the ring is two long, so both steps are the same move — while the
             // horizontal pair sets the slider whichever control is marked, which is
@@ -180,6 +195,10 @@ impl Game {
 
     pub(crate) fn choose(&mut self, entry: MenuEntry) {
         match entry {
+            // The saved run, straight back in (§12.5/#514) — no dialog in front of it:
+            // the run's options were settled when it started, and the only thing this
+            // row can be asked is *the one I was playing*.
+            MenuEntry::ContinueRun => self.continue_run(),
             // Quick play opens its **pre-run** dialog rather than booting straight in
             // (#298): the difficulty is a choice about the run, so it is asked before
             // there is a run. `MenuEntry::Options` stays inert — that is §14 v2's

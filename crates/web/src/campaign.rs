@@ -64,6 +64,11 @@ impl Game {
         };
         self.draw();
         crate::menu::set_screen(SCREEN_MAP);
+        // The map is a **save-worthy moment** of its own (§12.5/#514). Between raids no
+        // turn is taken, so without this the run would only ever be written from inside
+        // a facility — and a campaign closed at the choice point would come back at the
+        // last one it stood on. Covers the run starting, and each raid banking.
+        self.autosave_moment();
     }
 
     /// Apply a [`MapNav`] from the map screen — walk the list, or raid the marked
@@ -125,6 +130,9 @@ impl Game {
             self.ui.map = Some(map.saying(outlay));
         }
         self.draw();
+        // A purchase moves the run without a turn (§14 v3/#212), so it arms its own
+        // write: intel spent and then reloaded away would be a road bought twice.
+        self.autosave_moment();
     }
 
     /// Move the marker and repaint.

@@ -51,6 +51,8 @@
 //! handed over, a part of the map that was not on offer. What stands on that ground is
 //! whatever the seed put there, exactly as everywhere else.
 
+use serde::{Deserialize, Serialize};
+
 use crate::modifiers::{CacheCount, GuardCount, IntelCount, LevelModifiers};
 use crate::rng::Rng;
 
@@ -350,7 +352,7 @@ pub struct Offer {
 /// list and no cursor — those are what a pre-generated world needs, and every one of them
 /// is a copy of something the seed already says. Growing the graph is therefore free, and
 /// asking the same question twice cannot give two answers.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct FacilityMap {
     seed: u64,
     depth: u32,

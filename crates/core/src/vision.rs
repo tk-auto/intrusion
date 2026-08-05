@@ -36,6 +36,8 @@
 //! they leaned one step forward. The union steps outside the symmetry property on
 //! purpose; see the function for the rule and the rationale.
 
+use serde::{Deserialize, Serialize};
+
 use crate::cell::{Cell, Direction};
 use crate::facility::Facility;
 
@@ -170,7 +172,7 @@ impl BlindPolicy {
 /// A default-constructed set is empty and contains nothing; it is the placeholder a
 /// viewer carries before its first sight phase runs (§4.2 runs one full turn at
 /// level start, so no live [`State`](crate::State) ever exposes one).
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct VisibleSet {
     width: u32,
     height: u32,

@@ -11,6 +11,8 @@
 //!    seed produces can never drift between releases. (Rust's default `rand`
 //!    generator explicitly does *not* guarantee this across versions.)
 
+use serde::{Deserialize, Serialize};
+
 use rand_core::{RngCore, SeedableRng};
 use rand_pcg::Pcg64Mcg;
 
@@ -19,7 +21,7 @@ use rand_pcg::Pcg64Mcg;
 /// Clone it only when you deliberately want two identical streams (e.g. a
 /// speculative lookahead); otherwise pass `&mut Rng` so a single stream advances
 /// in a well-defined order.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rng {
     inner: Pcg64Mcg,
 }

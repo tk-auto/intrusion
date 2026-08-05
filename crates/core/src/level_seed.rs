@@ -80,6 +80,8 @@
 //! is the very facility any of them plays (§13.2). A run's identity lives in one
 //! place, and there is no second "almost the same" boot to drift from it.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ability::{AbilityId, Loadout};
 use crate::cell::Direction;
 use crate::difficulty::Difficulty;
@@ -345,7 +347,7 @@ const fn scramble_from(magic: u64, nonce: u64) -> u128 {
 /// Everything random in a run derives from `seed` (§12.4); `modifiers` and
 /// `abilities` are the config that now also shapes it (#225/#244). A [`LevelSeed`]
 /// plus a replay's `[inputs]` reproduces a run byte-for-byte.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct LevelSeed {
     /// The run's random seed (§12.4) — the facility is carved from it.
     pub seed: u64,

@@ -41,6 +41,8 @@
 //! it — a run cannot walk away from a crate mid-decision in one of them and not in the
 //! others (§12.4).
 
+use serde::{Deserialize, Serialize};
+
 use crate::ability::{AbilityId, Loadout};
 use crate::cell::Cell;
 
@@ -50,7 +52,7 @@ use crate::cell::Cell;
 /// the player has merely chosen to *look at* costs no turn (§12.1), and this is a
 /// decision the facility is waiting on. It carries the crate's cell so the trade can
 /// mark that crate opened — the same crate, however the player got here.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Exchange {
     /// The tech in the crate: the fourth thing, and the only candidate not already held.
     offered: AbilityId,
