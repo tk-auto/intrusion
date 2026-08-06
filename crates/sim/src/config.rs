@@ -267,7 +267,7 @@ impl RunConfig {
 /// and deliberately so: one concept, one spelling, and a reader of a command line can
 /// find the field it names by searching for it.
 type SetModifier = fn(&mut LevelModifiers);
-const MODIFIERS: [(&str, SetModifier); 15] = [
+const MODIFIERS: [(&str, SetModifier); 16] = [
     ("guards-always-search-hideouts", |m| {
         m.guards_always_search_hideouts = true
     }),
@@ -349,6 +349,17 @@ const MODIFIERS: [(&str, SetModifier); 15] = [
     // is the ground that *is* safe. No new cue — what changed is the board the existing
     // ones read.
     ("narrowed-guard-cones", |m| m.narrowed_guard_cones = true),
+    // The **pre-level scout** (§11.5a/§14 v3/#215), read at boot: it seeds tile memory
+    // and touches neither the carve nor placement, so a batch that names it plays the
+    // baseline's building with the consoles, crates and cupboards already on the board.
+    //
+    // **The bot plays this one honestly**, which is what makes it worth a name at all
+    // (`docs/bot-behaviour.md` §2): its explore→take→leave loop routes to the objectives
+    // it *remembers* (`State::memory`), so a scouted facility is one it can walk straight
+    // into — exactly the advantage the player buys. What it cannot weigh is the **price**
+    // (the sim plays single facilities and has no wallet), so a batch here measures what
+    // foreknowledge is worth, never whether it is worth three intel.
+    ("scouted", |m| m.scouted = true),
     // `calm-guards-detect-only-their-cone` is **not** here: slot 5 is retired (#442)
     // and its rule is the baseline, so a name that set it would offer the operator a
     // sweep that measures nothing. The destructure in the test below still names the
@@ -651,6 +662,7 @@ mod tests {
             caches,
             prize_room_locked,
             narrowed_guard_cones,
+            scouted,
             intel_to_exit,
         } = all.modifiers;
         assert!(prize_room_locked);
@@ -662,6 +674,7 @@ mod tests {
         assert!(guards_watch_consoles);
         assert!(show_search_areas);
         assert!(narrowed_guard_cones);
+        assert!(scouted);
         // The knob's two ends are two names over one field, so naming both leaves the
         // one named last rather than accumulating — see [`RunConfig::with_modifier`].
         assert_eq!(guard_count, GuardCount::Fewer);

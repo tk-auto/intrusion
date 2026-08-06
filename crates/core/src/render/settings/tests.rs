@@ -194,11 +194,17 @@ fn a_debug_row_is_inked_like_any_other() {
             "{row:?} reads like every other row",
         );
     }
-    // The gate is the heading's alone, and it keeps its own cue.
+    // **The two headings read alike too** — System, the panel's own heading colour. The
+    // gate is the word and the gap, not an alarm colour over the section most sessions
+    // never see.
     assert_eq!(
-        grid.get(column, DEBUG_HEADING_ROW).fg,
-        Category::Warning,
-        "the DEBUG heading still says what it is",
+        grid.get(SECTION_INDENT, DEBUG_HEADING_ROW).fg,
+        grid.get(SECTION_INDENT, DISPLAY_HEADING_ROW).fg,
+        "the DEBUG heading is inked like the DISPLAY one",
+    );
+    assert_eq!(
+        grid.get(SECTION_INDENT, DEBUG_HEADING_ROW).fg,
+        Category::System,
     );
     // Both sections are laid out the same way: heading, a blank, then the first row.
     assert_eq!(
@@ -421,4 +427,3 @@ fn a_tiny_board_clips_rather_than_panicking() {
         assert_eq!((grid.width(), grid.height), (w, h));
     }
 }
-

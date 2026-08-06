@@ -298,7 +298,11 @@ impl VisibleSet {
 
     /// Mark `cell` seen. Off-grid coordinates are ignored — the caster probes the
     /// box edge freely and the grid boundary simply absorbs it.
-    fn mark(&mut self, cell: Cell) {
+    ///
+    /// `pub(crate)` for the **pre-level scout** (§11.5a/#215), which writes tile memory
+    /// at boot rather than through a sight phase: what it hands over is the same fact a
+    /// sighting leaves behind, so it goes in through the same door.
+    pub(crate) fn mark(&mut self, cell: Cell) {
         if cell.x < self.width && cell.y < self.height {
             self.seen[(cell.y * self.width + cell.x) as usize] = true;
         }

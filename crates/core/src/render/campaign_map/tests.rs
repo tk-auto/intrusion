@@ -107,7 +107,7 @@ fn the_map_draws_the_country_the_run_is_in() {
             "                                        ",
             "                                        ",
             "                                        ",
-            "  ↑↓ choose · Enter/tap raids theme [n] ",
+            "  ↑↓ choose · Enter/tap opens theme [n] ",
         ],
     );
 }
@@ -356,7 +356,7 @@ fn a_price_the_run_cannot_meet_is_drawn_as_out_of_reach() {
         // Off the marker, so the marker's own Interest is not what is being read.
         let ui = MapUi {
             selected: if i == 0 { 1 } else { 0 },
-            outlay: None,
+            ..MapUi::default()
         };
         let grid = render_map(W, H, run, ui);
         grid.get(list_column(W, &ahead) + 2, row_of(H, i)).fg
@@ -545,7 +545,7 @@ fn the_screen_names_a_category_for_everything_it_draws() {
 
     // The marked row moves its Interest with it, and takes the node's colour along.
     let ahead = run.ahead();
-    let marked = MapUi::default().next(&ahead);
+    let marked = MapUi::default().next(&run);
     let grid = render_map(W, H, &run, marked);
     let map = run.map();
     let (x, y) = plot(
@@ -571,7 +571,7 @@ fn the_marker_walks_every_row_including_the_priced_one() {
     let mut ui = MapUi::default();
     let mut walked = vec![ui.selected(&ahead)];
     for _ in 0..ahead.len() {
-        ui = ui.next(&ahead);
+        ui = ui.next(&run);
         walked.push(ui.selected(&ahead));
     }
     assert_eq!(
@@ -580,7 +580,7 @@ fn the_marker_walks_every_row_including_the_priced_one() {
         "next walks every row and wraps to the first",
     );
     assert_eq!(
-        MapUi::default().prev(&ahead).selected(&ahead),
+        MapUi::default().prev(&run).selected(&ahead),
         ahead.len() - 1,
         "prev past the first wraps to the last row",
     );
@@ -590,7 +590,7 @@ fn the_marker_walks_every_row_including_the_priced_one() {
     for stale in [ahead.len(), 99] {
         let resolved = MapUi {
             selected: stale,
-            outlay: None,
+            ..MapUi::default()
         }
         .selected(&ahead);
         assert!(
@@ -603,8 +603,8 @@ fn the_marker_walks_every_row_including_the_priced_one() {
     // left is a message about nothing.
     let saying = MapUi::default().saying(Outlay::Closed);
     assert_eq!(saying.outlay, Some(Outlay::Closed));
-    assert_eq!(saying.next(&ahead).outlay, None);
-    assert_eq!(saying.prev(&ahead).outlay, None);
+    assert_eq!(saying.next(&run).outlay, None);
+    assert_eq!(saying.prev(&run).outlay, None);
 }
 
 /// **Every row is reachable by finger too** (§11.6): a press anywhere along it raids that
@@ -625,7 +625,7 @@ fn a_press_on_a_row_does_what_that_row_says() {
         assert_eq!(Some(hit_of(*offer)), expected, "row {i}");
         for x in [0, W / 2, W - 1] {
             assert_eq!(
-                map_hit(W, H, &run, x, row),
+                map_hit(W, H, &run, MapUi::default(), x, row),
                 expected,
                 "row {i} at column {x}"
             );
@@ -633,7 +633,7 @@ fn a_press_on_a_row_does_what_that_row_says() {
         // The blank beneath each row is the buffer that keeps a low tap off its
         // neighbour, exactly as the title screen's is.
         assert_eq!(
-            map_hit(W, H, &run, W / 2, row + 1),
+            map_hit(W, H, &run, MapUi::default(), W / 2, row + 1),
             None,
             "the gap under row {i}",
         );
@@ -642,7 +642,7 @@ fn a_press_on_a_row_does_what_that_row_says() {
     // finger can hit — the row underneath is how you pick it.
     let map = run.map();
     let (x, y) = plot(map.position(ahead[0].node), map.depth(), W, map_height(H));
-    assert_eq!(map_hit(W, H, &run, x, y), None);
+    assert_eq!(map_hit(W, H, &run, MapUi::default(), x, y), None);
 }
 
 /// **The theme control keeps its corner** (§11.2/#189), and the footer never runs into
@@ -660,8 +660,14 @@ fn the_footer_and_the_theme_control_never_meet() {
     );
 
     let theme = theme_control_start(W);
-    assert_eq!(map_hit(W, H, &run, theme, H - 1), Some(MapHit::ToggleTheme));
-    assert_eq!(map_hit(W, H, &run, theme - 1, H - 1), None);
+    assert_eq!(
+        map_hit(W, H, &run, MapUi::default(), theme, H - 1),
+        Some(MapHit::ToggleTheme)
+    );
+    assert_eq!(
+        map_hit(W, H, &run, MapUi::default(), theme - 1, H - 1),
+        None
+    );
 }
 
 /// **The list never runs into the footer either**, in the widest offer a choice point

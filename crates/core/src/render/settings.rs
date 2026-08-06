@@ -250,8 +250,9 @@ impl SettingsUi {
     }
 }
 
-/// The two section headings. `DISPLAY` is what a player came here for; `DEBUG` names
-/// the gate rather than hiding it (§12.6).
+/// The two section headings, drawn alike in the panel's own heading colour. `DISPLAY`
+/// is what a player came here for; `DEBUG` names the gate rather than hiding it (§12.6),
+/// and naming it is the whole of what it has to do.
 const DISPLAY_HEADING: &str = "DISPLAY";
 const DEBUG_HEADING: &str = "DEBUG";
 
@@ -422,16 +423,19 @@ pub(super) fn draw_settings(
         Category::System,
     );
 
-    // The debug section's heading in **Warning** — the standing "this is not the
-    // ordinary thing" cue (§11.2), never new ad-hoc styling — so the boundary between a
-    // preference and a playtest switch is visible before either is read (§12.6).
+    // **Both headings read alike** — System, the panel's own heading colour, as
+    // `THIS RUN` and `MODIFIERS` do one tab over. The debug section was drawn in Warning
+    // to mark the gate, and that made it the brightest thing on a tab whose *preferences*
+    // are what a player came for: an alarm colour over two switches most sessions never
+    // see. The word `DEBUG` names the gate perfectly well on its own, and the widest gap
+    // on the tab sets it apart (§12.6 — the split has to be unmistakable, not loud).
     if ui.debug_mode {
         draw(
             grid,
             SECTION_INDENT,
             DEBUG_HEADING_ROW,
             DEBUG_HEADING,
-            Category::Warning,
+            Category::System,
         );
     }
 

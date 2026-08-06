@@ -27,7 +27,10 @@
 //! run won. Both are already what [`CampaignStage::is_over`] answers, so the shell asks
 //! that rather than deciding for itself.
 
-use intrusion_core::{Campaign, CampaignStage, MapHit, MapNav, MapUi, NodeId, ScreenUi, Verdict};
+use intrusion_core::{
+    map_activation, Campaign, CampaignStage, MapHit, MapNav, MapScreen, MapUi, NodeId, Outlay,
+    ScreenUi, Verdict,
+};
 
 use crate::menu::{SCREEN_MAP, SCREEN_PLAY};
 use crate::{seed, Game};
@@ -71,19 +74,27 @@ impl Game {
         self.autosave_moment();
     }
 
-    /// Apply a [`MapNav`] from the map screen — walk the list, or raid the marked
-    /// facility.
+    /// Apply a [`MapNav`] from the map screen — walk the rows, fire the marked one, or
+    /// leave the facility brief.
     pub(crate) fn apply_map_nav(&mut self, nav: MapNav) {
-        let Some(ahead) = self.campaign.as_ref().map(|run| run.ahead()) else {
+        let Some(run) = self.campaign.as_ref() else {
             return;
         };
         let Some(map) = self.ui.map else { return };
         match nav {
-            MapNav::Prev => self.select_facility(map.prev(&ahead)),
-            MapNav::Next => self.select_facility(map.next(&ahead)),
+            MapNav::Prev => self.select_facility(map.prev(run)),
+            MapNav::Next => self.select_facility(map.next(run)),
             MapNav::Activate => {
-                if let Some(&offer) = ahead.get(map.selected(&ahead)) {
-                    self.apply_map_hit(intrusion_core::hit_of(offer));
+                if let Some(hit) = map_activation(run, map) {
+                    self.apply_map_hit(hit);
+                }
+            }
+            // **Dropped on the map's own list** (#215): `Escape` leaves the brief, and
+            // there is nowhere back from the list itself (§2.2). The core's key table is
+            // stateless, so this is the one place that knows which screen is up.
+            MapNav::Back => {
+                if matches!(map.screen, MapScreen::Brief(_)) {
+                    self.select_facility(map.closing());
                 }
             }
             MapNav::ToggleTheme => {
@@ -96,13 +107,20 @@ impl Game {
     /// Apply a press on the map screen (§11.6) — the touch half of
     /// [`apply_map_nav`](Self::apply_map_nav).
     ///
-    /// A tap on a row **raids it outright**, exactly as a tap on a menu entry starts a
-    /// run: the row is the target, and the arm-on-press / fire-on-lift path the tap
-    /// pump already enforces is what keeps a stray press off it (#306).
+    /// A tap on a facility row **opens its brief** rather than raiding it (#215), so the
+    /// one irreversible press of a campaign (§2.1) is a row on a screen the player asked
+    /// for, not the first thing a finger lands on.
     pub(crate) fn apply_map_hit(&mut self, hit: MapHit) {
         match hit {
-            MapHit::Facility(node) => self.raid(node),
-            MapHit::Unlock(node) => self.unlock(node),
+            MapHit::Facility(node) => self.open_brief(node),
+            MapHit::Unlock(node) => self.buy(|run| run.unlock(node)),
+            MapHit::Enter(node) => self.raid(node),
+            MapHit::Scout(node) => self.buy(|run| run.scout(node)),
+            MapHit::Back => {
+                if let Some(map) = self.ui.map {
+                    self.select_facility(map.closing());
+                }
+            }
             MapHit::ToggleTheme => {
                 self.ui.theme = self.ui.theme.toggled();
                 self.draw();
@@ -110,22 +128,32 @@ impl Game {
         }
     }
 
-    /// **Buy the alternative route** (§14 v3/#212) and say what happened.
+    /// **Open a facility's brief** (#215) — the sub-screen that says what may be done about
+    /// it, and what that costs. Changes no world and moves no run: the campaign is untouched
+    /// until a row of the brief is fired.
+    fn open_brief(&mut self, node: NodeId) {
+        if let Some(map) = self.ui.map {
+            self.select_facility(map.opening(node));
+        }
+    }
+
+    /// **Spend intel at the hub** (§14 v3/#212/#215) and say what happened — the one path
+    /// every sink's purchase takes.
     ///
-    /// The rule is [`Campaign::unlock`]'s — whether the row is a locked offer, whether the
-    /// wallet covers it, what comes out — and the shell's whole part is putting the answer
-    /// somewhere the player reads it. Paid or refused, the map redraws with the outlay on
-    /// the wallet line; a paid one has already flipped the row to takeable underneath it,
-    /// so the next press raids where this one bought.
+    /// The rule is the campaign's — whether the row is a live offer, whether the wallet
+    /// covers it, what comes out — and the shell's whole part is putting the answer
+    /// somewhere the player reads it. Paid or refused, the screen redraws with the outlay
+    /// on the wallet line; a paid one has already changed what the rows say underneath it,
+    /// so the next press acts on what this one bought.
     ///
     /// The map does **not** come back up from scratch: `show_map` resets the marker, and a
     /// purchase should leave the player on the row they just bought rather than back at the
     /// top of a list they were part-way down.
-    fn unlock(&mut self, node: NodeId) {
+    fn buy(&mut self, spend: impl FnOnce(&mut Campaign) -> Outlay) {
         let Some(run) = self.campaign.as_mut() else {
             return;
         };
-        let outlay = run.unlock(node);
+        let outlay = spend(run);
         if let Some(map) = self.ui.map {
             self.ui.map = Some(map.saying(outlay));
         }

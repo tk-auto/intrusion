@@ -148,6 +148,31 @@ impl NodeId {
 /// replaced.
 pub const ROUTE_UNLOCK_COST: u32 = 1;
 
+/// **What scouting a facility costs** (§14 v3's pre-level intel sink, #215) — the price of
+/// a plan of the building ahead: its consoles, its crates and its cupboards, drawn in the
+/// §11.5a remembered state from turn one.
+///
+/// **[START], and it is a facility's whole haul.** Three consoles is what the §10.2 recipe
+/// puts in a building, so scouting one facility costs what raiding one earns: the sink is
+/// deliberately the expensive end of the hub, because what it sells is the largest thing
+/// intel can buy — the §10 exploration of an entire building, answered before turn one. A
+/// price that let a run scout every facility it walked into would make the fog a formality
+/// rather than a thing the player pays to lift.
+///
+/// **What that price actually asks for.** No run can scout its *first* facility, and few
+/// can scout two in a row: three intel is two or three raids' surplus once the other sinks
+/// have taken their share, so scouting is the thing a run saves up for and spends on the
+/// facility it is most afraid of. That is the decision the sink exists to sell, and the
+/// reason it is priced three rather than one — see [`ROUTE_UNLOCK_COST`], which is one
+/// because a blind road is worth a third of what a known building is.
+///
+/// **The §2.3 answer to *when would a good player choose not to?*** is on the map beside
+/// it. The same wallet buys the alternative route and the sinks after it, so a facility
+/// scouted is three roads not bought; and the scout is bought **before the run commits**,
+/// so intel spent on a facility the run then declines is spent all the same. Scouting the
+/// road you are not sure of is exactly the purchase that can be wrong.
+pub const SCOUT_COST: u32 = 3;
+
 /// Separates the per-facility seed draw from every other use of the run seed, exactly
 /// as the loadout draw is separated from generation (§12.4): two streams that never
 /// share a position. The run seed still fixes the whole campaign (§12.4 rule 1), and
@@ -259,6 +284,17 @@ pub struct Campaign {
     /// one seed differ in exactly this and in the path they took, which is the whole of
     /// what a run is.
     unlocked: Vec<NodeId>,
+    /// **The facilities this run has scouted** (§11.5a/§14 v3/#215), in the order it
+    /// bought them.
+    ///
+    /// A list of node identities rather than a flag on the map, for the reason
+    /// [`unlocked`](Self::unlocked) is one: the country is a function of the seed and
+    /// buying a plan of a building does not change the building — it changes what *this
+    /// run* walks in knowing. It is keyed by node so a scout bought at a choice point
+    /// survives the [`choose`](Self::choose) that walks the run onto it, and so a scout
+    /// bought for a facility the run then declines is spent rather than silently
+    /// refunded onto the one it took instead.
+    scouted: Vec<NodeId>,
 }
 
 impl Campaign {
@@ -288,6 +324,7 @@ impl Campaign {
             wallet: Wallet::empty(),
             alert: 0,
             unlocked: Vec::new(),
+            scouted: Vec::new(),
         }
     }
 
@@ -381,6 +418,69 @@ impl Campaign {
             self.unlocked.push(node);
         }
         outlay
+    }
+
+    /// **Scout the facility at `node`** (§11.5a/§14 v3's pre-level intel sink, #215):
+    /// spend [`SCOUT_COST`] so that raiding it opens with its points of interest already
+    /// **remembered** — position known, live state as fogged as ever.
+    ///
+    /// What the intel buys is **a plan of the building's contents**: where the consoles,
+    /// the crates and the cupboards are ([`scout`](crate::scout)). It is the one thing
+    /// allowed to buy its way past §11.5a's *hidden until seen*, and what it may never buy
+    /// is the live layer — no guard, no door pose, no cone — because that is earned inside
+    /// the facility or not at all.
+    ///
+    /// **Bought before the run commits** (#215/#207). It is refused for anything that is
+    /// not a facility the run may walk into right now ([`ahead`](Self::ahead)) — so at a
+    /// choice point it is the *offered* successors that may be scouted, before
+    /// [`choose`](Self::choose) has moved anything, and the run may still take one of the
+    /// others with the intel spent. That is the sink's teeth: scouting a road you then
+    /// decline costs exactly what scouting the road you take costs.
+    ///
+    /// Refused, with nothing spent, for everything [`scoutable`](Self::scoutable) refuses
+    /// — a locked edge, a facility already scouted, one whose config has no room left for
+    /// the rule — and outside the hub by [`spend`](Self::spend), like every sink.
+    #[must_use]
+    pub fn scout(&mut self, node: NodeId) -> Outlay {
+        if !self.scoutable(node) {
+            return Outlay::Closed;
+        }
+        let outlay = self.spend(SCOUT_COST);
+        if outlay.paid() {
+            self.scouted.push(node);
+        }
+        outlay
+    }
+
+    /// **Whether `node` may be scouted at all** (#215) — what the hub asks before it puts
+    /// a price in front of the player, so an offer that cannot be taken is never made.
+    ///
+    /// Three things have to hold. The facility must be one the run may walk into
+    /// ([`ahead`](Self::ahead)) and not behind a road it has not bought; it must not be
+    /// scouted already ([`is_scouted`](Self::is_scouted)), since a second plan of one
+    /// building is not a purchase; and the facility's config must still **fit its
+    /// level-seed token** ([`LevelSeed::is_sayable`]).
+    ///
+    /// **That last one is a real refusal and not a formality.** The token carries at most
+    /// a handful of rules (§12.7), and a rich facility under an alerted campaign can
+    /// already be spending them all — a Vault is three on its own. Selling a rule that
+    /// would push the config off the wire would buy the player a facility that can no
+    /// longer be written down, shared or replayed, and the sink is not worth that: the
+    /// row is simply not offered, exactly as an unaffordable one is drawn unaffordable
+    /// rather than discovered by pressing it.
+    pub fn scoutable(&self, node: NodeId) -> bool {
+        let offered = self
+            .ahead()
+            .into_iter()
+            .any(|offer| offer.node == node && !offer.locked);
+        offered && !self.is_scouted(node) && self.level_at(node, true).is_sayable()
+    }
+
+    /// **Whether this run has scouted `node`** (#215) — the purchase itself, which is what
+    /// the facility's [`LevelModifiers::scouted`] becomes when it is raided and what the
+    /// hub reads to draw a facility as already bought.
+    pub fn is_scouted(&self, node: NodeId) -> bool {
+        self.scouted.contains(&node)
     }
 
     /// **The facilities the run may walk into next** — what the map screen (#208) puts
@@ -593,11 +693,20 @@ impl Campaign {
     /// resolved into one [`LevelSeed`], without starting the raid.
     ///
     /// Three pieces, all of them the campaign's: the seed derived from `(run seed, node
-    /// id)`, the modifiers, and the carried loadout. The gate is [`IntelGate::None`]
-    /// because §4.5 settles it that way for the campaign — intel is currency, so the
-    /// exit never refuses and extraction is voluntary — and the modifiers resolve
-    /// through [`ModifierSources`], where the node's **flavour** (§14 v3) and the
-    /// campaign alert (#210) each land as their own source rather than as a private
+    /// id)`, the modifiers, and the carried loadout. See [`level_at`](Self::level_at),
+    /// which is this asked about any facility the run can see.
+    pub fn next_level(&self) -> LevelSeed {
+        self.level_at(self.node(), self.is_scouted(self.node()))
+    }
+
+    /// **The config raiding `node` would boot** — [`next_level`](Self::next_level) asked
+    /// about a facility the run has not walked into yet, with `scouted` standing in for
+    /// what it would know when it did (#215).
+    ///
+    /// The gate is [`IntelGate::None`] because §4.5 settles it that way for the campaign —
+    /// intel is currency, so the exit never refuses and extraction is voluntary — and the
+    /// modifiers resolve through [`ModifierSources`], where the node's **flavour** (§14 v3)
+    /// and the campaign alert (#210) each land as their own source rather than as a private
     /// knob set of the campaign's.
     ///
     /// **This is what makes the offer honest** (§2.3). The map screen says *Vault*, and
@@ -605,12 +714,24 @@ impl Campaign {
     /// one console more, one guard more — because the same value produces both. It also
     /// travels: the flavour rides in the [`LevelSeed`]'s modifiers, so a campaign
     /// facility's level-seed token is the facility as it was actually played (§12.7).
-    pub fn next_level(&self) -> LevelSeed {
+    ///
+    /// The `scouted` parameter is what lets the hub ask a question about a purchase it has
+    /// not made: *would this facility still fit its token if I sold the scout?*
+    /// ([`scoutable`](Self::scoutable)). Every other caller passes what the run has
+    /// actually bought.
+    pub fn level_at(&self, node: NodeId, scouted: bool) -> LevelSeed {
         LevelSeed {
-            seed: facility_seed(self.seed(), self.node()),
+            seed: facility_seed(self.seed(), node),
             modifiers: ModifierSources {
                 chosen: LevelModifiers {
                     intel_to_exit: IntelGate::None,
+                    // What the run **paid to know** about this facility before walking
+                    // in (§11.5a/#215). It rides in the chosen set rather than in a
+                    // source of its own because it is the run's own decision, exactly as
+                    // the gate is — the alert and the flavour are what the *world* says
+                    // about a facility, and neither has anything to add about what the
+                    // player scouted.
+                    scouted,
                     ..LevelModifiers::default()
                 },
                 // The campaign alert (#210), through the shared seam (§12.6) rather
@@ -618,25 +739,30 @@ impl Campaign {
                 // noise reached this facility, it is drawn a rule — harder for a loud
                 // raid, easier for one nobody noticed — and composed like any other
                 // source.
-                alert: self.alert_contribution(),
-                flavour: Some(self.flavour().modifiers()),
+                alert: self.alert_contribution(node),
+                flavour: Some(self.map.flavour(node).modifiers()),
             }
             .resolve(),
             abilities: self.loadout,
         }
     }
 
-    /// The modifier contribution the campaign alert makes to the facility the run is
-    /// standing on (§12.6/#210) — `None` on the first facility of a run, and for a
-    /// facility the last raid's noise did not reach.
+    /// The modifier contribution the campaign alert makes to `node` (§12.6/#210) — `None`
+    /// on the first facility of a run, and for a facility the last raid's noise did not
+    /// reach.
     ///
-    /// Kept beside [`next_level`](Self::next_level) rather than inlined into it so the
+    /// Kept beside [`level_at`](Self::level_at) rather than inlined into it so the
     /// source is a named thing a test can hold: the §2.3 assertion this ticket owes is
     /// *the rule the alert drew is active in the facility the run walks into*, and that
     /// is stated against the resolved seed, with this as its witness.
-    fn alert_contribution(&self) -> Option<LevelModifiers> {
+    ///
+    /// The noise is read from [`noise_made_at`](Self::noise_made_at), the same place
+    /// [`alert_reaches`](Self::alert_reaches) reads it — so the contribution and the map
+    /// screen's *"the Vault is alerted"* line are two views of one fact, in both live
+    /// stages.
+    fn alert_contribution(&self, node: NodeId) -> Option<LevelModifiers> {
         let loudness = self.loudness()?;
-        loudness.contribution(self.map, self.previous()?, self.node())
+        loudness.contribution(self.map, self.noise_made_at()?, node)
     }
 
     /// **Enter the current facility**: the raid begins, and the caller boots
