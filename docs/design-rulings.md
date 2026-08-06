@@ -4002,7 +4002,7 @@ counting on the §7.3 clock, often somewhere the player cannot walk back to. Tha
 ability's honest counterweight, and a line reading only *"the guard drops"* would report the
 adjacent verb's cost instead of this one's.
 
-### What the sim was asked, and what would reject it
+### What the sim was asked, and the cue bug that made the first answer worthless
 
 The instrument is `Verb::Dart` in the §13.2 histogram, read against `Verb::Takedown` — a
 dart hit moves both, so the gap between them is how often the shot missed. The bot's cue
@@ -4014,7 +4014,38 @@ the cue would spend the level's dart on the first patrol in front of it and the 
 would read *used* while measuring nothing, which is #347's failure mode at its sharpest,
 because here the press can never be refused.
 
-The kill-thresholds are on the stats page, written before the batch ran. The measured
-outcome is there too; the summary is that the ability is real but small — the cue is shy by
-construction, since the line has to happen to be right, and the bot cannot turn on the spot
-to make it so.
+**And the first version got a more basic thing wrong, which is worth recording because of
+how convincing its output was.** `balanced` and `cautious` ship `takedown_reach: 0`, and
+that knob's doc is explicit about what zero means: *"not 'never gets the chance', but 'does
+not want it'"*, with *"a cautious profile reporting `takedowns: 0` is **correct behaviour**,
+not a defect"*. The cue ignored it. So an avoidance-first bot started taking guards down at
+range — 12 times per 100 runs on `balanced` — and every metric for those two profiles was
+then a **changed bot measured against the old bot's baseline**, which is §13.3's failure
+mode rather than a tuning question.
+
+What makes it worth an appendix is that the wrong numbers looked like the *right* answer.
+`balanced` went 0 → 12 takedowns, left 11 bodies where its control leaves none, and its
+`alert_peak_mean` rose 0.76 → 0.95 — which reads exactly like this ability's design claim
+coming true: the unreachable body pays for the takedown. It was reported that way. The tell
+was there to be seen and was not: **a profile whose control column says `takedowns: 0` had
+started leaving bodies.** A with/without pair can only be read when the two sides differ in
+the one thing under test, and a cue that overrides a temperament breaks that quietly, in the
+direction of the hypothesis.
+
+The fix is that the dart is gated on the same appetite the walk-up strike is
+(`Moment::strikes`, threaded from `takedown_reach` as a fact about the plan, like `Intent`),
+so a temperament that declines the verb declines it **at every range** — and the
+avoidance-first profiles are byte-identical holding the ability, which is the property #316
+already guarantees for the adjacent takedown. What is left is a much thinner measurement,
+honestly labelled: two profiles decline it, and the two that take it fire 2–11 darts per 100
+runs.
+
+**The design question the fix exposes is left open on purpose.** Borrowing `takedown_reach`
+is right for *this* ticket, because that knob is the only statement of takedown appetite the
+profiles have. But the two verbs do not obviously belong on one axis: a walk-up takedown asks
+for a detour into a guard's cone, and a dart asks for none — so the player who least wants to
+walk into a blind spot is arguably the player a ranged takedown is most *for*. If the Dart
+deserves an appetite of its own, that is a §13.4 temperament decision and its own ticket, and
+until it exists the sim simply has nothing to say about the avoidance-first half of the
+roster. `docs/stats/abilities/dart.md` says so in those words rather than filling the gap
+with the numbers the bug produced.

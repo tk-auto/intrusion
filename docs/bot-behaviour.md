@@ -340,7 +340,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Pierce Wall** | a route the facility does not offer | the same crossing, at three times the price — the budget is scarcer |
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **False Call** | emptying the ground you are walking away from | the route step, the guards inside core's reach, and whether that step opens the gap on **every** one of them |
-| **Dart** | the watcher on your line you could not have walked up to | core's own resolved shot, that the target is not adjacent, and that its cone watches the ground ahead |
+| **Dart** | the watcher on your line you could not have walked up to | **the temperament's takedown appetite**, core's own resolved shot, that the target is not adjacent, and that its cone watches the ground ahead |
 | **Drone** | — **activated but uncued** (#273): the press opens a control mode the policy does not drive | — |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
 | **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |
@@ -377,7 +377,27 @@ Three of these are worth reading twice, because they are the seam's own rules bi
   overshoots the far side). Both guard the same thing: a duration that expires inside
   a solid costs the safety eject plus a stun as long as the throw (§8.3).
 
-- **The Dart is the one cue that has to check its own aim, and that is not a
+- **The Dart is a takedown, so it obeys the takedown appetite — at every range.**
+  `balanced` and `cautious` carry `takedown_reach: 0`, and that knob means *"does not want
+  it"* rather than *"never gets the chance"*; both report `takedowns: 0`. The cue reads the
+  appetite off `Moment::strikes` and declines outright for them, so those two temperaments
+  are **byte-identical** holding the Dart — the same property #316 gives the adjacent
+  takedown.
+
+  It is the first gate rather than a detail, because getting it wrong does not make a cue shy
+  or keen, it makes the measurement meaningless. The first version of this cue ignored the
+  appetite, and the output was convincing: `balanced` went 0 → 12 takedowns and its
+  `alert_peak_mean` rose, which reads like the ability's own design claim coming true. It was
+  a changed bot measured against the unchanged bot's baseline (§13.3). The tell was a profile
+  whose control says `takedowns: 0` leaving bodies. Appendix 54.
+
+  **Whether that gate is the right one is open.** A walk-up takedown asks for a detour into a
+  cone; a dart asks for none — so the player who least wants to walk into a blind spot may be
+  the one a ranged takedown is most for. Until the Dart has an appetite of its own, the sim
+  says nothing about the avoidance-first half of the roster, and
+  `docs/stats/abilities/dart.md` states that rather than papering over it.
+
+- **The Dart is also the one cue that has to check its own aim, and that is not a
   re-derived precondition.** Every other cue leans on `status.state` for legality
   (#345) because every other ability reads `Unusable` when its target is missing. A dart
   is deliberately **never refused** — a greyed entry would answer *"is there a guard in

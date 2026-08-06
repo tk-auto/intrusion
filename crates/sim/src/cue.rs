@@ -194,6 +194,24 @@ pub struct Moment<'a> {
     /// (§8.3). Handed over rather than re-derived — it is a Dijkstra descent the
     /// policy has already run.
     pub route: Option<Direction>,
+    /// Whether this temperament **wants the takedown verb at all** — the
+    /// [`takedown_reach`](Profile::takedown_reach) knob as the yes/no the cues need
+    /// (§7.2/#316).
+    ///
+    /// It is here rather than read off the profile inside a cue because it is a fact
+    /// about the *plan*, exactly like [`intent`](Moment::intent): `balanced` and
+    /// `cautious` ship a reach of zero, which the knob's own doc defines as **"not
+    /// 'never gets the chance', but 'does not want it'"** — an avoidance-first bot
+    /// leaves an unaware guard blocked and waits the patrol out.
+    ///
+    /// **A cue for a takedown must honour it, whatever the range** (§13.3). The Dart
+    /// (§8.3/#239) is §7.2's verb with reach, so handing it to a profile that declines
+    /// the verb would not measure the ability — it would change the temperament and then
+    /// report the change as the ability's doing. The tell is unmissable once you look
+    /// for it: a profile with `takedowns: 0` in its control column suddenly leaving
+    /// bodies, which is a bot that has stopped being the bot whose baseline it is being
+    /// read against.
+    pub strikes: bool,
 }
 
 impl Moment<'_> {
@@ -740,6 +758,22 @@ impl Moment<'_> {
     /// having. So the bid asks the one question that separates this ability from the §7.2
     /// verb it copies: **is this a guard I could not have reached on foot?**
     fn dart(&self, status: AbilityStatus) -> Option<Bid> {
+        // **A temperament that declines the takedown declines the dart** (§7.2/§13.3/#316).
+        // This is the first gate rather than a detail, because getting it wrong does not
+        // make the cue shy or keen — it makes the measurement meaningless. `balanced` and
+        // `cautious` carry `takedown_reach: 0`, which the knob's own doc defines as *"does
+        // not want it"*, and both report `takedowns: 0` in their control columns. A dart is
+        // §7.2's verb with the range changed, so a cue that fired it for them would hand an
+        // avoidance-first bot a kill it would never walk up and take, and every number in
+        // the with/without pair would then be measuring a **different bot** against the
+        // baseline of the old one (§13.3's whole failure mode).
+        //
+        // Read off the plan rather than out of `Profile` here for [`Intent`]'s reason: this
+        // is a fact the policy already holds, and a cue that reached for the profile itself
+        // would be the second place a temperament is interpreted.
+        if !self.strikes {
+            return None;
+        }
         // **Never in flight.** A guard that is hunting the bot has detected it, so it is not
         // a legal target at all (§7.2) — the press would fire, miss, and spend the level's
         // dart on the turn the bot could least afford it. This is the one cue where declining
@@ -926,37 +960,43 @@ mod tests {
                             Some((Direction::East, 4)),
                             Some((Direction::East, 40)),
                         ] {
-                            let moment = Moment {
-                                state: &state,
-                                intent,
-                                refuge,
-                                nearest_guard,
-                                route,
-                                crossing,
-                            };
-                            for id in AbilityId::ALL {
-                                for &ability_state in &states {
-                                    let status = AbilityStatus {
-                                        id,
-                                        state: ability_state,
-                                    };
-                                    let Some(bid) = moment.bid(status) else {
-                                        continue;
-                                    };
-                                    assert!(
-                                        !bid.reason.is_empty(),
-                                        "{}: a bid must say why (§13.3)",
-                                        id.name(),
-                                    );
-                                    if bid.input == Input::Activate(id) {
+                            // Both takedown appetites (#316): the striking half of the
+                            // roster reaches cue arms the avoidance-first half never does.
+                            for strikes in [false, true] {
+                                let moment = Moment {
+                                    state: &state,
+                                    intent,
+                                    refuge,
+                                    nearest_guard,
+                                    route,
+                                    crossing,
+                                    strikes,
+                                };
+                                for id in AbilityId::ALL {
+                                    for &ability_state in &states {
+                                        let status = AbilityStatus {
+                                            id,
+                                            state: ability_state,
+                                        };
+                                        let Some(bid) = moment.bid(status) else {
+                                            continue;
+                                        };
                                         assert!(
-                                            matches!(
-                                                ability_state,
-                                                AbilityState::Ready | AbilityState::Limited { .. }
-                                            ),
-                                            "{} bid an activation while {ability_state:?}",
+                                            !bid.reason.is_empty(),
+                                            "{}: a bid must say why (§13.3)",
                                             id.name(),
                                         );
+                                        if bid.input == Input::Activate(id) {
+                                            assert!(
+                                                matches!(
+                                                    ability_state,
+                                                    AbilityState::Ready
+                                                        | AbilityState::Limited { .. }
+                                                ),
+                                                "{} bid an activation while {ability_state:?}",
+                                                id.name(),
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -980,6 +1020,9 @@ mod tests {
             nearest_guard,
             route: None,
             crossing: None,
+            // Neither cue under test is on the takedown axis; the permissive value keeps
+            // this measuring what it always measured.
+            strikes: true,
         };
         let ready = |id| AbilityStatus {
             id,
@@ -1041,6 +1084,58 @@ mod tests {
     /// with no shot resolved — which is what stops the histogram filling up with darts
     /// fired at empty corridors (#347's failure mode, at its sharpest here because the
     /// press is never refused).
+    /// **A temperament that declines the takedown declines the dart, at every range**
+    /// (§7.2/§13.3/#316) — swept over the shipped roster rather than asserted about one
+    /// profile, so it is a claim about the `--profile` vocabulary and not arithmetic.
+    ///
+    /// This is the invariant, not a detail. `balanced` and `cautious` carry
+    /// `takedown_reach: 0`, which that knob's doc defines as *"not 'never gets the chance',
+    /// but 'does not want it'"*, and both report `takedowns: 0` in their control columns. A
+    /// dart is §7.2's verb with the range changed, so a cue that fired it for them would
+    /// hand an avoidance-first bot a kill it would never walk up and take — and the whole
+    /// with/without pair would then compare a **different bot** against the old one's
+    /// baseline, which is §13.3's failure mode rather than a tuning question. The first
+    /// version of this cue did exactly that, and the tell was `balanced` leaving 11 bodies
+    /// in a column whose control leaves none.
+    #[test]
+    fn a_temperament_that_declines_the_takedown_declines_the_dart() {
+        let (state, _) = crate::test_support::boot(0);
+        let dart = AbilityStatus {
+            id: AbilityId::Dart,
+            state: AbilityState::Ready,
+        };
+        for profile in Profile::ALL {
+            if profile.takedown_reach > 0 {
+                continue; // the striking half is what the cue is *for*
+            }
+            for intent in [
+                Intent::Flee,
+                Intent::TakeCover,
+                Intent::Pursue,
+                Intent::Explore,
+            ] {
+                for route in [None, Some(Direction::North), Some(Direction::East)] {
+                    for nearest_guard in [None, Some(1), Some(6)] {
+                        let moment = Moment {
+                            state: &state,
+                            intent,
+                            refuge: None,
+                            nearest_guard,
+                            route,
+                            crossing: None,
+                            strikes: profile.takedown_reach > 0,
+                        };
+                        assert!(
+                            moment.bid(dart).is_none(),
+                            "{}: declines the takedown verb, so it must decline the dart",
+                            profile.name,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_dart_cue_needs_a_real_shot_and_never_fires_in_flight() {
         let (state, _) = crate::test_support::boot(0);
@@ -1055,6 +1150,7 @@ mod tests {
             nearest_guard: Some(6),
             route,
             crossing: None,
+            strikes: true,
         };
 
         // Never in flight — a guard hunting you has detected you (§7.2).
@@ -1096,6 +1192,7 @@ mod tests {
             nearest_guard: Some(4),
             route: None,
             crossing: None,
+            strikes: true,
         };
         let balanced = Profile::BALANCED;
         assert_eq!(
@@ -1125,6 +1222,7 @@ mod tests {
             nearest_guard: Some(4),
             route: None,
             crossing: None,
+            strikes: true,
         };
         let keen = balanced.with_cue_floor(AbilityId::Camouflage, URGE_NONE);
         assert_eq!(
