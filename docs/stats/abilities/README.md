@@ -9,6 +9,13 @@ file; it says so, and says why — today that is the three passives (Vision, the
 the Guide) and the Drone, whose press exists but whose *control mode* the bot does not
 have (#273).
 
+There is a fourth kind of gap, and the Dart is the first page to carry it: a verb the bot
+*does* fire, but only ever in the half of its behaviour that succeeds. Its cue will not take
+a shot it knows misses, so the batch measures a dart that always lands and says nothing
+about the miss — which is that ability's main balance surface. A page whose cue is
+outcome-gated like that has to say so, because a clean set of numbers there is a narrower
+claim than it looks.
+
 ## These are numbers, not verdicts (§13.4)
 
 The bot is a smoke detector, not a fun oracle. It has no fear, perfect recall of
@@ -105,6 +112,7 @@ to make.
 | Pierce Wall | cued | [`pierce-wall.md`](pierce-wall.md) |
 | Lockdown | cued | [`lockdown.md`](lockdown.md) |
 | False Call | cued, narrowly | [`false-call.md`](false-call.md) |
+| Dart | cued, and shy by construction | [`dart.md`](dart.md) |
 | Guide | **none** — passive, and a cue would have to cheat | [`guide.md`](guide.md) |
 | Vision | **none** — passive, nothing to activate | [`vision.md`](vision.md) |
 | Saver | **none** — passive, and deliberately uncued | [`saver.md`](saver.md) |

@@ -813,6 +813,22 @@ impl Guard {
         self.pos = cell;
     }
 
+    /// Turn this guard to face `dir`, **for a test fixture only** — the cone is *not*
+    /// refreshed, so a caller that needs one must run a turn (or [`look`](Self::look))
+    /// afterwards.
+    ///
+    /// Every guard spawns facing south (§7.1/[`GUARD_INITIAL_FACING`]), which makes "a
+    /// guard looking *at* the player" a matter of standing north of them — fine until a
+    /// scenario needs two guards on one line looking different ways, which no geometry can
+    /// arrange. Hence this, on `silence_radio_for_test`'s precedent: scaffolding that says
+    /// in its name that it is scaffolding. Nothing in the game turns a guard except
+    /// [`advance_to`](Self::advance_to) — facing follows movement (§5) — and that is the
+    /// rule this deliberately does not touch.
+    #[cfg(test)]
+    pub(crate) fn face_for_test(&mut self, dir: Direction) {
+        self.facing = dir;
+    }
+
     /// The guard's whole turn of sensing (§4.2 phase 3), run before it acts: a lead
     /// **cools** by one turn, then sight gets its say and refreshes it if the guard
     /// detects the player. Detection is vision alone (§9 **[SETTLED]** — guards do not

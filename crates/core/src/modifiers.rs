@@ -208,7 +208,7 @@ impl GuardCount {
     /// wherever it always meant something — the [`IntelGate`], the toggles, the
     /// [`LayoutKnowledge`] knob — none of which is a count and none of which composes here.
     ///
-    /// Appendix 54 has the argument.
+    /// Appendix 55 has the argument.
     #[must_use]
     pub fn plus(self, other: Self) -> Self {
         Self::at_steps(self.steps() + other.steps())

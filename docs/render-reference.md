@@ -707,7 +707,7 @@ mark) > investigation area > Effect wash.**
 | **Sensed**, full (orange) | A guard felt through a wall right now — its exact cell, position only |
 | **Sensed**, quiet (orange) | Where the sense felt something a turn or two ago: the trail behind a moving guard, the ghost of one that left the box, a door that changed away from you (§9.5). It fades to nothing over a couple of turns — *was just here*, never a heading |
 | **Warning** (orange) | The area a §7.6 search is sweeping — the `SEARCH_RADIUS` box around a searching guard's focus. Only with the `show_search_areas` modifier on (§12.6); baseline the board draws no investigation area at all |
-| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds, the reach a False Call broadcast over — **or**, uniquely, where one is *pointing*: the Guide's bearing (§8.3/#505), one cell of the eight around you, **on one turn in three** |
+| **Effect** wash (cyan) | Where your own gadget acted — a blast's box, a bored cell, the doorways a lockdown holds, the reach a False Call broadcast over, **the line a Dart flew** (§8.3/#239) — **or**, uniquely, where one is *pointing*: the Guide's bearing (§8.3/#505), one cell of the eight around you, **on one turn in three** |
 
 **The Guide's cell is the one Effect cue that is not about a thing** (#505), and it is
 worth flagging because cyan is already busy: it marks a held guard, a live decoy, your
@@ -804,6 +804,8 @@ Lockdown's radius — and then goes. The **marks** are what carry the state for 
 of the window and cost almost no ink: a frozen guard recoloured cyan (§8.3 Confusion)
 and every cell of a **sealed door** while Lockdown holds it (#242). A mark says *this
 one*, where the footprint said *this far*.
+
+**The Dart's wash is a line rather than an area** (§8.3/#239), and it is the only one: the ray it flew, cell by cell, for the firing frame alone. It answers the question a projectile raises that a radius does not — *how far did it get* — since a dart that stopped short stopped **on** something, and where it stopped is the whole report. It is safe to paint through the fog for the same reason the boxes are (your own gadget's reach is your own knowledge), plus one specific to a line: the flight is clamped inside the guard sense, so a short wash can only ever end on a cell already drawn (appendix 54).
 
 **Sensed and Effect are not fogged.** Both are certain, position-only knowledge that
 travels through walls, so neither dims with the knowledge state of the cell

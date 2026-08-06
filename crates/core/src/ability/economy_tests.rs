@@ -129,6 +129,60 @@ fn the_catalog_matches_the_design_coded() {
     assert_eq!(AbilityId::PierceWall.script_letter(), 'b');
 }
 
+/// The **Dart**'s row (§7.2/§8.3/§8.4/#239) — the third coded ability, and the
+/// experiment. Every number here is [START], and every one of them is a §2.3 safeguard on
+/// an ability the design records as having *been* the old game, so each is pinned with the
+/// reason it holds that value.
+#[test]
+fn the_catalog_matches_the_design_dart() {
+    let def = AbilityId::Dart.def();
+    let economy = def.economy().expect("the Dart is activated");
+    assert_eq!(economy.cost(), 1, "the full turn (§2.3's safeguard (a))");
+    assert_eq!(
+        economy.targeting(),
+        TargetingMode::Direction,
+        "aimed by facing — the first ability to use the cardinal as a ray (§8.4)",
+    );
+    assert_eq!(
+        economy.duration(),
+        0,
+        "instant — the dart resolves on the turn it is fired",
+    );
+    assert_eq!(
+        economy.cooldown(),
+        0,
+        "no clock: `1/level` is stricter than any lockout can be (appendix 54)",
+    );
+    assert_eq!(def.uses_per_level(), Some(DART_USES));
+    assert_eq!(
+        DART_USES, 1,
+        "[START] — one ranged takedown a facility, §8.2's floor",
+    );
+    assert!(
+        matches!(def.behaviour(), Behaviour::Coded),
+        "a projectile that walks a line is not a primitive the vocabulary has (§8.1)",
+    );
+    assert_eq!(AbilityId::Dart.name(), "Dart");
+    assert_eq!(AbilityId::Dart.bar_name(), "Dart", "§11.4 fits 5 cells");
+    assert_eq!(AbilityId::Dart.script_letter(), 'n');
+    // **The bar reads `(1)` and then `—`, and never a cooldown** — the ticket's own
+    // prediction, and the reason the row carries no clock. Pinned here because it is the
+    // whole of what the player is shown about the price.
+    let mut deck = Deck::new(Loadout::empty().with(AbilityId::Dart));
+    assert_eq!(
+        deck.state(AbilityId::Dart),
+        AbilityState::Limited { uses: 1 }
+    );
+    assert!(deck.activate(AbilityId::Dart));
+    assert_eq!(deck.state(AbilityId::Dart), AbilityState::Exhausted);
+    // And nothing brings it back: the level is the only thing that ever does (§8.2).
+    for _ in 0..100 {
+        deck.tick(&mut Vec::new());
+        assert_eq!(deck.state(AbilityId::Dart), AbilityState::Exhausted);
+    }
+    assert!(!deck.activate(AbilityId::Dart), "no second dart, ever");
+}
+
 /// The **Drone**'s row (§8.1's escape hatch, #273), the second coded ability and the
 /// one the design names when it reserves the hatch. Every number here is [START].
 ///
@@ -177,8 +231,14 @@ fn every_activated_ability_is_pinned_by_a_catalog_test() {
             // The data rows are covered by `..._activated`, which walks a literal
             // list; a row missing from it fails here rather than silently.
             Behaviour::Effects(_) => PINNED_ACTIVATED.contains(&id),
-            // The coded rows are covered one by one by `..._coded`.
-            Behaviour::Coded => matches!(id, AbilityId::PierceWall | AbilityId::Drone),
+            // The coded rows are covered one by one by `..._coded`, `..._drone` and
+            // `..._dart`.
+            Behaviour::Coded => {
+                matches!(
+                    id,
+                    AbilityId::PierceWall | AbilityId::Drone | AbilityId::Dart
+                )
+            }
         };
         assert!(pinned, "{} is in no catalogue pin", id.name());
     }
@@ -600,8 +660,13 @@ fn a_passive_in_the_deck_changes_no_activated_ability_timing() {
         assert_eq!(active, duration, "{} active turns", id.name());
         assert_eq!(cooling, cooldown, "{} cooling turns", id.name());
         // Available again — for a budgeted ability that means one use lighter
-        // (§8.2/#302), which is the budget doing its job, not the clock failing.
+        // (§8.2/#302), which is the budget doing its job, not the clock failing. A row
+        // whose budget was **one** (Dart, #239) comes out `Exhausted` instead: the clock
+        // has run in full and there is nothing behind it, which is `Deck::state`'s own
+        // ranking rather than an exception to it — *"a cooldown on an ability that is
+        // never usable again is a countdown to nothing"*.
         let expected = match id.def().uses_per_level() {
+            Some(0 | 1) => AbilityState::Exhausted,
             Some(uses) => AbilityState::Limited { uses: uses - 1 },
             None => AbilityState::Ready,
         };

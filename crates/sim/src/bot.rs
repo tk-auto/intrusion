@@ -1086,6 +1086,10 @@ impl StealthBot {
             nearest_guard: nearest_perceived_guard(state),
             route,
             crossing,
+            // The takedown appetite, as the yes/no the cues need (§7.2/#316) — the same
+            // knob `strike` gates on, so a temperament that declines the verb declines it
+            // at every range.
+            strikes: self.profile.takedown_reach > 0,
         }
         .best(&self.profile)?;
         self.last_bid = Some(bid);
