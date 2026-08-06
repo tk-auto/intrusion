@@ -253,15 +253,19 @@ const CAPTION_INDENT: &str = "  ";
 const MAX_ROWS: u32 = 4;
 const MAX_CRATES: u32 = crate::modifiers::CacheCount::MAX as u32;
 
-/// How tall the brief's block is, given how many lines of each kind it is drawing: a row
-/// takes [`ENTRY_SPACING`] (itself and the blank that buffers a low tap off its neighbour,
-/// §11.6), a crate line takes one, and a blank sits at each end.
+/// How tall the brief's block is, given how many lines of each kind it is drawing.
 ///
-/// **A crate line is packed, and that is what makes the expansion read as a list.** Spacing
-/// the names as widely as the rows would make them look like three more things to press;
-/// tight under their heading, they read as what they are — one row's answer.
+/// The spacing rule is *a blank before every row but the first*: a row keeps the buffer
+/// that stops a low tap landing on its neighbour (§11.6/[`ENTRY_SPACING`]), and a **crate
+/// line is packed tight under the heading it belongs to**. That is what makes the expansion
+/// read as one row's answer rather than as three more things to press — and it is why the
+/// blank goes *before* a row rather than after it: the list has to hug its heading, and the
+/// way out still has to have its buffer.
 const fn block_rows(rows: u32, crates: u32) -> u32 {
-    rows * ENTRY_SPACING + crates + 1
+    // Every row and every crate line, plus one blank ahead of each row after the first,
+    // plus the blank that keeps the last line off the footer — which is prose about the
+    // screen rather than a line of the block.
+    rows + crates + rows.saturating_sub(1) + 2
 }
 
 /// The tallest the block can ever be — what the layout reserves so the picture above it
@@ -285,12 +289,12 @@ fn laid_out(run: &Campaign, node: NodeId, height: u32) -> Vec<(u32, Line)> {
     let lines = brief_lines(run, node);
     let mut y = height.saturating_sub(LIST_ROWS);
     let mut placed = Vec::with_capacity(lines.len());
-    for line in lines {
+    for (i, line) in lines.into_iter().enumerate() {
+        if i > 0 && matches!(line, Line::Row(_)) {
+            y += ENTRY_SPACING - 1; // the buffer blank, ahead of the row it protects
+        }
         placed.push((y, line));
-        y += match line {
-            Line::Row(_) => ENTRY_SPACING,
-            Line::Crate(_) => 1,
-        };
+        y += 1;
     }
     placed
 }

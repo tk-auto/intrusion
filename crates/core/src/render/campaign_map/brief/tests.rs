@@ -286,6 +286,14 @@ fn the_last_row_keeps_a_blank_between_itself_and_the_footer() {
         H.saturating_sub(LIST_ROWS) > 0 && LIST_ROWS < H - 1,
         "the widest block ({LIST_ROWS} rows) does not fit above the footer",
     );
+    // And the **tallest** block there is — every row, and a Vault's three crates listed
+    // under one of them — still ends a blank clear of the footer.
+    let tallest = block_rows(MAX_ROWS, MAX_CRATES);
+    let last = H.saturating_sub(LIST_ROWS) + tallest - 3;
+    assert!(
+        last + 1 < H - 1,
+        "the tallest block's last line ({last}) sits on the footer",
+    );
     let run = at_a_choice_point_holding(8371, SCOUT_COST as usize);
     let node = open_offer(&run).node;
     let ui = MapUi::default().opening(node);
