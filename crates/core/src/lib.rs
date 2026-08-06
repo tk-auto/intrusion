@@ -83,6 +83,7 @@ mod render;
 mod replay;
 mod rng;
 mod salvage;
+mod scout;
 mod state;
 mod status;
 mod targeting;
@@ -100,7 +101,7 @@ pub use body::Body;
 pub use campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
 pub use campaign::{
     facility_seed, Campaign, CampaignStage, FacilityMap, Flavour, Loudness, MapPos, NodeId, Offer,
-    Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE, ROUTE_UNLOCK_COST,
+    Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE, ROUTE_UNLOCK_COST, SCOUT_COST,
 };
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
@@ -140,6 +141,7 @@ pub use replay::{
 };
 pub use rng::Rng;
 pub use salvage::cache_contents;
+pub use scout::scouted_cells;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
     SenseMark, State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS,

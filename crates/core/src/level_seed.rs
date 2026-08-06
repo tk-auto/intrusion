@@ -435,6 +435,20 @@ impl LevelSeed {
     ///
     /// Every surface that shows or shares a token already has a "there is no token
     /// for this" branch, because a hand-built state has never had one.
+    /// **Whether this config can be written down at all** (§12.7/#333) — [`encode`] asked
+    /// as a question rather than for its string.
+    ///
+    /// It is what a **hub** asks before selling a rule (#215): the token carries at most a
+    /// handful of modifiers, so a facility already spending them all is one no further rule
+    /// may be added to without taking it off the wire. A sink that checks here refuses the
+    /// sale; one that did not would hand the player a facility that cannot be shared,
+    /// replayed or said aloud.
+    ///
+    /// [`encode`]: Self::encode
+    pub fn is_sayable(&self) -> bool {
+        self.encode().is_some()
+    }
+
     pub fn encode(&self) -> Option<String> {
         let (modifiers, gate) = modifier_slots(self.modifiers)?;
         let mut chain = Chain::default();
@@ -724,6 +738,15 @@ enum ModifierSlot {
     /// Appended (#495). A shared level whose guards see less is a different run to
     /// play, so the token has to carry it like any other rule.
     NarrowedGuardCones = 18,
+    /// Appended (#215): the **pre-level scout**, one slot for one purchase — the sink
+    /// sells a facility's contents whole, so there is one toggle to carry rather than a
+    /// class per slot.
+    ///
+    /// **A scouted facility is a different run to play**, which is what puts it on the
+    /// wire at all: the token hands over the level *as it was actually played* (§12.7),
+    /// and a raid that opened knowing where the consoles were is not the raid the same
+    /// seed gives someone who did not pay.
+    Scouted = 19,
 }
 
 impl ModifierSlot {
@@ -751,6 +774,7 @@ impl ModifierSlot {
         ModifierSlot::LayoutUnknown,
         ModifierSlot::PrizeRoomLocked,
         ModifierSlot::NarrowedGuardCones,
+        ModifierSlot::Scouted,
     ];
 }
 
@@ -794,6 +818,7 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         caches,
         prize_room_locked,
         narrowed_guard_cones,
+        scouted,
         intel_to_exit,
     } = m;
     let mut slots = SlotSet::default();
@@ -826,6 +851,8 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
         ),
         (S::PrizeRoomLocked, prize_room_locked),
         (S::NarrowedGuardCones, narrowed_guard_cones),
+        // The pre-level scout (#215).
+        (S::Scouted, scouted),
     ] {
         if active {
             slots.push(slot as usize)?;
@@ -902,6 +929,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         caches,
         prize_room_locked: at(S::PrizeRoomLocked),
         narrowed_guard_cones: at(S::NarrowedGuardCones),
+        scouted: at(S::Scouted),
         intel_to_exit: gate,
     })
 }
@@ -912,7 +940,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
 /// [`LevelModifiers`] *fields*: the guard-count knob (#232), the intel-count knob
 /// (#207) and the layout knob (#233) spend one slot per end, and the cache knob
 /// (#209) one slot per rung.
-const MODIFIER_SLOTS_USED: usize = 19;
+const MODIFIER_SLOTS_USED: usize = 20;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1096,7 +1124,11 @@ pub fn start_level_with(config: &LevelConfig, level: &LevelSeed) -> Result<State
     )
     .with_rng(rng)
     .with_level(*level)
-    .with_caches(stock))
+    .with_caches(stock)
+    // **The pre-level scout** (§11.5a/#215), applied last: it writes tile memory, and
+    // memory is a fact about the finished board — the crates have to be stamped and the
+    // consoles placed before there is anything to have been scouted.
+    .with_scouted(modifiers.scouted))
 }
 
 #[cfg(test)]
@@ -1325,24 +1357,27 @@ mod tests {
             // The layout knob (#233) joins the knob sweep rather than the bitmask: its
             // two ends are one field, so a bit per end would build configs — both at
             // once — that a run cannot hold and the codec is right to refuse.
-            for (guard_count, intel_count, caches, layout_knowledge) in [
+            for (guard_count, intel_count, caches, layout_knowledge, scouted) in [
                 (
                     GuardCount::Baseline,
                     IntelCount::Baseline,
                     CacheCount::None,
                     LayoutKnowledge::Plans,
+                    false,
                 ),
                 (
                     GuardCount::More,
                     IntelCount::More,
                     CacheCount::Three,
                     LayoutKnowledge::Full,
+                    true,
                 ),
                 (
                     GuardCount::Fewer,
                     IntelCount::Fewer,
                     CacheCount::Two,
                     LayoutKnowledge::None,
+                    false,
                 ),
                 // The knobs crossed the other way, so the sweep covers a set holding one
                 // end of each rather than only matched pairs (#207), and every rung of
@@ -1352,6 +1387,7 @@ mod tests {
                     IntelCount::Fewer,
                     CacheCount::One,
                     LayoutKnowledge::Full,
+                    true,
                 ),
             ] {
                 for gate in gates {
@@ -1371,6 +1407,7 @@ mod tests {
                             caches,
                             prize_room_locked: locked,
                             narrowed_guard_cones: narrowed,
+                            scouted,
                             intel_to_exit: gate,
                         };
                         let level = LevelSeed {
@@ -1394,7 +1431,8 @@ mod tests {
                             + usize::from(guard_count != GuardCount::Baseline)
                             + usize::from(intel_count != IntelCount::Baseline)
                             + usize::from(caches != CacheCount::None)
-                            + usize::from(layout_knowledge != LayoutKnowledge::Plans);
+                            + usize::from(layout_knowledge != LayoutKnowledge::Plans)
+                            + usize::from(scouted);
                         if active > MODIFIER_CAP {
                             assert_eq!(
                                 level.encode(),
@@ -1535,6 +1573,10 @@ mod tests {
                 // short-sighted decodes as the facility it always named — one where
                 // every cone is §7.1's own.
                 narrowed_guard_cones: false,
+                // Slot 19 (#215) is the seventh: a token minted before a facility could
+                // be scouted decodes as the facility it always named — one whose
+                // contents are hidden until seen (§11.5a).
+                scouted: false,
                 intel_to_exit: IntelGate::All,
             },
             abilities: Loadout::innate()
@@ -1657,31 +1699,30 @@ mod tests {
             .with(AbilityId::TECH[AbilityId::TECH.len() - 1]);
         // The widest set the format admits is [`MODIFIER_CAP`] slots, and the widest
         // *payload* takes the **highest** ones — so this is the top five a run can
-        // actually hold, which now reaches slot 15, the shown search areas (#224). A
-        // knob holds one value, so the highest five are the shown areas (15), the top
-        // cache rung (14), the watched consoles (11) and one end of each count knob (10
-        // and 8) — appending slot 15 pushed the automatic doors (6) out of the set,
-        // which is what "the widest payload" moving with the roster looks like. Holding
-        // more than five at once is over the cap and refused outright, asserted in
+        // actually hold, which now reaches slot 19, the scout (#215). A knob holds one
+        // value, so the highest five are the scout (19), the short cones (18), the
+        // locked room (17), the fogged layout (16) and the shown search areas (15) —
+        // appending slot 19 pushed the top cache rung (14) out of the set, which is what
+        // "the widest payload" moving with the roster looks like. Holding more than five
+        // at once is over the cap and refused outright, asserted in
         // `every_config_round_trips`.
         let all_modifiers = LevelModifiers {
             guards_always_search_hideouts: false,
             sighting_lost_calls_a_guard: false,
             body_found_calls_two_guards: false,
             always_show_vision_cones: false,
-            layout_knowledge: LayoutKnowledge::Plans,
+            layout_knowledge: LayoutKnowledge::None,
             calm_guards_detect_only_their_cone: false,
             automatic_doors: false,
-            guards_watch_consoles: true,
-            show_search_areas: false,
-            guard_count: GuardCount::Fewer,
-            intel_count: IntelCount::Fewer,
-            caches: CacheCount::Three,
-            prize_room_locked: false,
-            // The newest slot (#495) rather than the search areas it replaces here:
-            // this fixture sits **at** [`MODIFIER_CAP`], so covering an appended slot
-            // means standing one down, and the appended one is the interesting half.
+            guards_watch_consoles: false,
+            show_search_areas: true,
+            guard_count: GuardCount::Baseline,
+            intel_count: IntelCount::Baseline,
+            caches: CacheCount::None,
+            prize_room_locked: true,
             narrowed_guard_cones: true,
+            // The newest slot (#215), which is where the top of the wire now is.
+            scouted: true,
             intel_to_exit: IntelGate::All,
         };
         for seed in [0, 1, SEED_SPACE - 2, SEED_SPACE - 1] {
@@ -1882,6 +1923,10 @@ mod tests {
                 },
                 S::NarrowedGuardCones => LevelModifiers {
                     narrowed_guard_cones: true,
+                    ..neutral
+                },
+                S::Scouted => LevelModifiers {
+                    scouted: true,
                     ..neutral
                 },
             }

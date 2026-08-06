@@ -815,6 +815,40 @@ impl State {
         self
     }
 
+    /// Thread in the **pre-level scout** (§11.5a/§14 v3/#215): mark the facility's points
+    /// of interest as already remembered, so it opens with them on the board.
+    ///
+    /// **It writes tile memory and nothing else**, which is the whole design. §11.5a
+    /// already has a state for *"you know this is here and you cannot see it now"* — the
+    /// remembered one — and the renderer already draws a console, a crate and a cupboard
+    /// in it ([`render`](crate::render)). So a scouted facility needs no third knowledge
+    /// state, no second fog rule and no flag the renderer has to consult: it needs the
+    /// player to have *found* those cells, a turn early.
+    ///
+    /// What that buys is bounded by what memory is worth. **Live state never consults
+    /// memory** (§11.5a), so a scout hands over no guard, no door pose and no danger
+    /// cone; the room around a scouted console is as unexplored as it was, because the
+    /// scout marks the console's own cell and not its surroundings. Handing over *where*
+    /// and
+    /// never *what is happening there* is not a restraint applied on top of this — it is
+    /// what marking one cell can express.
+    ///
+    /// Called by [`start_level`](crate::start_level) with the resolved
+    /// [`LevelModifiers::scouted`](crate::LevelModifiers::scouted), after the crates are
+    /// stamped: memory is a fact about the finished board. A state built without it plays
+    /// the unchanged §11.5a game, which is every quick-play level and every hand-built
+    /// fixture.
+    #[must_use]
+    pub fn with_scouted(mut self, scouted: bool) -> Self {
+        if !scouted {
+            return self;
+        }
+        for cell in crate::scout::scouted_cells(self.layout.facility()) {
+            self.memory.mark(cell);
+        }
+        self
+    }
+
     /// The run's ability loadout (§8.3/#244) — the abilities it holds, for a test
     /// to assert what a preset resolved and for the level-seed token to carry.
     #[must_use]
