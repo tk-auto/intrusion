@@ -652,12 +652,6 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
     grid
 }
 
-/// Draw the seed prompt's heading and instructions from `heading` down, high enough
-/// on the screen that the band around the **middle** stays clear for the DOM text box
-/// that floats there (see [`render_menu`]). The box is centred in the viewport and the
-/// canvas is centred in the viewport too, so the middle of the grid is where it lands
-/// at every fit — the one row-level coupling between the two, kept as slack rather
-/// than arithmetic, and asserted below.
 /// Draw the level-options dialog (#298): the heading, the difficulty slider, and the
 /// two controls.
 ///
@@ -771,6 +765,13 @@ fn control_column(width: u32) -> u32 {
     centre(width, widest).saturating_sub(MARKER.chars().count() as u32)
 }
 
+/// Draw the seed prompt's heading and instructions from `heading` down, high enough
+/// on the screen that the band around the **middle** stays clear for the DOM text box
+/// that floats there (see [`render_menu`]). The box is centred in the viewport and the
+/// canvas is centred in the viewport too, so the middle of the grid is where it lands
+/// at every fit — the one row-level coupling between the two, kept as slack rather
+/// than arithmetic, and asserted by
+/// `the_seed_prompt_instructs_and_keeps_the_middle_clear` below.
 fn draw_seed_prompt(grid: &mut Grid, heading: u32) {
     draw_centred(grid, heading, SEED_HEADING, Category::System);
     for (i, line) in SEED_LINES.iter().enumerate() {

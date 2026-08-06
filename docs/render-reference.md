@@ -13,7 +13,7 @@ the two disagree, the design doc wins and this file is stale.
 **The values live in code, not here.** The glyph table is
 [`Terrain::glyph`](../crates/core/src/facility.rs) plus the entity constants in
 [`crates/core/src/render.rs`](../crates/core/src/render.rs); the palette is the one
-table in [`crates/web/src/lib.rs`](../crates/web/src/lib.rs). The in-game glyph
+table in [`crates/web/src/palette.rs`](../crates/web/src/palette.rs). The in-game glyph
 legend (the `[?]` panel's **Help** tab) derives its rows from those same sources, so
 it cannot drift from the board. This file is the prose companion to all three.
 

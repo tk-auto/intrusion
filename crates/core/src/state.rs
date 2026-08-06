@@ -12,7 +12,7 @@
 //!   world costs the turn.* A move, a bump that opens a door, taking the intel — all
 //!   advance the turn, which is what lets the guards act. The exceptions are few and
 //!   enumerated: moving into a wall is **free** (it's a mis-input, not a decision),
-//!   and — once abilities exist — toggling one off is free. A free action does not
+//!   and toggling an ability off is free (§4.4/#304). A free action does not
 //!   end the turn, so the world does not move and the guards do not get a go.
 //! - **Win and lose (§4.5), the only two.** *Lose:* a guard moving into your cell
 //!   captures you — contact, not detection, so being unseen is not being safe. *Win:*
@@ -37,14 +37,17 @@
 //!
 //! # Where the loop lives
 //!
-//! This file owns the [`State`] itself, [`step`](State::step), the player phase and
-//! the sight phase. The rest is next door, each in its own module: the public
+//! This file owns the [`State`] itself, its tuning constants, [`step`](State::step),
+//! the player phase (with the §4.3 bump ladder it resolves), the radio phase and the
+//! sight phase. The rest is next door, each in its own module: the public
 //! [`Input`]/[`Event`]/[`Affordance`] vocabulary ([`events`]), the read surface the
-//! renderer and the §13.2 bot ask ([`view`]), phase 3 ([`guards`]), the doors' own turn
-//! ([`doors`]), the §9 sense channel both halves of which fade on one model
-//! ([`sense`]), the ability effects ([`abilities`]) and the #57 auto-slide
-//! ([`traversal`]). They are all `impl State` blocks over the *same* struct — plain
-//! structs, not an ECS (§12.3), so the coupling stays visible in the types.
+//! renderer and the §13.2 bot ask ([`view`]), phase 3 ([`guards`]), the doors' own
+//! turn ([`doors`]), the §9 sense channel ([`sense`]), the ability machinery
+//! ([`abilities`], [`activation`], [`effects`], [`lockdown`], [`bore`], the piloting
+//! seam [`control`]), the §7.3 reinforcements ([`reinforcements`]) and the #57
+//! auto-slide ([`traversal`]). They are all `impl State` blocks over the *same*
+//! struct — plain structs, not an ECS (§12.3), so the coupling stays visible in the
+//! types.
 
 use serde::{Deserialize, Serialize};
 
@@ -274,14 +277,6 @@ pub const GUIDE_BLINK_TURNS: u32 = 3;
 /// pair is what the sim sweeps first.
 pub const FALSE_CALL_RADIUS: u32 = 10;
 
-/// The broadcast is deliberately **wider than the guard sense** (§9/§8.3/#504) — the
-/// opposite of what Confusion's and Lockdown's assertions hold, and pinned here so that
-/// a later tune which quietly brought it back inside eyesight would have to say so.
-///
-/// Reaching past what the player can perceive is the whole of what makes it a radio
-/// rather than a shout; a value at or under [`PLAYER_SENSE_RANGE`] would leave the
-/// ability indistinguishable from a wider Confusion and would make the *duct* case —
-/// where a crawler still broadcasts in full — silently disappear.
 /// The broadcast reaches **at least as far as the guard sense** (§9/§8.3/#504) — the
 /// opposite of what Confusion's and Lockdown's assertions hold, and pinned here so a
 /// later tune that quietly brought it back inside eyesight would have to say so.

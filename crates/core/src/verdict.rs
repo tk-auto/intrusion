@@ -15,13 +15,13 @@
 //!
 //! # The exits belong to the mode, not to the screen
 //!
-//! The same screen ends a quick-play run and, one day, a campaign run — and they may
-//! not offer the same way on. Quick play is **training**: a level is a thing you retry
-//! until you have read the building. The campaign *is* the run (§2.2), and a run you
-//! can restart is not a permadeath run at all. So the exit set is a property of
-//! [`RunMode`] ([`RunMode::exits`]), and a campaign cannot inherit a retry button by
-//! reusing this screen. §14 v3 does not exist yet; the gate does, in shape, which is
-//! the whole point of writing it down now (see design appendix 31).
+//! The same screen ends a quick-play run and a campaign run — and they do not offer
+//! the same way on. Quick play is **training**: a level is a thing you retry until
+//! you have read the building. The campaign *is* the run (§2.2), and a run you can
+//! restart is not a permadeath run at all. So the exit set is a property of
+//! [`RunMode`] ([`RunMode::exits`]), and the campaign (§14 v3, shipped with #208)
+//! cannot inherit a retry button by reusing this screen — the gate was written down
+//! before the mode that needed it, which is why it held (see design appendix 31).
 
 use serde::{Deserialize, Serialize};
 
@@ -148,8 +148,8 @@ pub enum RunMode {
     QuickPlay,
     /// The campaign (§14 v3): 2–3 hours, and **the run is the game** (§2.2). Its end
     /// screen offers no way to play the run again, because permadeath means there is
-    /// no again. Nothing constructs this yet — it exists so the shape of the gate is
-    /// in the code before the mode that needs it is.
+    /// no again. Constructed by [`Campaign::run_options`](crate::campaign::Campaign)
+    /// (#208) — every level launched off the campaign map carries this gate.
     Campaign,
 }
 

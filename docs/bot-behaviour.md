@@ -321,7 +321,11 @@ it is ruled out the same way.
 
 ### 4.4a The cues that exist, and the fact each one reads
 
-Every activated verb is cued (#347). What a cue is *allowed* to key off
+Every activated verb is cued (#347), with one recorded exception: the **Drone**
+(#273), whose press opens a piloting mode the policy does not drive — flying it well
+needs its own routing and a judgement about the parked body, so until that exists its
+zero in the histogram is deliberate (§13.3; `docs/stats/abilities/drone.md` says which
+kind of zero). What a cue is *allowed* to key off
 is a fact the surrounding policy has already computed and handed over — the sharing is
 the seam's reason to exist — so the right-hand column is also the list of what the
 `Moment` carries:
@@ -337,6 +341,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Pierce Wall** | a route the facility does not offer | the same crossing, at three times the price — the budget is scarcer |
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **False Call** | emptying the ground you are walking away from | the route step, the guards inside core's reach, and whether that step opens the gap on **every** one of them |
+| **Drone** | — **activated but uncued** (#273): the press opens a control mode the policy does not drive | — |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
 | **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |
 | **Saver** | — **passive**, and deliberately uncued even though it has a budget (#243) | — |
