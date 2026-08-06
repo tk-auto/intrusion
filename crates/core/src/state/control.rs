@@ -148,13 +148,15 @@ impl State {
         }
     }
 
-    /// End `id`'s remote (§8.2/#273): the window is over — by expiry, the only way it
-    /// ends — so the machine dies and, if the player was still flying it, the keys come
-    /// back with it.
+    /// End `id`'s remote (§8.2/#273): its window is over — by expiry, or by the run no
+    /// longer holding the ability that was its life (a trade, #266/#528) — so the
+    /// machine dies and, if the player was still flying it, the keys come back with it.
+    /// The toggle-off key never reaches here: on a live remote it is refused (#528),
+    /// so there is still no early recall.
     ///
-    /// Called from the end-of-turn expiry sweep beside the decoy's and the lockdown's,
-    /// keyed on the ability rather than on the kind, so the remote a future second
-    /// control ability deploys ends on its own clock without a second arm.
+    /// Called from the shared unwind beside the decoy's and the lockdown's, keyed on
+    /// the ability rather than on the kind, so the remote a future second control
+    /// ability deploys ends on its own clock without a second arm.
     pub(super) fn end_remote(&mut self, id: AbilityId, events: &mut Vec<Event>) {
         if !self.remote.is_some_and(|remote| remote.source == id) {
             return;

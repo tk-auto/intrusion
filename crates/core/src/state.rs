@@ -1364,27 +1364,11 @@ impl State {
             self.tick_guard_daze();
             let phase_ended = expired.iter().any(|&id| declares(id, Effect::Phase));
             for &ability in &expired {
-                // The decoy's lifetime is its ability's active window (§8.3):
-                // expiry takes the fake with it.
-                if declares(ability, Effect::SpawnDecoy) {
-                    self.decoy = None;
-                }
-                // A remote's life is its ability's window and nothing else (§8.1/#273):
-                // the window ending kills the machine and, if the player was still
-                // flying it, hands the keys back with it. This is the *only* way a
-                // remote ends — there is no early recall, because letting go does not
-                // end the window (§8.2: cancelling refunds nothing, and here it is not
-                // even a cancel).
-                self.end_remote(ability, &mut events);
-                // Every seal is released with the window that placed it (§8.3/#242).
-                // This is the guarantee that a temporary wall is temporary: the
-                // duration is the only clock, so a door cannot stay sealed past it.
-                if declares(ability, Effect::SealDoors) {
-                    self.release_lockdown();
-                }
-                // An effect's marks live exactly as long as its window (#308/#338):
-                // whatever life a mark had left dies with the effect, never after it.
-                self.clear_effect_marks(ability);
+                // One teardown, shared with the early ends (§8.2/#528): whatever the
+                // window was doing to the world — the decoy, the remote and its
+                // controls, the door seals, the marks — dies with it here, from the
+                // same list a toggle-off or a trade walks.
+                self.unwind_effect(ability, &mut events);
             }
             events.extend(
                 expired
@@ -1625,8 +1609,18 @@ impl State {
                     }
                     return false;
                 }
+                // A remote out and unattended cannot be switched off from here
+                // (§8.2/#273/#528): the window is the machine's whole life and there
+                // is no early recall, so the key that would end it is refused — free,
+                // and silent like every dead key around the drone, because the reason
+                // is already on the board (§11.7: the machine is drawn under its own
+                // mark). While flying, the same key is the let-go, handled in the
+                // piloted phase before control reaches this arm.
+                if self.remote_awaits(id) {
+                    return false;
+                }
                 if self.abilities.deactivate(id) {
-                    self.unwind_effect(id);
+                    self.unwind_effect(id, events);
                     events.push(Event::AbilityDeactivated { ability: id });
                 }
                 false
@@ -1660,8 +1654,10 @@ impl State {
                         self.abilities.revoke(dropped);
                         // Whatever the dropped ability was still doing to the world goes
                         // with it — the same unwind an early toggle-off does, because
-                        // that is what `revoke` just did to its slot.
-                        self.unwind_effect(dropped);
+                        // that is what `revoke` just did to its slot. The remote too
+                        // (#528): a machine whose ability has left the run has nothing
+                        // left that could ever end it.
+                        self.unwind_effect(dropped, events);
                         self.abilities.grant(taken);
                         self.exchange = None;
                         events.push(Event::Traded { taken, dropped });
@@ -1687,20 +1683,27 @@ impl State {
         }
     }
 
-    /// Take back whatever an ability's **window** was still doing to the world, after
-    /// its slot has been switched off (§8.2): the decoy it was standing up, the doors it
-    /// was holding shut, the marks it had painted.
+    /// Take back whatever an ability's **window** was still doing to the world, once
+    /// its slot has stopped running it (§8.2): the decoy it was standing up, the remote
+    /// it was keeping alive, the doors it was holding shut, the marks it had painted.
     ///
-    /// One helper for the two ways a window can end early — the player's free toggle-off
-    /// (§4.4/#304) and the exchange trading the ability away (#266) — so an ability that
-    /// grows something to unwind cannot have it unwound on one path and left behind on
-    /// the other. Expiry has its own copy in the turn loop, where the whole expired set
-    /// is walked at once.
-    fn unwind_effect(&mut self, id: AbilityId) {
+    /// **The one teardown list**, shared by every way a window can end — expiry in the
+    /// turn loop, the player's free toggle-off (§4.4/#304), and the exchange trading
+    /// the ability away (#266) — so an ability that grows something to unwind cannot
+    /// have it unwound on one path and left behind on another (#528: expiry once kept
+    /// its own copy, and the remote leaked through the gap).
+    fn unwind_effect(&mut self, id: AbilityId, events: &mut Vec<Event>) {
         // The decoy's lifetime is its ability's active window (§8.3).
         if declares(id, Effect::SpawnDecoy) {
             self.decoy = None;
         }
+        // A remote's life is its ability's window and nothing else (§8.1/#273): the
+        // window ending kills the machine and, if the player was still flying it,
+        // hands the keys back with it. On the early paths this only ever fires for a
+        // trade — the toggle-off of a live remote is refused before it gets here —
+        // so "no early recall" holds at the key while a machine can still die with
+        // the loadout that was its life.
+        self.end_remote(id, events);
         // The seals are the window (§8.3/#242): ending it early hands every door back
         // at once. It refunds nothing — the full lockout still runs (§8.2).
         if declares(id, Effect::SealDoors) {

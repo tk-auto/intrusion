@@ -535,6 +535,78 @@ fn a_hovering_drone_dies_with_the_window() {
     );
 }
 
+/// A second press of the toggle-off cannot end the window early (§8.2/#273): there is
+/// no early recall, so on a hovering drone the key is a refused free no-op — the same
+/// window, the same machine, and the controls still there to resume. Silent, like every
+/// dead key while flying: the reason is on the board (§11.7).
+#[test]
+fn toggling_off_a_hovering_drone_is_refused() {
+    let mut s = pilot(Cell::new(5, 5));
+    s.step(Input::Activate(AbilityId::Drone));
+    s.step(Input::Step(Direction::East));
+    s.step(Input::Deactivate(AbilityId::Drone)); // let go: free, the window runs on
+    let (turn, left) = (s.turn(), s.ability_state(AbilityId::Drone));
+
+    let events = s.step(Input::Deactivate(AbilityId::Drone));
+    assert_eq!(events, vec![], "refused silently — the drone is the reason");
+    assert_eq!(s.turn(), turn, "free, like every refusal (§4.4)");
+    assert_eq!(
+        s.ability_state(AbilityId::Drone),
+        left,
+        "the window cannot be ended early — expiry is its only clock (§8.2)",
+    );
+    assert_eq!(
+        s.remote().map(|r| r.cell()),
+        Some(Cell::new(6, 5)),
+        "and the machine still hovers where it was left",
+    );
+
+    s.step(Input::Activate(AbilityId::Drone));
+    assert!(s.piloting(), "and the controls can still be resumed");
+}
+
+/// **Trading the drone away takes the machine with it** (§8.3/#266): the window's life
+/// is the slot that holds it, and the slot just left the run — a camera with no ability
+/// behind it would be a zombie nothing could ever end.
+#[test]
+fn trading_the_drone_away_takes_the_machine_with_it() {
+    let mut layout = open_room(20, 20);
+    layout.place(Cell::new(5, 6), Terrain::EquipmentCache);
+    let mut s = State::new(
+        layout,
+        Cell::new(5, 5),
+        Direction::South,
+        Vec::new(),
+        Vec::new(),
+        Cell::new(18, 18),
+    )
+    .with_loadout(
+        // Full-handed (§8.3): the bump must open an *offer*, not a plain salvage.
+        Loadout::innate()
+            .with(AbilityId::Drone)
+            .with(AbilityId::Camouflage)
+            .with(AbilityId::Autodoors),
+    )
+    .with_caches([AbilityId::Dephase]);
+
+    s.step(Input::Activate(AbilityId::Drone));
+    s.step(Input::Deactivate(AbilityId::Drone)); // let go: hovering on the player's cell
+    assert!(s.remote().is_some());
+
+    s.step(Input::Step(Direction::South)); // the bump opens the offer
+    assert!(s.exchange().is_some(), "the crate offers");
+    s.step(Input::Discard(AbilityId::Drone));
+    assert!(!s.loadout().contains(AbilityId::Drone));
+    assert!(
+        s.remote().is_none(),
+        "the machine goes with the ability that was its life (§8.2/#273)",
+    );
+    assert!(
+        !s.piloting(),
+        "and there are no controls left to be holding",
+    );
+}
+
 /// You launch, and take the controls back, **on your feet** (§10.7/#273): a crawlspace
 /// hides the body, and this ability's whole cost is the body being exposed (§2.3).
 #[test]
