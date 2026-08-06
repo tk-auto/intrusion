@@ -363,6 +363,50 @@ impl Placement {
 ///
 /// Deterministic from `rng` (§12.4): the same layout and stream always place the
 /// same board.
+/// The placement ledger: every cell the draw has claimed (`taken` — nothing else may
+/// land there) and the **solid usables** among them (`usables` — what the §10.3 seal
+/// gate and the §11.4 one-usable preference judge later picks against). The two grow
+/// in lockstep for a usable, and [`claim_usable`](Ledger::claim_usable) is the one
+/// place that writes both, so a draw site cannot update one and forget the other —
+/// the drift that four hand-rolled copies of this discipline used to invite (#538).
+struct Ledger {
+    taken: Vec<Cell>,
+    usables: Vec<Cell>,
+}
+
+impl Ledger {
+    /// Claim `cell` as a placed usable: off the free pool, and into the set later
+    /// seal/conflict judgements run against.
+    fn claim_usable(&mut self, cell: Cell) {
+        self.taken.push(cell);
+        self.usables.push(cell);
+    }
+
+    /// **The two-tier usable draw** (#481/§11.4), shared by every stage that picks
+    /// from an already-shuffled pool: cells that would seal ground off are out at
+    /// both tiers (a gate, §10.3-solid pieces are walls to a route), then a cell
+    /// that keeps every floor neighbour to one adjacent usable is preferred, falling
+    /// back to any non-sealing cell rather than failing the draw (a preference —
+    /// the arrow keeps a doubled cell unambiguous). The winner is claimed before it
+    /// is returned.
+    ///
+    /// Consumes no randomness: order is the pool's own, so a stage's RNG spend is
+    /// exactly its shuffles and nothing here (§12.4 seed stability).
+    fn draw_usable(&mut self, pool: &[Cell], layout: &Layout) -> Option<Cell> {
+        let facility = layout.facility();
+        let placeable = || {
+            pool.iter()
+                .copied()
+                .filter(|&c| !seal::seals_ground(facility, c, &self.usables))
+        };
+        let cell = placeable()
+            .find(|&c| !placement_conflict(layout, c, &self.usables))
+            .or_else(|| placeable().next())?;
+        self.claim_usable(cell);
+        Some(cell)
+    }
+}
+
 pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Option<Placement> {
     let facility = layout.facility();
 
@@ -457,19 +501,19 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     // a duct's interior to overlie. (Guards may stand on one — a guard walks straight
     // over a concealed crawler, §10.7.) The §10.7 shortcuts are held to the same rule
     // here, which nothing used to do.
-    let mut taken: Vec<Cell> = vec![exit, player];
-    taken.extend(exit_duct.cells().iter().copied());
+    let mut ledger = Ledger {
+        taken: vec![exit, player],
+        usables: vec![exit],
+    };
+    ledger.taken.extend(exit_duct.cells().iter().copied());
     // Read off the layout rather than the `ducted` set: the list is ordered, and every
     // draw below this one has to be a function of the seed alone (§12.4).
-    taken.extend(
+    ledger.taken.extend(
         layout
             .ducts()
             .iter()
             .flat_map(|d| d.cells().iter().copied()),
     );
-    // The usables placed so far — what later usable picks prefer not to crowd
-    // (§11.4, one usable per cell — a preference, not a gate).
-    let mut usables: Vec<Cell> = vec![exit];
 
     // §10.1.8 + §10.6: intel in any room except the start room — and *spread*, one
     // room each, so all three can never land in one room. Rooms are drawn in
@@ -489,22 +533,24 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
             .1
             .iter()
             .copied()
-            .filter(|&c| !seal::seals_ground(facility, c, &usables))
+            .filter(|&c| !seal::seals_ground(facility, c, &ledger.usables))
             .collect();
         // It is also a usable (§11.4): prefer a cell that keeps every floor cell to
         // one adjacent usable, but fall back to the rest of the room rather than fail
         // the draw — *that* preference never blocks a placement (the arrow keeps a
-        // doubled cell unambiguous).
+        // doubled cell unambiguous). The two tiers are [`Ledger::draw_usable`]'s, but
+        // through [`pick_free`] rather than pool order: intel predates the shuffled-
+        // pool stages and draws from the run stream per pick, and changing how it
+        // spends randomness would reshuffle every facility ever shared (§12.4).
         let clean: Vec<Cell> = placeable
             .iter()
             .copied()
-            .filter(|&c| !placement_conflict(layout, c, &usables))
+            .filter(|&c| !placement_conflict(layout, c, &ledger.usables))
             .collect();
-        let console =
-            pick_free(&clean, &taken, rng).or_else(|| pick_free(&placeable, &taken, rng))?;
+        let console = pick_free(&clean, &ledger.taken, rng)
+            .or_else(|| pick_free(&placeable, &ledger.taken, rng))?;
         intel.push(console);
-        taken.push(console);
-        usables.push(console);
+        ledger.claim_usable(console);
     }
 
     // The comms console (§7.3/§7.7): the facility's radio terminal, treated like an
@@ -526,27 +572,15 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     let mut comms_pool: Vec<Cell> = others
         .iter()
         .flat_map(|&i| rooms[i].1.iter().copied())
-        .filter(|&c| !taken.contains(&c) && c.manhattan_distance(exit) >= PLAYER_COMMS_MIN_DISTANCE)
+        .filter(|&c| {
+            !ledger.taken.contains(&c) && c.manhattan_distance(exit) >= PLAYER_COMMS_MIN_DISTANCE
+        })
         .collect();
     shuffle(&mut comms_pool, rng);
-    // Solid like the rest (§10.3), so a cell that would seal ground off is out of the
-    // pool at both tiers (#481) — the comms console is the single most frequent
-    // sealer measured, being drawn last and from the widest pool.
-    let placeable = || {
-        comms_pool
-            .iter()
-            .copied()
-            .filter(|&c| !seal::seals_ground(facility, c, &usables))
-    };
-    // A usable like any other (§11.4): prefer a cell that leaves every floor
-    // neighbour with one adjacent usable, but fall back rather than fail the draw.
-    let comms = placeable()
-        .find(|&c| !placement_conflict(layout, c, &usables))
-        .or_else(|| placeable().next())?;
-
-    // Claimed, so no guard spawns on top of the console it is standing on.
-    taken.push(comms);
-    usables.push(comms);
+    // The shared two-tier draw ([`Ledger::draw_usable`], #481/§11.4) — the comms
+    // console is the single most frequent sealer measured, being drawn late and from
+    // the widest pool. Claimed by the draw, so no guard spawns on top of it.
+    let comms = ledger.draw_usable(&comms_pool, layout)?;
 
     // The **equipment caches** (§2.2/§14 v3/#209), on the comms console's terms and for
     // the same reasons: non-start rooms, each at least `PLAYER_CACHE_MIN_DISTANCE` from
@@ -574,7 +608,8 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
                 .iter()
                 .copied()
                 .filter(|&c| {
-                    !taken.contains(&c) && c.manhattan_distance(exit) >= PLAYER_CACHE_MIN_DISTANCE
+                    !ledger.taken.contains(&c)
+                        && c.manhattan_distance(exit) >= PLAYER_CACHE_MIN_DISTANCE
                 })
                 .collect()
         };
@@ -589,28 +624,16 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
             pool = others.iter().flat_map(&eligible).collect();
         }
         shuffle(&mut pool, rng);
-        // A crate is a **solid usable** (§10.3), so it is a wall to a route exactly as a
-        // console is — and a cell whose stamping would seal ground off is out of the pool
-        // at both tiers (#481), the rule the consoles above are drawn under. Applied per
-        // crate rather than once for the set, because `usables` grows as they are placed:
-        // the second crate has to be judged against a building the first is already
+        // The shared two-tier draw ([`Ledger::draw_usable`], #481/§11.4): a crate is a
+        // **solid usable** (§10.3), a wall to a route exactly as a console is. Judged
+        // per crate rather than once for the set, because the ledger grows as they are
+        // placed: the second crate is judged against a building the first is already
         // standing in.
-        let placeable = || {
-            pool.iter()
-                .copied()
-                .filter(|&c| !seal::seals_ground(facility, c, &usables))
-        };
-        // A usable like the consoles (§11.4): prefer a cell that leaves every floor
-        // neighbour with one adjacent usable, but fall back rather than fail the draw.
-        let cell = placeable()
-            .find(|&c| !placement_conflict(layout, c, &usables))
-            .or_else(|| placeable().next())?;
+        let cell = ledger.draw_usable(&pool, layout)?;
         if let Some(&room) = others.iter().find(|&&i| rooms[i].1.contains(&cell)) {
             crated.push(room);
         }
         caches.push(cell);
-        taken.push(cell);
-        usables.push(cell);
     }
 
     // §10.1.9 + §10.6: guards in any room except the start room, and never where
@@ -628,7 +651,7 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     let mut guard_pool: Vec<Cell> = others
         .iter()
         .flat_map(|&i| rooms[i].1.iter().copied())
-        .filter(|c| !taken.contains(c))
+        .filter(|c| !ledger.taken.contains(c))
         .collect();
     shuffle(&mut guard_pool, rng);
     let guards: Vec<Cell> = guard_pool
@@ -692,7 +715,7 @@ pub(crate) fn place(layout: &Layout, config: &LevelConfig, rng: &mut Rng) -> Opt
     // a generator must never merely *believe* a reachability property, and this is a
     // flood fill. A rejection here means the filter has a hole, not that the seed is
     // unlucky.
-    if !seal::nothing_orphaned(facility, &usables) {
+    if !seal::nothing_orphaned(facility, &ledger.usables) {
         return None;
     }
     // Each guard's radio ping cadence (§7.3), drawn once from the run stream —
