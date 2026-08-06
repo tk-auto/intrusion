@@ -70,8 +70,12 @@ pub use brief::{brief_rows, render_brief, BriefRow};
 const HEADING: &str = "THE FACILITY MAP";
 
 /// The footer. It names both input paths (§11.6), like the menu's: a touch player who
-/// cannot see a keyboard still reads that tapping a row raids it.
-const FOOTER: &str = "↑↓ choose · Enter/tap raids";
+/// cannot see a keyboard still reads that tapping a row does something.
+///
+/// It says **opens** rather than *raids* since #215: a row now opens that facility's
+/// brief, and the raid is a row of *that* screen. A footer still promising a raid would be
+/// the screen describing the press it used to answer.
+const FOOTER: &str = "↑↓ choose · Enter/tap opens";
 
 /// What an intel-locked row says (§14 v3's alternative-route sink, #212) — the label, and
 /// its **price** in the currency's own word.
@@ -763,7 +767,14 @@ fn standing_here(run: &Campaign, ahead: &[Offer]) -> bool {
 /// row cannot come to mean different things — and neither can a tap on the map and a tap
 /// on the brief drawn over it.
 #[must_use]
-pub fn map_hit(width: u32, height: u32, run: &Campaign, ui: MapUi, x: u32, y: u32) -> Option<MapHit> {
+pub fn map_hit(
+    width: u32,
+    height: u32,
+    run: &Campaign,
+    ui: MapUi,
+    x: u32,
+    y: u32,
+) -> Option<MapHit> {
     if height > 0 && y == height - 1 {
         let theme = theme_control_start(width);
         return (x >= theme && x < theme + theme_control_len()).then_some(MapHit::ToggleTheme);

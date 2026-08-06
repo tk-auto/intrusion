@@ -3,9 +3,9 @@
 //! screen it was made on, and that a sale the hub cannot honour is never offered.
 
 use super::*;
+use crate::ability::Loadout;
 use crate::campaign::{Campaign, CampaignStage, Offer, Outlay, SCOUT_COST};
 use crate::render::campaign_map::{map_activation, map_hit, MapScreen};
-use crate::ability::Loadout;
 use crate::verdict::{Ending, RunStats, Verdict};
 
 /// The v1 frame (§10.2/§11.4): the board's width, and its height plus the status rows.
@@ -148,12 +148,18 @@ fn the_scout_row_says_whether_it_can_be_had() {
             .expect("a scout row");
         let grid = render_brief(W, H, run, ui, node);
         let text = grid.to_text()[row_of_brief(H, i) as usize].clone();
-        let x = text.chars().position(|c| !c.is_whitespace()).expect("a row") as u32;
+        let x = text
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .expect("a row") as u32;
         grid.get(x, row_of_brief(H, i)).fg
     };
 
     let broke = at_a_choice_point_holding(8371, SCOUT_COST as usize - 1);
-    assert_eq!(category_of(&broke, open_offer(&broke).node), Category::Ground);
+    assert_eq!(
+        category_of(&broke, open_offer(&broke).node),
+        Category::Ground
+    );
 
     let flush = at_a_choice_point_holding(8371, SCOUT_COST as usize);
     assert_eq!(
@@ -276,4 +282,3 @@ fn the_last_row_keeps_a_blank_between_itself_and_the_footer() {
     assert!(footer.contains(FOOTER));
     assert!(footer.contains("theme [n]"), "the theme keeps its corner");
 }
-

@@ -28,8 +28,8 @@
 //! that rather than deciding for itself.
 
 use intrusion_core::{
-    map_activation, Campaign, CampaignStage, MapHit, MapNav, MapScreen, MapUi, NodeId, ScreenUi,
-    Outlay, Verdict,
+    map_activation, Campaign, CampaignStage, MapHit, MapNav, MapScreen, MapUi, NodeId, Outlay,
+    ScreenUi, Verdict,
 };
 
 use crate::menu::{SCREEN_MAP, SCREEN_PLAY};

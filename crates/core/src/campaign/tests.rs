@@ -1441,7 +1441,10 @@ fn a_scout_does_not_follow_the_run_onto_another_road() {
         !run.next_level().modifiers.scouted,
         "the facility it took is not the one it paid to know",
     );
-    assert!(run.is_scouted(open[0]), "and the plan it bought is still its");
+    assert!(
+        run.is_scouted(open[0]),
+        "and the plan it bought is still its"
+    );
 }
 
 /// **A facility with no room left in its level-seed token is never offered the rule**
@@ -1513,8 +1516,13 @@ fn the_scout_costs_a_facilitys_whole_haul() {
     // so it is priced at what a building is worth. It is deliberately the expensive end of
     // the hub, against the road bought blind (#212) at a third of it.
     let recipe = LevelConfig::V1.intel as u32;
-    assert_eq!(SCOUT_COST, recipe, "a building known costs a building robbed");
-    assert!(SCOUT_COST > ROUTE_UNLOCK_COST);
+    assert_eq!(
+        SCOUT_COST, recipe,
+        "a building known costs a building robbed"
+    );
+    // A const block: both prices are constants, so this is a claim about the *build*
+    // rather than about a run — the expensive end of the hub must stay the expensive end.
+    const { assert!(SCOUT_COST > ROUTE_UNLOCK_COST) };
 
     // No run scouts its first facility: nothing is banked until a raid is walked out of,
     // and one clean raid is exactly the price — so the earliest a scout can be had is the

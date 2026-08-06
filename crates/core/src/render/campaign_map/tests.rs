@@ -107,7 +107,7 @@ fn the_map_draws_the_country_the_run_is_in() {
             "                                        ",
             "                                        ",
             "                                        ",
-            "  ↑↓ choose · Enter/tap raids theme [n] ",
+            "  ↑↓ choose · Enter/tap opens theme [n] ",
         ],
     );
 }
@@ -660,8 +660,14 @@ fn the_footer_and_the_theme_control_never_meet() {
     );
 
     let theme = theme_control_start(W);
-    assert_eq!(map_hit(W, H, &run, MapUi::default(), theme, H - 1), Some(MapHit::ToggleTheme));
-    assert_eq!(map_hit(W, H, &run, MapUi::default(), theme - 1, H - 1), None);
+    assert_eq!(
+        map_hit(W, H, &run, MapUi::default(), theme, H - 1),
+        Some(MapHit::ToggleTheme)
+    );
+    assert_eq!(
+        map_hit(W, H, &run, MapUi::default(), theme - 1, H - 1),
+        None
+    );
 }
 
 /// **The list never runs into the footer either**, in the widest offer a choice point
