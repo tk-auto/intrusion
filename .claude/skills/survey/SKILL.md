@@ -11,7 +11,10 @@ description: >-
   clean up", "is anything getting too big or messy", "where's the tech debt", or
   wants a health check before planning the next slice of work. This is a
   structural survey, not a bug hunt: for runtime correctness in a working diff
-  use /code-review, and for reviewing one specific PR use /review.
+  use /code-review, and for reviewing one specific PR use /review. After
+  reporting, asks the user how many findings to fix and then works the chosen
+  ones one at a time — ticket, code, PR, merge on green — filing each ticket
+  only when its fix starts.
 ---
 
 # Survey the code
@@ -22,9 +25,11 @@ should be. This is the instinct that noticed `state.rs` had swollen to 2 000+
 lines and owned five unrelated concerns; the skill makes that instinct routine
 instead of accidental.
 
-It is a **survey, not a rewrite**: you report, the user decides. Nothing here
-edits code. The output is a ranked list that feeds `/create-tickets` (to file
-the good ones) or `/work-ticket` (to fix one now).
+**The survey itself changes nothing** — sections 1–5 only read and report, and
+the user decides what is worth doing. But it does not stop at the list: section
+6 asks how many of the findings to fix, then drives the chosen ones one at a
+time — ticket, code, PR, merge on green — and files each ticket only when its
+fix begins.
 
 ## 1. Scope it
 
@@ -143,15 +148,66 @@ its own plan. End with a short **What I looked at** note (scope, what you
 measured) so the user can trust the coverage — and, if you deliberately skipped
 areas, which.
 
-## 6. Hand off
+## 6. Ask how many to fix — then work them one at a time
 
-Close by offering the next step, don't just drop the list:
+A list nobody acts on was not worth the tokens. So don't stop at the report and
+don't leave the next step vague: **ask the user, explicitly, how many of the
+findings to fix now.**
 
-- **File them:** the strong findings map cleanly onto tickets — offer
-  `/create-tickets` to turn the approved ones into issues (it proposes in chat
-  first, then labels them area/type/size). A survey finding's area and size
-  slot straight into that taxonomy.
-- **Fix one now:** if the user wants to act immediately, `/work-ticket` picks one
-  up end-to-end.
-- Let the user choose which findings are worth it. The survey informs the
-  backlog; it doesn't dictate it.
+Ask in plain text, as a single question, per `CLAUDE.md` — not
+`AskUserQuestion`, not a batch. Something like:
+
+> That's 7 findings. How many do you want me to take on now — the top 3? I'll
+> work them one at a time: file the ticket, build it, PR, merge on green, then
+> the next one.
+
+- **Ask; don't assume.** "None, I just wanted the picture" is a legitimate
+  answer — take it and stop.
+- **A count means the top N of your ranking**, since you ranked by leverage. If
+  the user names specific findings instead, use theirs.
+- **Read the chosen list back in one line** before starting, so a
+  miscommunication costs a sentence rather than a PR.
+
+### File tickets one at a time — never a stack up front
+
+**Do not create issues for the whole chosen set before starting.** One ticket is
+filed at the moment its fix begins, and not before. A stack filed in advance
+goes stale the instant the first PR lands: the earlier fix moves the code the
+later findings sit on, seams shift, sizes change, a finding gets fixed
+incidentally — and the user may well stop after two, leaving the rest as
+backlog noise nobody asked for.
+
+For each chosen finding, in ranked order:
+
+1. **Ticket.** File exactly one issue with the **create-tickets** skill's body
+   template and labels (`area:` / `type:` / `size:` + `milestone:`). The
+   finding already maps onto it: *Where/What* → Summary, the design sections
+   and conventions it drifts from → Design reference, *Suggested fix* +
+   observable outcome → Acceptance criteria, *Why it matters* → the rationale.
+   The user approved this finding in the conversation, so that approval *is*
+   create-tickets' phase 1 — file it directly, don't re-propose.
+2. **Build it.** Hand the fresh issue to the **work-ticket** skill and follow it
+   from its step 1b through step 8: the brief, a branch off freshly fetched
+   `origin/main`, implementation, unit tests, `./scripts/gate.sh` green,
+   conventional commits with `Closes #<n>`, the PR, and — if the cleanup can
+   change anything a player sees — an artifact build to prove it still runs.
+3. **Merge on green.** work-ticket step 9: check mergeability, watch CI yourself
+   with a basic monitor (never the Claude Code Remote tools — `CLAUDE.md`),
+   squash-merge when every check is green, then watch the `main` build. Its
+   hold-instead-of-merge cases still apply (the user asked to review it, a key
+   player-visible change awaiting their playtest, or you're not confident) — say
+   which one and leave the PR open.
+4. **Report, then re-read the next finding.** One line back to the user: issue
+   number, PR URL, merge state. Before filing the next ticket, **check the next
+   finding against the tree you just changed** — restate it if the seam moved,
+   resize it, or drop it if the last fix already covered it. That re-check is
+   the whole point of not filing in advance.
+
+Then repeat. Stop when the count is reached, when the user says stop, or when a
+held-open PR blocks the next fix (the next change would stack on unmerged work)
+— in that last case say so and hand back rather than stacking silently.
+
+**Findings you didn't work stay unfiled.** They live in this conversation, and a
+later survey will surface them again if they still matter. If the user wants the
+remainder on the backlog anyway, that's an explicit `/create-tickets` pass they
+ask for — not something this skill does on its way out.
