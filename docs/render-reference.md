@@ -642,10 +642,13 @@ separated there by spacing the rungs out in luminance, with System pulled well c
 below the ladder rather than by making the tan warmer, which would only have walked it
 into the orange.
 
-**The toggle is `n`** (for *night*), listed on the help panel's controls and offered
-there as an `[n]` footer button for touch. It is the one key the modal help panel
-forwards rather than swallows, because the panel is where the option lives until v2
-grows an options screen. Nothing persists it yet: a reload comes back dark.
+**The toggle is `n`** (for *night*), listed on the help panel's controls and forwarded
+rather than swallowed by the open panel — its colour key is the best thing on screen to
+judge the flip against. Its **home is the options screen** (§14 v2/#513): a `theme` row
+drawing the live value, and the record that persists it, so a reload comes back in the
+theme that was chosen. The panel's own `[n]` footer button gave way to `options [o]`
+there; the campaign map keeps a drawn `theme [n]`, since it has no route to the screen
+yet and a touch player would otherwise be left with no control at all.
 
 ### 4.5 The alert rung's colour
 

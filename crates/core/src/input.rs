@@ -85,28 +85,25 @@ pub enum HelpNav {
     PrevTab,
     /// Flip the colour theme without leaving the panel (§11.2/#189) — the same
     /// [`UiCommand::ToggleTheme`] the board answers, re-offered here because the
-    /// panel is where the option lives until v2 grows an options screen, and its
-    /// colour key is the best thing on the screen to judge a theme against.
+    /// panel's colour key is the best thing on the screen to judge a theme against.
+    /// The setting's *home* is the options screen ([`OpenSettings`](Self::OpenSettings),
+    /// #513); this is the shortcut, and it is drawn nowhere on the panel any more.
     ToggleTheme,
+    /// Open the **options screen** over the panel (§14 v2/#513) — the keyboard half of
+    /// the footer's `options [o]` control.
+    ///
+    /// It is the panel's whole reason to still be in this list twice over: the theme
+    /// row is there, and so are the debug session's switches, which had a tab here
+    /// until #513. The help panel is the one modal surface a *running* game can always
+    /// raise, so routing the door through it is what keeps every §12.6 switch
+    /// flippable mid-run, exactly as the Debug tab did.
+    OpenSettings,
     /// Copy this run's **level-seed token** to the system clipboard (§13.1/#353) —
     /// the keyboard half of the Level info tab's `copy [c]` control, so the panel is
     /// reachable without a pointer and so is this (§11.6). The shell performs the
     /// write and mirrors the control exactly: a run whose panel draws no token has
     /// nothing to copy, and the key does nothing there, as the absent control does.
     CopySeed,
-    /// Copy the whole **run** — a `…#seed=<token>&inputs=<script>` replay link — to
-    /// the clipboard (§12.4/§13.1/#411): the keyboard half of the Debug tab's
-    /// `replay [r]` control, [`CopySeed`](Self::CopySeed)'s sibling. Every build
-    /// records its input stream (#478), so the only thing that can be missing is a
-    /// run with no token for the link to name; the shell mirrors the drawn control
-    /// exactly, and there the key does nothing, as the absent control does.
-    CopyReplay,
-    /// Flip **omni-vision** — [`DebugModifiers::reveal_whole_level`](crate::DebugModifiers)
-    /// — for the running game (§12.6/#459): the keyboard half of the Debug tab's
-    /// `omni [v]` control. Offered only in a debug session, like the tab that draws it.
-    /// A view switch like the rest of this list: it changes what the player perceives,
-    /// costs no turn (§4.4) and leaves the facility exactly as it was.
-    ToggleReveal,
 }
 
 /// Map a key to the [`HelpNav`] it drives **while the help panel is open**, or
@@ -124,32 +121,29 @@ pub enum HelpNav {
 /// *character* is listed, because a digit means a bar slot (#369), and no letter,
 /// because §11.6's movement is arrows and numpad only (#368).
 ///
-/// `debug` is whether this session has the panel's Debug tab
-/// ([`ScreenUi::debug_mode`](crate::ScreenUi), §12.6/#459). The two keys whose
-/// controls live on that tab are offered only when it does: a key that silently does
-/// nothing is precisely the drift the panel-only discipline exists to prevent, and it
-/// would be a worse one here — a stray `r` in an ordinary build would be a control
-/// nobody could see they had pressed.
-pub fn help_nav_for_key(key: &str, debug: bool) -> Option<HelpNav> {
+/// It took a `debug` argument while the panel had a Debug tab (#459): the two keys
+/// whose controls lived there were offered only in a session that had it. Both keys
+/// moved to the options screen with the tab in #513, so every key here is now offered
+/// on every panel — which is the same rule stated the same way, that a key is offered
+/// exactly where its control is drawn.
+pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
     match key {
         "?" | "Escape" => Some(HelpNav::Close),
         "Tab" | "ArrowRight" => Some(HelpNav::NextTab),
         "ArrowLeft" => Some(HelpNav::PrevTab),
         // The one binding the modal panel does **not** swallow (#189): the theme
-        // toggle lives on this panel, so it has to work with the panel up.
+        // toggle reaches every modal screen, and this is the one whose colour key is
+        // the best thing on screen to judge the flip against.
         "n" => Some(HelpNav::ToggleTheme),
+        // `o` opens the options screen (#513) — panel-only like `c` below, so it claims
+        // no board letter from the ability mnemonics (§11.6/#368).
+        "o" => Some(HelpNav::OpenSettings),
         // `c` copies the run's level-seed token (#353). It is listed *here only* — the
         // panel is the one surface the token is drawn on, so a board-wide binding
         // would name a control that is not on screen, and leaving it off
         // `ui_command_for_key` also leaves the letter free for an ability mnemonic
         // (#360), which the modal panel swallows anyway while it is up.
         "c" => Some(HelpNav::CopySeed),
-        // `r` copies the whole run as a replay link (#411) and `v` flips omni-vision
-        // (#459): the Debug tab's two controls, panel-only for the same reasons as
-        // `c` and session-only for the reason above. `r` additionally does nothing in
-        // a build with no recorder, which the shell mirrors from the absent control.
-        "r" if debug => Some(HelpNav::CopyReplay),
-        "v" if debug => Some(HelpNav::ToggleReveal),
         _ => None,
     }
 }
@@ -210,6 +204,69 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
         // level-seed token, and a key that retyped the screen's colours mid-token
         // would be a trap — the shell holds it back there (`apply_menu_nav`).
         "n" => Some(MenuNav::ToggleTheme),
+        _ => None,
+    }
+}
+
+/// A navigation command on the **options screen** (§14 v2/#513) — the settings
+/// surface, modal like every other screen in this file: while it is up the shell
+/// routes keys here first and nothing underneath sees them.
+///
+/// The same shape as [`MenuNav`], because it is the same shape of screen: a vertical
+/// list walked by `↑`/`↓` and fired by `Enter`. A player who has used the title screen
+/// has already learned it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SettingsNav {
+    /// Move the marker to the previous row, wrapping.
+    Prev,
+    /// Move the marker to the next row, wrapping.
+    Next,
+    /// **Fire the marked row** — flip the setting it names, or, for the one row that is
+    /// an action rather than a setting, copy the run as a replay link.
+    Activate,
+    /// Leave the screen, back to whatever it was opened over — the title screen, or the
+    /// help panel mid-run. The keyboard half of the drawn `[x]`, and the reason this
+    /// screen can never trap (§11.6, the old options dialog's exact failure).
+    Back,
+    /// Flip the colour theme (§11.2/#189), as on every other modal surface. It is the
+    /// same flip the theme *row* performs, and it is bound here for the reason it is
+    /// bound everywhere else: `n` is a standing shortcut, and a key that worked on the
+    /// board, on the menu and on the help panel but not on the screen that owns the
+    /// setting would be the one place it surprised.
+    ToggleTheme,
+}
+
+/// Map a key to the [`SettingsNav`] it drives **while the options screen is up**, or
+/// `None` for a key the modal screen swallows (§14 v2/#513).
+///
+/// `Escape` leaves, and so does `o` — the key that opened it from the help panel
+/// ([`HelpNav::OpenSettings`]), still closing what it opened, exactly as `?` does for
+/// the panel itself.
+pub fn settings_nav_for_key(key: &str) -> Option<SettingsNav> {
+    match key {
+        "ArrowUp" => Some(SettingsNav::Prev),
+        "ArrowDown" => Some(SettingsNav::Next),
+        "Enter" | " " => Some(SettingsNav::Activate),
+        "Escape" | "o" => Some(SettingsNav::Back),
+        "n" => Some(SettingsNav::ToggleTheme),
+        _ => None,
+    }
+}
+
+/// Map a gesture to the [`SettingsNav`] it drives **while the options screen is up**
+/// (§11.6/#336/#513) — the touch half of [`settings_nav_for_key`].
+///
+/// The vertical swipes walk the list, exactly as they walk the menu's. **A press is
+/// unbound**, for the menu's reason: resolving it to
+/// [`Activate`](SettingsNav::Activate) would let a stray tap on empty screen flip a
+/// setting — and, in a debug session, lift the fog on a run mid-raid. A row is fired by
+/// pressing *the row*, on the arm-on-press / fire-on-lift path, and by nothing else.
+/// Leaving is the drawn `[x]`, not a swipe: a gesture that dismissed a modal by
+/// accident would work against the no-trap rule rather than for it.
+pub fn settings_nav_for_gesture(gesture: Gesture) -> Option<SettingsNav> {
+    match gesture {
+        Gesture::Swipe(Direction::North) => Some(SettingsNav::Prev),
+        Gesture::Swipe(Direction::South) => Some(SettingsNav::Next),
         _ => None,
     }
 }
@@ -594,7 +651,7 @@ mod tests {
             assert_eq!(input_for_key(&key), None, "{key:?} is not a movement key");
             assert_eq!(ui_command_for_key(&key), None, "{key:?} owns no UI command");
             assert_eq!(
-                help_nav_for_key(&key, false),
+                help_nav_for_key(&key),
                 None,
                 "{key:?} navigates no help tab"
             );
@@ -629,7 +686,7 @@ mod tests {
         // the only one of the three the *open* help panel forwards rather than
         // swallows, because the panel is where the option lives.
         assert_eq!(ui_command_for_key("n"), Some(UiCommand::ToggleTheme));
-        assert_eq!(help_nav_for_key("n", false), Some(HelpNav::ToggleTheme));
+        assert_eq!(help_nav_for_key("n"), Some(HelpNav::ToggleTheme));
         for key in ["m", "?", "n"] {
             assert_eq!(input_for_key(key), None, "{key:?} is not a game action");
         }
@@ -650,28 +707,31 @@ mod tests {
     fn the_open_help_panel_captures_input_and_switches_tabs() {
         for key in ["?", "Escape"] {
             assert_eq!(
-                help_nav_for_key(key, false),
+                help_nav_for_key(key),
                 Some(HelpNav::Close),
                 "{key:?} closes"
             );
         }
         for key in ["Tab", "ArrowRight"] {
             assert_eq!(
-                help_nav_for_key(key, false),
+                help_nav_for_key(key),
                 Some(HelpNav::NextTab),
                 "{key:?} → next tab"
             );
         }
         assert_eq!(
-            help_nav_for_key("ArrowLeft", false),
+            help_nav_for_key("ArrowLeft"),
             Some(HelpNav::PrevTab),
             "← → prev tab"
         );
         // `c` copies the run's level-seed token (#353) — a panel-only binding, so it is
         // here and *not* in the board's table: outside this panel there is nothing
         // drawn for it to name.
-        assert_eq!(help_nav_for_key("c", false), Some(HelpNav::CopySeed));
-        for key in ["c", "r", "v"] {
+        assert_eq!(help_nav_for_key("c"), Some(HelpNav::CopySeed));
+        // `o` opens the options screen (#513) — panel-only for the same reason, and
+        // the door that keeps every setting reachable mid-run.
+        assert_eq!(help_nav_for_key("o"), Some(HelpNav::OpenSettings));
+        for key in ["c", "o"] {
             assert_eq!(
                 ui_command_for_key(key),
                 None,
@@ -680,44 +740,58 @@ mod tests {
         }
         // A movement/wait/ability/other-UI key is swallowed by the open modal panel —
         // the vi keys among them, now that they navigate nothing anywhere (#368).
-        for key in ["k", "j", "l", "h", "w", "5", "t", "m", "Enter"] {
+        for key in ["k", "j", "l", "h", "w", "5", "t", "m", "r", "v", "Enter"] {
             assert_eq!(
-                help_nav_for_key(key, false),
+                help_nav_for_key(key),
                 None,
                 "{key:?} is swallowed while help is open"
             );
         }
     }
 
-    /// **The Debug tab's keys exist exactly where its tab does** (§12.6/#459): `r`
-    /// (copy the run as a replay link, #411) and `v` (flip omni-vision) answer in a
-    /// debug session and are swallowed like any other letter without one.
+    /// **The options screen is modal too** (§14 v2/#513): while it is up the shell
+    /// routes keys through [`settings_nav_for_key`] first. The vertical keys walk the
+    /// rows, `Enter`/`Space` fires the marked one, and `Escape` — or the `o` that
+    /// opened it — leaves. Every other key is swallowed, so nothing underneath the
+    /// screen runs while a setting is being changed.
     ///
-    /// This is the panel-only discipline taken one step further. A key that silently
-    /// does nothing teaches the player a control they do not have — and here it would
-    /// be worse than useless, since the control it names is not on screen to contradict
-    /// it. The rest of the panel's keys are unchanged either way: the session decides
-    /// what is on the bar, never how the bar is navigated.
+    /// The two keys the Debug tab used to own, `r` and `v`, are **gone from every
+    /// table** (#459 → #513): their controls are rows on this screen now, fired by
+    /// `Enter` like every other row, so a session without them has no key that
+    /// silently does nothing.
     #[test]
-    fn the_debug_tabs_keys_answer_only_in_a_debug_session() {
-        assert_eq!(help_nav_for_key("r", true), Some(HelpNav::CopyReplay));
-        assert_eq!(help_nav_for_key("v", true), Some(HelpNav::ToggleReveal));
-        assert_eq!(help_nav_for_key("r", false), None, "no tab, no key");
-        assert_eq!(help_nav_for_key("v", false), None);
-
-        // Neither is a binding anywhere else — not on the board, not a movement key.
-        for key in ["r", "v"] {
-            assert_eq!(ui_command_for_key(key), None, "{key:?} is panel-only");
-            assert_eq!(input_for_key(key), None, "{key:?} shadows no movement");
-        }
-        // And the standing panel keys answer the same in either session: the debug
-        // flag adds keys, it never changes what the panel already does.
-        for key in ["?", "Escape", "Tab", "ArrowRight", "ArrowLeft", "n", "c"] {
+    fn the_open_options_screen_captures_input_and_walks_its_rows() {
+        assert_eq!(settings_nav_for_key("ArrowUp"), Some(SettingsNav::Prev));
+        assert_eq!(settings_nav_for_key("ArrowDown"), Some(SettingsNav::Next));
+        for key in ["Enter", " "] {
             assert_eq!(
-                help_nav_for_key(key, true),
-                help_nav_for_key(key, false),
-                "{key:?} is the same key in either session",
+                settings_nav_for_key(key),
+                Some(SettingsNav::Activate),
+                "{key:?} fires the marked row",
             );
+        }
+        for key in ["Escape", "o"] {
+            assert_eq!(
+                settings_nav_for_key(key),
+                Some(SettingsNav::Back),
+                "{key:?} leaves — the screen can never trap (§11.6)",
+            );
+        }
+        // The standing theme shortcut reaches the screen that owns the setting too,
+        // rather than being the one place `n` surprises.
+        assert_eq!(settings_nav_for_key("n"), Some(SettingsNav::ToggleTheme));
+        for key in ["k", "j", "w", "5", "m", "?", "c", "r", "v", "Tab"] {
+            assert_eq!(
+                settings_nav_for_key(key),
+                None,
+                "{key:?} is swallowed while the options screen is up",
+            );
+        }
+        // The retired Debug-tab keys bind nowhere at all now.
+        for key in ["r", "v"] {
+            assert_eq!(help_nav_for_key(key), None, "{key:?} left the panel");
+            assert_eq!(ui_command_for_key(key), None, "{key:?} is not a board key");
+            assert_eq!(input_for_key(key), None, "{key:?} shadows no movement");
         }
     }
 
@@ -874,11 +948,11 @@ mod tests {
             Some(MenuNav::Prev)
         );
         assert_eq!(
-            help_nav_for_key(key_for_code("Numpad6").unwrap(), false),
+            help_nav_for_key(key_for_code("Numpad6").unwrap()),
             Some(HelpNav::NextTab)
         );
         assert_eq!(
-            help_nav_for_key(key_for_code("Numpad4").unwrap(), false),
+            help_nav_for_key(key_for_code("Numpad4").unwrap()),
             Some(HelpNav::PrevTab)
         );
         // The top row does not fold: its digits are the bar's, and a letter key needs
@@ -982,11 +1056,11 @@ mod tests {
         // The help panel: a horizontal tab bar, walked by the horizontal swipes.
         assert_eq!(
             help_nav_for_gesture(Gesture::Swipe(Direction::West)),
-            help_nav_for_key("ArrowLeft", false),
+            help_nav_for_key("ArrowLeft"),
         );
         assert_eq!(
             help_nav_for_gesture(Gesture::Swipe(Direction::East)),
-            help_nav_for_key("ArrowRight", false),
+            help_nav_for_key("ArrowRight"),
         );
     }
 

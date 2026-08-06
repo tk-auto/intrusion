@@ -3787,3 +3787,74 @@ was taken deliberately rather than papered over with a throwaway draw that would
 bought compatibility by making the generator lie about what it does. A
 placement-depth modifier does not carry that cost, which is a reason to prefer one
 where the rule permits — not a licence to reach for generation by default.
+
+---
+
+## Appendix 53 — The options screen is a screen, and it is the *only* drawn home of a setting
+
+*(§11.2, §11.6, §12.6, §14 v2. See #513, and #189, #460, #298, #459 before it.)*
+
+Two settings had been camping. The colour theme lived on the help panel's footer as
+`theme [n]`, explicitly "until v2 grows an options screen" (#189); the tile renderer
+had no surface at all and hid behind `?tiles=1` (#460). The debug session's two
+switches — omni-vision and the replay export — had a *fourth help tab* (#459). #513
+gave all four a home. Three things about that were not obvious.
+
+**A screen, not a tab — and the reason is arithmetic.** `render::help`'s own doc
+comment had predicted the opposite: "*Options* land as a further tab". They cannot.
+The tab bar is one row of a 40-column board (§10.2) sharing that row with the
+right-aligned `[x]`, and the compile-time assertion that keeps it clear of that `[x]`
+is what settles it: `[Level] [Abilities] [Help] [Options]` reaches column 37 and the
+`[x]` starts at 36. The bar is full at three tabs plus the one that was there. So the
+Debug tab was retired rather than joined, `HelpTab::shown` went with it — every
+session gets the same bar again — and the switches moved onto a screen of its own.
+The check that said so is still in `render::help`, now with a comment naming this as
+what it decided.
+
+**The screen is raised *over* whatever opened it, not switched to.** That one choice
+answers the ticket's third open question — how the §12.6 switches stay flippable
+mid-run once their tab is gone — without a pause menu, which the game does not have.
+The title screen's `Options` entry opens it over the menu; the help panel's new
+`options [o]` control opens it over the panel, and the panel is the one modal surface
+a *running* game can always raise. Leaving clears one field and touches nothing else,
+so the menu surface or the help tab underneath is exactly as it was left. It also
+fixes the input precedence for free: the options screen is asked **first**, by key and
+by gesture and by tap alike, because it is the only surface that can have another one
+underneath it.
+
+**One drawn home, several keys.** The tempting symmetry was to keep the `theme [n]`
+button everywhere it was and add the screen beside it. That is what leaves a setting
+with no home: three surfaces drawing a control for one value, three hit-tests, and no
+answer to "where does the theme live?". So the drawn control was retired from the help
+panel (replaced by the door) and from the title screen (whose `Options` row is one row
+away, and is the door). What was **not** retired is the `n` key: it is a §11.6 table
+row, it costs nothing, and a one-press legibility toggle is worth having wherever you
+are when the screen is hard to read. The distinction that makes both true at once is
+that a key is a *shortcut* and a drawn row is a *home* — and it is only safe because
+every path lands on one shell seam (`Game::toggle_theme`), which flips the flag and
+writes the record. A preference is stored because it **changed**, not because of where
+it was changed.
+
+**The campaign map kept its control**, and that is the exception worth stating rather
+than tidying. The map has no route to the options screen — wiring one is §14 v3 work —
+so taking its `theme [n]` away would have left a touch player on that screen with no
+way to change the theme at all. Removing a control with nothing in its place is a
+regression whatever it does for consistency.
+
+**What did *not* move.** The `?tiles=` flag survives, against #460's own expectation
+that it would graduate into the screen. It does a job the screen cannot: a preview
+artifact is framed and hash-stripped by its host, so a build stamps the renderer in
+rather than being asked, and the flag is the only way to see the text renderer in the
+very build the tile renderer is being judged against. What changed is its standing —
+it states the renderer for *this load*, the record states the *preference*, and the
+load wins. A URL override is deliberately never written back: a link that silently
+rewrote someone's stored settings would be the shared-link channel reaching somewhere
+it has no business (§13.1's level/debug split, in a smaller key).
+
+**And the debug switches are still not persisted.** They sit on a screen whose other
+two rows are written to storage, which is exactly the confusion §12.6 warns about, so
+the split is drawn as well as coded: their own heading, in Warning rather than System,
+over a line saying *sight only, never the facility*. The preference record holds the
+theme and the renderer and has no field for anything else — a record that re-armed
+omni-vision on the next visit would outlive the session gate the whole debug channel
+rests on.

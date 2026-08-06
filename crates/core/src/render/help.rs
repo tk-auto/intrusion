@@ -18,13 +18,14 @@
 //!   actually *does*, and what it costs (§8.2/§8.3; #343, and see [`abilities`]).
 //! - **Help** ([`HelpTab::Help`]) — the glyph legend, the colour key, and the
 //!   **standing** controls, the original reference card (#139/#296).
-//! - **Debug** ([`HelpTab::Debug`]) — **present only in a debug session** (§12.6/#459):
-//!   the omni-vision switch and the replay export (§12.4/#411/#478).
-//!   It is the one tab that is not always there, which is why
-//!   [`HelpTab::shown`] rather than [`HelpTab::ALL`] is what the bar, the cycle and
-//!   the hit-test are laid out from.
-//! - *Options* land as a further tab (§14 v2 "options"; #189 light mode, #237
-//!   difficulty).
+//!
+//! **Settings are not a tab** (§14 v2/#513). They were going to be — and the debug
+//! session's switches were a fourth tab, [`HelpTab::Debug`], from #459 until #513 —
+//! but the bar is one row of a 40-cell board (§10.2) and a fourth `[Label]` clear of
+//! the `[x]` is all it holds. The options screen ([`super::settings`]) is a screen of
+//! its own instead, and the panel keeps a **door** to it: the footer's `options [o]`
+//! control, which is also how the debug switches stay reachable mid-run now that
+//! their tab is gone.
 //!
 //! **Every row derives from the real source**, never a hand-copied table that
 //! could drift from the game it documents (§11.2/§11.3/§11.6): terrain glyphs and
@@ -66,9 +67,7 @@ use crate::alert::AlertReadout;
 use crate::category::Category;
 use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
-use crate::modifiers::{
-    DebugModifiers, LevelModifiers, ModifierDirection, CAPTIONS, CAPTION_SEPARATOR,
-};
+use crate::modifiers::{LevelModifiers, ModifierDirection, CAPTIONS, CAPTION_SEPARATOR};
 use crate::place::LevelConfig;
 
 /// The key that toggles the help panel (§11.6). A free letter — not a movement
@@ -78,29 +77,40 @@ use crate::place::LevelConfig;
 /// [`help_nav_for_key`](crate::help_nav_for_key) (to close).
 pub(crate) const HELP_KEY: char = '?';
 
-/// The key that flips the colour theme (§11.2/#189) — `n`, for *night* mode. It is
-/// the panel's own option for now (§14 v2 lists options next to this help screen),
-/// so it is drawn as a footer button here as well as listed in the controls, and it
-/// is matched in [`ui_command_for_key`](crate::input::ui_command_for_key) (on the
-/// board) and [`help_nav_for_key`](crate::help_nav_for_key) (with the panel up).
-/// The tests below pin the character against both tables, so the card and the
-/// binding can never drift apart.
+/// The key that flips the colour theme (§11.2/#189) — `n`, for *night* mode. A
+/// **standing** shortcut: it is listed in this card's controls block, and matched in
+/// [`ui_command_for_key`](crate::input::ui_command_for_key) (on the board) and in
+/// every modal screen's own table, the panel's included. The tests below pin the
+/// character against those tables, so the card and the binding cannot drift apart.
+///
+/// Its home is the options screen ([`super::settings`], #513) — the row that draws the
+/// live value and persists it. The key stays because a one-press legibility toggle is
+/// worth having wherever you are when the screen is hard to read; what it no longer
+/// has here is a *drawn control*, which moved with the setting.
 pub(crate) const THEME_KEY: char = 'n';
+
+/// The key that opens the **options screen** from the panel (§14 v2/#513) — `o`, for
+/// *options*. Drawn as `options [o]` on the footer and matched in
+/// [`help_nav_for_key`](crate::help_nav_for_key).
+///
+/// **Panel-only**, like [`COPY_KEY`]: it is absent from
+/// [`ui_command_for_key`](crate::input::ui_command_for_key), so it claims no board
+/// letter and shadows no ability mnemonic (§11.6/#368) — the open panel swallows the
+/// mnemonics anyway. The board's own door to the screen is this panel, one `?` away.
+pub(crate) const SETTINGS_KEY: char = 'o';
 
 /// The tabs the help panel pages between (§14 v2/#248). The panel opens on the
 /// leftmost ([`Default`]) and the tab bar switches between them; a shell keeps the
 /// current tab on [`ScreenUi`](super::ScreenUi) and hands it to [`render_help`].
 ///
-/// Ordered as the player reads them left to right — *this run* first, the standing
-/// reference next, and the session-only [`Debug`](Self::Debug) tab last — and cycled
-/// by [`next`](Self::next)/[`prev`](Self::prev) so the tab bar wraps at either end.
-/// An *Options* tab slots in among the standing three.
+/// Ordered as the player reads them left to right — *this run* first, then the
+/// standing reference — and cycled by [`next`](Self::next)/[`prev`](Self::prev) so the
+/// tab bar wraps at either end.
 ///
-/// **Not every tab is always there** (§12.6/#459). [`ALL`](Self::ALL) is the whole
-/// vocabulary; [`shown`](Self::shown) is the bar the player actually has, which is the
-/// list every other rule here is written over — the layout, the cycle, and the
-/// hit-test alike, so a tab that is not drawn cannot be reached by tap, by Tab, or by
-/// a stale [`ScreenUi::help_tab`](super::ScreenUi::help_tab).
+/// **Every tab is always there.** It took a `shown` list while the debug session had a
+/// fourth tab of its own (#459); the switches live on the options screen since #513, so
+/// the bar is the same three tabs in every session and the layout, the cycle and the
+/// hit-test are all written over [`ALL`](Self::ALL) again.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum HelpTab {
     /// This run's active level modifiers (§12.6/#248) — what is bending the rules.
@@ -111,92 +121,49 @@ pub enum HelpTab {
     /// The glyph legend, colour key, and standing controls (#139) — the reference
     /// card, the same one for every run (#296).
     Help,
-    /// The **debug session's** own tab (§12.6/#459): the omni-vision switch and the
-    /// replay export. Present only when the shell
-    /// says this session is a debug one
-    /// ([`ScreenUi::debug_mode`](super::ScreenUi::debug_mode)) — a baked artifact or a
-    /// page opened with the activation parameter. **Last**, so the tabs a player
-    /// always has keep the positions they have always had.
-    Debug,
 }
 
 impl HelpTab {
     /// Every tab this panel knows, in reading (left-to-right) order. A new tab is one
-    /// entry here — and, if it is conditional like [`Debug`](Self::Debug), one arm in
-    /// [`shown`](Self::shown).
+    /// entry here.
     ///
     /// Ordered outward from *this run*: the run's rules, then the run's abilities,
-    /// then the standing reference that never changes, then the debug session's.
-    pub const ALL: [HelpTab; 4] = [
-        HelpTab::LevelInfo,
-        HelpTab::Abilities,
-        HelpTab::Help,
-        HelpTab::Debug,
-    ];
-
-    /// **The tabs actually on the bar**, given whether this is a debug session
-    /// (§12.6/#459): all of [`ALL`](Self::ALL), or all but the trailing
-    /// [`Debug`](Self::Debug) one. Everything the panel does with its tabs reads this
-    /// — [`tab_layout`], [`next`](Self::next)/[`prev`](Self::prev), [`help_hit`] and
-    /// [`render_help`] — so "the tab is not there" is one fact rather than four
-    /// agreeing ones.
-    #[must_use]
-    pub fn shown(debug: bool) -> &'static [HelpTab] {
-        if debug {
-            &Self::ALL
-        } else {
-            &Self::ALL[..Self::ALL.len() - 1]
-        }
-    }
+    /// then the standing reference that never changes.
+    pub const ALL: [HelpTab; 3] = [HelpTab::LevelInfo, HelpTab::Abilities, HelpTab::Help];
 
     /// The label shown on the tab bar and used to size its hit region. `const` so the
     /// bar's width can be checked at compile time ([`TAB_BAR_FITS`]).
     const fn label(self) -> &'static str {
         match self {
             // *Level*, not *Level info*: the bar is one row of a 40-cell board and has
-            // to hold four `[Label]`s clear of the `[x]` (§10.2/#459). The tab's own
+            // to hold its `[Label]`s clear of the `[x]` (§10.2/#459). The tab's own
             // heading says `THIS RUN`, so the extra word on the bar was the most
             // expendable five cells on the panel.
             HelpTab::LevelInfo => "Level",
             HelpTab::Abilities => "Abilities",
             HelpTab::Help => "Help",
-            HelpTab::Debug => "Debug",
         }
     }
 
     /// The next tab, wrapping past the last back to the first — the panel's
-    /// "advance" motion (Tab / rightward keys, §14 v2/#248). Cycles the tabs that are
-    /// **shown**, so a session without the debug tab never lands on it.
+    /// "advance" motion (Tab / rightward keys, §14 v2/#248).
     #[must_use]
-    pub fn next(self, debug: bool) -> Self {
-        self.step(debug, 1)
+    pub fn next(self) -> Self {
+        self.step(1)
     }
 
     /// The previous tab, wrapping past the first back to the last.
     #[must_use]
-    pub fn prev(self, debug: bool) -> Self {
-        let shown = Self::shown(debug);
-        self.step(debug, shown.len() - 1)
+    pub fn prev(self) -> Self {
+        self.step(Self::ALL.len() - 1)
     }
 
-    /// Walk `by` places along the shown tabs, wrapping. A tab that is not shown at all
-    /// (a stale debug tab in a session that has none) counts as position zero, so any
-    /// motion from it lands somewhere real.
-    fn step(self, debug: bool, by: usize) -> Self {
-        let shown = Self::shown(debug);
-        let i = shown.iter().position(|&t| t == self).unwrap_or(0);
-        shown[(i + by) % shown.len()]
+    /// Walk `by` places along the bar, wrapping.
+    fn step(self, by: usize) -> Self {
+        let i = Self::ALL.iter().position(|&t| t == self).unwrap_or(0);
+        Self::ALL[(i + by) % Self::ALL.len()]
     }
 }
-
-// The conditional tab is the **last** entry of [`HelpTab::ALL`], which is what lets
-// [`HelpTab::shown`] take a prefix of it rather than filter it — checked at compile
-// time, so a tab appended after it fails the build instead of quietly becoming
-// debug-only.
-const _: () = assert!(
-    matches!(HelpTab::ALL[HelpTab::ALL.len() - 1], HelpTab::Debug),
-    "the debug tab must stay last in HelpTab::ALL — `shown` takes a prefix of it",
-);
 
 /// What a pointer press inside the open help panel lands on (§11.6/#248) — the
 /// touch counterpart of [`help_nav_for_key`](crate::help_nav_for_key). A shell
@@ -208,39 +175,19 @@ pub enum HelpHit {
     Close,
     /// A tab in the tab bar — switch the panel to it.
     Tab(HelpTab),
-    /// The footer's `[n]` theme button — flip the colour table (§11.2/#189), the
-    /// touch half of the key. Without it the theme would be a keyboard-only option
-    /// on a game that is played on phones (§11.6: every control reachable by key
-    /// *and* touch).
-    ToggleTheme,
+    /// The footer's `options [o]` control — open the options screen (§14 v2/#513),
+    /// the touch half of its key. It is the panel's door to the settings that used to
+    /// camp on it: the colour theme, whose `theme [n]` button stood in this very
+    /// corner (#189), and the debug session's switches, which had a tab of their own
+    /// (#459). Without it the screen would be keyboard-only mid-run, on a game that is
+    /// played on phones (§11.6: every control reachable by key *and* touch).
+    OpenSettings,
     /// The Level info tab's `copy [c]` control — put this run's level-seed token on
     /// the system clipboard (§13.1/#353). The **core neither performs nor knows
     /// about** the write: it owns the geometry and the token, and the shell owns the
     /// clipboard (§12.1). Only ever produced when a token is actually drawn, so a
     /// hand-built state offers no control rather than one that copies nothing.
     CopySeed,
-    /// The Debug tab's `replay [r]` control — put the whole **run** on the
-    /// clipboard as a `…#seed=<token>&inputs=<script>` link (§12.4/§13.1/#411), the
-    /// seed control's bigger sibling: that one hands over the level, this one hands
-    /// over what just happened on it. The shell owns the recorder and the write, as
-    /// with [`CopySeed`]; the core owns the geometry. Only ever produced on the Debug
-    /// tab, and only for a run with a token for the link to carry — every build
-    /// records its inputs (#478), so there is nothing else left to ask.
-    ///
-    /// It sat on the Level info tab until #459 gave debugging a tab of its own.
-    /// Exporting a run is a debugging affordance; the Level info tab is where a
-    /// player reads what their run's rules are, and its `copy [c]` — the level, for
-    /// sharing — is the control that belongs there.
-    CopyReplay,
-    /// The Debug tab's `omni [v]` control — flip [`DebugModifiers::reveal_whole_level`]
-    /// for the running game (§12.6/#459). The switch was threaded in once at boot and
-    /// could only be changed by rebuilding; a debug session can flip it mid-run, which
-    /// is the point of a session you can activate on a page that is already deployed.
-    ///
-    /// Perception only, by construction: the core applies it in the sight phase and
-    /// nowhere else, so flipping it changes what is drawn and never the facility, the
-    /// guards, or what a replay of the run produces.
-    ToggleReveal,
 }
 
 /// Whether the player's last attempt to copy from the panel reached the clipboard
@@ -275,7 +222,7 @@ impl SeedCopy {
     /// the `[x]` and the control itself already use, because the line belongs to the
     /// control that produced it; a failure takes Warning, the standing "this is not
     /// what you wanted" cue (§11.2), rather than any new ad-hoc styling.
-    fn acknowledgement(self) -> Option<(&'static str, Category)> {
+    pub(super) fn acknowledgement(self) -> Option<(&'static str, Category)> {
         match self {
             SeedCopy::Idle => None,
             SeedCopy::Copied => Some((COPIED_ACK, Category::System)),
@@ -303,36 +250,40 @@ const _: () = {
 };
 
 /// The `[x]` close control on the tab bar — three cells wide, like the header's
-/// other `[?]`/`[▾]` buttons, so the escape reads as a button.
-const CLOSE_BUTTON: &str = "[x]";
-const CLOSE_BUTTON_LEN: u32 = 3;
+/// other `[?]`/`[▾]` buttons, so the escape reads as a button. Shared with the
+/// options screen ([`super::settings`]), which puts the same escape in the same
+/// corner of its own first row.
+pub(super) const CLOSE_BUTTON: &str = "[x]";
+pub(super) const CLOSE_BUTTON_LEN: u32 = 3;
 
-/// The theme control on the panel's **footer** row (#189): the word it does,
-/// followed by the key it answers to — `theme [n]`.
+/// The **options control** on the panel's footer row (§14 v2/#513): the word it does,
+/// followed by the key it answers to — `options [o]`.
 ///
-/// **The label is part of the control, not prose beside it.** A bare `[n]` is only a
-/// target if you already know what `n` means, and the word is the larger and more
-/// obvious thing to reach for — so the whole `theme [n]` run is drawn in the button
-/// colour and the whole run hit-tests ([`help_hit`]). The bracketed key still teaches
-/// the shortcut, the way `[?]` and `[x]` do.
+/// **The label is part of the control, not prose beside it.** A bare `[o]` is only a
+/// target if you already know what `o` means, and the word is the larger and more
+/// obvious thing to reach for — so the whole run is drawn in the button colour and the
+/// whole run hit-tests ([`help_hit`]). The bracketed key still teaches the shortcut,
+/// the way `[?]` and `[x]` do.
 ///
-/// It sits on the footer rather than the tab bar because the tab bar is full at the
-/// v1 width (§10.2) and a fourth tab is already planned for it; the footer is the
-/// row that already teaches the panel's controls, and it is drawn on every tab, so
-/// [`help_hit`] needs no notion of which tab is showing.
-pub(super) const THEME_LABEL: &str = "theme";
+/// It stands where the `theme [n]` control used to (#189). That control was the
+/// theme's temporary home "until v2 grows an options screen" (§11.2), and this is the
+/// door to that screen: from here the theme is one press further away and the renderer
+/// is reachable at all. It is also the panel's answer to *how do the debug switches
+/// stay flippable mid-run* once their tab is gone (#459/#513) — the help panel is the
+/// one modal surface a running game can always raise, so it is where the way in sits.
+pub(super) const OPTIONS_LABEL: &str = "options";
 
-pub(super) fn theme_control() -> String {
-    format!("{THEME_LABEL} [{THEME_KEY}]")
+pub(super) fn options_control() -> String {
+    format!("{OPTIONS_LABEL} [{SETTINGS_KEY}]")
 }
 
-pub(super) fn theme_control_len() -> u32 {
-    theme_control().chars().count() as u32
+pub(super) fn options_control_len() -> u32 {
+    options_control().chars().count() as u32
 }
 
 /// The key that copies the run's **level-seed token** to the clipboard while the
 /// panel is open (§13.1/#353) — `c`, for *copy*. It is drawn as `copy [c]` beside the
-/// token, the same label-and-key shape [`THEME_LABEL`] uses, and matched in
+/// token, the same label-and-key shape [`OPTIONS_LABEL`] uses, and matched in
 /// [`help_nav_for_key`](crate::help_nav_for_key).
 ///
 /// Unlike `?` and `n` it is a **panel-only** key: it is absent from
@@ -344,7 +295,7 @@ pub(super) fn theme_control_len() -> u32 {
 pub(crate) const COPY_KEY: char = 'c';
 
 /// The copy control's word, drawn with its key as `copy [c]`. The whole run is the
-/// target, label included, for the reason [`THEME_LABEL`] gives: the word is the
+/// target, label included, for the reason [`OPTIONS_LABEL`] gives: the word is the
 /// larger and more obvious thing to reach for, and a bare `[c]` is only a target if
 /// you already know what `c` means.
 const COPY_LABEL: &str = "copy";
@@ -356,76 +307,6 @@ fn copy_control() -> String {
 fn copy_control_len() -> u32 {
     copy_control().chars().count() as u32
 }
-
-/// The key that copies the whole **run** — the `…#seed=<token>&inputs=<script>`
-/// replay link — while the panel is open (§12.4/§13.1/#411): `r`, for *replay*.
-/// Panel-only like [`COPY_KEY`], and matched in
-/// [`help_nav_for_key`](crate::help_nav_for_key); the letter is free there because
-/// the open panel swallows the ability mnemonics anyway.
-///
-/// Since #459 it is a **debug-session** key as well as a panel-only one: the control
-/// it names lives on the Debug tab, so `help_nav_for_key` stops offering it in a
-/// session with no such tab. A key that silently does nothing is exactly the drift the
-/// panel-only discipline above exists to prevent.
-pub(crate) const REPLAY_COPY_KEY: char = 'r';
-
-/// The copy-replay control, drawn whole — a `const` string rather than a
-/// [`copy_control`]-style `format!`, because the compile-time layout checks below
-/// need its width. The check under it pins the bracketed character to
-/// [`REPLAY_COPY_KEY`], so the drawn key and the bound one cannot drift.
-const REPLAY_CONTROL: &str = "replay [r]";
-
-// ASCII throughout, so bytes are cells and the `const` width below is exact —
-// and byte indexing can read the key back out of the label.
-const _: () = {
-    let bytes = REPLAY_CONTROL.as_bytes();
-    assert!(
-        bytes[bytes.len() - 3] == b'['
-            && bytes[bytes.len() - 2] == REPLAY_COPY_KEY as u8
-            && bytes[bytes.len() - 1] == b']',
-        "the replay control must end with its own bracketed key, `[r]`",
-    );
-};
-
-const REPLAY_CONTROL_LEN: u32 = REPLAY_CONTROL.len() as u32;
-
-/// The key that flips **omni-vision** on the Debug tab (§12.6/#459): `v`, for
-/// *vision*. A debug-session key like [`REPLAY_COPY_KEY`] — offered by
-/// [`help_nav_for_key`](crate::help_nav_for_key) only where the tab that draws it is,
-/// and bound nowhere else, so an ordinary build's panel answers it exactly as it
-/// answers any other letter: not at all.
-pub(crate) const OMNI_KEY: char = 'v';
-
-/// The omni-vision control, drawn whole — `const` for the same compile-time layout
-/// reason [`REPLAY_CONTROL`] is one, and checked the same way against its own key.
-const OMNI_CONTROL: &str = "omni [v]";
-
-const _: () = {
-    let bytes = OMNI_CONTROL.as_bytes();
-    assert!(
-        bytes[bytes.len() - 3] == b'['
-            && bytes[bytes.len() - 2] == OMNI_KEY as u8
-            && bytes[bytes.len() - 1] == b']',
-        "the omni-vision control must end with its own bracketed key, `[v]`",
-    );
-};
-
-const OMNI_CONTROL_LEN: u32 = OMNI_CONTROL.len() as u32;
-
-/// What the omni-vision row says the switch is doing — read off the run's live
-/// [`DebugModifiers`], never off a flag the panel keeps of its own, so the line and
-/// the sight phase cannot disagree.
-const OMNI_ON: &str = "omni-vision: on";
-const OMNI_OFF: &str = "omni-vision: off";
-
-/// The one-line reason the switch is safe to have here at all (§12.6): it changes
-/// sight, so the run underneath is the run that would have been played anyway. Worth a
-/// row because this tab is the first place the two channels — what the game *is* and
-/// what you *see of it* — meet a control rather than a build flag.
-const OMNI_NOTE: &str = "sight only — the run is unchanged";
-
-/// What the Debug tab's replay row offers, beside its control.
-const REPLAY_NOTE: &str = "this run as a link";
 
 /// The column every Level info row is drawn from — one in from the section
 /// headings, the panel's standing content indent.
@@ -443,29 +324,10 @@ const CONTENT_TOP: u32 = 2;
 const SEED_TOKEN_ROW: u32 = CONTENT_TOP + 3;
 
 /// The row under the token: the seed-copy acknowledgement's own line (#353). The
-/// `replay [r]` control lodged on its right until #459 moved it to the Debug tab —
-/// the row keeps the spacer it always was, so the modifier list below it did not
-/// move when the lodger left.
+/// `replay [r]` control lodged on its right until #459 moved it to the Debug tab, and
+/// the tab itself gave way to the options screen in #513 — the row keeps the spacer it
+/// always was, so the modifier list below it never moved for either.
 const SEED_ACK_ROW: u32 = SEED_TOKEN_ROW + 1;
-
-/// The Debug tab's rows (§12.6/#459), derived from [`CONTENT_TOP`] the way the Level
-/// info tab's are, and shared by [`draw_debug`] and [`help_hit`] so a tap lands on
-/// exactly the control drawn: the `DEBUG` heading, a blank, the `VISION` heading,
-/// then the omni-vision row.
-const OMNI_ROW: u32 = CONTENT_TOP + 3;
-
-/// The note under the omni-vision row — the §12.6 promise, printed where the switch is.
-const OMNI_NOTE_ROW: u32 = OMNI_ROW + 1;
-
-/// The Debug tab's `replay [r]` row (#411/#459): a blank under the note, the `RUN`
-/// heading, then the control and what it offers. Drawn only in a build that records
-/// its inputs, on a run that has a token for the link to carry.
-const REPLAY_CONTROL_ROW: u32 = OMNI_NOTE_ROW + 3;
-
-/// The Debug tab's acknowledgement line, directly under its control — the same
-/// "did that work?" answer the Level info tab prints under its own (#353). On its own
-/// row here, so nothing shares a line with it.
-const REPLAY_ACK_ROW: u32 = REPLAY_CONTROL_ROW + 1;
 
 /// **The modifier caption width bound** (#248). The panel fills the board, so the
 /// narrowest screen a real run ever renders on is the v1 board
@@ -498,89 +360,49 @@ const _: () = {
 /// **The panel's one right-alignment rule**: where a control `len` cells wide starts
 /// on a screen `width` wide, with the one-cell right margin every column of the card
 /// keeps. Every control on the panel is laid out through this — the tab bar's `[x]`,
-/// the footer's `theme [n]`, the token row's `copy [c]` — and each is *drawn* and
+/// the footer's `options [o]`, the token row's `copy [c]` — and each is *drawn* and
 /// *hit-tested* from its own wrapper below, so a tap can only ever land on the cells
 /// the frame actually drew.
-const fn right_aligned_start(width: u32, len: u32) -> u32 {
+pub(super) const fn right_aligned_start(width: u32, len: u32) -> u32 {
     width.saturating_sub(1 + len)
 }
 
 /// The column the close control starts at: right-aligned with a one-cell margin,
 /// like the ability line's deploy button. Shared by the drawing and [`help_hit`]
 /// so a tap lands on exactly the `[x]` drawn.
-const fn close_button_start(width: u32) -> u32 {
+pub(super) const fn close_button_start(width: u32) -> u32 {
     right_aligned_start(width, CLOSE_BUTTON_LEN)
 }
 
-/// The column the footer's theme control starts at — right-aligned with the same
+/// The column the footer's options control starts at — right-aligned with the same
 /// one-cell margin the `[x]` keeps, so the two controls line up at the screen's right
 /// edge. Shared by [`draw_footer`] and [`help_hit`] so a tap lands on exactly the
-/// `theme [n]` drawn, label included — **and by the title screen** ([`super::menu`]),
-/// which puts the control in the very same corner of its own footer row, so the one
-/// option the game has so far is in one place wherever you meet it.
-pub(super) fn theme_control_start(width: u32) -> u32 {
-    right_aligned_start(width, theme_control_len())
+/// `options [o]` drawn, label included.
+fn options_control_start(width: u32) -> u32 {
+    right_aligned_start(width, options_control_len())
 }
 
 /// The column the token row's copy control starts at — the same right edge the `[x]`
-/// and the theme control keep, so the panel's three controls stack in one column
-/// rather than each finding its own place. Shared by [`draw_level_info`] and
-/// [`help_hit`].
+/// and the options control keep, so the panel's controls stack in one column rather
+/// than each finding its own place. Shared by [`draw_level_info`] and [`help_hit`].
 fn copy_control_start(width: u32) -> u32 {
     right_aligned_start(width, copy_control_len())
 }
-
-/// The column the `replay [r]` control starts at — the same right edge as the rest
-/// of the panel's control column. Shared by [`draw_debug`] and [`help_hit`].
-const fn replay_control_start(width: u32) -> u32 {
-    right_aligned_start(width, REPLAY_CONTROL_LEN)
-}
-
-/// The column the `omni [v]` control starts at — the same right edge again, so the
-/// Debug tab's two controls stack in the panel's one control column like every other.
-const fn omni_control_start(width: u32) -> u32 {
-    right_aligned_start(width, OMNI_CONTROL_LEN)
-}
-
-// Each Debug-tab row carries prose on the left and a control on the right, so the
-// prose must stop short of the control with a cell of air between — [`draw`] clips in
-// silence, and here it would clip the control, not the prose. Checked at compile time
-// like the panel's other fixed columns (§2.3), plus the two full-width notes against
-// the tab's own content column.
-const _: () = {
-    let indent = CONTENT_INDENT as usize;
-    assert!(
-        indent + OMNI_ON.len() < omni_control_start(LevelConfig::V1.width) as usize
-            && indent + OMNI_OFF.len() < omni_control_start(LevelConfig::V1.width) as usize,
-        "an omni-vision state line runs into the control beside it (see draw_debug)",
-    );
-    assert!(
-        indent + REPLAY_NOTE.len() < replay_control_start(LevelConfig::V1.width) as usize,
-        "the replay note runs into the control beside it (see draw_debug)",
-    );
-    assert!(
-        OMNI_NOTE.len() <= column_width(CONTENT_INDENT),
-        "the omni-vision note is too long for the Debug tab — shorten it \
-         (see column_width in render::help)",
-    );
-};
 
 /// The tab bar's one-cell left margin, and the one-cell gap between tabs — named so
 /// the compile-time width check below measures the bar [`tab_layout`] actually draws.
 const TAB_BAR_MARGIN: u32 = 1;
 const TAB_GAP: u32 = 1;
 
-/// Lay the tab bar out: each **shown** tab as `(tab, start col, width)`, drawn
-/// `[Label]` from a one-cell margin with a one-cell gap between. The width is
-/// independent of which tab is active (the brackets are always there), so switching
-/// tabs never shifts a hit region. Shared by [`draw_tab_bar`] and [`help_hit`] so a
-/// tap lands on exactly the tab drawn — and taking `debug` from the same
-/// [`ScreenUi`](super::ScreenUi) both read, so a session without the Debug tab has no
-/// hit region where it would have been.
-fn tab_layout(debug: bool) -> Vec<(HelpTab, u32, u32)> {
+/// Lay the tab bar out: each tab as `(tab, start col, width)`, drawn `[Label]` from a
+/// one-cell margin with a one-cell gap between. The width is independent of which tab
+/// is active (the brackets are always there), so switching tabs never shifts a hit
+/// region. Shared by [`draw_tab_bar`] and [`help_hit`] so a tap lands on exactly the
+/// tab drawn.
+fn tab_layout() -> Vec<(HelpTab, u32, u32)> {
     let mut out = Vec::new();
     let mut x = TAB_BAR_MARGIN;
-    for &tab in HelpTab::shown(debug) {
+    for &tab in HelpTab::ALL.iter() {
         let len = tab.label().chars().count() as u32 + 2; // the enclosing `[` `]`
         out.push((tab, x, len));
         x += len + TAB_GAP;
@@ -602,10 +424,11 @@ const fn tab_bar_end() -> u32 {
 
 // **The tab bar has to fit its row** (§10.2/#459). The panel fills the board, so the
 // narrowest screen a real run draws on is the v1 board's 40 columns, and the bar
-// shares row 0 with the right-aligned `[x]`. [`draw`] clips in silence, so a fourth
-// tab that overran would simply arrive half-drawn — and, worse, still hit-test over
-// the cells the `[x]` is painted on. Checked here over the **whole** vocabulary, so
-// the day a fifth tab lands the build says so rather than a player's screen.
+// shares row 0 with the right-aligned `[x]`. [`draw`] clips in silence, so a tab that
+// overran would simply arrive half-drawn — and, worse, still hit-test over the cells
+// the `[x]` is painted on. This is also why the options screen is a screen and not a
+// fourth tab (#513): `[Options]` does not fit here, and the check below is what said
+// so rather than a player's eye.
 const _: () = assert!(
     tab_bar_end() < close_button_start(LevelConfig::V1.width),
     "the help panel's tab bar runs into its [x] close control — shorten a tab label \
@@ -627,11 +450,10 @@ pub(super) fn seed_token(level: Option<LevelSeed>) -> Option<String> {
 
 /// The pointer→control hit-test for the open panel (§11.6/#248): which [`HelpHit`]
 /// screen cell `(x, y)` lands on, or `None` for the body (a press the modal panel
-/// swallows without acting). Four rows can carry controls — the tab bar (row 0), the
-/// footer's `theme [n]` control on the last row (#189), label and key alike, the
-/// Level info tab's token row with its `copy [c]` (#353), and the Debug tab's two
-/// (#459) — and on the tab bar the close `[x]` is tested first so it wins even if a
-/// layout ever abutted it.
+/// swallows without acting). Three rows can carry controls — the tab bar (row 0), the
+/// footer's `options [o]` control on the last row (#513), label and key alike, and the
+/// Level info tab's token row with its `copy [c]` (#353) — and on the tab bar the
+/// close `[x]` is tested first so it wins even if a layout ever abutted it.
 ///
 /// It takes the panel's `height` for the footer row's sake: the footer is drawn from
 /// the bottom up, so the hit-test has to measure from the same edge the drawing does
@@ -655,9 +477,9 @@ pub fn help_hit(
     y: u32,
 ) -> Option<HelpHit> {
     if height > 0 && y == height - 1 {
-        let theme = theme_control_start(width);
-        if x >= theme && x < theme + theme_control_len() {
-            return Some(HelpHit::ToggleTheme);
+        let options = options_control_start(width);
+        if x >= options && x < options + options_control_len() {
+            return Some(HelpHit::OpenSettings);
         }
         return None;
     }
@@ -666,17 +488,15 @@ pub fn help_hit(
         if x >= close && x < close + CLOSE_BUTTON_LEN {
             return Some(HelpHit::Close);
         }
-        for (entry, start, len) in tab_layout(ui.debug_mode) {
+        for (entry, start, len) in tab_layout() {
             if x >= start && x < start + len {
                 return Some(HelpHit::Tab(entry));
             }
         }
         return None;
     }
-    // The tab that is actually drawn, which is the tab whose controls are actually
-    // there — a stale Debug tab in a session with none draws Level info, so it must
-    // hit-test as Level info too.
-    match shown_tab(ui) {
+    // The Level info tab is the only one whose *content* carries a control.
+    match ui.help_tab {
         HelpTab::LevelInfo => {
             if seed_token(level).is_some() && y == SEED_TOKEN_ROW {
                 let copy = copy_control_start(width);
@@ -685,36 +505,9 @@ pub fn help_hit(
                 }
             }
         }
-        HelpTab::Debug => {
-            if y == OMNI_ROW {
-                let omni = omni_control_start(width);
-                if x >= omni && x < omni + OMNI_CONTROL_LEN {
-                    return Some(HelpHit::ToggleReveal);
-                }
-            }
-            if seed_token(level).is_some() && y == REPLAY_CONTROL_ROW {
-                let replay = replay_control_start(width);
-                if x >= replay && x < replay + REPLAY_CONTROL_LEN {
-                    return Some(HelpHit::CopyReplay);
-                }
-            }
-        }
         HelpTab::Abilities | HelpTab::Help => {}
     }
     None
-}
-
-/// **The tab the panel actually draws** for `ui` — its chosen tab, or the leftmost
-/// when that tab is not on this session's bar ([`HelpTab::shown`], #459). One
-/// function, read by both the drawing and [`help_hit`], so a shell that left
-/// [`ScreenUi::help_tab`](super::ScreenUi) pointing at a tab it then switched off
-/// cannot show one panel and hit-test another.
-fn shown_tab(ui: ScreenUi) -> HelpTab {
-    if HelpTab::shown(ui.debug_mode).contains(&ui.help_tab) {
-        ui.help_tab
-    } else {
-        HelpTab::default()
-    }
 }
 
 /// Render the full-screen help panel (§14 v2/#139/#248): the tab bar, the active
@@ -731,25 +524,21 @@ fn shown_tab(ui: ScreenUi) -> HelpTab {
 /// on that clamp, because a clipped sentence is a wrong sentence (see
 /// [`abilities`]).
 ///
-/// `ui` is the shell's whole view state; the panel reads the three fields that are
-/// its own — the tab up ([`ScreenUi::help_tab`]), whether this session has a Debug tab
-/// ([`ScreenUi::debug_mode`], #459),
-/// and the copy acknowledgement ([`ScreenUi::seed_copy`], #353) — and ignores the
-/// rest, which
+/// `ui` is the shell's whole view state; the panel reads the two fields that are its
+/// own — the tab up ([`ScreenUi::help_tab`]) and the copy acknowledgement
+/// ([`ScreenUi::seed_copy`], #353) — and ignores the rest, which
 /// [`render_screen`](super::render_screen) has already adjudicated. `run` is what the
 /// panel draws *about*: the facts of the run itself, bundled so the tabs' one entry
 /// point stays readable as they multiply.
 pub(super) fn render_help(width: u32, height: u32, ui: ScreenUi, run: PanelRun<'_>) -> Grid {
     let mut grid = blank_grid(width, height);
 
-    let tab = shown_tab(ui);
-    draw_tab_bar(&mut grid, ui.debug_mode, tab);
+    draw_tab_bar(&mut grid, ui.help_tab);
     // Content begins two rows down, leaving the tab bar and a blank rule above it.
-    match tab {
+    match ui.help_tab {
         HelpTab::LevelInfo => draw_level_info(&mut grid, CONTENT_TOP, &run, ui.seed_copy),
         HelpTab::Abilities => abilities::draw_abilities(&mut grid, CONTENT_TOP, &run.bar),
         HelpTab::Help => draw_help_card(&mut grid, CONTENT_TOP),
-        HelpTab::Debug => draw_debug(&mut grid, CONTENT_TOP, ui, &run),
     }
     draw_footer(&mut grid);
     grid
@@ -781,16 +570,13 @@ pub(super) struct PanelRun<'a> {
     /// entry with the wrong digit — and would leave out the one ability the player most
     /// needs to read about, the one they are being offered.
     pub(super) bar: Vec<AbilityId>,
-    /// The **live** debug switches (§12.6/#459) — read, never held, so the Debug
-    /// tab's omni-vision line says what the sight phase is actually doing.
-    pub(super) debug: DebugModifiers,
 }
 
-/// Draw the tab bar on row 0: each shown tab as `[Label]` — the active one in Interest
+/// Draw the tab bar on row 0: each tab as `[Label]` — the active one in Interest
 /// (the bright goal colour), the rest in Ground (dim) — and the right-aligned
 /// `[x]` close control in System (the HUD-control colour, like the deploy button).
-fn draw_tab_bar(grid: &mut Grid, debug: bool, active: HelpTab) {
-    for (tab, start, _len) in tab_layout(debug) {
+fn draw_tab_bar(grid: &mut Grid, active: HelpTab) {
+    for (tab, start, _len) in tab_layout() {
         let category = if tab == active {
             Category::Interest
         } else {
@@ -833,7 +619,7 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
         // the player copies off this panel is exactly what a link carries (#333).
         draw(grid, CONTENT_INDENT, y, &token, Category::Interest);
         // …and the control that actually takes it away (#353), right-aligned on the
-        // token's own row in System — the HUD-control colour the `[x]` and the theme
+        // token's own row in System — the HUD-control colour the `[x]` and the footer
         // button already wear, so it reads as a button rather than as more of the
         // token's ink. The token was the one thing on this panel that existed *to be
         // taken* and the only thing the player could not take.
@@ -903,84 +689,6 @@ fn draw_level_info(grid: &mut Grid, mut y: u32, run: &PanelRun<'_>, copy: SeedCo
     // under it to be pushed around.
     y += 1;
     super::alert::draw_alert(grid, y, alert, CONTENT_INDENT);
-}
-
-/// The **Debug** tab (§12.6/#459) — the session's own instruments, present only when
-/// the shell says this is a debug session.
-///
-/// Two controls, each a row of prose and a right-aligned button in the panel's one
-/// control column:
-///
-/// - **`omni [v]`** flips [`DebugModifiers::reveal_whole_level`] live. The row above
-///   it reads the switch's *real* state off the run, so the line cannot claim a fog
-///   that is lifted or a lift that never happened, and the note under it says why a
-///   control here is safe at all: it changes sight, so the run underneath is untouched
-///   (§12.6). Turning it back off does not restore what was already seen — tile memory
-///   (§11.5a) accumulates from sight like it does for any other cell — which is honest
-///   rather than surprising: you did see it.
-/// - **`replay [r]`** copies the whole run as a link (§12.4/#411), drawn for any run
-///   that has a token for the link to name (#333's rule, unchanged). Exporting a run
-///   is a debugging affordance, which is why it lives here rather than on the tab that
-///   tells a player what their run's rules are — and every build records its inputs
-///   now (#478), so a strange run on the deployed page is one its player can hand over.
-///
-/// Nothing on this tab may ever change the facility. The gate in front of it is a
-/// convention (a parameter anyone reading the wasm can find), so what sits behind it
-/// has to be things that only ever alter the picture — see §12.6 and the ticket's own
-/// note.
-fn draw_debug(grid: &mut Grid, y: u32, ui: ScreenUi, run: &PanelRun<'_>) {
-    draw(grid, 2, y, "DEBUG", Category::Interest);
-
-    draw(grid, 2, y + 2, "VISION", Category::System);
-    // The live switch, in its own state's colour: Interest while it is lifting the
-    // fog (the panel's "this is on" ink), Ground while it is not.
-    let (state, category) = if run.debug.reveal_whole_level {
-        (OMNI_ON, Category::Interest)
-    } else {
-        (OMNI_OFF, Category::Ground)
-    };
-    debug_assert_eq!(y + 3, OMNI_ROW, "the omni row and its hit-test agree");
-    draw(grid, CONTENT_INDENT, OMNI_ROW, state, category);
-    draw(
-        grid,
-        omni_control_start(grid.width),
-        OMNI_ROW,
-        OMNI_CONTROL,
-        Category::System,
-    );
-    draw(
-        grid,
-        CONTENT_INDENT,
-        OMNI_NOTE_ROW,
-        OMNI_NOTE,
-        Category::Ground,
-    );
-
-    // The replay export (§12.4/#411): drawn whenever there is a run for the link to
-    // name (#333). It took a second condition until #478 — whether the build had a
-    // recorder behind it — and every build has one now.
-    if seed_token(run.level).is_some() {
-        draw(grid, 2, REPLAY_CONTROL_ROW - 1, "RUN", Category::System);
-        draw(
-            grid,
-            CONTENT_INDENT,
-            REPLAY_CONTROL_ROW,
-            REPLAY_NOTE,
-            Category::Ground,
-        );
-        draw(
-            grid,
-            replay_control_start(grid.width),
-            REPLAY_CONTROL_ROW,
-            REPLAY_CONTROL,
-            Category::System,
-        );
-        // The same acknowledgement the Level info tab prints under its own control
-        // (#353) — on its own row here, directly under what produced it.
-        if let Some((text, category)) = ui.seed_copy.acknowledgement() {
-            draw(grid, CONTENT_INDENT, REPLAY_ACK_ROW, text, category);
-        }
-    }
 }
 
 /// The §11.2 category a direction reads in — the colour cue the caption is drawn
@@ -1092,35 +800,37 @@ const _: () = {
     }
 };
 
-/// Draw the footer hint on the last row: how to switch tabs and close, so a player
-/// who opened the modal panel always sees the way out (§11.6's no-trap rule, made
-/// explicit now the header `[?]` is covered).
-/// The footer row's left indent — where the hint prose starts on the panel and on
-/// the title screen alike (§11.4), leaving the row's right edge to the theme control.
+/// The footer row's left indent — where the hint prose starts on the panel, on the
+/// title screen and on the campaign map alike (§11.4), leaving the row's right edge to
+/// whichever control that screen carries.
 pub(super) const FOOTER_INDENT: u32 = 2;
 
+/// Draw the footer on the last row: how to switch tabs and close — so a player who
+/// opened the modal panel always sees the way out (§11.6's no-trap rule, made explicit
+/// now the header `[?]` is covered) — and the `options [o]` control beside it.
 fn draw_footer(grid: &mut Grid) {
     if grid.height == 0 {
         return;
     }
     let row = grid.height - 1;
     draw(grid, FOOTER_INDENT, row, FOOTER_HINT, Category::Ground);
-    // The theme control, right-aligned on the same row. **Label and key together** in
+    // The options control, right-aligned on the same row. **Label and key together** in
     // System — the HUD-control colour the `[x]` and the near line's `[?]` share — so
     // the word reads as part of the button rather than as more footer prose, which is
-    // what makes it obvious the word is the thing to press (#189).
+    // what makes it obvious the word is the thing to press (#189's rule, kept by the
+    // control that took the corner over in #513).
     draw(
         grid,
-        theme_control_start(grid.width),
+        options_control_start(grid.width),
         row,
-        &theme_control(),
+        &options_control(),
         Category::System,
     );
 }
 
 /// The footer hint — the keys the panel answers that have no on-screen control of
 /// their own. Named so the layout test can measure it against
-/// [`theme_control_start`] rather than trusting that a longer sentence would have
+/// [`options_control_start`] rather than trusting that a longer sentence would have
 /// been noticed: [`draw`] clips in silence, and here it would clip the control, not
 /// the prose.
 const FOOTER_HINT: &str = "Tab switches   Esc closes";

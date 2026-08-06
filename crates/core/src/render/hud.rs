@@ -158,6 +158,15 @@ pub struct ScreenUi {
     /// not reachable from a [`State`]. A shell holding a campaign asks for the map
     /// screen directly; one that is not in a campaign has nothing to ask with.
     pub map: Option<MapUi>,
+    /// The **options screen**, while it is up (§14 v2/#513) — `None` otherwise. Modal
+    /// and full-screen like [`menu`](Self::menu), and drawn *over* whatever raised it:
+    /// the title screen's *Options* entry, or the help panel's `options [o]` control
+    /// mid-run. Leaving it clears this field and nothing else, so the surface
+    /// underneath is exactly as it was left.
+    ///
+    /// It is checked **first** by [`render_screen`] and by every input path, because it
+    /// is the one screen that can be opened over another one.
+    pub settings: Option<SettingsUi>,
     /// Which help tab is showing while [`help_open`](Self::help_open) (§14 v2/#248).
     /// Ignored when the panel is closed; the [`Default`] is the leftmost tab, so the
     /// panel opens on Level info. The shell cycles it from
@@ -173,6 +182,17 @@ pub struct ScreenUi {
     /// In-session only for now: nothing persists it, so a reload comes back on the
     /// [`Default`] dark theme.
     pub theme: Theme,
+    /// Which cell primitive the shell paints the board with (§11.1/#460/#513). The
+    /// core carries the *flag* and never a sprite: it says which of presentation's two
+    /// implementations is live, and the shell owns both — the same split
+    /// [`theme`](Self::theme) makes for colour, and what keeps §11.1's "the core must
+    /// not know which is in use" true while the options screen still draws a row for
+    /// it.
+    ///
+    /// A pure view choice like the rest — no world change, no turn (§4.4) — and, like
+    /// the theme, a **preference**: the shell restores it from its settings record at
+    /// boot and writes it back when the row is fired (#513), so it outlives the run.
+    pub renderer: Renderer,
     /// Whether the last attempt to copy this run's level-seed token reached the
     /// clipboard (§13.1/#353) — the acknowledgement the Level info tab prints under
     /// the token. The shell performs the write and records the outcome here; the core
@@ -221,9 +241,10 @@ impl ScreenUi {
     /// - [`modality`](Self::modality) is a fact about the player's hands
     ///   (§11.6/#323), so a fresh facility must not send a touch player back to
     ///   reading keys;
-    /// - [`theme`](Self::theme) is a fact about the person looking at the screen
-    ///   (§11.2/#189) — the one they chose on the title screen is the one the run
-    ///   must open in;
+    /// - [`theme`](Self::theme) and [`renderer`](Self::renderer) are facts about the
+    ///   person looking at the screen (§11.2/§11.1, #189/#513) — the settings they
+    ///   chose are the ones the run must open in, and they outlive the page as well as
+    ///   the run;
     /// - [`debug_mode`](Self::debug_mode) is a fact about the **session**
     ///   (§12.6/#459) — a page opened as a debug session stays one, whatever run it
     ///   is playing, and nothing a run can do turns it on or off.
@@ -239,6 +260,7 @@ impl ScreenUi {
         Self {
             modality: self.modality,
             theme: self.theme,
+            renderer: self.renderer,
             debug_mode: self.debug_mode,
             ..Self::default()
         }
@@ -455,6 +477,14 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
     let width = facility.width();
     let height = TOP_ROWS + facility.height() + BOTTOM_ROWS;
 
+    // The **options screen** (§14 v2/#513) comes before everything, because it is the
+    // one surface that can be raised over another: the title screen's *Options* entry
+    // opens it, and so does the help panel's `options [o]` control mid-run. Whatever
+    // raised it is left untouched underneath and is drawn again the moment it is left.
+    if ui.settings.is_some() {
+        return super::settings::render_settings(width, height, ui, state.debug(), state.level());
+    }
+
     // The title screen (§14/#268) comes first of all: before a run starts there is
     // nothing of the game to show, so the menu takes the whole screen — sized to the
     // board behind it, so starting a run changes what is drawn and never the fit.
@@ -478,7 +508,6 @@ pub fn render_screen(state: &State, ui: ScreenUi) -> Grid {
                 modifiers: state.modifiers(),
                 alert: &state.alert_readout(),
                 bar: state.bar_statuses().iter().map(|s| s.id).collect(),
-                debug: state.debug(),
             },
         );
     }

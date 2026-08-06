@@ -47,7 +47,7 @@
 //! list would be a screen to learn for no fact it could not have said here.
 
 use super::alert::condition_line;
-use super::help::{theme_control, theme_control_len, theme_control_start, FOOTER_INDENT};
+use super::help::{right_aligned_start, FOOTER_INDENT, THEME_KEY};
 use super::menu::{centre, ENTRY_SPACING, MARKER, NO_MARKER};
 use super::{blank_grid, draw, Grid};
 use crate::alert::TOP_RUNG;
@@ -400,6 +400,39 @@ impl MapUi {
             ..self
         }
     }
+}
+
+/// The **theme control** on the map's footer row (§11.2/#189): the word it does,
+/// followed by the key it answers to — `theme [n]`.
+///
+/// **The label is part of the control, not prose beside it.** A bare `[n]` is only a
+/// target if you already know what `n` means, and the word is the larger and more
+/// obvious thing to reach for — so the whole `theme [n]` run is drawn in the button
+/// colour and the whole run hit-tests ([`map_hit`]). The bracketed key still teaches
+/// the shortcut, the way `[?]` and `[x]` do.
+///
+/// It lived on the help panel until #513, and the title screen carried a copy of it.
+/// Both gave it up when the options screen took the setting over: the panel grew a door
+/// to that screen and the title screen already lists one. **The map kept it**, and
+/// deliberately — it is the one modal surface with no route to the options screen
+/// (§14 v3 work), and taking a legibility control away from a touch player with nothing
+/// in its place would be a regression rather than a tidy-up.
+const THEME_LABEL: &str = "theme";
+
+fn theme_control() -> String {
+    format!("{THEME_LABEL} [{THEME_KEY}]")
+}
+
+fn theme_control_len() -> u32 {
+    theme_control().chars().count() as u32
+}
+
+/// The column the theme control starts at — right-aligned with the one-cell margin
+/// every control in the game keeps, so it sits in the same corner here as the panel's
+/// `options [o]` does there. Shared by the drawing and [`map_hit`], so a tap lands on
+/// exactly the cells drawn, label included.
+fn theme_control_start(width: u32) -> u32 {
+    right_aligned_start(width, theme_control_len())
 }
 
 /// What a press on the map screen lands on (§11.6) — the touch half of

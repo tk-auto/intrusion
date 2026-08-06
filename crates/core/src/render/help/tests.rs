@@ -31,9 +31,8 @@ pub(super) fn quiet_alert() -> AlertReadout {
 }
 
 /// The view state a test renders the panel under: the tab up and the copy
-/// acknowledgement to print — the two [`ScreenUi`] fields the panel reads for an
-/// ordinary session, spelled positionally so a test says both where it renders. A
-/// test about the Debug tab spreads `debug_mode` over this (see [`debug_ui`]).
+/// acknowledgement to print — the two [`ScreenUi`] fields the panel reads, spelled
+/// positionally so a test says both where it renders.
 pub(super) fn show(tab: HelpTab, copy: SeedCopy) -> ScreenUi {
     ScreenUi {
         help_tab: tab,
@@ -42,10 +41,8 @@ pub(super) fn show(tab: HelpTab, copy: SeedCopy) -> ScreenUi {
     }
 }
 
-/// The run a test draws the panel *about* — the four facts the tabs read, in the
-/// order they were passed one by one before [`PanelRun`] bundled them, with the
-/// debug switches off. A test about the switches themselves spreads this
-/// (`PanelRun { debug, ..panel_run(…) }`) rather than growing everyone's call.
+/// The run a test draws the panel *about* — the facts the tabs read, in the order
+/// they were passed one by one before [`PanelRun`] bundled them.
 pub(super) fn panel_run<'a>(
     level: Option<LevelSeed>,
     modifiers: LevelModifiers,
@@ -57,7 +54,6 @@ pub(super) fn panel_run<'a>(
         modifiers,
         alert,
         bar: loadout.iter().collect(),
-        debug: DebugModifiers::default(),
     }
 }
 
@@ -661,18 +657,14 @@ fn the_caption_reads_in_its_direction_cue_colour() {
 
 /// The tab bar shows every tab it has, and the active one reads in Interest while
 /// the rest are dim Ground — the at-a-glance "you are here" (#248), asserted on the
-/// cell colour since a text render loses it. Walked for **both** bars (#459): three
-/// tabs in an ordinary session, four in a debug one, with the layout each is drawn
-/// from.
+/// cell colour since a text render loses it. **One bar in every session** since #513
+/// took the debug session's fourth tab to the options screen.
 #[test]
 fn the_tab_bar_highlights_the_active_tab() {
-    for debug in [false, true] {
-        let layout = tab_layout(debug);
-        for &active in HelpTab::shown(debug) {
-            let ui = ScreenUi {
-                debug_mode: debug,
-                ..show(active, SeedCopy::default())
-            };
+    {
+        let layout = tab_layout();
+        for &active in HelpTab::ALL.iter() {
+            let ui = show(active, SeedCopy::default());
             let g = render_help(
                 W,
                 H,
@@ -734,7 +726,7 @@ fn the_panel_is_escapable_and_switchable_by_touch() {
     assert_ne!(hit(close - 1, 0), Some(HelpHit::Close));
 
     // Each tab's whole `[Label]` region resolves to that tab, by identity.
-    for (tab, start, len) in tab_layout(false) {
+    for (tab, start, len) in tab_layout() {
         for x in start..start + len {
             assert_eq!(hit(x, 0), Some(HelpHit::Tab(tab)), "tab cell {x}");
         }
@@ -744,33 +736,39 @@ fn the_panel_is_escapable_and_switchable_by_touch() {
     assert_eq!(hit(0, 0), None, "the left margin is not a tab");
 }
 
-/// §11.6/#189: the theme is reachable **by touch**, not just by key — the
-/// footer's `theme [n]` hit-tests to [`HelpHit::ToggleTheme`] over exactly the
-/// cells it is drawn on, and the rest of the footer row is inert like the body. A
-/// phone has no `n` key, so without this the light theme would be a desktop-only
-/// option on a game that fits its whole board to a phone screen.
+/// §11.6/#513: the options screen is reachable **by touch**, not just by key — the
+/// footer's `options [o]` hit-tests to [`HelpHit::OpenSettings`] over exactly the cells
+/// it is drawn on, and the rest of the footer row is inert like the body. A phone has
+/// no `o` key, so without this the settings — the theme included, and in a debug
+/// session the §12.6 switches — would be a desktop-only screen on a game that fits its
+/// whole board to a phone.
 ///
-/// **The word is a target too, not only the bracketed key.** `theme` is the
-/// larger and more obvious thing to reach for, and a bare `[n]` is only a target
-/// if you already know what `n` means — so every cell of the label presses the
-/// control, which is what this walks.
+/// **The word is a target too, not only the bracketed key.** `options` is the larger
+/// and more obvious thing to reach for, and a bare `[o]` is only a target if you
+/// already know what `o` means — so every cell of the label presses the control, which
+/// is what this walks. It is the rule the `theme [n]` control that stood here was held
+/// to (#189), inherited by the control that replaced it.
 #[test]
-fn the_theme_control_is_reachable_by_touch() {
-    let start = theme_control_start(W);
-    for x in start..start + theme_control_len() {
-        assert_eq!(hit(x, H - 1), Some(HelpHit::ToggleTheme), "footer cell {x}");
+fn the_options_control_is_reachable_by_touch() {
+    let start = options_control_start(W);
+    for x in start..start + options_control_len() {
+        assert_eq!(
+            hit(x, H - 1),
+            Some(HelpHit::OpenSettings),
+            "footer cell {x}"
+        );
     }
     // The label's own first cell — the regression this guards is a control that
     // only answered on its last three cells.
-    let label_end = start + THEME_LABEL.chars().count() as u32;
-    assert_eq!(hit(start, H - 1), Some(HelpHit::ToggleTheme));
-    assert_eq!(hit(label_end - 1, H - 1), Some(HelpHit::ToggleTheme));
+    let label_end = start + OPTIONS_LABEL.chars().count() as u32;
+    assert_eq!(hit(start, H - 1), Some(HelpHit::OpenSettings));
+    assert_eq!(hit(label_end - 1, H - 1), Some(HelpHit::OpenSettings));
 
     assert_eq!(hit(start - 1, H - 1), None, "the hint is inert");
     assert_eq!(hit(start, H - 2), None, "only the footer row");
     // Measured from the *bottom* edge, so a shorter screen moves it with the
     // drawing rather than leaving the hit region a row adrift.
-    assert_eq!(hit_on(20, start, 19), Some(HelpHit::ToggleTheme));
+    assert_eq!(hit_on(20, start, 19), Some(HelpHit::OpenSettings));
     assert_eq!(hit_on(20, start, H - 1), None);
 }
 
@@ -969,8 +967,8 @@ fn the_copy_acknowledgement_says_only_what_happened() {
     }
 }
 
-/// The panel's key and its control name the same character (#353), the way `n`
-/// and `theme [n]` do — so the `[c]` the player reads is the `c` they press. It is
+/// The panel's key and its control name the same character (#353), the way `o`
+/// and `options [o]` do — so the `[c]` the player reads is the `c` they press. It is
 /// deliberately **not** a board key: there is no token drawn outside this panel
 /// for it to copy, which is also what leaves the letter free for an ability
 /// mnemonic (#360).
@@ -978,7 +976,7 @@ fn the_copy_acknowledgement_says_only_what_happened() {
 fn the_copy_key_is_the_same_on_the_control_and_in_the_table() {
     let key = COPY_KEY.to_string();
     assert_eq!(
-        crate::help_nav_for_key(&key, false),
+        crate::help_nav_for_key(&key),
         Some(crate::input::HelpNav::CopySeed),
     );
     assert!(copy_control().ends_with(&format!("[{key}]")));
@@ -994,310 +992,53 @@ fn the_copy_key_is_the_same_on_the_control_and_in_the_table() {
     );
 }
 
-// --- The Debug tab (§12.6/#459) ----------------------------------------------
-
-/// The Debug tab as a debug session draws it: `copy` is the acknowledgement under
-/// whichever control was last pressed, and `reveal` the live state of omni-vision.
-fn debug_ui(copy: SeedCopy) -> ScreenUi {
-    ScreenUi {
-        debug_mode: true,
-        ..show(HelpTab::Debug, copy)
-    }
-}
-
-fn debug_tab(level: Option<LevelSeed>, reveal: bool, copy: SeedCopy) -> Grid {
-    render_help(
-        W,
-        H,
-        debug_ui(copy),
-        PanelRun {
-            debug: DebugModifiers {
-                reveal_whole_level: reveal,
-            },
-            ..panel_run(
-                level,
-                LevelModifiers::default(),
-                &quiet_alert(),
-                Loadout::innate(),
-            )
-        },
-    )
-}
-
-/// **The Level info tab is the panel that shipped, minus one control** (#459): the
-/// token and its `copy [c]` are exactly where they were, and the `replay [r]` that
-/// lodged on the acknowledgement's row is gone from the tab entirely. Its row is the
-/// acknowledgement's spacer again, which is what it was before the lodger arrived.
-#[test]
-fn the_level_info_tab_no_longer_carries_the_replay_control() {
-    let level = Some(run_with_a_token());
-    let g = level_info(level, SeedCopy::Idle);
-    assert!(
-        !text_of(&g).contains(REPLAY_CONTROL),
-        "the replay control left this tab",
-    );
-    // …and its cells hit nothing, so a tap that used to copy a run is body again.
-    let start = replay_control_start(W);
-    for x in start..start + REPLAY_CONTROL_LEN {
-        assert_eq!(
-            help_hit(
-                W,
-                H,
-                show(HelpTab::LevelInfo, SeedCopy::default()),
-                level,
-                x,
-                SEED_ACK_ROW
-            ),
-            None,
-            "cell {x} of the acknowledgement row",
-        );
-    }
-    // The acknowledgement still has that row to itself, and reads whole on it.
-    let g = level_info(level, SeedCopy::Unavailable);
-    let row: String = (0..W).map(|x| g.get(x, SEED_ACK_ROW).glyph).collect();
-    assert!(row.contains(UNAVAILABLE_ACK), "{row:?}");
-}
-
-/// **The switch says what it is doing** (§12.6/#459): the omni-vision row is drawn
-/// from the run's live [`DebugModifiers`], not from a flag the panel keeps of its own,
-/// so the line and the sight phase cannot disagree — and it reads in the panel's
-/// "this is on" ink when it is on.
-#[test]
-fn the_omni_vision_row_reads_the_live_switch() {
-    let on = debug_tab(None, true, SeedCopy::Idle);
-    let off = debug_tab(None, false, SeedCopy::Idle);
-    assert!(row_text(&on, OMNI_ROW).contains(OMNI_ON), "{OMNI_ON:?}");
-    assert!(row_text(&off, OMNI_ROW).contains(OMNI_OFF));
-    assert_eq!(on.get(CONTENT_INDENT, OMNI_ROW).fg, Category::Interest);
-    assert_eq!(off.get(CONTENT_INDENT, OMNI_ROW).fg, Category::Ground);
-    // The note under it is the §12.6 promise, printed where the switch is.
-    assert!(row_text(&on, OMNI_NOTE_ROW).contains(OMNI_NOTE));
-}
-
-/// **The omni-vision control is reachable by touch** (§11.6/#459), over exactly the
-/// cells it is drawn on and nowhere else — and only in a session that has the tab: a
-/// stale Debug tab in an ordinary session draws Level info, so the same press lands on
-/// Level info's body rather than flipping a switch that is not on screen.
-#[test]
-fn the_omni_control_is_reachable_by_touch_in_a_debug_session() {
-    let start = omni_control_start(W);
-    let g = debug_tab(None, false, SeedCopy::Idle);
-    let drawn: String = (start..start + OMNI_CONTROL_LEN)
-        .map(|x| g.get(x, OMNI_ROW).glyph)
-        .collect();
-    assert_eq!(drawn, OMNI_CONTROL, "the control is drawn on its row");
-    assert_eq!(g.get(start, OMNI_ROW).fg, Category::System);
-
-    for x in start..start + OMNI_CONTROL_LEN {
-        assert_eq!(
-            help_hit(W, H, debug_ui(SeedCopy::default()), None, x, OMNI_ROW),
-            Some(HelpHit::ToggleReveal),
-            "cell {x}",
-        );
-    }
-    assert_eq!(
-        help_hit(
-            W,
-            H,
-            debug_ui(SeedCopy::default()),
-            None,
-            start - 1,
-            OMNI_ROW
-        ),
-        None,
-        "the gap is inert",
-    );
-    assert_eq!(
-        help_hit(
-            W,
-            H,
-            debug_ui(SeedCopy::default()),
-            None,
-            start,
-            OMNI_ROW + 1
-        ),
-        None,
-        "the note beneath is body",
-    );
-    // No session, no tab, no control — the press lands on the Level info tab drawn
-    // in its place, where those cells mean nothing.
-    assert_eq!(
-        help_hit(
-            W,
-            H,
-            show(HelpTab::Debug, SeedCopy::default()),
-            None,
-            start,
-            OMNI_ROW
-        ),
-        None,
-        "an ordinary session has no such switch",
-    );
-}
-
-/// **The run is takeable, and every build can take it** (§12.4/#411/#478), on the tab
-/// it moved to (#459): the Debug tab carries a `replay [r]` control — drawn where it
-/// is hit-tested, every cell of the label a target, in the HUD-control colour the
-/// panel's other controls wear.
-///
-/// Two conditions are left on it, and both are tested: the tab has to be there, and
-/// the run has to have a token for the link to name (#333). The third — whether the
-/// *build* had a recorder behind the control — is gone with the `debug-tools` feature
-/// (#478), which is what let the deployed page export a run at all.
-#[test]
-fn the_replay_control_is_on_the_debug_tab_of_a_run_with_a_token() {
-    let level = Some(run_with_a_token());
-    let start = replay_control_start(W);
-    let hit = |ui, x, y| help_hit(W, H, ui, level, x, y);
-
-    // Every cell of the control resolves, and the drawn row matches.
-    for x in start..start + REPLAY_CONTROL_LEN {
-        assert_eq!(
-            hit(debug_ui(SeedCopy::default()), x, REPLAY_CONTROL_ROW),
-            Some(HelpHit::CopyReplay),
-            "cell {x}"
-        );
-    }
-    assert_eq!(
-        hit(debug_ui(SeedCopy::default()), start - 1, REPLAY_CONTROL_ROW),
-        None,
-        "the gap is inert",
-    );
-    assert_eq!(
-        hit(debug_ui(SeedCopy::default()), start, REPLAY_CONTROL_ROW + 1),
-        None,
-        "the row beneath",
-    );
-    let g = debug_tab(level, false, SeedCopy::Idle);
-    let drawn: String = (start..start + REPLAY_CONTROL_LEN)
-        .map(|x| g.get(x, REPLAY_CONTROL_ROW).glyph)
-        .collect();
-    assert_eq!(drawn, REPLAY_CONTROL, "the control is drawn on its row");
-    assert_eq!(g.get(start, REPLAY_CONTROL_ROW).fg, Category::System);
-    assert!(row_text(&g, REPLAY_CONTROL_ROW).contains(REPLAY_NOTE));
-
-    // No token, no run to hand over — like the seed control (#353), there is nothing
-    // for a link to name, so the control is drawn nowhere and hits nothing.
-    assert_eq!(
-        help_hit(
-            W,
-            H,
-            debug_ui(SeedCopy::default()),
-            None,
-            start,
-            REPLAY_CONTROL_ROW
-        ),
-        None,
-    );
-    assert!(!text_of(&debug_tab(None, false, SeedCopy::Idle)).contains(REPLAY_CONTROL));
-
-    // No debug session, no control: an ordinary panel draws Level info in its place,
-    // where those cells mean nothing — the regression this guards is the export
-    // leaking onto a panel every player can see.
-    assert_eq!(
-        hit(
-            show(HelpTab::Debug, SeedCopy::default()),
-            start,
-            REPLAY_CONTROL_ROW
-        ),
-        None,
-        "an ordinary session has no export",
-    );
-
-    // And it belongs to the Debug tab alone.
-    for tab in HelpTab::ALL {
-        if tab == HelpTab::Debug {
-            continue;
-        }
-        let ui = ScreenUi {
-            debug_mode: true,
-            ..show(tab, SeedCopy::default())
-        };
-        assert_eq!(
-            hit(ui, start, REPLAY_CONTROL_ROW),
-            None,
-            "{tab:?} draws no replay control",
-        );
-    }
-}
-
-/// The copy acknowledgement follows the control (#353/#459): pressed on the Debug
-/// tab, the answer prints under the Debug tab's own control — on its own row, so
-/// nothing shares a line with it and neither can clip the other.
-#[test]
-fn the_debug_tab_acknowledges_its_own_copy() {
-    let level = Some(run_with_a_token());
-    for (copy, expected) in [
-        (SeedCopy::Copied, COPIED_ACK),
-        (SeedCopy::Unavailable, UNAVAILABLE_ACK),
-    ] {
-        let g = debug_tab(level, false, copy);
-        assert!(
-            row_text(&g, REPLAY_ACK_ROW).contains(expected),
-            "the acknowledgement reads whole: {:?}",
-            row_text(&g, REPLAY_ACK_ROW),
-        );
-        // The control above it is untouched by the answer under it.
-        assert!(row_text(&g, REPLAY_CONTROL_ROW).contains(REPLAY_CONTROL));
-    }
-    // Idle says nothing at all, as on the Level info tab.
-    let idle = debug_tab(level, false, SeedCopy::Idle);
-    assert_eq!(row_text(&idle, REPLAY_ACK_ROW).trim(), "");
-}
-
-/// The panel's keys and their controls name the same characters (#411/#459), the way
-/// `c` and `copy [c]` do — and, like `c`, both are panel-only and shadow nothing: not
-/// a UI command, not a movement key. They answer only in a debug session, which is
-/// the pairing this asserts against the table.
-#[test]
-fn the_debug_tab_keys_are_the_same_on_the_controls_and_in_the_table() {
-    assert_eq!(
-        crate::help_nav_for_key(&REPLAY_COPY_KEY.to_string(), true),
-        Some(crate::input::HelpNav::CopyReplay),
-    );
-    assert_eq!(
-        REPLAY_CONTROL,
-        format!("replay [{REPLAY_COPY_KEY}]"),
-        "the drawn key is the bound one",
-    );
-    assert_eq!(
-        crate::help_nav_for_key(&OMNI_KEY.to_string(), true),
-        Some(crate::input::HelpNav::ToggleReveal),
-    );
-    assert_eq!(OMNI_CONTROL, format!("omni [{OMNI_KEY}]"));
-
-    for key in [REPLAY_COPY_KEY, OMNI_KEY] {
-        let key = key.to_string();
-        assert_eq!(
-            crate::help_nav_for_key(&key, false),
-            None,
-            "{key:?} answers only where its control is drawn",
-        );
-        assert_eq!(crate::input::ui_command_for_key(&key), None, "panel-only");
-        assert_eq!(crate::input_for_key(&key), None, "it shadows no movement");
-    }
-}
-
-/// The footer's hint and its theme control share one row, so the prose must stop
+/// The footer's hint and its options control share one row, so the prose must stop
 /// before the control starts — [`draw`] would clip the control in silence, and a
 /// half-drawn control is one the player cannot see they can press.
 #[test]
-fn the_footer_hint_stops_short_of_the_theme_control() {
+fn the_footer_hint_stops_short_of_the_options_control() {
     let end = FOOTER_INDENT + FOOTER_HINT.chars().count() as u32;
     assert!(
-        end < theme_control_start(W),
-        "the footer hint runs into the theme control ({end} vs {})",
-        theme_control_start(W),
+        end < options_control_start(W),
+        "the footer hint runs into the options control ({end} vs {})",
+        options_control_start(W),
     );
     // And the control itself clears the board's right margin.
-    assert_eq!(theme_control(), format!("{THEME_LABEL} [{THEME_KEY}]"));
-    assert!(theme_control_start(W) + theme_control_len() <= W);
+    assert_eq!(
+        options_control(),
+        format!("{OPTIONS_LABEL} [{SETTINGS_KEY}]")
+    );
+    assert!(options_control_start(W) + options_control_len() <= W);
 }
 
-/// The card and the key tables cannot drift (#189): the controls row, the footer
-/// button and both bindings all name the same character. The theme is the one
-/// key the open panel *forwards* rather than swallows, because the panel is
-/// where the option lives — so pressing it on the card actually does something.
+/// The panel's own door to the options screen cannot drift from its key (#513): the
+/// drawn control ends with the bracketed character the table answers to, and — like
+/// `c` — the key is panel-only, so it claims nothing from the board.
+#[test]
+fn the_options_key_is_the_same_on_the_control_and_in_the_table() {
+    let key = SETTINGS_KEY.to_string();
+    assert_eq!(
+        crate::help_nav_for_key(&key),
+        Some(crate::input::HelpNav::OpenSettings),
+    );
+    assert!(options_control().ends_with(&format!("[{key}]")));
+    assert_eq!(
+        crate::input::ui_command_for_key(&key),
+        None,
+        "panel-only: it claims no board letter from the ability mnemonics",
+    );
+    assert_eq!(crate::input_for_key(&key), None, "it shadows no movement");
+    // …and it leaves the screen it opened, so the pair is `?`/`?` all over again.
+    assert_eq!(
+        crate::settings_nav_for_key(&key),
+        Some(crate::input::SettingsNav::Back),
+    );
+}
+
+/// The card and the key tables cannot drift (#189): the controls row and both
+/// bindings name the same character. The theme is the one key the open panel
+/// *forwards* rather than swallows — its colour key is the best thing on screen to
+/// judge the flip against, even though the setting's home is the options screen now.
 #[test]
 fn the_theme_key_is_the_same_on_the_card_and_in_both_tables() {
     let key = THEME_KEY.to_string();
@@ -1306,11 +1047,10 @@ fn the_theme_key_is_the_same_on_the_card_and_in_both_tables() {
         Some(crate::input::UiCommand::ToggleTheme),
     );
     assert_eq!(
-        crate::help_nav_for_key(&key, false),
+        crate::help_nav_for_key(&key),
         Some(crate::input::HelpNav::ToggleTheme),
-        "the modal panel forwards its own option's key",
+        "the modal panel forwards the standing shortcut",
     );
-    assert!(theme_control().ends_with(&format!("[{key}]")));
     // It shadows nothing: not a movement key, and not an ability key — those are
     // the bar's four digits now (§11.6/#359), so a letter cannot collide with one.
     assert_eq!(crate::input_for_key(&key), None);
@@ -1321,67 +1061,55 @@ fn the_theme_key_is_the_same_on_the_card_and_in_both_tables() {
 }
 
 /// The tabs cycle, wrapping at both ends (§14 v2/#248) — the Tab / arrow motion.
-/// Written over the **shown** tabs rather than naming pairs, so adding a tab (as
-/// #343 did) extends the cycle instead of breaking the test — and run for both
-/// sessions, because #459 made "which tabs there are" a question with two answers.
+/// Written over [`HelpTab::ALL`] rather than naming pairs, so adding a tab (as #343
+/// did) extends the cycle instead of breaking the test.
 #[test]
 fn the_tabs_cycle_both_ways() {
-    assert_eq!(HelpTab::LevelInfo.next(false), HelpTab::Abilities);
-    for debug in [false, true] {
-        let shown = HelpTab::shown(debug);
-        for (i, &tab) in shown.iter().enumerate() {
-            let after = shown[(i + 1) % shown.len()];
-            assert_eq!(
-                tab.next(debug),
-                after,
-                "{tab:?} advances, wrapping at the end (debug: {debug})"
-            );
-            assert_eq!(after.prev(debug), tab, "…and steps back the same way");
-        }
+    assert_eq!(HelpTab::LevelInfo.next(), HelpTab::Abilities);
+    for (i, &tab) in HelpTab::ALL.iter().enumerate() {
+        let after = HelpTab::ALL[(i + 1) % HelpTab::ALL.len()];
+        assert_eq!(tab.next(), after, "{tab:?} advances, wrapping at the end");
+        assert_eq!(after.prev(), tab, "…and steps back the same way");
     }
 }
 
-/// **The Debug tab is only there when the session has one** (§12.6/#459), and the
-/// cycle honours that from either direction: an ordinary session walks its three
-/// tabs and never lands on the fourth, a debug session wraps through all four.
-///
-/// The stale case is the one worth pinning: a [`HelpTab::Debug`] left on a
-/// [`ScreenUi`] whose session has no such tab is not a trap — any motion from it lands
-/// on a real tab, and [`shown_tab`] draws (and hit-tests) the leftmost instead.
+/// **The bar is the same in every session** (#513). It was not while the debug
+/// session had a fourth tab of its own (#459) — the cycle, the layout and the
+/// hit-test all had to be written over a `shown` list, and a stale tab had to be
+/// resolved before it could be drawn. The switches live on the options screen now, so
+/// the panel has one bar, the three tabs a player always had.
 #[test]
-fn a_session_without_the_debug_tab_never_reaches_it() {
-    assert_eq!(HelpTab::shown(false), &HelpTab::ALL[..3]);
-    assert_eq!(HelpTab::shown(true), &HelpTab::ALL);
-    assert!(!HelpTab::shown(false).contains(&HelpTab::Debug));
-
-    // Walking the whole cycle from every starting point never yields the debug tab.
-    for &start in HelpTab::shown(false) {
-        let mut tab = start;
-        for _ in 0..HelpTab::ALL.len() + 1 {
-            tab = tab.next(false);
-            assert_ne!(tab, HelpTab::Debug, "from {start:?}");
+fn every_session_gets_the_same_three_tabs() {
+    assert_eq!(HelpTab::ALL.len(), 3);
+    for debug in [false, true] {
+        let ui = ScreenUi {
+            debug_mode: debug,
+            ..show(HelpTab::LevelInfo, SeedCopy::default())
+        };
+        let bar = render_help(
+            W,
+            H,
+            ui,
+            panel_run(
+                None,
+                LevelModifiers::default(),
+                &quiet_alert(),
+                Loadout::innate(),
+            ),
+        )
+        .to_text()[0]
+            .clone();
+        for tab in HelpTab::ALL {
+            assert!(
+                bar.contains(tab.label()),
+                "{tab:?} is missing from the bar (debug: {debug}): {bar:?}",
+            );
         }
+        assert!(
+            !bar.contains("Debug"),
+            "the debug session draws no tab of its own (debug: {debug}): {bar:?}",
+        );
     }
-    // In a debug session the last tab is reachable, and wraps back to the first.
-    assert_eq!(HelpTab::Help.next(true), HelpTab::Debug);
-    assert_eq!(HelpTab::Debug.next(true), HelpTab::LevelInfo);
-    assert_eq!(HelpTab::LevelInfo.prev(true), HelpTab::Debug);
-
-    // A stale debug tab in an ordinary session: motion lands somewhere real, and the
-    // panel draws the leftmost tab rather than a tab that is not on the bar.
-    assert_eq!(HelpTab::Debug.next(false), HelpTab::Abilities);
-    assert_eq!(HelpTab::Debug.prev(false), HelpTab::Help);
-    assert_eq!(
-        shown_tab(show(HelpTab::Debug, SeedCopy::default())),
-        HelpTab::LevelInfo,
-    );
-    assert_eq!(
-        shown_tab(ScreenUi {
-            debug_mode: true,
-            ..show(HelpTab::Debug, SeedCopy::default())
-        }),
-        HelpTab::Debug,
-    );
 }
 
 /// `ActiveModifier` is re-exported for shells and tests to read the descriptor

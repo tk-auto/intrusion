@@ -1194,6 +1194,7 @@ mod help;
 mod hud;
 mod menu;
 mod message_log;
+mod settings;
 mod usable;
 mod verdict;
 pub use campaign_map::{flavour_glyph, hit_of, map_hit, render_map, MapHit, MapUi};
@@ -1206,6 +1207,7 @@ pub use menu::{menu_hit, MenuEntry, MenuHit, MenuScreen, MenuUi, OptionsControl}
 #[cfg(test)]
 pub(crate) use message_log::near_line_text_max;
 pub use message_log::{is_message_button, message_log_rows};
+pub use settings::{settings_hit, shown_rows, Renderer, SettingsHit, SettingsRow, SettingsUi};
 pub use verdict::{verdict_hit, EndUi};
 
 /// Render a facility's **terrain only** to a grid of glyphs, one `String` per row

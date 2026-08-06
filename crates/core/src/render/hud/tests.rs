@@ -1703,10 +1703,56 @@ fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
     );
 }
 
+/// The **options screen** takes the whole frame too (§14 v2/#513) — and it is the one
+/// surface raised *over* another, so it has to win over both the menu that opened it
+/// and the help panel that did, and leave each exactly as it found it.
+///
+/// This is also §11.6's "toggling a setting is never a turn" from the core's side: the
+/// screen is drawn from `&State`, so there is nothing it *could* step, and clearing the
+/// field restores the identical frame — the board underneath is the board that was
+/// there, guard for guard.
+#[test]
+fn the_options_screen_replaces_the_whole_frame_over_whatever_raised_it() {
+    let s = help_board();
+    let playing = render_screen(&s, ScreenUi::default());
+    let over_help = ScreenUi {
+        help_open: true,
+        settings: Some(SettingsUi::default()),
+        ..ScreenUi::default()
+    };
+    let over_menu = ScreenUi {
+        menu: Some(MenuUi::default()),
+        settings: Some(SettingsUi::default()),
+        ..ScreenUi::default()
+    };
+    for ui in [over_help, over_menu] {
+        let screen = render_screen(&s, ui);
+        let text = screen.to_text().join("\n");
+        assert!(
+            text.contains(SettingsRow::Theme.label()),
+            "the frame is the options screen, not what it was opened over:\n{text}",
+        );
+        assert!(
+            !text.contains(MenuEntry::QuickPlay.label()),
+            "…and nothing of the surface underneath shows through:\n{text}",
+        );
+        assert_eq!(
+            (screen.width(), screen.height()),
+            (playing.width(), playing.height()),
+            "at the board's own size, so opening it never moves the fit",
+        );
+    }
+    assert_eq!(
+        render_screen(&s, ScreenUi::default()),
+        playing,
+        "leaving the options screen restores the identical frame",
+    );
+}
+
 /// #473: **what outlives a run, named one by one.** The theme a player picks on
 /// the title screen has to be the theme the run opens in — it is a fact about
-/// their eyes, not about the facility — and so does the modality and the debug
-/// session's tab (#459); everything else is the last screen's and must go.
+/// their eyes, not about the facility — and so are the renderer (#513), the modality
+/// and the debug session (#459); everything else is the last screen's and must go.
 ///
 /// The result is destructured field-by-field rather than compared against a
 /// hand-built `ScreenUi`, so adding a field to the struct fails to compile *here*
@@ -1723,8 +1769,12 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
             selected: 1,
             outlay: Some(Outlay::Closed),
         }),
+        settings: Some(SettingsUi {
+            selected: SettingsRow::Renderer,
+        }),
         help_tab: HelpTab::Abilities,
         theme: Theme::default().toggled(),
+        renderer: Renderer::default().toggled(),
         seed_copy: SeedCopy::Copied,
         debug_mode: true,
         end: EndUi {
@@ -1741,12 +1791,14 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         // Kept — the player's and the session's.
         modality,
         theme,
+        renderer,
         debug_mode,
         // Dropped — the last screen's.
         message_log_open,
         help_open,
         menu,
         map,
+        settings,
         help_tab,
         seed_copy,
         end,
@@ -1754,7 +1806,11 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
 
     assert_eq!(modality, carried.modality, "the player's hands (§11.6)");
     assert_eq!(theme, carried.theme, "the player's eyes (§11.2)");
-    assert!(debug_mode, "the session's own tab (§12.6/#459)");
+    assert_eq!(
+        renderer, carried.renderer,
+        "the renderer they chose (§11.1/#513)"
+    );
+    assert!(debug_mode, "the session's own switches (§12.6/#459)");
 
     assert!(
         !message_log_open,
@@ -1768,6 +1824,10 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
     assert!(
         map.is_none(),
         "and the campaign map closes as the facility opens (§14 v3)",
+    );
+    assert!(
+        settings.is_none(),
+        "a run opens on the board, not on the options screen (#513)",
     );
     assert_eq!(help_tab, HelpTab::default());
     assert_eq!(
