@@ -23,7 +23,7 @@
 //! change recomputes and redraws. The grid arrives already fogged (§11.5a) and
 //! overlaid (§11.5 — `Danger` backgrounds on cells watched by visible guards); this
 //! shell maps each cell's knowledge state to styling: full category colour live,
-//! the row's dim shade out of FOV (dark gray for most; quieter for floor dots,
+//! the row's dim shade out of FOV (dark grey for most; quieter for floor dots,
 //! tinted for the exit), muted slate remembered, and two red background shades for
 //! the danger overlay. Colours all come from [`palette`] — a full-range,
 //! colour-blind-safe 16-colour set behind a single category→swatch table. The frame
@@ -68,7 +68,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, Element, HtmlCanvasElement, Window};
 
-use crate::palette::{bg_color, memory, page, swatch};
+use crate::palette::{bg_colour, memory, page, swatch};
 
 /// The glyph cell's base aspect (width:height); a monospace glyph reads best in a
 /// slightly tall box. Actual on-screen cell size is this scaled to fit the viewport.
@@ -576,17 +576,17 @@ fn paint(
             // The danger overlay (§11.5) first: a background paints even under a
             // blank glyph — a watched open doorway is still watched.
             if let Some(bg) = cell.bg {
-                ctx.set_fill_style_str(bg_color(theme, bg, cell.fill));
+                ctx.set_fill_style_str(bg_colour(theme, bg, cell.fill));
                 ctx.fill_rect(x as f64 * m.cell_w, y as f64 * m.cell_h, m.cell_w, m.cell_h);
             }
             if cell.glyph == ' ' {
                 continue;
             }
-            let color = match cell.vis {
+            let colour = match cell.vis {
                 // Live: the full category colour (§11.5).
                 Visibility::Live => swatch(theme, cell.fg).fg,
                 // Out-of-FOV geometry: the row's dim shade (§11.5) — the standard
-                // dark gray for most, quieter for Ground, tinted for the exit.
+                // dark grey for most, quieter for Ground, tinted for the exit.
                 //
                 // Unexplored geometry takes **the same shade** (§11.5a/#307): the
                 // schematic separates itself by shape (`□`, and blank where a plan
@@ -604,10 +604,10 @@ fn paint(
             // this cell has one, and the character otherwise (§11.1/#460). It is
             // handed the **grid**, not the cell (#461): a wall's sprite is chosen from
             // its neighbours, and the grid is the only thing it may read them from.
-            if tiles.is_some_and(|tiles| tiles.draw(ctx, grid, x, y, color, m)) {
+            if tiles.is_some_and(|tiles| tiles.draw(ctx, grid, x, y, colour, m)) {
                 continue;
             }
-            ctx.set_fill_style_str(color);
+            ctx.set_fill_style_str(colour);
             draw_char(ctx, x as f64, y as f64, cell.glyph, m);
         }
     }

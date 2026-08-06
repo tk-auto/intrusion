@@ -45,7 +45,7 @@ fn locked(s: &State, x: u32) -> bool {
     s.layout().regions().door(id).is_locked()
 }
 
-/// Lockdown's window, read off its own catalog row rather than restated here.
+/// Lockdown's window, read off its own catalogue row rather than restated here.
 fn lockdown_duration() -> u32 {
     AbilityId::Lockdown
         .def()

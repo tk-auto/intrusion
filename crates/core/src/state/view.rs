@@ -849,7 +849,7 @@ impl State {
         match self.abilities.state(id) {
             // `Ready`/`Limited` are the states that promise the press does something.
             // They are the only ones the context may overrule, and it overrules them
-            // to the state the catalog has always documented as "discoverable, but
+            // to the state the catalogue has always documented as "discoverable, but
             // greyed" (§11.4).
             AbilityState::Ready | AbilityState::Limited { .. } if !self.would_fire(id) => {
                 AbilityState::Unusable

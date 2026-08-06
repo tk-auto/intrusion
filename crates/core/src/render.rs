@@ -96,7 +96,7 @@ pub enum Visibility {
     Live,
     /// Outside the FOV but the cell has been in it before — geometry the player
     /// has stood in and looked at, drawn as itself in the §11.5 dim shade: dark
-    /// gray, dim but legible.
+    /// grey, dim but legible.
     Explored,
     /// Never in the player's FOV — geometry known from the building's plans and
     /// nothing else (§11.5a). Drawn as the **schematic** (see [`SCHEMATIC_WALL`]):
@@ -573,7 +573,7 @@ fn duct_pass(state: &State, cells: &mut [GlyphCell]) {
         // System — the furniture band, where the doors and cupboards are — but the
         // tunnel is the thing `E` anchors, so lighting the run in Interest makes the
         // opening frame one continuous purple line from the border to the mouth rather
-        // than a gray thread ending in a purple letter. Same glyph either way: `=` is
+        // than a grey thread ending in a purple letter. Same glyph either way: `=` is
         // what a crawlspace is (§11.3), and a second `E` on the board would be a lie
         // about where the mouth is.
         let band = if duct.way_out().is_some() {
@@ -1022,7 +1022,7 @@ struct Fogged {
 /// things worth a mark on a plan. A duct mouth belongs among them because §10.7
 /// makes a duct an escape a pursuer cannot follow: a mouth scouted is a route you
 /// plan with, in the way §2.3's exit anchors every escape plan. Drawn as geometry it
-/// took the shared dim gray — the very colour a wall dims to — and a route found
+/// took the shared dim grey — the very colour a wall dims to — and a route found
 /// read as one more piece of building the moment you looked away.
 ///
 /// **Doors and furniture take the dim shade**, and that is the render's decision
@@ -1122,7 +1122,7 @@ fn fogged_view(terrain: Terrain, explored: bool, knowledge: LayoutKnowledge) -> 
         // A **duct mouth** is contents too (#450), and for the reason the layer table
         // gives it: it is a route you plan with. §10.7 makes a duct an escape a
         // pursuer cannot follow, so a mouth found once is worth as much to the plan as
-        // the cupboard beside it — and drawn as geometry it took the shared dim gray
+        // the cupboard beside it — and drawn as geometry it took the shared dim grey
         // and read as one more wall the moment you looked away. The memory slate is
         // what says *you found this*.
         Terrain::Console

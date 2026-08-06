@@ -71,7 +71,7 @@ impl Message {
 /// red near line and a red `g` reinforce (§11.2).
 /// Whether `ability` is **instant** (§8.2): it resolves the turn it is pressed and has
 /// no active window at all — Pierce Wall's bore, Confusion's blast (#303/#325). Read
-/// off the catalog rather than listed here, so a later ability that ships instant is
+/// off the catalogue rather than listed here, so a later ability that ships instant is
 /// covered without an edit. A passive has no clock and is never activated, so it is not
 /// instant either.
 fn is_instant(ability: crate::AbilityId) -> bool {

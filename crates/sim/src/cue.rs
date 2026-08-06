@@ -8,7 +8,7 @@
 //! one" quietly stopped measuring the game.
 //!
 //! This module is the seam that fixes that. [`Moment::bid`] matches
-//! **exhaustively** on [`AbilityId`], so adding a row to the §8.1 catalog fails to
+//! **exhaustively** on [`AbilityId`], so adding a row to the §8.1 catalogue fails to
 //! *compile* until somebody says what that ability is for. The compile-time
 //! obligation is the whole point: it is the same move §8.1 makes with
 //! `Behaviour::Effects` — a small declared vocabulary you cannot silently skip.
@@ -240,7 +240,7 @@ impl Moment<'_> {
     }
 
     /// **The seam**: one ability's cue. Exhaustive over [`AbilityId`], so a new row
-    /// in the §8.1 catalog cannot ship without somebody saying what it is for — the
+    /// in the §8.1 catalogue cannot ship without somebody saying what it is for — the
     /// compile error *is* the obligation.
     ///
     /// `status` carries the ability's contextual state (#345), which is where
@@ -538,7 +538,7 @@ impl Moment<'_> {
     /// 45-turn cooldown.
     fn confusion(&self, status: AbilityStatus) -> Option<Bid> {
         // A panic-buy is bought in a panic. Freezing a patrol you have not been seen
-        // by spends the longest cooldown in the catalog on a guard that was going to
+        // by spends the longest cooldown in the catalogue on a guard that was going to
         // walk past anyway.
         if self.intent != Intent::Flee {
             return None;
@@ -802,7 +802,7 @@ impl Moment<'_> {
 /// An ability's **cue slot**: its position in [`AbilityId::ALL`], which is the index
 /// its per-ability floor sits at in [`Profile::cue_floors`].
 ///
-/// Derived from the catalog order rather than written out, so a new ability lands
+/// Derived from the catalogue order rather than written out, so a new ability lands
 /// in a slot without a second list to keep in step — and, per the never-renumber
 /// rule, the positions are permanent.
 pub fn slot(id: AbilityId) -> usize {
@@ -834,7 +834,7 @@ mod tests {
         assert_eq!(URGE_DECISIVE, 100, "the scale runs 0..=100");
     }
 
-    /// Every ability has a distinct cue slot, and the slots cover the catalog —
+    /// Every ability has a distinct cue slot, and the slots cover the catalogue —
     /// the floors array is indexed by this, so a collision would silently give two
     /// abilities one threshold.
     #[test]

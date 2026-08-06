@@ -117,7 +117,7 @@ enum Policy {
 }
 
 /// The whole usage text: the fixed prose above plus the vocabularies, which a
-/// `const` cannot interpolate. Read off the catalog rather than hand-listed, so a
+/// `const` cannot interpolate. Read off the catalogue rather than hand-listed, so a
 /// new modifier or a newly shipped ability is spellable *and* documented the day it
 /// lands — the failure mode `the_usage_text_names_every_vocabulary` exists to catch,
 /// fixed at the source rather than pinned by a test.
@@ -506,7 +506,7 @@ mod tests {
     /// the tie that makes that a failing test rather than a silence.
     ///
     /// The config vocabularies are not pinned that way: [`usage`] reads them off the
-    /// catalog, so this asserts the *mechanism* rather than a list — a new modifier
+    /// catalogue, so this asserts the *mechanism* rather than a list — a new modifier
     /// or a newly shipped ability documents itself.
     #[test]
     fn the_usage_text_names_every_vocabulary() {
@@ -520,7 +520,7 @@ mod tests {
         for name in [modifier_names(), ability_names(), intel_gate_names()] {
             assert!(help.contains(&name), "--help does not list {name}");
         }
-        // Read off the catalog, so this holds for a row that ships tomorrow.
+        // Read off the catalogue, so this holds for a row that ships tomorrow.
         assert!(
             help.contains("lockdown"),
             "a shipped ability is unspellable"

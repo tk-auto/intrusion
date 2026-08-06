@@ -35,7 +35,7 @@ fn armed(layout: Layout, player: Cell, facing: Direction, id: AbilityId) -> Stat
 }
 
 /// **The bar stops advertising a press that cannot fire** (§11.4/#345) — the hole this
-/// ticket closes. The catalog has always documented `Unusable` as *"no adjacent target
+/// ticket closes. The catalogue has always documented `Unusable` as *"no adjacent target
 /// … discoverable, but greyed"*, and nothing produced it: a decoy facing a wall drew
 /// `Decoy`, plain and ready, over a key that was a guaranteed free no-op.
 ///
@@ -209,7 +209,7 @@ fn the_economy_outranks_the_context_unless_it_says_press_me() {
 
 /// **One aimed target per ability** — the assumption
 /// [`Aimed`](crate::state::activation::Aimed) is a choice rather than a set. An ability
-/// declaring two would silently get only the first arm of the ladder, so the catalog is
+/// declaring two would silently get only the first arm of the ladder, so the catalogue is
 /// checked rather than trusted: adding such a row fails here, where the fix (widen
 /// `Aimed`) is obvious, instead of shipping half an activation.
 #[test]

@@ -47,7 +47,7 @@
 //! ([`Atlases::tinted`]) rather than compositing per cell — a 40x40 board every frame
 //! is the one thing that would make this expensive — and the colour set is closed and
 //! small (~10 categories x 3 knowledge states x 2 themes, and most of them share the
-//! one dim gray), so the cache is bounded by construction. It is filled lazily: a
+//! one dim grey), so the cache is bounded by construction. It is filled lazily: a
 //! session that never flips the theme never bakes the other one.
 //!
 //! # What tiles deliberately do *not* touch

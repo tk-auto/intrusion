@@ -341,7 +341,7 @@ impl State {
     /// ```
     ///
     /// The clamp can only ever **shrink** the blast, never widen it: [`CONFUSION_RADIUS`]
-    /// stays the catalog's **[START]** cap, so no change to the sense — a Wait's widened
+    /// stays the catalogue's **[START]** cap, so no change to the sense — a Wait's widened
     /// 20, a future modifier, salvaged tech — can make Confusion reach further than its
     /// own row says. What it does do is keep #240's promise as a *rule* rather than as a
     /// coincidence of two constants: the blast never freezes what the player cannot

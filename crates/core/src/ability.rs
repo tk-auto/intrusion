@@ -16,7 +16,7 @@
 //! three-tech grant) and the bar names all of them on one row of a 40-wide board
 //! (§10.2). That is a real budget, so it is spent deliberately: the bar names
 //! ([`AbilityId::bar_name`]) are short by design, the widest state notation is
-//! **derived from the catalog's own numbers** ([`MAX_STATE_NOTATION`]) rather than
+//! **derived from the catalogue's own numbers** ([`MAX_STATE_NOTATION`]) rather than
 //! written down, and the render turns the two into a compile-time assertion that the
 //! worst-case bar fits the board. Renaming an ability, raising a cooldown past 99,
 //! or raising the grant then fails the *build* — never the frame.
@@ -24,7 +24,7 @@
 //! # Two halves: the economy model and its display
 //!
 //! The per-ability **runtime economy** (§8.1/§8.2) lives in this module too —
-//! [`AbilityId`] and its data-driven [`Ability`] catalog, the effect vocabulary
+//! [`AbilityId`] and its data-driven [`Ability`] catalogue, the effect vocabulary
 //! ([`Effect`]) and the code escape hatch ([`Behaviour`]), and the [`Deck`] the
 //! turn loop steps: activation, early toggle-off, and the end-of-turn
 //! duration/cooldown tick, with the `duration + cooldown` lockout *emergent* from
@@ -135,7 +135,7 @@ impl AbilityState {
     /// The number is rendered verbatim from the state, so what the bar shows is
     /// exactly what the player gets (§8.2) — the advertised-vs-real gap the old UI
     /// had cannot open here. The widest this can ever come out is
-    /// [`MAX_STATE_NOTATION`], derived from the catalog itself.
+    /// [`MAX_STATE_NOTATION`], derived from the catalogue itself.
     pub fn suffix(self) -> String {
         match self {
             AbilityState::Ready => String::new(),
@@ -190,7 +190,7 @@ impl AbilityStatus {
     }
 }
 
-/// The widest state notation ([`AbilityState::suffix`]) the catalog can produce, in
+/// The widest state notation ([`AbilityState::suffix`]) the catalogue can produce, in
 /// cells: the longest duration or cooldown in it plus the two delimiters of `[N]` /
 /// `/N/`, or the [`PASSIVE_MARKER`], whichever is wider. **Derived, not written
 /// down** — retuning a §8.3 number past 99 widens this on its own, and trips the
@@ -204,7 +204,7 @@ pub(crate) const MAX_STATE_NOTATION: usize = max_state_notation();
 pub(crate) const MAX_BAR_ENTRY: usize = max_bar_name() + MAX_STATE_NOTATION;
 
 /// How many abilities are **innate** (§8.3) — the part of a loadout that is never
-/// drawn. `const` so [`AbilityId::MAX_HELD`] is arithmetic over the catalog rather
+/// drawn. `const` so [`AbilityId::MAX_HELD`] is arithmetic over the catalogue rather
 /// than a second number to keep in step.
 const fn innate_count() -> usize {
     let mut count = 0;
@@ -230,7 +230,7 @@ const fn decimal_width(n: u32) -> usize {
     width
 }
 
-/// Walk the catalog for the widest notation any ability can show: the biggest
+/// Walk the catalogue for the widest notation any ability can show: the biggest
 /// number an [`Economy`] carries plus its two delimiters, against the passive
 /// marker's own width. `const` so [`MAX_STATE_NOTATION`] is a compile-time fact.
 const fn max_state_notation() -> usize {
@@ -612,9 +612,9 @@ impl AbilityId {
     }
 
     /// This ability's static definition (§8.1): how it is paid for, and its
-    /// behaviour. The catalog is `const` data — declaring a new ability is adding a
+    /// behaviour. The catalogue is `const` data — declaring a new ability is adding a
     /// row here (§8.1), not writing a system. `const` so the display can measure the
-    /// catalog's own numbers at compile time ([`MAX_STATE_NOTATION`]).
+    /// catalogue's own numbers at compile time ([`MAX_STATE_NOTATION`]).
     pub const fn def(self) -> &'static Ability {
         match self {
             AbilityId::Run => &RUN,
@@ -675,7 +675,7 @@ pub struct Loadout {
 impl Loadout {
     /// The **full** loadout: every ability present, passives included.
     ///
-    /// It is **not a loadout a run can hold** — the whole catalog is well over the
+    /// It is **not a loadout a run can hold** — the whole catalogue is well over the
     /// [`AbilityId::MAX_HELD`] cap (§8.3), so no preset resolves to it and the
     /// ability bar's compile-time width bound (§11.4) does not cover it. A bar this
     /// long simply truncates, as it does on any oversized hand-built state.
@@ -978,7 +978,7 @@ pub enum AbilityMode {
 /// One ability declared as **data** (§8.1): how it is paid for ([`AbilityMode`])
 /// and the behaviour the effect tickets consume.
 ///
-/// Built as `const` catalog rows ([`AbilityId::def`]). Every number is `[START]`
+/// Built as `const` catalogue rows ([`AbilityId::def`]). Every number is `[START]`
 /// (§8.3) — tunable, and pinned by a test so a change is a visible decision.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ability {
@@ -1045,7 +1045,7 @@ impl Ability {
     }
 }
 
-// The §8.3 starting-set catalog. All numbers `[START]` (§8.3), pinned by
+// The §8.3 starting-set catalogue. All numbers `[START]` (§8.3), pinned by
 // `the_catalog_matches_the_design`. Effects are declared here and applied by each
 // ability's own ticket; the economy is blind to them.
 
@@ -1442,7 +1442,7 @@ impl Slot {
 /// [`deactivate`] in the player phase, [`tick`] at end of turn (§8.2 timing). The
 /// `duration + cooldown` lockout is **emergent, not stored** — the deck keeps only
 /// the current slot and reads every number fresh from [`AbilityId::def`], so
-/// retuning a catalog value moves the lockout with it and nothing here needs to
+/// retuning a catalogue value moves the lockout with it and nothing here needs to
 /// change (§8.2). For v1 the whole set is available from the start (#104): a fresh
 /// deck is all [`Ready`](Slot::Ready).
 ///
@@ -1460,7 +1460,7 @@ pub(crate) struct Deck {
     loadout: Loadout,
     /// Uses left this **level** for each ability that declares a budget
     /// ([`Economy::uses_per_level`], §8.2/#302), `None` for the ones the clocks alone
-    /// govern. Seeded from the catalog when the deck is built — which is once, at
+    /// govern. Seeded from the catalogue when the deck is built — which is once, at
     /// level start — decremented on each use that actually happens, and never
     /// written upward by anything: a fresh level is the only way a budget comes back,
     /// and it comes back by being a fresh deck.
@@ -1582,7 +1582,7 @@ impl Deck {
     /// so an ability found in a crate is usable from the turn the crate was opened.
     ///
     /// The one thing that grows a loadout after boot, and it grows it only. A deck's
-    /// slots and use budgets were seeded for the whole catalog in
+    /// slots and use budgets were seeded for the whole catalogue in
     /// [`new`](Deck::new) — every ability starts [`Ready`](Slot::Ready) with its budget
     /// full, held or not — so what was missing was never state, it was **permission**:
     /// [`state`](Deck::state) and [`activate`](Deck::activate) both refuse an ability the

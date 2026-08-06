@@ -1864,7 +1864,7 @@ fn an_unseen_hideout_masks_as_wall_until_scouted() {
 /// three-state life as the cupboard above, and for the same reason. A duct is an
 /// escape a pursuer cannot follow (§10.7), so a mouth you have scouted is a route
 /// you plan with, exactly as §2.3's exit anchors every escape plan. It used to take
-/// the geometry arm and draw its `=` in the shared dim gray out of view, which is
+/// the geometry arm and draw its `=` in the shared dim grey out of view, which is
 /// the colour a wall dims to — a route found, reported as one more piece of
 /// building.
 ///
@@ -1905,7 +1905,7 @@ fn a_scouted_duct_mouth_is_remembered_like_a_cupboard() {
     assert_eq!(
         (cell.glyph, cell.fg, cell.vis),
         ('=', Category::System, Visibility::Remembered),
-        "the memory slate is what says you found this — not the wall's dim gray",
+        "the memory slate is what says you found this — not the wall's dim grey",
     );
 }
 
@@ -3299,7 +3299,7 @@ fn any_effect_ink(grid: &Grid) -> bool {
 /// **`E` keeps its own face** through it, and the run wears the exit's own colour
 /// (§11.2/#466): §11.5a draws the exit as itself from turn one — *yours* — so the frame
 /// is one continuous Interest line from the border to the mouth, `=` up to `E` and `E`
-/// at the end of it, rather than a gray thread finishing in a purple letter.
+/// at the end of it, rather than a grey thread finishing in a purple letter.
 #[test]
 fn turn_one_draws_the_whole_exit_tunnel_and_e_keeps_its_face() {
     let exit = Cell::new(4, 4);

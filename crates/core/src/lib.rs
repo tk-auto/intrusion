@@ -30,7 +30,7 @@
 //! guards, in that order, under the turn-cost rule (§4.4) and the two win/lose
 //! conditions (§4.5). Around it sit the guard mind ([`Guard`], §7 — patrol, the two
 //! detection zones, the bounded search, takedowns and the radio net) and the ability
-//! economy ([`Ability`], §8.1/§8.2): a data-driven catalog plus turn cost, duration
+//! economy ([`Ability`], §8.1/§8.2): a data-driven catalogue plus turn cost, duration
 //! and cooldown, with the `duration + cooldown` lockout emergent rather than stored.
 //!
 //! **Presentation.** [`render`] (§11.1): a pure function of state producing the glyph

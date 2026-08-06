@@ -510,7 +510,7 @@ fn ambient_counts_the_stun_down() {
     s.step(Input::Step(Direction::East)); // turn 2: into the wall
                                           // Stand in there for the rest of the window; the last of these is the turn the
                                           // duration ends and the player is thrown clear and stunned. Counted off the
-                                          // catalog so a retune (#449) moves the scene rather than breaking it.
+                                          // catalogue so a retune (#449) moves the scene rather than breaking it.
     let duration = crate::AbilityId::Dephase
         .def()
         .economy()
@@ -1076,7 +1076,7 @@ fn a_refusal_still_costs_nothing() {
 /// a duplicate paid for with the near line's one row — and a budgeted ability is
 /// typically instant, so there is no "active" window to announce either. An
 /// unbudgeted ability keeps the wording it has always had, which is every other
-/// ability in the catalog.
+/// ability in the catalogue.
 #[test]
 fn a_budgeted_activation_says_nothing_and_leaves_the_others_alone() {
     let spoken = |uses_left| {

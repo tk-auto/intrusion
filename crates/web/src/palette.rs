@@ -87,13 +87,13 @@ impl Palette {
 }
 
 /// The dark theme's **standard §11.5 dim**: out-of-FOV geometry collapses to this
-/// one dark gray — dim but legible — for most rows, receding toward the black page.
+/// one dark grey — dim but legible — for most rows, receding toward the black page.
 /// Distinct from the memory slate so the three knowledge states never collapse into
 /// two (§11.5a's note; asserted below). Three rows carry their own dim instead:
 /// Ground recedes further (nothing draws it since #470 took floor out of the board
 /// beyond your sight — it is a value the table keeps, not board ink), Interest keeps a readable purple
 /// tint — the exit anchors every escape plan (§7.6) and §11.5a keeps it always
-/// visible, so it must not vanish into wall gray — and Effect keeps its cyan for the
+/// visible, so it must not vanish into wall grey — and Effect keeps its cyan for the
 /// help card's colour key.
 const DARK_DIM: &str = "#4a4a4a";
 
@@ -116,7 +116,7 @@ const DARK_DIM: &str = "#4a4a4a";
 /// the last, in the same descending direction the foregrounds take, so a band reads
 /// as its rung rather than as "a dark warm colour". Where the dark tier compressed
 /// two hues together — tan against orange, cyan against blue, either against the
-/// neutral gray — the shade carries **more** saturation than a straight scaling of
+/// neutral grey — the shade carries **more** saturation than a straight scaling of
 /// its foreground would give it, because a dark colour needs more of it to read as a
 /// hue at all. The old values put the whole warm cluster inside `#2e2000`–`#521717`
 /// and they were, correctly, reported as indistinguishable in play.
@@ -124,8 +124,8 @@ const DARK: Palette = Palette {
     rows: [
         sw("#000000", "#000000", "#000000", "#000000"), //  0 true black — the page backdrop
         sw("#ffffff", DARK_DIM, "#646464", "#373737"),  //  1 true white — Neutral
-        sw("#4a4a4a", "#262626", "#202020", "#121212"), //  2 dark gray — Ground (floor dots)
-        sw("#a8a8a8", DARK_DIM, "#535353", "#353535"),  //  3 light gray — spare (secondary text)
+        sw("#4a4a4a", "#262626", "#202020", "#121212"), //  2 dark grey — Ground (floor dots)
+        sw("#a8a8a8", DARK_DIM, "#535353", "#353535"),  //  3 light grey — spare (secondary text)
         sw("#667a8a", DARK_DIM, "#303941", "#1e2328"),  //  4 slate — tile memory (§11.5a)
         sw("#4ea6ff", DARK_DIM, "#2a649e", "#194169"),  //  5 blue — Owned
         sw("#2456b8", DARK_DIM, "#183878", "#0e2248"),  //  6 deep blue — spare
@@ -141,7 +141,7 @@ const DARK: Palette = Palette {
     ],
 };
 
-/// The light theme's standard dim — a light gray, receding toward the white page.
+/// The light theme's standard dim — a light grey, receding toward the white page.
 /// Same job as [`DARK_DIM`], opposite direction; the exceptions are the same three
 /// rows, for the same reasons.
 const LIGHT_DIM: &str = "#b0b0b0";
@@ -172,8 +172,8 @@ const LIGHT: Palette = Palette {
     rows: [
         sw("#ffffff", "#ffffff", "#ffffff", "#ffffff"), //  0 true white — the page backdrop
         sw("#000000", LIGHT_DIM, "#858585", "#adadad"), //  1 true black — Neutral
-        sw("#b8b8b8", "#d8d8d8", "#dadada", "#ededed"), //  2 light gray — Ground (floor dots)
-        sw("#8a8a8a", LIGHT_DIM, "#9d9d9d", "#c5c5c5"), //  3 mid gray — spare (secondary text)
+        sw("#b8b8b8", "#d8d8d8", "#dadada", "#ededed"), //  2 light grey — Ground (floor dots)
+        sw("#8a8a8a", LIGHT_DIM, "#9d9d9d", "#c5c5c5"), //  3 mid grey — spare (secondary text)
         sw("#3f5f80", LIGHT_DIM, "#a7b6c5", "#cdd5de"), //  4 slate — tile memory (§11.5a)
         sw("#0060c0", LIGHT_DIM, "#64a3e3", "#8dc0f2"), //  5 blue — Owned
         sw("#082a72", LIGHT_DIM, "#8a9abc", "#bbc5d8"), //  6 deep blue — spare
@@ -271,7 +271,7 @@ pub(crate) fn swatch(theme: Theme, category: Category) -> Swatch {
 /// "sensed" and "sensed, and fading" without a second row to learn. The shell reads the
 /// answer and never the reason — the core does not name colours, and here it does not
 /// name fog either.
-pub(crate) fn bg_color(theme: Theme, bg: Category, fill: Fill) -> &'static str {
+pub(crate) fn bg_colour(theme: Theme, bg: Category, fill: Fill) -> &'static str {
     let swatch = swatch(theme, bg);
     // The **effect layer** (§8.3/#308) is the one category that ignores `fill` outright:
     // how far your own gadget reaches is certain knowledge, through walls and over
@@ -400,13 +400,13 @@ mod tests {
     const MIN_BAND_CONTRAST: i32 = 300;
 
     /// The background variant a category paints at each fill, as the board actually
-    /// paints it ([`bg_color`]) — so the `Effect` full-strength exception is honoured
+    /// paints it ([`bg_colour`]) — so the `Effect` full-strength exception is honoured
     /// here rather than re-derived, and a check can never assert something about a shade
     /// the screen never shows.
     fn bg_shades(theme: Theme, c: Category) -> [&'static str; 2] {
         [
-            bg_color(theme, c, Fill::Full),
-            bg_color(theme, c, Fill::Quiet),
+            bg_colour(theme, c, Fill::Full),
+            bg_colour(theme, c, Fill::Quiet),
         ]
     }
 
@@ -440,7 +440,7 @@ mod tests {
                      (dist^2 {d} < {MIN_DIST2})"
                 );
             }
-            // And the dim gray must not collapse into the remembered slate — three
+            // And the dim grey must not collapse into the remembered slate — three
             // knowledge states, not two (§11.5a's implementation note).
             let d = dist2(rgb(std_dim(theme)), rgb(memory(theme)));
             assert!(
@@ -460,7 +460,7 @@ mod tests {
     /// hue discrimination is worst — and nothing in the suite objected, because every
     /// distinctness guarantee was asserted on the `fg` column alone.
     ///
-    /// Measured through [`bg_color`] rather than off the [`Swatch`], so it compares what
+    /// Measured through [`bg_colour`] rather than off the [`Swatch`], so it compares what
     /// the screen actually paints: an out-of-FOV `Effect` cell paints its full-strength
     /// fill beside an out-of-FOV `Danger` cell's dimmed one, and those two are exactly
     /// the pair a player has to tell apart.
@@ -584,10 +584,10 @@ mod tests {
     #[test]
     fn the_effect_layer_is_distinct_from_danger_and_sensed() {
         for theme in THEMES {
-            let effect = bg_color(theme, Category::Effect, Fill::Quiet);
+            let effect = bg_colour(theme, Category::Effect, Fill::Quiet);
             assert_eq!(
                 effect,
-                bg_color(theme, Category::Effect, Fill::Full),
+                bg_colour(theme, Category::Effect, Fill::Full),
                 "{theme:?}: the effect wash is full-strength in and out of the FOV alike",
             );
 
@@ -605,10 +605,10 @@ mod tests {
             );
 
             for other in [
-                bg_color(theme, Category::Danger, Fill::Full),
-                bg_color(theme, Category::Danger, Fill::Quiet),
-                bg_color(theme, Category::Sensed, Fill::Full),
-                bg_color(theme, Category::Sensed, Fill::Quiet),
+                bg_colour(theme, Category::Danger, Fill::Full),
+                bg_colour(theme, Category::Danger, Fill::Quiet),
+                bg_colour(theme, Category::Sensed, Fill::Full),
+                bg_colour(theme, Category::Sensed, Fill::Quiet),
             ] {
                 let d = dist2(rgb(effect), rgb(other));
                 assert!(
@@ -645,8 +645,8 @@ mod tests {
     #[test]
     fn danger_overlay_shades_read_on_the_backdrop() {
         for theme in THEMES {
-            let live = bg_color(theme, Category::Danger, Fill::Full);
-            let dimmed = bg_color(theme, Category::Danger, Fill::Quiet);
+            let live = bg_colour(theme, Category::Danger, Fill::Full);
+            let dimmed = bg_colour(theme, Category::Danger, Fill::Quiet);
             for shade in [live, dimmed] {
                 let d = dist2(rgb(shade), rgb(page(theme)));
                 assert!(
@@ -680,8 +680,8 @@ mod tests {
     #[test]
     fn the_sensed_background_is_orange_and_distinct_from_danger() {
         for theme in THEMES {
-            let fresh = bg_color(theme, Category::Sensed, Fill::Full);
-            let fading = bg_color(theme, Category::Sensed, Fill::Quiet);
+            let fresh = bg_colour(theme, Category::Sensed, Fill::Full);
+            let fading = bg_colour(theme, Category::Sensed, Fill::Quiet);
             let d = dist2(rgb(fresh), rgb(fading));
             assert!(
                 d >= MIN_BG_DIST2,
@@ -709,8 +709,8 @@ mod tests {
             // however fresh either of them is.
             for sensed in [fresh, fading] {
                 for danger in [
-                    bg_color(theme, Category::Danger, Fill::Full),
-                    bg_color(theme, Category::Danger, Fill::Quiet),
+                    bg_colour(theme, Category::Danger, Fill::Full),
+                    bg_colour(theme, Category::Danger, Fill::Quiet),
                 ] {
                     let d = dist2(rgb(sensed), rgb(danger));
                     assert!(
@@ -866,7 +866,7 @@ mod tests {
     }
 
     /// §7.6/§11.5a: the exit anchors every escape plan and is always visible — so
-    /// out of the FOV the `E` must not sink into wall gray the way it briefly did.
+    /// out of the FOV the `E` must not sink into wall grey the way it briefly did.
     /// Interest's dim shade still reads as purple, apart from both the standard
     /// dim and the memory slate (a dim exit is not a remembered content).
     #[test]

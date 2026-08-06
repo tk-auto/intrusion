@@ -353,7 +353,7 @@ fn a_refused_bore_marks_nothing() {
 /// out the duration strands them inside the wall and fires the safety eject.
 ///
 /// Returned **one turn short of the expiry**, so a caller's single `Wait` is the turn
-/// the window ends. The waiting is counted off the catalog's duration rather than
+/// the window ends. The waiting is counted off the catalogue's duration rather than
 /// written out, so a retune (#449 moved it 3 → 4) leaves every caller reading the
 /// same way.
 fn phased_into_a_wall() -> State {
@@ -385,7 +385,7 @@ fn phased_into_a_wall() -> State {
 }
 
 /// Dephase's `[START]` window (§8.3), counting the activation turn — read from the
-/// catalog so a tune moves the tests with it rather than stranding them on a number.
+/// catalogue so a tune moves the tests with it rather than stranding them on a number.
 fn dephase_duration() -> u32 {
     AbilityId::Dephase
         .def()

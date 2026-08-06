@@ -339,7 +339,7 @@ pub const EFFECT_FLASH_TURNS: u32 = 1;
 /// This is the **open-floor** half of the promise, and only that. Where the sense
 /// itself shrinks below the cap — inside a duct, §10.7 — what keeps the promise is the
 /// clamp in [`confusion_blast`](State::confusion_blast). The two are deliberately not
-/// interchangeable: this one states a fact about the catalog's numbers at compile time,
+/// interchangeable: this one states a fact about the catalogue's numbers at compile time,
 /// the clamp states the rule at every firing, and neither stands in for the other.
 const _: () = assert!(CONFUSION_RADIUS <= PLAYER_SENSE_RANGE);
 
