@@ -1291,7 +1291,8 @@ impl StealthBot {
 /// two-cell run would spend the whole window and land its exit on the expiry turn, and
 /// a duration that ends inside a solid costs a safety eject plus a stun as long as the
 /// throw (§8.3) — the exact trap the cue must not walk into. The slack is what absorbs
-/// a stolen turn (see [`StealthBot::push_on`]), not a deeper crossing.
+/// a stolen turn (the re-bid [`StealthBot::pursue`] makes mid-crossing), not a deeper
+/// crossing.
 fn crossing(
     facility: &Facility,
     memory: &intrusion_core::VisibleSet,

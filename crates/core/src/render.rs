@@ -3,9 +3,9 @@
 //!
 //! The game draws as a grid of cells, each a character plus a foreground *category*
 //! plus a background (§11.1). This is a **pure function of [`State`]**: it composes
-//! the terrain grid **and** the entities on it — the player, the guards, later bodies
-//! and decoys — into one grid, resolving overlaps by a defined **glyph priority**
-//! (§11.3). Because it prints as text it is assertable in a native test with no
+//! the terrain grid **and** the entities on it — the player, the guards, the bodies,
+//! the remote and the decoys — into one grid, resolving overlaps by a defined
+//! **glyph priority** (§11.3). Because it prints as text it is assertable in a native test with no
 //! browser, which is what makes UI iteration agent-checkable (§11.1).
 //!
 //! # The seam, stated once so it stops drifting
@@ -30,10 +30,11 @@
 //! `Danger` on every cell watched by a guard the player can see — because it must
 //! read the *same* sight data the guard AI reads
 //! ([`Guard::fov`](crate::state::Guard::fov)), not a re-implementation that could
-//! lie. What is **not** here yet: the two red shades of the §7.6 two-zone
-//! detection (certain vs glimpse) — detection zones are a guard ticket; until it
-//! lands the whole cone is one zone. Colour *values* are the shell's table
-//! (§11.2); this module only speaks in categories.
+//! lie. What is deliberately **not** here: the two red shades of the §7.6 two-zone
+//! detection (certain vs glimpse). The zones themselves shipped
+//! ([`Sighting`](crate::guard::Sighting)) — painting the whole cone as one zone is
+//! a render choice, kept until the overlay earns a second shade (§11.5). Colour
+//! *values* are the shell's table (§11.2); this module only speaks in categories.
 
 use crate::category::{Category, Theme};
 use crate::cell::{Cell, Direction};
