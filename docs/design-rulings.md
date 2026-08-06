@@ -3732,3 +3732,58 @@ that *is* safe. No cue was needed; what changed is the board the existing cues r
 None of which is a verdict. §13.4's rule stands — the sim is a smoke detector, not a
 judge — and *how much easier a −1 draw should feel* is exactly the kind of question
 §13.1 reserves for playing it.
+
+## Appendix 52 — Generation-reaching modifiers: three depths, three assertions, and what a carve costs
+
+*(Moved from §12.6, where only the rules remain; this is the argument behind them.
+See #452, #232, #236, #518.)*
+
+Several modifiers reach generation, and they reach **different depths** of it
+(§10.4/#452, §10.2/#232, §10.4/#236). Every other field is read at runtime or by the
+renderer, so a directional assertion can hold the *facility* fixed and vary only the
+rule. Each of these is resolved **before** `generate_level` and threaded in as a
+parameter — never consulted from a global, or the generator would have a hidden input
+and §12.4's determinism would be a claim nobody could check. What they cost differs,
+and the difference is exactly how deep into generation they reach.
+
+`all doors automatic` decides what a doorway **is**, so it reaches the **carve**. From
+one seed the two settings are two *different facilities*, so "same seed and inputs"
+cannot be the frame; the assertion it is held to instead is **distributional** — the
+sim's four temperaments over the same seed sweep, both settings.
+
+The **guard count** reaches **placement** only, and that buys back the stronger claim.
+The carve is already finished when it is read, and the pieces are drawn from one
+stream in one order, so the three settings put the same player, exit and intel in the
+same building — and because the guards come off a single shuffled pool by taking the
+first *N*, their guard sets are strictly **nested**: fewer is the baseline's guards
+minus its last, more is them plus one. The directional assertion is therefore exact
+and per-seed — on one facility, more guards watch a **superset** of the cells fewer
+guards watch. What does shift after placement is everything drawn from the stream
+behind it (the comms console, the radio clocks), so the two settings are the same
+*level* played out differently, not the same run.
+
+The **locked room** reaches deepest in one sense and shallowest in another: it runs
+*after* placement, on the finished board, because which room holds the prize is decided
+by where the crates and consoles landed. And it draws **nothing** — no shuffle, no pick
+— so it buys the strongest claim of the three: from one seed the two settings carve the
+same building, place the same board down to each guard's radio clock, and differ in
+exactly the cells of one room's doorways, where two hinges have become panels. That is
+what lets its §2.3 assertion be stated per seed and in the simplest possible form: a
+prize a keyless flood reaches at baseline, it does not reach behind the lock.
+
+**Two of these are now in the difficulty pool** (#518), and that is what turns the
+paragraphs above from a note about generation into a promise about comparisons. A ±N
+comparison used to be two rulesets over one building, flatly. It is graded now, in
+three tiers, and the tiers are pinned by a test rather than by this sentence: the
+**doors** may move the building (measured, a duct mouth relocates on seed 42), the
+**locked room** may only re-role cells inside doorways the carve already cut, and every
+other entry leaves the grid byte-identical. A new generation-reaching entry fails that
+test, which is what makes admitting one a deliberate act rather than a discovery.
+
+It is also why adding to this set is not free: a modifier that reaches the **carve**
+breaks **seed stability**. Dropping the old per-doorway draw shifted the RNG stream,
+so every `#seed=N` link shared before #452 now names a different facility. The break
+was taken deliberately rather than papered over with a throwaway draw that would have
+bought compatibility by making the generator lie about what it does. A
+placement-depth modifier does not carry that cost, which is a reason to prefer one
+where the rule permits — not a licence to reach for generation by default.
