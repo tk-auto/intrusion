@@ -217,7 +217,7 @@ const _: () = {
         "too little of the token space is left over to reject a bad token with",
     );
     assert!(
-        AbilityId::TECH.len() < SLOT_CAPACITY && MODIFIER_FIELDS < SLOT_CAPACITY,
+        AbilityId::TECH.len() < SLOT_CAPACITY && MODIFIER_SLOTS_USED < SLOT_CAPACITY,
         "the roster has outgrown its reserved slots — that is a new format version, \
          never a quiet bump of SLOT_CAPACITY, which would rewrite every token shared",
     );
@@ -651,16 +651,134 @@ const fn sets_up_to(cap: usize) -> u64 {
     total
 }
 
+/// Every modifier wire position this build spends, **by name** (spec §3): the
+/// discriminant *is* the permanent slot number, so the number a token encodes is
+/// written once, here, and read by name everywhere else — never re-derived from a
+/// list's position, where a transposition would silently re-point every token ever
+/// shared at a different modifier (the #286 break, without an error to notice it by).
+///
+/// The list is **append-only**: a new modifier takes the next free discriminant at
+/// the bottom, whatever it reads like beside — order here is the token's wire
+/// format, never a reading order. A retired modifier keeps its variant as a
+/// tombstone (slot 5), never a hole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModifierSlot {
+    GuardsAlwaysSearchHideouts = 0,
+    SightingLostCallsAGuard = 1,
+    BodyFoundCallsTwoGuards = 2,
+    AlwaysShowVisionCones = 3,
+    /// The layout knob's **easier** end, and the slot the toggle `full_layout_known`
+    /// held before #233 made the two ends one knob. Its meaning is unchanged — *the
+    /// full layout is on the map* — so every token minted before the knob existed
+    /// still decodes to exactly the run it named.
+    FullLayoutKnown = 4,
+    /// Retired in place (§12.6): the field is read by nothing, but the slot keeps
+    /// round-tripping so every token that named it still decodes.
+    CalmGuardsDetectOnlyTheirCone = 5,
+    /// Appended (#452) — never inserted. A slot number is permanent: the token
+    /// encodes it by index, so renumbering would silently re-point every token ever
+    /// shared at a different modifier.
+    AutomaticDoors = 6,
+    /// Slots 7 and 8, appended (#232): the guard-count knob's two **ends**, one slot
+    /// each, rather than a new field of its own in the chain.
+    ///
+    /// That is the whole reason a bounded knob can be added for free. A field would
+    /// move every radix after it and change what a token *means* — the §8 format
+    /// bump, and every link ever shared stops decoding. Two more slots out of the 256
+    /// reserved change no radix at all (spec §3): the encoded set simply names one
+    /// more member. The knob's baseline names neither slot, so a run at the §10.2
+    /// count encodes byte-for-byte as it did before this existed.
+    MoreGuards = 7,
+    FewerGuards = 8,
+    /// Slots 9 and 10, appended (#207): the intel-count knob's two ends, on the guard
+    /// knob's terms and for the same price. This is what makes a campaign facility's
+    /// flavour ride in its **token** (§12.7): the level you are handed is the level
+    /// the map offered, consoles and all.
+    MoreIntel = 9,
+    FewerIntel = 10,
+    /// Appended (#319) — a plain toggle, taking the next free slot after the two
+    /// knobs' ends exactly as the rule says.
+    GuardsWatchConsoles = 11,
+    /// Slots 12, 13 and 14, appended (#209): the cache knob's three rungs, one slot
+    /// each. Three slots rather than a packed field because that is what the format
+    /// is *for* (spec §3): 256 permanent positions, spent one at a time — a count
+    /// squeezed into two bits would be a new field, and a new field is a format bump.
+    /// The last piece of "the level you are handed is the level the map offered"
+    /// (§12.7): a Vault's token carries its three crates.
+    OneCache = 12,
+    TwoCaches = 13,
+    ThreeCaches = 14,
+    /// Appended (#224) — the next free position after the cache knob's rungs, taken
+    /// rather than tidied in beside the easier toggles it reads with.
+    ShowSearchAreas = 15,
+    /// Appended (#233) — the layout knob's **harder** end, at the end of the list
+    /// rather than beside its own easier end at slot 4. That is the rule rather than
+    /// an oversight: a slot number is permanent, so a knob that grows a second end
+    /// appends it, exactly as the guard knob would have to if a third rung were ever
+    /// added.
+    LayoutUnknown = 16,
+    /// Appended (#236). What carries "the prize room is locked" into a shared level:
+    /// the token hands over the run, and a run whose prize is behind a key is a
+    /// different run to play.
+    PrizeRoomLocked = 17,
+    /// Appended (#495). A shared level whose guards see less is a different run to
+    /// play, so the token has to carry it like any other rule.
+    NarrowedGuardCones = 18,
+}
+
+impl ModifierSlot {
+    /// Every spent slot, in wire order — the one list both directions of the codec
+    /// walk. Its length is [`MODIFIER_SLOTS_USED`], and the build-time check below
+    /// pins each entry to its own discriminant, so the array cannot silently skip,
+    /// repeat or reorder a position.
+    const ALL: [ModifierSlot; MODIFIER_SLOTS_USED] = [
+        ModifierSlot::GuardsAlwaysSearchHideouts,
+        ModifierSlot::SightingLostCallsAGuard,
+        ModifierSlot::BodyFoundCallsTwoGuards,
+        ModifierSlot::AlwaysShowVisionCones,
+        ModifierSlot::FullLayoutKnown,
+        ModifierSlot::CalmGuardsDetectOnlyTheirCone,
+        ModifierSlot::AutomaticDoors,
+        ModifierSlot::MoreGuards,
+        ModifierSlot::FewerGuards,
+        ModifierSlot::MoreIntel,
+        ModifierSlot::FewerIntel,
+        ModifierSlot::GuardsWatchConsoles,
+        ModifierSlot::OneCache,
+        ModifierSlot::TwoCaches,
+        ModifierSlot::ThreeCaches,
+        ModifierSlot::ShowSearchAreas,
+        ModifierSlot::LayoutUnknown,
+        ModifierSlot::PrizeRoomLocked,
+        ModifierSlot::NarrowedGuardCones,
+    ];
+}
+
+// Position = slot number, checked at build time: `ALL` walked out of step with the
+// discriminants would be exactly the silent transposition this enum exists to
+// prevent, so it fails the build instead of a decode.
+const _: () = {
+    let mut i = 0;
+    while i < ModifierSlot::ALL.len() {
+        assert!(
+            ModifierSlot::ALL[i] as usize == i,
+            "ModifierSlot::ALL must list every slot at its own wire position",
+        );
+        i += 1;
+    }
+};
+
 /// Split a [`LevelModifiers`] into the token's fields: the active toggles as slot
 /// numbers, and the gate. A struct destructure names every field, so a new modifier
 /// will not compile until it is given a **permanent slot** here — and that slot is
-/// then load-bearing forever (see [`SLOT_CAPACITY`]): appending is free, renumbering
-/// silently rewrites every token ever shared.
+/// then load-bearing forever (see [`SLOT_CAPACITY`] and [`ModifierSlot`]): appending
+/// is free, renumbering silently rewrites every token ever shared.
 ///
 /// `None` when more than [`MODIFIER_CAP`] are active. That cap is a format promise
 /// §12.6 does not enforce — its three sources compose harder-ward without a bound —
 /// so this is where the promise is actually kept.
 fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
+    use ModifierSlot as S;
     let LevelModifiers {
         guards_always_search_hideouts,
         sighting_lost_calls_a_guard,
@@ -680,82 +798,37 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
     } = m;
     let mut slots = SlotSet::default();
     for (slot, active) in [
-        guards_always_search_hideouts,
-        sighting_lost_calls_a_guard,
-        body_found_calls_two_guards,
-        always_show_vision_cones,
-        // Slot 4 is the layout knob's **easier** end, and it is the slot the toggle
-        // `full_layout_known` held before #233 made the two ends one knob. Its meaning
-        // is unchanged — *the full layout is on the map* — so every token minted
-        // before the knob existed still decodes to exactly the run it named.
-        matches!(layout_knowledge, LayoutKnowledge::Full),
-        calm_guards_detect_only_their_cone,
-        // Slot 6, appended (#452) — never inserted. A slot number is permanent: the
-        // token encodes it by index, so renumbering would silently re-point every
-        // token ever shared at a different modifier.
-        automatic_doors,
-        // Slots 7 and 8, appended (#232): the guard-count knob's two **ends**, one
-        // slot each, rather than a new field of its own in the chain.
-        //
-        // That is the whole reason a bounded knob can be added for free. A field
-        // would move every radix after it and change what a token *means* — the
-        // §8 format bump, and every link ever shared stops decoding. Two more slots
-        // out of the 256 reserved change no radix at all (spec §3): the encoded set
-        // simply names one more member. The knob's baseline names neither slot, so a
-        // run at the §10.2 count encodes byte-for-byte as it did before this existed.
-        matches!(guard_count, GuardCount::More),
-        matches!(guard_count, GuardCount::Fewer),
-        // Slots 9 and 10, appended (#207): the intel-count knob's two ends, on the
-        // guard knob's terms and for the same price — two more of the 256 reserved
-        // slots, no radix moved, and a run at the §10.2 count naming neither. This is
-        // what makes a campaign facility's flavour ride in its **token** (§12.7): the
-        // level you are handed is the level the map offered, consoles and all.
-        matches!(intel_count, IntelCount::More),
-        matches!(intel_count, IntelCount::Fewer),
-        // Slot 11, appended (#319) — a plain toggle, taking the next free slot after
-        // the two knobs' ends exactly as the rule says: appending is free, and the
-        // position is permanent from here on.
-        guards_watch_consoles,
-        // Slots 12, 13 and 14, appended (#209): the cache knob's three rungs, one slot
-        // each, on the terms the two count knobs' ends were appended under — no radix
-        // moves, and a facility with no crate in it names none of them, so every token
-        // minted before caches existed still encodes byte for byte.
-        //
-        // Three slots rather than a packed field because that is what the format is
-        // *for* (§3 of the token spec): 256 permanent positions, spent one at a time. A
-        // count squeezed into two bits would be a new field, and a new field is a
-        // format bump.
-        //
-        // This is the last piece of "the level you are handed is the level the map
-        // offered" (§12.7) — a Vault's token carries its three crates.
-        matches!(caches, CacheCount::One),
-        matches!(caches, CacheCount::Two),
-        matches!(caches, CacheCount::Three),
-        // Slot 15, appended (#224) — the next free position after the cache knob's
-        // three rungs, taken rather than tidied in beside the easier toggles it reads
-        // with. Order here is the token's wire format, never a reading order.
-        show_search_areas,
-        // Slot 16, appended (#233) — the layout knob's **harder** end, taken at the end
-        // of the list rather than beside its own easier end at slot 4. That is the rule
-        // rather than an oversight: a slot number is permanent, so a knob that grows a
-        // second end appends it, exactly as the guard knob would have to if a third
-        // rung were ever added. Wire format, never reading order.
-        matches!(layout_knowledge, LayoutKnowledge::None),
-        // Slot 17, appended (#236) — a plain toggle in the next free position, on the
-        // terms every slot above it took. It is what carries "the prize room is locked"
-        // into a shared level: the token hands over the run, and a run whose prize is
-        // behind a key is a different run to play.
-        prize_room_locked,
-        // Slot 18, appended (#495) — a plain toggle in the next free position, on the
-        // terms every slot above it took. A shared level whose guards see less is a
-        // different run to play, so the token has to carry it like any other rule.
-        narrowed_guard_cones,
-    ]
-    .into_iter()
-    .enumerate()
-    {
+        (S::GuardsAlwaysSearchHideouts, guards_always_search_hideouts),
+        (S::SightingLostCallsAGuard, sighting_lost_calls_a_guard),
+        (S::BodyFoundCallsTwoGuards, body_found_calls_two_guards),
+        (S::AlwaysShowVisionCones, always_show_vision_cones),
+        (
+            S::FullLayoutKnown,
+            matches!(layout_knowledge, LayoutKnowledge::Full),
+        ),
+        (
+            S::CalmGuardsDetectOnlyTheirCone,
+            calm_guards_detect_only_their_cone,
+        ),
+        (S::AutomaticDoors, automatic_doors),
+        (S::MoreGuards, matches!(guard_count, GuardCount::More)),
+        (S::FewerGuards, matches!(guard_count, GuardCount::Fewer)),
+        (S::MoreIntel, matches!(intel_count, IntelCount::More)),
+        (S::FewerIntel, matches!(intel_count, IntelCount::Fewer)),
+        (S::GuardsWatchConsoles, guards_watch_consoles),
+        (S::OneCache, matches!(caches, CacheCount::One)),
+        (S::TwoCaches, matches!(caches, CacheCount::Two)),
+        (S::ThreeCaches, matches!(caches, CacheCount::Three)),
+        (S::ShowSearchAreas, show_search_areas),
+        (
+            S::LayoutUnknown,
+            matches!(layout_knowledge, LayoutKnowledge::None),
+        ),
+        (S::PrizeRoomLocked, prize_room_locked),
+        (S::NarrowedGuardCones, narrowed_guard_cones),
+    ] {
         if active {
-            slots.push(slot)?;
+            slots.push(slot as usize)?;
         }
     }
     Some((slots, intel_to_exit))
@@ -772,22 +845,25 @@ fn modifier_slots(m: LevelModifiers) -> Option<(SlotSet, IntelGate)> {
 /// It joins the other "this is not a run this game can produce" rejections, and falls
 /// gracefully to a fresh run like any token that does not decode.
 fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifiers> {
-    let mut active = [false; MODIFIER_FIELDS];
+    use ModifierSlot as S;
+    let mut active = [false; MODIFIER_SLOTS_USED];
     for slot in slots.iter() {
         *active.get_mut(slot)? = true;
     }
-    let [guards_always_search_hideouts, sighting_lost_calls_a_guard, body_found_calls_two_guards, always_show_vision_cones, full_layout, calm_guards_detect_only_their_cone, automatic_doors, more_guards, fewer_guards, more_intel, fewer_intel, guards_watch_consoles, one_cache, two_caches, three_caches, show_search_areas, unknown_layout, prize_room_locked, narrowed_guard_cones] =
-        active;
+    // Every read below is by **name**, through the slot's own discriminant — never by
+    // a position in a pattern, where one transposed binding would silently swap what
+    // two modifiers mean in every shared token.
+    let at = |slot: S| active[slot as usize];
     // The layout knob's two ends (#233), rejected together for the reason the guard
     // knob's are: a knob holds one value, so a set naming both describes a config no
     // run can be in — and there is no honest way to pick which end was meant.
-    let layout_knowledge = match (full_layout, unknown_layout) {
+    let layout_knowledge = match (at(S::FullLayoutKnown), at(S::LayoutUnknown)) {
         (false, false) => LayoutKnowledge::Plans,
         (true, false) => LayoutKnowledge::Full,
         (false, true) => LayoutKnowledge::None,
         (true, true) => return None,
     };
-    let guard_count = match (more_guards, fewer_guards) {
+    let guard_count = match (at(S::MoreGuards), at(S::FewerGuards)) {
         (false, false) => GuardCount::Baseline,
         (true, false) => GuardCount::More,
         (false, true) => GuardCount::Fewer,
@@ -795,7 +871,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     };
     // The same rejection over the intel knob (#207): a knob holds one value, so a set
     // naming both its ends describes a config no run can be in.
-    let intel_count = match (more_intel, fewer_intel) {
+    let intel_count = match (at(S::MoreIntel), at(S::FewerIntel)) {
         (false, false) => IntelCount::Baseline,
         (true, false) => IntelCount::More,
         (false, true) => IntelCount::Fewer,
@@ -804,7 +880,7 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
     // And over the cache knob's three rungs (#209), for the reason a knob's two ends are
     // rejected together: a facility hides one number of crates, so a set naming two of
     // these describes a config no run can be in.
-    let caches = match (one_cache, two_caches, three_caches) {
+    let caches = match (at(S::OneCache), at(S::TwoCaches), at(S::ThreeCaches)) {
         (false, false, false) => CacheCount::None,
         (true, false, false) => CacheCount::One,
         (false, true, false) => CacheCount::Two,
@@ -812,30 +888,31 @@ fn modifiers_from_slots(slots: &SlotSet, gate: IntelGate) -> Option<LevelModifie
         _ => return None,
     };
     Some(LevelModifiers {
-        guards_always_search_hideouts,
-        sighting_lost_calls_a_guard,
-        body_found_calls_two_guards,
-        always_show_vision_cones,
+        guards_always_search_hideouts: at(S::GuardsAlwaysSearchHideouts),
+        sighting_lost_calls_a_guard: at(S::SightingLostCallsAGuard),
+        body_found_calls_two_guards: at(S::BodyFoundCallsTwoGuards),
+        always_show_vision_cones: at(S::AlwaysShowVisionCones),
         layout_knowledge,
-        calm_guards_detect_only_their_cone,
-        automatic_doors,
-        guards_watch_consoles,
-        show_search_areas,
+        calm_guards_detect_only_their_cone: at(S::CalmGuardsDetectOnlyTheirCone),
+        automatic_doors: at(S::AutomaticDoors),
+        guards_watch_consoles: at(S::GuardsWatchConsoles),
+        show_search_areas: at(S::ShowSearchAreas),
         guard_count,
         intel_count,
         caches,
-        prize_room_locked,
-        narrowed_guard_cones,
+        prize_room_locked: at(S::PrizeRoomLocked),
+        narrowed_guard_cones: at(S::NarrowedGuardCones),
         intel_to_exit: gate,
     })
 }
 
-/// How many modifier slots this build actually uses — the live count, against which
-/// a decoded slot number is checked. It grows into [`SLOT_CAPACITY`] without changing
-/// the format. Not the same as the number of *fields*: the guard-count knob (#232),
-/// the intel-count knob (#207) and the layout knob (#233) spend one slot per end, and
-/// the cache knob (#209) one slot per rung.
-const MODIFIER_FIELDS: usize = 19;
+/// How many modifier wire slots this build actually spends — [`ModifierSlot::ALL`]'s
+/// length, the live count against which a decoded slot number is checked. It grows
+/// into [`SLOT_CAPACITY`] without changing the format. Not the number of
+/// [`LevelModifiers`] *fields*: the guard-count knob (#232), the intel-count knob
+/// (#207) and the layout knob (#233) spend one slot per end, and the cache knob
+/// (#209) one slot per rung.
+const MODIFIER_SLOTS_USED: usize = 19;
 
 /// The tech a loadout holds, as slot numbers over [`AbilityId::TECH`]'s permanent
 /// order. `None` when the loadout is not one a run can hold: over the §8.3 cap, or
@@ -1657,7 +1734,7 @@ mod tests {
     fn a_token_naming_an_unknown_slot_is_rejected() {
         // A modifier slot past the live roster, packed by hand.
         let mut unknown = SlotSet::default();
-        unknown.push(MODIFIER_FIELDS).expect("one slot fits");
+        unknown.push(MODIFIER_SLOTS_USED).expect("one slot fits");
         assert_eq!(
             modifiers_from_slots(&unknown, IntelGate::All),
             None,
@@ -1718,6 +1795,107 @@ mod tests {
         assert_eq!(both(7, 8), None, "one more guard and one fewer");
         assert_eq!(both(9, 10), None, "one more console and one fewer");
         assert_eq!(both(12, 13), None, "one cache and two");
+    }
+
+    /// **The wire mapping itself, pinned slot by slot.** Round-trips cannot catch a
+    /// renumbering that moves encode and decode together — the build would agree with
+    /// itself while disagreeing with every token already shared — so each modifier's
+    /// slot *number* is asserted here against the config that names it and nothing
+    /// else. The match is exhaustive over [`ModifierSlot`]: a new slot does not
+    /// compile until its number is pinned too.
+    #[test]
+    fn every_modifier_encodes_at_its_permanent_slot() {
+        use ModifierSlot as S;
+        let naming = |slot: S| -> LevelModifiers {
+            let neutral = LevelModifiers::default();
+            match slot {
+                S::GuardsAlwaysSearchHideouts => LevelModifiers {
+                    guards_always_search_hideouts: true,
+                    ..neutral
+                },
+                S::SightingLostCallsAGuard => LevelModifiers {
+                    sighting_lost_calls_a_guard: true,
+                    ..neutral
+                },
+                S::BodyFoundCallsTwoGuards => LevelModifiers {
+                    body_found_calls_two_guards: true,
+                    ..neutral
+                },
+                S::AlwaysShowVisionCones => LevelModifiers {
+                    always_show_vision_cones: true,
+                    ..neutral
+                },
+                S::FullLayoutKnown => LevelModifiers {
+                    layout_knowledge: LayoutKnowledge::Full,
+                    ..neutral
+                },
+                S::CalmGuardsDetectOnlyTheirCone => LevelModifiers {
+                    calm_guards_detect_only_their_cone: true,
+                    ..neutral
+                },
+                S::AutomaticDoors => LevelModifiers {
+                    automatic_doors: true,
+                    ..neutral
+                },
+                S::MoreGuards => LevelModifiers {
+                    guard_count: GuardCount::More,
+                    ..neutral
+                },
+                S::FewerGuards => LevelModifiers {
+                    guard_count: GuardCount::Fewer,
+                    ..neutral
+                },
+                S::MoreIntel => LevelModifiers {
+                    intel_count: IntelCount::More,
+                    ..neutral
+                },
+                S::FewerIntel => LevelModifiers {
+                    intel_count: IntelCount::Fewer,
+                    ..neutral
+                },
+                S::GuardsWatchConsoles => LevelModifiers {
+                    guards_watch_consoles: true,
+                    ..neutral
+                },
+                S::OneCache => LevelModifiers {
+                    caches: CacheCount::One,
+                    ..neutral
+                },
+                S::TwoCaches => LevelModifiers {
+                    caches: CacheCount::Two,
+                    ..neutral
+                },
+                S::ThreeCaches => LevelModifiers {
+                    caches: CacheCount::Three,
+                    ..neutral
+                },
+                S::ShowSearchAreas => LevelModifiers {
+                    show_search_areas: true,
+                    ..neutral
+                },
+                S::LayoutUnknown => LevelModifiers {
+                    layout_knowledge: LayoutKnowledge::None,
+                    ..neutral
+                },
+                S::PrizeRoomLocked => LevelModifiers {
+                    prize_room_locked: true,
+                    ..neutral
+                },
+                S::NarrowedGuardCones => LevelModifiers {
+                    narrowed_guard_cones: true,
+                    ..neutral
+                },
+            }
+        };
+        for slot in ModifierSlot::ALL {
+            let (slots, _) = modifier_slots(naming(slot)).expect("under the cap");
+            assert_eq!(
+                slots.iter().collect::<Vec<_>>(),
+                vec![slot as usize],
+                "{slot:?} must encode at wire slot {} and nowhere else",
+                slot as usize,
+            );
+        }
     }
 
     /// A malformed token decodes to `None` — the graceful fall to a fresh run the
