@@ -1032,12 +1032,11 @@ fn quick_play_loadout(seed: u64) -> Loadout {
         }
         return loadout;
     }
-    // A partial Fisher–Yates over the tech pool: draw `grant` distinct tech.
+    // The shared partial draw (`Rng::choose_n`): `grant` distinct tech, off the
+    // salted loadout stream, consuming it exactly as the hand-rolled loop did.
     let mut rng = Rng::new(seed ^ LOADOUT_STREAM_SALT);
-    for i in 0..grant {
-        let j = i + rng.below((pool.len() - i) as u32) as usize;
-        pool.swap(i, j);
-        loadout = loadout.with(pool[i]);
+    for &id in rng.choose_n(&mut pool, grant) {
+        loadout = loadout.with(id);
     }
     loadout
 }

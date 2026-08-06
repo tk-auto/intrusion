@@ -1300,13 +1300,11 @@ pub(crate) fn draw_from_pool(
         .iter()
         .filter(|entry| entry.caption.direction == direction)
         .collect();
-    // A partial Fisher–Yates over the directed pool, the same idiom the quick-play tech
-    // grant draws its subset with.
+    // The shared partial draw (`Rng::choose_n`) — one home for the idiom this and
+    // the quick-play tech grant used to hand-roll as twins.
     let mut rng = Rng::new(seed);
-    for i in 0..picks.min(pool.len()) {
-        let j = i + rng.below((pool.len() - i) as u32) as usize;
-        pool.swap(i, j);
-        (pool[i].set)(&mut drawn);
+    for entry in rng.choose_n(&mut pool, picks) {
+        (entry.set)(&mut drawn);
     }
     drawn
 }

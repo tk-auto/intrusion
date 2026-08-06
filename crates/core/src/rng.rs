@@ -80,6 +80,22 @@ impl Rng {
     pub fn bool(&mut self) -> bool {
         self.next_u32() & 1 == 1
     }
+
+    /// Draw `n` distinct elements of `pool`, in place: a **partial Fisher–Yates**
+    /// that leaves the chosen set — in draw order — as the returned prefix.
+    ///
+    /// The one home for the idiom the difficulty draw (§12.6) and the quick-play
+    /// tech grant (#244) each used to hand-roll: exactly `min(n, len)` calls to
+    /// [`below`](Self::below), one per pick, so retiring a hand-rolled copy onto
+    /// this consumes the stream identically and no shared seed shifts (§12.4).
+    pub fn choose_n<'a, T>(&mut self, pool: &'a mut [T], n: usize) -> &'a [T] {
+        let n = n.min(pool.len());
+        for i in 0..n {
+            let j = i + self.below((pool.len() - i) as u32) as usize;
+            pool.swap(i, j);
+        }
+        &pool[..n]
+    }
 }
 
 #[cfg(test)]
