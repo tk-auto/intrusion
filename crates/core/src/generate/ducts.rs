@@ -268,6 +268,11 @@ fn region_index(regions: &RegionGraph, id: RegionId) -> usize {
 /// BFS hop distances from `start` to every region across single-door adjacency
 /// (§10.5). The region graph is small (~12 regions), so an all-from-`start` flood per
 /// source is cheap.
+///
+/// Hand-rolled rather than shared (#544): `path.rs` floods **cells**, and this file's
+/// three walks return three different shapes (region distances, a parent-chain cell
+/// path, floor distances) over generation-specific passability — visit order is
+/// output-affecting under §12.4, so each keeps its own loop.
 fn hop_distances(regions: &RegionGraph, start: RegionId) -> HashMap<RegionId, u32> {
     let mut dist: HashMap<RegionId, u32> = HashMap::new();
     dist.insert(start, 0);

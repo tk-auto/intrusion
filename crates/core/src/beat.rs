@@ -254,6 +254,11 @@ fn spans_one_piece<I: Iterator<Item = RegionId>>(
     }
     seen.len() == group.len()
 }
+// The other walks in this file are deliberately *not* folded onto one helper with
+// the connectivity check above (#544): the components walk collects visit-ordered
+// vectors and the partition walk is multi-source with ownership — different output
+// shapes, and §12.4 makes visit order load-bearing, so a shared frontier loop would
+// buy nothing but the risk of changing it.
 
 /// Divide one connected `component` into `parts` connected groups covering **all** of
 /// it.
@@ -520,21 +525,10 @@ pub(crate) fn coordinated_beat_cells(
 /// §10.5 invariant every beat must keep, so a guard can walk its whole territory.
 #[cfg(test)]
 pub(crate) fn is_connected(regions: &RegionGraph, facility: &Facility, beat: &[RegionId]) -> bool {
-    if beat.is_empty() {
-        return true;
-    }
     let joined = adjacency(regions, facility);
-    let held: HashSet<RegionId> = beat.iter().copied().collect();
-    let mut seen = HashSet::from([beat[0]]);
-    let mut frontier = vec![beat[0]];
-    while let Some(region) = frontier.pop() {
-        for &neighbour in joined.get(&region).into_iter().flatten() {
-            if held.contains(&neighbour) && seen.insert(neighbour) {
-                frontier.push(neighbour);
-            }
-        }
-    }
-    seen.len() == beat.len()
+    spans_one_piece(beat, &|region: &RegionId| {
+        joined.get(region).into_iter().flatten().copied()
+    })
 }
 
 #[cfg(test)]
