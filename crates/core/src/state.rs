@@ -89,6 +89,7 @@ mod activation;
 mod bore;
 mod bump;
 mod control;
+mod dart;
 mod doors;
 mod effects;
 mod events;
@@ -101,6 +102,7 @@ mod tuning;
 mod view;
 
 pub use bore::BoreRefusal;
+pub use dart::DartShot;
 pub use effects::EffectArea;
 pub use events::{Affordance, Event, Input};
 pub(crate) use reinforcements::{RUNG_THREE_REINFORCEMENTS, RUNG_TWO_REINFORCEMENTS};
@@ -1171,6 +1173,7 @@ impl State {
                         Aimed::Seal(doors) => self.seal_doors(&doors, events),
                         Aimed::Blast(blast) => self.fire_confusion(blast, events),
                         Aimed::Call(reach) => self.fire_false_call(reach, events),
+                        Aimed::Dart(shot) => self.fire_dart(&shot, events),
                         Aimed::Launch(from) => self.deploy_remote(id, from, events),
                         Aimed::Nothing | Aimed::Decoy(_) => {}
                     }

@@ -71,6 +71,10 @@ pub fn ability_script_letter(ability: &str) -> Option<char> {
         // Saver's it is never written into a script — a passive has no activation to
         // spell — and exists so the map stays exhaustive over the catalogue.
         "Guide" => 'u',
+        // `n` for *needle*, on the "`s` for *seal*" precedent: neither of the Dart's own
+        // letters is free — `d` is the Decoy's and `t` the Takedown's — and the letters
+        // have to stay unique for [`parse_script`] to be unambiguous.
+        "Dart" => 'n',
         _ => return None,
     })
 }

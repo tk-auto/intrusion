@@ -803,6 +803,44 @@ impl State {
                     MarkPlace::Cells(reach.cells(self.layout.facility())),
                     MarkLife::Momentary(EFFECT_FLASH_TURNS),
                 ),
+                // The **dart's flight** (§8.3/#239) wears the wash alone, and for False
+                // Call's reason with the geometry swapped: a line rather than a box. The
+                // one thing neither the board nor the near line can say is *where the dart
+                // went and how far it got* — the guard it dropped is a body the player can
+                // see, and a guard it did not drop leaves nothing behind at all — so the
+                // path is drawn once, on the firing frame, and then gone.
+                //
+                // **It is painted through the fog, and the clamp is what makes that safe.**
+                // How far your own gadget reached is your own knowledge (§11.5a), which is
+                // why False Call's box needs no perception gate either. But a *ray* says
+                // more than a box does: it stops where it stopped, so a wash ending short
+                // would report something standing there. That is why the flight is clamped
+                // inside the guard sense ([`dart_shot`](State::dart_shot)) — everything the
+                // dart can stop on is already drawn for the player as a seen `g` or a §9
+                // dot, so the short line restates the board rather than extending it.
+                //
+                // Reconstructed from the event's own three fields rather than from the
+                // player, who by now may have been moved (§8.3's Run takes an extra step,
+                // and the mark is lit at the end of the turn): a cardinal ray is exactly its
+                // origin, its direction and its length, so what is painted is what was
+                // measured. The origin itself is left out — the player's own cell is drawn
+                // as the `@` and washing under it would say the dart hit the shooter.
+                Event::DartFired {
+                    from,
+                    dir,
+                    travelled,
+                    ..
+                } => {
+                    let path: Vec<Cell> = std::iter::successors(Some(from), |cell| cell.step(dir))
+                        .skip(1)
+                        .take(travelled as usize)
+                        .collect();
+                    self.light_mark(
+                        AbilityId::Dart,
+                        MarkPlace::Cells(path),
+                        MarkLife::Momentary(EFFECT_FLASH_TURNS),
+                    );
+                }
                 Event::WallBored { at } => self.light_mark(
                     AbilityId::PierceWall,
                     MarkPlace::Cells(vec![at]),

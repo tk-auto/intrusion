@@ -196,6 +196,49 @@ const _: () = assert!(FALSE_CALL_RADIUS >= PLAYER_SENSE_RANGE);
 /// alive and the radius would stop being a lever at all.
 const _: () = assert!(FALSE_CALL_RADIUS * 2 < crate::LevelConfig::V1.height);
 
+/// How far a **Dart** flies (§7.2/§8.3/#239 **[START]**): the dart travels at most this
+/// many cells from the player along the cardinal they face, stopping at the first solid or
+/// the first guard.
+///
+/// **A count of cells along a line, not a box.** Every other reach here is a §6.1
+/// Chebyshev radius because every other effect acts on an *area*; this one walks a
+/// cardinal ray, so its range is simply how many steps it takes. The two metrics agree on
+/// a cardinal anyway — the eighth cell due north is `sight_distance` 8 — so nothing here
+/// introduces a second notion of distance (§6.1).
+///
+/// **Eight, and it is the lever that changes the *play* rather than the frequency.** The
+/// use budget decides how often a facility allows a ranged takedown; this decides what
+/// kind of shot exists at all.
+///
+/// **It is deliberately shorter than the §5 sight range of 15** (asserted below), so
+/// *seeing* a guard is never the same thing as being able to shoot it — the walk up the
+/// corridor to get inside eight is the exposure the ability is paid for with. That gap is
+/// load-bearing twice: it is also half of why an **open-floor** dart can never land
+/// somewhere the player cannot see, which is what makes the clamp in
+/// [`dart_shot`](State::dart_shot) inert outside a crawlspace (that function has the
+/// argument, and the crawlspace counter-example the clamp exists for).
+///
+/// **It stays inside [`PLAYER_SENSE_RANGE`]** too (asserted below), so the clamp never
+/// shortens an open-floor shot: `min(8, 10)` is 8.
+///
+/// **The corridor case is the risk the ticket names**, and the generator already answers
+/// most of it: §10.1a stamps partial cover into every over-long straight run, and a table
+/// is solid, so a long clear firing line is exactly the geometry the sightline rule
+/// forbids the level to be *born* with. That is the argument, not a guarantee — if the
+/// end-of-corridor shot still plays as a reliable free kill, this is the number to cut.
+pub const DART_RANGE: u32 = 8;
+
+/// The dart flies **less far than the player sees** (§5/§6.1/#239) — pinned at compile
+/// time, because [`dart_shot`](State::dart_shot)'s whole safety argument rests on it: a
+/// range that reached past the §5 cone would put cells in flight that the fog could be
+/// hiding, and then the flight's wash would start reporting them.
+const _: () = assert!(DART_RANGE < crate::PLAYER_SIGHT_RANGE);
+
+/// And **inside the guard sense** (§9/#239), so the [`dart_shot`](State::dart_shot) clamp
+/// is a crawlspace rule rather than a standing nerf: on open floor `min(8, 10)` leaves the
+/// shot exactly as long as this constant says.
+const _: () = assert!(DART_RANGE <= PLAYER_SENSE_RANGE);
+
 /// How long a guard caught by a Confusion blast stays **dazed** (§8.3/#325
 /// **[START]**): blinded and frozen for this many turns, counted down on the guard's
 /// own clock ([`Guard::shake_off_daze`](crate::Guard)) rather than on the player's.

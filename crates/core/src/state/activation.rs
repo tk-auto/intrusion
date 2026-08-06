@@ -66,6 +66,17 @@ pub(super) enum Aimed {
     /// The reach a False Call would broadcast over (§7.7/§8.3/#504) — already known to
     /// have a live net to travel down and at least one guard inside it.
     Call(EffectArea),
+    /// The **dart** a facing-aimed shot would fire (§7.2/§8.3/#239): the resolved line,
+    /// where it stops, and whether it found a legal §7.2 target.
+    ///
+    /// The one arm that is **never** the [`Err`] side of anything, and the exception is the
+    /// design rather than a gap in the ladder (§8.4/#239). Every other precondition here
+    /// exists so a press that cannot do its work is refused for free; refusing a dart for
+    /// an empty line would answer *"is there a guard in front of me?"* every frame, for
+    /// nothing, out of the bar's own colour — a detector wearing a weapon's name. So the
+    /// shot is resolved and handed over *whatever* it found, and a miss is paid for in
+    /// full ([`fire_dart`](State::fire_dart)).
+    Dart(DartShot),
     /// The cell a control-transfer ability would launch its remote from (§8.1/#273):
     /// the player's own, because you let it go from your hands.
     ///
@@ -170,6 +181,18 @@ impl State {
                 .decoy_spawn_cell()
                 .map(Aimed::Decoy)
                 .ok_or(Refused::NoDecoyCell);
+        }
+        // The **dart** resolves its line and never refuses (§7.2/§8.3/§8.4/#239). It sits
+        // above the refusing arms deliberately: read top to bottom, the ladder now says
+        // "here is the one ability whose press always fires", and a later edit that wanted
+        // to add a refusal to it has to argue with [`Aimed::Dart`]'s own doc first.
+        //
+        // It is aimed by facing, not by precondition, so — unlike Pierce Wall below — the
+        // geometry does not narrow the ability to one legal board position. What it costs
+        // instead is having walked to the right cell facing the right way, which is a price
+        // paid in the world rather than in a verdict here.
+        if id == AbilityId::Dart {
+            return Ok(Aimed::Dart(self.dart_shot()));
         }
         // Pierce Wall's target is unique by precondition rather than aimed (§8.4/#303),
         // so the geometry *is* the ability; `bore_target` owns it, refusal reasons and
