@@ -440,6 +440,26 @@ impl Default for Profile {
     }
 }
 
+/// How much the router's own cost must fall before a phased crossing is worth it
+/// **[START]** — twice the three turns it spends (one to press, two to walk through),
+/// so a shortcut has to be a real one and not a tie.
+///
+/// A shared number rather than a [`Profile`] field: the margin prices the *crossing*,
+/// not a temperament, and every profile judges it identically. Housed here with the
+/// rest of the numbers (`docs/bot-behaviour.md`), beside the sibling it anchors.
+pub const CROSSING_MARGIN: u64 = 6;
+
+/// What a crossing must save the router before it is worth **a third of the level's
+/// borer** **[START]** — three times the margin a phase asks for
+/// ([`CROSSING_MARGIN`], the sibling above: one seam, two prices).
+///
+/// The two abilities answer the same question ("is there a better way through this
+/// wall?") out of very different pockets: Dephase spends a cooldown that comes back,
+/// Pierce Wall spends one of three permanent uses that does not (§8.2). The scarcer
+/// supply asks the bigger price, which is also what keeps the two cues from bidding
+/// for the same ordinary shortcut.
+pub const BORE_MARGIN: u64 = 3 * CROSSING_MARGIN;
+
 #[cfg(test)]
 mod tests {
     use super::*;
