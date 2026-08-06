@@ -552,6 +552,9 @@ pub enum MapHit {
     /// **Scout the facility** the brief is for (§11.5a/#215): buy its contents, drawn
     /// remembered from turn one.
     Scout(NodeId),
+    /// **Buy the cache manifest** for the facility the brief is for (§8.3/#550): what its
+    /// crates hold, listed on the brief itself.
+    Manifest(NodeId),
     /// **Close the brief** and go back to the list — the drawn, tappable way out §11.6
     /// wants beside the way on, so the sub-screen is never one a touch player can open and
     /// not leave.
@@ -616,10 +619,27 @@ fn list_top(height: u32) -> u32 {
     height.saturating_sub(LIST_ROWS)
 }
 
+/// The rows the picture must keep clear beneath itself: the **taller** of the two blocks
+/// that can be drawn there — this screen's list, and the brief's, which grows when a cache
+/// manifest is bought (#550).
+///
+/// Reserving the same band on both screens is what keeps the picture *the same picture*
+/// when a brief opens over it. Fitting each screen to its own block would rescale the
+/// country as the player stepped into a facility's brief and again as they stepped back —
+/// a map that moved while it was being read, which is the objection the map's own fixed
+/// wallet line already answers one row up.
+const RESERVED_ROWS: u32 = if LIST_ROWS > brief::LIST_ROWS {
+    LIST_ROWS
+} else {
+    brief::LIST_ROWS
+};
+
 /// How many rows the map band gets on a screen `height` tall: everything between the
-/// heading and the list.
+/// heading and the reserved block below it.
 fn map_height(height: u32) -> u32 {
-    list_top(height).saturating_sub(MAP_TOP + 1)
+    height
+        .saturating_sub(RESERVED_ROWS)
+        .saturating_sub(MAP_TOP + 1)
 }
 
 /// One row's text, marker and all — the [`entry_text`](super::menu) of this screen, and

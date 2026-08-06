@@ -116,6 +116,7 @@ impl Game {
             MapHit::Unlock(node) => self.buy(|run| run.unlock(node)),
             MapHit::Enter(node) => self.raid(node),
             MapHit::Scout(node) => self.buy(|run| run.scout(node)),
+            MapHit::Manifest(node) => self.buy(|run| run.buy_manifest(node)),
             MapHit::Back => {
                 if let Some(map) = self.ui.map {
                     self.select_facility(map.closing());

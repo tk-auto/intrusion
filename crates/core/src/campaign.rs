@@ -71,6 +71,7 @@ use crate::difficulty::Difficulty;
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{IntelGate, LevelModifiers, ModifierDirection, ModifierSources};
 use crate::rng::Rng;
+use crate::salvage::cache_contents;
 use crate::state::Outcome;
 use crate::verdict::{Ending, RunMode, RunOptions, RunStats, Verdict};
 
@@ -172,6 +173,29 @@ pub const ROUTE_UNLOCK_COST: u32 = 1;
 /// so intel spent on a facility the run then declines is spent all the same. Scouting the
 /// road you are not sure of is exactly the purchase that can be wrong.
 pub const SCOUT_COST: u32 = 3;
+
+/// **What a facility's cache manifest costs** (§14 v3's second pre-level intel sink, #550)
+/// — the price of learning *which* tech the crates ahead hold.
+///
+/// **[START], and it is priced against what it does not tell you.** The full scout
+/// ([`SCOUT_COST`]) hands over the building: where every console, crate and cupboard
+/// stands. This hands over one fact about at most three boxes, and **never a position** —
+/// so a run that buys it still has to find the crates, and what it has bought is only the
+/// answer to *is the detour worth walking*.
+///
+/// Two thirds of a scout rather than a third of one, because the fact is worth more than
+/// its size suggests: a crate is at least sixteen cells from the spawn (§10.6), and the
+/// §8.3 rules make the detour a real gamble — the tech may be something the run already
+/// carries, and at a full bar it costs an **exchange** (#266). Knowing beforehand is what
+/// turns walking past a `¤` from a shrug into a decision, which is exactly the §2.3 bite
+/// the sink is asked for.
+///
+/// **The §2.3 answer to *when would a good player choose not to?***: when the run needs
+/// anything at all and will walk to every crate regardless — an early run with two slots
+/// free has nothing to decide — and when the two intel are wanted for the road or the
+/// building itself. It is the cheap sink beside an expensive one, so buying it is rarely
+/// wrong and often unnecessary, which is the shape a small price should have.
+pub const MANIFEST_COST: u32 = 2;
 
 /// Separates the per-facility seed draw from every other use of the run seed, exactly
 /// as the loadout draw is separated from generation (§12.4): two streams that never
@@ -295,6 +319,17 @@ pub struct Campaign {
     /// bought for a facility the run then declines is spent rather than silently
     /// refunded onto the one it took instead.
     scouted: Vec<NodeId>,
+    /// **The facilities whose cache manifest this run has bought** (§8.3/§14 v3/#550), in
+    /// the order it bought them.
+    ///
+    /// A list of nodes like [`unlocked`](Self::unlocked) and [`scouted`](Self::scouted), and
+    /// for the same reason — and this one carries even less: the manifest is a *fact about
+    /// the country* that the seed already fixes, so what a purchase records is only that
+    /// **this run has been told**. Nothing about the facility changes, which is why —
+    /// unlike the scout — it reaches no [`LevelModifiers`] and takes no level-seed token
+    /// slot (§12.7): there is nothing to carry into the raid, only something to say at the
+    /// hub.
+    manifests: Vec<NodeId>,
 }
 
 impl Campaign {
@@ -325,6 +360,7 @@ impl Campaign {
             alert: 0,
             unlocked: Vec::new(),
             scouted: Vec::new(),
+            manifests: Vec::new(),
         }
     }
 
@@ -481,6 +517,86 @@ impl Campaign {
     /// hub reads to draw a facility as already bought.
     pub fn is_scouted(&self, node: NodeId) -> bool {
         self.scouted.contains(&node)
+    }
+
+    /// **Buy the cache manifest** for the facility at `node` (§8.3/§14 v3's second
+    /// pre-level intel sink, #550): spend [`MANIFEST_COST`] to be told **which** tech its
+    /// crates hold, and hand back what the wallet said.
+    ///
+    /// **What, never where.** The manifest is a *set*, and it says nothing about the cells
+    /// the crates stand in — those stay fogged until seen (§11.5a), and buying them is
+    /// [`scout`](Self::scout)'s. The two sinks compose and neither implies the other: a run
+    /// may know a Vault holds the Drone and still have to find the box, or know where all
+    /// three boxes are and not what is in any of them.
+    ///
+    /// Refused, with nothing spent, for everything [`manifest_on_sale`](Self::manifest_on_sale)
+    /// refuses — a facility that is not on offer, one that hides no crates, one already
+    /// bought — and outside the hub by [`spend`](Self::spend), like every sink.
+    #[must_use]
+    pub fn buy_manifest(&mut self, node: NodeId) -> Outlay {
+        if !self.manifest_on_sale(node) {
+            return Outlay::Closed;
+        }
+        let outlay = self.spend(MANIFEST_COST);
+        if outlay.paid() {
+            self.manifests.push(node);
+        }
+        outlay
+    }
+
+    /// **Whether `node`'s manifest may be bought right now** (#550) — what the hub asks
+    /// before it puts a price in front of the player.
+    ///
+    /// Three things have to hold: the facility must be one the run may walk into
+    /// ([`ahead`](Self::ahead)) and not behind a road it has not bought; it must actually
+    /// **hide crates**; and it must not be bought already.
+    ///
+    /// **A facility with no crates is not offered the sale**, rather than offered and
+    /// refused (#550). The flavour is visible when offered (§14 v3 **[SETTLED]**) and an
+    /// [`Outpost`](Flavour::Outpost) hides none, so the row's absence tells the player
+    /// nothing the map screen had not already told them — and a price for an empty list
+    /// would be the hub selling a blank page.
+    pub fn manifest_on_sale(&self, node: NodeId) -> bool {
+        let offered = self
+            .ahead()
+            .into_iter()
+            .any(|offer| offer.node == node && !offer.locked);
+        offered && !self.has_manifest(node) && !self.crates_at(node).is_empty()
+    }
+
+    /// Whether this run has bought `node`'s manifest (#550).
+    pub fn has_manifest(&self, node: NodeId) -> bool {
+        self.manifests.contains(&node)
+    }
+
+    /// **What the crates at `node` hold**, or `None` while the run has not paid to know
+    /// (#550) — the one read the hub draws its list from.
+    ///
+    /// An `Option` rather than a list-or-empty because the two are different facts and a
+    /// screen must not confuse them: *nobody has told you* is not *there is nothing there*.
+    /// A facility that hides no crates is never on sale in the first place, so a `Some`
+    /// here is never empty.
+    ///
+    /// The order is the **draw's own** ([`cache_contents`]), which is the order the crates
+    /// were stocked in and carries no spatial information — the placement that decides
+    /// *where* they stand happens later and from a different stream. Handing back a list
+    /// that could be read as a map of the building would give away #215's sink for free.
+    pub fn manifest(&self, node: NodeId) -> Option<Vec<AbilityId>> {
+        self.has_manifest(node).then(|| self.crates_at(node))
+    }
+
+    /// **The tech the facility at `node` is stocked with** — the truth behind
+    /// [`manifest`](Self::manifest), read whether or not the run has paid for it.
+    ///
+    /// Private, because it is the one thing a hub must not be able to say by accident. It
+    /// is also what makes the reveal **incapable of lying**: it is not a copy of the
+    /// stocking rule, it is [`cache_contents`] itself, called on the very
+    /// [`LevelSeed`] the raid will boot from ([`level_at`](Self::level_at)). §8.3 draws a
+    /// facility's crates from its seed alone, so the answer exists before the building
+    /// does and cannot drift from what walking in would find.
+    fn crates_at(&self, node: NodeId) -> Vec<AbilityId> {
+        let level = self.level_at(node, self.is_scouted(node));
+        cache_contents(level.seed, level.modifiers.caches.crates())
     }
 
     /// **The facilities the run may walk into next** — what the map screen (#208) puts

@@ -3918,6 +3918,31 @@ bullet below fills one of its seams.
       player a facility that cannot be written down, shared or replayed. The row is
       absent rather than drawn and refused — unlike a price the run merely cannot afford
       yet, which it can save up for.
+  - **The third sink: the cache manifest** (#550). Spending **two intel** [START] at the
+    hub tells you **which tech** the crates of one facility ahead hold — the set, never the
+    positions. A flavour already says *how many* crates a facility hides; this sells the one
+    thing it does not, which is what turns the optional detour to a `¤` from a gamble into a
+    decision: §8.3 lets a run meet tech it already carries, and a full bar makes the find an
+    exchange (#266).
+    - **What, never where** [SETTLED]. The crates stay fogged until seen (§11.5a); their
+      cells are #215's to sell, and the two sinks compose without either implying the
+      other. The list is in the stocking draw's own order, which carries no spatial
+      information — a manifest ordered by cell would hand over the other sink for free.
+    - **It changes nothing about the facility**, so unlike the scout it is **not a level
+      modifier** and takes **no level-seed token slot** (§12.7): there is nothing to carry
+      into the raid, only something the hub knows how to say. What is bought is the
+      *telling*.
+    - **It cannot lie** [SETTLED]. The hub reads the crates through the same
+      `cache_contents` draw the generator later stocks the facility from, on the same
+      seed — §8.3 stocks a building before anyone breaks into it, so the answer exists
+      before the level does and there is no second copy of the rule to drift.
+    - **Not offered where there is nothing to sell.** A facility that hides no crates (an
+      Outpost) has no row at all, rather than a row that always refuses. Flavours are
+      visible when offered, so the absence says nothing the map had not already said.
+    - **It is read on the facility brief, in place** (#215's screen). Once bought, the
+      priced row becomes the heading of a short list of the tech itself. A third screen for
+      at most three names would put the fact one press further from the two decisions it
+      informs — walk the detour, and raid this facility at all.
   - **Walking out empty-handed is not punished** [OPEN on the tuning]. Nothing is taken
     away for a wasted raid; the run is simply poorer at a facility the alert may have
     made harder (#210), and caches are one-shot. An explicit nudge (a small alert bump)
