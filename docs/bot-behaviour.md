@@ -288,7 +288,6 @@ its arm declines and says why. A boldness knob, if it is ever wanted, belongs to
 | `input` | The concrete `Input` to issue. There is no second place that turns an ability into a keypress |
 | `urge` | How badly this cue wants the moment, on the anchored scale below |
 | `reason` | Why, in the cue's own words — the string a §13.3 investigation reads back off a flagged seed |
-| `then_hold` | Turns of follow-through the cue is committing to. Some abilities are a *plan*, not a press: Camouflage is only worth the turn if you then hold still (§8.3) |
 
 ### 4.3 The urge scale, and what every value on it means
 

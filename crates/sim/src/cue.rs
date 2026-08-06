@@ -25,9 +25,10 @@
 //!
 //! A [`Bid`] carries the concrete [`Input`] to issue (there is no second place that
 //! turns an ability into a keypress), a **reason** (§13.3: a flagged signal has to
-//! be traceable back to *why*), the turns of follow-through the cue is committing
-//! to ([`Bid::then_hold`]), and an [**urge**](Bid::urge) on the anchored scale
-//! below.
+//! be traceable back to *why*), and an [**urge**](Bid::urge) on the anchored scale
+//! below. An ability that is a *plan* rather than a press (Camouflage's hold-still,
+//! §8.3) is followed through by **re-bidding each turn** while it runs — there is no
+//! stored commitment for the policy to honour or forget.
 //!
 //! # Legality is core's answer, never re-derived here
 //!
@@ -50,7 +51,7 @@ use intrusion_core::{
     AbilityId, AbilityState, AbilityStatus, Cell, Direction, GuardState, Input, State, Terrain,
 };
 
-use crate::profile::Profile;
+use crate::profile::{Profile, BORE_MARGIN, CROSSING_MARGIN};
 
 /// What the bot is **trying to do** this turn — the plan its policy has already
 /// settled on, named so a cue can be asked "is this a moment for you?" against it
@@ -73,17 +74,6 @@ pub enum Intent {
     /// themselves (§11.5a — the bot cannot route to intel it has never seen).
     Explore,
 }
-
-/// What a crossing must save the router before it is worth **a third of the level's
-/// borer** **[START]** — three times the margin a phase asks for
-/// ([`crate::bot::CROSSING_MARGIN`]).
-///
-/// The two abilities answer the same question ("is there a better way through this
-/// wall?") out of very different pockets: Dephase spends a cooldown that comes back,
-/// Pierce Wall spends one of three permanent uses that does not (§8.2). The scarcer
-/// supply asks the bigger price, which is also what keeps the two cues from bidding
-/// for the same ordinary shortcut.
-pub const BORE_MARGIN: u64 = 3 * crate::bot::CROSSING_MARGIN;
 
 /// **No fit at all**: this is not a moment for the ability. Never pressed,
 /// whatever the floor is set to — a zero urge is the same as declining to bid.
@@ -165,10 +155,6 @@ pub struct Bid {
     /// off a flagged seed. Justified from the ability's §8.3 row, never from what
     /// makes the bot win.
     pub reason: &'static str,
-    /// Turns of follow-through the cue is committing to: some abilities are a
-    /// *plan*, not a press (§8.3 — Camouflage is only worth the turn if you then
-    /// hold still). Zero for a press that stands on its own, like Run.
-    pub then_hold: u32,
 }
 
 /// The moment a cue is asked about: the world through the player's own channels,
@@ -316,7 +302,6 @@ impl Moment<'_> {
             status,
             URGE_DECISIVE,
             "hunted with a cell of room to spare — spend the turn opening the gap (§8.3)",
-            0,
         )
     }
 
@@ -336,13 +321,13 @@ impl Moment<'_> {
         // Strong, not decisive: it is the fallback for having nowhere to hide, and
         // an escape that actually moves (Run) should outrank it on the same turn.
         // The press is only half of it — a *moving* cloaked player is seen like any
-        // other — so the cue commits to holding still for the cloak's whole
-        // duration, and keeps saying so for as long as it lasts.
+        // other — so the follow-through is the `hold` arm below, re-bid on every
+        // turn the cloak still runs: the plan is restated while it holds, never
+        // stored as a commitment nothing would read.
         self.press(
             status,
             URGE_STRONG,
             "hunted with no cupboard to reach — cloak and let it pass over (§8.3)",
-            status.id.def().economy().map_or(0, |e| e.duration()),
         )
         .or_else(|| {
             self.hold(
@@ -413,7 +398,7 @@ impl Moment<'_> {
                 "a patrol is hunting for something it cannot see — offer it the fake (§8.3)",
             ),
         };
-        self.press(status, urge, reason, 0)
+        self.press(status, urge, reason)
     }
 
     /// Autodoors (§8.3): a door in your path *"opens as you step into it — no bump,
@@ -447,7 +432,6 @@ impl Moment<'_> {
             status,
             URGE_STRONG,
             "breaking contact through a door — shut it behind me and make them reopen it (§8.3)",
-            0,
         )
     }
 
@@ -484,7 +468,6 @@ impl Moment<'_> {
             status,
             URGE_STRONG,
             "a wall standing between me and where I am going, and a route worth a third of the borer (§8.3)",
-            0,
         )
     }
 
@@ -518,7 +501,7 @@ impl Moment<'_> {
         // a shortcut, and a shortcut is worth exactly what it saves. Nothing here is
         // ever decisive — no crossing is worth losing the run over, which is the
         // difference between a shortcut and an escape.
-        let (urge, reason) = if saving >= 2 * crate::bot::CROSSING_MARGIN {
+        let (urge, reason) = if saving >= 2 * CROSSING_MARGIN {
             (
                 URGE_STRONG,
                 "a wall between me and where I am going, with the far side in view (§8.3)",
@@ -529,7 +512,7 @@ impl Moment<'_> {
                 "a short crossing that beats walking round it (§8.3)",
             )
         };
-        self.press(status, urge, reason, 0)
+        self.press(status, urge, reason)
     }
 
     /// Confusion (§8.3): *"a costed panic-buy of time, not a kill"* — fired once from
@@ -567,7 +550,6 @@ impl Moment<'_> {
                 status,
                 URGE_DECISIVE,
                 "a guard at arm's length and nowhere to spend a turn — freeze it or be taken (§8.3)",
-                0,
             );
         }
         // Otherwise the daze is worth its cooldown when it buys time against more than
@@ -584,7 +566,7 @@ impl Moment<'_> {
                 "hunted, with the blast on a guard — buy the six turns (§8.3)",
             )
         };
-        self.press(status, urge, reason, 0)
+        self.press(status, urge, reason)
     }
 
     /// Lockdown (§8.3/#242): every door within `LOCKDOWN_RADIUS` of **where you fired
@@ -634,7 +616,7 @@ impl Moment<'_> {
                 "one door in reach while hunted — a sealed handle is a detour they have to walk (§8.3)",
             )
         };
-        self.press(status, urge, reason, 0)
+        self.press(status, urge, reason)
     }
 
     /// False Call (§7.7/§8.3/#504): a forged control message naming the cell you fired
@@ -742,7 +724,7 @@ impl Moment<'_> {
                 "one guard behind me and a route ahead — call it to the cell I am leaving (§8.3)",
             )
         };
-        self.press(status, urge, reason, 0)
+        self.press(status, urge, reason)
     }
 
     /// Whether `cell` holds a door panel, open or closed, **as the player knows it**
@@ -763,13 +745,7 @@ impl Moment<'_> {
     /// press does something (§8.2/#302), and every other state — cooling,
     /// exhausted, already active, passive, or contextually `Unusable` (#345) — has
     /// no activation to offer.
-    fn press(
-        &self,
-        status: AbilityStatus,
-        urge: u8,
-        reason: &'static str,
-        then_hold: u32,
-    ) -> Option<Bid> {
+    fn press(&self, status: AbilityStatus, urge: u8, reason: &'static str) -> Option<Bid> {
         matches!(
             status.state,
             AbilityState::Ready | AbilityState::Limited { .. }
@@ -778,7 +754,6 @@ impl Moment<'_> {
             input: Input::Activate(status.id),
             urge,
             reason,
-            then_hold,
         })
     }
 
@@ -786,15 +761,10 @@ impl Moment<'_> {
     /// out while you do not move (§8.3). `None` unless it is genuinely active, so
     /// this can never become a way to wait for nothing.
     fn hold(&self, status: AbilityStatus, urge: u8, reason: &'static str) -> Option<Bid> {
-        let AbilityState::Active { remaining } = status.state else {
-            return None;
-        };
-        Some(Bid {
+        matches!(status.state, AbilityState::Active { .. }).then_some(Bid {
             input: Input::Wait,
             urge,
             reason,
-            // Exactly what is left of it: the commitment shortens as the ability does.
-            then_hold: remaining,
         })
     }
 }
@@ -979,21 +949,13 @@ mod tests {
             .bid(cloaked)
             .expect("an active cloak holds");
         assert_eq!(bid.input, Input::Wait);
-        assert_eq!(bid.then_hold, 7, "the commitment is what is left of it");
 
-        // The press commits to the cloak's whole duration up front.
+        // The press stands on its own; the follow-through is the hold arm re-bid
+        // each turn the cloak runs, asserted above.
         let bid = moment(Intent::Flee, None, Some(3))
             .bid(camo)
             .expect("a ready cloak presses");
         assert_eq!(bid.input, Input::Activate(AbilityId::Camouflage));
-        assert_eq!(
-            bid.then_hold,
-            AbilityId::Camouflage
-                .def()
-                .economy()
-                .expect("Camouflage is activated")
-                .duration(),
-        );
     }
 
     /// Arbitration is deterministic and floor-gated (§12.4): the keener bid wins,

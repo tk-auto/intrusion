@@ -330,9 +330,9 @@ the histogram to catch.
 
 A cue returns a **bid**, not a bare number: the concrete `Input` to issue, a
 *reason* in the cue's own words (§13.3 — a flagged seed has to be traceable back
-to *why*), the turns of follow-through it is committing to (`then_hold`; some
-abilities are a plan, not a press — Camouflage only pays out while you hold
-still), and an **urge**.
+to *why*), and an **urge**. An ability that is a plan rather than a press —
+Camouflage only pays out while you hold still — is followed through by re-bidding
+each turn while it runs.
 
 #### The urge scale, and what every value on it means
 
