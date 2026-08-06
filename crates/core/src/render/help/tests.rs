@@ -367,6 +367,7 @@ fn no_modifier_caption_is_clipped_on_the_board() {
                 prize_room_locked: true,
                 narrowed_guard_cones: true,
                 scouted: true,
+                guards_watch_their_sides: true,
                 intel_to_exit: gate,
                 composite,
             };

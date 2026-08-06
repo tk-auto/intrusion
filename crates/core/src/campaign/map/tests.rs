@@ -308,9 +308,17 @@ fn every_flavour_names_itself() {
 /// is also what stands in for a **directional** assertion (§2.3), which a composite cannot
 /// have — a Vault is harder *and* richer, so there is no single direction to claim, and
 /// equivalence is the stronger promise anyway.
+///
+/// **The archive is out of it since #217**, and that is the guarantee holding rather than
+/// breaking. #565 promised that stating a flavour as a composite changed no facility;
+/// #217 is the ticket that changes the **terminus**, deliberately and by name, so the
+/// frozen combination it is measured against is a record of what the placeholder was and
+/// not a claim about what the archive should be. What the terminus expands to now is
+/// [`the_archive_expands_to_the_ending_it_names`]'s; the four *offered* flavours are still
+/// held to the letter here.
 #[test]
 fn every_flavour_expands_to_exactly_the_combination_it_replaces() {
-    for flavour in Flavour::ALL {
+    for flavour in Flavour::OFFERED {
         let was = flavour.combination_before_composites();
         // The **expansion** is what the word means; the contribution is just the word.
         let now = flavour.composite().expansion();
@@ -334,6 +342,55 @@ fn every_flavour_expands_to_exactly_the_combination_it_replaces() {
             now, was,
             "{flavour:?} no longer resolves to the combination it replaced",
         );
+    }
+}
+
+/// **What the archive expands to** (§14 v3/#217) — the terminus, clause by clause, and
+/// the record of what it deliberately stopped being.
+///
+/// It sits beside [`every_flavour_expands_to_exactly_the_combination_it_replaces`] rather
+/// than inside it because the two say opposite things about the same word. That one is a
+/// *migration* guarantee — stating a flavour as a composite changed nothing — and this is
+/// the one facility the ending changes on purpose: the placeholder was one extra guard and
+/// a hideout search, and what replaced it is the run's conclusion.
+#[test]
+fn the_archive_expands_to_the_ending_it_names() {
+    let terminus = Composite::Archive.expansion();
+    // Two more guards and two more consoles — the count knobs' whole reach, from one
+    // source, which is what #565's arithmetic made sayable.
+    assert_eq!(terminus.guard_count, GuardCount::TwoMore);
+    assert_eq!(terminus.intel_count, IntelCount::TwoMore);
+    // A locked room (#236) and no crates, so the lock falls on a **console** — under the
+    // terminus's gate that is a hard gate on the win, and the key is a takedown (§7.2).
+    assert!(terminus.prize_room_locked);
+    assert_eq!(terminus.caches, CacheCount::None);
+    // And the §6.2 flank carve withdrawn: a Calm patrol watches its sides here.
+    assert!(terminus.guards_watch_their_sides);
+
+    // **The gate is not the composite's** (#565): a composite says what a facility is, and
+    // what the *run* must take is the node's — `Campaign::level_at`.
+    assert_eq!(
+        terminus.intel_to_exit,
+        LevelModifiers::neutral().intel_to_exit
+    );
+
+    // What the placeholder was, and no longer is: the extra guard became two, and the
+    // hideout search is gone rather than inherited. #217 replaced a stand-in for "hard"
+    // with a stated ending; keeping a rule because the placeholder had it would be keeping
+    // a number nobody designed.
+    let placeholder = Flavour::Archive.combination_before_composites();
+    assert!(placeholder.guards_always_search_hideouts);
+    assert!(
+        !terminus.guards_always_search_hideouts,
+        "the placeholder's stand-in for hard is not inherited",
+    );
+
+    // No *offered* flavour names any of the terminus's own rules — an ordinary node
+    // cannot be dealt an ending.
+    for flavour in Flavour::OFFERED {
+        let ordinary = flavour.composite().expansion();
+        assert!(!ordinary.prize_room_locked, "{flavour:?}");
+        assert!(!ordinary.guards_watch_their_sides, "{flavour:?}");
     }
 }
 

@@ -820,10 +820,23 @@ impl Campaign {
     /// what it would know when it did (#215).
     ///
     /// The gate is [`IntelGate::None`] because §4.5 settles it that way for the campaign —
-    /// intel is currency, so the exit never refuses and extraction is voluntary — and the
-    /// modifiers resolve through [`ModifierSources`], where the node's **flavour** (§14 v3)
-    /// and the campaign alert (#210) each land as their own source rather than as a private
-    /// knob set of the campaign's.
+    /// intel is currency, so the exit never refuses and extraction is voluntary — **except
+    /// at the archive**, which is [`IntelGate::All`] and is the run's one mandatory
+    /// objective (§14 v3/#217): the terminus is the one facility a run cannot leave
+    /// empty-handed, and taking its data out is the run won.
+    ///
+    /// **The gate is set here rather than in the archive's composite**, and the line is
+    /// worth keeping straight (#565). A composite says what a *facility* is — how many
+    /// guards stand in it, what is locked, what its patrols notice — and every one of those
+    /// clauses of the archive is in [`Composite::Archive`](crate::Composite::Archive). A
+    /// gate says what the **run** is asked for, which is a property of the **node**: it is
+    /// the end of this map, and there is nothing past it to spend a surplus in. Two
+    /// different facts about one word, kept in the two places that own them — and both
+    /// travel in the token, the composite in its slot and the gate in its own field.
+    ///
+    /// The modifiers resolve through [`ModifierSources`], where the node's **flavour** (§14
+    /// v3) and the campaign alert (#210) each land as their own source rather than as a
+    /// private knob set of the campaign's.
     ///
     /// **This is what makes the offer honest** (§2.3). The map screen says *Vault*, and
     /// the run walks into the facility that flavour's [`Flavour::modifiers`] describe —
@@ -840,7 +853,12 @@ impl Campaign {
             seed: facility_seed(self.seed(), node),
             modifiers: ModifierSources {
                 chosen: LevelModifiers {
-                    intel_to_exit: IntelGate::None,
+                    // Voluntary everywhere but the terminus (§4.5/#211/#217).
+                    intel_to_exit: if self.map.is_archive(node) {
+                        IntelGate::All
+                    } else {
+                        IntelGate::None
+                    },
                     // What the run **paid to know** about this facility before walking
                     // in (§11.5a/#215). It rides in the chosen set rather than in a
                     // source of its own because it is the run's own decision, exactly as

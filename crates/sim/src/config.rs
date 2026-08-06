@@ -663,6 +663,7 @@ mod tests {
             prize_room_locked,
             narrowed_guard_cones,
             scouted,
+            guards_watch_their_sides,
             intel_to_exit,
             composite,
         } = all.modifiers;
@@ -690,6 +691,11 @@ mod tests {
             intrusion_core::CacheCount::None,
             "the cache knob has no name until the bot has a cue for it (#209), so naming \
              every modifier must not plant one",
+        );
+        assert!(
+            !guards_watch_their_sides,
+            "the archive's ring carve has no name (#217): its one source is the campaign's \
+             terminus, and naming every modifier must not deal one",
         );
         assert_eq!(
             intel_to_exit,

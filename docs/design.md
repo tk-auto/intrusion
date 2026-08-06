@@ -1700,9 +1700,9 @@ will have neither (§2.2, appendix 31) — the exits belong to the mode.
 | Parameter | Value |
 |---|---|
 | Size | **40 × 40** **[START]** |
-| Guards | **4** **[START]** — a **level modifier** moves it (`guard_count`, §12.6/#232): one more (harder) or one fewer (easier), within **3…5** |
-| Intel | **3** **[START]** |
-| Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, the sim = **at least one**, campaign = **none** |
+| Guards | **4** **[START]** — a **level modifier** moves it (`guard_count`, §12.6/#232/#565): a signed delta of up to two either way, within **2…6**. The *Archive* names two more on its own (#217) |
+| Intel | **3** **[START]** — the same knob on the reward axis (`intel_count`, §12.6/#207/#565), within **2…5**. The *Archive* names two more (#217), which is what took the ceiling from four to five |
+| Exit rule | **A level modifier** (`intel_to_exit`, §4.5/§12.6/#244): quick play = **all three**, the sim = **at least one**, campaign = **none** — except the **archive**, whose node sets *all of it* and makes the run's one mandatory objective (#217) |
 | Starting abilities | **A level modifier** (`starting_abilities`, §8.3/#244): quick play grants the innate set **plus three random tech**, seeded (§12.4); the sim grants the **innate set only**; campaign accumulates instead (§2.2) |
 
 **The sim plays bare, and that is the point.** The headless baseline (§13.2) holds
@@ -1718,11 +1718,13 @@ threshold; **4** is the forgiving-but-real end, giving a bare bot run a 37% win 
 (appendix 26). Read it against §13.4: this is a floor, not a forecast.
 
 **And one guard is one difficulty step.** That same linearity is what makes the count a
-good level modifier (§12.6/#232): the knob moves it by **one**, bounded to **3…5**, so
+good level modifier (§12.6/#232): the knob moves it a step at a time, bounded to **2…6**, so
 each end is worth roughly one sweep row — measured at 43% / 35% / 25% over 300 bare bot
-seeds. The envelope is stated rather than open-ended: below three a facility is a walk
-rather than a raid, and above five a screen-bound 40×40 board (§11.4) crowds and the
-§7.5 beats cut too small. The knob is a **step, not a setter** — it never moves the
+seeds. The envelope is stated rather than open-ended: at its floor a facility is a walk
+rather than a raid, and at its ceiling a screen-bound 40×40 board (§11.4) crowds and the
+§7.5 beats cut too small. Six is the top because the **archive** asks for it (#217) — the
+one facility a run is told about from the first frame and walks six raids to reach — and
+it stops there: an alerted terminus is still six. The knob is a **step, not a setter** — it never moves the
 count the way it does not name, so a sim sweep already outside the envelope is left
 where it is rather than dragged into it.
 
@@ -3301,11 +3303,12 @@ flips a rule an existing system already owns rather than adding a parallel one:
 | **Layout knob** (`layout_knowledge`) | both ends | how much of the building a run starts knowing, either side of §11.5a's schematic. *Full known* draws the real architecture from turn one — doorways, furniture and the duct mouths, the one *content* it hands over because a mouth reads off a plan like a doorway does (a scouted mouth still gets the memory slate, #450). *Unknown* draws nothing, fogging the geometry so route-planning is what exploring buys — #233, the **one modifier that overrides a [SETTLED] rule**, kept out of the directed pool for that reason until #518 admitted it (see §11.5a) |
 | **The two cooperation call-ins** | harder | whether a lost sighting and a found body summon anyone (§7.7) |
 | **All doors automatic** | harder | every doorway generates frameless instead of hinged (§10.4/#452 — **read by generation**, see the blockquote below) |
-| **Guard count** (knob) | both ends | the §10.2 baseline, by a signed **delta** of up to two either way (#232/#565 — generation-time; contributions add, and two is one step per source that can name it) |
+| **Guard count** (knob) | both ends | the §10.2 baseline, by a signed **delta** of up to two either way (#232/#565 — generation-time; contributions add, and two is one step per source that can name it, or the whole reach from one — the *Archive* names two, #217) |
 | **Guards watch consoles** | harder | a Calm patrol prefers a cell beside a console its beat touches and cycles them, so the ground the player must reach is the ground that is patrolled (§7.5/#319; appendix 39) |
 | **Search areas shown** | easier | the area every §7.6 search is sweeping paints in the Warning orange — the *when* is free and unconditional, only the *where* is priced (§11.5/#224) |
 | **Locked room** | harder | key-gates every doorway of the room holding the facility's prize and puts a key on every guard (§10.4/#236 — the fifth generation-read entry, and the one reaching *past* placement: it draws nothing, so both settings are the same board and only one room's doorways differ) |
 | **Guard cones: shorter** | easier | every guard's reach 10 → 6, the same ~90° wedge watched late, and §7.6's two zones shorten with it (§6.1/#495 — the first easier entry that bends a rule rather than handing over knowledge or slack) |
+| **Guards watch their sides** | harder | the §6.2 flank carve withdrawn: a **Calm** patrol detects its two flank cells like every other mood, so the flank takedown and the tail through a corner are both off. The **harder arm** of the rule #442 settled the other way — a new field and a new slot, never a revival of the tombstone below — and **out of the directed pool**, because appendix 28 measured the unconditional carve as a real mover and a draw would re-open that call by lottery. Its one source is the archive (§14 v3/#217) |
 | **Calm guards detect only their cone** | easier | a Calm guard's two flank cells drop from detection while a hunting guard keeps its sides — shipped as an experiment (#410), then **adopted and retired in place** (#442, see below) |
 
 This is the **mechanism** difficulty and mode rules flow through — the shared seam
@@ -3346,7 +3349,17 @@ new machinery. Three consequences, all load-bearing:
   whole of §14 v3's three-axis design. What stands in for the directional assertion is a
   stronger one: **equivalence**, asserted field by field against the combination the
   composite replaces, so *"nothing about any facility differs"* is proved rather than
-  claimed. The direction is inherited by the parts, which keep their own.
+  claimed. The direction is inherited by the parts, which keep their own — even where the
+  facility inverts it: the *Archive*'s two extra consoles draw as an **easier** row because
+  a console is loot everywhere else (§2.2), while at the terminus every one of them is
+  required. A composite may not recolour its parts; the *Intel to exit* row beneath says
+  what makes them hard.
+- **A composite says what a facility is, never what the run is asked for.** No composite
+  sets the intel gate: that is a mode knob (§4.5/#244), and a preset that moved it would be
+  changing the run rather than the facility. The **archive** is where the line shows
+  (#217): every rule of the terminus is in its composite, and its *mandatory* objective is
+  set by the **node** — the end of the map, with nothing past it to spend a surplus in.
+  Two facts about one word, kept in the two places that own them.
 
 **A composite brings its own version of the modifiers, so they stack** — which is what
 made the **count** knobs (guards, consoles) arithmetic. They are signed **deltas** on the
@@ -3673,7 +3686,8 @@ a campaign of **one** facility is exactly the game v1 ships.
   its level-seed), *complete* one (the haul is banked, the facility is dropped —
   geometry, guards and bodies do not persist, and the run arrives at a **choice
   point**), *choose* the next facility from what the map offers (§14 v3), *capture*
-  (terminal for the run, anywhere, §2.2), and *leave the archive* (the run is won).
+  (terminal for the run, anywhere, §2.2), and *leave the archive* — which its own exit
+  permits only with everything it holds (#217) — and the run is **won**.
 - **A campaign facility is an ordinary level with one extra source of modifiers**: the
   node's flavour (§12.6). Nothing below this layer knows the difference — which is why
   a campaign facility's level-seed token is a level anyone can play on its own.
@@ -3849,7 +3863,9 @@ bullet below fills one of its seams.
     the mechanic and a choice made blind is a coin flip. The starting set [START] is
     *Outpost* (one guard and one console fewer), *Depot* (the §10.2 recipe untouched),
     *Vault* (one more of each, and **three** equipment caches), *Workshop* (**two**
-    caches, and one console fewer to pay for them — #209) and the *Archive*. A Depot
+    caches, and one console fewer to pay for them — #209) and the *Archive* (the terminus,
+    and the one flavour that is an ending rather than a position on those axes — #217,
+    below). A Depot
     hides **one** crate and an Outpost none, so the crate count rises with the richness
     of the facility. Three axes now, risk and the two rewards, so no option is simply the
     right answer; a flavour reaches the facility through the §12.6 flavour source, so what
@@ -3864,8 +3880,28 @@ bullet below fills one of its seams.
     rather than a better facility handed over. What stands on that ground is whatever the
     seed put there.
   - **Every route converges on the archive** [SETTLED], the one node with no
-    successors. Reaching it ends traversal; what it holds and what arriving concludes
-    are the ending's (#217).
+    successors. Reaching it ends traversal.
+  - **The archive is the ending, and it is one composite** (#217/#565). What the terminus
+    *is* rides in `Composite::Archive` like every other flavour, and it expands to: **two
+    more guards** and **two more consoles** (the count knobs' whole reach from one source
+    — six and five on the §10.2 recipe), **one locked room** behind a key every guard
+    carries (§10.4/#236 — no crates here, so it falls on a *console* room), **guards that
+    watch their sides in every mood** (the §6.2 flank carve withdrawn, so the
+    tail-through-a-corner and the flank takedown the rest of the campaign teaches are both
+    off), and **no equipment caches**, because salvage on the last facility is a power
+    curve rising after the last thing it could be spent on. It reaches placement and the
+    lock's pass, never the carve — so the terminus is the same building its seed always
+    carved, with more in it and one room shut.
+  - **The archive is the campaign's one mandatory objective** [SETTLED], and the single
+    exception to §4.5's voluntary extraction (#211/#217). Everywhere else the exit never
+    refuses because intel is currency; here it wants every console. **That gate is the
+    node's, not the composite's**: a composite says what a *facility* is, and a gate says
+    what the **run** is asked for — the end of this map, with nothing past it to spend a
+    surplus in. Because one console is behind the lock and all five are required, a won
+    run is one that committed a **takedown** (§7.2 — the protagonist never kills, so the
+    price is a body to hide and a §7.3 radio clock to outrun). Leaving with the data is
+    the **run won** (§2.2); capture there is terminal like capture anywhere, with no
+    special case.
   - **The map screen is the campaign's surface** (#208) — the title screen's *Story
     mode* opens it, and it is where every raid is chosen and started. It draws in the
     same character grid as everything else (§11.1), as **a picture and a list**: the
@@ -3883,7 +3919,10 @@ bullet below fills one of its seams.
   - **A completed facility does not raise the end screen.** The map comes up instead,
     with the haul banked — a "you won" card between every raid would be seven endings
     in a game that has one. The end screen keeps the endings that are endings: capture,
-    and the archive left behind.
+    and the archive left behind. The won run draws the **ordinary** end screen (§14 v2),
+    which already tells a win from a loss, with the campaign's single exit: back to the
+    title, because a run you can replay is not a permadeath run (appendix 31). A victory
+    screen that says more than *ESCAPED* is later work, not the ending's.
 - **Salvaged tech accumulating across facilities.** This is the run's power curve
   and it is the reason the campaign exists. It was fully built last time and
   reachable by nobody: no facility was ever generated with an equipment cache, so

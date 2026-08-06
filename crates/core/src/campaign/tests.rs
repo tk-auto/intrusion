@@ -13,7 +13,7 @@ use crate::cell::{Cell, Direction};
 use crate::facility::Terrain;
 use crate::guard::GuardState;
 use crate::level_seed::start_level;
-use crate::modifiers::{LevelModifiers, ModifierDirection, ModifierSources};
+use crate::modifiers::{Composite, LevelModifiers, ModifierDirection, ModifierSources};
 use crate::path::first_step_toward;
 use crate::place::LevelConfig;
 use crate::render::render;
@@ -284,7 +284,13 @@ fn the_facility_is_the_flavour_the_map_offered() {
             let level = run.enter().expect("a facility to raid");
             let expected = ModifierSources {
                 chosen: LevelModifiers {
-                    intel_to_exit: IntelGate::None,
+                    // The terminus is the one node that asks for something (§4.5/#217);
+                    // everywhere else the campaign's exit never refuses.
+                    intel_to_exit: if flavour == Flavour::Archive {
+                        IntelGate::All
+                    } else {
+                        IntelGate::None
+                    },
                     ..LevelModifiers::default()
                 },
                 alert: None,
@@ -328,17 +334,19 @@ fn the_flavours_build_different_facilities() {
     );
     assert_eq!(recipe(Flavour::Vault), (base_guards + 1, base_intel + 1));
     assert_eq!(recipe(Flavour::Outpost), (base_guards - 1, base_intel - 1));
+    // The terminus is not a position on the same axes (#217): it names the whole reach of
+    // both counts at once, which is what makes it the hard raid and what §10.2's envelopes
+    // were widened to hold.
     assert_eq!(
-        recipe(Flavour::Archive).0,
-        base_guards + 1,
+        recipe(Flavour::Archive),
+        (base_guards + 2, base_intel + 2),
         "the last raid is the hard one",
     );
-    assert!(
-        Flavour::Archive
-            .composite()
-            .expansion()
-            .guards_always_search_hideouts
-    );
+    // And the terminus's own two rules, which no offered flavour has: a locked room and
+    // patrols that watch their sides (#217). What it is *not* is the placeholder's hideout
+    // search — see `the_archive_expands_to_the_ending_it_names`.
+    let archive = Flavour::Archive.composite().expansion();
+    assert!(archive.prize_room_locked && archive.guards_watch_their_sides);
 }
 
 /// **Every flavour actually carves.** The recipe arithmetic above is one thing; a
@@ -1192,7 +1200,10 @@ fn a_run_that_buys_a_route_replays_identically() {
 #[test]
 fn every_campaign_facility_lets_the_run_leave_empty_handed() {
     let mut run = Campaign::to_depth(PLAYED_SEED, 3);
-    for _ in 0..=3 {
+    // **Every facility but the terminus** (#217). The archive is the campaign's one
+    // mandatory objective and the exception this rule is now stated against, so the walk
+    // stops short of it — `the_archive_refuses_to_be_left_empty_handed` is the other half.
+    while !run.map().is_archive(run.node()) {
         assert_eq!(
             run.next_level().modifiers.intel_to_exit,
             IntelGate::None,
@@ -1207,6 +1218,111 @@ fn every_campaign_facility_lets_the_run_leave_empty_handed() {
     assert_eq!(run.intel(), 0, "nothing taken is nothing banked");
 }
 
+/// **The archive is where a run cannot leave empty-handed** (§4.5/§14 v3/#217) — the
+/// campaign's one **mandatory** objective, against the voluntary-extraction surplus model
+/// everywhere else (#211, appendix 47).
+///
+/// The interesting half is *whose* rule it is. Every other campaign facility boots with
+/// [`IntelGate::None`] because intel is currency (§2.2), and the terminus's gate is set by
+/// the **node** rather than by the composite: what a facility *is* and what the run is
+/// asked for are two different facts, and only the second one ends a run.
+#[test]
+fn the_archive_refuses_to_be_left_empty_handed() {
+    let mut run = Campaign::to_depth(PLAYED_SEED, 0);
+    let level = run.enter().expect("the terminus");
+    assert_eq!(level.modifiers.intel_to_exit, IntelGate::All);
+    let state = start_level(&level).expect("the archive carves");
+    assert!(!state.exit_ready(), "the terminus will not let you leave");
+    assert_eq!(
+        state.intel_needed_to_exit(),
+        LevelConfig::V1.intel + 2,
+        "and it wants every console it holds",
+    );
+
+    // The contrast, one facility earlier on the same run seed: an ordinary facility opens
+    // with its exit already willing, which is what makes the refusal the terminus's own
+    // rule rather than the campaign's.
+    let mut ordinary = Campaign::to_depth(PLAYED_SEED, 1);
+    let first = ordinary.enter().expect("the first facility");
+    assert_ne!(first.modifiers.composite, Composite::Archive);
+    assert!(
+        start_level(&first).expect("it carves").exit_ready(),
+        "an ordinary campaign facility never refuses (§4.5/#211)",
+    );
+}
+
+/// **What the player sees when the run is won** (§14 v2/#138/#217): the ordinary end
+/// screen, reading the win it already knows how to read, with **one** way on.
+///
+/// That the run ends `Won` is [`leaving_the_archive_wins_the_run`]'s; this is the half a
+/// player actually meets. The stage [`is_over`](CampaignStage::is_over), which is what the
+/// shell asks before it raises the end screen instead of the map; the verdict behind it is
+/// an [`Escaped`](Ending::Escaped), which the screen already draws as a win rather than as
+/// a loss; and the exits are the campaign's single [`Menu`](EndExit::Menu) row — a run you
+/// can replay is not a permadeath run (appendix 31).
+#[test]
+fn the_won_run_ends_on_the_end_screen_with_one_way_out() {
+    let mut run = Campaign::to_depth(PLAYED_SEED, 0);
+    run.enter().expect("the terminus");
+    let verdict = extracted(LevelConfig::V1.intel + 2, 2);
+    assert_eq!(run.complete(&verdict), CampaignStage::Won);
+    assert!(run.stage().is_over(), "the shell raises the end screen");
+    assert!(
+        verdict.ending.won(),
+        "and the screen reads it as a win (#138)"
+    );
+    assert_eq!(run.run_options().mode.exits(), &[EndExit::Menu]);
+}
+
+/// **Capture at the archive is terminal like capture anywhere** (§2.2/#217) — the terminus
+/// gets no special escape, and the layer needs no special case to say so.
+#[test]
+fn capture_at_the_archive_ends_the_run_like_anywhere_else() {
+    let mut run = Campaign::to_depth(PLAYED_SEED, 0);
+    run.enter().expect("the terminus");
+    assert_eq!(run.complete(&captured()), CampaignStage::Lost);
+    assert_eq!(run.outcome(), Outcome::Lost);
+}
+
+/// **The archive stands at depth *N*, on every route and every run of a seed** (§12.4) —
+/// the determinism the ending rests on: a run reproduces from `(run seed, [choices],
+/// [inputs])`, so the terminus has to be a function of the seed alone.
+///
+/// And it has to stay **sayable** (§12.7/§13.1): the one facility of a campaign a player
+/// would most want to hand to someone else is the one they finished on. That it still fits
+/// its token with a scout bought on top is the practical dividend of stating it as one
+/// composite (#565) rather than as the five rules it stands for.
+#[test]
+fn the_archive_is_the_same_terminus_on_every_run_of_a_seed() {
+    for seed in [0, 1, PLAYED_SEED, u64::MAX] {
+        let run = Campaign::new(seed);
+        let archive = run.map().archive();
+        assert_eq!(archive.depth(), DEPTH_TO_ARCHIVE, "seed {seed}");
+        assert_eq!(run.map().flavour(archive), Flavour::Archive, "seed {seed}");
+        assert!(
+            run.map().successors(archive).is_empty(),
+            "seed {seed}: nothing past the terminus",
+        );
+
+        // Two runs of one seed, and two asks of one run, name the same facility.
+        let level = run.level_at(archive, false);
+        assert_eq!(level, Campaign::new(seed).level_at(archive, false));
+        assert_eq!(level, run.level_at(archive, false));
+        assert_eq!(level.modifiers.composite, Composite::Archive, "seed {seed}");
+
+        // Sayable, scouted or not.
+        for scouted in [false, true] {
+            let level = run.level_at(archive, scouted);
+            assert!(level.is_sayable(), "seed {seed}, scouted {scouted}");
+            assert_eq!(
+                LevelSeed::decode(&level.encode().expect("sayable")),
+                Some(level),
+                "seed {seed}: the terminus does not survive its own token",
+            );
+        }
+    }
+}
+
 /// **The campaign offers no way to play the run again** (§2.2/appendix 31). The gate
 /// has been in the code since the end screen shipped; this is the first thing that
 /// actually stands behind it.
@@ -1217,25 +1333,33 @@ fn the_campaign_offers_no_way_to_play_the_run_again() {
     assert_eq!(options.mode.exits(), &[EndExit::Menu]);
 }
 
-/// **A depth-zero campaign is the game v1 already ships**: the start node *is* the
-/// archive, so it is enter, raid, leave, and the run is over — a strict superset of the
-/// turn loop, not a rewrite of it.
+/// **A depth-zero campaign is one facility, entered and left, and the run is over** — the
+/// degenerate country §12.7 names, and the smallest thing the campaign layer can be asked
+/// to do.
+///
+/// It is no longer *the game v1 ships*, and that is #217 rather than a regression: the
+/// start node of a depth-zero country **is** the archive, so its one facility is the
+/// terminus, with everything the composite and the node's gate make that mean. What is
+/// still under test here is the *layer* — enter, complete, `Won` — so the raid is the
+/// fixture verdict a finished one hands back. That the terminus itself refuses an
+/// empty-handed exit is [`the_archive_refuses_to_be_left_empty_handed`]'s.
 #[test]
 fn a_one_facility_campaign_is_a_single_raid() {
     let mut run = Campaign::to_depth(PLAYED_SEED, 0);
     assert_eq!(run.node(), run.map().archive());
     assert_eq!(run.flavour(), Flavour::Archive);
     let level = run.enter().expect("the one facility");
-    let played = raid(&level);
-
+    assert_eq!(level.modifiers.composite, Composite::Archive);
+    // It carves, and it is the facility the composite promises — the layer hands out a
+    // level a raid could actually be played in, not a config that would reject.
+    let state = start_level(&level).expect("the archive carves");
     assert_eq!(
-        played.state.outcome(),
-        Outcome::Won,
-        "the raider got out (§4.5)",
+        state.objectives_remaining(),
+        LevelConfig::V1.intel + 2,
+        "the one facility is stocked as the terminus",
     );
-    assert!(played.state.turn() > 0, "and played the facility to do it",);
     assert_eq!(
-        run.complete(&played.state.verdict().expect("the raid ended")),
+        run.complete(&extracted(state.objectives_remaining(), 1)),
         CampaignStage::Won,
     );
 }
@@ -1251,11 +1375,18 @@ fn a_one_facility_campaign_is_a_single_raid() {
 /// either.
 #[test]
 fn a_two_facility_run_replays_byte_for_byte() {
-    let mut first = Campaign::to_depth(PLAYED_SEED, 1);
+    let mut first = Campaign::to_depth(PLAYED_SEED, 2);
     let mut script: Vec<(NodeId, LevelSeed, Vec<Input>)> = Vec::new();
     let mut grids: Vec<Vec<String>> = Vec::new();
 
-    while let Some(level) = first.enter() {
+    // **Stops one short of the terminus**, which is what makes the depth 2 rather than 1
+    // (#217). The archive's exit refuses a run not carrying all five of its consoles, and
+    // one of them stands behind a locked door a key has to be taken off a guard for — a
+    // raid this fixture cannot drive and is not trying to. What is under test is that the
+    // *same choices* grow the same graph and replay the same boards, and two ordinary
+    // facilities say that exactly as well.
+    while !first.map().is_archive(first.node()) {
+        let Some(level) = first.enter() else { break };
         let node = first.node();
         let played = raid(&level);
         assert_eq!(
@@ -1273,7 +1404,10 @@ fn a_two_facility_run_replays_byte_for_byte() {
         }
     }
     assert_eq!(script.len(), 2, "both facilities were played");
-    assert_eq!(first.stage(), CampaignStage::Won);
+    // Standing on the archive with the raid ahead of it — the loop chose it and stopped
+    // rather than playing it.
+    assert_eq!(first.stage(), CampaignStage::Approach);
+    assert!(first.map().is_archive(first.node()));
     assert_ne!(
         script[0].1.seed, script[1].1.seed,
         "two facilities, not the same one twice",
@@ -1281,7 +1415,7 @@ fn a_two_facility_run_replays_byte_for_byte() {
 
     // Same run seed, same choices, same inputs — same run, from the campaign's carried
     // state down to the last glyph of each facility's final frame.
-    let mut second = Campaign::to_depth(PLAYED_SEED, 1);
+    let mut second = Campaign::to_depth(PLAYED_SEED, 2);
     for (facility, (node, level, inputs)) in script.iter().enumerate() {
         assert_eq!(
             second.node(),
@@ -1306,6 +1440,13 @@ fn a_two_facility_run_replays_byte_for_byte() {
             );
         }
     }
+    // The loop above replays a choice only when another *raid* follows it, and the run's
+    // last choice was the one that walked it onto the archive without entering it. Take
+    // the same step here, so the two runs are compared standing in the same place.
+    assert!(
+        second.choose(first.node()),
+        "the recorded last choice is still an offer",
+    );
     assert_eq!(second, first, "the whole run, carried state and all");
 }
 
@@ -1697,3 +1838,4 @@ fn the_same_seed_and_the_same_spends_read_the_same_manifest() {
     };
     assert_eq!(read(), read());
 }
+

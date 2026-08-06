@@ -806,16 +806,26 @@ impl State {
     /// - **The cone's shape is a level modifier** (§12.6/#495): the narrowed-cones draw
     ///   hands every guard [`GuardSight::NARROWED`] — §7.1's own wedge with a shorter
     ///   reach — and with it §7.6's zones, which are that cone's own halves.
+    /// - **So is the ring carve, at the archive** (§14 v3/#217): the terminus's own rule
+    ///   ([`guards_watch_their_sides`](crate::LevelModifiers::guards_watch_their_sides))
+    ///   hands every guard [`BlindPolicy::Rear`] whatever its mood, so a **Calm** patrol
+    ///   watches its sides like every other. It is not the retired slot 5 coming back —
+    ///   that asked for the inverse — and it composes with the cone's shape rather than
+    ///   replacing it, which is why the two are read as a pair rather than in sequence.
     ///
     /// Still a function rather than a constant, and still read fresh on every use
     /// (§12.3) exactly like [`patrol_style`](Self::patrol_style) — one truth, so a
     /// guard's cone, the sighting it resolves and the §11.5 danger overlay drawn from
     /// them cannot disagree.
     pub(crate) fn guard_sight(&self) -> GuardSight {
-        if self.modifiers.narrowed_guard_cones {
-            GuardSight::NARROWED
-        } else {
-            GuardSight::BASELINE
+        match (
+            self.modifiers.guards_watch_their_sides,
+            self.modifiers.narrowed_guard_cones,
+        ) {
+            (false, false) => GuardSight::BASELINE,
+            (false, true) => GuardSight::NARROWED,
+            (true, false) => GuardSight::VIGILANT,
+            (true, true) => GuardSight::VIGILANT_NARROWED,
         }
     }
 

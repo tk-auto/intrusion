@@ -2142,3 +2142,58 @@ mod watched_consoles {
         );
     }
 }
+
+/// **The archive takes the flank back** (§6.1/§6.2/§14 v3/#217): under
+/// [`GuardSight::VIGILANT`] a **Calm** patrol watches its sides like every other mood, so
+/// the two things a campaign spends six facilities teaching — the flank takedown and the
+/// tail through a corner — are both off at the terminus.
+///
+/// It is the same scene as [`a_deferred_first_spot_rotation_still_watches_its_flanks`]
+/// with the mood held at Calm and the **sight** changed instead, which is what makes the
+/// assertion about the rule rather than about the guard: same guard, same cone, and only
+/// the ring carve moved. §2.3's direction is the pair — baseline blind, archive detecting,
+/// on the same cell.
+#[test]
+fn the_archives_guards_watch_their_sides_even_while_calm() {
+    let facility = Facility::walled_box(11, 11);
+    let calm_sees = |sight: GuardSight, other: Cell| {
+        let mut guard = Guard::patrolling(Cell::new(5, 5));
+        guard.facing = Direction::North;
+        // The carve happens at **look** time against the guard's own mood, so the look has
+        // to run under the level's sight for the ring rule to be the one under test.
+        guard.look(&facility, sight);
+        guard.sense(other, false, sight);
+        guard.detected_player()
+    };
+
+    // Facing north, so (4,5) and (6,5) are the flanks.
+    for flanker in [Cell::new(4, 5), Cell::new(6, 5)] {
+        assert!(
+            !calm_sees(GuardSight::BASELINE, flanker),
+            "{flanker:?}: an ordinary facility's patrol is flank-blind (#442)",
+        );
+        assert!(
+            calm_sees(GuardSight::VIGILANT, flanker),
+            "{flanker:?}: the archive's patrol watches its sides",
+        );
+        // The shortened cone composes with the carve rather than replacing it (#495): a
+        // flank cell is a *touching* neighbour, so it is inside either reach.
+        assert!(
+            calm_sees(GuardSight::VIGILANT_NARROWED, flanker),
+            "{flanker:?}: a short-sighted archive guard still watches its sides",
+        );
+    }
+
+    // What the archive does **not** take is the back: the takedown stays available from
+    // directly behind and rear-diagonal (§7.2), which is what keeps the locked room's key
+    // obtainable at all.
+    for behind in [Cell::new(4, 6), Cell::new(5, 6), Cell::new(6, 6)] {
+        assert!(
+            !calm_sees(GuardSight::VIGILANT, behind),
+            "{behind:?}: the three cells at a guard's back stay blind (§155)",
+        );
+    }
+    // And the whole of it is the ring carve — the wedge is untouched.
+    assert_eq!(GuardSight::VIGILANT.arc, GuardSight::BASELINE.arc);
+    assert_eq!(GuardSight::VIGILANT.range, GuardSight::BASELINE.range);
+}
