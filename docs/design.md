@@ -3256,43 +3256,24 @@ so; a snapshot either restores exactly what was stored or fails to decode.
 A **level modifier** is a named toggle or bounded knob that shifts a facility's
 *baseline* — its difficulty or its rules — *before the level begins*. Each one
 flips a rule an existing system already owns rather than adding a parallel one:
-*"guards always search hideouts"* forces the §7.6 search to check occupied
-cupboards unconditionally (harder); *"always show vision cones"* paints the §11.5
-danger overlay in full (easier); the **layout knob** (`layout_knowledge`) moves how much
-of the building a run is given before setting foot in it, either side of §11.5a's
-schematic — *"full layout known"* draws the real architecture where the schematic would
-otherwise stand, so doorways, duct mouths and furniture are all on the map from turn one
-(easier — the duct mouth is the one *content* it hands over, because a mouth reads off a
-plan the way a doorway does; a scouted mouth is still the one that gets the memory slate,
-#450), and *"layout unknown"* draws nothing there at all, so the geometry is fogged like
-the contents and route-planning becomes what exploring buys (#233 — harder, and the **one
-modifier that overrides a [SETTLED] rule**; it was kept out of the directed pool below
-for that reason until #518 admitted it: see §11.5a); the two
-**cooperation call-ins** (§7.7) decide whether a lost sighting and a found body
-summon anyone (harder); *"all doors automatic"* generates every doorway frameless
-instead of hinged (§10.4/#452 — harder, and one of the modifiers **read by
-generation** rather than at runtime: see below); the **guard count** moves the §10.2
-baseline by one either way (#232 — *"guards: one more"* harder, *"one fewer"* easier;
-another generation-time modifier, and the one bounded knob whose baseline is a
-neutral middle); *"guards watch consoles"* has a Calm patrol prefer a cell beside a
-console its beat touches and cycle them, so the ground the player must reach is the
-ground that is patrolled (§7.5/#319 — harder; appendix 39); *"search areas shown"* paints
-the area every §7.6 search is sweeping in the Warning orange, so *where* a guard is
-combing is on the board rather than inferred from a wandering cone (§11.5/#224 — easier;
-the *when* is free and unconditional, and only the *where* is priced); *"locked room"*
-key-gates every doorway of the one room holding the facility's prize and puts a key on
-every guard (§10.4/#236 — harder, the **fifth** modifier read by generation, and the one
-that reaches *past* placement rather than into it: it draws nothing, so both settings are
-the same board and only one room's doorways differ); *"guard cones: shorter"*
-shortens every guard's reach from 10 to 6 — the same ~90° wedge, watched late — and
-§7.6's two zones shorten with it (§6.1/#495 — easier, and the first entry on that side
-that bends a rule rather than handing over knowledge or slack: see below); *"calm guards detect only their cone"* drops a **Calm**
-guard's two **flank** cells from detection, so a patrol notices exactly its ~90°
-wedge while a guard that is hunting still watches its sides (easier — an
-**experiment**, see below). This is the
-**mechanism** difficulty and mode rules flow through — the shared seam #210 (alert
-scaling), #244 (quick play), and the v3 catalogue (#232–#236) all plug into
-instead of each inventing its own knobs.
+
+| Modifier | Bends | The rule it flips, and where |
+|---|---|---|
+| **Guards always search hideouts** | harder | the §7.6 search checks occupied cupboards unconditionally |
+| **Always show vision cones** | easier | the §11.5 danger overlay paints in full |
+| **Layout knob** (`layout_knowledge`) | both ends | how much of the building a run starts knowing, either side of §11.5a's schematic. *Full known* draws the real architecture from turn one — doorways, furniture and the duct mouths, the one *content* it hands over because a mouth reads off a plan like a doorway does (a scouted mouth still gets the memory slate, #450). *Unknown* draws nothing, fogging the geometry so route-planning is what exploring buys — #233, the **one modifier that overrides a [SETTLED] rule**, kept out of the directed pool for that reason until #518 admitted it (see §11.5a) |
+| **The two cooperation call-ins** | harder | whether a lost sighting and a found body summon anyone (§7.7) |
+| **All doors automatic** | harder | every doorway generates frameless instead of hinged (§10.4/#452 — **read by generation**, see the blockquote below) |
+| **Guard count** (knob) | both ends | the §10.2 baseline, one either way (#232 — generation-time, and the one bounded knob whose baseline is a neutral middle) |
+| **Guards watch consoles** | harder | a Calm patrol prefers a cell beside a console its beat touches and cycles them, so the ground the player must reach is the ground that is patrolled (§7.5/#319; appendix 39) |
+| **Search areas shown** | easier | the area every §7.6 search is sweeping paints in the Warning orange — the *when* is free and unconditional, only the *where* is priced (§11.5/#224) |
+| **Locked room** | harder | key-gates every doorway of the room holding the facility's prize and puts a key on every guard (§10.4/#236 — the fifth generation-read entry, and the one reaching *past* placement: it draws nothing, so both settings are the same board and only one room's doorways differ) |
+| **Guard cones: shorter** | easier | every guard's reach 10 → 6, the same ~90° wedge watched late, and §7.6's two zones shorten with it (§6.1/#495 — the first easier entry that bends a rule rather than handing over knowledge or slack) |
+| **Calm guards detect only their cone** | easier | a Calm guard's two flank cells drop from detection while a hunting guard keeps its sides — shipped as an experiment (#410), then **adopted and retired in place** (#442, see below) |
+
+This is the **mechanism** difficulty and mode rules flow through — the shared seam
+#210 (alert scaling), #244 (quick play), and the v3 catalogue (#232–#236) all plug
+into instead of each inventing its own knobs.
 
 **One resolved value, read by many (§12.3).** All active modifiers are fields on a
 single `LevelModifiers` value — plain, heterogeneous data (a toggle is a `bool`, a
@@ -3306,54 +3287,17 @@ at least as much pressure as baseline, the easier one reveals at least as much �
 so a flag that changes nothing observable cannot pass for shipped.
 
 > **Several modifiers reach generation, and they reach different depths of it**
-> (§10.4/#452, §10.2/#232, §10.4/#236). Every other field here is read at runtime or by
-> the renderer, so a directional assertion can hold the *facility* fixed and vary only
-> the rule. Each of these is resolved **before** `generate_level` and threaded in as a
-> parameter — never consulted from a global, or the generator would have a hidden input
-> and §12.4's determinism would be a claim nobody could check. What they cost differs,
-> and the difference is exactly how deep into generation they reach.
->
-> `all doors automatic` decides what a doorway **is**, so it reaches the **carve**. From
-> one seed the two settings are two *different facilities*, so "same seed and inputs"
-> cannot be the frame; the assertion it is held to instead is **distributional** — the
-> sim's four temperaments over the same seed sweep, both settings.
->
-> The **guard count** reaches **placement** only, and that buys back the stronger claim.
-> The carve is already finished when it is read, and the pieces are drawn from one
-> stream in one order, so the three settings put the same player, exit and intel in the
-> same building — and because the guards come off a single shuffled pool by taking the
-> first *N*, their guard sets are strictly **nested**: fewer is the baseline's guards
-> minus its last, more is them plus one. The directional assertion is therefore exact
-> and per-seed — on one facility, more guards watch a **superset** of the cells fewer
-> guards watch. What does shift after placement is everything drawn from the stream
-> behind it (the comms console, the radio clocks), so the two settings are the same
-> *level* played out differently, not the same run.
->
-> The **locked room** reaches deepest in one sense and shallowest in another: it runs
-> *after* placement, on the finished board, because which room holds the prize is decided
-> by where the crates and consoles landed. And it draws **nothing** — no shuffle, no pick
-> — so it buys the strongest claim of the three: from one seed the two settings carve the
-> same building, place the same board down to each guard's radio clock, and differ in
-> exactly the cells of one room's doorways, where two hinges have become panels. That is
-> what lets its §2.3 assertion be stated per seed and in the simplest possible form: a
-> prize a keyless flood reaches at baseline, it does not reach behind the lock.
->
-> **Two of these are now in the difficulty pool** (#518), and that is what turns the
-> paragraph above from a note about generation into a promise about comparisons. A ±N
-> comparison used to be two rulesets over one building, flatly. It is graded now, in
-> three tiers, and the tiers are pinned by a test rather than by this sentence: the
-> **doors** may move the building (measured, a duct mouth relocates on seed 42), the
-> **locked room** may only re-role cells inside doorways the carve already cut, and every
-> other entry leaves the grid byte-identical. A new generation-reaching entry fails that
-> test, which is what makes admitting one a deliberate act rather than a discovery.
->
-> It is also why adding to this set is not free: a modifier that reaches the **carve**
-> breaks **seed stability**. Dropping the old per-doorway draw shifted the RNG stream,
-> so every `#seed=N` link shared before #452 now names a different facility. The break
-> was taken deliberately rather than papered over with a throwaway draw that would have
-> bought compatibility by making the generator lie about what it does. A
-> placement-depth modifier does not carry that cost, which is a reason to prefer one
-> where the rule permits — not a licence to reach for generation by default.
+> (§10.4/#452, §10.2/#232, §10.4/#236). Each is resolved **before** `generate_level`
+> and threaded in as a parameter — never consulted from a global, or §12.4's
+> determinism would be a claim nobody could check. The depths are graded and **pinned
+> by a test**: the *doors* reach the carve and may move the building, the *locked
+> room* may only re-role cells inside doorways the carve already cut, and every other
+> entry leaves the grid byte-identical — so admitting a new generation-reaching entry
+> is a deliberate act, not a discovery. A carve-reaching modifier **breaks seed
+> stability** (every pre-#452 `#seed=N` link names a different facility now), which is
+> a reason to prefer placement depth where the rule permits. The full argument — the
+> three depths, the assertion each one buys, and why the break was taken rather than
+> papered over — is appendix 52.
 
 **The source → modifier → config flow.** The mechanism is shared; the *sources*
 that switch modifiers on are separate and stack on top of it. Three, kept
@@ -3986,28 +3930,14 @@ default.
    too close to omniscient (every guard a dot for one turn's cost)? Should the
    sensed dot stay a **flat presence marker**, or convey *some* state — say, a
    distinct tint when a guard is Chasing — trading legibility for tension? Does it
-   name *which* guard, or just "a guard"? *(This slot used to be "how is sound
-   presented?" — the deepest UI problem in the old design. Dropping sound for the
-   sense (§9) dissolved it: the sense's presentation is "draw the dot." What's left
-   is tuning, not a research problem — which is why this no longer gates the fun.)*
+   name *which* guard, or just "a guard"?
 4. **Run score.** Does a run have a score? If so, takedowns cost score — giving
    "no killing" mechanical teeth via a leaderboard rather than a rule, and creating
    a ghost↔aggressive play spectrum. If not, the radio clock (§7.3) is the only
    takedown cost, which may well be enough. Note a score also gives the bot in §13
    a far better objective function, which is an argument for it beyond the game.
-5. **Do guards check hideouts?** *(Resolved — see §10.3.)* If never, hideouts are
-   permanent safe rooms and patrol coverage has holes by design. If always, they're
-   death traps. The settled answer: **only when alerted, and only if they saw you go
-   in _or found a body nearby_.** *Saw you go in:* a guard that was alerted and whose
-   cone covered the cupboard on the entry turn flushes you out. *Found a body nearby:*
-   a guard thrown into a §7.6 search by finding a corpse (§7.2) checks the occupied
-   cupboards within the disc it sweeps (`SEARCH_RADIUS`), flushing one the same way —
-   the readable signal being the body you left, not a cone you could watch (§2.2). A
-   search that began by *losing a chase* checks nothing, and a **stowed** body (never
-   found) never triggers a check. Every other guard still routes around the occupied
-   cupboard forever. This interacts with §7.6 as hoped — a cupboard entered *in* a
-   hunter's cone, or beside a body a guard finds, is now a trap, so the hiding game
-   rewards breaking sight *first* and not hiding beside your own handiwork.
+5. **Do guards check hideouts?** *(Resolved — §10.3 owns the answer: only when
+   alerted, and only if they saw you go in or found a body nearby.)*
 6. **Sight and sense: box or circle?** The box is cheap and nobody noticed. A
    circle is more natural and slightly less exploitable at the diagonals. Whatever
    wins should apply to **both** the vision box (§6.1) and the guard-sense box (§9.1)
@@ -4020,7 +3950,5 @@ default.
    danger overlay.
 8. **Touch.** A real target, or drop the manifest? Half-built touch is worse than
    none — the old version could trap a touch user in a dialog they couldn't close.
-9. **Where does ability state live on screen?** *(Resolved — see §11.4 and
-   appendix 20.)* An always-on **bottom-right bar naming every held ability** in a fixed
-   10-cell slot, with its `[3]` / `/2/` / `(on)` notation and its state colour, and
-   nothing to deploy. What unlocked it was capping the held set at four (§8.3).
+9. **Where does ability state live on screen?** *(Resolved — §11.4 and appendix 20
+   own the answer: the always-on bottom-right bar.)*
