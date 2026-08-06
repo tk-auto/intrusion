@@ -178,6 +178,14 @@ fn the_dart_cannot_outreach_the_player_on_open_floor() {
 /// This is the case the clamp exists for, and the one the first version of this module talked
 /// itself out of. A mid-duct cell has no live sight at all, so an unclamped eight-cell shot
 /// would fly blind into a room and its §11.5 wash would report whatever it found there.
+///
+/// **The clamp, not the walls, is what bounds it**, and the difference showed up in a real
+/// build. This fixture's duct is threaded through a wall band, so its interior happens to be
+/// solid — but a duct's interior keeps whatever terrain it already had (§10.7), and a crawl
+/// that crosses room floor to join two far regions has a walkable interior. The player's own
+/// exit tunnel is exactly that: firing along it in the artifact flew three cells over its
+/// floor and stopped at the `E`. So the bound asserted below is the *sense*, which holds
+/// either way, and never "a duct is made of wall", which does not.
 #[test]
 fn a_dart_fired_from_a_duct_is_clamped_to_the_crawlspace_sense() {
     let mut s = super::ducts::duct_world().with_loadout(Loadout::innate().with(AbilityId::Dart));
@@ -187,7 +195,8 @@ fn a_dart_fired_from_a_duct_is_clamped_to_the_crawlspace_sense() {
     assert!(s.in_duct(), "the fixture has to have the player inside");
     assert_eq!(s.sense_range(), DUCT_SENSE_RANGE);
 
-    // Along the duct itself there is no line at all: the interior cells are walls.
+    // Along *this* duct's own axis there is no line, because this fixture's interior is
+    // the wall band it was threaded through — a property of the fixture, not of ducts.
     for dir in [Direction::East, Direction::West, Direction::North] {
         let mut probe = s.clone();
         probe.facing = dir;

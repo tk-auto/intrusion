@@ -56,13 +56,22 @@
 //! open-floor dart reaches is a cell the player can already see. `min(8, 10)` changes
 //! nothing there.
 //!
-//! **The clamp is for the crawlspace** (§10.7), which is where all of that stops holding —
-//! and it is worth being concrete, because the first version of this module reasoned its
-//! way to "no clamp needed" and was wrong. A duct's interior cells are [`Terrain::Wall`],
-//! but a mouth (and a mid-duct cell backing onto a room) has a **floor neighbour**, so a
-//! dart can be fired out of a crawlspace. Meanwhile a crawler's live sight is only the
-//! mouth peek — a mid-duct cell sees *nothing at all* — so the dart would otherwise fly
-//! eight cells into a room the player has no picture of. The clamp cuts it to
+//! **The clamp is for the crawlspace** (§10.7), which is where all of that stops holding.
+//! It is worth being concrete, because the first version of this module reasoned its way to
+//! "no clamp needed" and was wrong twice over — and both mistakes came from assuming a duct
+//! is made of wall:
+//!
+//! - **A mouth has a floor neighbour.** It is the cell you climb out onto, so a dart fired
+//!   out of a mouth flies into the room.
+//! - **A duct's interior keeps whatever terrain it already had** ([`Duct`](crate::Duct)
+//!   records the path; nothing stamps the cells). A crawl may cross room and corridor
+//!   *floor* to join two far regions, so a dart fired from mid-crawl is not stopped by the
+//!   crawlspace either — the player's own exit tunnel is exactly this, and firing along it
+//!   flies over its floor and stops at the `E`.
+//!
+//! Meanwhile a crawler's live sight is only the mouth peek, and a mid-duct cell sees
+//! *nothing at all*, so an unclamped dart flew eight cells into a room the player had no
+//! picture of and its wash reported what it found there. The clamp cuts the reach to
 //! `DUCT_SENSE_RANGE` = 5, inside which every guard is at least a §9 dot, so the wash can
 //! only ever stop on something already drawn.
 //!

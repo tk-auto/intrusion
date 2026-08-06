@@ -73,9 +73,16 @@ fn near_line_text_max() -> usize {
 /// than the column the words stop at, which is one more and is what it used to be:
 /// two of those three had been clipping by a single cell while the bound said they
 /// were fine.
-const PRE_EXISTING_OVERFLOW: [&str; 2] = [
+/// **The third entry was found by adding an event to the list below** (#239): the False
+/// Call refusal has been clipping since #504 — 36 cells in a 32-cell row, drawn as *"the
+/// radio is dead — nothing to sp…"* — and nothing caught it because the event was never
+/// measured here. It is recorded rather than fixed, because rewording another ticket's
+/// player-facing line is not this one's business; what belongs here is that it is now
+/// *visible*. Somebody's ticket.
+const PRE_EXISTING_OVERFLOW: [&str; 3] = [
     "you stow the body — the cupboard is sealed",
     "intel in hand — the exit is open (9 more out)",
+    "the radio is dead — nothing to spoof",
 ];
 
 /// §11.7: **every** message the near line can show fits the row it is shown on.
@@ -159,6 +166,29 @@ fn every_near_line_message_fits() {
         Event::WallBored { at },
         Event::SearchBegan,
         Event::SearchEnded,
+        // Both dart wordings (§8.3/#239), because they are two different sentences on
+        // one event and the hit is the longer of them.
+        Event::DartFired {
+            from: at,
+            dir: Direction::North,
+            travelled: 8,
+            hit: true,
+        },
+        Event::DartFired {
+            from: at,
+            dir: Direction::North,
+            travelled: 8,
+            hit: false,
+        },
+        // Four refusals that were never in this list, added while the dart's absence
+        // from it was being fixed: the list is hand-maintained, so an event added
+        // without a line here is measured by nothing (§11.7). `FalseCallFired` still is
+        // not here — it carries an `EffectArea` this module cannot build — so it remains
+        // measured by nothing, which is worth someone's ticket rather than a workaround.
+        Event::FalseCallDead,
+        Event::LockdownRefused,
+        Event::ConfusionMissed,
+        Event::LaunchRefused,
     ];
     // Every bore refusal is a near-line message of its own (§8.4/#303), so each
     // wording is measured rather than just one representative.

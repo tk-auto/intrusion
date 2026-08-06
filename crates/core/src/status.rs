@@ -240,12 +240,15 @@ pub fn message_for(event: Event) -> Option<Message> {
         // reasoning behind False Call's silent firing, which bites harder here, since what
         // the distinctions would leak is worth a takedown. *Spent* is the word that carries
         // it: the player is told the cost landed and told nothing about the dark.
-        Event::DartFired { hit: true, .. } => {
-            ("the dart drops it — a body out there".to_string(), 1)
-        }
-        Event::DartFired { hit: false, .. } => {
-            ("the dart is spent — nothing goes down".to_string(), 0)
-        }
+        //
+        // **Both wordings are written to the row's 32 cells**, which is not a detail: the
+        // first draft said *"the dart drops it — a body out there"* (36) and *"the dart is
+        // spent — nothing goes down"* (37), and the artifact drew the second one clipped at
+        // *"…nothing goes dow"*. `every_near_line_message_fits` walks a hand-maintained
+        // event list and this event was not in it, so the row failed silently in exactly the
+        // way that test's own comment warns about. Both are now in the list.
+        Event::DartFired { hit: true, .. } => ("the dart drops it, out of reach".to_string(), 1),
+        Event::DartFired { hit: false, .. } => ("spent — the dart finds nobody".to_string(), 0),
         // The key off the belt (§10.4/#236). Ranked with the objective feedback rather
         // than with the takedown it travels beside, and above it, for the comms
         // console's reason: it is the payoff for a price the player just paid, and *the
