@@ -7,14 +7,15 @@
 //! offers the things that actually start a run — **Quick play** (a fresh seeded
 //! facility off the clock), **Seed play** (the level-seed token re-entry that used to be
 //! the always-on seed bar, §13.1/#110/#245), since #208 **Story mode**, which opens
-//! the campaign map (§14 v3), and since #514 **Continue run**, which resumes the
-//! autosaved run and is listed only when there is one (§12.5) — and lists **Options**
-//! (§14 v2) as a visibly *later*, inert entry. It is there so the menu has room to grow, and it does nothing at all:
-//! the moment it acts, it is v2 work, not this screen.
+//! the campaign map (§14 v3), since #514 **Continue run**, which resumes the autosaved
+//! run and is listed only when there is one (§12.5), and since #513 **Options**, which
+//! opens the global settings screen (§14 v2, [`super::settings`]).
 //!
-//! Story mode was one of those inert entries until the map it needed existed, which is
-//! the shape this screen is meant to grow in: an entry becomes live when the thing
-//! behind it does, and not a ticket before.
+//! Story mode and Options were both inert entries until the thing behind them existed,
+//! which is the shape this screen is meant to grow in: an entry becomes live when what
+//! it opens does, and not a ticket before. **Nothing is listed as *later* any more** —
+//! the tag and the dim ink stay, because the next entry to be sketched here will want
+//! them, and the selection walk still steps over a disabled row.
 //!
 //! **Drawn in the character grid** (§11.1), like the help card ([`super::help`]) and
 //! for the same reasons: the whole screen is a pure function of its view state, so
@@ -26,8 +27,12 @@
 //! shipped: a screen that could be opened but not closed by touch). Every entry row
 //! is a full-width tap target ([`menu_hit`]), the seed prompt carries its own DOM
 //! *back* button beside the *play* one, and the footer always spells out the way on.
+//!
+//! The footer's own `theme [n]` control left with #513: the theme is a setting now, and
+//! **Options** is the row that opens the screen it lives on — a second door to it, one
+//! row from the first, was the kind of duplication that leaves a setting with no home.
 
-use super::help::{theme_control, theme_control_len, theme_control_start, FOOTER_INDENT};
+use super::help::FOOTER_INDENT;
 use super::{blank_grid, draw, Grid};
 use crate::category::Category;
 use crate::difficulty::Difficulty;
@@ -54,7 +59,11 @@ pub enum MenuEntry {
     /// Enter a level-seed token and play the run it names (§13.1/#110/#245) —
     /// what the always-on seed bar used to do, now behind a menu entry.
     SeedPlay,
-    /// Settings (§14 v2 "options"; #189 light mode, #237 difficulty). **Later.**
+    /// The **global settings screen** (§14 v2/#513, [`super::settings`]): the colour
+    /// theme (#189), the renderer (#460), and — in a debug session — the §12.6
+    /// switches. Deliberately *not* the level-options dialog
+    /// ([`MenuScreen::LevelOptions`]) that *Quick play* opens: that one asks about the
+    /// run you are starting, this one about the game.
     Options,
     /// **The campaign** (§14 v3/#208): a run as a forward walk through the facility
     /// map. Opens the map screen, which is where a campaign is played from.
@@ -93,13 +102,17 @@ impl MenuEntry {
     /// by tap — is a no-op. **This is the whole of their behaviour** (#268): a menu
     /// with room to grow, with nothing yet growing in it.
     pub fn enabled(self) -> bool {
-        matches!(
-            self,
+        // Every entry is live since #513 lit *Options*. The machinery stays — the dim
+        // ink, the *later* tag, the selection walk that steps over a disabled row —
+        // because it is how the next sketched-in entry gets listed without acting, and
+        // the tests below still pin all three over a hand-built disabled entry.
+        match self {
             MenuEntry::ContinueRun
-                | MenuEntry::QuickPlay
-                | MenuEntry::SeedPlay
-                | MenuEntry::StoryMode
-        )
+            | MenuEntry::QuickPlay
+            | MenuEntry::SeedPlay
+            | MenuEntry::Options
+            | MenuEntry::StoryMode => true,
+        }
     }
 }
 
@@ -498,11 +511,6 @@ fn draw_centred(grid: &mut Grid, y: u32, text: &str, category: Category) {
 pub enum MenuHit {
     /// An entry row — choose it (start the run, or open the seed prompt).
     Entry(MenuEntry),
-    /// The footer's `theme [n]` control — flip the colour table (§11.2/#189). The
-    /// same control the help panel carries, in the same corner: the title screen is
-    /// the first thing a player sees, so it is where a theme they cannot read is
-    /// most worth being able to change.
-    ToggleTheme,
     /// A **slider stop** on the level-options dialog (#298) — set the difficulty to
     /// that position. A stop is set by tapping it directly rather than by tapping a
     /// nudge control: five stops is few enough to aim at, and it is the one gesture
@@ -531,18 +539,17 @@ pub enum MenuHit {
 /// the old options dialog never shipped.
 ///
 /// The seed prompt answers `None` everywhere — its controls are the DOM box's own
-/// *play* and *back* buttons, which handle their taps before the board sees them,
-/// and a theme control under a floating text box is a control half hidden.
+/// *play* and *back* buttons, which handle their taps before the board sees them.
+///
+/// **No footer control** since #513: the `theme [n]` button that used to sit in the
+/// row's right corner went with the setting, to the options screen the *Options* entry
+/// opens. The row is prose again, on all three surfaces.
 #[must_use]
 pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<MenuHit> {
     if ui.seed_prompt() {
         return None;
     }
     if ui.level_options() {
-        if height > 0 && y == height - 1 {
-            let theme = theme_control_start(width);
-            return (x >= theme && x < theme + theme_control_len()).then_some(MenuHit::ToggleTheme);
-        }
         if y == options_title_row(height) + OPTIONS_TRACK_ROW {
             return stop_hit(width, x).map(MenuHit::Difficulty);
         }
@@ -551,10 +558,6 @@ pub fn menu_hit(width: u32, height: u32, ui: MenuUi, x: u32, y: u32) -> Option<M
             .enumerate()
             .find(|&(i, _)| options_control_row(height, i) == y)
             .map(|(_, &control)| MenuHit::OptionsControl(control));
-    }
-    if height > 0 && y == height - 1 {
-        let theme = theme_control_start(width);
-        return (x >= theme && x < theme + theme_control_len()).then_some(MenuHit::ToggleTheme);
     }
     ui.entries()
         .iter()
@@ -636,19 +639,6 @@ pub(super) fn render_menu(width: u32, height: u32, ui: MenuUi) -> Grid {
         footer,
         Category::Ground,
     );
-    // The theme control, in the same corner of the same row as the help panel's
-    // (#189) — label and key together in System, so the word is visibly part of the
-    // button and is a target in its own right. Not on the seed prompt: the DOM text
-    // box floats over that screen, and a control it might cover is worse than none.
-    if !ui.seed_prompt() {
-        draw(
-            &mut grid,
-            theme_control_start(width),
-            footer_row,
-            &theme_control(),
-            Category::System,
-        );
-    }
     grid
 }
 
@@ -944,45 +934,53 @@ mod tests {
 
     /// §14's scaffolding warning, pinned: an entry that is not built yet is **visible
     /// but inert** — tagged *later* on screen and answering `false` to
-    /// [`MenuEntry::enabled`], while the ones that start a run answer `true`. If one of
-    /// them ever does something, this test is the reminder that it became v2/v3 work.
+    /// [`MenuEntry::enabled`]. **Every entry answers `true` today**, which is the shape
+    /// this screen was meant to grow in: Story mode graduated with #208 when the
+    /// campaign map existed, and Options with #513 when the settings screen did. The
+    /// rows moving from one side of this assertion to the other are the record of it.
     ///
-    /// **Story mode graduated** with #208: the campaign map it opens now exists, so it
-    /// answers `true` and carries no tag. That is the shape this screen is meant to grow
-    /// in — an entry goes live when the thing behind it does — and the row moving from
-    /// one side of this assertion to the other is the record of it.
+    /// The machinery is asserted over a *listed and disabled* entry rather than
+    /// deleted, because the next sketched-in row will want it: the tag is drawn, the
+    /// ink recedes, and the marker steps over it.
     #[test]
-    fn the_unbuilt_entries_are_listed_but_do_nothing() {
-        assert!(MenuEntry::QuickPlay.enabled());
-        assert!(MenuEntry::SeedPlay.enabled());
-        assert!(MenuEntry::StoryMode.enabled());
-        assert!(!MenuEntry::Options.enabled());
-
-        assert!(MenuEntry::ContinueRun.enabled());
+    fn every_listed_entry_is_live_and_a_disabled_one_would_be_tagged() {
+        for entry in MenuEntry::ALL {
+            assert!(entry.enabled(), "{entry:?} does something");
+        }
 
         let ui = resumable();
         let rows = render_menu(W, H, ui).to_text();
         for (i, entry) in ui.entries().iter().enumerate() {
             let row = &rows[entry_row(ui, H, i) as usize];
-            assert_eq!(
-                row.contains(LATER_TAG.trim()),
-                !entry.enabled(),
-                "{entry:?}'s row must be tagged later iff it is disabled: {row}",
+            assert!(
+                !row.contains(LATER_TAG.trim()),
+                "{entry:?} is live, so its row carries no tag: {row}",
             );
         }
+        // The tag is still what a disabled row *would* wear: [`entry_text`] appends it
+        // for any entry that is not enabled, which is the machinery the next
+        // sketched-in row will want. Asserted through the one function that draws it,
+        // since no entry is disabled today.
+        assert!(
+            entry_text(MenuEntry::Options, false).ends_with(MenuEntry::Options.label()),
+            "a live entry carries no tag",
+        );
+        assert!(LATER_TAG.contains("later"), "and the tag still says so");
     }
 
     /// Selection steps **over** the entries that do nothing and wraps at both ends,
-    /// so the marker can only ever rest where Enter starts something.
+    /// so the marker can only ever rest where Enter starts something. With every entry
+    /// live (#513) the walk is simply the listed ring, in order.
     #[test]
-    fn selection_skips_the_disabled_entries_and_wraps() {
+    fn selection_walks_the_live_entries_and_wraps() {
         let at = |selected| menu(selected);
         assert_eq!(at(MenuEntry::QuickPlay).next_entry(), MenuEntry::SeedPlay);
         assert_eq!(
             at(MenuEntry::SeedPlay).next_entry(),
-            MenuEntry::StoryMode,
-            "next steps over the inert Options entry between them",
+            MenuEntry::Options,
+            "the Options entry is walked onto now that it opens a screen",
         );
+        assert_eq!(at(MenuEntry::Options).next_entry(), MenuEntry::StoryMode);
         assert_eq!(
             at(MenuEntry::StoryMode).next_entry(),
             MenuEntry::QuickPlay,
@@ -1040,6 +1038,7 @@ mod tests {
                 MenuEntry::ContinueRun,
                 MenuEntry::QuickPlay,
                 MenuEntry::SeedPlay,
+                MenuEntry::Options,
                 MenuEntry::StoryMode,
             ],
         );
@@ -1082,56 +1081,46 @@ mod tests {
         );
     }
 
-    /// The title screen carries the theme control too (#189), **in the same corner of
-    /// the same row** as the help panel's — so the one option the game has is in one
-    /// place wherever you meet it, and a player who cannot comfortably read the
-    /// current theme can change it before starting a run rather than after.
-    ///
-    /// Its whole run is the target, the word included, and the footer prose beside it
-    /// is inert — the same two facts the panel's control is held to.
+    /// **The footer row carries no control on any of the three surfaces** (#513). The
+    /// `theme [n]` button stood in its right corner until the options screen took the
+    /// setting over; the *Options* entry is the door now, one row from the first, and a
+    /// second door beside it was the duplication that left the setting with no home.
+    /// So every cell of the row is inert, and the row is prose alone.
     #[test]
-    fn the_title_screen_carries_the_theme_control_in_the_panel_s_corner() {
-        let ui = MenuUi::default();
-        let start = theme_control_start(W);
-        for x in start..start + theme_control_len() {
-            assert_eq!(
-                menu_hit(W, H, ui, x, H - 1),
-                Some(MenuHit::ToggleTheme),
-                "footer cell {x}",
-            );
+    fn the_footer_row_is_prose_and_carries_no_control() {
+        for ui in [
+            MenuUi::default(),
+            seed_prompt(),
+            options(Difficulty::Standard),
+        ] {
+            for x in 0..W {
+                assert_eq!(
+                    menu_hit(W, H, ui, x, H - 1),
+                    None,
+                    "footer cell {x} of {:?} is a target",
+                    ui.screen,
+                );
+            }
         }
+        // The *Options* entry is what replaced it, and it is a live row like any other.
+        assert!(MenuEntry::Options.enabled());
         assert_eq!(
-            menu_hit(W, H, ui, start - 1, H - 1),
-            None,
-            "the footer prose is inert",
-        );
-        // It is drawn where it is tested, and the footer prose stops short of it —
-        // `draw` clips in silence, and a half-drawn control cannot be seen to be one.
-        let screen = text_of(&render_menu(W, H, ui));
-        let footer = screen.lines().last().expect("a footer row").to_string();
-        assert!(footer.contains(&theme_control()), "footer: {footer:?}");
-        let prose_end = FOOTER_INDENT + MENU_FOOTER.chars().count() as u32;
-        assert!(
-            prose_end < start,
-            "the menu footer runs into the theme control ({prose_end} vs {start})",
-        );
-    }
-
-    /// **Not on the seed prompt.** The DOM text box floats over the middle of that
-    /// screen and `n` is an ordinary letter of a level-seed token, so a control there
-    /// would be half hidden and its key a trap mid-token — the prompt keeps its own
-    /// *back* button as the way out (§11.6's no-trap rule) and nothing else.
-    #[test]
-    fn the_seed_prompt_carries_no_theme_control() {
-        let ui = seed_prompt();
-        let start = theme_control_start(W);
-        for x in start..start + theme_control_len() {
-            assert_eq!(menu_hit(W, H, ui, x, H - 1), None, "footer cell {x}");
-        }
-        let screen = text_of(&render_menu(W, H, ui));
-        assert!(
-            !screen.contains(&theme_control()),
-            "the seed prompt drew a theme control",
+            menu_hit(
+                W,
+                H,
+                MenuUi::default(),
+                W / 2,
+                entry_row(
+                    MenuUi::default(),
+                    H,
+                    MenuUi::default()
+                        .entries()
+                        .iter()
+                        .position(|&e| e == MenuEntry::Options)
+                        .expect("Options is listed"),
+                ),
+            ),
+            Some(MenuHit::Entry(MenuEntry::Options)),
         );
     }
 
@@ -1382,16 +1371,12 @@ mod tests {
                 "the gap under {control:?} is not a target",
             );
         }
-        // The theme control is still in its corner — the dialog is glyphs all the way
-        // down, so unlike the seed prompt nothing floats over it (#189).
-        let theme = theme_control_start(W);
-        assert_eq!(menu_hit(W, H, ui, theme, H - 1), Some(MenuHit::ToggleTheme),);
     }
 
     /// §11.6's no-trap rule on the dialog — **the exact failure the old options dialog
     /// shipped**, which is why this is pinned rather than left to review. The footer
     /// names the way on and the way back, a *Back* control is drawn and tappable, and
-    /// the prose stops short of the theme control it shares its row with.
+    /// the prose fits the row it is drawn on.
     #[test]
     fn the_dialog_spells_out_the_way_on_and_the_way_back() {
         let screen = text_of(&render_menu(W, H, options(Difficulty::Standard)));
@@ -1399,11 +1384,7 @@ mod tests {
         assert!(screen.contains(OptionsControl::Back.label()), "{screen}");
         assert!(screen.contains(OptionsControl::Play.label()), "{screen}");
         let prose_end = FOOTER_INDENT + OPTIONS_FOOTER.chars().count() as u32;
-        assert!(
-            prose_end < theme_control_start(W),
-            "the options footer runs into the theme control ({prose_end} vs {})",
-            theme_control_start(W),
-        );
+        assert!(prose_end <= W, "the options footer overruns the row");
     }
 
     /// The dialog sits on **one centre line**: the heading, the slider's rail, the

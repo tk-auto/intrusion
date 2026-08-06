@@ -243,11 +243,26 @@ impl Game {
     /// [`is_message_button`], [`ability_at`] — so a tap resolves to exactly the control
     /// drawn and can never hit one that is not there.
     ///
-    /// The two modal screens come first and exclusively: while the title menu or the
-    /// help panel is up it owns every press (§14/#268, §14 v2/#248), so the in-play
-    /// chrome underneath is not reachable.
+    /// The modal screens come first and exclusively: while the help panel or the title
+    /// menu is up it owns every press (§14 v2/#248, §14/#268), so the in-play chrome
+    /// underneath is not reachable — and the panel is asked before the menu, since it is
+    /// the one that can be raised over the other (#513).
     fn control_at(&self, col: u32, row: u32) -> Option<Control> {
         let width = self.state.layout().facility().width();
+        // **The open panel is asked before the menu** (#513): the menu's `Options` entry
+        // raises it on the Options tab, so a press that fell through to the list
+        // underneath would fire an entry the player cannot see.
+        if self.ui.help_open {
+            return help_hit(
+                width,
+                self.screen_height(),
+                self.ui,
+                self.state.level(),
+                col,
+                row,
+            )
+            .map(Control::Help);
+        }
         if let Some(menu) = self.ui.menu {
             return menu_hit(width, self.screen_height(), menu, col, row).map(Control::Menu);
         }
@@ -271,17 +286,6 @@ impl Game {
                 row,
             )
             .map(Control::End);
-        }
-        if self.ui.help_open {
-            return help_hit(
-                width,
-                self.screen_height(),
-                self.ui,
-                self.state.level(),
-                col,
-                row,
-            )
-            .map(Control::Help);
         }
         if is_help_button(col, row) {
             return Some(Control::HelpToggle);

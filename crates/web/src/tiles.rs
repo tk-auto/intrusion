@@ -1,5 +1,5 @@
 //! The **tile renderer** (§11.1 / #460, #461) — the shell's second cell primitive, and
-//! the whole of what `?tiles=1` turns on.
+//! the whole of what the options screen's `renderer` row turns on.
 //!
 //! §11.1 **[SETTLED]** says the renderer is *"a separate concern behind one
 //! interface. ASCII now; a tile renderer later is a second implementation of the
@@ -102,12 +102,12 @@
 //! Decoding is asynchronous, so the first frames of a `?tiles=1` load paint as text
 //! and the shell redraws once the sheet lands ([`install`]).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::f64::consts::FRAC_PI_2;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-use intrusion_core::{Direction, GlyphCell, Grid, Surface};
+use intrusion_core::{Direction, GlyphCell, Grid, Renderer, Surface};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
@@ -201,7 +201,14 @@ const fn atlas_rows() -> u32 {
 /// level-seed token — `seed::reflect_level` rewrites it the moment a run starts, and a
 /// preference parked there would be overwritten by the first frame.
 ///
-/// It graduates to the options screen (§14 v2) later; the flag is the temporary form.
+/// **It survives the options screen** (#513), rather than graduating into it as #460
+/// expected. The screen is where a *player* sets the renderer, and the record it writes
+/// is what an ordinary load starts under ([`crate::settings`]); the flag stays because
+/// it does a job the screen cannot — it is how a preview artifact is stamped, since the
+/// host strips the hash and frames the page, and how the text renderer can be seen in
+/// the very build the tile renderer is being judged against. What changed is only its
+/// standing: it states the mode for *this load* and the record states the preference,
+/// and the load wins.
 const TILES_FIELD: &str = "tiles";
 const TILES_ON: &str = "1";
 const TILES_OFF: &str = "0";
@@ -403,12 +410,18 @@ fn joins(grid: &Grid, x: u32, y: u32, dx: i64, dy: i64, glyph: char) -> bool {
     neighbour.surface == Surface::Board && neighbour.glyph == glyph
 }
 
-/// The tile layer: whether the mode is on, and — once the browser has decoded the
-/// sheet — the art and its tinted copies.
+/// The tile layer: the art, once the browser has decoded it, and its tinted copies.
+///
+/// **It does not hold the mode.** Which renderer is live is
+/// [`ScreenUi::renderer`](intrusion_core::ScreenUi) — the core's flag, drawn as a row
+/// on the options screen and flipped from it (#513) — and this is asked for a layer
+/// only where that flag says tiles. One source of truth for the choice, so the screen
+/// can never say `tiles` while the board paints text.
 pub(crate) struct Tiles {
-    /// Whether `?tiles=1` (or a baked build) asked for tiles at all. Fixed at boot:
-    /// the mode is a property of the load, not something a run can change.
-    on: bool,
+    /// Whether the sheet's decode has been started. Not "is it here yet" — that is
+    /// [`Atlases::sheet`] — but "has anyone asked for it", so the flips the options
+    /// screen allows start one load between them ([`ensure_sheet`]).
+    requested: Cell<bool>,
     /// The decoded sheet and the tinted atlases baked from it. Interior-mutable
     /// because painting is `&self` all the way down and the cache fills *during* a
     /// paint — the first frame in a new colour is the one that bakes it.
@@ -429,26 +442,25 @@ struct Atlases {
 }
 
 impl Tiles {
-    /// Read the tile mode for this load: the URL's `?tiles=` field if it states one,
-    /// otherwise whatever the build baked in, otherwise off.
-    ///
-    /// The URL wins **in both directions**, so `?tiles=0` turns a baked-on build back
-    /// off. That is not symmetry for its own sake: the artifact host strips the hash
-    /// and frames the page, so a preview build stamps the mode in rather than being
-    /// asked for it, and the override is the only way to see the text renderer in the
-    /// very build the tile renderer is being judged against.
+    /// An empty tile layer, before the sheet has decoded.
     pub(crate) fn boot() -> Self {
         Self {
-            on: url_choice().unwrap_or_else(baked),
+            requested: Cell::new(false),
             atlases: RefCell::new(Atlases::default()),
         }
     }
 
-    /// The tile layer to paint with, or `None` when this load draws as pure text —
+    /// Claim the one sheet load: `true` for the first caller, `false` for every one
+    /// after it.
+    fn claim_load(&self) -> bool {
+        !self.requested.replace(true)
+    }
+
+    /// The tile layer to paint with, or `None` when this frame draws as pure text —
     /// the flag's whole job, and what makes the text renderer byte-identical with the
-    /// flag absent.
-    pub(crate) fn layer(&self) -> Option<&Self> {
-        self.on.then_some(self)
+    /// renderer set to [`Renderer::Text`].
+    pub(crate) fn layer(&self, renderer: Renderer) -> Option<&Self> {
+        (renderer == Renderer::Tiles).then_some(self)
     }
 
     /// The sprite cell `(x, y)` would be drawn with, and how far round, or `None` when
@@ -476,7 +488,7 @@ impl Tiles {
     /// is: this one against cells a test can state outright, and [`neighbour_mask`]
     /// against grids the core actually rendered.
     fn sprite_for_cell(&self, cell: GlyphCell, mask: impl FnOnce() -> u8) -> Option<Sprite> {
-        if !self.on || cell.surface != Surface::Board {
+        if cell.surface != Surface::Board {
             return None;
         }
         if let Some(base) = autotile_base(cell.glyph) {
@@ -628,19 +640,34 @@ impl Atlases {
     }
 }
 
-/// Start decoding the sheet, and redraw when it lands.
+/// Start decoding the sheet at boot, if this load opens on tiles.
 ///
-/// A no-op when the mode is off, so a load that never asked for tiles never pays for
-/// the sheet. The handle is **weak** — the same reason the clipboard write holds one
-/// ([`Game`]): the closure outlives the call that made it, and a strong reference from
-/// an element the game owns back to the game would close a cycle for a page that is
-/// already gone.
+/// A no-op when it does not, so a load that never asked for tiles never pays for the
+/// sheet — and since #513 that is *not* the end of the question, because the options
+/// screen can turn tiles on mid-session. [`ensure_sheet`] is the call that answers it
+/// then, and this is its boot-time wrapper.
 pub(crate) fn install(game: &Rc<RefCell<Game>>) -> Result<(), JsValue> {
-    if !game.borrow().tiles.on {
+    let game = game.borrow();
+    ensure_sheet(&game.tiles, game.handle.clone(), game.ui.renderer)
+}
+
+/// Start decoding the sheet, and redraw when it lands — **once**, whenever the tile
+/// renderer first becomes the live one.
+///
+/// It is idempotent by [`Tiles::claim_load`]: a player flipping the renderer back and
+/// forth starts one decode, and a page that never reaches tiles starts none. The handle
+/// is **weak** — the same reason the clipboard write holds one ([`Game`]): the closure
+/// outlives the call that made it, and a strong reference from an element the game owns
+/// back to the game would close a cycle for a page that is already gone.
+pub(crate) fn ensure_sheet(
+    tiles: &Tiles,
+    handle: Weak<RefCell<Game>>,
+    renderer: Renderer,
+) -> Result<(), JsValue> {
+    if renderer != Renderer::Tiles || !tiles.claim_load() {
         return Ok(());
     }
     let image = HtmlImageElement::new()?;
-    let handle = Rc::downgrade(game);
     let decoded = image.clone();
     let onload = Closure::<dyn FnMut()>::new(move || {
         let Some(game) = handle.upgrade() else {
@@ -675,6 +702,23 @@ fn new_canvas(width: u32, height: u32) -> Option<HtmlCanvasElement> {
 /// A 2d context for an offscreen canvas.
 fn canvas_context(canvas: &HtmlCanvasElement) -> Option<CanvasRenderingContext2d> {
     canvas.get_context("2d").ok()??.dyn_into().ok()
+}
+
+/// **What this load says the renderer is**, before the stored preference is consulted
+/// (#460 × #513): the URL's `?tiles=` field if it states one, otherwise whatever the
+/// build baked in, otherwise `None` — nothing was said, and the record decides
+/// ([`crate::settings::Settings::boot`]).
+///
+/// The URL wins **in both directions**, so `?tiles=0` turns a baked-on build back off.
+/// That is not symmetry for its own sake: it is the only way to see the text renderer
+/// in the very build the tile renderer is being judged against.
+pub(crate) fn boot_choice() -> Option<Renderer> {
+    let stated = url_choice().or_else(|| baked().then_some(true))?;
+    Some(if stated {
+        Renderer::Tiles
+    } else {
+        Renderer::Text
+    })
 }
 
 /// The tile mode the page URL states, or `None` when it states nothing — the field is
@@ -750,13 +794,14 @@ mod tests {
         Terrain, Visibility,
     };
 
-    /// A tile layer in a known mode, with nothing decoded — every test here is about
-    /// the *decision*, which is the half a native test can reach.
-    fn tiles(on: bool) -> Tiles {
-        Tiles {
-            on,
-            atlases: RefCell::new(Atlases::default()),
-        }
+    /// A tile layer with nothing decoded — every test here is about the *decision*,
+    /// which is the half a native test can reach.
+    ///
+    /// It takes no mode: since #513 the layer holds only the art, and whether tiles are
+    /// live is [`Renderer`] on the core's view state, asked once at [`Tiles::layer`]
+    /// before a cell is ever consulted.
+    fn tiles() -> Tiles {
+        Tiles::boot()
     }
 
     /// A cell carrying a glyph on a chosen surface; the rest is the board's default.
@@ -1187,7 +1232,7 @@ mod tests {
         }
         assert_eq!(facing, REST_FACING, "four quarters is the whole turn");
 
-        let tiles = tiles(true);
+        let tiles = tiles();
         for facing in Direction::ALL {
             let turned = GlyphCell {
                 facing: Some(facing),
@@ -1230,12 +1275,46 @@ mod tests {
         assert_eq!(choice_in(""), None);
     }
 
-    /// The tile layer is absent unless the mode is on — the flag's whole job, and the
-    /// guarantee behind "the text renderer is byte-identical with the flag absent".
+    /// The tile layer is absent unless the live renderer asks for it — the flag's whole
+    /// job, and the guarantee behind "the text renderer is byte-identical with tiles
+    /// off". The flag is the core's [`Renderer`] since #513, so the screen that draws
+    /// the row and the board that paints it read one value.
     #[test]
-    fn the_layer_is_absent_unless_the_mode_is_on() {
-        assert!(tiles(false).layer().is_none());
-        assert!(tiles(true).layer().is_some());
+    fn the_layer_is_absent_unless_the_renderer_is_tiles() {
+        let layer = Tiles::boot();
+        assert!(layer.layer(Renderer::Text).is_none());
+        assert!(layer.layer(Renderer::Tiles).is_some());
+    }
+
+    /// **The sheet loads once**, however many times the options screen flips the
+    /// renderer: the first switch to tiles claims the load and every later one finds it
+    /// already claimed (#513).
+    #[test]
+    fn the_sheet_is_claimed_once_however_often_the_renderer_flips() {
+        let layer = Tiles::boot();
+        assert!(
+            layer.claim_load(),
+            "the first switch to tiles starts the load"
+        );
+        for _ in 0..3 {
+            assert!(!layer.claim_load(), "and no later flip starts another");
+        }
+    }
+
+    /// **What this load says the renderer is** (#460 × #513) — the URL over the baked
+    /// flag, and `None` when neither says anything, which is where the stored
+    /// preference decides ([`crate::settings`]).
+    #[test]
+    fn the_url_states_the_renderer_for_this_load() {
+        assert_eq!(
+            choice_in("?tiles=1").map(|on| if on { Renderer::Tiles } else { Renderer::Text }),
+            Some(Renderer::Tiles),
+        );
+        assert_eq!(
+            choice_in("?tiles=0").map(|on| if on { Renderer::Tiles } else { Renderer::Text }),
+            Some(Renderer::Text),
+            "the override works in both directions, so a baked build can be compared",
+        );
     }
 
     /// **Chrome never tiles, whatever its glyph is** (#460). A `#` in a panel's rule
@@ -1250,20 +1329,21 @@ mod tests {
     fn a_chrome_cell_is_never_a_candidate_for_a_tile() {
         for glyph in SPRITES.map(|(glyph, _)| glyph) {
             assert!(
-                sprite_of(&tiles(true), cell(glyph, Surface::Chrome)).is_none(),
+                sprite_of(&tiles(), cell(glyph, Surface::Chrome)).is_none(),
                 "{glyph:?} in chrome must draw as a character"
             );
             assert!(
-                sprite_of(&tiles(true), cell(glyph, Surface::Board)).is_some(),
+                sprite_of(&tiles(), cell(glyph, Surface::Board)).is_some(),
                 "{glyph:?} on the board is a tile"
             );
         }
         // And an unmapped glyph is text on either surface.
         for surface in [Surface::Board, Surface::Chrome] {
-            assert!(sprite_of(&tiles(true), cell('a', surface)).is_none());
+            assert!(sprite_of(&tiles(), cell('a', surface)).is_none());
         }
-        // With the mode off, nothing is ever a candidate.
-        assert!(sprite_of(&tiles(false), cell('#', Surface::Board)).is_none());
+        // With the renderer set to text there is no layer to ask at all, which is
+        // `the_layer_is_absent_unless_the_renderer_is_tiles` above: the mode is decided
+        // once per frame, not re-asked per cell.
     }
 
     /// The sheet is embedded and is a **PNG** — a build that lost the asset, or

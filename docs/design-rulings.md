@@ -3787,3 +3787,95 @@ was taken deliberately rather than papered over with a throwaway draw that would
 bought compatibility by making the generator lie about what it does. A
 placement-depth modifier does not carry that cost, which is a reason to prefer one
 where the rule permits — not a licence to reach for generation by default.
+
+---
+
+## Appendix 53 — Options is a tab, and it is the *only* drawn home of a setting
+
+*(§11.2, §11.6, §12.6, §14 v2. See #513, and #189, #460, #298, #459 before it.)*
+
+Two settings had been camping. The colour theme lived on the help panel's footer as
+`theme [n]`, explicitly "until v2 grows an options screen" (#189); the tile renderer
+had no surface at all and hid behind `?tiles=1` (#460). The debug session's two
+switches — omni-vision and the replay export — had a *fourth help tab* (#459). #513
+gave all four a home. Three things about that were not obvious.
+
+**A tab, and the price of it was a label.** `render::help`'s own doc comment had
+predicted a tab — "*Options* land as a further tab" — and the first build of this ticket
+refused, on arithmetic: the tab bar is one row of a 40-column board (§10.2) sharing that
+row with the right-aligned `[x]`, and `[Level] [Abilities] [Options] [Help]` reaches
+column 37 while the `[x]` starts at 36. Over by two. So it shipped as a screen of its
+own, and that was the wrong call — the two columns were buyable and the screen was not
+free.
+
+What buys them is the **Abilities tab's label**, drawn *Actions*: `[Level] [Actions]
+[Options] [Help]` ends at 32, four columns clear. The alternatives were worse. Deleting
+the gaps between tabs saves three columns but takes away the dead cell between two hit
+regions, which is what stops a mis-tap firing the neighbour (§11.6). *Tech* is shorter
+still and is **wrong**: §8.3 uses it for the *salvaged* subset (`AbilityId::TECH`), and
+the tab lists the innate verbs too, so the label would name a set the page does not show.
+*Actions* costs three more columns than *Tech* and says what the tab is.
+
+What the tab buys back is worth more than the columns: settings are one press from the
+reference card rather than a surface away, there is no second modal to route input to,
+and the panel keeps being the one thing a running game raises. The compile-time check
+that decided all of this is still in `render::help`, now with a comment naming what it
+decided — and it is the reason a *fifth* tab is not on the table: the next kind of
+content is a **section** of an existing tab, not a new one.
+
+**The panel is raised *over* the menu, not switched to.** That answers the ticket's third
+open question — how the §12.6 switches stay flippable mid-run once their own tab is gone
+— without a pause menu, which the game does not have: mid-run the tab is one `?` away,
+and before a run the title screen's `Options` entry raises the panel on it. Leaving
+clears `help_open` and touches nothing else, so the menu underneath is exactly as it was
+left. It also fixes the input precedence: **the panel is asked before the menu**, by key
+and by gesture and by tap alike, because it is the only surface that can have another one
+underneath it. That is the one place two modal surfaces stack, and before #513 there was
+no such place.
+
+**One drawn home, several keys.** The tempting symmetry was to keep the `theme [n]`
+button everywhere it was and add the tab beside it. That is what leaves a setting
+with no home: three surfaces drawing a control for one value, three hit-tests, and no
+answer to "where does the theme live?". So the drawn control was retired from the help
+panel (whose Options tab is one press away) and from the title screen (whose `Options`
+row is the door to it). What was **not** retired is the `n` key: it is a §11.6 table
+row, it costs nothing, and a one-press legibility toggle is worth having wherever you
+are when the screen is hard to read. The distinction that makes both true at once is
+that a key is a *shortcut* and a drawn row is a *home* — and it is only safe because
+every path lands on one shell seam (`Game::toggle_theme`), which flips the flag and
+writes the record. A preference is stored because it **changed**, not because of where
+it was changed.
+
+**The campaign map kept its control**, and that is the exception worth stating rather
+than tidying. The map has no route to the panel — wiring one is §14 v3 work —
+so taking its `theme [n]` away would have left a touch player on that screen with no
+way to change the theme at all. Removing a control with nothing in its place is a
+regression whatever it does for consistency.
+
+**What did *not* move.** The `?tiles=` flag survives, against #460's own expectation
+that it would graduate into the screen. It does a job the screen cannot: a preview
+artifact is framed and hash-stripped by its host, so a build stamps the renderer in
+rather than being asked, and the flag is the only way to see the text renderer in the
+very build the tile renderer is being judged against. What changed is its standing —
+it states the renderer for *this load*, the record states the *preference*, and the
+load wins. A URL override is deliberately never written back: a link that silently
+rewrote someone's stored settings would be the shared-link channel reaching somewhere
+it has no business (§13.1's level/debug split, in a smaller key).
+
+**And the debug switches are still not persisted.** They sit on a tab whose other two
+rows are written to storage, which is exactly the confusion §12.6 warns about, so
+the split is drawn as well as coded: their own heading, in Warning rather than System,
+after the widest gap on it. The preference record holds the theme and the
+renderer and has no field for anything else — a record that re-armed omni-vision on the
+next visit would outlive the session gate the whole debug channel rests on.
+
+**Two things the first draft got wrong, and what they taught.** It printed
+a line under the DEBUG heading — *sight only, never the facility* — restating §12.6's
+promise where the switches are. On screen it read as a caption bolted to a heading, made
+the two sections' spacing differ, and said to a player something they either already knew
+or could not act on. The promise belongs in the design doc and in the module that keeps
+it, not in the chrome. And the debug **rows** were drawn in Ground while unmarked, a
+shade below the preferences, to mark them as a different kind of thing. Ground is the
+§11.2 colour of *receding scenery* — it told the eye these controls were inert, in the
+one section where a press does the most. Both were the same mistake in two forms:
+loading the gate onto the rows instead of onto the heading that names it.

@@ -1570,7 +1570,7 @@ fn the_open_frame_is_the_panel_showing_the_run_modifiers() {
         row0.contains("[Level]"),
         "the tab bar heads the panel: {row0:?}"
     );
-    assert!(row0.contains("[Abilities]") && row0.contains("[Help]"));
+    assert!(row0.contains("[Actions]") && row0.contains("[Help]"));
     assert!(row0.contains("[x]"), "a touchable close control");
     assert!(
         !row0.contains("intel remaining"),
@@ -1679,8 +1679,10 @@ fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
         &s,
         ScreenUi {
             menu: Some(MenuUi::default()),
-            // Set alongside every other overlay: the menu still wins outright.
-            help_open: true,
+            // Set alongside the in-play overlay: the menu still wins outright. The one
+            // surface it no longer outranks is the **help panel**, which its own
+            // `Options` entry raises over it (#513) — that pairing is
+            // `the_panel_outranks_the_menu_it_was_raised_over`.
             message_log_open: true,
             ..ScreenUi::default()
         },
@@ -1703,10 +1705,55 @@ fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
     );
 }
 
+/// **The panel outranks the title screen** (§14 v2/#513) — the one place the two modal
+/// surfaces stack, because the menu's `Options` entry opens the panel on its Options
+/// tab. Whatever it was raised over is left untouched: clearing `help_open` restores the
+/// identical frame.
+///
+/// That is also §11.6's "toggling a setting is never a turn" from the core's side: the
+/// panel is drawn from `&State`, so there is nothing it could step.
+#[test]
+fn the_panel_outranks_the_menu_it_was_raised_over() {
+    let s = help_board();
+    let playing = render_screen(&s, ScreenUi::default());
+    let over_menu = ScreenUi {
+        menu: Some(MenuUi::default()),
+        help_open: true,
+        help_tab: HelpTab::Options,
+        ..ScreenUi::default()
+    };
+    let screen = render_screen(&s, over_menu);
+    let text = screen.to_text().join("\n");
+    assert!(
+        text.contains(SettingsRow::Theme.label()),
+        "the frame is the Options tab, not the menu under it:\n{text}",
+    );
+    assert!(
+        !text.contains(MenuEntry::QuickPlay.label()),
+        "…and nothing of the menu shows through:\n{text}",
+    );
+    assert_eq!(
+        (screen.width(), screen.height()),
+        (playing.width(), playing.height()),
+        "at the board's own size, so opening it never moves the fit",
+    );
+    // The menu is still there underneath, untouched, the moment the panel closes.
+    let menu_again = ScreenUi {
+        menu: Some(MenuUi::default()),
+        ..ScreenUi::default()
+    };
+    assert_eq!(render_screen(&s, menu_again), render_screen(&s, menu_again),);
+    assert_eq!(
+        render_screen(&s, ScreenUi::default()),
+        playing,
+        "and leaving the panel restores the identical frame",
+    );
+}
+
 /// #473: **what outlives a run, named one by one.** The theme a player picks on
 /// the title screen has to be the theme the run opens in — it is a fact about
-/// their eyes, not about the facility — and so does the modality and the debug
-/// session's tab (#459); everything else is the last screen's and must go.
+/// their eyes, not about the facility — and so are the renderer (#513), the modality
+/// and the debug session (#459); everything else is the last screen's and must go.
 ///
 /// The result is destructured field-by-field rather than compared against a
 /// hand-built `ScreenUi`, so adding a field to the struct fails to compile *here*
@@ -1725,8 +1772,12 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
             screen: MapScreen::Brief(NodeId::at(0, 0)),
             brief_row: 1,
         }),
+        settings: SettingsUi {
+            selected: SettingsRow::Renderer,
+        },
         help_tab: HelpTab::Abilities,
         theme: Theme::default().toggled(),
+        renderer: Renderer::default().toggled(),
         seed_copy: SeedCopy::Copied,
         debug_mode: true,
         end: EndUi {
@@ -1743,12 +1794,14 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         // Kept — the player's and the session's.
         modality,
         theme,
+        renderer,
         debug_mode,
         // Dropped — the last screen's.
         message_log_open,
         help_open,
         menu,
         map,
+        settings,
         help_tab,
         seed_copy,
         end,
@@ -1756,7 +1809,11 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
 
     assert_eq!(modality, carried.modality, "the player's hands (§11.6)");
     assert_eq!(theme, carried.theme, "the player's eyes (§11.2)");
-    assert!(debug_mode, "the session's own tab (§12.6/#459)");
+    assert_eq!(
+        renderer, carried.renderer,
+        "the renderer they chose (§11.1/#513)"
+    );
+    assert!(debug_mode, "the session's own switches (§12.6/#459)");
 
     assert!(
         !message_log_open,
@@ -1770,6 +1827,11 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
     assert!(
         map.is_none(),
         "and the campaign map closes as the facility opens (§14 v3)",
+    );
+    assert_eq!(
+        settings,
+        SettingsUi::default(),
+        "and the settings marker opens where it always does (#513)",
     );
     assert_eq!(help_tab, HelpTab::default());
     assert_eq!(

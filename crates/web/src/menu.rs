@@ -27,7 +27,7 @@ use std::rc::Rc;
 
 use intrusion_core::{
     Difficulty, LevelSeed, MenuEntry, MenuHit, MenuNav, MenuScreen, MenuUi, OptionsControl,
-    RunMode, RunOptions, ScreenUi, UiCommand,
+    RunMode, RunOptions, ScreenUi,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -46,6 +46,9 @@ const SCREEN_ATTR: &str = "data-screen";
 const SCREEN_MENU: &str = "menu";
 const SCREEN_SEED: &str = "seed";
 const SCREEN_OPTIONS: &str = "options";
+/// The **global settings screen** (§14 v2/#513) — named apart from `options`, which is
+/// the *pre-run* level dialog (#298), for the reason the two screens are apart at all.
+pub(crate) const SCREEN_SETTINGS: &str = "settings";
 pub(crate) const SCREEN_PLAY: &str = "play";
 /// The campaign map (§14 v3/#208). Like `play` it hides the seed box; it is named
 /// separately so the headless smoke check can tell a map from a board.
@@ -108,6 +111,17 @@ pub(crate) fn set_screen(screen: &str) {
     }
 }
 
+/// The `data-screen` value for the menu surface `menu` is showing — the one place that
+/// maps a [`MenuScreen`] to its name, so raising and leaving the options screen over the
+/// menu restores exactly the value the menu set for itself.
+pub(crate) fn screen_for(menu: MenuUi) -> &'static str {
+    match menu.screen {
+        MenuScreen::Entries => SCREEN_MENU,
+        MenuScreen::SeedPrompt => SCREEN_SEED,
+        MenuScreen::LevelOptions => SCREEN_OPTIONS,
+    }
+}
+
 /// Whether the **level-options** dialog is the surface showing.
 fn on_options(menu: MenuUi) -> bool {
     menu.screen == MenuScreen::LevelOptions
@@ -157,7 +171,7 @@ impl Game {
             // dialog, both of which draw the control — it is the same free view
             // toggle as anywhere in the game, and the key matches the drawn control.
             MenuNav::ToggleTheme if menu.screen != MenuScreen::SeedPrompt => {
-                self.apply_ui_command(UiCommand::ToggleTheme);
+                self.toggle_theme();
                 self.draw();
             }
             // Back out of the seed prompt. On the list itself there is nowhere
@@ -170,17 +184,13 @@ impl Game {
     /// Choose an entry — by key or by tap, one path for both (§11.6). A disabled
     /// entry (§14 v2/v3) does nothing at all, deliberately: they are listed so the
     /// menu has room to grow, and nothing more (#268).
-    /// Apply a [`MenuHit`] from a tap on the title screen — choose an entry, or flip
-    /// the theme from the footer control (§11.2/#189). The pointer counterpart of
-    /// [`apply_menu_nav`](Self::apply_menu_nav), so a tap and a key do the same
-    /// thing through the same two calls.
+    /// Apply a [`MenuHit`] from a tap on the title screen — choose an entry, or set the
+    /// level-options slider. The pointer counterpart of
+    /// [`apply_menu_nav`](Self::apply_menu_nav), so a tap and a key do the same thing
+    /// through the same handlers.
     pub(crate) fn apply_menu_hit(&mut self, hit: MenuHit) {
         match hit {
             MenuHit::Entry(entry) => self.choose(entry),
-            MenuHit::ToggleTheme => {
-                self.apply_ui_command(UiCommand::ToggleTheme);
-                self.draw();
-            }
             // A tapped slider stop is set directly rather than nudged towards — the
             // stop under the finger is the one the player meant.
             MenuHit::Difficulty(difficulty) => self.set_difficulty(difficulty),
@@ -201,8 +211,8 @@ impl Game {
             MenuEntry::ContinueRun => self.continue_run(),
             // Quick play opens its **pre-run** dialog rather than booting straight in
             // (#298): the difficulty is a choice about the run, so it is asked before
-            // there is a run. `MenuEntry::Options` stays inert — that is §14 v2's
-            // *global* settings screen, a different thing entirely.
+            // there is a run. Deliberately not `MenuEntry::Options`, which is §14 v2's
+            // *global* settings screen — a different thing entirely (#513).
             MenuEntry::QuickPlay => self.show_level_options(),
             MenuEntry::SeedPlay => self.show_seed_prompt(),
             // Story mode goes **straight to the map** (§14 v3/#208), with no dialog in
@@ -210,7 +220,11 @@ impl Game {
             // alert (#210) rather than through the §12.6 difficulty axis, so the one
             // control the quick-play dialog carries would have nothing to set.
             MenuEntry::StoryMode => self.start_campaign(),
-            MenuEntry::Options => {}
+            // The **global settings screen** (§14 v2/#513), raised over the menu: the
+            // theme, the renderer, and in a debug session the §12.6 switches. It is
+            // drawn over the entry list rather than replacing it, so leaving lands back
+            // exactly here.
+            MenuEntry::Options => self.open_settings(),
         }
     }
 

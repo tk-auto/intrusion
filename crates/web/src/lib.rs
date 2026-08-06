@@ -53,7 +53,9 @@ mod menu;
 mod palette;
 mod replay;
 mod save;
+mod screen_settings;
 mod seed;
+mod settings;
 mod tap;
 mod tiles;
 
@@ -179,6 +181,10 @@ pub fn start() -> Result<(), JsValue> {
     // way the view state opens on the device's own input modality (§11.6/#323), which
     // the first key or finger then corrects.
     let modality = input::boot_modality();
+    // The player's stored preferences (§14 v2/#513), and this load's override of them:
+    // the theme and the renderer come back from the settings record, and a `?tiles=`
+    // URL (or a baked preview build) states the renderer for this load over the top.
+    let preferences = settings::Settings::boot(tiles::boot_choice());
     let ui = if chosen.is_none() && replay.is_none() {
         menu::opening_ui(resume.is_some())
     } else {
@@ -191,6 +197,8 @@ pub fn start() -> Result<(), JsValue> {
     // that control; every build has one now, so there is one question left to ask.
     let ui = ScreenUi {
         modality,
+        theme: preferences.theme,
+        renderer: preferences.renderer,
         debug_mode: debug.mode,
         ..ui
     };
@@ -477,7 +485,7 @@ impl Game {
             &grid,
             &self.metrics,
             self.ui.theme,
-            self.tiles.layer(),
+            self.tiles.layer(self.ui.renderer),
         );
         reflect_theme(self.ui.theme);
         // In replay mode, keep the `K / total` HUD in step with the board every
