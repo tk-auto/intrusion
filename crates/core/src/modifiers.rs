@@ -106,71 +106,125 @@ impl Ord for IntelGate {
     }
 }
 
-/// The facility's **guard count** (§10.2/#232) — one step either side of the
-/// recipe's own number, the two ends of a single bounded knob.
+/// The facility's **guard count** (§10.2/#232/#565) — a signed **delta** on the recipe's
+/// own number, in whole guards.
 ///
 /// The §10.2 [START] baseline is four guards, and the `--guards` sweep is roughly
 /// linear at 8–10 points of bare win rate per guard with no cliff (appendix 26), so
 /// one guard is exactly one difficulty step: [`More`](GuardCount::More) is harder,
 /// [`Fewer`](GuardCount::Fewer) easier, and neither is a threshold that turns the
-/// game into a different one. The **±1 reach is the whole knob** — the envelope it
-/// may move within is [`LevelConfig::GUARDS_MIN`]…[`LevelConfig::GUARDS_MAX`]
-/// (`crate::LevelConfig`), and the arithmetic lives there with the recipe rather
-/// than here, because how many guards a carve can *seat* is a fact about generation
-/// (§10.6), not about the modifier seam.
+/// game into a different one. The envelope the count may move within is
+/// [`LevelConfig::GUARDS_MIN`]…[`LevelConfig::GUARDS_MAX`] (`crate::LevelConfig`), and the
+/// arithmetic lives there with the recipe rather than here, because how many guards a
+/// carve can *seat* is a fact about generation (§10.6), not about the modifier seam.
 ///
-/// **The one knob whose baseline sits in the middle.** [`IntelGate`] is ordered along
-/// a single exposure axis with quick play already at its hard end, so composing it
-/// harder-ward is all the seam ever needs. This knob's baseline is a *neutral* middle
-/// with a departure on each side, which is what lets both ends live in the §12.6
-/// directed pool — see [`harder_of`](GuardCount::harder_of) for the composition rule
-/// that follows from it.
+/// **It is a delta, and deltas stack** (#565). Its reach is [`REACH`](Self::REACH) steps
+/// either way rather than one, because a facility can be told *one more guard* by two
+/// sources at once — a [`Vault`](Composite::Vault) is watched, and the campaign alert
+/// (#210) can deal a harder rule onto the same facility — and the honest answer to that is
+/// **two** more guards, not one. One source's step is one rung; two sources' steps are two,
+/// and each keeps its own row on the Level info tab so the player can read the sum.
+/// See [`plus`](Self::plus) for the composition rule and what it costs.
+///
+/// **The one knob whose baseline sits in the middle**, with [`IntelCount`]. [`IntelGate`]
+/// is ordered along a single exposure axis with quick play already at its hard end, so
+/// composing it harder-ward is all the seam ever needs. This knob's baseline is a *neutral*
+/// zero with departures either side, which is what lets both ends live in the §12.6
+/// directed pool and what makes arithmetic the natural composition.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GuardCount {
-    /// **Easier.** One guard fewer than the recipe asks for — never below
-    /// [`LevelConfig::GUARDS_MIN`](crate::LevelConfig::GUARDS_MIN), the floor that
-    /// keeps a facility patrolled rather than empty.
+    /// **Easier, twice over.** Two guards fewer — only ever reached by two sources each
+    /// asking for one, never by a single draw (the §12.6 pool holds one rung per
+    /// direction). Never below [`LevelConfig::GUARDS_MIN`](crate::LevelConfig::GUARDS_MIN),
+    /// the floor that keeps a facility patrolled rather than empty.
+    TwoFewer,
+    /// **Easier.** One guard fewer than the recipe asks for.
     Fewer,
     /// The recipe's own count, unchanged — §10.2's four **[START]** for
     /// [`LevelConfig::V1`](crate::LevelConfig::V1). [`Default`], so a hand-built
     /// state and the sim play the unchanged §10.2 game.
     #[default]
     Baseline,
-    /// **Harder.** One guard more — never above
-    /// [`LevelConfig::GUARDS_MAX`](crate::LevelConfig::GUARDS_MAX), the cap that
-    /// keeps the screen-bound board (§11.4) from being crowded.
+    /// **Harder.** One guard more.
     More,
+    /// **Harder, twice over.** Two guards more — a [`Vault`](Composite::Vault) that the
+    /// campaign has also dealt a harder rule to, and the case #565 was reopened for. Never
+    /// above [`LevelConfig::GUARDS_MAX`](crate::LevelConfig::GUARDS_MAX), the cap that
+    /// keeps the screen-bound board (§11.4) from being crowded.
+    TwoMore,
 }
 
 impl GuardCount {
-    /// Compose two contributions, the [`LevelModifiers::union`] rule for this knob:
-    /// **the end that departs from the baseline wins, and pressure breaks a tie.**
+    /// How far the knob reaches either side of the baseline, in steps.
     ///
-    /// It is the same promise [`IntelGate::harder_of`] makes — *sources add pressure
-    /// and never cancel each other* — read against a knob whose baseline is a neutral
-    /// middle rather than one end of an axis. Taking the plain maximum would have a
-    /// source that asked for **nothing** silently overrule one that asked for fewer
-    /// guards, which is not a source adding pressure; it is a source that stayed
-    /// quiet being counted as one that objected.
-    ///
-    /// So: a baseline contribution yields to whichever end its partner names, and
-    /// [`More`](Self::More) beats [`Fewer`](Self::Fewer) when two sources genuinely
-    /// disagree. The invariant that matters is preserved exactly — **no contribution
-    /// can relieve pressure another one asked for**, so the campaign alert (#210)
-    /// cannot be talked out of its extra guard by a choice the player made.
-    #[must_use]
-    pub fn harder_of(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Baseline, end) | (end, Self::Baseline) => end,
-            (Self::More, _) | (_, Self::More) => Self::More,
-            (Self::Fewer, Self::Fewer) => Self::Fewer,
+    /// **Two, because two sources can each name one** (#565): a node flavour and the
+    /// campaign alert both speak to the same facility, and there is no third source that
+    /// names this knob in a campaign. A wider reach would be rungs nothing can ask for.
+    pub const REACH: i8 = 2;
+
+    /// The knob's value as a signed number of guards off the recipe's count — what
+    /// [`LevelConfig::with_guard_count`](crate::LevelConfig::with_guard_count) adds.
+    pub const fn steps(self) -> i8 {
+        match self {
+            Self::TwoFewer => -2,
+            Self::Fewer => -1,
+            Self::Baseline => 0,
+            Self::More => 1,
+            Self::TwoMore => 2,
         }
+    }
+
+    /// The rung standing for `steps`, **clamped** to [`REACH`](Self::REACH) — the inverse
+    /// of [`steps`](Self::steps), and where the arithmetic below stops.
+    pub const fn at_steps(steps: i8) -> Self {
+        match steps {
+            i8::MIN..=-2 => Self::TwoFewer,
+            -1 => Self::Fewer,
+            0 => Self::Baseline,
+            1 => Self::More,
+            2..=i8::MAX => Self::TwoMore,
+        }
+    }
+
+    /// Compose two contributions, the [`LevelModifiers::union`] rule for this knob:
+    /// **the deltas add, clamped to the knob's reach** (§12.6/#565).
+    ///
+    /// It replaces the *"the end that departs from the baseline wins, and pressure breaks
+    /// a tie"* rule, and the reason is the composite (#565). A
+    /// [`Vault`](Composite::Vault) says *one more guard* and a campaign condition deals
+    /// *one more guard* onto the same facility; under the old rule the second one landed
+    /// on a knob already at its only harder rung and did **nothing**, which is a rule the
+    /// Level info tab would be drawing a row for and the building would not have. A
+    /// modifier that changes nothing observable cannot pass for shipped (§2.3), and that
+    /// applies to the *second* source as much as to the first.
+    ///
+    /// **What it costs, stated rather than buried.** §12.6's older invariant — *no
+    /// contribution can relieve pressure another one asked for* — does not survive
+    /// arithmetic: an [`Outpost`](Composite::Outpost)'s `-1` and a drawn `+1` now sum to
+    /// the recipe's own count instead of the drawn rule winning. That is the same trade in
+    /// the other direction, and it is the honest one for a **count**: a facility told to
+    /// hold one fewer guard and one more guard holds the number it started with, and the
+    /// tab shows both rules so the player can do the sum. The invariant still holds
+    /// wherever it always meant something — the [`IntelGate`], the toggles, the
+    /// [`LayoutKnowledge`] knob — none of which is a count and none of which composes here.
+    ///
+    /// Appendix 54 has the argument.
+    #[must_use]
+    pub fn plus(self, other: Self) -> Self {
+        Self::at_steps(self.steps() + other.steps())
+    }
+
+    /// The departure `self` names **beyond** `other` — the inverse of [`plus`](Self::plus),
+    /// used to say what a set asks for over and above its composite
+    /// ([`LevelModifiers::departures_beyond_composite`]).
+    #[must_use]
+    pub fn minus(self, other: Self) -> Self {
+        Self::at_steps(self.steps() - other.steps())
     }
 }
 
-/// The facility's **intel count** (§10.2/#207) — one step either side of the recipe's
-/// own number, the second bounded knob of [`GuardCount`]'s shape and the campaign's
-/// **reward** axis.
+/// The facility's **intel count** (§10.2/#207/#565) — a signed **delta** on the recipe's
+/// own number of consoles, [`GuardCount`]'s shape over the campaign's **reward** axis.
 ///
 /// It exists because the facility map (#207) offers a choice between facilities and a
 /// choice needs two axes to be a choice: a successor that is only ever *harder* is one
@@ -182,50 +236,80 @@ impl GuardCount {
 /// **Which end is "harder" is the opposite of the guard knob's**, and follows from
 /// what intel *is* rather than from arithmetic. Under the campaign's
 /// [`IntelGate::None`] (§4.5) intel is currency (§2.2), so fewer consoles is a thinner
-/// run: [`Fewer`](Self::Fewer) is the harder end and composes as one
-/// ([`harder_of`](Self::harder_of)). Under quick play's [`IntelGate::All`] the same
-/// step would move the **win condition** instead — which is exactly why this knob is
-/// not in the §12.6 directed pool (see [`POOL`]): the difficulty draw would be
-/// deciding how much of the game you have to do, under a change that is not about
-/// quick play at all.
+/// run: [`Fewer`](Self::Fewer) is the harder end. Under quick play's [`IntelGate::All`]
+/// the same step would move the **win condition** instead — which is exactly why this knob
+/// is not in the §12.6 directed pool (see [`POOL`]): the difficulty draw would be deciding
+/// how much of the game you have to do, under a change that is not about quick play at all.
 ///
-/// The ±1 envelope is [`LevelConfig::INTEL_MIN`]…[`LevelConfig::INTEL_MAX`]
+/// **A delta like the guard knob, and it stacks like one** (#565, [`plus`](Self::plus)).
+/// Its two-step rungs are unreachable in play today — nothing but a node flavour names this
+/// knob, and a facility has one flavour — so they exist for the same reason the knob is
+/// arithmetic at all: the rule is *deltas add*, and a knob that quietly stopped adding at
+/// one rung would be the special case §12.6 spends its length avoiding.
+///
+/// The envelope is [`LevelConfig::INTEL_MIN`]…[`LevelConfig::INTEL_MAX`]
 /// (`crate::LevelConfig`), and lives there with the recipe for the same reason the
 /// guard envelope does: how many consoles a carve can *seat* is a fact about
 /// generation (§10.6), not about this seam.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IntelCount {
-    /// **Harder.** One console fewer than the recipe asks for — never below
-    /// [`LevelConfig::INTEL_MIN`](crate::LevelConfig::INTEL_MIN), the floor that keeps
-    /// a facility worth raiding at all.
+    /// **Harder, twice over.** Two consoles fewer, never below
+    /// [`LevelConfig::INTEL_MIN`](crate::LevelConfig::INTEL_MIN) — the floor that keeps a
+    /// facility worth raiding at all.
+    TwoFewer,
+    /// **Harder.** One console fewer than the recipe asks for.
     Fewer,
     /// The recipe's own count, unchanged — §10.2's three **[START]** for
     /// [`LevelConfig::V1`](crate::LevelConfig::V1). [`Default`], so a hand-built state,
     /// quick play and the sim all play the unchanged §10.2 game.
     #[default]
     Baseline,
-    /// **Easier.** One console more — never above
-    /// [`LevelConfig::INTEL_MAX`](crate::LevelConfig::INTEL_MAX), the cap that keeps
-    /// the intel pool inside what a 40×40 carve reliably seats.
+    /// **Easier.** One console more.
     More,
+    /// **Easier, twice over.** Two consoles more, never above
+    /// [`LevelConfig::INTEL_MAX`](crate::LevelConfig::INTEL_MAX), the cap that keeps the
+    /// intel pool inside what a 40×40 carve reliably seats.
+    TwoMore,
 }
 
 impl IntelCount {
-    /// Compose two contributions **harder-ward**, the [`LevelModifiers::union`] rule
-    /// for this knob — [`GuardCount::harder_of`]'s rule with the ends swapped, because
-    /// here the *scarce* end is the hard one.
-    ///
-    /// The invariant is the one that matters everywhere in §12.6: **no contribution can
-    /// relieve pressure another one asked for**. A baseline source stayed quiet and
-    /// yields to whichever end its partner names; when two sources genuinely disagree,
-    /// [`Fewer`](Self::Fewer) wins.
-    #[must_use]
-    pub fn harder_of(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Baseline, end) | (end, Self::Baseline) => end,
-            (Self::Fewer, _) | (_, Self::Fewer) => Self::Fewer,
-            (Self::More, Self::More) => Self::More,
+    /// How far the knob reaches either side of the baseline, in steps — [`GuardCount`]'s
+    /// reach, for the same reason (#565).
+    pub const REACH: i8 = 2;
+
+    /// The knob's value as a signed number of consoles off the recipe's count.
+    pub const fn steps(self) -> i8 {
+        match self {
+            Self::TwoFewer => -2,
+            Self::Fewer => -1,
+            Self::Baseline => 0,
+            Self::More => 1,
+            Self::TwoMore => 2,
         }
+    }
+
+    /// The rung standing for `steps`, clamped to [`REACH`](Self::REACH).
+    pub const fn at_steps(steps: i8) -> Self {
+        match steps {
+            i8::MIN..=-2 => Self::TwoFewer,
+            -1 => Self::Fewer,
+            0 => Self::Baseline,
+            1 => Self::More,
+            2..=i8::MAX => Self::TwoMore,
+        }
+    }
+
+    /// Compose two contributions: **the deltas add, clamped** — [`GuardCount::plus`]'s rule
+    /// over the reward axis, and see it for what arithmetic costs and why it is worth it.
+    #[must_use]
+    pub fn plus(self, other: Self) -> Self {
+        Self::at_steps(self.steps() + other.steps())
+    }
+
+    /// The departure `self` names beyond `other` — the inverse of [`plus`](Self::plus).
+    #[must_use]
+    pub fn minus(self, other: Self) -> Self {
+        Self::at_steps(self.steps() - other.steps())
     }
 }
 
@@ -568,18 +652,22 @@ impl Composite {
         }
     }
 
-    /// This composite as a **source contribution** (§12.6): the variant itself, plus the
-    /// fields it stands for. What [`Flavour::modifiers`](crate::Flavour::modifiers) hands
-    /// to [`ModifierSources::flavour`].
+    /// This composite as a **source contribution** (§12.6): the variant, and *only* the
+    /// variant. What [`Flavour::modifiers`](crate::Flavour::modifiers) hands to
+    /// [`ModifierSources::flavour`].
     ///
-    /// It carries the expansion as well as the variant so that a caller reading a field off
-    /// a contribution reads what the contribution actually asks for. Resolution expands
-    /// again and the operation is idempotent, so nothing double-counts.
+    /// **The expansion is deliberately not in it** (#565). A contribution says what a source
+    /// asks for, and this source asks for one thing: *this facility is a Vault*. Carrying
+    /// the fields as well would have them counted twice once the count knobs became
+    /// arithmetic — the merge would add the Vault's guard, and
+    /// [`expand_composite`](LevelModifiers::expand_composite) would add it again. Read a
+    /// primitive field off a resolved set, or off
+    /// [`expansion`](Self::expansion) if what you want is what the word means.
     #[must_use]
     pub fn contribution(self) -> LevelModifiers {
         LevelModifiers {
             composite: self,
-            ..self.expansion()
+            ..LevelModifiers::neutral()
         }
     }
 
@@ -1209,7 +1297,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 21] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 25] = [
     LOCKED_PRIZE_ROOM,
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
@@ -1220,9 +1308,13 @@ pub(crate) const CAPTIONS: [ActiveModifier; 21] = [
     ALL_DOORS_AUTOMATIC,
     WATCHES_CONSOLES,
     GUARDS_MORE,
+    GUARDS_TWO_MORE,
     GUARDS_FEWER,
+    GUARDS_TWO_FEWER,
     CONSOLES_MORE,
+    CONSOLES_TWO_MORE,
     CONSOLES_FEWER,
+    CONSOLES_TWO_FEWER,
     ONE_CACHE,
     TWO_CACHES,
     THREE_CACHES,
@@ -1334,6 +1426,26 @@ const GUARDS_MORE: ActiveModifier = ActiveModifier {
     short: "one more guard",
 };
 
+/// The knob's two-step rungs (#565), reached when **two sources each ask for one** — a
+/// Vault watched by the campaign as well as by its own design. Said as a count like the
+/// single steps beside them, because that is still the only thing about it a player can
+/// act on; the *why* is on the rows above, one per source.
+const GUARDS_TWO_MORE: ActiveModifier = ActiveModifier {
+    name: "Guards",
+    direction: ModifierDirection::Harder,
+    detail: Some("two more"),
+    source: None,
+    short: "two more guards",
+};
+
+const GUARDS_TWO_FEWER: ActiveModifier = ActiveModifier {
+    name: "Guards",
+    direction: ModifierDirection::Easier,
+    detail: Some("two fewer"),
+    source: None,
+    short: "two fewer guards",
+};
+
 const GUARDS_FEWER: ActiveModifier = ActiveModifier {
     name: "Guards",
     direction: ModifierDirection::Easier,
@@ -1352,6 +1464,23 @@ const CONSOLES_MORE: ActiveModifier = ActiveModifier {
     detail: Some("one more"),
     source: None,
     short: "one more console",
+};
+
+/// The reward axis's two-step rungs (#565), on the guard knob's terms.
+const CONSOLES_TWO_MORE: ActiveModifier = ActiveModifier {
+    name: "Consoles",
+    direction: ModifierDirection::Easier,
+    detail: Some("two more"),
+    source: None,
+    short: "two more consoles",
+};
+
+const CONSOLES_TWO_FEWER: ActiveModifier = ActiveModifier {
+    name: "Consoles",
+    direction: ModifierDirection::Harder,
+    detail: Some("two fewer"),
+    source: None,
+    short: "two fewer consoles",
 };
 
 const CONSOLES_FEWER: ActiveModifier = ActiveModifier {
@@ -1729,28 +1858,27 @@ impl LevelModifiers {
     /// **A rule a composite set is drawn under its name** (§12.6/#565): a
     /// [`Vault`](Composite::Vault) contributes `Vault: one more guard`, `Vault: one more
     /// console` and `Vault: three caches` — one row per expanded field, so nothing is
-    /// hidden behind a label and the tab's honest count of active rules is unchanged. The
-    /// attribution is by **value**: a row is the composite's exactly when the composite's
-    /// own [`parts`](Composite::parts) produce that identical row, so a contribution another
-    /// source overruled is not claimed, and a rule no composite asked for keeps its own
-    /// name. Where a composite and another source touch different fields, both rows are
-    /// there with their owners readable; where they name the same rung of the same knob,
-    /// there is **one** rule in force and one row says so — a second row for a rule
-    /// changing nothing is the §2.3 facade, not legibility.
+    /// hidden behind a label and the tab's honest count of active rules is unchanged.
+    ///
+    /// **Every source keeps its own row, and two of them stack.** The list is the
+    /// composite's [`parts`](Composite::parts) followed by
+    /// [`departures_beyond_composite`](Self::departures_beyond_composite) — what the *other*
+    /// sources asked for — so a Vault dealt a harder guard rule draws both `Vault: one more
+    /// guard` and `Guards: one more`, and the facility really does hold the two guards those
+    /// rows add up to. That is what makes a row a receipt rather than a claim: no row here
+    /// stands for a rule the building does not have, and none of the building's rules is
+    /// missing a row.
     #[must_use]
     pub fn active(&self) -> Vec<ActiveModifier> {
-        let parts = self.composite.parts();
         let owner = self.composite.label();
-        self.rows()
+        let mut active: Vec<ActiveModifier> = self
+            .composite
+            .parts()
             .into_iter()
-            .map(|row| {
-                if parts.contains(&row) {
-                    row.attributed_to(owner)
-                } else {
-                    row
-                }
-            })
-            .collect()
+            .map(|part| part.attributed_to(owner))
+            .collect();
+        active.extend(self.departures_beyond_composite().rows());
+        active
     }
 
     /// The active rules as rows, **before** any composite is credited with the ones it set
@@ -1850,7 +1978,9 @@ impl LevelModifiers {
         match guard_count {
             GuardCount::Baseline => {} // the recipe's own count — nothing to surface
             GuardCount::More => active.push(GUARDS_MORE),
+            GuardCount::TwoMore => active.push(GUARDS_TWO_MORE),
             GuardCount::Fewer => active.push(GUARDS_FEWER),
+            GuardCount::TwoFewer => active.push(GUARDS_TWO_FEWER),
         }
         // The reward end of the same shape (§10.2/#207) — surfaced beside the guard
         // count, so a Vault's card reads as the one trade it is: one more console,
@@ -1858,7 +1988,9 @@ impl LevelModifiers {
         match intel_count {
             IntelCount::Baseline => {} // the recipe's own count — nothing to surface
             IntelCount::More => active.push(CONSOLES_MORE),
+            IntelCount::TwoMore => active.push(CONSOLES_TWO_MORE),
             IntelCount::Fewer => active.push(CONSOLES_FEWER),
+            IntelCount::TwoFewer => active.push(CONSOLES_TWO_FEWER),
         }
         // Read before turn one like the two above (#215): a facility whose contents are
         // already on the board is a facility somebody paid for, and the card is where a
@@ -1926,16 +2058,15 @@ impl LevelModifiers {
             automatic_doors: self.automatic_doors || other.automatic_doors,
             guards_watch_consoles: self.guards_watch_consoles || other.guards_watch_consoles,
             show_search_areas: self.show_search_areas || other.show_search_areas,
-            // A bounded knob composes *harder-ward* (§12.6): take the value further
-            // in its documented direction, so sources add pressure, never cancel.
-            // For the guard count that reads as "the end that departs from the
-            // baseline wins, pressure breaking a tie" — the same promise over a knob
-            // whose baseline is a neutral middle (#232).
-            guard_count: self.guard_count.harder_of(other.guard_count),
-            // The same rule with the ends swapped (#207): scarcity is this knob's
-            // hard direction, so a flavour asking for fewer consoles cannot be talked
-            // out of it by a source that asked for more.
-            intel_count: self.intel_count.harder_of(other.intel_count),
+            // A **count** knob composes by arithmetic (§12.6/#565): the deltas add,
+            // clamped to the knob's reach, so two sources each asking for one more
+            // guard get two — and each keeps its own row on the Level info tab. See
+            // `GuardCount::plus` for what that costs the older no-cancelling rule, and
+            // why a count is the one place the trade goes this way.
+            guard_count: self.guard_count.plus(other.guard_count),
+            // The same arithmetic over the reward axis (#207), whose ends are the other
+            // way up: `Fewer` is the harder one and the sum is still just the sum.
+            intel_count: self.intel_count.plus(other.intel_count),
             // The reward knob (#209): a quiet source yields and the larger count wins,
             // so what the map advertised, the facility holds. See `CacheCount::most_of`
             // for why this one does not compose harder-ward like its neighbours.
@@ -1960,33 +2091,103 @@ impl LevelModifiers {
         }
     }
 
-    /// **Expand this set's composite into the primitive fields it stands for**
-    /// (§12.6/#565) — what [`ModifierSources::resolve`] does last, and the reason no system
-    /// below resolution ever learns the word *Vault*.
+    /// **Add this set's composite to the departures already named here** (§12.6/#565) —
+    /// what [`ModifierSources::resolve`] does last, and the reason no system below
+    /// resolution ever learns the word *Vault*.
     ///
     /// The expansion is composed by [`union`](Self::union) like any other contribution, so
-    /// a composite adds pressure and never relieves it: an [`Outpost`](Composite::Outpost)
-    /// asking for one guard fewer cannot talk a drawn harder rule out of its extra guard,
-    /// and a [`Vault`](Composite::Vault) asking for one more cannot be talked out of it
-    /// either. **The bounded knobs compose as deltas over the baseline, clamped** — which
-    /// at today's ±1 envelope (`LevelConfig::GUARDS_MIN`…`GUARDS_MAX`, three either side of
-    /// four) is exactly what [`GuardCount::harder_of`] already computes, since a second
-    /// `+1` clamps straight back onto the same fifth guard. Widening that envelope so a
-    /// second step is observable is a **balance** change and its own ticket; this one is a
-    /// representation change and must leave every facility exactly as it was.
+    /// the count knobs **add**: a [`Vault`](Composite::Vault)'s `+1 guard` on a facility
+    /// the campaign has also dealt `+1 guard` resolves to `+2`, and both rules keep their
+    /// own row. That is the whole point of a composite bringing its own version of the
+    /// modifiers rather than a claim on them.
     ///
     /// The variant is **kept** rather than cleared, because the token and the Level info
     /// tab both still need to know the set was stated as one word (see
-    /// [`composite`](Self::composite)). Expansion is therefore **idempotent**: a set that
-    /// has already been expanded is unchanged by expanding it again, which is what lets a
-    /// decoded token and a freshly resolved facility be the same value.
+    /// [`composite`](Self::composite)).
+    ///
+    /// # It is not idempotent, and it must not be called twice
+    ///
+    /// Arithmetic has no room for that: expanding twice would count the composite's guard
+    /// a second time. So this takes a set whose primitive fields state the departures
+    /// **beyond** its composite — what
+    /// [`departures_beyond_composite`](Self::departures_beyond_composite) produces, and
+    /// what both of its callers hold: `resolve` has just merged the sources, whose
+    /// contributions never carry an expansion, and `decode` has just read a token, whose
+    /// slots are stored beyond the composite for exactly this reason. The two are inverses,
+    /// pinned by `expanding_and_stripping_a_composite_are_inverses`.
     #[must_use]
-    pub fn expanded(self) -> Self {
+    pub fn expand_composite(self) -> Self {
         let composite = self.composite;
         Self {
             composite,
             ..self.union(composite.expansion())
         }
+    }
+
+    /// **What this set asks for beyond its composite** — the inverse of
+    /// [`expand_composite`](Self::expand_composite), and the one derivation both the wire
+    /// and the panel are written over (§12.6/#565).
+    ///
+    /// A composite's fields are not encoded (its slot stands for them) and not drawn under
+    /// their own names (they are drawn under its), so both need the same question answered:
+    /// *what is here that the composite did not put here?* For a **count** knob that is
+    /// subtraction, which is what makes two sources' steps two rows rather than one; for a
+    /// toggle it is "on, unless the composite already asks for it"; for the other knobs it
+    /// is "this value, unless it is exactly the one the composite gives".
+    ///
+    /// **It takes a resolved set** — one the composite has already been added to. The
+    /// subtraction is arithmetic, so handing it a bare contribution (a composite named with
+    /// its fields still at baseline) reads the missing fields as a source that *cancelled*
+    /// them, and answers accordingly. Every caller holds a resolved set by construction:
+    /// the panel draws one and the encoder writes one.
+    ///
+    /// The result names no composite, so it is a plain set of departures — which is what
+    /// `expand_composite` expects back.
+    #[must_use]
+    pub fn departures_beyond_composite(self) -> Self {
+        let given = self.composite.expansion();
+        Self {
+            guards_always_search_hideouts: self.guards_always_search_hideouts
+                && !given.guards_always_search_hideouts,
+            sighting_lost_calls_a_guard: self.sighting_lost_calls_a_guard
+                && !given.sighting_lost_calls_a_guard,
+            body_found_calls_two_guards: self.body_found_calls_two_guards
+                && !given.body_found_calls_two_guards,
+            always_show_vision_cones: self.always_show_vision_cones
+                && !given.always_show_vision_cones,
+            layout_knowledge: strip(self.layout_knowledge, given.layout_knowledge),
+            calm_guards_detect_only_their_cone: self.calm_guards_detect_only_their_cone
+                && !given.calm_guards_detect_only_their_cone,
+            automatic_doors: self.automatic_doors && !given.automatic_doors,
+            guards_watch_consoles: self.guards_watch_consoles && !given.guards_watch_consoles,
+            show_search_areas: self.show_search_areas && !given.show_search_areas,
+            guard_count: self.guard_count.minus(given.guard_count),
+            intel_count: self.intel_count.minus(given.intel_count),
+            caches: strip(self.caches, given.caches),
+            prize_room_locked: self.prize_room_locked && !given.prize_room_locked,
+            narrowed_guard_cones: self.narrowed_guard_cones && !given.narrowed_guard_cones,
+            scouted: self.scouted && !given.scouted,
+            // Never a composite's to set (see `Composite::expansion`), so it passes
+            // through whole rather than being differenced against a value that is always
+            // `neutral`'s.
+            intel_to_exit: self.intel_to_exit,
+            composite: Composite::None,
+        }
+    }
+}
+
+/// A non-count knob's departure **beyond** what a composite already gives: the value
+/// itself, unless it is exactly the one the composite asked for, in which case the
+/// composite is already saying it and there is nothing left over (§12.6/#565).
+///
+/// Written once over `Default` rather than per knob because that is precisely what
+/// "nothing left over" means for a knob whose baseline is its own default — and because
+/// the count knobs, which subtract instead, are the only ones this would be wrong for.
+fn strip<T: PartialEq + Default>(value: T, given: T) -> T {
+    if value == given {
+        T::default()
+    } else {
+        value
     }
 }
 
@@ -2044,7 +2245,7 @@ impl ModifierSources {
         if let Some(flavour) = self.flavour {
             active = active.union(flavour);
         }
-        active.expanded()
+        active.expand_composite()
     }
 }
 
@@ -2406,48 +2607,72 @@ mod tests {
         assert_eq!(a.union(LevelModifiers::default()), a);
     }
 
-    /// The guard knob's composition rule (#232): the **end that departs from the
-    /// baseline wins, and pressure breaks a tie**. The invariant it exists to keep is
-    /// the §12.6 one — no contribution can relieve pressure another one asked for —
-    /// stated over a knob whose baseline is a neutral middle rather than one end of an
-    /// axis, which is why a plain maximum is not the rule here.
+    /// **The count knobs are deltas, and deltas add** (§12.6/#565) — the composition rule
+    /// the composite reopened, stated on the knob and then through the seam.
+    ///
+    /// Two sources each asking for one more guard get **two**, which is the whole change:
+    /// under the old *"the departing end wins, pressure breaks a tie"* rule the second
+    /// source landed on a knob already at its only harder rung and did nothing, and a rule
+    /// that changes nothing observable cannot pass for shipped (§2.3).
     #[test]
-    fn the_guard_knob_composes_without_a_quiet_source_overruling_a_loud_one() {
-        use GuardCount::{Baseline, Fewer, More};
-        // A source that asks for nothing yields to one that names an end — either end.
-        assert_eq!(Baseline.harder_of(Fewer), Fewer);
-        assert_eq!(Fewer.harder_of(Baseline), Fewer);
-        assert_eq!(Baseline.harder_of(More), More);
-        assert_eq!(More.harder_of(Baseline), More);
-        // A genuine disagreement resolves *harder-ward*: the campaign alert (#210)
-        // cannot be talked out of its extra guard by the player's easier choice.
-        assert_eq!(More.harder_of(Fewer), More);
-        assert_eq!(Fewer.harder_of(More), More);
-        // Agreement composes to itself, and the baseline is the identity.
-        assert_eq!(Fewer.harder_of(Fewer), Fewer);
-        assert_eq!(More.harder_of(More), More);
-        assert_eq!(Baseline.harder_of(Baseline), Baseline);
+    fn the_count_knobs_add_their_deltas() {
+        use GuardCount::{Baseline, Fewer, More, TwoFewer, TwoMore};
+        // A source that asks for nothing is the identity — it contributes zero steps.
+        assert_eq!(Baseline.plus(Fewer), Fewer);
+        assert_eq!(Fewer.plus(Baseline), Fewer);
+        assert_eq!(Baseline.plus(More), More);
+        assert_eq!(Baseline.plus(Baseline), Baseline);
+        // Two sources agreeing **stack**, which is the point.
+        assert_eq!(More.plus(More), TwoMore);
+        assert_eq!(Fewer.plus(Fewer), TwoFewer);
+        // Two sources disagreeing **cancel** — the cost of arithmetic, taken deliberately
+        // (see `GuardCount::plus`): a facility told to hold one fewer guard and one more
+        // holds the number it started with, and both rules keep their row.
+        assert_eq!(More.plus(Fewer), Baseline);
+        assert_eq!(Fewer.plus(More), Baseline);
+        // The reach is a wall, not a wrap: a third step cannot exist, and asking for one
+        // stops at the rung rather than rolling over.
+        assert_eq!(TwoMore.plus(More), TwoMore);
+        assert_eq!(TwoFewer.plus(Fewer), TwoFewer);
+        assert_eq!(GuardCount::at_steps(GuardCount::REACH + 1), TwoMore);
         // Commutative over the whole knob — sources compose in any order.
-        for a in [Fewer, Baseline, More] {
-            for b in [Fewer, Baseline, More] {
-                assert_eq!(a.harder_of(b), b.harder_of(a), "{a:?} / {b:?}");
+        for a in [TwoFewer, Fewer, Baseline, More, TwoMore] {
+            for b in [TwoFewer, Fewer, Baseline, More, TwoMore] {
+                assert_eq!(a.plus(b), b.plus(a), "{a:?} / {b:?}");
+                // …and `minus` undoes `plus` wherever the reach did not bite.
+                if (a.steps() + b.steps()).abs() <= GuardCount::REACH {
+                    assert_eq!(a.plus(b).minus(b), a, "{a:?} / {b:?}");
+                }
             }
         }
-        // And the whole rule, once more through the seam the systems actually read:
-        // an alert asking for one more guard survives a choice asking for one fewer.
+        // The reward axis is the same arithmetic with its ends the other way up (#207).
+        assert_eq!(IntelCount::More.plus(IntelCount::More), IntelCount::TwoMore);
+        assert_eq!(
+            IntelCount::Fewer.plus(IntelCount::More),
+            IntelCount::Baseline
+        );
+        // And the whole rule, once more through the seam the systems actually read: a
+        // Vault the campaign has also dealt a harder rule to posts **two** extra guards.
         let resolved = ModifierSources {
             chosen: LevelModifiers {
-                guard_count: Fewer,
+                intel_to_exit: IntelGate::None,
                 ..LevelModifiers::default()
             },
-            flavour: None,
             alert: Some(LevelModifiers {
                 guard_count: More,
-                ..LevelModifiers::default()
+                ..LevelModifiers::neutral()
             }),
+            flavour: Some(Composite::Vault.contribution()),
         }
         .resolve();
-        assert_eq!(resolved.guard_count, More);
+        assert_eq!(resolved.guard_count, TwoMore);
+        assert_eq!(
+            crate::LevelConfig::V1
+                .with_guard_count(resolved.guard_count)
+                .guards,
+            crate::LevelConfig::V1.guards + 2,
+            "and the recipe really seats both of them",
+        );
     }
 
     /// The layout knob's composition (#233), the guard knob's rule over the knowledge
@@ -2730,61 +2955,17 @@ mod tests {
         );
     }
 
-    /// **An overruled contribution is not claimed** (§12.6/#565). An Outpost asks for one
-    /// guard fewer; a harder rule drawn onto the same facility asks for one more, and the
-    /// §12.6 rule is that pressure wins. The tab then says *one more guard* — with nobody's
-    /// name on it, because the facility really does have one more and a row reading
-    /// `Outpost: one fewer guard` beside it would be a caption the board contradicts.
-    #[test]
-    fn a_contribution_another_source_overruled_is_not_attributed() {
-        let resolved = ModifierSources {
-            chosen: LevelModifiers {
-                intel_to_exit: IntelGate::None,
-                ..LevelModifiers::default()
-            },
-            alert: Some(LevelModifiers {
-                guard_count: GuardCount::More,
-                ..LevelModifiers::neutral()
-            }),
-            flavour: Some(Composite::Outpost.contribution()),
-        }
-        .resolve();
-        assert_eq!(resolved.guard_count, GuardCount::More);
-        let rows = resolved.active();
-        let guards: Vec<&ActiveModifier> = rows
-            .iter()
-            .filter(|r| r.detail == Some("one more"))
-            .collect();
-        assert_eq!(
-            guards.len(),
-            1,
-            "one rule about guards, so one row: {rows:?}"
-        );
-        assert_eq!(guards[0].source, None, "the Outpost did not set this");
-        assert!(
-            !rows.iter().any(|r| r.detail == Some("one fewer guard")),
-            "a contribution that lost must not be drawn as though it held: {rows:?}",
-        );
-        // The Outpost's *other* contribution was not overruled, so it keeps its row.
-        assert!(rows.iter().any(|r| r.source == Some("Outpost")));
-    }
-
-    /// **The composition rule, pinned on the case the campaign will actually meet**
-    /// (§12.6/#565): a Vault (`+1 guard`) and a drawn harder rule (`+1 guard`) on the same
-    /// facility.
+    /// **A composite's guard and a drawn guard are two guards, and two rows** (§12.6/#565)
+    /// — the case the campaign will actually meet, and the reason the count knobs became
+    /// arithmetic.
     ///
-    /// The rule is *deltas over the baseline, clamped* — and at today's envelope that is
-    /// exactly what [`GuardCount::harder_of`] computes, because the knob's whole reach is
-    /// ±1 (`LevelConfig::GUARDS_MIN`…`GUARDS_MAX`, three either side of four) and a second
-    /// step clamps straight back onto the same fifth guard. It is emphatically **not**
-    /// "reject the combination" — that would make the campaign's own stacking illegal —
-    /// and it is not last-writer-wins either: no source can relieve pressure another asked
-    /// for, whichever order they compose in.
-    ///
-    /// If the envelope is ever widened so a second step is observable, this test is what
-    /// fails and this is where the new rule is stated.
+    /// A composite brings its **own** version of the modifiers rather than a claim on them,
+    /// so a Vault's `+1` and a condition's `+1` stack: the facility posts two extra guards,
+    /// the tab draws `Vault: one more guard` and `Guards: one more`, and the two rows add up
+    /// to the building. Under the old harder-ward rule the second source landed on a rung
+    /// the first had already taken and did nothing — a row with no rule behind it (§2.3).
     #[test]
-    fn a_vault_and_a_drawn_guard_rule_compose_to_the_envelope_and_no_further() {
+    fn a_vault_and_a_drawn_guard_rule_stack_into_two_guards_and_two_rows() {
         let drawn = LevelModifiers {
             guard_count: GuardCount::More,
             ..LevelModifiers::neutral()
@@ -2798,39 +2979,137 @@ mod tests {
             flavour: Some(Composite::Vault.contribution()),
         }
         .resolve();
-        assert_eq!(resolved.guard_count, GuardCount::More);
+        // Two guards, and the recipe seats both — the envelope was widened to make room
+        // for exactly this (`LevelConfig::GUARDS_MAX`).
+        assert_eq!(resolved.guard_count, GuardCount::TwoMore);
         assert_eq!(
             crate::LevelConfig::V1
                 .with_guard_count(resolved.guard_count)
                 .guards,
-            crate::LevelConfig::GUARDS_MAX,
-            "the sum clamps at the envelope, which is where the knob has always stopped",
+            crate::LevelConfig::V1.guards + 2,
         );
-        // Neither end is rejected and neither is silently dropped: composing the other way
-        // round gives the same facility, so the order sources merge in cannot matter.
+        // Two rows, each naming its own source, so the player can read the sum.
+        let rows = resolved.active();
+        let guard_rows: Vec<&ActiveModifier> = rows
+            .iter()
+            .filter(|r| r.short.contains("guard") || r.name == GUARDS_MORE.name)
+            .collect();
+        assert_eq!(guard_rows.len(), 2, "one row per source: {rows:?}");
+        assert_eq!(guard_rows[0].source, Some("Vault"));
+        assert_eq!(guard_rows[0].detail, Some("one more guard"));
+        assert_eq!(guard_rows[1].source, None);
+        assert_eq!(guard_rows[1].detail, Some("one more"));
+        // Order cannot matter: the sources compose commutatively either way round.
         assert_eq!(
-            drawn.union(Composite::Vault.contribution()).expanded(),
-            Composite::Vault.contribution().union(drawn).expanded(),
+            drawn
+                .union(Composite::Vault.contribution())
+                .expand_composite(),
+            Composite::Vault
+                .contribution()
+                .union(drawn)
+                .expand_composite(),
         );
     }
 
-    /// Expansion is **idempotent** (#565) — the property that lets a decoded token and a
-    /// freshly resolved facility be the same value, since decode expands what the encoder
-    /// dropped and resolution expands what a source asked for.
+    /// **Two contributions that disagree cancel, and both still keep a row** (§12.6/#565).
+    ///
+    /// This is what arithmetic costs, and it is stated rather than hidden: §12.6's older
+    /// *no contribution may relieve pressure another asked for* does not survive a knob
+    /// that is a count. An [`Outpost`](Composite::Outpost) is thinly guarded and a drawn
+    /// harder rule posts one back, so the facility ends at the recipe's own number — with
+    /// `Outpost: one fewer guard` and `Guards: one more` on adjacent rows, which is the
+    /// player's receipt for a sum they can do.
     #[test]
-    fn expanding_an_expanded_set_changes_nothing() {
-        for composite in [Composite::None].into_iter().chain(Composite::ALL) {
-            let once = LevelModifiers {
-                composite,
-                show_search_areas: true,
+    fn two_contributions_that_disagree_cancel_and_both_keep_a_row() {
+        let resolved = ModifierSources {
+            chosen: LevelModifiers {
+                intel_to_exit: IntelGate::None,
                 ..LevelModifiers::default()
+            },
+            alert: Some(LevelModifiers {
+                guard_count: GuardCount::More,
+                ..LevelModifiers::neutral()
+            }),
+            flavour: Some(Composite::Outpost.contribution()),
+        }
+        .resolve();
+        assert_eq!(resolved.guard_count, GuardCount::Baseline);
+        assert_eq!(
+            crate::LevelConfig::V1
+                .with_guard_count(resolved.guard_count)
+                .guards,
+            crate::LevelConfig::V1.guards,
+        );
+        let rows = resolved.active();
+        assert!(
+            rows.iter()
+                .any(|r| r.source == Some("Outpost") && r.detail == Some("one fewer guard")),
+            "the Outpost's own rule keeps its row: {rows:?}",
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.source.is_none() && r.name == "Guards" && r.detail == Some("one more")),
+            "and so does the drawn one: {rows:?}",
+        );
+    }
+
+    /// **Expanding a composite and stripping it back are inverses** (#565) — the property
+    /// the wire rests on, since the encoder writes what a run asks for *beyond* its
+    /// composite and the decoder adds the composite back.
+    ///
+    /// Expansion is deliberately **not** idempotent (arithmetic has no room for that), so
+    /// this is the check that stands in its place: strip, expand, and you are where you
+    /// started.
+    #[test]
+    fn expanding_and_stripping_a_composite_are_inverses() {
+        for composite in [Composite::None].into_iter().chain(Composite::ALL) {
+            for extra in [
+                LevelModifiers::neutral(),
+                LevelModifiers {
+                    show_search_areas: true,
+                    ..LevelModifiers::neutral()
+                },
+                LevelModifiers {
+                    guard_count: GuardCount::More,
+                    ..LevelModifiers::neutral()
+                },
+                LevelModifiers {
+                    guard_count: GuardCount::Fewer,
+                    intel_count: IntelCount::Fewer,
+                    ..LevelModifiers::neutral()
+                },
+                LevelModifiers {
+                    guards_always_search_hideouts: true,
+                    caches: CacheCount::One,
+                    ..LevelModifiers::neutral()
+                },
+            ] {
+                let resolved = ModifierSources {
+                    chosen: LevelModifiers {
+                        intel_to_exit: IntelGate::None,
+                        ..LevelModifiers::default()
+                    },
+                    alert: Some(extra),
+                    flavour: Some(composite.contribution()),
+                }
+                .resolve();
+                // Stripping drops the word as well as the fields, so putting the word back
+                // is part of the inverse — which is exactly the shape the codec holds: a
+                // slot set plus a composite slot.
+                let stripped = LevelModifiers {
+                    composite,
+                    ..resolved.departures_beyond_composite()
+                };
+                assert_eq!(
+                    stripped.expand_composite(),
+                    resolved,
+                    "{composite:?} with {extra:?}",
+                );
+                assert_eq!(
+                    resolved.composite, composite,
+                    "{composite:?}: the word survives, for the token and the panel",
+                );
             }
-            .expanded();
-            assert_eq!(once.expanded(), once, "{composite:?}");
-            assert_eq!(
-                once.composite, composite,
-                "{composite:?}: the word survives, for the token and the panel",
-            );
         }
     }
 

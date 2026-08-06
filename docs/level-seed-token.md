@@ -62,7 +62,7 @@ no token (§6).
 
 A held set — the active modifiers, the tech a run holds — is encoded as a
 **combination index over 256 reserved slots**, not over the entries that exist today
-(six tech and twenty-five modifier slots as of writing).
+(six tech and twenty-nine modifier slots as of writing).
 
 This is the single most important property of the format.
 
@@ -94,10 +94,12 @@ makes that structurally impossible rather than merely detected.
 - Reserving 256 against a target of ~100 live entries is what makes the churn
   affordable: a placeholder costs a slot, and there are 256 of them.
 
-**A bounded knob spends one slot per end, not a field of its own.** The guard count
+**A bounded knob spends one slot per rung, not a field of its own.** The guard count
 (#232) is the worked example: `More` takes slot 7 and `Fewer` slot 8, and its baseline
 names neither, so a run at the §10.2 count encodes byte-for-byte as it did before the
-knob existed. The **intel count** (#207) is the second telling, at slots 9 and 10 — the
+knob existed. When the knob grew a **two-step** rung either way (#565, because two sources
+can each ask for one guard) those took slots 20 and 21 — appended, not tidied in beside
+their partners, for the reason every slot number is permanent. The **intel count** (#207) is the second telling, at slots 9 and 10 — the
 campaign map's reward axis, and the reason a campaign facility's *flavour* rides in its
 own token rather than in a recipe the token cannot carry (design §12.7). The alternative — a new radix-3 field in the chain beside the intel
 gate's — would have moved every field after it and changed what a token *means*: a §8
@@ -121,16 +123,18 @@ twelve slots apart.
 
 **A composite spends one slot *instead of* the slots its combination would have spent**
 (#565, design §12.6). A composite modifier is one word for a combination of primitive
-fields — the §14 v3 flavours are the first, at slots 20–24 — and it is the case that
+fields — the §14 v3 flavours are the first, at slots 24–28 — and it is the case that
 turns the slot space's abundance into the thing that is actually scarce. A `Vault` sets
 one more guard, one more console and three crates; written out that is three of
-`MODIFIER_CAP`'s **five** active slots, and written as a composite it is one. So the
-encoder **subtracts**: a primitive slot is written only when this run names it *and* the
-composite does not already give it, and `decode` puts the expansion back with the same
-`union` resolution used. That inverse is exact even when another source overruled a
-composite's contribution — an `Outpost` dealt a harder guard rule writes `MoreGuards` and
-not its own `FewerGuards`, and decoding composes the Outpost's `Fewer` harder-ward
-straight back to `More`.
+`MODIFIER_CAP`'s **five** active slots, and written as a composite it is one.
+
+So what goes on the wire is what a run asks for **beyond** its composite
+(`LevelModifiers::departures_beyond_composite`), and `decode` adds the composite back
+(`expand_composite`). For a toggle "beyond" is a set difference; for a **count** knob it is
+subtraction, because contributions to a count *add* — a `Vault` dealt a harder guard rule
+resolves to two more guards and encodes as the Vault's slot plus a plain `MoreGuards`,
+which decodes back to the two. The same derivation feeds the Level info tab, so the slots
+written and the rows drawn can never describe different runs.
 
 Two composites at once is refused exactly as a knob's two ends are: a facility is one
 thing, so a token calling it both a Vault and an Outpost describes a run no source can

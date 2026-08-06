@@ -382,7 +382,14 @@ fn the_marker_and_the_finger_both_step_over_the_crates() {
 fn a_facility_with_no_crates_shows_no_manifest_row() {
     let run = at_a_choice_point_holding(8371, 99);
     for offer in run.ahead().into_iter().filter(|o| !o.locked) {
-        let has_crates = run.map().flavour(offer.node).modifiers().caches.crates() > 0;
+        let has_crates = run
+            .map()
+            .flavour(offer.node)
+            .composite()
+            .expansion()
+            .caches
+            .crates()
+            > 0;
         let listed = brief_rows(&run, offer.node)
             .iter()
             .any(|row| matches!(row, BriefRow::Manifest { .. }));

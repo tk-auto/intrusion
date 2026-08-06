@@ -312,7 +312,8 @@ fn every_flavour_names_itself() {
 fn every_flavour_expands_to_exactly_the_combination_it_replaces() {
     for flavour in Flavour::ALL {
         let was = flavour.combination_before_composites();
-        let now = flavour.modifiers();
+        // The **expansion** is what the word means; the contribution is just the word.
+        let now = flavour.composite().expansion();
         // Field by field, not by one `assert_eq!` on the whole value: a struct comparison
         // that failed would say only *that* something moved, and the point of this test is
         // to say **which** knob a refactor knocked.
@@ -330,11 +331,7 @@ fn every_flavour_expands_to_exactly_the_combination_it_replaces() {
         // And the whole value, so a field neither list names cannot drift unnoticed. The
         // composite itself is the one intended difference, so it is set aside first.
         assert_eq!(
-            LevelModifiers {
-                composite: Composite::None,
-                ..now
-            },
-            was,
+            now, was,
             "{flavour:?} no longer resolves to the combination it replaced",
         );
     }

@@ -331,6 +331,20 @@ fn no_modifier_caption_is_clipped_on_the_board() {
             IntelCount::Fewer,
             CacheCount::Three,
         ),
+        // The knobs' two-step rungs (#565), which two sources reach together — the
+        // longest count captions the tab can draw.
+        (
+            IntelGate::All,
+            GuardCount::TwoMore,
+            IntelCount::TwoMore,
+            CacheCount::Two,
+        ),
+        (
+            IntelGate::None,
+            GuardCount::TwoFewer,
+            IntelCount::TwoFewer,
+            CacheCount::One,
+        ),
     ] {
         // …and once per composite (#565), so the **attributed** rows — a composite's name
         // in front of a rule's short phrasing — are measured on a real frame too. They are
