@@ -222,6 +222,30 @@ pub fn message_for(event: Event) -> Option<Message> {
         // Your one offensive verb (§7.2): quiet self-narration, like a crouch —
         // the loud half is what happens if the body is ever seen.
         Event::TakenDown { .. } => ("the guard drops — a body is left".to_string(), 0),
+        // The dart, hit or miss (§7.2/§8.3/§11.7/#239) — **one event, two lines, and the
+        // miss says the same thing whatever it found.**
+        //
+        // On a **hit** it ranks at 1, above the `TakenDown` travelling beside it at 0, and
+        // it earns that place by saying the half the board cannot: the body is *out there*.
+        // Every other takedown in the game leaves a body at arm's length, where the player
+        // can see it and decide whether to stow it (§7.2); this one leaves it several cells
+        // down a corridor, on a route they may not be able to walk back, already counting on
+        // the guard's own radio cadence (§7.3). A line that only said "the guard drops"
+        // would be the adjacent verb's line, reporting the wrong cost.
+        //
+        // On a **miss** it ranks at 0 with the other self-narration, and the wording is the
+        // load-bearing part. An empty line, a guard that has seen you, and a guard you can
+        // only sense are three different worlds; this says one sentence about all three,
+        // because three sentences would be a detector with three settings — the §8.3
+        // reasoning behind False Call's silent firing, which bites harder here, since what
+        // the distinctions would leak is worth a takedown. *Spent* is the word that carries
+        // it: the player is told the cost landed and told nothing about the dark.
+        Event::DartFired { hit: true, .. } => {
+            ("the dart drops it — a body out there".to_string(), 1)
+        }
+        Event::DartFired { hit: false, .. } => {
+            ("the dart is spent — nothing goes down".to_string(), 0)
+        }
         // The key off the belt (§10.4/#236). Ranked with the objective feedback rather
         // than with the takedown it travels beside, and above it, for the comms
         // console's reason: it is the payoff for a price the player just paid, and *the

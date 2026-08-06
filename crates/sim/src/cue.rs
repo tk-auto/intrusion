@@ -242,6 +242,7 @@ impl Moment<'_> {
             AbilityId::PierceWall => self.pierce_wall(status),
             AbilityId::Lockdown => self.lockdown(status),
             AbilityId::FalseCall => self.false_call(status),
+            AbilityId::Dart => self.dart(status),
             // **Passive** (§8.2/#264): always on while held, with no activation to
             // cue. Stated here rather than left to the match's silence, so "no cue"
             // reads as a decision and not an omission.
@@ -727,6 +728,78 @@ impl Moment<'_> {
         self.press(status, urge, reason)
     }
 
+    /// Dart (§7.2/§8.3/#239): *"the first guard on the line goes down if it has not seen
+    /// you"* — one shot a facility, fired along the way you are already facing. What it is
+    /// **for** is the watcher standing between the bot and where it is going that it cannot
+    /// walk up to.
+    ///
+    /// #347's failure mode is sharper here than anywhere else, because the target is free:
+    /// a cue that fired at the first legal guard on the line would spend the level's only
+    /// dart on the first patrol that happened to be in front of the bot, and the histogram
+    /// would read *used* while measuring nothing about whether a ranged takedown is worth
+    /// having. So the bid asks the one question that separates this ability from the §7.2
+    /// verb it copies: **is this a guard I could not have reached on foot?**
+    fn dart(&self, status: AbilityStatus) -> Option<Bid> {
+        // **Never in flight.** A guard that is hunting the bot has detected it, so it is not
+        // a legal target at all (§7.2) — the press would fire, miss, and spend the level's
+        // dart on the turn the bot could least afford it. This is the one cue where declining
+        // while fleeing is a *legality* statement rather than a judgement about value.
+        if matches!(self.intent, Intent::Flee | Intent::TakeCover) {
+            return None;
+        }
+        // **The cue owns the aim check, and that is not a re-derived precondition.** Every
+        // other cue leans on `status.state` for legality (#345), because every other ability
+        // is `Unusable` when its target is missing. A dart is deliberately never refused —
+        // that would make the bar a detector (§8.4/#239) — so `Ready`/`Limited` says nothing
+        // about whether there is anything on the line, and the shot has to be asked for
+        // directly. Core still owns the answer: this reads `dart_shot`, the same function
+        // the firing uses, and re-implements none of it.
+        let shot = self.state.dart_shot();
+        let target = shot.hit()?;
+        // **A guard the bot could simply walk into is not what this is for.** The adjacent
+        // takedown costs the same turn and no use at all (§7.2), so spending the facility's
+        // one dart on a guard already at arm's length is strictly worse than stepping.
+        if self.state.player().manhattan_distance(target) <= 1 {
+            return None;
+        }
+        // **It has to be in the way.** The shot is worth the level's supply when the target
+        // is *watching the ground the bot is heading for* — that is the guard a route cannot
+        // simply be planned around, and taking it off the board is the thing a dart does
+        // that nothing else in the kit does at range. The scouted line is False Call's, for
+        // False Call's reason: the router already prices watched cells out
+        // ([`Profile::watched_penalty`]), so keying on the single next step would make this
+        // shy by construction, and the honest question is about where the bot is *going*.
+        //
+        // Read off the guard's own cone rather than off `visible_cone_cells`, because the
+        // question is about **this** guard and not about whether any cone covers the route:
+        // darting a guard whose cone is elsewhere would leave the watcher standing.
+        let step = self.route?;
+        let player = self.state.player();
+        let scout: Vec<Cell> = std::iter::successors(Some(player), |cell| cell.step(step))
+            .take(FALSE_CALL_SCOUT + 1)
+            .skip(1)
+            .collect();
+        let watcher = self
+            .state
+            .guards()
+            .iter()
+            .find(|guard| guard.pos() == target)?;
+        if !scout.iter().any(|&cell| watcher.fov().contains(cell)) {
+            return None;
+        }
+        // **Strong, never decisive.** Nothing about clearing a route is worth the run, and
+        // the run's one dart should lose to any escape that wants the same turn — Run and
+        // Confusion both claim `URGE_DECISIVE` in their own moments, and both of those
+        // moments are ones this cue has already declined (it never speaks in flight). No
+        // follow-through: the dart resolves on the turn it is pressed and the next turns are
+        // for walking down the line it cleared.
+        self.press(
+            status,
+            URGE_STRONG,
+            "a guard watching the ground ahead, on my line and unaware — spend the dart (§8.3)",
+        )
+    }
+
     /// Whether `cell` holds a door panel, open or closed, **as the player knows it**
     /// (§11.5a): a door the bot has never seen is not a fact it may plan around.
     fn door_at(&self, cell: Cell) -> bool {
@@ -956,6 +1029,53 @@ mod tests {
             .bid(camo)
             .expect("a ready cloak presses");
         assert_eq!(bid.input, Input::Activate(AbilityId::Camouflage));
+    }
+
+    /// The **Dart**'s cue answers its own row and nothing wider (§8.3/#239). It is the one
+    /// cue that must check the aim itself — the ability is never `Unusable`, deliberately
+    /// (§8.4: a greyed entry would be a detector), so `Ready` says nothing about whether
+    /// there is anything on the line.
+    ///
+    /// The two refusals that matter are pinned from both sides: it never speaks in flight
+    /// (a hunter has seen you, so it is not a legal target at all), and it never speaks
+    /// with no shot resolved — which is what stops the histogram filling up with darts
+    /// fired at empty corridors (#347's failure mode, at its sharpest here because the
+    /// press is never refused).
+    #[test]
+    fn the_dart_cue_needs_a_real_shot_and_never_fires_in_flight() {
+        let (state, _) = crate::test_support::boot(0);
+        let dart = AbilityStatus {
+            id: AbilityId::Dart,
+            state: AbilityState::Ready,
+        };
+        let moment = |intent, route| Moment {
+            state: &state,
+            intent,
+            refuge: None,
+            nearest_guard: Some(6),
+            route,
+            crossing: None,
+        };
+
+        // Never in flight — a guard hunting you has detected you (§7.2).
+        for intent in [Intent::Flee, Intent::TakeCover] {
+            assert!(
+                moment(intent, Some(Direction::North)).bid(dart).is_none(),
+                "{intent:?}: an aware guard is no target",
+            );
+        }
+        // And never without a resolved shot. The boot state has nobody lined up on the
+        // player's facing, so `dart_shot` finds no legal target and the cue declines —
+        // whatever the intent, and whatever the route.
+        assert!(state.dart_shot().hit().is_none(), "fixture precondition");
+        for intent in [Intent::Pursue, Intent::Explore] {
+            for route in [None, Some(Direction::North), Some(Direction::East)] {
+                assert!(
+                    moment(intent, route).bid(dart).is_none(),
+                    "{intent:?}/{route:?}: no shot, no bid",
+                );
+            }
+        }
     }
 
     /// Arbitration is deterministic and floor-gated (§12.4): the keener bid wins,

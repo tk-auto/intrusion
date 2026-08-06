@@ -162,7 +162,11 @@ pub const fn remote_kind(id: AbilityId) -> Option<RemoteKind> {
         | AbilityId::Lockdown
         | AbilityId::Saver
         | AbilityId::FalseCall
-        | AbilityId::Guide => None,
+        | AbilityId::Guide
+        // The dart is a projectile and not a machine (§8.3/#239): it resolves on the turn
+        // it is fired and there is nothing left in the world to fly, so nothing changes
+        // hands.
+        | AbilityId::Dart => None,
     }
 }
 

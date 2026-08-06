@@ -377,6 +377,9 @@ pub enum AbilityId {
     /// Salvaged tech (§8.3/#505), **passive**: a compass to the nearest unclaimed
     /// objective, painted as one of the eight cells around you.
     Guide,
+    /// Salvaged tech (§8.3/#239), **the experiment**: a dart fired along the cardinal
+    /// you face, taking down the first unaware guard on the line.
+    Dart,
 }
 
 impl AbilityId {
@@ -385,7 +388,7 @@ impl AbilityId {
     /// which bar slot a held ability lands in and therefore which digit fires it
     /// (§11.6/#359) — and it *is* the order [`index`](Self::index) pins, so the two
     /// must not drift.
-    pub const ALL: [AbilityId; 13] = [
+    pub const ALL: [AbilityId; 14] = [
         AbilityId::Run,
         AbilityId::Camouflage,
         AbilityId::Decoy,
@@ -399,6 +402,7 @@ impl AbilityId {
         AbilityId::Drone,
         AbilityId::FalseCall,
         AbilityId::Guide,
+        AbilityId::Dart,
     ];
 
     /// The **salvaged-tech** abilities (§8.3) — the found-in-the-facility set, as
@@ -412,7 +416,7 @@ impl AbilityId {
     /// the draw only bites once the pool outgrows the grant. A passive (#264) is drawn
     /// from here like any other tech — it competes for the same slot, which is exactly
     /// what it pays with.
-    pub const TECH: [AbilityId; 12] = [
+    pub const TECH: [AbilityId; 13] = [
         AbilityId::Camouflage,
         AbilityId::Decoy,
         AbilityId::Dephase,
@@ -425,6 +429,7 @@ impl AbilityId {
         AbilityId::Drone,
         AbilityId::FalseCall,
         AbilityId::Guide,
+        AbilityId::Dart,
     ];
 
     /// The **innate** abilities (§8.3) — the part of a loadout that is never drawn
@@ -494,6 +499,13 @@ impl AbilityId {
             // the Decoy's job, and the two are complements rather than variants.
             AbilityId::FalseCall => "False Call",
             AbilityId::Guide => "Guide",
+            // One word, and the shortest name in the catalogue: what it is, and nothing
+            // about what it does to a guard. The §7.2 verb is called a *takedown*, and
+            // naming this one after the reach — "remote takedown" — would have advertised
+            // the thing §7.2 keeps **[SETTLED]** as adjacent-only, on the bar, every
+            // frame. The dart is the object you fire; whether it takes anything down is
+            // the line's business.
+            AbilityId::Dart => "Dart",
         }
     }
 
@@ -523,6 +535,7 @@ impl AbilityId {
             AbilityId::Drone => "Drone",
             AbilityId::FalseCall => "Call",
             AbilityId::Guide => "Guide",
+            AbilityId::Dart => "Dart",
         }
     }
 
@@ -594,6 +607,16 @@ impl AbilityId {
                 "Washes the neighbouring cell lying toward the nearest thing left to \
                  take. A bearing as the crow flies — it will point through walls."
             }
+            // It states the **aim and the gate**, in that order, because those are the
+            // two things a player has to get right and neither is on the board: the
+            // dart goes where you are already facing, and it only drops a guard that
+            // has not seen you. The miss is spelled out too — the one sentence that
+            // stops the first firing feeling like a bug (§8.4: it is never refused for
+            // want of a target).
+            AbilityId::Dart => {
+                "Fires the way you face. The first guard on the line drops if it has not \
+                 seen you. A shot that finds nobody is spent too."
+            }
         }
     }
 
@@ -630,6 +653,7 @@ impl AbilityId {
             AbilityId::Drone => &DRONE,
             AbilityId::FalseCall => &FALSE_CALL,
             AbilityId::Guide => &GUIDE,
+            AbilityId::Dart => &DART,
         }
     }
 
@@ -649,6 +673,7 @@ impl AbilityId {
             AbilityId::Drone => 10,
             AbilityId::FalseCall => 11,
             AbilityId::Guide => 12,
+            AbilityId::Dart => 13,
         }
     }
 }
@@ -1326,6 +1351,92 @@ const GUIDE: Ability = Ability {
     uses: None,
     behaviour: Behaviour::Effects(&[Effect::ObjectiveBearing]),
 };
+
+// Dart [START] (§7.2/§8.3/§8.4, #239): **the experiment** — a takedown at *range*, and
+// therefore a deliberate reopening of the ability that broke the old game (§2.3: *"the
+// neutralise ability … unlimited range, no cooldown, and it did not consume a turn"*).
+// It exists on trial, with every safeguard §2.3 asks for stacked on it at once, and the
+// sim is what decides whether it survives (§14).
+//
+// **Aiming by facing is the safeguard the cursor was not.** The §2.3 failure was
+// *auto-target-nearest-visible* — an ability that asked nothing at all of where the
+// player stood. A cursor would have asked for two keypresses. This asks you to **be in
+// the corridor, on the line, pointing the right way, and unseen**, which is paid for in
+// movement, exposure and turns, on the board, where the guards can punish it. So the aim
+// is [`TargetingMode::Direction`] — Decoy's mode, and the first use of it as a **ray**
+// rather than as the single faced cell — and there is no target list anywhere in the
+// implementation to snap to (§8.4/appendix 1).
+//
+// **Instant** (`duration: 0`) and **with no cooldown at all**, which is Pierce Wall's
+// row exactly — and it is the one place this deliberately does not do what #239 asked
+// for, so the reasoning is here rather than in the ticket.
+//
+// The ticket lists a *"very large cooldown, exaggerated on purpose"* among the §2.3
+// safeguards, and then asks in the same breath that every cost be **shown to the
+// player**, predicting the bar will read `(1)` and then `—`. Those two cannot both
+// happen. With [`DART_USES`] at 1 the budget always bites first: [`Deck::state`] ranks a
+// spent budget *above* a running cooldown — deliberately, because *"a cooldown on an
+// ability that is never usable again is a countdown to nothing"* — so no `/60/` is ever
+// drawn. Nor does one fit: the help panel's economy line has 34 cells and
+// `1 turn · instant · 60 cooling · 1 a level` needs 41. Three surfaces say
+// independently that there is one number here, and §8.2 agrees: the budget is the *one
+// non-time axis*, and Pierce Wall's row already argued this exact case — *"adding a
+// cooldown on top would only blur which number the player is actually managing."*
+//
+// **The safeguard is not dropped, it is met by something stronger.** Appendix 43 makes
+// the argument for the Saver and it holds verbatim here: one use per facility *"is
+// stricter than any cooldown can be: a lockout ends, and this does not."* A 60-turn
+// lockout would let a 200-turn run fire three darts; `1/level` lets it fire one, for
+// ever. So the clock is empty because the scarcity has moved somewhere a clock cannot
+// reach — see appendix 54, which records this reversal so the next person to ask *"why
+// has the most dangerous ability in the game no cooldown?"* does not have to re-derive it.
+//
+// - **1 turn**, like every activation (§4.4).
+// - **No cooldown** — the budget is the whole economy.
+// - **[`DART_USES`] = 1 per level** (§8.2/#302) — *"the one thing 'no charges' rules out
+//   that the game needs, for an effect too strong to hand out on a cooldown alone."*
+//   That sentence was written for exactly this ability; Pierce Wall's `3/level` is the
+//   precedent and this is the floor beneath it.
+//
+// **[`Behaviour::Coded`]**, the third such ability, on Pierce Wall's own grounds rather
+// than as a shortcut: a projectile that walks a line and takes a guard down at the end of
+// it is not a primitive the effect vocabulary has, and it is a genuine one-off — no
+// second ability would ever fire a dart — so it takes §8.1's escape hatch instead of
+// widening the vocabulary for one row. The economy does not care: it reads only the
+// numbers, so this steps through activation and its budget exactly as a data row does.
+//
+// **What it costs, and when a good player declines it** (§2.3). The turn, the level's
+// only dart — and the **body**, which is the counterweight that does the real work
+// (§7.3). A dart drops a guard *where it stood*, which is usually several cells away down
+// a corridor you were not planning to walk: you often cannot reach it to stow it (§7.2),
+// so what the shot buys is a guard gone and a find waiting to happen on a radio clock you
+// cannot silence. A good player declines it whenever the guard was going to walk past
+// anyway — which is most patrols — and spends it on the one watcher that genuinely cannot
+// be gone round.
+const DART: Ability = Ability {
+    id: AbilityId::Dart,
+    mode: activated(1, TargetingMode::Direction, 0, 0),
+    uses: Some(DART_USES),
+    behaviour: Behaviour::Coded,
+};
+
+/// How many darts one facility gives you — **[START]** (§7.2/§8.2/§8.3/#239).
+///
+/// **One**, which is §8.2's floor and the whole reason the experiment is filable at all.
+/// A ranged takedown is the ability §2.3 records as having *been* the old game, so the
+/// bound is not a dial that happens to be low: it is the statement that a facility allows
+/// exactly one guard to be removed at a distance, ever, and the rest of the building has
+/// to be played.
+///
+/// **It is the ability's whole economy**, the row carrying no cooldown at all (see
+/// [`DART`] and appendix 54), so this number is also the only thing between the player and
+/// a second ranged takedown. §8.2's fence would permit up to nine; **two is where the
+/// argument has to be made**, not where a tune quietly lands, because a second dart is a
+/// second guard removed from a building that only ever had a handful — and with no clock in
+/// the row the two could be fired on consecutive turns. Every value above one goes past the
+/// sim first (§13.2), and past the kill-thresholds on
+/// `docs/stats/abilities/dart.md`.
+pub const DART_USES: u32 = 1;
 
 /// How many captures one facility lets you walk away from — **[START]** (§4.5/§8.3/#243).
 ///

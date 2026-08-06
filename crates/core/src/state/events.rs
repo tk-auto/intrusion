@@ -142,6 +142,34 @@ pub enum Event {
     /// The player took an unaware adjacent guard down (§7.2): the guard is
     /// permanently out, and a body now lies at `at`.
     TakenDown { at: Cell },
+    /// A **dart went out** along the cardinal the player faced (§7.2/§8.3/#239): fired
+    /// from `from`, flying `dir` for `travelled` cells before a solid or a body stopped it,
+    /// and `hit` says whether the guard it stopped on was a legal §7.2 target.
+    ///
+    /// It fires on **every** activation, hit or miss, because a miss is a real firing and
+    /// not a refusal: the turn, the lockout and the level's only dart are all spent
+    /// (§8.4/#239 — an ability refused for want of a target would be a detector). On a hit
+    /// it travels with an [`Event::TakenDown`] for the body, on
+    /// [`CaptureSaved`](Event::CaptureSaved)'s pattern: *a guard is permanently out* is the
+    /// same fact whichever verb put it there, so every surface that counts takedowns needs
+    /// no arm of its own for this one.
+    ///
+    /// The geometry is carried rather than left to be re-derived, so the near line and the
+    /// §11.5 mark draw the flight the rule actually resolved — `from` plus `dir` plus
+    /// `travelled` **is** the path, a cardinal ray being fully described by its origin, its
+    /// direction and its length.
+    ///
+    /// **`hit` is the only thing it says about what was out there.** Whether the dart
+    /// stopped on nothing, on an aware guard, or on one the player can merely sense are
+    /// three different worlds and one event, deliberately: the near line reads this, and a
+    /// line that distinguished them would answer questions about the dark for the price of
+    /// a press (§8.3's False Call reasoning, which cuts harder here).
+    DartFired {
+        from: Cell,
+        dir: Direction,
+        travelled: u32,
+        hit: bool,
+    },
     /// The player lifted a **key** off the guard they have just taken down
     /// (§10.4/#236) — the prize room is open to them from now on.
     ///
@@ -525,7 +553,15 @@ impl Event {
             // The takedown is something you did (§7.2) — your one offensive verb,
             // reading in the same band as your other tools. Handling the body it
             // left (§8.3) is the same hands: grabbing and releasing are Owned.
-            Event::TakenDown { .. }
+            //
+            // A **dart** is Owned on the same terms, hit or miss (§8.3/#239), and it stays
+            // Owned where False Call went Warning: the difference is who the report is
+            // about. A forged call says *guards are coming here*; a dart says *I fired, and
+            // here is what happened to the thing I fired at*. The consequence a dart buys
+            // arrives later and through other events — the body being found, its radio going
+            // quiet — and each of those already wears its own band.
+            Event::DartFired { .. }
+            | Event::TakenDown { .. }
             | Event::BodyGrabbed { .. }
             | Event::BodyReleased { .. }
             | Event::BodyStored { .. } => Category::Owned,

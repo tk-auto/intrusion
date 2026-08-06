@@ -340,6 +340,7 @@ the seam's reason to exist — so the right-hand column is also the list of what
 | **Pierce Wall** | a route the facility does not offer | the same crossing, at three times the price — the budget is scarcer |
 | **Lockdown** | sending a pursuit the long way round | how many doors the box would seal, and no door on the bot's own way out |
 | **False Call** | emptying the ground you are walking away from | the route step, the guards inside core's reach, and whether that step opens the gap on **every** one of them |
+| **Dart** | the watcher on your line you could not have walked up to | core's own resolved shot, that the target is not adjacent, and that its cone watches the ground ahead |
 | **Drone** | — **activated but uncued** (#273): the press opens a control mode the policy does not drive | — |
 | **Vision** | — **passive**, no activation to cue (§8.2/#264) | — |
 | **Guide** | — **passive**, and a cue would have to cheat (§11.5a) | — |
@@ -375,6 +376,30 @@ Three of these are worth reading twice, because they are the seam's own rules bi
   the crossing offer is withdrawn outright while the sprint is up (a two-cell step
   overshoots the far side). Both guard the same thing: a duration that expires inside
   a solid costs the safety eject plus a stun as long as the throw (§8.3).
+
+- **The Dart is the one cue that has to check its own aim, and that is not a
+  re-derived precondition.** Every other cue leans on `status.state` for legality
+  (#345) because every other ability reads `Unusable` when its target is missing. A dart
+  is deliberately **never refused** — a greyed entry would answer *"is there a guard in
+  front of me?"* for free, every frame (§8.4/#239) — so `Ready` says nothing about
+  whether anything is on the line, and the cue asks `State::dart_shot` directly. It is
+  still core's answer: the cue calls the very function the firing calls and
+  re-implements none of it.
+
+  What it adds on top is the question that separates this ability from the §7.2 verb it
+  copies: *is this a guard I could not have reached on foot?* Hence the two refusals —
+  never adjacent, where the innate takedown costs the same turn and no use at all, and
+  only when the target's **own** cone watches the ground the bot is heading for (read off
+  that guard's `fov`, not off `visible_cone_cells`, or darting a guard whose attention is
+  elsewhere would leave the watcher standing). Without that clause the cue would spend
+  the facility's only dart on the first patrol in front of it, and the histogram would
+  read *used* while measuring nothing — #347's failure mode, at its sharpest here,
+  because the press can never be refused into a zero.
+
+  **It is shy by construction, and the shyness is honest.** The bot faces the way it last
+  stepped and there is no turn-in-place action (§5), so the line has to *happen* to be
+  right; the bot cannot arrange the shot the way a player can. Read the small numbers on
+  `docs/stats/abilities/dart.md` as a floor on the ability rather than a measure of it.
 
 **The Guide's zero is a third kind, and it is the interesting one.** Vision and the
 Saver have no cue because there is no key; the Guide has no key *either*, but unlike

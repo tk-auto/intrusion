@@ -3879,3 +3879,142 @@ shade below the preferences, to mark them as a different kind of thing. Ground i
 §11.2 colour of *receding scenery* — it told the eye these controls were inert, in the
 one section where a press does the most. Both were the same mistake in two forms:
 loading the gate onto the rows instead of onto the heading that names it.
+
+## Appendix 54 — The Dart: aiming by facing, and why the reopened neutralise has no cooldown
+
+*(§2.3/§6/§7.2/§7.3/§8.1/§8.2/§8.3/§8.4/§10.7/§11.5/§11.7/§13.2; #239, and #556 for the
+targeting rewrite it was rewritten against. `crates/core/src/state/dart.rs`,
+`crates/core/src/ability.rs`, `crates/sim/src/cue.rs`,
+`docs/stats/abilities/dart.md`.)*
+
+§2.3 records one ability by name as the thing that broke the old game: *"the neutralise
+ability … unlimited range, no cooldown, and it did not consume a turn"*, with
+*"auto-target-nearest-visible was the path of least resistance"* as the cause. #239 is the
+ticket that proposes building it again on purpose, so that the design can find out whether
+a **heavily costed** ranged takedown can exist. This appendix records what the safeguards
+turned out to be, and the three places the implementation went somewhere the ticket did
+not.
+
+### The aim is the ray, and that is a stronger fence than the cursor it replaced
+
+The ticket was first written around §8.4's tile cursor and then rewritten (#556) around the
+facing. The rewrite is the better version, and the reason is worth stating because it looks
+like the weaker one: a cursor is *more* steps, so surely it is more cost?
+
+It is not, because a cursor's cost is paid in the **UI** and the failure §2.3 records was a
+failure of **position**. Auto-target-nearest asked nothing of where the player stood; a
+cursor would have asked for two keypresses, which is nothing either. A dart along the facing
+asks the player to *be in the corridor, on the guard's line, pointing the right way, inside
+eight cells, and unseen* — every clause of which is bought with movement, turns and
+exposure, on the board, where the guards can punish it. The cost lands in the fiction rather
+than in a menu.
+
+It also removes the temptation structurally rather than by rule. `dart_shot` walks one line
+and stops; there is no candidate set anywhere in the ability for a later edit to start
+sorting by distance. That is the appendix 1 ban satisfied by construction, which is the only
+way it stays satisfied.
+
+### Stopping and hitting are two questions, and conflating them would be an aiming aid
+
+The dart stops at the first **solid** or the first **guard**, seen or not. It *hits* only if
+that guard is unaware (§7.2) and in the player's line of sight (§6). Keeping the two apart
+matters: a flight that skipped over illegal targets would shoot *through* the guard standing
+in the way, which is both absurd and an aiming aid — the player would not have to know what
+is in the corridor to shoot down it.
+
+The stopper is the terrain table's own `blocks_movement`, so the list is not maintained
+twice. The consequence worth naming is that **a table stops the dart** even though sight
+goes straight over it (§10.3) — the one thing in the game you can see past and not shoot
+past. That is load-bearing rather than an oddity: §10.1a stamps partial cover into every
+over-long straight run, so the long clear firing line down a corridor is precisely the
+geometry the sightline rule stops a level being *born* with. The generator bounds the
+corridor shot before `DART_RANGE` does.
+
+A loose body and the player's own decoy are flown over. Neither is terrain, so neither is
+consulted — but the decoy is worth a sentence, because a dart that stopped on one would
+spend the facility's only shot on the player's own prop, and that is a joke a player gets
+exactly once.
+
+### The clamp: a case the first implementation reasoned itself out of, wrongly
+
+The reach fired is `min(DART_RANGE, sense_range())` — Confusion's **[SETTLED]** clamp,
+borrowed for a different reason. The reason is the §11.5 wash: the flight is painted, and a
+line that stopped six cells short on a guard the player could not perceive would report a
+body in the dark.
+
+The first version of the module removed that clamp, having proved it redundant. The proof
+was good and the conclusion was wrong, and the shape of the mistake is the reason this
+paragraph exists. Every terrain that blocks **sight** also blocks **movement** — wall,
+hinge, closed panel, duct entry is the whole opaque set — so along a cardinal nothing can
+break the sightline without also stopping the dart; with `DART_RANGE` shorter than the §5
+sight range, every cell an open-floor dart reaches is a cell the player already sees. All
+true. What it missed is the **crawlspace** (§10.7): a duct's interior cells are walls, but a
+mouth has a floor neighbour, so a dart *can* be fired out of one — while a crawler's live
+sight is the mouth peek alone, and a mid-duct cell sees nothing at all. Unclamped, a crawling
+player's dart flew eight cells into a room they had no picture of, and the wash reported what
+it found there.
+
+So the clamp stays, inert on open floor (`min(8, 10)`) and cutting a crawler to
+`DUCT_SENSE_RANGE` = 5, inside which every guard is at least a §9 dot. The general lesson is
+the one §10.7 keeps teaching: a rule proved from open-floor geometry has to be re-proved for
+the duct, because the duct is where perception stops matching position.
+
+### The cooldown the ticket asked for does not exist, and the budget is why
+
+#239 lists among its §2.3 safeguards *"a very large cooldown — a named constant, exaggerated
+on purpose"*, and in the same acceptance criterion asks that every cost be **shown to the
+player**, predicting the bar will read `(1)` then `—`. Those two cannot both happen, and
+three surfaces say so independently:
+
+- **The bar.** `Deck::state` ranks a spent budget *above* a running cooldown, deliberately,
+  because *"a cooldown on an ability that is never usable again is a countdown to
+  nothing"*. With one use a level, no `/60/` is ever drawn.
+- **The help panel.** Its economy line has 34 cells.
+  `1 turn · instant · 60 cooling · 1 a level` needs 41.
+- **§8.2 and Pierce Wall.** The use budget is the *one non-time axis*, and Pierce Wall's row
+  already argued this exact case: *"adding a cooldown on top would only blur which number
+  the player is actually managing."*
+
+So the row carries no clock at all. **The safeguard is not dropped, it is met by something
+stricter**, and appendix 43 already wrote the sentence for the Saver: one use per facility
+*"is stricter than any cooldown can be: a lockout ends, and this does not."* A 60-turn
+lockout would let a 200-turn run fire three darts. `1/level` lets it fire one, for ever.
+
+The consequence to keep in view is that `DART_USES` is now the *whole* economy, so raising
+it to two is not a tune — it is a second ranged takedown with nothing to space it from the
+first, and it goes past the sim and the kill-thresholds on
+`docs/stats/abilities/dart.md` before it goes anywhere else.
+
+### A miss is never refused, and never differentiated
+
+Nothing on the line, an aware guard, and a guard the player can only sense all spend the
+turn and the level's dart, and all three read as the **same** near line. Two things follow
+from one rule, and the rule is §8.3's for False Call: an ability refused for want of a
+target — or a bar entry that greyed when the line was empty — answers *"is there a guard in
+front of me?"* for free, every frame, without spending the turn. That is a detector. It
+bites harder here than it does for the spoofer, because the answer a dart's detector would
+give is worth a takedown rather than a search.
+
+The near line therefore has exactly two things to say. On a hit it ranks *above* the
+`TakenDown` travelling beside it, and it says **where**: every other takedown in the game
+leaves a body at arm's length, and this one leaves it several cells down a corridor, already
+counting on the §7.3 clock, often somewhere the player cannot walk back to. That is the
+ability's honest counterweight, and a line reading only *"the guard drops"* would report the
+adjacent verb's cost instead of this one's.
+
+### What the sim was asked, and what would reject it
+
+The instrument is `Verb::Dart` in the §13.2 histogram, read against `Verb::Takedown` — a
+dart hit moves both, so the gap between them is how often the shot missed. The bot's cue
+asks the one question that separates this ability from the §7.2 verb it copies: *is this a
+guard I could not have reached on foot?* — never in flight (a hunter has seen you, so it is
+not a legal target at all), never adjacent (the free verb is strictly better), and only when
+the target's own cone watches the ground the bot is heading for. Without that last clause
+the cue would spend the level's dart on the first patrol in front of it and the histogram
+would read *used* while measuring nothing, which is #347's failure mode at its sharpest,
+because here the press can never be refused.
+
+The kill-thresholds are on the stats page, written before the batch ran. The measured
+outcome is there too; the summary is that the ability is real but small — the cue is shy by
+construction, since the line has to happen to be right, and the bot cannot turn on the spot
+to make it so.
