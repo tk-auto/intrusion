@@ -1838,4 +1838,3 @@ fn the_same_seed_and_the_same_spends_read_the_same_manifest() {
     };
     assert_eq!(read(), read());
 }
-
