@@ -83,6 +83,7 @@ mod render;
 mod replay;
 mod rng;
 mod salvage;
+mod scout;
 mod state;
 mod status;
 mod targeting;
@@ -100,7 +101,7 @@ pub use body::Body;
 pub use campaign::map::{DEPTH_SPACING, LANES, LANE_SPACING};
 pub use campaign::{
     facility_seed, Campaign, CampaignStage, FacilityMap, Flavour, Loudness, MapPos, NodeId, Offer,
-    Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE, ROUTE_UNLOCK_COST,
+    Outlay, Wallet, ALERTS_ALL, ALERTS_ONE, DEPTH_TO_ARCHIVE, ROUTE_UNLOCK_COST, SCOUT_COST,
 };
 pub use category::{Category, Theme};
 pub use cell::{Cell, Direction};
@@ -128,11 +129,12 @@ pub use region::{
     Door, DoorCell, DoorId, DoorKind, DoorLock, Region, RegionGraph, RegionId, RegionKind,
 };
 pub use render::{
-    ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid,
-    flavour_glyph, help_hit, hit_of, is_help_button, is_message_button, map_hit, menu_hit,
-    message_log_rows, render, render_map, render_screen, verdict_hit, EndUi, Fill, GlyphCell, Grid,
-    HelpHit, HelpTab, InputModality, MapHit, MapUi, MenuEntry, MenuHit, MenuScreen, MenuUi,
-    OptionsControl, ScreenUi, SeedCopy, Surface, Visibility, BOTTOM_ROWS, TOP_ROWS,
+    ability_at, ability_in_slot, ability_mnemonic, ability_slot_for_letter, ascii_grid, brief_rows,
+    flavour_glyph, help_hit, hit_of, is_help_button, is_message_button, map_activation, map_hit,
+    menu_hit, message_log_rows, render, render_brief, render_map, render_screen, verdict_hit,
+    BriefRow, EndUi, Fill, GlyphCell, Grid, HelpHit, HelpTab, InputModality, MapHit, MapScreen,
+    MapUi, MenuEntry, MenuHit, MenuScreen, MenuUi, OptionsControl, ScreenUi, SeedCopy, Surface,
+    Visibility, BOTTOM_ROWS, TOP_ROWS,
 };
 pub use replay::{
     ability_script_letter, field_in, input_token, parse_replay_link, parse_script, replay_fragment,
@@ -140,6 +142,7 @@ pub use replay::{
 };
 pub use rng::Rng;
 pub use salvage::cache_contents;
+pub use scout::scouted_cells;
 pub use state::{
     phase_eject_stun, Affordance, BoreRefusal, EffectArea, Event, GuardPerception, Input, Outcome,
     SenseMark, State, DOOR_CUE_DECAY_TURNS, DOOR_SENSE_RANGE, EFFECT_FLASH_TURNS,

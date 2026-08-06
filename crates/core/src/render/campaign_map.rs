@@ -59,16 +59,23 @@ use crate::category::Category;
 use crate::modifiers::ModifierDirection;
 use crate::place::LevelConfig;
 
+pub mod brief;
 #[cfg(test)]
 mod tests;
+
+pub use brief::{brief_rows, render_brief, BriefRow};
 
 /// The heading, in §11.8's **meta vocabulary** — it names the game around the run, so it
 /// reads as plainly as the title screen's own rows.
 const HEADING: &str = "THE FACILITY MAP";
 
 /// The footer. It names both input paths (§11.6), like the menu's: a touch player who
-/// cannot see a keyboard still reads that tapping a row raids it.
-const FOOTER: &str = "↑↓ choose · Enter/tap raids";
+/// cannot see a keyboard still reads that tapping a row does something.
+///
+/// It says **opens** rather than *raids* since #215: a row now opens that facility's
+/// brief, and the raid is a row of *that* screen. A footer still promising a raid would be
+/// the screen describing the press it used to answer.
+const FOOTER: &str = "↑↓ choose · Enter/tap opens";
 
 /// What an intel-locked row says (§14 v3's alternative-route sink, #212) — the label, and
 /// its **price** in the currency's own word.
@@ -335,8 +342,8 @@ pub struct MapUi {
     /// under it every time the run moves, and a marker resting past the end of a shorter
     /// list would draw nothing and activate nothing.
     pub selected: usize,
-    /// **What the last spend at the hub did** (#211/#212), or `None` when nothing has been
-    /// bought or refused since the marker last moved.
+    /// **What the last spend at the hub did** (#211/#212/#215), or `None` when nothing has
+    /// been bought or refused since the marker last moved.
     ///
     /// It rides on the view state rather than on the campaign because it is a *message*,
     /// not a fact about the run: the run's own record of a purchase is the road it can now
@@ -344,6 +351,33 @@ pub struct MapUi {
     /// sitting there while the player walks the list would be the screen answering a
     /// question nobody had just asked.
     pub outlay: Option<Outlay>,
+    /// **Which of the map's two screens is showing** (#215) — the list of facilities, or
+    /// the brief for one of them. The map's own [`MenuScreen`](super::MenuScreen): a
+    /// sub-screen rather than a second surface, because everything above the rows is the
+    /// same picture.
+    pub screen: MapScreen,
+    /// Which row of the **brief** the marker rests on, clamped at use like
+    /// [`selected`](Self::selected) — and kept apart from it so that leaving the brief
+    /// puts the marker back on the facility it was opened from rather than wherever the
+    /// brief's own list had reached.
+    pub brief_row: usize,
+}
+
+/// Which surface of the map screen is up (#215) — the map's counterpart of
+/// [`MenuScreen`](super::MenuScreen), and the same shape for the same reason: the two
+/// screens answer different questions about the same country, and a pair of flags could
+/// claim both at once.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MapScreen {
+    /// **The list of facilities** — the map's root, where a run picks which way to walk.
+    /// There is nowhere further back from it (§2.2: the last facility is gone).
+    #[default]
+    List,
+    /// **The facility brief** for one node — what may be done about the facility the
+    /// marker singled out: raid it, or spend intel to scout it first (#215). Carries the
+    /// **node**, not a row index, for [`MapHit`]'s reason: the offer list can change under
+    /// a screen that is already drawn.
+    Brief(NodeId),
 }
 
 impl MapUi {
@@ -363,36 +397,93 @@ impl MapUi {
         0
     }
 
-    /// The marker moved one row `step`-wards, wrapping, and the hub's last word dropped —
-    /// a message about the row you have just left is a message about nothing.
-    fn seek(self, ahead: &[Offer], step: usize) -> Self {
-        let n = ahead.len();
-        if n == 0 {
+    /// The marker moved one row `step`-wards on whichever screen is up, wrapping, and the
+    /// hub's last word dropped — a message about the row you have just left is a message
+    /// about nothing.
+    fn seek(self, len: usize, step: usize) -> Self {
+        if len == 0 {
             return Self {
                 outlay: None,
                 ..self
             };
         }
-        Self {
-            selected: (self.selected(ahead) + step) % n,
-            outlay: None,
+        let moved = (self.row(len) + step) % len;
+        match self.screen {
+            MapScreen::List => Self {
+                selected: moved,
+                outlay: None,
+                ..self
+            },
+            MapScreen::Brief(_) => Self {
+                brief_row: moved,
+                outlay: None,
+                ..self
+            },
+        }
+    }
+
+    /// The row the marker rests on for the screen that is up, given how many rows it has
+    /// — the clamp the drawing, the hit-test and the activation share.
+    fn row(self, len: usize) -> usize {
+        let raw = match self.screen {
+            MapScreen::List => self.selected,
+            MapScreen::Brief(_) => self.brief_row,
+        };
+        if raw < len {
+            return raw;
+        }
+        0
+    }
+
+    /// How many rows the screen that is up is showing — the list's offers, or the brief's
+    /// controls.
+    fn rows(self, run: &Campaign) -> usize {
+        match self.screen {
+            MapScreen::List => run.ahead().len(),
+            MapScreen::Brief(node) => brief_rows(run, node).len(),
         }
     }
 
     /// The next row down, wrapping.
     #[must_use]
-    pub fn next(self, ahead: &[Offer]) -> Self {
-        self.seek(ahead, 1)
+    pub fn next(self, run: &Campaign) -> Self {
+        self.seek(self.rows(run), 1)
     }
 
     /// The previous row up, wrapping.
     #[must_use]
-    pub fn prev(self, ahead: &[Offer]) -> Self {
-        self.seek(ahead, ahead.len().saturating_sub(1))
+    pub fn prev(self, run: &Campaign) -> Self {
+        let len = self.rows(run);
+        self.seek(len, len.saturating_sub(1))
     }
 
-    /// The same screen with the hub's answer to a spend on it (#212) — what the shell sets
-    /// after [`Campaign::unlock`](crate::Campaign::unlock), paid or refused alike.
+    /// **Open the brief** for `node` (#215) — the screen a facility row activates into,
+    /// with the marker on its first row and the hub's last word dropped.
+    #[must_use]
+    pub fn opening(self, node: NodeId) -> Self {
+        Self {
+            screen: MapScreen::Brief(node),
+            brief_row: 0,
+            outlay: None,
+            ..self
+        }
+    }
+
+    /// **Back to the list** (#215) — the brief closed, the marker left exactly where it
+    /// was on the map, and the hub's last word kept: a refusal the player has just read is
+    /// still the answer to the thing they just did.
+    #[must_use]
+    pub fn closing(self) -> Self {
+        Self {
+            screen: MapScreen::List,
+            brief_row: 0,
+            ..self
+        }
+    }
+
+    /// The same screen with the hub's answer to a spend on it (#212/#215) — what the shell
+    /// sets after [`Campaign::unlock`](crate::Campaign::unlock) or
+    /// [`Campaign::scout`](crate::Campaign::scout), paid or refused alike.
     #[must_use]
     pub fn saying(self, outlay: Outlay) -> Self {
         Self {
@@ -407,9 +498,13 @@ impl MapUi {
 /// [`MenuHit`](super::MenuHit).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MapHit {
-    /// A row of the list — raid that facility. Carries the **node**, not the row index:
-    /// the shell acts on a facility, and an index would have to be re-resolved against a
-    /// list that may have changed since the frame was drawn.
+    /// A row of the list — **open that facility's brief** (#215). Carries the **node**,
+    /// not the row index: the shell acts on a facility, and an index would have to be
+    /// re-resolved against a list that may have changed since the frame was drawn.
+    ///
+    /// It used to raid outright, and moving the raid one screen inward is the point of the
+    /// brief: the irreversible press (§2.1) now sits behind a screen that says what it will
+    /// cost and what may be bought first, rather than under a stray tap on the map.
     Facility(NodeId),
     /// The **intel-locked** row — buy the road rather than walk down it (§14 v3/#212).
     ///
@@ -418,6 +513,16 @@ pub enum MapHit {
     /// worked out which by asking the campaign again would be answering from a list that
     /// may have moved since the frame was drawn.
     Unlock(NodeId),
+    /// **Raid the facility** the brief is for (#215) — the one irreversible press on
+    /// either screen (§2.1), and now the only thing that is.
+    Enter(NodeId),
+    /// **Scout the facility** the brief is for (§11.5a/#215): buy its contents, drawn
+    /// remembered from turn one.
+    Scout(NodeId),
+    /// **Close the brief** and go back to the list — the drawn, tappable way out §11.6
+    /// wants beside the way on, so the sub-screen is never one a touch player can open and
+    /// not leave.
+    Back,
     /// The footer's `theme [n]` control (§11.2/#189), in the same corner it keeps on
     /// every other screen.
     ToggleTheme,
@@ -658,14 +763,24 @@ fn standing_here(run: &Campaign, ahead: &[Offer]) -> bool {
 /// cell is not a target a finger can hit (§11.6), and the row that names it is right
 /// underneath.
 ///
-/// The locked row is a target now (#212), and it buys rather than raids — the two are told
-/// apart here, once, so a tap and a keypress on the same row cannot come to mean different
-/// things.
+/// It answers for whichever screen `ui` says is up (#215), so a tap and a keypress on one
+/// row cannot come to mean different things — and neither can a tap on the map and a tap
+/// on the brief drawn over it.
 #[must_use]
-pub fn map_hit(width: u32, height: u32, run: &Campaign, x: u32, y: u32) -> Option<MapHit> {
+pub fn map_hit(
+    width: u32,
+    height: u32,
+    run: &Campaign,
+    ui: MapUi,
+    x: u32,
+    y: u32,
+) -> Option<MapHit> {
     if height > 0 && y == height - 1 {
         let theme = theme_control_start(width);
         return (x >= theme && x < theme + theme_control_len()).then_some(MapHit::ToggleTheme);
+    }
+    if let MapScreen::Brief(node) = ui.screen {
+        return brief::brief_hit(height, run, node, y);
     }
     let ahead = run.ahead();
     ahead
@@ -675,9 +790,28 @@ pub fn map_hit(width: u32, height: u32, run: &Campaign, x: u32, y: u32) -> Optio
         .map(|(_, offer)| hit_of(*offer))
 }
 
-/// What activating `offer` does — raid it, or buy the road to it (§14 v3/#212). Shared by
-/// the tap path and the key path, which is what keeps the two saying the same thing about
-/// one row.
+/// What **Enter** does on whichever screen is up — the key half of [`map_hit`], and the
+/// one place a row's meaning is decided for both input paths (§11.6).
+///
+/// `None` when the marked row is not there to be pressed: an empty offer list, or a brief
+/// whose rows have changed under a marker resting past the end of them.
+#[must_use]
+pub fn map_activation(run: &Campaign, ui: MapUi) -> Option<MapHit> {
+    match ui.screen {
+        MapScreen::List => {
+            let ahead = run.ahead();
+            ahead.get(ui.row(ahead.len())).copied().map(hit_of)
+        }
+        MapScreen::Brief(node) => {
+            let rows = brief_rows(run, node);
+            rows.get(ui.row(rows.len())).map(|row| row.hit(node))
+        }
+    }
+}
+
+/// What activating a **list** row does — open its brief (#215), or buy the road to it
+/// (§14 v3/#212). Shared by the tap path and the key path, which is what keeps the two
+/// saying the same thing about one row.
 #[must_use]
 pub fn hit_of(offer: Offer) -> MapHit {
     if offer.locked {
@@ -698,12 +832,52 @@ pub fn hit_of(offer: Offer) -> MapHit {
 /// Bounds are clamped, never asserted, like every other panel: on a board too small for
 /// a row, that row shows what fits and stops.
 pub fn render_map(width: u32, height: u32, run: &Campaign, ui: MapUi) -> Grid {
+    if let MapScreen::Brief(node) = ui.screen {
+        return render_brief(width, height, run, ui, node);
+    }
+    let ahead = run.ahead();
+    let selected = ui.row(ahead.len());
+    let marked = ahead.get(selected).map(|offer| offer.node);
+    let mut grid = picture(width, height, run, ui, marked);
+
+    let column = list_column(width, &ahead);
+    for (i, &offer) in ahead.iter().enumerate() {
+        let category = row_category(run, offer, i == selected);
+        draw(
+            &mut grid,
+            column,
+            row_of(height, i),
+            &row_text(offer, i == selected),
+            category,
+        );
+    }
+
+    footer(&mut grid, FOOTER);
+    grid
+}
+
+/// **The half of the screen both surfaces share** (#215): the heading, the alert line, the
+/// wallet line and the country itself, with `marked` drawn as the one facility currently
+/// in question.
+///
+/// It is a *picture*: it answers "where", not "which" (see the module docs). Splitting it
+/// out is what lets the brief be a sub-screen rather than a second surface — the player
+/// keeps the map they were reading, and only the rows beneath it change.
+///
+/// Bounds are clamped, never asserted, like every other panel: on a board too small for a
+/// row, that row shows what fits and stops.
+pub(super) fn picture(
+    width: u32,
+    height: u32,
+    run: &Campaign,
+    ui: MapUi,
+    marked: Option<NodeId>,
+) -> Grid {
     let mut grid = blank_grid(width, height);
     let map_h = map_height(height);
     let map = run.map();
     let ahead = run.ahead();
     let here = standing_here(run, &ahead);
-    let selected = ui.selected(&ahead);
     let drawn: Vec<NodeId> = run
         .path()
         .iter()
@@ -779,51 +953,38 @@ pub fn render_map(width: u32, height: u32, run: &Campaign, ui: MapUi) -> Grid {
         plot_node(&mut grid, at(node), glyph, Category::Ground);
     }
 
-    // What is on offer: Interest for the row the marker rests on — the thing worth
-    // reaching for — Neutral for the other live options, Ground for the locked edge.
+    // What is on offer: Interest for the facility currently in question — the row the
+    // marker rests on, or the one the brief is about — Neutral for the other live
+    // options, Ground for the locked edge.
     if !here {
-        for (i, offer) in ahead.iter().enumerate() {
+        for offer in ahead.iter() {
             let glyph = if offer.locked {
                 LOCKED_GLYPH
             } else {
                 flavour_glyph(offer.flavour)
             };
-            let category = row_category(run, *offer, i == selected);
+            let category = row_category(run, *offer, Some(offer.node) == marked);
             plot_node(&mut grid, at(offer.node), glyph, category);
         }
     }
 
     // And where you stand, last of all: nothing may be drawn over the player (§11.3).
     plot_node(&mut grid, at(standing), HERE_GLYPH, Category::Owned);
+    grid
+}
 
-    let column = list_column(width, &ahead);
-    for (i, &offer) in ahead.iter().enumerate() {
-        let category = row_category(run, offer, i == selected);
-        draw(
-            &mut grid,
-            column,
-            row_of(height, i),
-            &row_text(offer, i == selected),
-            category,
-        );
-    }
-
-    let footer_row = height.saturating_sub(1);
+/// The footer both surfaces draw: the screen's own prose on the left, and the theme
+/// control in the corner it keeps everywhere (§11.2/#189).
+pub(super) fn footer(grid: &mut Grid, hint: &str) {
+    let row = grid.height.saturating_sub(1);
+    draw(grid, FOOTER_INDENT, row, hint, Category::Ground);
     draw(
-        &mut grid,
-        FOOTER_INDENT,
-        footer_row,
-        FOOTER,
-        Category::Ground,
-    );
-    draw(
-        &mut grid,
-        theme_control_start(width),
-        footer_row,
+        grid,
+        theme_control_start(grid.width),
+        row,
         &theme_control(),
         Category::System,
     );
-    grid
 }
 
 /// Paint one node's glyph at `(x, y)`, if the cell is on the screen.

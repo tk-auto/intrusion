@@ -815,6 +815,31 @@ pub struct LevelModifiers {
     /// [`guard_count`]: LevelModifiers::guard_count
     /// [`calm_guards_detect_only_their_cone`]: LevelModifiers::calm_guards_detect_only_their_cone
     pub narrowed_guard_cones: bool,
+    /// **Easier.** The facility was **scouted** before the run set foot in it
+    /// (§11.5a/§14 v3/#215): its points of interest — the consoles, the crates and the
+    /// cupboards ([`scout`](crate::scout)) — are drawn in the **remembered** state from
+    /// turn one instead of hidden until seen. Baseline off: every quick-play level, and
+    /// every facility a campaign walked into without paying.
+    ///
+    /// **The second knowledge knob, and it moves the other line.**
+    /// [`layout_knowledge`](Self::layout_knowledge) moves what the *geometry* layer is
+    /// worth before turn one and hands over no content at all; this hands over contents
+    /// and touches no geometry beyond the cells those contents stand on. So the two
+    /// compose without overlapping: a run may know the building and not what is in it,
+    /// or know where the consoles are and nothing of the wing they stand in.
+    ///
+    /// **It is bought, never drawn** — which is why it is not in the §12.6 directed pool
+    /// (see [`POOL`]). A difficulty draw that handed over the objectives would be giving
+    /// away the scouting the campaign's own currency exists to sell (#211), and the price
+    /// would stop being a decision. Its one source is
+    /// [`Campaign::scout`](crate::Campaign::scout).
+    ///
+    /// **Position only, never live state** (§11.5a **[SETTLED]**). What is drawn is the
+    /// cell a console, a crate or a cupboard stands on; whether a guard is beside it,
+    /// whether the door to it is open, and whether the intel is still there are all
+    /// earned inside the facility exactly as they were. See [`scout`](crate::scout) for
+    /// what may be sold and what may not.
+    pub scouted: bool,
     /// The exit's intel gate (§4.5/§10.2) — how much intel the run must hold to
     /// leave. Baseline [`IntelGate::AtLeastOne`]; quick play (#244) sets
     /// [`IntelGate::All`], campaign (§14 v3) [`IntelGate::None`]. Read at runtime
@@ -882,7 +907,7 @@ impl ActiveModifier {
 ///
 /// A bounded knob contributes **one entry per non-baseline value**, since each is a
 /// different caption with a different width.
-pub(crate) const CAPTIONS: [ActiveModifier; 20] = [
+pub(crate) const CAPTIONS: [ActiveModifier; 21] = [
     LOCKED_PRIZE_ROOM,
     SEARCHES_HIDEOUTS,
     CALLS_IN_SIGHTINGS,
@@ -901,6 +926,7 @@ pub(crate) const CAPTIONS: [ActiveModifier; 20] = [
     THREE_CACHES,
     SHOWS_SEARCH_AREAS,
     NARROWED_CONES,
+    SCOUTED,
     INTEL_GATE_ALL,
     INTEL_GATE_NONE,
 ];
@@ -1053,6 +1079,20 @@ const NARROWED_CONES: ActiveModifier = ActiveModifier {
     name: "Guard cones",
     direction: ModifierDirection::Easier,
     detail: Some("shorter"),
+};
+
+/// The scout caption (#215). Named for **what the board shows**, like every other easier
+/// caption here: the player reads that the building's contents are on the map, not that a
+/// flag was set at the hub.
+///
+/// The detail is *scouted* rather than *known* or *revealed*, because scouting is the word
+/// the hub sells it under (§11.8: one name for one thing), and because it is the honest one
+/// — a scouted console is a position on a plan, and the room around it is as dark as it
+/// ever was.
+const SCOUTED: ActiveModifier = ActiveModifier {
+    name: "Contents",
+    direction: ModifierDirection::Easier,
+    detail: Some("scouted"),
 };
 
 const INTEL_GATE_ALL: ActiveModifier = ActiveModifier {
@@ -1360,6 +1400,7 @@ impl LevelModifiers {
             caches,
             prize_room_locked,
             narrowed_guard_cones,
+            scouted,
             intel_to_exit,
         } = *self;
         let mut active = Vec::new();
@@ -1433,6 +1474,12 @@ impl LevelModifiers {
             IntelCount::Baseline => {} // the recipe's own count — nothing to surface
             IntelCount::More => active.push(CONSOLES_MORE),
             IntelCount::Fewer => active.push(CONSOLES_FEWER),
+        }
+        // Read before turn one like the two above (#215): a facility whose contents are
+        // already on the board is a facility somebody paid for, and the card is where a
+        // resumed run is told what it bought.
+        if scouted {
+            active.push(SCOUTED);
         }
         // The intel gate is a bounded knob (§4.5/§10.2): only its non-baseline
         // settings are "active", each with the direction its exposure rank implies.
@@ -1515,6 +1562,11 @@ impl LevelModifiers {
             // The rule holds in its easier direction too: a source asking for narrowed
             // cones is asking for a *rule*, and no source can talk another out of one.
             narrowed_guard_cones: self.narrowed_guard_cones || other.narrowed_guard_cones,
+            // Knowledge the run **bought** (#215), composed by the same OR as every
+            // other toggle: no silent source can un-scout a facility the hub was paid
+            // for. The §12.6 invariant reads unusually here and still holds — nothing in
+            // this field adds pressure, so there is nothing for a partner to relieve.
+            scouted: self.scouted || other.scouted,
             intel_to_exit: self.intel_to_exit.harder_of(other.intel_to_exit),
         }
     }
@@ -1768,10 +1820,11 @@ mod tests {
         assert_eq!(fewer.active()[0].detail, Some("one fewer"));
 
         // Several sources at once: every active field is listed, in reading order.
-        // **Twelve, not thirteen, with every field set** — `calm_guards_detect_only_their_cone`
-        // is the retired slot 5 (#442), and a retired toggle announces nothing: what it
-        // asked for is the rule the level plays regardless, so a caption for it would
-        // tell the player about a difference that no longer exists.
+        // **One short of the field count, with every field set** —
+        // `calm_guards_detect_only_their_cone` is the retired slot 5 (#442), and a
+        // retired toggle announces nothing: what it asked for is the rule the level
+        // plays regardless, so a caption for it would tell the player about a difference
+        // that no longer exists.
         let stacked = LevelModifiers {
             guards_always_search_hideouts: true,
             sighting_lost_calls_a_guard: true,
@@ -1786,10 +1839,11 @@ mod tests {
             intel_count: IntelCount::Fewer,
             caches: CacheCount::Three,
             prize_room_locked: true,
+            scouted: true,
             narrowed_guard_cones: true,
             intel_to_exit: IntelGate::All,
         };
-        assert_eq!(stacked.active().len(), 14);
+        assert_eq!(stacked.active().len(), 15);
         assert!(
             !stacked
                 .active()
@@ -1861,6 +1915,7 @@ mod tests {
             caches: CacheCount::Two,
             prize_room_locked: true,
             narrowed_guard_cones: false,
+            scouted: true,
             intel_to_exit: IntelGate::All,
         };
         let b = LevelModifiers {
@@ -1878,6 +1933,7 @@ mod tests {
             caches: CacheCount::None,
             prize_room_locked: false,
             narrowed_guard_cones: true,
+            scouted: false,
             intel_to_exit: IntelGate::None,
         };
         let both = a.union(b);
@@ -1895,6 +1951,10 @@ mod tests {
         // The reward knob (#209): `a` stocks two crates and `b` asked for none, so two
         // it is — a source that stayed quiet cannot take away a reward another offered.
         assert_eq!(both.caches, CacheCount::Two);
+        // The scout is a plain toggle (#215) and composes by OR: `a` paid for a plan of
+        // the building and `b` said nothing about one, so the plan survives — a quiet
+        // source cannot un-scout what the hub was paid for.
+        assert!(both.scouted);
         // Union with the baseline changes nothing.
         assert_eq!(a.union(LevelModifiers::default()), a);
     }

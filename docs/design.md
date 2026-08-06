@@ -2722,6 +2722,27 @@ so a watched cell out of your sight still paints red, now with nothing on top of
 > the directed difficulty draw it is bought with pressure taken on elsewhere, never
 > given away.
 
+> **The contents half has an override too, and it is bought rather than drawn** (#215).
+> The campaign's pre-level **scout** (§14 v3) spends intel at the hub to put a facility's
+> **points of interest** — its consoles, its crates and its cupboards — on the board from
+> turn one, in the **remembered** state, so *hidden until seen* becomes *found, a raid
+> early* for those cells. It is stated here for the reason the layout override is: a
+> **[SETTLED]** rule that something quietly bends is not settled.
+>
+> Three things keep it from being a hole in the rule. It reveals **position only** — the
+> live layer (guards, a door's pose, the cones) is never remembered even after it is seen,
+> so there is nothing there for intel to buy, and the room around a scouted console is as
+> unexplored as it ever was. It is **paid for, at a facility's whole haul** ([START] 3
+> intel), not handed out by the §12.6 difficulty draw — it is deliberately kept out of the
+> directed pool, because a draw that gave away the objectives would be giving away the
+> thing the campaign's own currency exists to sell. And the **comms console is not in it**:
+> §7.3's counterplay has to be found, and selling it would price that detour at three
+> intel.
+>
+> It is the same mechanism as the memory the player earns, which is what makes it cheap to
+> state: the scout marks those cells in tile memory at boot, and the renderer draws them
+> exactly as it draws a room walked through and left. There is no third knowledge state.
+
 > **The one deliberate override of this rule, and it is a modifier** (#233). The same
 > knob's hard end, `layout_knowledge: None`, fogs the **geometry layer too**: ground the
 > player has never had eyes on draws as nothing at all, and only what has been seen is
@@ -3841,6 +3862,38 @@ bullet below fills one of its seams.
       would be a second, unwritten rule about what the alert is. At condition 2 the
       locked edge is never the marked road — finding the unwatched one is the play there,
       and it must not cost intel.
+  - **The second sink: scouting the facility ahead** (#215). Spending **three intel**
+    [START] at the hub buys a **plan of one facility's contents** — where its consoles,
+    crates and cupboards are — and it walks in with them drawn in §11.5a's **remembered**
+    state instead of hidden until seen. It is the campaign's answer to *"I cannot see what
+    I am buying"*: the route sink buys ground, this buys what is standing on it.
+    - **Position only, never live state** [SETTLED]. Guards, door poses and cones are
+      earned inside the facility exactly as they were, and the comms console stays hidden
+      (§7.3's counterplay has to be found). The deliberate override of §11.5a's
+      *contents are hidden until seen* is recorded there, in the section it bends.
+    - **It costs a facility's whole haul** [START]. Three consoles is what the §10.2
+      recipe puts in a building, so knowing a building costs robbing one: no run can scout
+      its first facility, and few can scout two in a row. It is the expensive end of the
+      hub against the road bought blind at one, and that ratio is the design — what is
+      sold here is the §10 exploration of an entire facility, answered before turn one.
+    - **Bought before the run commits, and spent if the run declines** [SETTLED]. The
+      purchase is made at the choice point, on a facility the run has *not* walked to, so
+      it is part of the choice rather than something done on arrival — and backing out to
+      take another road leaves the intel spent. Scouting the road you are not sure of is
+      exactly the purchase that can be wrong, which is what stops the sink being a toll on
+      the way in.
+    - **Picking a facility no longer raids it: it opens the facility brief** (#215). The
+      map's list answers *which facility*, and the brief — the same picture with the rows
+      swapped — answers *what about it*: enter it, scout it first, or go back. The one
+      irreversible press of a campaign (§2.1) is now a row on a screen the player asked
+      for rather than the first thing a finger lands on, and the hub's prices have
+      somewhere to live that is not a third screen.
+    - **A facility with no room left in its level-seed token is not offered the sale**
+      (§12.7). A token carries a bounded number of rules, and a rich facility under an
+      alerted campaign can already be spending them all; selling one more would hand the
+      player a facility that cannot be written down, shared or replayed. The row is
+      absent rather than drawn and refused — unlike a price the run merely cannot afford
+      yet, which it can save up for.
   - **Walking out empty-handed is not punished** [OPEN on the tuning]. Nothing is taken
     away for a wasted raid; the run is simply poorer at a facility the alert may have
     made harder (#210), and caches are one-shot. An explicit nudge (a small alert bump)
