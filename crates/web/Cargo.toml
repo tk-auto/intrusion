@@ -50,6 +50,9 @@ features = [
     "PointerEvent",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    # The palette's chrome variables (§11.2/#546): boot injects one <style> into
+    # <head>, so index.html holds no literal colour.
+    "HtmlHeadElement",
     # Seed sharing (§13.1/#110): the menu's seed box reads its value, and the
     # active seed is read from / reflected into the page URL as `…#seed=N`.
     "HtmlInputElement",

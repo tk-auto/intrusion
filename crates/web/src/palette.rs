@@ -53,6 +53,10 @@ const fn sw(fg: &'static str, dim: &'static str, bg: &'static str, bg_dim: &'sta
 const PAGE: usize = 0;
 const INK: usize = 1;
 const FLOOR: usize = 2;
+/// Claimed by the page **chrome** ([`chrome_css`]): the DOM's secondary text —
+/// the letterbox, the replay bar, the seed box — reads in the spare light grey,
+/// per the convention above that a spare row is named the day a system claims it.
+const GREY: usize = 3;
 const SLATE: usize = 4;
 const BLUE: usize = 5;
 const CYAN: usize = 7;
@@ -201,6 +205,41 @@ const fn palette(theme: Theme) -> &'static Palette {
 
 /// The page background for a theme (§11.2) — what [`crate::paint`] fills before it
 /// draws a glyph, and the colour the dim and background shades recede toward.
+/// The page **chrome** (§11.2/#546): every colour the DOM around the board wears,
+/// as CSS custom properties derived from the two tables above — injected into a
+/// `<style>` element once at boot, so `web/index.html` holds `var(--chrome-…)`
+/// references and **no literal colour**. This is what makes the file's opening
+/// claim true: a recolour edits the tables here and nothing else, and the frame
+/// around the board is drawn from the same ink as the board.
+///
+/// One block per theme, keyed off `body[data-theme]` exactly as the canvas theme
+/// is mirrored (`crates/web/src/lib.rs`), so the CSS flip and the board flip are
+/// one fact. Alpha (the replay bar's translucency, the seed panel's) stays in the
+/// stylesheet as `color-mix` over these variables — a transparency is a chrome
+/// choice, not a palette value.
+pub(crate) fn chrome_css() -> String {
+    let block = |p: &Palette| {
+        format!(
+            "--chrome-page:{page};--chrome-text:{text};--chrome-accent:{accent};\
+             --chrome-label:{label};--chrome-hint:{hint};--chrome-edge:{edge};\
+             --chrome-inset:{inset};--chrome-line:{line};",
+            page = p.page(),
+            text = p.rows[GREY].fg,
+            accent = p.rows[BLUE].fg,
+            label = p.rows[PURPLE].fg,
+            hint = p.rows[SLATE].fg,
+            edge = p.rows[SLATE].bg,
+            inset = p.rows[SLATE].bg_dim,
+            line = p.rows[INK].bg_dim,
+        )
+    };
+    format!(
+        ":root{{{dark}}}body[data-theme=\"light\"]{{{light}}}",
+        dark = block(&DARK),
+        light = block(&LIGHT),
+    )
+}
+
 pub(crate) fn page(theme: Theme) -> &'static str {
     palette(theme).page()
 }
@@ -302,6 +341,35 @@ mod tests {
     /// that lies. Written as a loop over this rather than duplicated per theme, so a
     /// third theme inherits the whole suite by appearing here.
     const THEMES: [Theme; 2] = [Theme::Dark, Theme::Light];
+
+    /// **The chrome draws only from the tables** (#546): every hex value
+    /// `chrome_css` emits is some row's own ink — fg, dim, bg or bg_dim — in the
+    /// theme block it appears in. This is the fence that keeps `web/index.html`
+    /// from quietly growing a second palette again: a chrome shade that exists in
+    /// no table cannot come out of this function.
+    #[test]
+    fn the_chrome_variables_are_table_values() {
+        let css = chrome_css();
+        let (dark_block, light_block) = css
+            .split_once("body[data-theme=\"light\"]")
+            .expect("one block per theme");
+        for (block, palette) in [(dark_block, &DARK), (light_block, &LIGHT)] {
+            let table: Vec<&str> = palette
+                .rows
+                .iter()
+                .flat_map(|s| [s.fg, s.dim, s.bg, s.bg_dim])
+                .collect();
+            for value in block.split(['#', ';']).filter(|v| v.len() == 6) {
+                if value.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    let hex = format!("#{value}");
+                    assert!(
+                        table.contains(&hex.as_str()),
+                        "chrome emits {hex}, which no row of this theme owns",
+                    );
+                }
+            }
+        }
+    }
 
     /// Parse a `#rrggbb` string into RGB — mirror of what the browser does.
     fn rgb(hex: &str) -> (i32, i32, i32) {

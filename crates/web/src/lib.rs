@@ -158,6 +158,16 @@ pub fn start() -> Result<(), JsValue> {
     let document = web_sys::window()
         .and_then(|w| w.document())
         .ok_or_else(|| JsValue::from_str("no document"))?;
+    // The page chrome's colours, injected from the one palette table (§11.2/#546):
+    // index.html holds only `var(--chrome-…)` references, so this <style> is what
+    // gives them values — before the first paint of anything the shell owns, and
+    // for both themes at once (the flip rides `body[data-theme]` like the board's).
+    let chrome = document.create_element("style")?;
+    chrome.set_text_content(Some(&palette::chrome_css()));
+    document
+        .head()
+        .ok_or_else(|| JsValue::from_str("no head"))?
+        .append_child(&chrome)?;
     let canvas = mount_canvas(&document)?;
     let ctx: CanvasRenderingContext2d = canvas
         .get_context("2d")?

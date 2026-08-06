@@ -12,8 +12,11 @@
         height: 100%;
         /* The whole level fits the viewport (canvas sized in JS); never scroll. */
         overflow: hidden;
-        background: #0b0b0b;
-        color: #cfcfcf;
+        /* Values are the palette's own, injected at boot (§11.2/#546 —
+           crates/web/src/palette.rs::chrome_css is the single owner). The two
+           fallbacks cover only the instant before the wasm loads. */
+        background: var(--chrome-page, #000);
+        color: var(--chrome-text, #888);
         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
         /* Taps are game input (§11.6): no pan/pinch/double-tap-zoom gestures, no
            text selection or tap flash — the shell consumes pointerdown itself. */
@@ -29,23 +32,9 @@
          wearing the other theme. The shell mirrors the live theme onto
          `<body data-theme>` on every frame (crates/web/src/lib.rs); dark is the
          default above, so only the light case is stated here. */
-      body[data-theme="light"] {
-        background: #f4f4f4;
-        color: #3f3f3f;
-      }
-      body[data-theme="light"] #replaybar {
-        color: #6e6e6e;
-        background: rgba(244, 244, 244, 0.72);
-      }
-      body[data-theme="light"] #replaybar .lbl {
-        color: #7b2fa0;
-      }
-      body[data-theme="light"] #replay-pos {
-        color: #0060c0;
-      }
-      body[data-theme="light"] #replaybar .hint {
-        color: #3f5f80;
-      }
+      /* No light-theme overrides here: the boot-injected block re-assigns every
+         --chrome-… variable under body[data-theme="light"], so the flip is the
+         palette's, stated once (§11.2/#546). */
       #app {
         display: grid;
         place-items: center;
@@ -93,9 +82,9 @@
           monospace;
         gap: 0.6em;
         padding: 0.8em;
-        color: #a8a8a8;
-        background: rgba(11, 11, 11, 0.92);
-        border: 1px solid #293138;
+        color: var(--chrome-text);
+        background: color-mix(in srgb, var(--chrome-page) 92%, transparent);
+        border: 1px solid var(--chrome-edge);
         border-radius: 6px;
         /* The panel is UI, not the board: allow its own touch behaviour (the shell
            also stops these events reaching the game's document listeners). */
@@ -105,7 +94,7 @@
         display: flex;
       }
       #menu-seed .lbl {
-        color: #667a8a;
+        color: var(--chrome-hint);
       }
       /* The box's text is selectable so a token can be copied back out (#110:
          readable/copyable), unlike the rest of the page which suppresses selection
@@ -118,9 +107,9 @@
         box-sizing: border-box;
         padding: 0.35em 0.5em;
         font: inherit;
-        color: #4ea6ff;
-        background: #1e1e1e;
-        border: 1px solid #434343;
+        color: var(--chrome-accent);
+        background: var(--chrome-inset);
+        border: 1px solid var(--chrome-line);
         border-radius: 3px;
         user-select: text;
         -webkit-user-select: text;
@@ -137,14 +126,14 @@
         cursor: pointer;
       }
       #seed-go {
-        color: #0b0b0b;
-        background: #4ea6ff;
+        color: var(--chrome-page);
+        background: var(--chrome-accent);
       }
       /* The way back out, always beside the way forward — the touch player's escape
          from the prompt (§11.6's no-trap rule). Quieter than play, but a real button. */
       #seed-back {
-        color: #cfcfcf;
-        background: #293138;
+        color: var(--chrome-text);
+        background: var(--chrome-edge);
       }
       /* Replay viewer HUD (§12.4/#197): a small bar centred at the bottom edge that
          reads the scrub position (K / total) and marks the run as a replay, not live
@@ -162,8 +151,8 @@
         gap: 8px;
         padding: 4px 12px;
         font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-        color: #a8a8a8;
-        background: rgba(11, 11, 11, 0.72);
+        color: var(--chrome-text);
+        background: color-mix(in srgb, var(--chrome-page) 72%, transparent);
         border-top-left-radius: 6px;
         border-top-right-radius: 6px;
         pointer-events: none;
@@ -172,15 +161,15 @@
         display: flex;
       }
       #replaybar .lbl {
-        color: #bd6bd6;
+        color: var(--chrome-label);
         text-transform: uppercase;
         letter-spacing: 0.08em;
       }
       #replay-pos {
-        color: #4ea6ff;
+        color: var(--chrome-accent);
       }
       #replaybar .hint {
-        color: #667a8a;
+        color: var(--chrome-hint);
       }
     </style>
   </head>
