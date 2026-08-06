@@ -34,8 +34,7 @@
 
 use intrusion_core::{
     ability_at, help_hit, is_help_button, is_message_button, map_hit, menu_hit, message_log_rows,
-    settings_hit, verdict_hit, AbilityId, EndExit, HelpHit, MapHit, MenuHit, SettingsHit,
-    UiCommand, TOP_ROWS,
+    verdict_hit, AbilityId, EndExit, HelpHit, MapHit, MenuHit, UiCommand, TOP_ROWS,
 };
 
 use crate::input::SWIPE_THRESHOLD_PX;
@@ -46,10 +45,6 @@ use crate::Game;
 /// the frame drew and never one derived from the column it hit.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Control {
-    /// A row or the `[x]` on the **options screen** (§14 v2/#513). It is raised over
-    /// whatever opened it, so while it is up this is the only control there is —
-    /// which is why it is resolved before everything else below.
-    Settings(SettingsHit),
     /// A title-screen entry (§14/#268). The menu is modal, so while it is up this is
     /// the only control there is.
     Menu(MenuHit),
@@ -236,8 +231,7 @@ impl Game {
             // A finished run is modal too: the board behind the verdict is evidence
             // to read, not a surface to tap (§14 v2/#138) — and a stray wait on it
             // would be an input to a loop that is already over.
-            modal: self.settings_open()
-                || self.ui.menu.is_some()
+            modal: self.ui.menu.is_some()
                 || self.map_open()
                 || self.ui.help_open
                 || self.state.verdict().is_some(),
@@ -249,17 +243,25 @@ impl Game {
     /// [`is_message_button`], [`ability_at`] — so a tap resolves to exactly the control
     /// drawn and can never hit one that is not there.
     ///
-    /// The modal screens come first and exclusively: while the options screen, the
-    /// title menu or the help panel is up it owns every press (#513, §14/#268,
-    /// §14 v2/#248), so the in-play chrome underneath is not reachable.
+    /// The modal screens come first and exclusively: while the help panel or the title
+    /// menu is up it owns every press (§14 v2/#248, §14/#268), so the in-play chrome
+    /// underneath is not reachable — and the panel is asked before the menu, since it is
+    /// the one that can be raised over the other (#513).
     fn control_at(&self, col: u32, row: u32) -> Option<Control> {
         let width = self.state.layout().facility().width();
-        // The options screen is drawn **over** whatever raised it (#513), so it must be
-        // asked first: a press that fell through to the menu or the panel underneath
-        // would fire a control the player cannot see.
-        if self.settings_open() {
-            return settings_hit(width, self.ui, self.state.level(), col, row)
-                .map(Control::Settings);
+        // **The open panel is asked before the menu** (#513): the menu's `Options` entry
+        // raises it on the Options tab, so a press that fell through to the list
+        // underneath would fire an entry the player cannot see.
+        if self.ui.help_open {
+            return help_hit(
+                width,
+                self.screen_height(),
+                self.ui,
+                self.state.level(),
+                col,
+                row,
+            )
+            .map(Control::Help);
         }
         if let Some(menu) = self.ui.menu {
             return menu_hit(width, self.screen_height(), menu, col, row).map(Control::Menu);
@@ -283,17 +285,6 @@ impl Game {
                 row,
             )
             .map(Control::End);
-        }
-        if self.ui.help_open {
-            return help_hit(
-                width,
-                self.screen_height(),
-                self.ui,
-                self.state.level(),
-                col,
-                row,
-            )
-            .map(Control::Help);
         }
         if is_help_button(col, row) {
             return Some(Control::HelpToggle);
@@ -322,7 +313,6 @@ impl Game {
     /// would, and a cooling entry refuses for free in the economy (§4.4).
     pub(crate) fn apply_control(&mut self, control: Control) {
         match control {
-            Control::Settings(hit) => self.apply_settings_hit(hit),
             Control::Menu(hit) => self.apply_menu_hit(hit),
             Control::Map(hit) => self.apply_map_hit(hit),
             Control::Help(hit) => {

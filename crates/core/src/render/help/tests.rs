@@ -3,7 +3,7 @@ use crate::ability::AbilityId;
 use crate::ability::Loadout;
 use crate::alert::{AlertEffect, AlertTrigger, AlertTuning};
 use crate::modifiers::{
-    ActiveModifier, CacheCount, GuardCount, IntelCount, IntelGate, LayoutKnowledge,
+    ActiveModifier, CacheCount, DebugModifiers, GuardCount, IntelCount, IntelGate, LayoutKnowledge,
 };
 
 /// A full-screen frame the size of the v1 board's screen (§10.2) — wide enough
@@ -54,6 +54,7 @@ pub(super) fn panel_run<'a>(
         modifiers,
         alert,
         bar: loadout.iter().collect(),
+        debug: DebugModifiers::default(),
     }
 }
 
@@ -736,40 +737,16 @@ fn the_panel_is_escapable_and_switchable_by_touch() {
     assert_eq!(hit(0, 0), None, "the left margin is not a tab");
 }
 
-/// §11.6/#513: the options screen is reachable **by touch**, not just by key — the
-/// footer's `options [o]` hit-tests to [`HelpHit::OpenSettings`] over exactly the cells
-/// it is drawn on, and the rest of the footer row is inert like the body. A phone has
-/// no `o` key, so without this the settings — the theme included, and in a debug
-/// session the §12.6 switches — would be a desktop-only screen on a game that fits its
-/// whole board to a phone.
-///
-/// **The word is a target too, not only the bracketed key.** `options` is the larger
-/// and more obvious thing to reach for, and a bare `[o]` is only a target if you
-/// already know what `o` means — so every cell of the label presses the control, which
-/// is what this walks. It is the rule the `theme [n]` control that stood here was held
-/// to (#189), inherited by the control that replaced it.
+/// §11.6/#513: **the footer row carries no control on any tab.** The `theme [n]`
+/// button that sat in its corner (#189) went with the setting, onto the Options tab —
+/// so the row is prose, and every cell of it is inert like the body.
 #[test]
-fn the_options_control_is_reachable_by_touch() {
-    let start = options_control_start(W);
-    for x in start..start + options_control_len() {
-        assert_eq!(
-            hit(x, H - 1),
-            Some(HelpHit::OpenSettings),
-            "footer cell {x}"
-        );
+fn the_footer_row_carries_no_control() {
+    for x in 0..W {
+        assert_eq!(hit(x, H - 1), None, "footer cell {x} is a target");
     }
-    // The label's own first cell — the regression this guards is a control that
-    // only answered on its last three cells.
-    let label_end = start + OPTIONS_LABEL.chars().count() as u32;
-    assert_eq!(hit(start, H - 1), Some(HelpHit::OpenSettings));
-    assert_eq!(hit(label_end - 1, H - 1), Some(HelpHit::OpenSettings));
-
-    assert_eq!(hit(start - 1, H - 1), None, "the hint is inert");
-    assert_eq!(hit(start, H - 2), None, "only the footer row");
-    // Measured from the *bottom* edge, so a shorter screen moves it with the
-    // drawing rather than leaving the hit region a row adrift.
-    assert_eq!(hit_on(20, start, 19), Some(HelpHit::OpenSettings));
-    assert_eq!(hit_on(20, start, H - 1), None);
+    // …and on a shorter screen the row is still measured from the bottom edge.
+    assert_eq!(hit_on(20, 30, 19), None);
 }
 
 /// A run whose panel really does draw a token — quick play, spelled out in full
@@ -967,8 +944,8 @@ fn the_copy_acknowledgement_says_only_what_happened() {
     }
 }
 
-/// The panel's key and its control name the same character (#353), the way `o`
-/// and `options [o]` do — so the `[c]` the player reads is the `c` they press. It is
+/// The panel's key and its control name the same character (#353), the way `n`
+/// and the theme shortcut do — so the `[c]` the player reads is the `c` they press. It is
 /// deliberately **not** a board key: there is no token drawn outside this panel
 /// for it to copy, which is also what leaves the letter free for an ability
 /// mnemonic (#360).
@@ -992,47 +969,57 @@ fn the_copy_key_is_the_same_on_the_control_and_in_the_table() {
     );
 }
 
-/// The footer's hint and its options control share one row, so the prose must stop
-/// before the control starts — [`draw`] would clip the control in silence, and a
-/// half-drawn control is one the player cannot see they can press.
+/// The footer prose has the whole row to itself on every tab — [`draw`] clips in
+/// silence, so a longer sentence would simply arrive cut.
 #[test]
-fn the_footer_hint_stops_short_of_the_options_control() {
+fn the_footer_hint_fits_its_row() {
     let end = FOOTER_INDENT + FOOTER_HINT.chars().count() as u32;
+    assert!(end <= W, "the footer hint overruns its row ({end} vs {W})");
+    // The Options tab prints its own hint, and it has to fit the same row.
+    let options = FOOTER_INDENT + super::settings::FOOTER.chars().count() as u32;
     assert!(
-        end < options_control_start(W),
-        "the footer hint runs into the options control ({end} vs {})",
-        options_control_start(W),
+        options <= W,
+        "the Options tab's footer overruns its row ({options} vs {W})",
     );
-    // And the control itself clears the board's right margin.
-    assert_eq!(
-        options_control(),
-        format!("{OPTIONS_LABEL} [{SETTINGS_KEY}]")
-    );
-    assert!(options_control_start(W) + options_control_len() <= W);
 }
 
-/// The panel's own door to the options screen cannot drift from its key (#513): the
-/// drawn control ends with the bracketed character the table answers to, and — like
-/// `c` — the key is panel-only, so it claims nothing from the board.
+/// **The Options tab's three keys** (#513): the vertical pair walks its rows and
+/// `Enter`/`Space` fires the marked one. They are bound for the whole panel, because a
+/// key table cannot see which tab is up — the shell mirrors the drawn tab instead — and
+/// each was free to take: no tab had anything for `↑`/`↓`/`Enter` to do before.
 #[test]
-fn the_options_key_is_the_same_on_the_control_and_in_the_table() {
-    let key = SETTINGS_KEY.to_string();
+fn the_options_tab_keys_walk_its_rows_and_fire_one() {
     assert_eq!(
-        crate::help_nav_for_key(&key),
-        Some(crate::input::HelpNav::OpenSettings),
+        crate::help_nav_for_key("ArrowUp"),
+        Some(crate::input::HelpNav::PrevRow)
     );
-    assert!(options_control().ends_with(&format!("[{key}]")));
     assert_eq!(
-        crate::input::ui_command_for_key(&key),
-        None,
-        "panel-only: it claims no board letter from the ability mnemonics",
+        crate::help_nav_for_key("ArrowDown"),
+        Some(crate::input::HelpNav::NextRow)
     );
-    assert_eq!(crate::input_for_key(&key), None, "it shadows no movement");
-    // …and it leaves the screen it opened, so the pair is `?`/`?` all over again.
+    for key in ["Enter", " "] {
+        assert_eq!(
+            crate::help_nav_for_key(key),
+            Some(crate::input::HelpNav::Activate),
+            "{key:?} fires the marked row",
+        );
+        assert_eq!(
+            crate::input::ui_command_for_key(key),
+            None,
+            "{key:?} was free to take — nothing on the board wanted it",
+        );
+    }
+    // The vertical **swipes** do the same walk, so the tab is usable by finger — and a
+    // press stays unbound, so a stray tap flips no setting (§11.6/appendix 21).
     assert_eq!(
-        crate::settings_nav_for_key(&key),
-        Some(crate::input::SettingsNav::Back),
+        crate::help_nav_for_gesture(crate::Gesture::Swipe(crate::Direction::North)),
+        Some(crate::input::HelpNav::PrevRow),
     );
+    assert_eq!(
+        crate::help_nav_for_gesture(crate::Gesture::Swipe(crate::Direction::South)),
+        Some(crate::input::HelpNav::NextRow),
+    );
+    assert_eq!(crate::help_nav_for_gesture(crate::Gesture::Press), None);
 }
 
 /// The card and the key tables cannot drift (#189): the controls row and both
@@ -1073,14 +1060,14 @@ fn the_tabs_cycle_both_ways() {
     }
 }
 
-/// **The bar is the same in every session** (#513). It was not while the debug
-/// session had a fourth tab of its own (#459) — the cycle, the layout and the
-/// hit-test all had to be written over a `shown` list, and a stale tab had to be
-/// resolved before it could be drawn. The switches live on the options screen now, so
-/// the panel has one bar, the three tabs a player always had.
+/// **The bar is the same in every session** (#513). It was not while the debug session
+/// had a tab of its own (#459) — the cycle, the layout and the hit-test all had to be
+/// written over a `shown` list, and a stale tab had to be resolved before it could be
+/// drawn. Those switches are a gated *section* of the Options tab now, so the panel has
+/// one bar, the same four tabs whoever is looking at it.
 #[test]
-fn every_session_gets_the_same_three_tabs() {
-    assert_eq!(HelpTab::ALL.len(), 3);
+fn every_session_gets_the_same_four_tabs() {
+    assert_eq!(HelpTab::ALL.len(), 4);
     for debug in [false, true] {
         let ui = ScreenUi {
             debug_mode: debug,

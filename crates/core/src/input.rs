@@ -89,15 +89,17 @@ pub enum HelpNav {
     /// The setting's *home* is the options screen ([`OpenSettings`](Self::OpenSettings),
     /// #513); this is the shortcut, and it is drawn nowhere on the panel any more.
     ToggleTheme,
-    /// Open the **options screen** over the panel (§14 v2/#513) — the keyboard half of
-    /// the footer's `options [o]` control.
-    ///
-    /// It is the panel's whole reason to still be in this list twice over: the theme
-    /// row is there, and so are the debug session's switches, which had a tab here
-    /// until #513. The help panel is the one modal surface a *running* game can always
-    /// raise, so routing the door through it is what keeps every §12.6 switch
-    /// flippable mid-run, exactly as the Debug tab did.
-    OpenSettings,
+    /// Move the marker to the previous row of the **Options** tab, wrapping
+    /// (§14 v2/#513). It is the one tab whose rows are controls rather than reading, so
+    /// it is the only one `↑`/`↓` mean anything on — every other tab swallows them, as
+    /// the panel always did.
+    PrevRow,
+    /// Move the marker to the next row of the Options tab, wrapping.
+    NextRow,
+    /// **Fire the marked row** of the Options tab: flip the setting it names, or copy
+    /// the run as a replay link. `Enter`/`Space`, the confirm keys §11.6 reserves — free
+    /// here, because a modal panel has nothing else to confirm.
+    Activate,
     /// Copy this run's **level-seed token** to the system clipboard (§13.1/#353) —
     /// the keyboard half of the Level info tab's `copy [c]` control, so the panel is
     /// reachable without a pointer and so is this (§11.6). The shell performs the
@@ -135,9 +137,12 @@ pub fn help_nav_for_key(key: &str) -> Option<HelpNav> {
         // toggle reaches every modal screen, and this is the one whose colour key is
         // the best thing on screen to judge the flip against.
         "n" => Some(HelpNav::ToggleTheme),
-        // `o` opens the options screen (#513) — panel-only like `c` below, so it claims
-        // no board letter from the ability mnemonics (§11.6/#368).
-        "o" => Some(HelpNav::OpenSettings),
+        // The Options tab's own three (#513). They are bound for the whole panel rather
+        // than per tab — a table cannot see which tab is up — and the shell mirrors the
+        // drawn tab exactly, so on any other tab they are the no-ops they always were.
+        "ArrowUp" => Some(HelpNav::PrevRow),
+        "ArrowDown" => Some(HelpNav::NextRow),
+        "Enter" | " " => Some(HelpNav::Activate),
         // `c` copies the run's level-seed token (#353). It is listed *here only* — the
         // panel is the one surface the token is drawn on, so a board-wide binding
         // would name a control that is not on screen, and leaving it off
@@ -204,69 +209,6 @@ pub fn menu_nav_for_key(key: &str) -> Option<MenuNav> {
         // level-seed token, and a key that retyped the screen's colours mid-token
         // would be a trap — the shell holds it back there (`apply_menu_nav`).
         "n" => Some(MenuNav::ToggleTheme),
-        _ => None,
-    }
-}
-
-/// A navigation command on the **options screen** (§14 v2/#513) — the settings
-/// surface, modal like every other screen in this file: while it is up the shell
-/// routes keys here first and nothing underneath sees them.
-///
-/// The same shape as [`MenuNav`], because it is the same shape of screen: a vertical
-/// list walked by `↑`/`↓` and fired by `Enter`. A player who has used the title screen
-/// has already learned it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SettingsNav {
-    /// Move the marker to the previous row, wrapping.
-    Prev,
-    /// Move the marker to the next row, wrapping.
-    Next,
-    /// **Fire the marked row** — flip the setting it names, or, for the one row that is
-    /// an action rather than a setting, copy the run as a replay link.
-    Activate,
-    /// Leave the screen, back to whatever it was opened over — the title screen, or the
-    /// help panel mid-run. The keyboard half of the drawn `[x]`, and the reason this
-    /// screen can never trap (§11.6, the old options dialog's exact failure).
-    Back,
-    /// Flip the colour theme (§11.2/#189), as on every other modal surface. It is the
-    /// same flip the theme *row* performs, and it is bound here for the reason it is
-    /// bound everywhere else: `n` is a standing shortcut, and a key that worked on the
-    /// board, on the menu and on the help panel but not on the screen that owns the
-    /// setting would be the one place it surprised.
-    ToggleTheme,
-}
-
-/// Map a key to the [`SettingsNav`] it drives **while the options screen is up**, or
-/// `None` for a key the modal screen swallows (§14 v2/#513).
-///
-/// `Escape` leaves, and so does `o` — the key that opened it from the help panel
-/// ([`HelpNav::OpenSettings`]), still closing what it opened, exactly as `?` does for
-/// the panel itself.
-pub fn settings_nav_for_key(key: &str) -> Option<SettingsNav> {
-    match key {
-        "ArrowUp" => Some(SettingsNav::Prev),
-        "ArrowDown" => Some(SettingsNav::Next),
-        "Enter" | " " => Some(SettingsNav::Activate),
-        "Escape" | "o" => Some(SettingsNav::Back),
-        "n" => Some(SettingsNav::ToggleTheme),
-        _ => None,
-    }
-}
-
-/// Map a gesture to the [`SettingsNav`] it drives **while the options screen is up**
-/// (§11.6/#336/#513) — the touch half of [`settings_nav_for_key`].
-///
-/// The vertical swipes walk the list, exactly as they walk the menu's. **A press is
-/// unbound**, for the menu's reason: resolving it to
-/// [`Activate`](SettingsNav::Activate) would let a stray tap on empty screen flip a
-/// setting — and, in a debug session, lift the fog on a run mid-raid. A row is fired by
-/// pressing *the row*, on the arm-on-press / fire-on-lift path, and by nothing else.
-/// Leaving is the drawn `[x]`, not a swipe: a gesture that dismissed a modal by
-/// accident would work against the no-trap rule rather than for it.
-pub fn settings_nav_for_gesture(gesture: Gesture) -> Option<SettingsNav> {
-    match gesture {
-        Gesture::Swipe(Direction::North) => Some(SettingsNav::Prev),
-        Gesture::Swipe(Direction::South) => Some(SettingsNav::Next),
         _ => None,
     }
 }
@@ -538,6 +480,13 @@ pub fn help_nav_for_gesture(gesture: Gesture) -> Option<HelpNav> {
     match gesture {
         Gesture::Swipe(Direction::West) => Some(HelpNav::PrevTab),
         Gesture::Swipe(Direction::East) => Some(HelpNav::NextTab),
+        // The **vertical** swipes walk the Options tab's rows (#513), exactly as `↑`/`↓`
+        // do — free to bind, because no tab had anything for them to do before. A row is
+        // *fired* by pressing it, never by a swipe, and **a press stays unbound**: a
+        // stray tap on empty panel must not flip a setting, nor lift the fog on a run
+        // mid-raid (§11.6/appendix 21).
+        Gesture::Swipe(Direction::North) => Some(HelpNav::PrevRow),
+        Gesture::Swipe(Direction::South) => Some(HelpNav::NextRow),
         _ => None,
     }
 }
@@ -728,19 +677,16 @@ mod tests {
         // here and *not* in the board's table: outside this panel there is nothing
         // drawn for it to name.
         assert_eq!(help_nav_for_key("c"), Some(HelpNav::CopySeed));
-        // `o` opens the options screen (#513) — panel-only for the same reason, and
-        // the door that keeps every setting reachable mid-run.
-        assert_eq!(help_nav_for_key("o"), Some(HelpNav::OpenSettings));
-        for key in ["c", "o"] {
-            assert_eq!(
-                ui_command_for_key(key),
-                None,
-                "{key:?} does nothing on the board"
-            );
-        }
+        assert_eq!(
+            ui_command_for_key("c"),
+            None,
+            "`c` does nothing on the board",
+        );
         // A movement/wait/ability/other-UI key is swallowed by the open modal panel —
         // the vi keys among them, now that they navigate nothing anywhere (#368).
-        for key in ["k", "j", "l", "h", "w", "5", "t", "m", "r", "v", "Enter"] {
+        // `Enter` and the vertical arrows are **not** among them since #513: they walk
+        // and fire the Options tab's rows (see the test below).
+        for key in ["k", "j", "l", "h", "w", "5", "t", "m", "r", "v", "o"] {
             assert_eq!(
                 help_nav_for_key(key),
                 None,
@@ -749,44 +695,38 @@ mod tests {
         }
     }
 
-    /// **The options screen is modal too** (§14 v2/#513): while it is up the shell
-    /// routes keys through [`settings_nav_for_key`] first. The vertical keys walk the
-    /// rows, `Enter`/`Space` fires the marked one, and `Escape` — or the `o` that
-    /// opened it — leaves. Every other key is swallowed, so nothing underneath the
-    /// screen runs while a setting is being changed.
+    /// **The Options tab's rows are walked from the panel's own table** (§14 v2/#513):
+    /// the vertical pair moves the marker and `Enter`/`Space` fires it. Each was free to
+    /// take — no tab had anything for them to do — so nothing was claimed from play to
+    /// reach the settings.
     ///
     /// The two keys the Debug tab used to own, `r` and `v`, are **gone from every
-    /// table** (#459 → #513): their controls are rows on this screen now, fired by
-    /// `Enter` like every other row, so a session without them has no key that
-    /// silently does nothing.
+    /// table** (#459 → #513): their controls are rows on this tab now, fired by `Enter`
+    /// like every other row, so a session without them has no key that silently does
+    /// nothing.
     #[test]
-    fn the_open_options_screen_captures_input_and_walks_its_rows() {
-        assert_eq!(settings_nav_for_key("ArrowUp"), Some(SettingsNav::Prev));
-        assert_eq!(settings_nav_for_key("ArrowDown"), Some(SettingsNav::Next));
+    fn the_options_tab_is_walked_from_the_panels_own_table() {
+        assert_eq!(help_nav_for_key("ArrowUp"), Some(HelpNav::PrevRow));
+        assert_eq!(help_nav_for_key("ArrowDown"), Some(HelpNav::NextRow));
         for key in ["Enter", " "] {
             assert_eq!(
-                settings_nav_for_key(key),
-                Some(SettingsNav::Activate),
+                help_nav_for_key(key),
+                Some(HelpNav::Activate),
                 "{key:?} fires the marked row",
             );
         }
-        for key in ["Escape", "o"] {
-            assert_eq!(
-                settings_nav_for_key(key),
-                Some(SettingsNav::Back),
-                "{key:?} leaves — the screen can never trap (§11.6)",
-            );
-        }
-        // The standing theme shortcut reaches the screen that owns the setting too,
-        // rather than being the one place `n` surprises.
-        assert_eq!(settings_nav_for_key("n"), Some(SettingsNav::ToggleTheme));
-        for key in ["k", "j", "w", "5", "m", "?", "c", "r", "v", "Tab"] {
-            assert_eq!(
-                settings_nav_for_key(key),
-                None,
-                "{key:?} is swallowed while the options screen is up",
-            );
-        }
+        // The vertical swipes do the same walk; a press stays unbound, so a stray tap
+        // flips nothing (§11.6/appendix 21).
+        assert_eq!(
+            help_nav_for_gesture(Gesture::Swipe(Direction::North)),
+            Some(HelpNav::PrevRow),
+        );
+        assert_eq!(
+            help_nav_for_gesture(Gesture::Swipe(Direction::South)),
+            Some(HelpNav::NextRow),
+        );
+        assert_eq!(help_nav_for_gesture(Gesture::Press), None);
+
         // The retired Debug-tab keys bind nowhere at all now.
         for key in ["r", "v"] {
             assert_eq!(help_nav_for_key(key), None, "{key:?} left the panel");
@@ -1096,10 +1036,18 @@ mod tests {
                 "a horizontal swipe may only move the slider",
             );
         }
-        // The help panel answers only the axis its tab bar runs along, so a swipe up
-        // a horizontal bar is silence rather than a guess.
-        for direction in [Direction::North, Direction::South] {
-            assert_eq!(help_nav_for_gesture(Gesture::Swipe(direction)), None);
+        // The panel answers both axes since #513 — the horizontal pair walks its tab
+        // bar, the vertical pair the Options tab's rows — and **neither fires
+        // anything**: a row is activated by pressing *the row*, on the arm-on-press /
+        // fire-on-lift path, which is what this restraint is really about.
+        for direction in Direction::ALL {
+            assert!(
+                !matches!(
+                    help_nav_for_gesture(Gesture::Swipe(direction)),
+                    Some(HelpNav::Activate | HelpNav::Close),
+                ),
+                "no swipe on the panel may fire a control or dismiss it",
+            );
         }
     }
 }

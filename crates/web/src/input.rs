@@ -43,9 +43,9 @@ use intrusion_core::{
     ability_in_slot, ability_slot_for_code, ability_slot_for_letter, declines_exchange,
     end_nav_for_gesture, end_nav_for_key, help_nav_for_gesture, help_nav_for_key,
     input_for_gesture, input_for_key, key_for_code, map_nav_for_gesture, map_nav_for_key,
-    menu_nav_for_gesture, menu_nav_for_key, settings_nav_for_gesture, settings_nav_for_key,
-    ui_command_for_key, Cell, Direction, EndExit, EndNav, Gesture, HelpHit, HelpNav, HelpTab,
-    Input, InputModality, MapNav, MenuNav, SeedCopy, SettingsNav, UiCommand, BOTTOM_ROWS, TOP_ROWS,
+    menu_nav_for_gesture, menu_nav_for_key, ui_command_for_key, Cell, Direction, EndExit, EndNav,
+    Gesture, HelpHit, HelpNav, HelpTab, Input, InputModality, MapNav, MenuNav, SeedCopy, UiCommand,
+    BOTTOM_ROWS, TOP_ROWS,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -80,15 +80,18 @@ impl Game {
         // It folds onto the arrows rather than onto `8` `2` `4` `6` deliberately
         // (#369): those characters are the top row's too, and the top row is the bar's.
         let key = key_for_code(code).unwrap_or(key);
-        // The **options screen** owns the keyboard before anything else (§14 v2/#513):
-        // it is the one surface raised *over* another, so a key that reached the menu or
-        // the panel underneath would be answering a screen the player cannot see. Its
-        // own table walks the rows and leaves; everything the game would otherwise claim
-        // is swallowed, and a genuinely unowned key (F5, a browser shortcut) is still
-        // left to the page.
-        if self.settings_open() {
-            if let Some(nav) = settings_nav_for_key(key) {
-                self.apply_settings_nav(nav);
+        // **The open help panel comes before the menu** (#513): it is the one surface
+        // raised *over* another — the menu's `Options` entry opens it on the Options tab
+        // — so a key that fell through to the list underneath would be walking a screen
+        // the player cannot see. Everywhere else the panel is the only thing up anyway,
+        // so the reorder costs nothing. While it is up the panel is **modal** (#248): a
+        // key it does not navigate by is *swallowed* if the game would otherwise own it
+        // — keeping the world frozen — but a genuinely unowned key (F5, a browser
+        // shortcut) is still left to the page, as it is in play.
+        if self.ui.help_open {
+            if let Some(nav) = help_nav_for_key(key) {
+                self.apply_help_nav(nav);
+                self.draw();
                 return true;
             }
             return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
@@ -122,20 +125,6 @@ impl Game {
         if self.run_over() {
             if let Some(nav) = end_nav_for_key(key) {
                 self.apply_end_nav(nav);
-                return true;
-            }
-            return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
-        }
-        // While the help panel is open it is **modal** (§14 v2/#248): it captures
-        // input, so keys route to help navigation first and the world never steps
-        // underneath. `?`/Esc close it, Tab/←→ switch tabs. A key the panel does not
-        // navigate by is *swallowed* if the game would otherwise own it (a move, an
-        // ability, a UI toggle) — keeping the world frozen — but a genuinely unowned
-        // key (F5, a browser shortcut) is still left to the page, as it is in play.
-        if self.ui.help_open {
-            if let Some(nav) = help_nav_for_key(key) {
-                self.apply_help_nav(nav);
-                self.draw();
                 return true;
             }
             return ui_command_for_key(key).is_some() || self.game_claims_key(key, code);
@@ -229,11 +218,10 @@ impl Game {
     /// every other §11.6 rule here; this reads the two view flags it needs.
     fn gesture_command(&self, gesture: Gesture) -> Option<GestureCommand> {
         surface_command(
-            self.settings_open(),
+            self.ui.help_open,
             self.ui.menu.is_some(),
             self.map_open(),
             self.run_over(),
-            self.ui.help_open,
             gesture,
         )
     }
@@ -393,8 +381,12 @@ impl Game {
             HelpNav::NextTab => self.show_help_tab(self.ui.help_tab.next()),
             HelpNav::PrevTab => self.show_help_tab(self.ui.help_tab.prev()),
             HelpNav::ToggleTheme => self.toggle_theme(),
-            HelpNav::OpenSettings => self.open_settings(),
             HelpNav::CopySeed => self.copy_seed(),
+            // The Options tab's own three (#513). Each refuses on any other tab, exactly
+            // as the drawn tab offers nothing for them there.
+            HelpNav::PrevRow => self.walk_settings(true),
+            HelpNav::NextRow => self.walk_settings(false),
+            HelpNav::Activate => self.activate_setting(),
         }
     }
 
@@ -407,8 +399,8 @@ impl Game {
         match hit {
             HelpHit::Close => self.close_help(),
             HelpHit::Tab(tab) => self.show_help_tab(tab),
-            HelpHit::OpenSettings => self.open_settings(),
             HelpHit::CopySeed => self.copy_seed(),
+            HelpHit::Setting(row) => self.fire_setting(row),
         }
     }
 
@@ -416,6 +408,10 @@ impl Game {
     fn close_help(&mut self) {
         self.ui.help_open = false;
         self.ui.seed_copy = SeedCopy::default();
+        // The panel can be raised over the *menu* since #513 (its `Options` entry opens
+        // it on the Options tab), which publishes its own `data-screen`; leaving puts the
+        // surface underneath back. Over a board this is the no-op it has always been.
+        crate::menu::set_screen(self.current_screen());
     }
 
     /// Show `tab`, dropping the acknowledgement for the same reason: it is a reply to
@@ -509,7 +505,7 @@ impl Game {
     /// the input script, exactly as before the switches had a surface, so replaying it
     /// hands over the run and never the session it was exported from.
     fn replay_to_copy(&self) -> Option<String> {
-        if !self.ui.debug_mode || self.ui.settings.is_none() {
+        if !self.ui.debug_mode || !self.settings_open() {
             return None;
         }
         let token = self.state.level()?.encode()?;
@@ -745,33 +741,30 @@ enum GestureCommand {
     /// A navigation on the end screen (§14 v2/#138): walk the exits. Free too — a
     /// finished run has no turn left to spend.
     End(EndNav),
-    /// A navigation on the options screen (§14 v2/#513): walk the settings. Free, and
-    /// **first** in the precedence below, because the screen is raised over another.
-    Settings(SettingsNav),
 }
 
 /// Which surface a [`Gesture`] is aimed at, and what it means there (§11.6/#336) —
 /// the pure rule behind [`Game::gesture_command`], in the spirit of
 /// [`drag_gesture`], so the *order* the shell owns is pinned natively too.
 ///
-/// The precedence is the keyboard's, deliberately: the options screen, then the menu,
-/// then the campaign map, then the end screen, then help, then the board. The options
-/// screen leads because it is the one surface raised *over* another (#513). The map sits above the end screen because
+/// The precedence is the keyboard's, deliberately: the open help panel, then the menu,
+/// then the campaign map, then the end screen, then the board. The panel leads because
+/// it is the one surface raised *over* another — the menu's `Options` entry opens it on
+/// the Options tab (#513). The map sits above the end screen because
 /// between facilities there is a *finished* raid on the state underneath it (#208).
 /// Only the last arm can produce a [`Play`](GestureCommand::Play), which is what
 /// makes the two board-only gates in [`GesturePump::apply`] structurally
 /// unreachable from a modal screen — #223 asks about visible danger and #306's dead
 /// band about the board's edges, and a title screen has neither.
 fn surface_command(
-    settings_open: bool,
+    help_open: bool,
     menu_up: bool,
     map_open: bool,
     run_over: bool,
-    help_open: bool,
     gesture: Gesture,
 ) -> Option<GestureCommand> {
-    if settings_open {
-        return settings_nav_for_gesture(gesture).map(GestureCommand::Settings);
+    if help_open {
+        return help_nav_for_gesture(gesture).map(GestureCommand::Help);
     }
     if menu_up {
         return menu_nav_for_gesture(gesture).map(GestureCommand::Menu);
@@ -781,9 +774,6 @@ fn surface_command(
     }
     if run_over {
         return end_nav_for_gesture(gesture).map(GestureCommand::End);
-    }
-    if help_open {
-        return help_nav_for_gesture(gesture).map(GestureCommand::Help);
     }
     input_for_gesture(gesture).map(GestureCommand::Play)
 }
@@ -1079,7 +1069,6 @@ impl GesturePump {
             // #223 asks about visible danger and #306's dead band about the board's
             // edges, and a title screen has neither. It owns the whole viewport, so
             // there is nowhere on it a swipe could be a misaimed something else.
-            Some(GestureCommand::Settings(nav)) => game.apply_settings_nav(nav),
             Some(GestureCommand::Menu(nav)) => game.apply_menu_nav(nav),
             Some(GestureCommand::Map(nav)) => game.apply_map_nav(nav),
             Some(GestureCommand::End(nav)) => game.apply_end_nav(nav),
@@ -1562,56 +1551,50 @@ mod tests {
     }
 
     /// One pump, every surface, and the keyboard's own precedence (§11.6/#336): the
-    /// options screen owns the frame wherever it is raised, the menu owns it before a
-    /// run starts, the open help panel owns it during one, and only underneath them all
-    /// is there a board to walk. Each outranks the next exactly as `handle_key` reads
-    /// them.
+    /// open help panel owns the frame wherever it is raised, the menu owns it before a
+    /// run starts, and only underneath them all is there a board to walk. Each outranks
+    /// the next exactly as `handle_key` reads them.
     #[test]
     fn the_gesture_goes_to_whichever_surface_is_up() {
         let up = Gesture::Swipe(Direction::North);
         let left = Gesture::Swipe(Direction::West);
         assert_eq!(
-            surface_command(false, true, false, false, false, up),
+            surface_command(false, true, false, false, up),
             Some(GestureCommand::Menu(MenuNav::Prev)),
         );
-        assert_eq!(
-            surface_command(false, true, false, false, true, up),
-            Some(GestureCommand::Menu(MenuNav::Prev)),
-            "the menu outranks the panel, as it does on the keyboard",
-        );
-        // The **options screen** outranks everything (#513): it is the one surface
-        // raised over another, so whatever it was opened from must not answer a swipe
-        // aimed at it.
-        for (menu_up, help_open) in [(true, false), (false, true), (false, false)] {
+        // **The panel outranks the menu** (#513): the menu's `Options` entry raises it
+        // on the Options tab, so whatever it was opened over must not answer a swipe
+        // aimed at it. This is the one place two modal surfaces stack.
+        for menu_up in [true, false] {
             assert_eq!(
-                surface_command(true, menu_up, false, false, help_open, up),
-                Some(GestureCommand::Settings(SettingsNav::Prev)),
-                "the options screen outranks what it was opened over",
+                surface_command(true, menu_up, false, false, up),
+                Some(GestureCommand::Help(HelpNav::PrevRow)),
+                "the panel outranks what it was raised over (menu: {menu_up})",
             );
         }
         assert_eq!(
-            surface_command(false, false, false, false, true, left),
+            surface_command(true, false, false, false, left),
             Some(GestureCommand::Help(HelpNav::PrevTab)),
         );
-        // A finished run outranks the panel underneath it, as it does on the
-        // keyboard: there is nothing left to navigate but the way on (#138).
+        // A finished run outranks the board underneath it (#138): there is nothing left
+        // to navigate but the way on.
         assert_eq!(
-            surface_command(false, false, false, true, true, up),
+            surface_command(false, false, false, true, up),
             Some(GestureCommand::End(EndNav::Prev)),
         );
         // And the **campaign map** outranks the finished run under *it* (§14 v3/#208):
         // between facilities there is a raid that ended on the state below, so its end
         // screen must not answer a swipe aimed at the map drawn over it.
         assert_eq!(
-            surface_command(false, false, true, true, true, up),
+            surface_command(false, false, true, true, up),
             Some(GestureCommand::Map(MapNav::Prev)),
         );
         assert_eq!(
-            surface_command(false, false, false, false, false, up),
+            surface_command(false, false, false, false, up),
             Some(GestureCommand::Play(Input::Step(Direction::North))),
         );
         assert_eq!(
-            surface_command(false, false, false, false, false, Gesture::Press),
+            surface_command(false, false, false, false, Gesture::Press),
             Some(GestureCommand::Play(Input::Wait)),
         );
     }
@@ -1632,16 +1615,15 @@ mod tests {
             Gesture::Swipe(Direction::West),
         ];
         for gesture in every {
-            for (settings, menu_up, map_open, run_over, help_open) in [
-                (false, true, false, false, false),
-                (false, false, true, false, false),
-                (false, false, false, true, false),
-                (false, false, false, false, true),
-                (true, false, false, false, false),
+            for (help_open, menu_up, map_open, run_over) in [
+                (false, true, false, false),
+                (false, false, true, false),
+                (false, false, false, true),
+                (true, false, false, false),
             ] {
                 assert!(
                     !matches!(
-                        surface_command(settings, menu_up, map_open, run_over, help_open, gesture),
+                        surface_command(help_open, menu_up, map_open, run_over, gesture),
                         Some(GestureCommand::Play(_))
                     ),
                     "{gesture:?} on a modal must never reach the board's gates",
@@ -1649,7 +1631,7 @@ mod tests {
             }
             assert!(
                 matches!(
-                    surface_command(false, false, false, false, false, gesture),
+                    surface_command(false, false, false, false, gesture),
                     Some(GestureCommand::Play(_))
                 ),
                 "{gesture:?} on the board still goes through the gates",
@@ -1665,14 +1647,14 @@ mod tests {
     #[test]
     fn a_tap_on_empty_menu_space_never_activates_an_entry() {
         assert_eq!(
-            surface_command(false, true, false, false, false, Gesture::Press),
+            surface_command(false, true, false, false, Gesture::Press),
             None
         );
-        // And on the options screen, for the same reason one step down (#513): a stray
-        // tap on empty screen must not flip a setting, nor — in a debug session — lift
-        // the fog on a run mid-raid.
+        // And on the panel's Options tab, for the same reason one step down (#513): a
+        // stray tap on empty panel must not flip a setting, nor — in a debug session —
+        // lift the fog on a run mid-raid.
         assert_eq!(
-            surface_command(true, false, false, false, false, Gesture::Press),
+            surface_command(true, false, false, false, Gesture::Press),
             None,
         );
         // Nor does a swipe across the list's grain: the horizontal pair sets the
@@ -1681,7 +1663,7 @@ mod tests {
         for direction in [Direction::East, Direction::West] {
             assert!(
                 matches!(
-                    surface_command(false, true, false, false, false, Gesture::Swipe(direction)),
+                    surface_command(false, true, false, false, Gesture::Swipe(direction)),
                     Some(GestureCommand::Menu(MenuNav::Easier | MenuNav::Harder)),
                 ),
                 "a horizontal swipe on the menu may only move the slider",
@@ -1708,7 +1690,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(false, true, false, false, false, gesture),
+                surface_command(false, true, false, false, gesture),
                 menu_nav_for_key(key).map(GestureCommand::Menu),
                 "{gesture:?} and {key} drive the menu the same way",
             );
@@ -1720,7 +1702,7 @@ mod tests {
             (Gesture::Swipe(Direction::East), "ArrowRight"),
         ] {
             assert_eq!(
-                surface_command(false, false, false, false, true, gesture),
+                surface_command(true, false, false, false, gesture),
                 help_nav_for_key(key).map(GestureCommand::Help),
             );
         }

@@ -2219,12 +2219,12 @@ Effect colour** — the channel is not negotiable, the hue is.
 
 Base palette: a 16-colour, colour-blind-safe qualitative set, each usable as
 foreground and as a background variant that recedes toward the page. **There are two
-of them** — a dark theme and a light one (#189), whose **home is the options screen**
-(§14 v2/#513): a `theme` row that draws the live value and stores it, so a reload comes
-back in the theme the player chose. The `n` key stays a standing shortcut on every
-surface that forwards it, and the campaign map keeps a drawn `theme [n]` control because
-it has no route to the options screen yet; the help panel's own footer button gave way to
-the `options [o]` door beside it. This is exactly the reskin this section's rule was written
+of them** — a dark theme and a light one (#189), whose **home is the help panel's
+Options tab** (§14 v2/#513): a `theme` row that draws the live value and stores it, so a
+reload comes back in the theme the player chose. The `n` key stays a standing shortcut on
+every surface that forwards it, and the campaign map keeps a drawn `theme [n]` control
+because it has no route to that tab yet; the panel's own footer button went with the
+setting. This is exactly the reskin this section's rule was written
 to make cheap: the core gained a `Theme` flag and not one colour, and every §11.5
 guarantee is asserted over both tables. The concrete rows, the constraints the tests
 hold them to, and why each exception exists are in
@@ -2837,7 +2837,7 @@ finally having a mechanism.
 | `Enter` / `Space` | Confirm |
 | `Escape` | Cancel / menu |
 | `m` / `?` / `n` | Messages, help, colour theme — view toggles, never a turn (§11.2/§11.4) |
-| `o` | The options screen, **from the open help panel only** — panel-only like `c`, so it claims no board letter from the ability mnemonics (§14 v2/#513) |
+| `↑` `↓` / `Enter` | **On the help panel's Options tab only** — walk its rows and fire the marked one (§14 v2/#513). Free keys: no other tab had anything for them to do, so the settings claimed nothing from play |
 
 **Digits bind by physical key, not by character.** The top row's `Digit1`–`Digit4`
 and the numpad's `Numpad2` `4` `6` `8` `5` are resolved from `KeyboardEvent.code`,
@@ -2918,17 +2918,16 @@ it lasts changes *when* it fires, never what it means). What that means is a tab
 per surface, and those tables live in the core beside the key ones, so a screen's
 two input paths are read — and pinned — side by side:
 
-| Gesture | Board | Main menu | Help panel | Options screen |
-|---|---|---|---|---|
-| Swipe ↑ / ↓ | Step north / south | Previous / next entry | — | Previous / next row |
-| Swipe ← / → | Step west / east | — (a vertical list) | Previous / next tab | — (a vertical list) |
-| Press | Wait | **nothing** | nothing | **nothing** |
+| Gesture | Board | Main menu | Help panel |
+|---|---|---|---|
+| Swipe ↑ / ↓ | Step north / south | Previous / next entry | Previous / next row, on the Options tab |
+| Swipe ← / → | Step west / east | — (a vertical list) | Previous / next tab |
+| Press | Wait | **nothing** | nothing |
 
 One pump drives whichever surface is up, in the keyboard's own precedence — the options
-screen, then menu, then help, then the board. The options screen leads because it is the
-one surface raised *over* another (it opens from the menu's `Options` entry and from the
-help panel's `options [o]`), so a press that fell through would fire a control the player
-cannot see — so the thresholds, the repeat cadence and the
+help panel, then menu, then the board. **The panel leads**, which is the one place two
+modal surfaces stack: the menu's `Options` entry raises it on the Options tab, so a press
+that fell through would walk a list the player cannot see — so the thresholds, the repeat cadence and the
 lift-stops-everything guarantee are written once and inherited, and the next screen
 that wants touch costs a binding table rather than a pump.
 
@@ -3429,12 +3428,12 @@ failure the old options dialog shipped). It **names** the difficulty and does no
 preview which rules the draw will pick: the seed is not rolled until *Play*, and the
 resolved set is the help panel's Level info tab to show once there is a run to
 describe. It is deliberately **not** the menu's `Options` entry, which is §14 v2's
-**global settings screen** (#513, appendix 53) — the colour theme, the renderer, and behind the §12.6
+**global settings**, the panel's Options tab (#513, appendix 53) — the colour theme, the renderer, and behind the §12.6
 session gate the debug switches. One screen asks about the *run you are starting*, the
 other about *the game*; that boundary is why they are two screens and not one.
 
-**The debug switches live on that screen** (#459 → #513, appendix 53), under their own
-heading and in their own colour, after the widest gap on the screen — and they are drawn
+**The debug switches live on that tab** (#459 → #513, appendix 53), under their own
+heading and in their own colour, after the widest gap on it — and they are drawn
 only in a debug session, so with no session there is no heading and no row to reach by
 key or by tap. The **rows** themselves read like every other row: they are live
 controls, and dimming them would say *inert* about the section where a press does the
@@ -3723,9 +3722,11 @@ scaffolding.**
 
 - The headless sim + metrics (§13.2) — *this may well come before v2 proper*
 - Saves, options, a help screen and a legend (there was never a legend; nothing
-  ever explained what `$`, `E`, `}` or `z` meant). The **options screen** (#513) is
-  the settings home: theme (#189) and renderer (#460), persisted in their own record
-  beside the autosave's, plus the §12.6 debug switches in a gated section
+  ever explained what `$`, `E`, `}` or `z` meant). The **Options tab** (#513) is the
+  settings home: theme (#189) and renderer (#460), persisted in their own record beside
+  the autosave's, plus the §12.6 debug switches in a gated section. It is the panel's
+  fourth tab, and the fourth cost a label — *Abilities* is drawn **Actions**, because
+  four `[Label]`s and the `[x]` are all a 40-column row holds
 - A game-over screen that says **why you lost** (the old one didn't distinguish
   victory from defeat at all) — the capturing guard, the mood it made contact in and
   the cell it happened on, latched from the terminal event; a distinct win screen with

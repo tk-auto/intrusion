@@ -644,11 +644,11 @@ into the orange.
 
 **The toggle is `n`** (for *night*), listed on the help panel's controls and forwarded
 rather than swallowed by the open panel — its colour key is the best thing on screen to
-judge the flip against. Its **home is the options screen** (§14 v2/#513): a `theme` row
-drawing the live value, and the record that persists it, so a reload comes back in the
-theme that was chosen. The panel's own `[n]` footer button gave way to `options [o]`
-there; the campaign map keeps a drawn `theme [n]`, since it has no route to the screen
-yet and a touch player would otherwise be left with no control at all.
+judge the flip against. Its **home is that panel's Options tab** (§14 v2/#513): a `theme`
+row drawing the live value, and the record that persists it, so a reload comes back in
+the theme that was chosen. The panel's own `[n]` footer button went with the setting; the
+campaign map keeps a drawn `theme [n]`, since it has no route to the tab yet and a touch
+player would otherwise be left with no control at all.
 
 ### 4.5 The alert rung's colour
 

@@ -1,8 +1,10 @@
-//! The options screen's own tests (§14 v2/#513) — the golden grid with and without
-//! the debug section, the gate, the marker walk, and the touch targets.
+//! The Options tab's own tests (§14 v2/#513) — the golden grid with and without the
+//! debug section, the gate, the marker walk, and the touch targets.
 
 use super::*;
-use crate::render::{MenuUi, SeedCopy};
+use crate::alert::AlertReadout;
+use crate::render::help::{render_help, PanelRun};
+use crate::render::{HelpTab, MenuUi, SeedCopy};
 
 /// The v1 board's screen (§10.2): 40 wide, `TOP_ROWS + 40 + BOTTOM_ROWS` tall.
 const W: u32 = 40;
@@ -12,13 +14,41 @@ fn text_of(grid: &Grid) -> String {
     grid.to_text().join("\n")
 }
 
-/// The view state a shell hands the screen: the options screen up, at the row the
-/// marker rests on.
+/// The view state a shell hands the panel: the Options tab up, at the row the marker
+/// rests on.
 fn ui(selected: SettingsRow) -> ScreenUi {
     ScreenUi {
-        settings: Some(SettingsUi { selected }),
+        help_tab: HelpTab::Options,
+        settings: SettingsUi { selected },
         ..ScreenUi::default()
     }
+}
+
+/// The whole panel, drawn on its Options tab — the frame a player actually sees, so
+/// these tests read what the tab bar, the body and the footer produce together.
+fn render_settings(
+    _w: u32,
+    _h: u32,
+    ui: ScreenUi,
+    debug: DebugModifiers,
+    level: Option<LevelSeed>,
+) -> Grid {
+    let alert = AlertReadout {
+        rung: 0,
+        effects: Vec::new(),
+    };
+    render_help(
+        W,
+        H,
+        ui,
+        PanelRun {
+            level,
+            modifiers: crate::modifiers::LevelModifiers::default(),
+            alert: &alert,
+            bar: Vec::new(),
+            debug,
+        },
+    )
 }
 
 /// The same, in a **debug session** — the one flag that opens the gate.
@@ -37,8 +67,8 @@ fn level() -> Option<LevelSeed> {
     Some(seed)
 }
 
-/// The **ordinary session's screen**: the heading, the `[x]`, the display section and
-/// its two rows, the footer — and *nothing* of the debug section.
+/// The **ordinary session's tab**: the display section and its two rows, the tab's own
+/// footer — and *nothing* of the debug section.
 #[test]
 fn the_options_screen_lists_the_display_settings() {
     let text = text_of(&render_settings(
@@ -48,13 +78,12 @@ fn the_options_screen_lists_the_display_settings() {
         DebugModifiers::default(),
         level(),
     ));
-    assert!(text.contains(HEADING), "the screen names itself:\n{text}");
     assert!(
-        text.contains(CLOSE_BUTTON),
-        "and carries its escape:\n{text}"
+        text.contains(HelpTab::Options.label()),
+        "the tab names itself on the bar:\n{text}",
     );
     assert!(text.contains(DISPLAY_HEADING));
-    assert!(text.contains(FOOTER));
+    assert!(text.contains(FOOTER), "and prints its own footer:\n{text}");
     for row in [SettingsRow::Theme, SettingsRow::Renderer] {
         assert!(text.contains(row.label()), "{row:?} is missing:\n{text}");
     }
@@ -86,7 +115,7 @@ fn the_debug_section_is_drawn_only_in_a_debug_session() {
             "{row:?} is drawn without a debug session:\n{plain}",
         );
         assert_eq!(
-            settings_hit(W, ui(SettingsRow::Theme), level(), 0, row_y(row)),
+            settings_hit(false, true, row_y(row)),
             None,
             "{row:?} is tappable without a debug session",
         );
@@ -146,7 +175,7 @@ fn every_row_says_what_the_live_value_is() {
 /// identically otherwise.
 #[test]
 fn a_debug_row_is_inked_like_any_other() {
-    let column = block_column(W) + MARKER.chars().count() as u32;
+    let column = CONTENT_INDENT;
     let grid = render_settings(
         W,
         H,
@@ -198,13 +227,7 @@ fn the_replay_row_needs_a_token_to_hand_over() {
         "the omni switch does not need one:\n{without}",
     );
     assert_eq!(
-        settings_hit(
-            W,
-            debug_ui(SettingsRow::Theme),
-            None,
-            0,
-            row_y(SettingsRow::Replay)
-        ),
+        settings_hit(true, false, row_y(SettingsRow::Replay)),
         None,
         "and nothing is tappable where it would have been",
     );
@@ -240,49 +263,45 @@ fn the_copy_acknowledgement_answers_the_replay_row() {
     assert!(!text.contains("copied"), "\n{text}");
 }
 
-/// **The whole row is the target** (§11.6), at any column, and the blank row between
-/// settings is the buffer that keeps a low tap off the next one.
+/// **The whole row is the target** (§11.6), at any column — which is why the tab's hit
+/// test takes no column at all — and the blank row between settings is the buffer that
+/// keeps a low tap off the next one. Asserted through the panel's own [`help_hit`], so
+/// what is checked is the press a player actually makes.
 #[test]
 fn every_row_is_a_full_width_target_with_air_between() {
+    let hit = |x, y| crate::render::help_hit(W, H, debug_ui(SettingsRow::Theme), level(), x, y);
     for row in shown_rows(true, true) {
         for x in [0, W / 2, W - 1] {
             assert_eq!(
-                settings_hit(W, debug_ui(SettingsRow::Theme), level(), x, row_y(row)),
-                Some(SettingsHit::Row(row)),
+                hit(x, row_y(row)),
+                Some(crate::render::HelpHit::Setting(row)),
+                "a press on {row:?} at column {x} fires it",
+            );
+        }
+        assert_eq!(hit(W / 2, row_y(row) + 1), None, "the row under it is air");
+        for x in [0, W / 2, W - 1] {
+            assert_eq!(
+                settings_hit(true, true, row_y(row)),
+                Some(row),
                 "{row:?} at column {x}",
             );
         }
         assert_eq!(
-            settings_hit(
-                W,
-                debug_ui(SettingsRow::Theme),
-                level(),
-                W / 2,
-                row_y(row) + 1
-            ),
+            settings_hit(true, true, row_y(row) + 1),
             None,
             "the row under {row:?} is air",
         );
     }
 }
 
-/// The `[x]` is a target in its own right and nothing else on its row is — the
-/// always-reachable escape §11.6 asks for, the exact thing the old options dialog
-/// never had.
+/// The panel's `[x]` is the touch way out of this tab as of any other — the
+/// always-reachable escape §11.6 asks for, and the exact thing the old options dialog
+/// never had. It belongs to the panel, so this only pins that the tab did not take it
+/// away.
 #[test]
-fn the_close_control_is_the_touch_way_out() {
-    let start = close_button_start(W);
-    for x in start..start + CLOSE_BUTTON_LEN {
-        assert_eq!(
-            settings_hit(W, ui(SettingsRow::Theme), level(), x, HEADING_ROW),
-            Some(SettingsHit::Close),
-        );
-    }
-    assert_eq!(
-        settings_hit(W, ui(SettingsRow::Theme), level(), 0, HEADING_ROW),
-        None,
-        "the heading itself is not a control",
-    );
+fn the_panels_close_control_is_the_touch_way_out() {
+    let close = crate::render::help_hit(W, H, ui(SettingsRow::Theme), level(), W - 2, 0);
+    assert_eq!(close, Some(crate::render::HelpHit::Close));
 }
 
 /// The marker walks the **shown** rows and wraps at either end — and in an ordinary
@@ -327,7 +346,8 @@ fn a_selection_that_is_not_shown_falls_back() {
         W,
         H,
         ScreenUi {
-            settings: Some(stale),
+            help_tab: HelpTab::Options,
+            settings: stale,
             ..ScreenUi::default()
         },
         DebugModifiers::default(),
@@ -376,18 +396,29 @@ fn the_screen_is_a_pure_function_of_what_it_is_handed() {
     }
 }
 
-/// A board too small for the screen clips rather than panicking — the help card's rule
-/// (only hand-built states get this small).
+/// A board too small for the tab clips rather than panicking — the help card's rule
+/// (only hand-built states get this small). Drawn through the panel's own entry point,
+/// since that is what sizes the grid.
 #[test]
 fn a_tiny_board_clips_rather_than_panicking() {
+    let alert = AlertReadout {
+        rung: 0,
+        effects: Vec::new(),
+    };
     for (w, h) in [(0, 0), (1, 1), (8, 4)] {
-        let grid = render_settings(
+        let grid = render_help(
             w,
             h,
             debug_ui(SettingsRow::Theme),
-            DebugModifiers::default(),
-            level(),
+            PanelRun {
+                level: level(),
+                modifiers: crate::modifiers::LevelModifiers::default(),
+                alert: &alert,
+                bar: Vec::new(),
+                debug: DebugModifiers::default(),
+            },
         );
         assert_eq!((grid.width(), grid.height), (w, h));
     }
 }
+

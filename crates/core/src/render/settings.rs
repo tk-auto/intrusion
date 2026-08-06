@@ -1,11 +1,20 @@
-//! The **options screen** (§14 v2/#513) — the game's global settings, drawn in the
-//! character grid like the title screen and the help panel, and reachable from both.
+//! The **Options tab** (§14 v2/#513) — the game's global settings, a page of the help
+//! panel ([`super::help`]) and reachable everywhere the panel is: from the board with
+//! `?`, and from the title screen's `Options` entry, which raises the panel on this tab.
 //!
 //! §14 v2 promises "saves, options, a help screen and a legend". The other three
 //! shipped first, and the settings they wanted went wherever there was room: the
-//! colour theme lived on the help panel's footer "until v2 grows an options screen"
+//! colour theme lived on the panel's footer "until v2 grows an options screen"
 //! (§11.2/#189), and the tile renderer hid behind a `?tiles=1` URL flag (§11.1/#460).
-//! This is that screen, and it is where both of them now live.
+//! This is where both of them now live.
+//!
+//! **A tab rather than a screen of its own**, and the bar had to make room for it: the
+//! *Abilities* tab became **Actions** so four `[Label]`s clear the `[x]` on the v1
+//! board's 40 columns (§10.2 — [`super::help`] checks it at compile time). What that
+//! buys is that settings are one press from the reference card rather than a surface
+//! away, and that the panel keeps being the one modal thing a running game raises —
+//! which is also how the §12.6 switches stay reachable mid-run now that their own tab
+//! is gone (#459).
 //!
 //! # What is on it, and what is deliberately not
 //!
@@ -34,14 +43,14 @@
 //!
 //! # Input
 //!
-//! One vertical list, walked like the title screen's: `↑`/`↓` (and the vertical
-//! swipes) move the marker, `Enter` fires the marked row, `Escape` — or the drawn
-//! `[x]` — leaves. **A press is unbound** (§11.6/appendix 21), so a stray tap on empty
-//! screen flips nothing; a row is fired by pressing *the row*.
+//! One vertical list, walked like the title screen's: `↑`/`↓` (and the vertical swipes,
+//! which no other tab uses) move the marker, `Enter` fires the marked row, and the
+//! panel's own `Escape` / `?` / `[x]` leave. **A press is unbound** (§11.6/appendix 21),
+//! so a stray tap on empty panel flips nothing; a row is fired by pressing *the row*.
 
-use super::help::{close_button_start, CLOSE_BUTTON, CLOSE_BUTTON_LEN, FOOTER_INDENT};
-use super::menu::{centre, ENTRY_SPACING, MARKER, NO_MARKER};
-use super::{blank_grid, draw, Grid, ScreenUi};
+use super::help::{CONTENT_INDENT, CONTENT_TOP, SECTION_INDENT};
+use super::menu::{ENTRY_SPACING, MARKER, NO_MARKER};
+use super::{draw, Grid, ScreenUi};
 use crate::category::{Category, Theme};
 use crate::level_seed::LevelSeed;
 use crate::modifiers::DebugModifiers;
@@ -188,14 +197,15 @@ pub fn shown_rows(debug: bool, replay: bool) -> Vec<SettingsRow> {
         .collect()
 }
 
-/// The options screen's **view state**, owned by the shell exactly like
-/// [`MenuUi`](super::MenuUi) — it changes no world and costs no turn (§12.1). A shell
-/// keeps `Some(SettingsUi)` on [`ScreenUi::settings`] while the screen is up and
-/// clears it when the screen is left, whatever it was opened over.
+/// The Options tab's **view state**, owned by the shell exactly like
+/// [`ScreenUi::help_tab`](super::ScreenUi) — it changes no world and costs no turn
+/// (§12.1). It is a plain field rather than an `Option`, because "is this tab showing"
+/// is already [`ScreenUi::help_tab`]'s to answer; this is only *where the marker rests*
+/// while it is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct SettingsUi {
     /// Which row the marker rests on. The [`Default`] is the theme row, the first
-    /// setting on the screen.
+    /// setting on the tab.
     pub selected: SettingsRow,
 }
 
@@ -240,25 +250,19 @@ impl SettingsUi {
     }
 }
 
-/// The screen's own heading, on row 0 beside the `[x]` — the help panel's tab-bar row,
-/// with a title where the tabs would be.
-const HEADING: &str = "OPTIONS";
-
 /// The two section headings. `DISPLAY` is what a player came here for; `DEBUG` names
 /// the gate rather than hiding it (§12.6).
 const DISPLAY_HEADING: &str = "DISPLAY";
 const DEBUG_HEADING: &str = "DEBUG";
 
-/// The footer. It names the keys the screen answers that have no drawn control of
-/// their own, and the way back out — §11.6's no-trap rule in prose, beside the `[x]`
-/// that is its touch half.
-const FOOTER: &str = "↑↓ choose · Enter sets · Esc back";
+/// The footer this tab asks the panel to print (§11.6's no-trap rule in prose, beside
+/// the `[x]` that is its touch half). It names the two keys only this tab answers, and
+/// the way out — every other tab prints the panel's own hint.
+pub(super) const FOOTER: &str = "↑↓ choose · Enter sets · Esc closes";
 
-/// The row the `[x]` and the heading share.
-const HEADING_ROW: u32 = 0;
-
-/// The `DISPLAY` heading's row, and the first setting under it.
-const DISPLAY_HEADING_ROW: u32 = 2;
+/// The `DISPLAY` heading's row, and the first setting under it — measured from the
+/// panel's own content top, so this tab starts where every other tab's content does.
+const DISPLAY_HEADING_ROW: u32 = CONTENT_TOP;
 const FIRST_DISPLAY_ROW: u32 = DISPLAY_HEADING_ROW + 2;
 
 /// How many rows the display section occupies, from its first row to the blank after
@@ -302,12 +306,17 @@ const REPLAY_VALUE: &str = "copy as link";
 /// the v1 board (§10.2).
 const VALUE_MAX: usize = 12;
 
-/// The widest row the screen can draw, in cells — the marker, the padded label, and
-/// the longest value.
+/// The widest row this tab can draw, in cells — the marker, the padded label, and the
+/// longest value.
 const ROW_WIDTH: u32 = (MARKER.len() + LABEL_WIDTH + VALUE_MAX) as u32;
 
-// The widest row must fit the v1 board with its one-cell margins (§10.2/§2.3), and the
-// longest value must fit the column the block was measured from — [`draw`] clips in
+/// The column a row's text starts at: the **marker's** column, one in from the panel's
+/// left margin, so the labels land on [`CONTENT_INDENT`] — where every other tab's
+/// content sits — and the marker hangs into the margin beside the section headings.
+const BLOCK_COLUMN: u32 = CONTENT_INDENT - MARKER.len() as u32;
+
+// The widest row must fit the v1 board with its one-cell right margin (§10.2/§2.3), and
+// the longest value must fit the column the row was measured from — [`draw`] clips in
 // silence, so a value that outgrew it would arrive half-drawn on a player's screen
 // rather than failing the build.
 const _: () = {
@@ -317,9 +326,8 @@ const _: () = {
          VALUE_MAX (see render::settings)",
     );
     assert!(
-        ROW_WIDTH + 2 <= LevelConfig::V1.width,
-        "the settings block does not fit the v1 board with a margin either side \
-         (see render::settings)",
+        BLOCK_COLUMN + ROW_WIDTH < LevelConfig::V1.width,
+        "the settings rows do not fit the v1 board's width (see render::settings)",
     );
 };
 
@@ -337,19 +345,6 @@ fn row_y(row: SettingsRow) -> u32 {
         SettingsRow::Reveal => FIRST_DEBUG_ROW,
         SettingsRow::Replay => FIRST_DEBUG_ROW + ENTRY_SPACING,
     }
-}
-
-/// The column the block of rows starts at: the widest possible row centred, with every
-/// row left-aligned inside it — the menu's rule, so the two list screens are read the
-/// same way and the labels never jitter as the marker moves.
-fn block_column(width: u32) -> u32 {
-    centre(width, ROW_WIDTH)
-}
-
-/// The column the labels, the section headings and the promise line all start at — the
-/// block's column past the marker, so a heading sits directly over the rows it names.
-fn label_column(width: u32) -> u32 {
-    block_column(width) + MARKER.chars().count() as u32
 }
 
 /// What a row's **value** column says, read from the live values every time — never
@@ -380,84 +375,48 @@ fn row_text(row: SettingsRow, value: &str, selected: bool) -> String {
     format!("{marker}{:<LABEL_WIDTH$}{value}", row.label())
 }
 
-/// What a press on the options screen lands on (§11.6/#513) — the screen's
-/// counterpart of [`MenuHit`](super::MenuHit) and [`HelpHit`](super::HelpHit).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SettingsHit {
-    /// A setting's row — fire it, exactly as `Enter` on the marker does.
-    Row(SettingsRow),
-    /// The `[x]` close control — leave the screen, back to whatever it was opened
-    /// over. The always-reachable escape §11.6 asks for, and the exact thing the old
-    /// options dialog never had.
-    Close,
-}
-
-/// Which [`SettingsHit`] screen cell `(x, y)` lands on, or `None` for a press that hit
-/// nothing and is swallowed (§11.6/#513).
+/// The row screen row `y` lands on, or `None` for a press this tab does not claim —
+/// which the panel then swallows, like a press anywhere else on its body (§11.6/#513).
 ///
 /// **The whole row is the target**, at any column, as it is on the title screen:
 /// nothing else is drawn on a row, and a generous target is the difference between a
-/// screen that works on a phone and one that does not. The blank row between settings
-/// ([`ENTRY_SPACING`]) is the buffer that keeps a low tap off the next one.
+/// panel that works on a phone and one that does not. The blank row between settings
+/// ([`ENTRY_SPACING`]) is the buffer that keeps a low tap off the next one — which is
+/// why this takes no `x` at all.
 ///
-/// It takes the same `debug` and `level` the drawing does, so a switch this session
+/// It takes the same `debug` and `replay` the drawing does, so a switch this session
 /// does not have has no hit region where it would have been.
-#[must_use]
-pub fn settings_hit(
-    width: u32,
-    ui: ScreenUi,
-    level: Option<LevelSeed>,
-    x: u32,
-    y: u32,
-) -> Option<SettingsHit> {
-    if y == HEADING_ROW {
-        let close = close_button_start(width);
-        return (x >= close && x < close + CLOSE_BUTTON_LEN).then_some(SettingsHit::Close);
-    }
-    shown_rows(ui.debug_mode, level.is_some())
+pub(super) fn settings_hit(debug: bool, replay: bool, y: u32) -> Option<SettingsRow> {
+    shown_rows(debug, replay)
         .into_iter()
         .find(|&row| row_y(row) == y)
-        .map(SettingsHit::Row)
 }
 
-/// Render the options screen (§14 v2/#513) — the whole `width × height` screen, not an
-/// overlay, so the shell paints it through the one path it paints a frame with and
-/// nothing of the game or the menu shows behind it.
+/// Draw the **Options** tab (§14 v2/#513) into the panel's body: the two sections, the
+/// marked row, and the copy acknowledgement.
 ///
-/// `ui` is the shell's whole view state: the screen reads the values it draws rows for
-/// ([`ScreenUi::theme`], [`ScreenUi::renderer`]), the gate
-/// ([`ScreenUi::debug_mode`]), the marker ([`ScreenUi::settings`]) and the copy
-/// acknowledgement ([`ScreenUi::seed_copy`]). `debug` is the run's **live** switches,
-/// so the omni-vision row says what the sight phase is actually doing, and `level` is
-/// the run's token — the replay row exists on exactly the frames there is something
-/// for it to hand over.
+/// `ui` is the shell's whole view state: the tab reads the values it draws rows for
+/// ([`ScreenUi::theme`], [`ScreenUi::renderer`]), the gate ([`ScreenUi::debug_mode`]),
+/// the marker ([`ScreenUi::settings`]) and the copy acknowledgement
+/// ([`ScreenUi::seed_copy`]). `debug` is the run's **live** switches, so the
+/// omni-vision row says what the sight phase is actually doing, and `level` is the run's
+/// token — the replay row exists on exactly the frames there is something for it to
+/// hand over.
 ///
-/// Bounds are clamped, never asserted, like the help card: on a board too small for a
-/// row, that row shows what fits and stops.
-pub(super) fn render_settings(
-    width: u32,
-    height: u32,
+/// Bounds are clamped, never asserted, like the rest of the card: on a board too small
+/// for a row, that row shows what fits and stops.
+pub(super) fn draw_settings(
+    grid: &mut Grid,
     ui: ScreenUi,
     debug: DebugModifiers,
     level: Option<LevelSeed>,
-) -> Grid {
-    let mut grid = blank_grid(width, height);
-    let settings = ui.settings.unwrap_or_default();
+) {
     let replay = level.is_some();
-    let here = settings.selection(ui.debug_mode, replay);
-    let labels = label_column(width);
+    let here = ui.settings.selection(ui.debug_mode, replay);
 
-    draw(&mut grid, labels, HEADING_ROW, HEADING, Category::Interest);
     draw(
-        &mut grid,
-        close_button_start(width),
-        HEADING_ROW,
-        CLOSE_BUTTON,
-        Category::System,
-    );
-    draw(
-        &mut grid,
-        labels,
+        grid,
+        SECTION_INDENT,
         DISPLAY_HEADING_ROW,
         DISPLAY_HEADING,
         Category::System,
@@ -468,15 +427,14 @@ pub(super) fn render_settings(
     // preference and a playtest switch is visible before either is read (§12.6).
     if ui.debug_mode {
         draw(
-            &mut grid,
-            labels,
+            grid,
+            SECTION_INDENT,
             DEBUG_HEADING_ROW,
             DEBUG_HEADING,
             Category::Warning,
         );
     }
 
-    let column = block_column(width);
     for row in shown_rows(ui.debug_mode, replay) {
         // The marked row reads in Interest — the goal colour, the thing worth reaching
         // for — against Neutral for the rest, exactly as the title screen's list does.
@@ -490,31 +448,22 @@ pub(super) fn render_settings(
             Category::Neutral
         };
         draw(
-            &mut grid,
-            column,
+            grid,
+            BLOCK_COLUMN,
             row_y(row),
             &row_text(row, value(row, ui, debug), selected),
             category,
         );
     }
 
-    // The copy acknowledgement (#353), on its own row directly under the control that
-    // produced it — the same "did that work?" answer the help panel prints, since the
-    // control moved here and its reply came with it.
+    // The copy acknowledgement (#353), on its own row directly under the row that
+    // produced it — the same "did that work?" answer the Level info tab prints under
+    // its own control, since the replay control moved here and its reply came with it.
     if shown_rows(ui.debug_mode, replay).contains(&SettingsRow::Replay) {
         if let Some((text, category)) = ui.seed_copy.acknowledgement() {
-            draw(&mut grid, labels, REPLAY_ACK_ROW, text, category);
+            draw(grid, CONTENT_INDENT, REPLAY_ACK_ROW, text, category);
         }
     }
-
-    draw(
-        &mut grid,
-        FOOTER_INDENT,
-        height.saturating_sub(1),
-        FOOTER,
-        Category::Ground,
-    );
-    grid
 }
 
 #[cfg(test)]

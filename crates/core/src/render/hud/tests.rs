@@ -1570,7 +1570,7 @@ fn the_open_frame_is_the_panel_showing_the_run_modifiers() {
         row0.contains("[Level]"),
         "the tab bar heads the panel: {row0:?}"
     );
-    assert!(row0.contains("[Abilities]") && row0.contains("[Help]"));
+    assert!(row0.contains("[Actions]") && row0.contains("[Help]"));
     assert!(row0.contains("[x]"), "a touchable close control");
     assert!(
         !row0.contains("intel remaining"),
@@ -1679,8 +1679,10 @@ fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
         &s,
         ScreenUi {
             menu: Some(MenuUi::default()),
-            // Set alongside every other overlay: the menu still wins outright.
-            help_open: true,
+            // Set alongside the in-play overlay: the menu still wins outright. The one
+            // surface it no longer outranks is the **help panel**, which its own
+            // `Options` entry raises over it (#513) — that pairing is
+            // `the_panel_outranks_the_menu_it_was_raised_over`.
             message_log_open: true,
             ..ScreenUi::default()
         },
@@ -1703,49 +1705,48 @@ fn the_menu_replaces_the_whole_frame_and_leaves_it_untouched() {
     );
 }
 
-/// The **options screen** takes the whole frame too (§14 v2/#513) — and it is the one
-/// surface raised *over* another, so it has to win over both the menu that opened it
-/// and the help panel that did, and leave each exactly as it found it.
+/// **The panel outranks the title screen** (§14 v2/#513) — the one place the two modal
+/// surfaces stack, because the menu's `Options` entry opens the panel on its Options
+/// tab. Whatever it was raised over is left untouched: clearing `help_open` restores the
+/// identical frame.
 ///
-/// This is also §11.6's "toggling a setting is never a turn" from the core's side: the
-/// screen is drawn from `&State`, so there is nothing it *could* step, and clearing the
-/// field restores the identical frame — the board underneath is the board that was
-/// there, guard for guard.
+/// That is also §11.6's "toggling a setting is never a turn" from the core's side: the
+/// panel is drawn from `&State`, so there is nothing it could step.
 #[test]
-fn the_options_screen_replaces_the_whole_frame_over_whatever_raised_it() {
+fn the_panel_outranks_the_menu_it_was_raised_over() {
     let s = help_board();
     let playing = render_screen(&s, ScreenUi::default());
-    let over_help = ScreenUi {
-        help_open: true,
-        settings: Some(SettingsUi::default()),
-        ..ScreenUi::default()
-    };
     let over_menu = ScreenUi {
         menu: Some(MenuUi::default()),
-        settings: Some(SettingsUi::default()),
+        help_open: true,
+        help_tab: HelpTab::Options,
         ..ScreenUi::default()
     };
-    for ui in [over_help, over_menu] {
-        let screen = render_screen(&s, ui);
-        let text = screen.to_text().join("\n");
-        assert!(
-            text.contains(SettingsRow::Theme.label()),
-            "the frame is the options screen, not what it was opened over:\n{text}",
-        );
-        assert!(
-            !text.contains(MenuEntry::QuickPlay.label()),
-            "…and nothing of the surface underneath shows through:\n{text}",
-        );
-        assert_eq!(
-            (screen.width(), screen.height()),
-            (playing.width(), playing.height()),
-            "at the board's own size, so opening it never moves the fit",
-        );
-    }
+    let screen = render_screen(&s, over_menu);
+    let text = screen.to_text().join("\n");
+    assert!(
+        text.contains(SettingsRow::Theme.label()),
+        "the frame is the Options tab, not the menu under it:\n{text}",
+    );
+    assert!(
+        !text.contains(MenuEntry::QuickPlay.label()),
+        "…and nothing of the menu shows through:\n{text}",
+    );
+    assert_eq!(
+        (screen.width(), screen.height()),
+        (playing.width(), playing.height()),
+        "at the board's own size, so opening it never moves the fit",
+    );
+    // The menu is still there underneath, untouched, the moment the panel closes.
+    let menu_again = ScreenUi {
+        menu: Some(MenuUi::default()),
+        ..ScreenUi::default()
+    };
+    assert_eq!(render_screen(&s, menu_again), render_screen(&s, menu_again),);
     assert_eq!(
         render_screen(&s, ScreenUi::default()),
         playing,
-        "leaving the options screen restores the identical frame",
+        "and leaving the panel restores the identical frame",
     );
 }
 
@@ -1769,9 +1770,9 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
             selected: 1,
             outlay: Some(Outlay::Closed),
         }),
-        settings: Some(SettingsUi {
+        settings: SettingsUi {
             selected: SettingsRow::Renderer,
-        }),
+        },
         help_tab: HelpTab::Abilities,
         theme: Theme::default().toggled(),
         renderer: Renderer::default().toggled(),
@@ -1825,9 +1826,10 @@ fn a_fresh_run_keeps_the_player_and_the_build_and_drops_the_rest() {
         map.is_none(),
         "and the campaign map closes as the facility opens (§14 v3)",
     );
-    assert!(
-        settings.is_none(),
-        "a run opens on the board, not on the options screen (#513)",
+    assert_eq!(
+        settings,
+        SettingsUi::default(),
+        "and the settings marker opens where it always does (#513)",
     );
     assert_eq!(help_tab, HelpTab::default());
     assert_eq!(
