@@ -72,7 +72,8 @@ use crate::category::Category;
 use crate::facility::Terrain;
 use crate::level_seed::LevelSeed;
 use crate::modifiers::{
-    DebugModifiers, LevelModifiers, ModifierDirection, CAPTIONS, CAPTION_SEPARATOR,
+    ActiveModifier, Composite, DebugModifiers, LevelModifiers, ModifierDirection, CAPTIONS,
+    CAPTION_SEPARATOR,
 };
 use crate::place::LevelConfig;
 
@@ -346,6 +347,18 @@ const _: () = {
         );
         i += 1;
     }
+    // …and over the **attributed** rows a composite draws (§12.6/#565), which are the
+    // longest the tab can produce: a composite's name, the separator, and the rule's own
+    // short phrasing. Bounded conservatively by the longest label against the longest
+    // phrase — a pair no composite actually draws, so a row that fits this fits every real
+    // one. It is what makes *"the tab grows downward"* a guarantee rather than a hope: one
+    // row per active rule, and no row wide enough to wrap.
+    assert!(
+        Composite::max_label_len() + CAPTION_SEPARATOR.len() + ActiveModifier::max_short_len()
+            <= CAPTION_MAX,
+        "a composite's attributed row is too long for the Level info panel — \
+         shorten a composite label or a caption's short phrasing (see CAPTION_MAX)",
+    );
 };
 
 /// **The panel's one right-alignment rule**: where a control `len` cells wide starts

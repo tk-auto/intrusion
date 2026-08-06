@@ -62,7 +62,7 @@ no token (§6).
 
 A held set — the active modifiers, the tech a run holds — is encoded as a
 **combination index over 256 reserved slots**, not over the entries that exist today
-(six tech and seventeen modifier slots as of writing).
+(six tech and twenty-five modifier slots as of writing).
 
 This is the single most important property of the format.
 
@@ -119,7 +119,30 @@ produce one, so it describes no run, and there is no honest way to pick which en
 meant. This holds over the slot *pairs*, not over adjacency — the layout knob's ends are
 twelve slots apart.
 
-The compiler helps: `modifier_slots` destructures `LevelModifiers` by name, so a new
+**A composite spends one slot *instead of* the slots its combination would have spent**
+(#565, design §12.6). A composite modifier is one word for a combination of primitive
+fields — the §14 v3 flavours are the first, at slots 20–24 — and it is the case that
+turns the slot space's abundance into the thing that is actually scarce. A `Vault` sets
+one more guard, one more console and three crates; written out that is three of
+`MODIFIER_CAP`'s **five** active slots, and written as a composite it is one. So the
+encoder **subtracts**: a primitive slot is written only when this run names it *and* the
+composite does not already give it, and `decode` puts the expansion back with the same
+`union` resolution used. That inverse is exact even when another source overruled a
+composite's contribution — an `Outpost` dealt a harder guard rule writes `MoreGuards` and
+not its own `FewerGuards`, and decoding composes the Outpost's `Fewer` harder-ward
+straight back to `More`.
+
+Two composites at once is refused exactly as a knob's two ends are: a facility is one
+thing, so a token calling it both a Vault and an Outpost describes a run no source can
+build. *Tests: `a_vault_spends_one_slot_and_leaves_four_of_five_free`,
+`every_composite_round_trips_through_one_slot`.*
+
+> **This is why the cap is not raised instead.** Five composed slots is a *format*
+> promise, and `MODIFIER_CAP` is what keeps `PAYLOAD_SPACE` against `TOKEN_SPACE` — every
+> bit spent on more simultaneous modifiers is a bit taken from the format's integrity
+> (§4). Saying one thing once is free; raising the ceiling is not.
+
+The compiler helps: `primitive_slots` destructures `LevelModifiers` by name, so a new
 modifier will not compile until it is given a slot.
 
 > **A slot is not the same promise as a seed.** These rules keep a token *naming the

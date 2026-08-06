@@ -3309,10 +3309,51 @@ knob a small enum or clamped integer). It is resolved **once at facility start**
 and every system branches on *that* value — never a global bool queried in ten
 places. Adding a modifier is adding a field, and the compiler then enumerates
 every read site that must handle it. Each field carries a documented **direction**
-(harder / easier); §2.3's anti-facade rule means every shipped modifier needs a
-**directional assertion** — from the same seed and inputs, the harder one yields
-at least as much pressure as baseline, the easier one reveals at least as much —
-so a flag that changes nothing observable cannot pass for shipped.
+(harder / easier) — **with one stated exception, the composite below**; §2.3's
+anti-facade rule means every shipped modifier needs a **directional assertion** —
+from the same seed and inputs, the harder one yields at least as much pressure as
+baseline, the easier one reveals at least as much — so a flag that changes nothing
+observable cannot pass for shipped.
+
+**A composite modifier is one word for a combination** (#565). Some combinations have a
+name the game already uses — the §14 v3 flavours are the first, and a difficulty preset,
+a tutorial preset and a sim scenario are the same shape. A **composite** declares two
+things and nothing else: its **name**, the word the player reads, and its **expansion**,
+the primitive fields it sets. It is a *kind*, so a second one is a new entry rather than
+new machinery. Three consequences, all load-bearing:
+
+- **Expansion happens at resolution**, so nothing below `ModifierSources::resolve` learns
+  the word *Vault*: the resolved value carries the extra guard, the extra console and the
+  three crates as ordinary primitive fields, and every system branches on those exactly as
+  it would if a primitive source had named them. What the composite's own value is kept
+  for is the token and the help panel, and nothing else.
+- **It occupies one wire slot, and the fields it stands for are then not encoded.** A Vault
+  goes from three of `MODIFIER_CAP`'s five active slots to one, leaving four for the
+  campaign's drawn rules (#210) — precisely on the facilities that could least afford the
+  budget. What is scarce is *how many modifiers may be active at once*, never how many
+  slots exist (token spec §3), which is why the fix is a composite and **not** a raised
+  cap: the cap is what keeps the token's rejection rate honest.
+- **It has no direction, and does not fake one.** A Vault is harder *and* richer — the
+  whole of §14 v3's three-axis design. What stands in for the directional assertion is a
+  stronger one: **equivalence**, asserted field by field against the combination the
+  composite replaces, so *"nothing about any facility differs"* is proved rather than
+  claimed. The direction is inherited by the parts, which keep their own.
+
+**Composing a composite with a rule that touches the same field**: the bounded knobs are
+**deltas over the baseline, clamped** — a Vault's `+1 guard` and a drawn `+1 guard` are
+`+2`, clamped to the knob's envelope, which at §10.2's three-either-side-of-four is the
+same fifth guard. Not *reject the combination*, which would make the campaign's own
+stacking illegal, and not *last writer wins*, which is silent and unpredictable. The
+§12.6 invariant is unchanged: no contribution can relieve pressure another asked for.
+
+**The Level info tab lists one row per active rule, each with its owner** — `Vault: one
+more guard`, and a rule the campaign drew on its own row beside it. A composite adds no
+new row shape, only a name in front of a rule that is listed either way, so **no active
+rule is hidden behind a label** and the tab's count of active rules stays honest. A row is
+attributed only where the composite's value is the one **in force**: a contribution another
+source overruled is not claimed, because a caption the board contradicts is worse than no
+caption. The tab therefore grows **downward**, by exactly as many rows as there are rules.
+The argument, and the two questions #565 had to answer, is *appendix 54*.
 
 > **Several modifiers reach generation, and they reach different depths of it**
 > (§10.4/#452, §10.2/#232, §10.4/#236). Each is resolved **before** `generate_level`
@@ -3341,7 +3382,9 @@ deliberately distinct:
   *Outpost* is thin and thinly guarded, a *Vault* rich and watched, a *Workshop* full of
   crates and thin on intel (#209). A flavour **is**
   the modifier set it contributes and nothing else, which is what stops the map's
-  branches from being three differently-worded labels on the same facility (§2.3).
+  branches from being three differently-worded labels on the same facility (§2.3). Each
+  is stated as one **composite** (#565), so what rides on the wire is the word and not
+  the combination.
 
 They compose into the *same* resolved `LevelModifiers` (`ModifierSources::resolve`):
 a toggle is active if **any** source requests it; a knob composes *harder-ward*.

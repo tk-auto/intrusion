@@ -53,7 +53,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::modifiers::{CacheCount, GuardCount, IntelCount, LevelModifiers};
+#[cfg(test)]
+use crate::modifiers::{CacheCount, GuardCount, IntelCount};
+use crate::modifiers::{Composite, LevelModifiers};
 use crate::rng::Rng;
 
 use super::NodeId;
@@ -246,13 +248,51 @@ impl Flavour {
         }
     }
 
+    /// The **composite modifier** this flavour is stated as (§12.6/#565) — the one wire
+    /// slot that says *Vault*, and the value that holds what a Vault expands to.
+    ///
+    /// Two enums for what reads like one word, and the split is deliberate. A
+    /// [`Flavour`] is a property of a **node** on the map — what a branch offers, what its
+    /// blurb says, which one the terminus is — while a [`Composite`] is a *modifier value*
+    /// with a permanent wire slot, which a facility outside a campaign could carry and a
+    /// preset that is not a flavour at all will one day be. Collapsing them would put the
+    /// map's vocabulary in the token's slot list, and the pairing is pinned by
+    /// `every_flavour_maps_to_its_own_composite` rather than left to reading.
+    pub const fn composite(self) -> Composite {
+        match self {
+            Flavour::Outpost => Composite::Outpost,
+            Flavour::Depot => Composite::Depot,
+            Flavour::Vault => Composite::Vault,
+            Flavour::Workshop => Composite::Workshop,
+            Flavour::Archive => Composite::Archive,
+        }
+    }
+
     /// The modifier contribution this flavour makes to the facility it names (§12.6) —
     /// what it *is*, mechanically, and the whole of it.
     ///
     /// It lands in [`ModifierSources::flavour`](crate::ModifierSources) rather than in a
     /// knob set of the campaign's own, so it composes with the player's choice and with
     /// the campaign alert (#210) under one rule instead of three.
+    ///
+    /// **Stated as one composite rather than as a combination** (#565): the fields it sets
+    /// live on [`Composite::expansion`], so a Vault costs the level-seed token **one**
+    /// active slot instead of three and leaves four of five for the campaign's own drawn
+    /// rules — while the contribution this hands back is field-for-field the combination it
+    /// always was.
     pub fn modifiers(self) -> LevelModifiers {
+        self.composite().contribution()
+    }
+
+    /// The combination each flavour was written as before #565 made it a composite — kept
+    /// only as the migration oracle the equivalence test asserts against, never called by
+    /// the game.
+    ///
+    /// It is a **frozen copy**, deliberately: a test that re-derived the expected value
+    /// from the expansion would assert that the code equals itself. This is what *"nothing
+    /// about any facility differs afterwards"* is checked against, field by field.
+    #[cfg(test)]
+    pub(crate) fn combination_before_composites(self) -> LevelModifiers {
         match self {
             // The thin facility is thin in **every** currency: it is the route you take
             // when what you need is a raid you can walk out of, and a run that could
