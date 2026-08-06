@@ -3854,7 +3854,17 @@ it has no business (§13.1's level/debug split, in a smaller key).
 **And the debug switches are still not persisted.** They sit on a screen whose other
 two rows are written to storage, which is exactly the confusion §12.6 warns about, so
 the split is drawn as well as coded: their own heading, in Warning rather than System,
-over a line saying *sight only, never the facility*. The preference record holds the
-theme and the renderer and has no field for anything else — a record that re-armed
-omni-vision on the next visit would outlive the session gate the whole debug channel
-rests on.
+after the widest gap on the screen. The preference record holds the theme and the
+renderer and has no field for anything else — a record that re-armed omni-vision on the
+next visit would outlive the session gate the whole debug channel rests on.
+
+**Two things the first draft of the screen got wrong, and what they taught.** It printed
+a line under the DEBUG heading — *sight only, never the facility* — restating §12.6's
+promise where the switches are. On screen it read as a caption bolted to a heading, made
+the two sections' spacing differ, and said to a player something they either already knew
+or could not act on. The promise belongs in the design doc and in the module that keeps
+it, not in the chrome. And the debug **rows** were drawn in Ground while unmarked, a
+shade below the preferences, to mark them as a different kind of thing. Ground is the
+§11.2 colour of *receding scenery* — it told the eye these controls were inert, in the
+one section where a press does the most. Both were the same mistake in two forms:
+loading the gate onto the rows instead of onto the heading that names it.

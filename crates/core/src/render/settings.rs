@@ -24,11 +24,10 @@
 //!
 //! A preference and a playtest switch must never be confusable (§12.6 — "a debug
 //! modifier changes only what you get to see"), so the debug rows sit under their own
-//! heading, in their own colour, behind a line that states the promise the gate rests
-//! on. With no debug session there is no heading, no note and no row: [`shown_rows`]
-//! is what the drawing, the hit-test and the selection walk all read, so a switch that
-//! is not drawn cannot be reached by key, by tap, or by a stale
-//! [`SettingsUi::selected`].
+//! heading and in their own colour, after the widest gap on the screen. With no debug
+//! session there is no heading and no row: [`shown_rows`] is what the drawing, the
+//! hit-test and the selection walk all read, so a switch that is not drawn cannot be
+//! reached by key, by tap, or by a stale [`SettingsUi::selected`].
 //!
 //! Everything the gate promised on the Debug tab is unchanged — perception only, never
 //! persisted, never in a level-seed token. Only the surface moved.
@@ -151,7 +150,7 @@ impl SettingsRow {
 
     /// Whether the row belongs to the **debug** section — the gate that decides which
     /// heading it is drawn under and whether it is drawn at all.
-    fn debug_only(self) -> bool {
+    pub fn debug_only(self) -> bool {
         matches!(self, SettingsRow::Reveal | SettingsRow::Replay)
     }
 }
@@ -250,10 +249,6 @@ const HEADING: &str = "OPTIONS";
 const DISPLAY_HEADING: &str = "DISPLAY";
 const DEBUG_HEADING: &str = "DEBUG";
 
-/// The line under the DEBUG heading: the §12.6 promise, printed where the switches
-/// are, so the one thing that makes a control here safe is stated beside the control.
-const DEBUG_NOTE: &str = "sight only, never the facility";
-
 /// The footer. It names the keys the screen answers that have no drawn control of
 /// their own, and the way back out — §11.6's no-trap rule in prose, beside the `[x]`
 /// that is its touch half.
@@ -270,12 +265,12 @@ const FIRST_DISPLAY_ROW: u32 = DISPLAY_HEADING_ROW + 2;
 /// its last — two settings at [`ENTRY_SPACING`].
 const DISPLAY_ROWS: u32 = 2 * ENTRY_SPACING;
 
-/// The `DEBUG` heading, its promise line, and the first switch under them. The gap
-/// above the heading is deliberate and is the widest on the screen: the sections are
-/// different kinds of thing, and the space is the first thing that says so.
+/// The `DEBUG` heading and the first switch under it, the same two rows apart the
+/// display section's heading and first row are. The gap **above** the heading is
+/// deliberate and is the widest on the screen: the sections are different kinds of
+/// thing, and the space is the first thing that says so.
 const DEBUG_HEADING_ROW: u32 = FIRST_DISPLAY_ROW + DISPLAY_ROWS + 1;
-const DEBUG_NOTE_ROW: u32 = DEBUG_HEADING_ROW + 1;
-const FIRST_DEBUG_ROW: u32 = DEBUG_NOTE_ROW + 2;
+const FIRST_DEBUG_ROW: u32 = DEBUG_HEADING_ROW + 2;
 
 /// The row the copy acknowledgement is printed on — directly under the replay row it
 /// answers, exactly as the help panel prints its own (#353).
@@ -298,24 +293,32 @@ const _: () = {
     }
 };
 
-/// The value column's own bound: the widest value any row can draw. `copy as link` is
-/// the longest, and the block is centred from the sum of the two, so this is what
-/// keeps the widest row inside the v1 board (§10.2).
+/// The **replay** row's value — the longest the screen can draw, and the only one that
+/// is a phrase rather than a state, so it is named for the width check below.
+const REPLAY_VALUE: &str = "copy as link";
+
+/// The value column's own bound: the widest value any row can draw. The block is
+/// centred from this plus [`LABEL_WIDTH`], so it is what keeps the widest row inside
+/// the v1 board (§10.2).
 const VALUE_MAX: usize = 12;
 
 /// The widest row the screen can draw, in cells — the marker, the padded label, and
 /// the longest value.
 const ROW_WIDTH: u32 = (MARKER.len() + LABEL_WIDTH + VALUE_MAX) as u32;
 
-// The block is centred, and its **left** column is where the section headings and the
-// promise line start too — so the longest of those must fit from that column to the
-// board's one-cell right margin. [`draw`] clips in silence, and here it would clip the
-// one line that states why a debug control is safe to have at all (§2.3).
+// The widest row must fit the v1 board with its one-cell margins (§10.2/§2.3), and the
+// longest value must fit the column the block was measured from — [`draw`] clips in
+// silence, so a value that outgrew it would arrive half-drawn on a player's screen
+// rather than failing the build.
 const _: () = {
-    let label_column = (LevelConfig::V1.width - ROW_WIDTH) / 2 + MARKER.len() as u32;
     assert!(
-        label_column as usize + DEBUG_NOTE.len() < LevelConfig::V1.width as usize,
-        "the debug section's promise line does not fit the v1 board — shorten it \
+        REPLAY_VALUE.len() <= VALUE_MAX,
+        "a settings value is too long for the value column — shorten it or widen \
+         VALUE_MAX (see render::settings)",
+    );
+    assert!(
+        ROW_WIDTH + 2 <= LevelConfig::V1.width,
+        "the settings block does not fit the v1 board with a margin either side \
          (see render::settings)",
     );
 };
@@ -366,7 +369,7 @@ fn value(row: SettingsRow, ui: ScreenUi, debug: DebugModifiers) -> &'static str 
                 "off"
             }
         }
-        SettingsRow::Replay => "copy as link",
+        SettingsRow::Replay => REPLAY_VALUE,
     }
 }
 
@@ -471,26 +474,20 @@ pub(super) fn render_settings(
             DEBUG_HEADING,
             Category::Warning,
         );
-        draw(
-            &mut grid,
-            labels,
-            DEBUG_NOTE_ROW,
-            DEBUG_NOTE,
-            Category::Ground,
-        );
     }
 
     let column = block_column(width);
     for row in shown_rows(ui.debug_mode, replay) {
-        let selected = row == here;
         // The marked row reads in Interest — the goal colour, the thing worth reaching
         // for — against Neutral for the rest, exactly as the title screen's list does.
-        // A debug row recedes to Ground when unmarked instead, so the two sections stay
-        // told apart by ink as well as by heading.
-        let category = match (selected, row.debug_only()) {
-            (true, _) => Category::Interest,
-            (false, false) => Category::Neutral,
-            (false, true) => Category::Ground,
+        // **Every row reads alike**, debug rows included: they are live controls, and
+        // dimming them said *inert* (§11.2's Ground) about the one section where a press
+        // does the most. The heading over them carries the gate on its own.
+        let selected = row == here;
+        let category = if selected {
+            Category::Interest
+        } else {
+            Category::Neutral
         };
         draw(
             &mut grid,

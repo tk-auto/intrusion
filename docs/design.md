@@ -3433,10 +3433,12 @@ describe. It is deliberately **not** the menu's `Options` entry, which is §14 v
 session gate the debug switches. One screen asks about the *run you are starting*, the
 other about *the game*; that boundary is why they are two screens and not one.
 
-**The debug switches live on that screen** (#459 → #513, appendix 53), under their own heading, in
-their own colour, over a line stating the promise the gate rests on — and they are drawn
-only in a debug session, so with no session there is no heading, no note and no row to
-reach by key or by tap. They are **never persisted**: the preference record beside them
+**The debug switches live on that screen** (#459 → #513, appendix 53), under their own
+heading and in their own colour, after the widest gap on the screen — and they are drawn
+only in a debug session, so with no session there is no heading and no row to reach by
+key or by tap. The **rows** themselves read like every other row: they are live
+controls, and dimming them would say *inert* about the section where a press does the
+most, so the gate is the heading's job alone. They are **never persisted**: the preference record beside them
 holds the theme and the renderer and nothing else, because a record that re-armed
 omni-vision on the next visit would outlive the session gate this whole channel rests on.
 Everything else about the gate is unchanged — perception only, never in a level-seed

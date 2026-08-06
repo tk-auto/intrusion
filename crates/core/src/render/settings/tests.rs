@@ -67,9 +67,9 @@ fn the_options_screen_lists_the_display_settings() {
     );
 }
 
-/// **The gate** (§12.6/#459/#513): with no debug session there is no heading, no
-/// promise line and no switch — not a dimmed one, not one a stale marker could reach.
-/// With one, all of it is there.
+/// **The gate** (§12.6/#459/#513): with no debug session there is no heading and no
+/// switch — not a dimmed one, not one a stale marker could reach. With one, both are
+/// there.
 #[test]
 fn the_debug_section_is_drawn_only_in_a_debug_session() {
     let plain = text_of(&render_settings(
@@ -80,7 +80,6 @@ fn the_debug_section_is_drawn_only_in_a_debug_session() {
         level(),
     ));
     assert!(!plain.contains(DEBUG_HEADING), "no heading:\n{plain}");
-    assert!(!plain.contains(DEBUG_NOTE), "no promise line:\n{plain}");
     for row in [SettingsRow::Reveal, SettingsRow::Replay] {
         assert!(
             !plain.contains(row.label()),
@@ -101,10 +100,6 @@ fn the_debug_section_is_drawn_only_in_a_debug_session() {
         level(),
     ));
     assert!(debug.contains(DEBUG_HEADING), "\n{debug}");
-    assert!(
-        debug.contains(DEBUG_NOTE),
-        "the §12.6 promise is printed beside the switches:\n{debug}",
-    );
     for row in [SettingsRow::Reveal, SettingsRow::Replay] {
         assert!(debug.contains(row.label()), "{row:?} is missing:\n{debug}");
     }
@@ -142,6 +137,45 @@ fn every_row_says_what_the_live_value_is() {
         level(),
     ));
     assert!(off.contains("omni-vision  off"), "\n{off}");
+}
+
+/// **Every row reads alike** — Interest when marked, Neutral otherwise, debug rows
+/// included. They were drawn in Ground while unmarked, which said *inert* (§11.2's
+/// receding scenery) about the one section where a press does the most; the heading
+/// over them carries the gate on its own, and the two sections are laid out
+/// identically otherwise.
+#[test]
+fn a_debug_row_is_inked_like_any_other() {
+    let column = block_column(W) + MARKER.chars().count() as u32;
+    let grid = render_settings(
+        W,
+        H,
+        debug_ui(SettingsRow::Theme),
+        DebugModifiers::default(),
+        level(),
+    );
+    for row in shown_rows(true, true) {
+        assert_eq!(
+            grid.get(column, row_y(row)).fg,
+            if row == SettingsRow::Theme {
+                Category::Interest
+            } else {
+                Category::Neutral
+            },
+            "{row:?} reads like every other row",
+        );
+    }
+    // The gate is the heading's alone, and it keeps its own cue.
+    assert_eq!(
+        grid.get(column, DEBUG_HEADING_ROW).fg,
+        Category::Warning,
+        "the DEBUG heading still says what it is",
+    );
+    // Both sections are laid out the same way: heading, a blank, then the first row.
+    assert_eq!(
+        FIRST_DEBUG_ROW - DEBUG_HEADING_ROW,
+        FIRST_DISPLAY_ROW - DISPLAY_HEADING_ROW,
+    );
 }
 
 /// The **replay row exists only for a run with a token** (#333) — the drawn control
