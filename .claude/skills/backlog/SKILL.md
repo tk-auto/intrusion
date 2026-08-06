@@ -28,6 +28,11 @@ Everything about the **ticket itself** — milestone/area/type/size labels, the 
 template, the slicing principles — lives in `create-tickets`. Read it and follow
 it; do not restate it here or invent a second taxonomy.
 
+The file-as-you-go rule is shared with `/survey`, which files each cleanup ticket
+at the moment its fix begins rather than filing the chosen set up front. Same
+reason on both sides: a stack of tickets filed in advance is a stack that goes
+stale the moment the first one changes what the others should say.
+
 ## The loop
 
 For each idea the user brings:

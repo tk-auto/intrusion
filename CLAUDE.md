@@ -61,8 +61,9 @@ skill rather than improvising its workflow. The intended loop:
   ideas, settled one question at a time and filed the moment each one lands,
   never batched. Reuses `create-tickets`' taxonomy.
 - **`/survey`** — read the *code* for cleanup opportunities (oversized files,
-  muddy naming, convention drift) and the always-loaded docs for bloat, then
-  feed the good ones to `/create-tickets`.
+  muddy naming, convention drift) and the always-loaded docs for bloat, then ask
+  how many findings to fix and work them one at a time, ticket to merge. Each
+  ticket is filed as its fix starts, never as a stack up front.
 - **`/work-ticket`** — pick an open issue and build it end-to-end: branch per
   ticket, unit tests, the fmt/clippy/test gate, commit conventions, and a PR
   that closes it.
