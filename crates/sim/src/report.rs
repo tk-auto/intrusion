@@ -5,7 +5,7 @@
 //! `crates/sim/README.md` and pinned byte-for-byte by the tests below. It is
 //! flat, its values are integers, fixed strings and fixed-precision floats the
 //! harness controls entirely, so the encoding is hand-rolled here rather than
-//! buying a serialization dependency for eight fields.
+//! buying a serialisation dependency for eight fields.
 //!
 //! `alert_peak` used to be `null` on every row — the §13.2 metric with nothing behind
 //! it. Since #311 gave the facility a ladder and #376 measured it, the row carries the

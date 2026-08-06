@@ -790,7 +790,7 @@ fn the_always_on_bar_names_every_held_ability() {
 }
 
 /// **The bar greys a press that cannot fire** (§11.4/#345): the contextual
-/// `Unusable` the catalog always documented and nothing ever produced. Pierce
+/// `Unusable` the catalogue always documented and nothing ever produced. Pierce
 /// Wall is the clearest case, because its precondition is *exactly one adjacent
 /// wall* (§8.3/#303) and the same three cells of board decide it.
 ///
@@ -1056,7 +1056,7 @@ fn a_held_passive_reads_as_always_on() {
 }
 
 /// **The width budget, end to end** (§11.4/#287). The worst bar a run can ever
-/// produce — [`AbilityId::MAX_HELD`] abilities, each the widest entry the catalog
+/// produce — [`AbilityId::MAX_HELD`] abilities, each the widest entry the catalogue
 /// allows — is drawn whole on the v1 board: nothing truncated, the right margin
 /// intact, and not a cell past the frame's left edge. This is the runtime twin of
 /// the `const` assertion on [`MAX_BAR_WIDTH`]; if either ever fails, the other is

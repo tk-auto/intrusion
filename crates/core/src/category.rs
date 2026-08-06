@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 pub enum Category {
     /// White. Inert scenery, spent objectives.
     Neutral,
-    /// Dark gray. Traversable ground — the floor dots (§11.5). Its meaning is
+    /// Dark grey. Traversable ground — the floor dots (§11.5). Its meaning is
     /// *absence*: presentation draws it to recede, so walls, entities and items
     /// pop against it. (§11.3 originally left floor uncategorised because it drew
     /// blank; the §11.5 floor dots gave it a glyph, and a glyph needs a meaning.)

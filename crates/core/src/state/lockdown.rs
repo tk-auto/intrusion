@@ -25,7 +25,7 @@
 //! - **The window is the ability's own duration.** A seal carries no clock of its
 //!   own ([`DoorLock::Sealed`](crate::DoorLock)), so there is no second timer to
 //!   outlive the first, and the longest a door can be sealed is the §8.3 duration —
-//!   a number on the catalog row, bounded by the type system at `u32` and by
+//!   a number on the catalogue row, bounded by the type system at `u32` and by
 //!   playtest in practice.
 //! - **The release is total.** [`release_lockdown`](State::release_lockdown) walks
 //!   *every* door in the level rather than a remembered set

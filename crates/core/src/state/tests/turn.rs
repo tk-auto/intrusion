@@ -49,7 +49,7 @@ fn bumping_a_wall_is_free_and_does_not_advance_the_turn() {
 }
 
 /// The §8.4 seam: opening a targeting session reads the ability's *declared*
-/// mode (§8.1 catalog) and anchors it on the player's cell and facing (§5) —
+/// mode (§8.1 catalogue) and anchors it on the player's cell and facing (§5) —
 /// Run self-targets, Decoy targets the faced cardinal — and a `Tile` mode hands
 /// back a cursor on the player, never an auto-aim (§8.4's whole reason to exist).
 #[test]

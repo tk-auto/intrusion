@@ -47,7 +47,7 @@ fn a_use_budget_reads_as_a_count_not_a_countdown() {
 /// A budgeted entry draws its count against the bar name, exactly as the ticket's
 /// worked example reads — `Bore(2)` — and the widest one a legal budget can
 /// produce still fits the per-entry budget (§11.4). The single-digit fence is a
-/// `const` assertion over the catalog; this pins what that fence buys.
+/// `const` assertion over the catalogue; this pins what that fence buys.
 #[test]
 fn a_budgeted_bar_entry_fits_the_row() {
     let entry = |id, state| AbilityStatus { id, state }.bar_entry();
@@ -144,14 +144,14 @@ fn a_shortened_bar_name_is_a_prefix_of_the_full_one() {
 }
 
 /// **The bar's width budget, as arithmetic** (§11.4/#287). The widest notation is
-/// read off the catalog's own numbers — the longest `[N]`/`/N/` any §8.3 ability
+/// read off the catalogue's own numbers — the longest `[N]`/`/N/` any §8.3 ability
 /// can show, against the passive marker — and the widest entry is that plus the
 /// longest bar name, so a retune or a rename moves these rather than silently
 /// overflowing the row. The render turns them into a `const` assertion against
 /// the board width; this pins the values that assertion is made of.
 #[test]
 fn the_bar_budget_is_measured_from_the_catalog() {
-    // The longest number in the catalog is Confusion's 45 → `/45/`, exactly as
+    // The longest number in the catalogue is Confusion's 45 → `/45/`, exactly as
     // wide as the passive `(on)`.
     assert_eq!(MAX_STATE_NOTATION, 4);
     assert_eq!(PASSIVE_MARKER.len(), MAX_STATE_NOTATION);
@@ -184,7 +184,7 @@ fn the_bar_budget_is_measured_from_the_catalog() {
 }
 
 /// The held-set cap (§8.3/#244/#266), the other half of the budget: innate Run
-/// plus [`AbilityId::MAX_TECH_HELD`] tech. Counted off the catalog, so promoting
+/// plus [`AbilityId::MAX_TECH_HELD`] tech. Counted off the catalogue, so promoting
 /// an ability to innate moves it rather than leaving a stale number behind.
 #[test]
 fn the_held_cap_is_the_innate_set_plus_the_tech_grant() {

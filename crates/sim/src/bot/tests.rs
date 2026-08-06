@@ -593,7 +593,7 @@ fn every_confusion_is_fired_at_a_guard_it_catches() {
                 assert!(
                     hunted,
                     "seed {seed}: fired confusion without being hunted — the \
-                         longest cooldown in the catalog is a panic-buy (§8.3)",
+                         longest cooldown in the catalogue is a panic-buy (§8.3)",
                 );
                 let blast = state.confusion_blast();
                 assert!(

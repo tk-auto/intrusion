@@ -434,7 +434,7 @@ pub fn intel_gate_names() -> String {
         .join(", ")
 }
 
-/// The ability a name refers to, matched against the §8.3 catalog by
+/// The ability a name refers to, matched against the §8.3 catalogue by
 /// [`AbilityId::name`] — or the whole vocabulary as an error.
 fn ability_named(name: &str) -> Result<AbilityId, String> {
     let wanted = normalise(name);
@@ -450,7 +450,7 @@ fn ability_named(name: &str) -> Result<AbilityId, String> {
 }
 
 /// Every ability name, for the usage text and for an unknown name's error. Read off
-/// the catalog rather than written down, so a new §8.1 row is spellable the day it
+/// the catalogue rather than written down, so a new §8.1 row is spellable the day it
 /// ships.
 ///
 /// Spelled in kebab case (`pierce-wall`) to match how the modifier names read, not in

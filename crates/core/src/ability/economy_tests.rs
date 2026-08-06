@@ -1,6 +1,6 @@
 use super::*;
 
-/// The §8.3 [START] catalog, pinned value by value: duration, cooldown,
+/// The §8.3 [START] catalogue, pinned value by value: duration, cooldown,
 /// targeting, and the declared effect. A retune of any number must be a
 /// deliberate edit here, never a silent drift — and a moved number will move
 /// the emergent lockout with it (§8.2).
@@ -97,7 +97,7 @@ fn the_catalog_matches_the_design_activated() {
     }
 }
 
-/// The **coded** catalog (§8.1's escape hatch, #303), pinned separately because
+/// The **coded** catalogue (§8.1's escape hatch, #303), pinned separately because
 /// it is the arm the other pin cannot reach: Pierce Wall declares no effects at
 /// all, so its row is `cost 1`, self-targeted, **instant** (`duration: 0`), with
 /// **no cooldown** and a per-level budget instead — the scarcity is the budget,
@@ -167,7 +167,7 @@ fn the_catalog_matches_the_design_drone() {
     assert_eq!(AbilityId::Drone.script_letter(), 'o');
 }
 
-/// **Every** activated ability is pinned by one of the catalog tests — the
+/// **Every** activated ability is pinned by one of the catalogue tests — the
 /// guard against a row being added and quietly escaping the value-by-value pin,
 /// which a hand-written list of tuples otherwise invites.
 #[test]
@@ -180,7 +180,7 @@ fn every_activated_ability_is_pinned_by_a_catalog_test() {
             // The coded rows are covered one by one by `..._coded`.
             Behaviour::Coded => matches!(id, AbilityId::PierceWall | AbilityId::Drone),
         };
-        assert!(pinned, "{} is in no catalog pin", id.name());
+        assert!(pinned, "{} is in no catalogue pin", id.name());
     }
 }
 
@@ -197,7 +197,7 @@ const PINNED_ACTIVATED: [AbilityId; 8] = [
     AbilityId::FalseCall,
 ];
 
-/// The **passive** catalog (#264/#265), pinned: Vision is the one passive, it
+/// The **passive** catalogue (#264/#265), pinned: Vision is the one passive, it
 /// declares [`Effect::EnhancedSight`], and — the property that matters — it has
 /// **no economy at all**. Not a zeroed one: `economy()` is `None`, so there is no
 /// duration or cooldown for the deck to run and none for a future edit to set by
@@ -624,7 +624,7 @@ fn an_instant_ability_skips_straight_to_cooldown() {
 // -----------------------------------------------------------------------
 
 /// A deck in which `id` carries a per-level budget of `uses` — byte for byte the
-/// runtime a catalog row declaring [`Ability::uses_per_level`] produces, seeded
+/// runtime a catalogue row declaring [`Ability::uses_per_level`] produces, seeded
 /// here by hand because **no shipping row declares one yet**: #302 lands the axis
 /// and #303 is the ability that spends it. Everything else is exactly
 /// [`Deck::new`]'s deck, so these tests exercise the real activate/tick/state
@@ -643,7 +643,7 @@ fn wait_out_the_lockout(deck: &mut Deck, id: AbilityId) {
     }
 }
 
-/// A fresh deck seeds **every** budget from the catalog, and only from there
+/// A fresh deck seeds **every** budget from the catalogue, and only from there
 /// (§8.2/#302). This is the level-start boot path — [`Deck::new`] is called once
 /// per level and nowhere else — so "set at level start" is a property of where
 /// this code lives, and the assertion is that the seeding reads the row rather
@@ -791,7 +791,7 @@ fn a_fresh_level_restores_the_budget() {
     wait_out_the_lockout(&mut deck, id);
     assert_eq!(deck.state(id), AbilityState::Exhausted);
 
-    // The next facility is a new deck off the same catalog row.
+    // The next facility is a new deck off the same catalogue row.
     let next = deck_budgeting(Loadout::full(), id, 1);
     assert_eq!(next.state(id), AbilityState::Limited { uses: 1 });
 }
@@ -827,7 +827,7 @@ fn an_unbudgeted_ability_is_untouched_by_the_axis() {
 // A budgeted **passive** (§8.2/#302 × #264, the pair #243 needed)
 // -----------------------------------------------------------------------
 
-/// The catalog row: the Saver is a passive that also carries a per-level budget, and
+/// The catalogue row: the Saver is a passive that also carries a per-level budget, and
 /// the two axes are declared in different places on purpose — the mode says there is
 /// no clock, [`Ability::uses_per_level`] says how much of the level there is. Neither
 /// is inside the other, which is what makes this combination expressible at all.

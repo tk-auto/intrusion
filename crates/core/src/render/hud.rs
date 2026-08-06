@@ -105,7 +105,7 @@ const MAX_BAR_WIDTH: u32 = AbilityId::MAX_HELD as u32 * BAR_SLOT;
 /// **The bar must fit the board it is drawn under.** The whole point of naming every
 /// entry (#287) is that the held set is small enough to; this is where that stops
 /// being a hope. Every input is derived — the held cap from the innate set and the
-/// tech grant (§8.3), the entry width from the ability names and the catalog's own
+/// tech grant (§8.3), the entry width from the ability names and the catalogue's own
 /// durations and cooldowns (§8.2) — so renaming an ability, pushing a cooldown past
 /// 99, or granting a fourth tech fails the *build* rather than quietly truncating the
 /// row on a player's screen.
@@ -826,7 +826,7 @@ pub fn ability_at(state: &State, x: u32, y: u32) -> Option<AbilityId> {
 /// The §11.2 category an ability entry reads in, by its state: an available ability
 /// — ready, active, or a passive in effect — is **Owned** (blue, "yours, in hand");
 /// a cooling one is **System** (the muted furniture tan, "unavailable, will
-/// return"); an unusable one is **Ground** (dim gray, receding) — discoverable but
+/// return"); an unusable one is **Ground** (dim grey, receding) — discoverable but
 /// plainly not an option now. The `[N]` / `/N/` / `(N)` / `(on)` notation carries the
 /// rest, so those states share a colour without ambiguity.
 ///

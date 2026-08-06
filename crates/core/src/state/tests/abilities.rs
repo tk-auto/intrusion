@@ -149,7 +149,7 @@ fn wall_to_phase_into(guards: Vec<Guard>, seed: u64) -> State {
 /// solid in the terrain sweep — and let the duration run out in there, returning the
 /// expiry turn's events.
 ///
-/// The waiting is counted off the **catalog's** duration rather than written out as a
+/// The waiting is counted off the **catalogue's** duration rather than written out as a
 /// fixed run of turns, so a retune of the `[START]` number (#449 moved it 3 → 4)
 /// changes where the window ends without changing what any of these tests assert.
 fn phase_into_the_solid(s: &mut State) -> Vec<Event> {
@@ -162,7 +162,7 @@ fn phase_into_the_solid(s: &mut State) -> Vec<Event> {
 }
 
 /// Dephase's `[START]` window (§8.3), counting the activation turn — read from the
-/// catalog so a tune moves the tests with it. Pinned value-by-value by
+/// catalogue so a tune moves the tests with it. Pinned value-by-value by
 /// `the_catalog_matches_the_design_activated`; here it is only arithmetic.
 fn dephase_duration() -> u32 {
     AbilityId::Dephase

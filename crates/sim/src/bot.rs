@@ -55,7 +55,7 @@
 //! which answers for itself whether this is a moment it is *for* and how badly.
 //! One call site here ([`StealthBot::cue`]); one exhaustively-matched arm per
 //! ability there. That exhaustiveness is the point: an ability added to the §8.1
-//! catalog fails to compile until somebody says what it is for, so no new verb can
+//! catalogue fails to compile until somebody says what it is for, so no new verb can
 //! land as a silent zero in the usage histogram — and a false zero is
 //! indistinguishable from a dead ability.
 
@@ -1060,7 +1060,7 @@ impl StealthBot {
     ///
     /// This is the *only* place the bot decides to press an ability key. What each
     /// ability is for lives in [`crate::cue`], one exhaustively-matched arm apiece,
-    /// so a new row in the §8.1 catalog cannot arrive dead by omission — it fails to
+    /// so a new row in the §8.1 catalogue cannot arrive dead by omission — it fails to
     /// compile until somebody says.
     ///
     /// The comparison it does not make: §4.4 says the real question is "is this turn
